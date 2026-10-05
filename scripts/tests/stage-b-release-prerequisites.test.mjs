@@ -6,8 +6,8 @@ import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import test from 'node:test';
 import { taskChange, rotationVariables } from './fixtures/stage-b-task-rotation.mjs';
 import { canonicalBrokerPolicy } from './fixtures/staged-broker.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
-import { brokerDigest, assertBrokerPublicationPlan } from '../aws/stage-b-staged-broker-contract.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from '../aws/stage-b-release-prerequisites.mjs';
+import { brokerDigest, assertBrokerPublicationPlan, assertRegistrationHandoff } from '../aws/stage-b-staged-broker-contract.mjs';
 import { preparation as brokerPreparation, publicationPlan, rig as brokerRig, configuration, authorization as brokerAuthorization, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
 function rig(character = 'a', revision = 17) {
@@ -378,4 +378,88 @@ test('explicit recovery dispatch authenticates dual identity without weakening m
   await assert.rejects(()=>runStagedBrokerRequest({...request,operation:'register',allowSourceShaMismatch:true},{adapterFactory:()=>r.deps}),/Unknown staged request field/);
   assert.equal(r.writes(),1);
  }finally{fs.rmSync(directory,{recursive:true});}
+});
+
+async function handoffRig() {
+  const r = rig('a', 42), p = { ...brokerPreparation(), schemaVersion: 2, purpose: TASK_REGISTRATION,
+    sourceSha: r.p.sourceSha, treeSha256: r.p.treeSha256, savedPlanSha256: r.p.savedPlanSha256,
+    logicalPlanSha256: r.p.logicalPlanSha256, canonicalAddresses: [...TASK_REGISTRATION_ADDRESSES, 'aws_lambda_function.broker', 'aws_lambda_alias.reviewed'],
+    prerequisiteChain: null, target: null, publication: null };
+  const auth = brokerAuthorization(p), id = brokerDigest(auth);
+  r.p = p; r.deps.authenticatePrerequisiteAuthorization = async () => id;
+  r.deps.readPlan = async () => ({ plan: r.plan, bytes: Buffer.from('saved-a'), artifactSetSha256: p.artifactSetSha256 });
+  r.deps.now = () => new Date(Date.parse(auth.issuedAt) + 1000);
+  const result = await executeTaskRegistration({ preparation: p, authorization: auth }, r.deps);
+  const entry = { preparation: p, authorization: auth, result }, release = { sourceSha: 'b'.repeat(40), treeSha256: 'b'.repeat(64) };
+  const plan = { errored: false, variables: { tooling_sha: { value: release.sourceSha } }, resource_changes: Object.entries(r.states).map(([address, after]) =>
+    ({ address, mode: 'managed', change: { actions: ['no-op'], before: structuredClone(after), after: structuredClone(after), after_unknown: {} } })) };
+  const impact = { imageReleaseSha: p.sourceSha, toolingSha: release.sourceSha, toolingInputTreeSha256: release.treeSha256,
+    imageReuseCompatible: true, newImagesRequired: false, imageAffectingFiles: [] };
+  const records = new Map(r.receipts.map(([, status, value]) => [status, value]));
+  const reservation = { kind: 'STAGED_BROKER_RESERVATION', id, value: { purpose: TASK_REGISTRATION, nonce: auth.nonce, preparationSha256: brokerDigest(p) } };
+  const deps = { verifyAuthorization: async () => true, authenticateTransactionSource: async original => assert.equal(original.sourceSha, 'a'.repeat(40)),
+    readReceipt: async (_, status) => records.get(status), readReservation: async () => reservation };
+  return { r, entry, release, plan, impact, deps, records, reservation };
+}
+test('current main explicitly adopts exact historical outputs without rewriting provenance or registering again', async () => {
+  const x = await handoffRig(), before = structuredClone(x.entry);
+  await authenticateRegistrationHandoffEvidence(x.entry, x.release, x.deps);
+  const adopted = adoptRegisteredOutputs(x.entry, x.release, x.plan, x.impact);
+  assertRegistrationHandoff(adopted, x.release);
+  assert.deepEqual({ preparation: adopted.preparation, authorization: adopted.authorization, result: adopted.result }, before);
+  assert.equal(adopted.result.sourceSha, 'a'.repeat(40)); assert.equal(adopted.adoption.release.sourceSha, 'b'.repeat(40));
+  assert.deepEqual(adopted.result.taskMap, taskMapFromRegisteredDefinitions(before.result.definitions));
+  assert.equal(x.r.writes(), 1);
+  // A second tooling successor uses the same immutable transaction, not B's authority.
+  const c = { sourceSha: 'c'.repeat(40), treeSha256: 'c'.repeat(64) };
+  x.plan.variables.tooling_sha.value = c.sourceSha;
+  const next = adoptRegisteredOutputs(x.entry, c, x.plan, { ...x.impact, toolingSha: c.sourceSha, toolingInputTreeSha256: c.treeSha256 });
+  assert.equal(next.result.sourceSha, before.result.sourceSha); assert.equal(x.r.writes(), 1);
+});
+for (const [name, change] of [
+  ['missing consumed reservation', x => x.deps.readReservation = async () => null],
+  ['wrong reservation', x => x.reservation.value.nonce = 'wrong'],
+  ['invalid original signature', x => x.deps.verifyAuthorization = async () => false],
+  ['missing intent', x => x.records.delete('TASK_REGISTRATION_INTENT')],
+  ['altered intent', x => x.records.get('TASK_REGISTRATION_INTENT').savedPlanSha256 = 'f'.repeat(64)],
+  ['altered saved plan', x => x.entry.preparation.savedPlanSha256 = 'f'.repeat(64)],
+  ['altered artifact set', x => x.entry.preparation.artifactSetSha256 = 'f'.repeat(64)],
+  ['receipt from another transaction', x => x.entry.result.sourceSha = x.release.sourceSha],
+  ['unauthenticated original source', x => x.deps.authenticateTransactionSource = async () => { throw new Error('wrong source'); }],
+]) test(`historical adoption rejects ${name}`, async () => {
+  const x = await handoffRig(); change(x);
+  await assert.rejects(() => authenticateRegistrationHandoffEvidence(x.entry, x.release, x.deps)); assert.equal(x.r.writes(), 1);
+});
+for (const [name, change] of [
+  ['changed image inputs', x => { x.impact.imageReuseCompatible = false; x.impact.imageAffectingFiles = ['backend/src/change.ts']; }],
+  ['wrong compatibility source', x => x.impact.imageReleaseSha = x.release.sourceSha],
+  ['wrong current-main tree', x => x.impact.toolingInputTreeSha256 = 'f'.repeat(64)],
+  ['another successor ARN', x => x.plan.resource_changes[0].change.after.arn += '0'],
+  ['changed image digest', x => { const c = x.plan.resource_changes[0].change; c.after.container_definitions = c.after.container_definitions.replace(/sha256:[a-f0-9]{64}/, `sha256:${'f'.repeat(64)}`); c.before = structuredClone(c.after); }],
+  ['changed role', x => { const c = x.plan.resource_changes[0].change; c.after.task_role_arn += '-other'; c.before = structuredClone(c.after); }],
+  ['changed command', x => { const c = x.plan.resource_changes[0].change; const containers = JSON.parse(c.after.container_definitions); containers[0].command = ['unexpected']; c.after.container_definitions = JSON.stringify(containers); c.before = structuredClone(c.after); }],
+  ['registration required', x => x.plan.resource_changes[0].change.actions = ['create']],
+  ['missing definition', x => x.plan.resource_changes.pop()],
+  ['unknown definition', x => x.plan.resource_changes[0].change.after_unknown = { container_definitions: true }],
+  ['partial registration', x => delete x.entry.result.definitions[TASK_REGISTRATION_ADDRESSES[0]]],
+]) test(`current-main adoption rejects ${name}`, async () => {
+  const x = await handoffRig(); change(x); assert.throws(() => adoptRegisteredOutputs(x.entry, x.release, x.plan, x.impact)); assert.equal(x.r.writes(), 1);
+});
+for (const [name, change] of [
+  ['adoption omitted', entry => delete entry.adoption],
+  ['new source substituted for old', entry => entry.result.sourceSha = entry.adoption.release.sourceSha],
+  ['wrong original receipt hash', entry => entry.adoption.transaction.resultSha256 = 'f'.repeat(64)],
+  ['wrong current release', entry => entry.adoption.release.sourceSha = 'f'.repeat(40)],
+  ['wrong definitions hash', entry => entry.adoption.definitionsSha256 = 'f'.repeat(64)],
+  ['unknown adoption field', entry => entry.adoption.allowMutation = true],
+]) test(`handoff receipt substitution fails closed: ${name}`, async () => {
+  const x = await handoffRig(), entry = adoptRegisteredOutputs(x.entry, x.release, x.plan, x.impact);
+  change(entry); assert.throws(() => assertRegistrationHandoff(entry, x.release));
+});
+
+for (const field of ['preparation', 'authorization', 'planPath']) test(`adoption dispatch rejects mutation input ${field} before constructing an executor`, async () => {
+  let called = false;
+  await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration-adoption', [field]: {} },
+    { adapterFactory: () => { called = true; throw new Error('must not execute'); } }));
+  assert.equal(called, false);
 });

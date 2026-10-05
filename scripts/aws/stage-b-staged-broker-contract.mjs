@@ -53,7 +53,7 @@ function planEnvelope(plan, sourceSha, { targeted = false } = {}) {
   assert.ok(addresses.every(a => typeof a === "string" && a));
 }
 
-export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, canonicalAddresses, prerequisiteChain, configuration, packageSha256 }) {
+export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, canonicalAddresses, prerequisiteChain, configuration, packageSha256, treeSha256 }) {
   // Terraform marks targeted plans incomplete by definition. Only this exact
   // publication profile permits that marker; other phases require full plans.
   planEnvelope(plan, sourceSha, { targeted: true }); brokerPrerequisiteIdentity(prerequisites);
@@ -79,7 +79,7 @@ export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, ca
     equal(after, configuration, "Publication differs from authenticated canonical successor");
     assert.equal(fn.change.after.source_code_hash, Buffer.from(packageSha256, 'hex').toString('base64'));
     equal(JSON.parse(after.BROKER_TASK_DEFINITIONS_JSON), prerequisiteChain.registration.result.taskMap);
-    assert.equal(prerequisiteChain.registration.result.sourceSha, sourceSha);
+    if (prerequisiteChain.registration.result.sourceSha !== sourceSha) assertRegistrationHandoff(prerequisiteChain.registration, { sourceSha, treeSha256 });
     equal(prerequisites.policy, prerequisiteChain.policy.result.policy);
   } else {
     equal({ ...oldExpected, releaseSha: sourceSha }, newExpected, "Publication changes other approval inputs");
@@ -131,6 +131,26 @@ export function brokerTargetIdentity(configuration, packageSha256) {
     configuration: normalized.configuration, configurationSha256: brokerDigest(normalized.configuration) };
 }
 
+// Adoption binds an immutable historical result to independently approved current-main
+// preparation. It is never registration authority and never rewrites the result.
+export function assertRegistrationHandoff(entry, release) {
+  keys(entry, entry.adoption ? ['preparation', 'authorization', 'result', 'adoption'] : ['preparation', 'authorization', 'result']);
+  const { preparation: p, authorization, result, adoption } = entry;
+  assert.equal(p.purpose, 'STAGE_B_TASK_REGISTRATION');
+  assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
+  assert.equal(result.preparationSha256, brokerDigest(p)); assert.equal(result.authorizationSha256, brokerDigest(authorization));
+  if (p.sourceSha === release.sourceSha) {
+    assert.equal(adoption, undefined); assert.equal(p.treeSha256, release.treeSha256); return;
+  }
+  assert.equal(result.savedPlanSha256, p.savedPlanSha256);
+  keys(adoption, ['kind', 'schemaVersion', 'transaction', 'release', 'imageImpactSha256', 'definitionsSha256']);
+  assert.equal(adoption.kind, 'REGISTERED_OUTPUT_ADOPTION'); assert.equal(adoption.schemaVersion, 1);
+  equal(adoption.transaction, { sourceSha: p.sourceSha, treeSha256: p.treeSha256,
+    preparationSha256: brokerDigest(p), authorizationSha256: brokerDigest(authorization), resultSha256: brokerDigest(result) });
+  equal(adoption.release, release); hash(adoption.imageImpactSha256);
+  assert.equal(adoption.definitionsSha256, brokerDigest(result.definitions));
+}
+
 export function assertBrokerPreparation(p) {
   const fields = ["schemaVersion", "purpose", "sourceSha", "treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "state", "packageSha256", "alias", "prerequisites", "configuration", "canonicalAddresses", "publication", "target"];
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
@@ -148,13 +168,15 @@ export function assertBrokerPreparation(p) {
     assert.equal(p.schemaVersion, 2); assert.equal(p.publication, null);
     if (p.purpose === 'STAGE_B_TASK_REGISTRATION') { assert.equal(p.target, null); assert.equal(p.prerequisiteChain, null); }
     else if (p.purpose === 'STAGE_B_BROKER_POLICY_PRUNING') { keys(p.target, ['versionId', 'inventory']); assert.match(p.target.versionId, /^v[1-9][0-9]*$/); assert.notEqual(p.target.versionId, p.prerequisites.policyVersion); }
-    else { assert.ok(p.prerequisiteChain?.registration); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
+    else { assert.ok(p.prerequisiteChain?.registration); if (p.prerequisiteChain.registration.adoption) assertRegistrationHandoff(p.prerequisiteChain.registration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
     return p;
   }
   if (p.schemaVersion === 2) {
     keys(p.prerequisiteChain, ['registration', 'policy']);
     for (const phase of ['registration', 'policy']) {
-      const chain = p.prerequisiteChain[phase]; keys(chain, ['preparation', 'authorization', 'result']);
+      const chain = p.prerequisiteChain[phase];
+      if (phase === 'registration') { assertRegistrationHandoff(chain, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); continue; }
+      keys(chain, ['preparation', 'authorization', 'result']);
       assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);
       assert.equal(chain.preparation.treeSha256, p.treeSha256);
       assert.equal(chain.result.preparationSha256, brokerDigest(chain.preparation));

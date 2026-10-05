@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -18,16 +18,16 @@ import {
 } from './stage-b-terraform-backend-contract.mjs';
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from './stage-b-artifact-contract.mjs';
 import { readStageBProtectedMainCheckout } from './stage-b-deployment-identity.mjs';
-import { deriveStageBToolingInputTreeSha256 } from './validate-stage-b-image-reuse.mjs';
+import { deriveStageBToolingInputTreeSha256, deriveStageBImageImpactReport } from './validate-stage-b-image-reuse.mjs';
 import { assertStageBBrokerPackageManifest } from './package-production-green-stage-b-broker.mjs';
 import { readStagedBrokerPrerequisites, readBrokerPolicyInventory } from './stage-b-staged-broker-observations.mjs';
 import { reserveStageBSharedApplyAttempt, reserveStageBApplyAttemptTransition, assertStageBApplyTerraformEnvironment } from '../apply-production-green-stage-b.mjs';
 import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from './stage-b-broker-policy-ownership.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan } from './stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from './stage-b-release-prerequisites.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
 
-const PHASES = ['PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'PREPARATION', 'CLOSURE', 'REGISTRATION', 'POLICY', 'POLICY_RECOVERY', 'REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY'];
+const PHASES = ['ADOPTION', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'PREPARATION', 'CLOSURE', 'REGISTRATION', 'POLICY', 'POLICY_RECOVERY', 'REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY'];
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
 STEPS.push('BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE');
@@ -131,7 +131,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     exec: (command, args, options) => exec(command, args, { ...options, cwd: root, env: { ...options.env, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard',
       ...(phase === 'CUTOVER' && args[0] === 'lambda' && args[1] === 'update-alias' ? { AWS_EXECUTION_ENV: `mscqr-broker-cutover-${brokerDigest(authorization)}` } : {}) } }) });
   const recoveryReceiptRun = runAws;
-  if (phase === 'REGISTRATION_RECOVERY') runAws = args => { assertRegistrationRecoveryReadCommand(args); return recoveryReceiptRun(args); };
+  if (['REGISTRATION_RECOVERY', 'ADOPTION'].includes(phase)) runAws = args => { assertRegistrationRecoveryReadCommand(args); return recoveryReceiptRun(args); };
   let registrationRecoveryIdentity;
   const json = args => JSON.parse(runAws([...args, '--output', 'json', '--no-cli-pager']));
   const kms = createBrokerKmsAuthorizationBoundary({ run: args => runAws(args) });
@@ -147,6 +147,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   const ownedReservations = new Set(); let mutationAttempted = false;
   const terraform = args => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
+    if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
     const metadata = path.join(terraformDataDir, 'terraform.tfstate');
     assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
     stagedBrokerArtifactSet(files, root, preparation);
@@ -191,9 +192,9 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     mutationAttempted = true;
   };
   const capture = (kind, flags) => {
-    assert.ok(['PREPARATION', 'RECONCILIATION', 'CLOSURE', 'POLICY', 'POLICY_RECOVERY'].includes(phase));
+    assert.ok(['ADOPTION', 'PREPARATION', 'RECONCILIATION', 'CLOSURE', 'POLICY', 'POLICY_RECOVERY'].includes(phase));
     const file = path.join(directory, `${kind}-${randomUUID()}.tfplan`);
-    terraform(['plan', ...flags, `-var-file=${files.tfvars}`, '-input=false', '-lock=true', `-out=${file}`]);
+    terraform(['plan', ...flags, `-var-file=${files.tfvars}`, '-input=false', phase === 'ADOPTION' ? '-lock=false' : '-lock=true', `-out=${file}`]);
     fs.chmodSync(file, 0o600); const bytes = fs.readFileSync(file), plan = JSON.parse(terraform(['show', '-json', file]));
     return { file, bytes, plan };
   };
@@ -202,6 +203,34 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assert.equal(caller.Account, STAGE_B.account);
     assert.match(caller.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
     return caller;
+  };
+  const readHistoricalRegistration = (entry, checkout) => authenticateRegistrationHandoffEvidence(entry, checkout, {
+    verifyAuthorization: kms.verify, readReceipt,
+    authenticateTransactionSource: async (p, recovery, release) => {
+      const git = args => exec('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+      git(['merge-base', '--is-ancestor', p.sourceSha, release.sourceSha]);
+      assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
+      if (recovery) {
+        assertRegistrationRecoveryIdentity(recovery, p);
+        git(['merge-base', '--is-ancestor', p.sourceSha, recovery.tooling.sourceSha]);
+        git(['merge-base', '--is-ancestor', recovery.tooling.sourceSha, release.sourceSha]);
+        assert.equal(deriveStageBToolingInputTreeSha256(recovery.tooling.sourceSha), recovery.tooling.treeSha256);
+      }
+    },
+    readReservation: async id => {
+      const file = path.join(directory, `adoption-reservation-${randomUUID()}.json`);
+      try {
+        runAws(['s3api', 'get-object', '--bucket', STAGE_B_TERRAFORM_BACKEND.bucketName, '--key', stageBApplyAttemptS3Key(id), '--expected-bucket-owner', STAGE_B.account, file]);
+        return JSON.parse(fs.readFileSync(file));
+      } finally { fs.rmSync(file, { force: true }); }
+    },
+  });
+  const readAdoptionPlan = () => {
+    const file = path.join(directory, `adoption-read-${randomUUID()}.tfplan`);
+    try {
+      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`]);
+      return JSON.parse(terraform(['show', '-json', file]));
+    } finally { fs.rmSync(file, { force: true }); }
   };
   let capturedRefresh;
   const adapter = {
@@ -347,6 +376,18 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       if (p.prerequisiteChain) await adapter.authenticatePrerequisiteChain(p.prerequisiteChain);
       return id;
     },
+    adoptRegistration: async (entry, plan) => {
+      assert.equal(phase, 'ADOPTION'); assert.equal(entry.adoption, undefined);
+      const checkout = await adapter.readCheckout();
+      await readHistoricalRegistration(entry, checkout);
+      for (const [address, definition] of Object.entries(entry.result.definitions)) {
+        equal(authenticateRegisteredDefinition({ address, desired: definition.desired,
+          state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) }), definition);
+      }
+      const adopted = adoptRegisteredOutputs(entry, checkout, plan,
+        deriveStageBImageImpactReport({ imageReleaseSha: entry.preparation.sourceSha, toolingSha: checkout.sourceSha }));
+      equal(await adapter.readCheckout(), checkout); return adopted;
+    },
     authenticatePrerequisiteChain: async chain => {
       assert.ok(chain?.registration);
       if (chain.policy) {
@@ -358,7 +399,11 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         assert.ok(['registration', 'policy'].includes(name));
         const { preparation: p, authorization: auth, result } = entry;
         assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
-        assert.equal(p.sourceSha, checkout.sourceSha); assert.equal(p.treeSha256, checkout.treeSha256);
+        if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
+          assertRegistrationHandoff(entry, checkout); await readHistoricalRegistration(entry, checkout);
+          equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(),
+            deriveStageBImageImpactReport({ imageReleaseSha: p.sourceSha, toolingSha: checkout.sourceSha })));
+        } else { assert.equal(entry.adoption, undefined); assert.equal(p.sourceSha, checkout.sourceSha); assert.equal(p.treeSha256, checkout.treeSha256); }
         assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
         const id = await assertBrokerAuthorization(auth, p, { verify: kms.verify, now: new Date(result.authorizedAt) });
         assert.equal(result.authorizationSha256, id); assert.equal(result.preparationSha256, brokerDigest(p));
@@ -668,7 +713,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         },
       });
     },
-    captureCutoverPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('cutover', []); },
+    captureCutoverPlan: async () => { assert.ok(['PREPARATION', 'ADOPTION'].includes(phase)); return capture('cutover', []); },
     readTerraformFunctionVersion: async () => {
       const response = json(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn]);
       assert.equal(response.NextMarker, undefined); assert.equal(response.NextToken, undefined);

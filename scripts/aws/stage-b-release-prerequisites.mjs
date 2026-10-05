@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { canonicalJson, STAGE_B, assertStageBBrokerTaskDefinitionMap } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_TASK_DEFINITION_FAMILIES, assertStageBTaskDefinitionRotation, canonicalizeEcsTaskDefinitionVolumes } from './stage-b-reference-audit-contract.mjs';
 import { assertStageBBrokerPolicyDocument, STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
-import { brokerDigest } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest, assertRegistrationHandoff, assertBrokerAuthorization, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 
 export const TASK_REGISTRATION = 'STAGE_B_TASK_REGISTRATION';
 export const BROKER_POLICY_CONVERGENCE = 'STAGE_B_BROKER_POLICY_CONVERGENCE';
@@ -285,4 +285,51 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
   }
   const recovered = { ...result, recovery };
   await deps.record(id, 'TASK_REGISTERED', recovered); return recovered;
+}
+
+// Pure semantic check; production supplies independently derived image-impact
+// evidence and a fresh current-main diagnostic plan, never client assertions.
+export function adoptRegisteredOutputs(entry, release, plan, imageImpact) {
+  const { preparation: p, result } = entry;
+  assert.notEqual(p.sourceSha, release.sourceSha, 'Same-main outputs need no adoption');
+  equal(imageImpact.imageReleaseSha, p.sourceSha); equal(imageImpact.toolingSha, release.sourceSha);
+  equal(imageImpact.toolingInputTreeSha256, release.treeSha256);
+  assert.equal(imageImpact.imageReuseCompatible, true); assert.equal(imageImpact.newImagesRequired, false);
+  equal(imageImpact.imageAffectingFiles, []);
+  assert.equal(plan.variables.tooling_sha.value, release.sourceSha); assert.equal(plan.errored, false);
+  equal(plan.deferred_changes || [], []);
+  assert.ok(!(plan.resource_drift || []).some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address)), 'Registration state drift');
+  equal(Object.keys(result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+  equal(result.taskMap, taskMapFromRegisteredDefinitions(result.definitions));
+  const changes = plan.resource_changes; assert.ok(Array.isArray(changes));
+  assert.equal(new Set(changes.map(c => c.address)).size, changes.length);
+  for (const address of TASK_REGISTRATION_ADDRESSES) {
+    const c = changes.find(c => c.address === address); assert.ok(c, 'Incomplete current-main registration census');
+    assert.equal(c.mode, 'managed'); assert.equal(c.deposed, undefined);
+    equal(c.change.actions, ['no-op'], 'Current main requires different task definitions');
+    equal(c.change.before, c.change.after); requireKnown(c.change);
+    const definition = result.definitions[address]; assert.equal(c.change.after.arn, definition.arn);
+    assertRegisteredTaskDefinitionState(definition.desired, c.change.after);
+  }
+  const adopted = { preparation: p, authorization: entry.authorization, result,
+    adoption: { kind: 'REGISTERED_OUTPUT_ADOPTION', schemaVersion: 1,
+      transaction: { sourceSha: p.sourceSha, treeSha256: p.treeSha256, preparationSha256: brokerDigest(p),
+        authorizationSha256: brokerDigest(entry.authorization), resultSha256: brokerDigest(result) },
+      release: structuredClone(release), imageImpactSha256: brokerDigest(imageImpact), definitionsSha256: brokerDigest(result.definitions) } };
+  assertRegistrationHandoff(adopted, release); return adopted;
+}
+
+export async function authenticateRegistrationHandoffEvidence(entry, release, deps) {
+  const { preparation: p, authorization: auth, result } = entry;
+  assertBrokerPreparation(p); assert.equal(p.purpose, TASK_REGISTRATION);
+  await deps.authenticateTransactionSource(p, result.recovery, release);
+  const id = await assertBrokerAuthorization(auth, p, { verify: deps.verifyAuthorization, now: new Date(result.authorizedAt) });
+  assert.equal(result.authorizationSha256, id); assert.equal(result.preparationSha256, brokerDigest(p));
+  assert.equal(result.savedPlanSha256, p.savedPlanSha256); assert.equal(result.status, 'REGISTERED_NONTERMINAL');
+  assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
+  equal(await deps.readReceipt(id, 'TASK_REGISTERED'), result);
+  equal(await deps.readReceipt(id, 'TASK_REGISTRATION_INTENT'), { savedPlanSha256: p.savedPlanSha256, authorizedAt: result.authorizedAt });
+  equal(await deps.readReservation(id), { kind: 'STAGED_BROKER_RESERVATION', id,
+    value: { purpose: TASK_REGISTRATION, nonce: auth.nonce, preparationSha256: brokerDigest(p) } });
+  return id; // Historical consumed authority, never a new reservation or mutation.
 }
