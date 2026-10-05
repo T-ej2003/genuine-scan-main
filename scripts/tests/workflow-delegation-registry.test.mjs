@@ -52,3 +52,18 @@ test("existing delegations retain their canonical identities and missing-workflo
   assert.match(output, /Related accesses: .*c03IncidentRepository/);
   assert.match(output, /do not edit generated workflow JSON/);
 });
+
+
+test("Startex QR scoped repositories retain their exact registered HTTP owner", () => {
+  for (const [functionName, sourceFile, canonicalFunction] of [
+    ["createAllocationRequest", "backend/src/controllers/qrRequestController.ts", "createQrAllocationRequest"],
+    ["listAllocationRequests", "backend/src/controllers/qrRequestController.ts", "getQrAllocationRequests"],
+    ["rejectAllocationRequest", "backend/src/controllers/qrRequestController.ts", "rejectQrAllocationRequest"],
+    ["readScanAnalytics", "backend/src/controllers/qrLogController.ts", "getQrTrackingAnalyticsController"],
+  ]) {
+    const entry = resolveWorkflowDelegation({ executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts", function: functionName });
+    assert.deepEqual(entry.canonical, { executionSurface: "http", sourceFile, function: canonicalFunction });
+  }
+  const telemetry = scanProductionAccess().accesses.filter(access => access.sourceFile === "backend/src/controllers/telemetryController.ts");
+  assert(!telemetry.some(access => ["captureRouteTransitionMetric", "getRouteTransitionSummary"].includes(access.function)), "retired telemetry must not retain database access");
+});

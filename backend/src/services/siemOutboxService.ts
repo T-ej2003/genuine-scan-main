@@ -12,6 +12,7 @@ import {
   withB03SiemWorkerContext,
 } from "../rls-waves/session-b/b03/systemContext";
 import { logger } from "../utils/logger";
+import { publishAllocationRequestAuditProjection } from "./auditService";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const webhookUrl = () => String(process.env.SIEM_WEBHOOK_URL || "").trim();
@@ -74,11 +75,11 @@ const sendToWebhook = async (row: { id: string; eventType: string; payload: any;
       createdAt: row.createdAt.toISOString(),
       payload: row.payload,
     });
-    return;
+    return true;
   }
 
   const url = webhookUrl();
-  if (!url) return;
+  if (!url) return false;
 
   const body = JSON.stringify({
     id: row.id,
@@ -102,6 +103,7 @@ const sendToWebhook = async (row: { id: string; eventType: string; payload: any;
   if (!response.ok) {
     throw new Error(`SIEM webhook HTTP ${response.status}`);
   }
+  return true;
 };
 
 const flushSecurityEventOutboxThroughB03Boundary = async () => {
@@ -126,7 +128,21 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
       };
       try {
         if (claim.expiresAt.getTime() <= attemptedAt.getTime()) throw new Error("SIEM_OUTBOX_EXPIRED");
-        await sendToWebhook({
+        if (claim.eventType === "AUDIT_LOG" && ["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST"].includes(String((claim.eventPayload as Record<string, unknown>)?.action || ""))) {
+          const log = claim.eventPayload as Record<string, unknown>;
+          if (b03PayloadDigest(log) !== claim.payloadDigest || log.userId !== claim.initiatingUserId
+              || log.licenseeId !== claim.licenseeId || (log.orgId || null) !== (claim.organizationId || null)) {
+            throw new Error("AUDIT_PROJECTION_AUTHORITY_MISMATCH");
+          }
+          if (!claim.projectionCompleted) {
+            await publishAllocationRequestAuditProjection(log);
+            await withB03SiemWorkerContext(context, (tx) => completeSecurityEventOutbox(tx, {
+              jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt,
+              sinkEventId: `projection:${claim.id}`,
+            }));
+          }
+        }
+        const delivered = await sendToWebhook({
           id: claim.id,
           eventType: claim.eventType,
           payload: claim.eventPayload,
@@ -136,7 +152,7 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
           jobId: claim.id,
           payloadDigest: claim.payloadDigest,
           attemptedAt,
-          sinkEventId: claim.id,
+          sinkEventId: delivered ? claim.id : `disabled:${claim.id}`,
         }));
       } catch (error) {
         const errorCode = error instanceof Error && /^[A-Z0-9_]{1,128}$/.test(error.message)
@@ -155,8 +171,6 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
 };
 
 export const flushSecurityEventOutbox = async () => {
-  const url = webhookUrl();
-  if (!url && sinkMode() !== "stdout") return;
   return flushSecurityEventOutboxThroughB03Boundary();
 };
 
@@ -172,12 +186,6 @@ export const startSecurityEventOutboxWorker = () => {
     return;
   }
   if (started) return;
-
-  const url = webhookUrl();
-  if (!url && sinkMode() !== "stdout") {
-    logger.info("SIEM outbox worker disabled (no webhook configured)");
-    return;
-  }
 
   started = true;
   const pollMs = parseIntEnv("SIEM_OUTBOX_POLL_MS", 5000, 1000, 60000);

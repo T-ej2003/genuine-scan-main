@@ -252,6 +252,7 @@ async function main() {
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   process.env.SIEM_WEBHOOK_URL = `http://127.0.0.1:${server.address().port}/events`;
   process.env.SIEM_SINK_MODE = "webhook";
+  process.env.SIEM_OUTBOX_BATCH_SIZE = "200";
   try {
     const cspRequest = requestId();
     await authenticated("b03-security-enqueue", async (tx) => siemOutbox.queueSecurityEvent("CSP_VIOLATION", { disposition: "blocked", requestId: cspRequest }, {
@@ -262,6 +263,33 @@ async function main() {
     assert(serverEvents.some(({ eventType }) => eventType === "CSP_VIOLATION"));
   } finally {
     await new Promise((resolve) => server.close(resolve));
+  }
+
+  // Internal projection receipts do not claim external delivery and survive retries.
+  for (const action of ['CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST']) {
+    const request=requestId();
+    const payload={id:requestId(),action,entityType:'QrAllocationRequest',entityId:requestId(),
+      userId:ids.user,orgId:ids.org,licenseeId:ids.licensee,details:{},createdAt:new Date().toISOString()};
+    const id=await authenticated('b03-security-enqueue',tx=>siemOutbox.queueSecurityEvent('AUDIT_LOG',payload,{
+      db:tx,authority:{...authority(request),initiatingActorRoleSnapshot:undefined},
+    }));
+    const [claim]=await worker.$transaction(tx=>repository.claimSecurityEventOutboxSlice(tx,{attemptedAt:new Date(),batchSize:1,jobType:'AUDIT_LOG'}));
+    assert.equal(claim.id,id); assert.equal(claim.projectionCompleted,false);
+    const complete=sinkEventId=>worker.$transaction(tx=>repository.completeSecurityEventOutbox(tx,{jobId:id,payloadDigest:claim.payloadDigest,attemptedAt:new Date(),sinkEventId}));
+    await assert.rejects(complete(`disabled:${id}`),/B03_OUTBOX_DENIED/);
+    await assert.rejects(complete(id),/B03_OUTBOX_DENIED/);
+    await assert.rejects(complete(`projection:${requestId()}`),/B03_OUTBOX_DENIED/);
+    assert.equal((await complete(`projection:${id}`)).replayed,false);
+    assert.equal((await complete(`projection:${id}`)).replayed,true);
+    assert.equal(psql(bootstrapUrl,`SELECT "sentAt" IS NULL FROM public."SecurityEventOutbox" WHERE id='${id}'`),'t');
+    await worker.$transaction(tx=>repository.failSecurityEventOutbox(tx,{jobId:id,payloadDigest:claim.payloadDigest,attemptedAt:new Date(),attempt:claim.attempt,errorCode:'EXTERNAL_DELIVERY_FAILED'}));
+    psql(bootstrapUrl,`UPDATE public."SecurityEventOutbox" SET "nextAttemptAt"=transaction_timestamp()-interval '1 second' WHERE id='${id}'`);
+    const [retry]=await worker.$transaction(tx=>repository.claimSecurityEventOutboxSlice(tx,{attemptedAt:new Date(),batchSize:1,jobType:'AUDIT_LOG'}));
+    assert.equal(retry.projectionCompleted,true);
+    await complete(`disabled:${id}`); assert.equal((await complete(`disabled:${id}`)).replayed,true);
+    assert.deepEqual(JSON.parse(psql(bootstrapUrl,`SELECT jsonb_build_object('status',status,'error',"lastError",'sentAt',"sentAt") FROM public."SecurityEventOutbox" WHERE id='${id}'`)),{status:'FAILED',error:'SIEM_SINK_DISABLED',sentAt:null});
+    await assert.rejects(worker.$transaction(tx=>repository.failSecurityEventOutbox(tx,{jobId:id,payloadDigest:claim.payloadDigest,attemptedAt:new Date(),attempt:retry.attempt,errorCode:'UNCERTAIN_RESPONSE'})),/B03_OUTBOX_DENIED/);
+    assert.equal((await worker.$transaction(tx=>repository.claimSecurityEventOutboxSlice(tx,{attemptedAt:new Date(),batchSize:1,jobType:'AUDIT_LOG'}))).length,0);
   }
 
   const fixedRequest = requestId();

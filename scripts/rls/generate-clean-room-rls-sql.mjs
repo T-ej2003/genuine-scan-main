@@ -2322,7 +2322,7 @@ const expectedRoutineIdentities = [
   ["app_rls", "session_c_write_audit", "p_actor_id text, p_organization_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb, p_ip_hash text, p_user_agent text"],
   ["app_rls", "session_c_admin_command", "p_capability text, p_purpose text, p_request_id text, p_command text, payload jsonb"],
   ["app_rls", "qr_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_target_licensee_id text"],
-  ["app_rls", "qr_write_audit", "p_actor_id text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
+  ["app_rls", "qr_write_audit", "p_actor_id text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb, p_ip_hash text"],
   ["app_rls", "printing_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_batch_id text"],
   ["app_rls", "printing_write_audit", "p_actor_id text, p_actor_role text, p_org_id text, p_licensee_id text, p_action text, p_entity_type text, p_entity_id text, p_details jsonb"],
   ["app_rls", "scheduled_job_prepare", "p_capability text, p_schedule_id text, p_operation text, p_request_id text"],

@@ -46,7 +46,7 @@ export const listScopedPrintReissueRequests = (params: {
   readPrintingProjection({
     ...params.boundary,
     operation: "REISSUE_LIST",
-    subjectId: "00000000-0000-4000-8000-000000000000",
+    subjectId: null,
     options: { status: params.status || null, limit: params.limit || 50 },
   });
 

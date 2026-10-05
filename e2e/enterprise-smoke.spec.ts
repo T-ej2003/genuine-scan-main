@@ -473,6 +473,13 @@ test.describe.serial("Enterprise smoke flows", () => {
     );
 
     await installLocalPrintAgentMock(page);
+    // Allow the normal UI dismissal to persist for this isolated browser actor.
+    await goto(page, "/login");
+    await page.getByRole("button", { name: "Manage preferences" }).click();
+    const cookiePreferences = page.getByRole("dialog", { name: "Cookie preferences" });
+    await cookiePreferences.getByRole("switch", { name: "Functional preferences consent" }).setChecked(true);
+    await cookiePreferences.getByRole("button", { name: "Save preferences" }).click();
+    await expect(cookiePreferences).toBeHidden();
     await login(page, env.manufacturerEmail, env.manufacturerPassword, {
       mfaBackupCode: backupCodeForRetry(env.manufacturerMfaBackupCodes, testInfo),
     });
@@ -481,11 +488,34 @@ test.describe.serial("Enterprise smoke flows", () => {
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
     await page.getByTestId("batches-search-input").fill(env.manufacturerBatchQuery);
-    await closeTransientDialogs(page);
     const targetBatchRow = page.locator("tbody tr", { hasText: env.manufacturerBatchQuery }).first();
     await expect(targetBatchRow).toBeVisible({ timeout: 30_000 });
     const createPrintJobButton = targetBatchRow.getByTestId("manufacturer-create-print-job").first();
     await expect(createPrintJobButton).toBeVisible();
+    const currentActor = await page.request.get("/api/auth/me");
+    expect(currentActor.ok()).toBe(true);
+    const actorPayload = await currentActor.json();
+    expect(actorPayload.success).toBe(true);
+    const actorId = actorPayload.data?.user?.id || actorPayload.data?.id;
+    expect(actorId).toBeTruthy();
+    const onboardingKey = await page.evaluate((userId) => {
+      const deviceCookie = document.cookie.split(";").map(cookie => cookie.trim())
+        .find(cookie => cookie.startsWith("aq_vid="));
+      if (!deviceCookie) throw new Error("Printer onboarding device identity is missing");
+      return `manufacturer-printer-onboarding:v1:${userId}:${decodeURIComponent(deviceCookie.slice("aq_vid=".length))}`;
+    }, actorId);
+    const printerOnboarding = page.getByRole("dialog", { name: "Set up printing on this computer" });
+    // Only a persisted terminal marker proves the initialization hook settled.
+    await expect(async () => {
+      if (await page.evaluate(key => localStorage.getItem(key) === "shown", onboardingKey)
+        && await printerOnboarding.isVisible()) {
+        await printerOnboarding.getByRole("button", { name: "Close for now" }).click();
+      }
+      expect(await page.evaluate(key => localStorage.getItem(key), onboardingKey))
+        .toMatch(/^(dismissed|completed)$/);
+    }).toPass({ timeout: 20_000 });
+    await expect(printerOnboarding).toBeHidden();
+    await closeTransientDialogs(page);
     await createPrintJobButton.click();
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();

@@ -1,4 +1,5 @@
 import { emitMutationEvent } from "@/lib/mutation-events";
+import { clearRequestCoordinator, getRequestCoordinatorScope, isRequestCoordinatorScopeReady, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import { recordSupportNetworkLog, reportSupportRuntimeIssue } from "@/lib/support-diagnostics";
 
 export const BASE_URL = import.meta.env.VITE_API_URL || "/api";
@@ -316,6 +317,8 @@ export function createApiClientCore(): ApiClientCore {
   const getToken = () => token;
 
   const logout = () => {
+    setRequestCoordinatorScope(null);
+    clearRequestCoordinator();
     setToken(null);
     getCache.clear();
   };
@@ -367,6 +370,13 @@ export function createApiClientCore(): ApiClientCore {
     endpoint.startsWith("/auth/mfa/");
 
   const request = async <T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> => {
+    if (endpoint === "/auth/login") {
+      setRequestCoordinatorScope(null);
+      clearRequestCoordinator();
+    }
+    if (!isRequestCoordinatorScopeReady() && !endpoint.startsWith("/auth/")) {
+      return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope is refreshing" };
+    }
     if (endpoint === "/auth/refresh" && !options.skipRefreshDedup) {
       if (!refreshInFlight) {
         refreshInFlight = request<{ user: any; auth?: any; accessToken?: string }>(
@@ -384,8 +394,9 @@ export function createApiClientCore(): ApiClientCore {
     };
 
     const method = String(options.method || "GET").toUpperCase();
-    const cacheKey = `${getToken() || "cookie"}:${endpoint}`;
-    const cooldownKey = `${method}:${normalizeCooldownEndpoint(endpoint)}`;
+    const requestScope = getRequestCoordinatorScope();
+    const cacheKey = `${getRequestCoordinatorScope()}:${getToken() || "cookie"}:${endpoint}`;
+    const cooldownKey = `${requestScope}:${method}:${normalizeCooldownEndpoint(endpoint)}`;
     const cooldown = endpointCooldowns.get(cooldownKey);
     if (cooldown && Date.now() < cooldown.until) {
       return {
@@ -465,8 +476,13 @@ export function createApiClientCore(): ApiClientCore {
         signal: controller.signal,
       });
       const requestId = response.headers.get("x-request-id") || response.headers.get("x-correlation-id") || undefined;
+      if (requestScope !== getRequestCoordinatorScope()) {
+        pushNetworkLog({ status: response.status, ok: false, error: "Request scope changed" });
+        return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed; refresh before retrying", unknownOutcome: method !== "GET" && method !== "HEAD", requestId };
+      }
 
       if (response.status === 304 && method === "GET") {
+        if (endpoint.startsWith("/auth/")) return { success: false, status: 304, error: "Authoritative session response required", requestId };
         pushNetworkLog({ status: response.status, ok: true });
         const cached = getCache.get(cacheKey);
         if (cached !== undefined) return { success: true, data: cached as T, requestId };
@@ -480,6 +496,11 @@ export function createApiClientCore(): ApiClientCore {
         ? await response.json().catch((): null => null)
         : await response.text().catch((): string => "");
 
+      // Parsing is asynchronous too: scope may change after headers arrive.
+      if (requestScope !== getRequestCoordinatorScope()) {
+        return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed", unknownOutcome: isStateChanging, requestId };
+      }
+
       if (response.status === 401 && !options.skipAuthRefresh && !isAuthRefreshEndpoint(endpoint)) {
         const rawMessage =
           (payload && typeof payload === "object" && (payload.error || payload.message)) ||
@@ -489,6 +510,9 @@ export function createApiClientCore(): ApiClientCore {
 
         setToken(null);
         const refreshed = await refreshOnce();
+        if (requestScope !== getRequestCoordinatorScope()) {
+          return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed; refresh before retrying", unknownOutcome: false, requestId };
+        }
         if (refreshed.success) {
           const nextToken = extractAccessToken(refreshed.data);
           if (nextToken) setToken(nextToken);
@@ -545,6 +569,7 @@ export function createApiClientCore(): ApiClientCore {
         if (response.status >= 500) {
           reportSupportRuntimeIssue({
             source: "network",
+            endpoint,
             message: `Server error (${response.status}) on ${method} ${endpoint}`,
           });
         }
@@ -560,10 +585,18 @@ export function createApiClientCore(): ApiClientCore {
         };
       }
 
-      pushNetworkLog({ status: response.status, ok: true });
+      pushNetworkLog({ status: response.status, ok: payload?.success !== false,
+        error: payload?.success === false ? payload.errorCode || payload.code || "Controlled unsuccessful response" : undefined });
       endpointCooldowns.delete(cooldownKey);
 
       if (payload && typeof payload === "object" && "success" in payload) {
+        if (payload.success && ["/auth/login", "/auth/me", "/auth/refresh"].includes(endpoint)) {
+          const authUser = payload.data?.user || (payload.data?.id ? payload.data : null);
+          if (authUser) {
+            const auth = payload.data?.auth || authUser.auth || null;
+            setRequestCoordinatorScope(auth?.sessionStage === "MFA_BOOTSTRAP" ? null : { ...authUser, auth });
+          }
+        }
         if (method === "GET" && payload.success) {
           getCache.set(cacheKey, (payload as ApiResponse<T>).data as T);
         }
@@ -582,11 +615,15 @@ export function createApiClientCore(): ApiClientCore {
       }
       return { success: true, data: payload as T, status: response.status, requestId };
     } catch (error: any) {
+      if (requestScope !== getRequestCoordinatorScope()) {
+        return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed", unknownOutcome: isStateChanging };
+      }
       const isAbort = error?.name === "AbortError";
       const message = isAbort ? "Request timed out" : "Network error - is the backend running?";
       pushNetworkLog({ status: null, ok: false, error: message });
       reportSupportRuntimeIssue({
         source: "network",
+        endpoint,
         message: `${method} ${endpoint}: ${message}`,
       });
       return {

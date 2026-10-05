@@ -10,11 +10,10 @@
     "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensee",
     "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees",
     "workflow-http-backend-src-controllers-qr-controller-ts-block-batch",
+    "workflow-http-backend-src-controllers-qr-log-controller-ts-get-qr-tracking-analytics-controller",
     "workflow-http-backend-src-controllers-qr-request-controller-ts-create-qr-allocation-request",
     "workflow-http-backend-src-controllers-qr-request-controller-ts-get-qr-allocation-requests",
     "workflow-http-backend-src-controllers-qr-request-controller-ts-reject-qr-allocation-request",
-    "workflow-http-backend-src-controllers-telemetry-controller-ts-capture-route-transition-metric",
-    "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
     "workflow-http-backend-src-controllers-user-controller-ts-get-users",
     "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-discover-printer-capabilities",
     "workflow-internal-backend-src-printing-registry-printer-profile-service-ts-ensure-printer-profile-for-printer",
@@ -87,8 +86,6 @@
     "workflow-internal-backend-src-services-qr-provenance-backfill-service-ts-backfill-historical-qr-provenance",
     "workflow-internal-backend-src-services-qr-service-ts-mark-batch-as-printed",
     "workflow-internal-backend-src-services-qr-service-ts-record-scan",
-    "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-build-activity-analytics",
-    "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-load-event-metrics",
     "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy",
     "workflow-internal-backend-src-services-sample-scan-policy-service-ts-mark-batch-sample-verified-if-satisfied",
     "workflow-internal-backend-src-services-scan-insight-service-ts-get-scan-insight",
@@ -116,6 +113,7 @@
       "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
       "workflowIds": [
         "workflow-http-backend-src-controllers-qr-controller-ts-block-batch",
+        "workflow-http-backend-src-controllers-qr-log-controller-ts-get-qr-tracking-analytics-controller",
         "workflow-http-backend-src-controllers-qr-request-controller-ts-create-qr-allocation-request",
         "workflow-http-backend-src-controllers-qr-request-controller-ts-get-qr-allocation-requests",
         "workflow-http-backend-src-controllers-qr-request-controller-ts-reject-qr-allocation-request",
@@ -136,8 +134,6 @@
         "workflow-internal-backend-src-services-qr-provenance-backfill-service-ts-backfill-historical-qr-provenance",
         "workflow-internal-backend-src-services-qr-service-ts-mark-batch-as-printed",
         "workflow-internal-backend-src-services-qr-service-ts-record-scan",
-        "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-build-activity-analytics",
-        "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-load-event-metrics",
         "workflow-internal-backend-src-services-scan-insight-service-ts-get-scan-insight",
         "workflow-internal-backend-src-services-scan-log-reporting-service-ts-list-scan-logs-for-reporting"
       ]
@@ -199,8 +195,6 @@
       "waveId": "a-08-runtime-idempotency-telemetry",
       "contract": "Shared transaction idempotency and route telemetry with exact attribution, replay and tenant semantics.",
       "workflowIds": [
-        "workflow-http-backend-src-controllers-telemetry-controller-ts-capture-route-transition-metric",
-        "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
         "workflow-internal-backend-src-services-idempotency-service-ts-begin-idempotent-action",
         "workflow-internal-backend-src-services-idempotency-service-ts-complete-idempotent-action",
         "workflow-internal-backend-src-services-idempotency-service-ts-load-existing"
@@ -219,8 +213,8 @@
     "backend/src/controllers/eventsController.ts",
     "backend/src/controllers/licenseeController.ts",
     "backend/src/controllers/qrController.ts",
+    "backend/src/controllers/qrLogController.ts",
     "backend/src/controllers/qrRequestController.ts",
-    "backend/src/controllers/telemetryController.ts",
     "backend/src/controllers/userController.ts",
     "backend/src/lib/canonicalDbContext.ts",
     "backend/src/middleware/tenantIsolation.ts",
@@ -249,7 +243,6 @@
     "backend/src/services/printerTestLabelGateService.ts",
     "backend/src/services/qrProvenanceBackfillService.ts",
     "backend/src/services/qrService.ts",
-    "backend/src/services/qrTrackingAnalyticsService.ts",
     "backend/src/services/sampleScanPolicyService.ts",
     "backend/src/services/scanInsightService.ts",
     "backend/src/services/scanLogReportingService.ts",
@@ -391,8 +384,8 @@
     "scripts/aws/**staging**",
     "documents/security/rls-program/STAGING_FULL_RLS_*"
   ],
-  "workflowCount": 88,
+  "workflowCount": 85,
   "workflowFamilyCount": 5,
-  "productionFileCount": 41,
+  "productionFileCount": 40,
   "existingTestFileCount": 0
 }

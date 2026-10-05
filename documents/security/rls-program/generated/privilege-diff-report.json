@@ -2710,7 +2710,31 @@
         "startNumber",
         "endNumber",
         "batchName",
-        "status"
+        "status",
+        "note",
+        "approvedByUserId",
+        "approvedAt",
+        "rejectedByUserId",
+        "rejectedAt",
+        "decisionNote",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "QrAllocationRequest",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "licenseeId",
+        "requestedByUserId",
+        "quantity",
+        "batchName",
+        "note",
+        "status",
+        "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -2722,6 +2746,8 @@
         "status",
         "approvedByUserId",
         "approvedAt",
+        "rejectedByUserId",
+        "rejectedAt",
         "decisionNote",
         "startNumber",
         "endNumber",
@@ -2759,6 +2785,7 @@
         "entityType",
         "entityId",
         "details",
+        "ipHash",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
@@ -2890,6 +2917,7 @@
       "table": "QrScanLog",
       "command": "SELECT",
       "columns": [
+        "id",
         "qrCodeId",
         "licenseeId",
         "batchId",
@@ -2897,10 +2925,39 @@
         "scannedAt",
         "isFirstScan",
         "isTrustedOwnerContext",
+        "scanCount",
         "device",
         "locationName",
         "locationCountry",
         "locationCity"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "VerificationDecision",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "qrCodeId",
+        "batchId",
+        "licenseeId",
+        "outcome",
+        "riskBand",
+        "replacementStatus",
+        "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "CustomerTrustCredential",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "qrCodeId",
+        "reviewState",
+        "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
@@ -3353,6 +3410,7 @@
         "status",
         "reason",
         "decisionNote",
+        "approvalReferenceId",
         "rejectionReason",
         "approvedAt",
         "rejectedAt",

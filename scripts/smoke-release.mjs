@@ -206,6 +206,7 @@ const logSkip = (message) => {
 };
 
 const run = async () => {
+  let authenticatedRole = "";
   console.log(`Smoke base: ${baseUrl}`);
   console.log(`Smoke API: ${apiBaseUrl}`);
 
@@ -303,6 +304,7 @@ const run = async () => {
   {
     const { response, payload } = await requestJson(`${apiBaseUrl}/auth/me`);
     ensureOk("auth me", response.status, payload);
+    authenticatedRole = payload?.data?.role || "";
     const expectedIdentity = {
       id: String(process.env.SMOKE_EXPECTED_USER_ID || "").trim(),
       role: String(process.env.SMOKE_EXPECTED_ROLE || "").trim(),
@@ -343,6 +345,31 @@ const run = async () => {
     const { response, payload } = await requestJson(`${apiBaseUrl}${route}`);
     ensureOk(label, response.status, payload);
     logPass(label);
+  }
+
+  if (authenticatedRole === "LICENSEE_ADMIN") {
+    for (const [label, route] of [
+      ["manufacturers", "/manufacturers"],
+      ["QR batches", "/qr/batches"],
+      ["QR allocation requests", "/qr/requests?limit=1"],
+      ["QR analytics", "/admin/qr/analytics?limit=1"],
+      ["print jobs", "/manufacturer/print-jobs?limit=1"],
+      ["print reissue requests", "/manufacturer/print-reissue-requests?limit=1"],
+    ]) {
+      const { response, payload } = await requestJson(`${apiBaseUrl}${route}`);
+      ensureOk(label, response.status, payload);
+      logPass(label);
+    }
+    const { response, payload } = await requestJson(`${apiBaseUrl}/telemetry/route-transition`, {
+      method: "POST",
+      body: JSON.stringify({ routeTo: "/qr-requests", transitionMs: 0, source: "production-smoke" }),
+    });
+    if (response.status !== 202 || payload?.success !== false
+      || payload?.code !== "TELEMETRY_NOT_PERSISTED"
+      || payload?.data?.accepted !== false || payload?.data?.persisted !== false) {
+      throw new Error("Route telemetry must return the controlled non-persistence contract.");
+    }
+    logPass("route telemetry failure isolation (not persisted)");
   }
 
   {

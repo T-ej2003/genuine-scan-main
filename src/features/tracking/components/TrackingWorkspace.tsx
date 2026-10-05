@@ -486,8 +486,8 @@ export function TrackingWorkspace({
 	                                    </Badge>
                                   </TableCell>
                                   <TableCell>
-                                    <div className="font-medium text-slate-900">{log.scanCount ?? 0}</div>
-                                    {log.isFirstScan ? (
+                                    <div className="font-medium text-slate-900">{log.scanCount ?? "Unavailable"}</div>
+                                    {log.isFirstScan == null ? <span className="text-xs text-slate-500">Scan sequence unavailable</span> : log.isFirstScan ? (
                                       <Badge className="mt-1 border-emerald-200 bg-emerald-50 text-emerald-700">First scan</Badge>
                                     ) : (
                                       <Badge className="mt-1 border-amber-200 bg-amber-50 text-amber-700">
@@ -497,8 +497,8 @@ export function TrackingWorkspace({
                                     )}
                                   </TableCell>
                                   <TableCell className="text-xs text-slate-700">
-                                    <Badge className={log.isTrustedOwnerContext ? "border-sky-200 bg-sky-50 text-sky-700" : "border-amber-200 bg-amber-50 text-amber-700"}>
-                                      {log.isTrustedOwnerContext ? "Trusted owner" : "External"}
+                                    <Badge className={log.isTrustedOwnerContext == null ? "border-slate-200 bg-slate-50 text-slate-700" : log.isTrustedOwnerContext ? "border-sky-200 bg-sky-50 text-sky-700" : "border-amber-200 bg-amber-50 text-amber-700"}>
+                                      {log.isTrustedOwnerContext == null ? "Unknown" : log.isTrustedOwnerContext ? "Trusted owner" : "External"}
                                     </Badge>
                                     <div className="mt-1 text-[11px] text-slate-500">{describeScanContext(log)}</div>
                                   </TableCell>

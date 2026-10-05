@@ -133,7 +133,6 @@
     { "code": "tenant-incident-evidence", "workflowClasses": ["tenant-bounded-read"] },
     { "code": "incident-response-alert-triage", "workflowClasses": ["incident-response-read"] },
     { "code": "licensee-directory-lookup", "workflowClasses": ["licensee-bounded-read"] },
-    { "code": "platform-telemetry-health", "workflowClasses": ["platform-aggregate-read"] },
     { "code": "tenant-support-triage", "workflowClasses": ["licensee-bounded-read"] },
     { "code": "tenant-compliance-status", "workflowClasses": ["licensee-bounded-read"] },
     { "code": "tenant-feature-flag-review", "workflowClasses": ["licensee-bounded-read"] },
@@ -173,7 +172,7 @@
     "secretOrReturnedPayloadLoggingAllowed": false
   },
   "aggregateRestrictions": {
-    "approvedWorkflowIds": ["workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"],
+    "approvedWorkflowIds": [],
     "rawRowsReturned": false,
     "tenantPrivateRowsMaterializedInApplicationMemory": false,
     "tenantIdentityDimensionsAllowed": false,
@@ -384,28 +383,6 @@
       "blockers": ["Current platform list permits omitted licensee scope, offset pagination, no date ceiling, no recent MFA/purpose, rich includes, and no same-transaction attribution."]
     },
     {
-      "workflowId": "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
-      "primaryClass": "platform-aggregate-read",
-      "inventoryBoundaryType": "authenticated-context",
-      "actorClasses": ["licensee-admin", "platform-admin"],
-      "requiredAssurance": "mfa-verified",
-      "purposeCodes": ["platform-telemetry-health"],
-      "requiredSelectors": [],
-      "optionalSelectors": ["licenseeId"],
-      "scopeRule": "The platform branch may omit licenseeId only for the exact dedicated aggregate; any supplied licenseeId must be database-validated and narrows the aggregate.",
-      "executionBoundary": "dedicated-aggregate-projection",
-      "tableProjections": [{ "tableId": "table-route-transition-metric", "allowedColumns": ["routeTo", "transitionMs", "dropped", "createdAt", "licenseeId"], "prohibitedColumns": ["id", "userId", "role", "routeFrom", "source", "deviceType", "networkType", "online", "verifyCodePresent", "verifyResult"] }],
-      "responseProjection": ["transitionCount", "averageTransitionMs", "verifyTransitionCount", "verifyDroppedCount", "at most 20 allowlisted routeTo aggregates"],
-      "maximumRows": 20,
-      "pagination": { "mode": "fixed-cardinality-aggregate", "maximumPageSize": 20, "maximumOffset": 0 },
-      "dateWindow": { "required": true, "maximumDays": 31 },
-      "deterministicOrdering": ["transitionCount DESC", "routeTo ASC"],
-      "countAndListSameSnapshot": true,
-      "readAttributionSameTransaction": true,
-      "implementationStatus": "blocked-dedicated-projection-pending",
-      "blockers": ["Current route accepts an unbounded date window, uses raw table aggregates through global Prisma, lacks recent MFA/purpose/attribution, and does not prove a database-enforced aggregate boundary."]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
       "primaryClass": "licensee-bounded-read",
       "inventoryBoundaryType": "unresolved",
@@ -507,7 +484,6 @@
     "workflow-http-backend-src-controllers-licensee-controller-ts-get-licensees",
     "workflow-http-backend-src-controllers-support-controller-ts-get-support-ticket",
     "workflow-http-backend-src-controllers-support-controller-ts-list-support-tickets",
-    "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
     "workflow-internal-backend-src-services-compliance-pack-service-ts-list-compliance-pack-jobs",
     "workflow-internal-backend-src-services-governance-service-ts-list-tenant-feature-flags",
     "workflow-internal-backend-src-services-analytics-service-ts-get-risk-analytics"

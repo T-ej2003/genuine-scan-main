@@ -53,10 +53,10 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.equal(sessionA.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionB.coordinationBaseCommit, partition.coordinationBaseCommit);
   assert.equal(sessionC.coordinationBaseCommit, partition.coordinationBaseCommit);
-  assert.equal(sessionA.workflowIds.length, 88);
+  assert.equal(sessionA.workflowIds.length, 85);
   assert.equal(sessionB.workflowIds.length, 169);
   assert.equal(sessionC.workflowIds.length, 73);
-  assert.equal(sessionA.productionFileCount, 41);
+  assert.equal(sessionA.productionFileCount, 40);
   assert.equal(sessionB.productionFileCount, 81);
   assert.equal(sessionC.productionFileCount, 30);
   assert.equal(sessionB.existingTestFileCount, 46);
@@ -73,6 +73,7 @@ test("session ownership is exhaustive and editable production and test files nev
   assert.deepEqual(partition.fileOwnership.sessionAAdditionalProductionFiles, ["backend/src/lib/canonicalDbContext.ts"]);
   assert.deepEqual(partition.fileOwnership.sessionBOwnedSharedFiles, ["backend/src/middleware/auth.ts"]);
   assert.deepEqual(partition.fileOwnership.sessionCOwnedSharedFiles, [
+    "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
     "backend/src/controllers/incidentController.ts",
     "backend/src/controllers/tracePolicyController.ts",
     "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",

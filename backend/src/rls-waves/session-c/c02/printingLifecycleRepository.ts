@@ -29,7 +29,7 @@ export const readPrintingProjection = (input: {
   capability: string;
   requestId: string;
   operation: "BATCH" | "JOB" | "JOB_LIST" | "ATTENTION_QUEUE" | "RELEASE" | "REISSUE" | "REISSUE_REQUEST" | "REISSUE_LIST" | "PRINTABLE_ITEMS" | "PRINTER" | "PRINTER_LIST" | "PRINTER_STATUS" | "VALIDATION_EVIDENCE";
-  subjectId: string;
+  subjectId: string | null;
   options?: Record<string, unknown>;
   client?: SqlClient;
 }) =>

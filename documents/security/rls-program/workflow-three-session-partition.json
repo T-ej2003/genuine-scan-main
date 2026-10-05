@@ -141,9 +141,9 @@
         "scripts/aws/**staging**",
         "documents/security/rls-program/STAGING_FULL_RLS_*"
       ],
-      "workflowCount": 88,
+      "workflowCount": 85,
       "workflowFamilyCount": 5,
-      "productionFileCount": 41,
+      "productionFileCount": 40,
       "existingTestFileCount": 0
     },
     {
@@ -162,6 +162,7 @@
         "backend/src/controllers/incidentController.ts",
         "backend/src/controllers/licenseeController.ts",
         "backend/src/controllers/tracePolicyController.ts",
+        "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
         "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
         "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
@@ -696,6 +697,20 @@
       ]
     },
     {
+      "workflowId": "workflow-http-backend-src-controllers-qr-log-controller-ts-get-qr-tracking-analytics-controller",
+      "sessionId": "session-a",
+      "waveId": "a-03-batch-qr-lifecycle",
+      "assignmentRuleId": "a03-batch-qr-root",
+      "corroboratingRuleIds": [],
+      "entryPoint": "http:getQrTrackingAnalyticsController",
+      "executionSurface": "http",
+      "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
+      "canonicalSourceFiles": [
+        "backend/src/controllers/qrLogController.ts",
+        "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts"
+      ]
+    },
+    {
       "workflowId": "workflow-http-backend-src-controllers-qr-request-controller-ts-create-qr-allocation-request",
       "sessionId": "session-a",
       "waveId": "a-03-batch-qr-lifecycle",
@@ -705,7 +720,8 @@
       "executionSurface": "http",
       "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
       "canonicalSourceFiles": [
-        "backend/src/controllers/qrRequestController.ts"
+        "backend/src/controllers/qrRequestController.ts",
+        "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts"
       ]
     },
     {
@@ -718,7 +734,8 @@
       "executionSurface": "http",
       "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
       "canonicalSourceFiles": [
-        "backend/src/controllers/qrRequestController.ts"
+        "backend/src/controllers/qrRequestController.ts",
+        "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts"
       ]
     },
     {
@@ -731,7 +748,8 @@
       "executionSurface": "http",
       "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
       "canonicalSourceFiles": [
-        "backend/src/controllers/qrRequestController.ts"
+        "backend/src/controllers/qrRequestController.ts",
+        "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts"
       ]
     },
     {
@@ -812,32 +830,6 @@
       "contract": "Raw and signed QR verification, proof-bound public status, customer trust, ownership, support and intake with non-enumerable exact projections.",
       "canonicalSourceFiles": [
         "backend/src/controllers/supportIssueController.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-http-backend-src-controllers-telemetry-controller-ts-capture-route-transition-metric",
-      "sessionId": "session-a",
-      "waveId": "a-08-runtime-idempotency-telemetry",
-      "assignmentRuleId": "a08-idempotency-telemetry-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:captureRouteTransitionMetric",
-      "executionSurface": "http",
-      "contract": "Shared transaction idempotency and route telemetry with exact attribution, replay and tenant semantics.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/telemetryController.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary",
-      "sessionId": "session-a",
-      "waveId": "a-08-runtime-idempotency-telemetry",
-      "assignmentRuleId": "a08-idempotency-telemetry-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "http:getRouteTransitionSummary",
-      "executionSurface": "http",
-      "contract": "Shared transaction idempotency and route telemetry with exact attribution, replay and tenant semantics.",
-      "canonicalSourceFiles": [
-        "backend/src/controllers/telemetryController.ts"
       ]
     },
     {
@@ -4404,32 +4396,6 @@
       ]
     },
     {
-      "workflowId": "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-build-activity-analytics",
-      "sessionId": "session-a",
-      "waveId": "a-03-batch-qr-lifecycle",
-      "assignmentRuleId": "a03-batch-qr-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:buildActivityAnalytics",
-      "executionSurface": "internal",
-      "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
-      "canonicalSourceFiles": [
-        "backend/src/services/qrTrackingAnalyticsService.ts"
-      ]
-    },
-    {
-      "workflowId": "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-load-event-metrics",
-      "sessionId": "session-a",
-      "waveId": "a-03-batch-qr-lifecycle",
-      "assignmentRuleId": "a03-batch-qr-root",
-      "corroboratingRuleIds": [],
-      "entryPoint": "internal:loadEventMetrics",
-      "executionSurface": "internal",
-      "contract": "Batch, QR, range, allocation, scan and lifecycle operations through tenant-bound transactions and database-enforced state transitions.",
-      "canonicalSourceFiles": [
-        "backend/src/services/qrTrackingAnalyticsService.ts"
-      ]
-    },
-    {
       "workflowId": "workflow-internal-backend-src-services-sample-scan-policy-service-ts-evaluate-sample-scan-policy",
       "sessionId": "session-a",
       "waveId": "a-04-printing-reissue-recovery-release",
@@ -4751,6 +4717,7 @@
       "backend/src/middleware/auth.ts"
     ],
     "sessionCOwnedSharedFiles": [
+      "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
       "backend/src/controllers/incidentController.ts",
       "backend/src/controllers/tracePolicyController.ts",
       "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
@@ -4762,23 +4729,23 @@
     ]
   },
   "validationSummary": {
-    "authoritativeWorkflowCount": 330,
-    "assignmentCount": 330,
-    "uniqueAssignmentCount": 330,
+    "authoritativeWorkflowCount": 327,
+    "assignmentCount": 327,
+    "uniqueAssignmentCount": 327,
     "missingWorkflowIds": [],
     "duplicateWorkflowIds": [],
     "unknownWorkflowIds": [],
     "genericCatchAllAssignments": [],
     "sessionCounts": {
-      "session-a": 88,
+      "session-a": 85,
       "session-b": 169,
       "session-c": 73
     },
     "waveCounts": {
       "a-01-tenant-manufacturer-platform-reads": 10,
-      "a-03-batch-qr-lifecycle": 25,
+      "a-03-batch-qr-lifecycle": 24,
       "a-04-printing-reissue-recovery-release": 47,
-      "a-08-runtime-idempotency-telemetry": 5,
+      "a-08-runtime-idempotency-telemetry": 3,
       "a-09-system-integration-owner": 1,
       "b-01-auth-preauth-session-account-security": 50,
       "b-02-public-proof-support-intake": 99,
@@ -4795,6 +4762,7 @@
       "backend/src/controllers/licenseeController.ts",
       "backend/src/controllers/tracePolicyController.ts",
       "backend/src/middleware/auth.ts",
+      "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
       "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
       "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
       "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",
