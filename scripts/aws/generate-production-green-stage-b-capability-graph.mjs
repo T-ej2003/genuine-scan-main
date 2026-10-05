@@ -8,7 +8,7 @@ import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-sta
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
-import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND, FULL_RLS_RECEIPT_PREFIXES } from "./stage-b-terraform-backend-contract.mjs";
 import { STAGE_A_TERRAFORM_BACKEND, STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
@@ -754,7 +754,7 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
       : action === 'cloudtrail:LookupEvents' || action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' || action === 'ecs:DescribeTaskDefinition' ? ['*']
       : action.startsWith('dynamodb:') ? [`arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${PRODUCTION_COMPONENT_STATE.table}`]
       : action === 's3:ListBucket' ? [STAGE_B_TERRAFORM_BACKEND.bucketArn, `arn:aws:s3:::${STAGE_B.receiptBucket}`]
-      : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, `arn:aws:s3:::${STAGE_B.receiptBucket}/rls-receipts/*`] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
+      : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, ...FULL_RLS_RECEIPT_PREFIXES.map(prefix => `arn:aws:s3:::${STAGE_B.receiptBucket}/${prefix}`)] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
       : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
       : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]

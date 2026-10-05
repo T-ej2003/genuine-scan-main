@@ -862,7 +862,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 269);
+  assert.equal(report.requiredEvaluations.length, 277);
   assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId.startsWith("staged-broker-")).map(({ manifestId, action, resource }) => [manifestId, action, resource]).sort(), [
     ["staged-broker-lambda-listaliases", "lambda:ListAliases", STAGE_B.brokerFunctionArn],
     ["staged-broker-lambda-listfunctionurlconfigs", "lambda:ListFunctionUrlConfigs", STAGE_B.brokerFunctionArn],

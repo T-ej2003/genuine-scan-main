@@ -28,14 +28,16 @@ const stageA = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGree
 const initializedMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
 const asArray = (value) => Array.isArray(value) ? value : [value];
 
+const globMatches = (pattern, value) => typeof value === 'string' && new RegExp('^' + [...pattern].map(c => c === '*' ? '.*' : c === '?' ? '.' : c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('') + '$').test(value);
+
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
   const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
-  if (!actions.includes(action) || !resources.some((candidate) => candidate === resource || candidate.endsWith("*") && resource.startsWith(candidate.slice(0, -1)))) return false;
+  if (!actions.includes(action) || !resources.some((candidate) => globMatches(candidate, resource))) return false;
   const expected = statement.Condition?.StringEquals?.["s3:prefix"];
   if (expected !== undefined && context.prefix !== expected) return false;
   const like = statement.Condition?.StringLike?.["s3:prefix"];
-  if (like !== undefined && !(typeof context.prefix === "string" && context.prefix.startsWith(like.slice(0, -1)))) return false;
+  if (like !== undefined && !asArray(like).some(pattern => globMatches(pattern, context.prefix))) return false;
   const nullCondition = statement.Condition?.Null?.["s3:if-none-match"];
   if (nullCondition !== undefined && String(context["s3:if-none-match"] === undefined) !== nullCondition) return false;
   return true;
@@ -337,10 +339,10 @@ test('receipt read scope covers both canonical namespaces and grants no artifact
   const artifacts = 'arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an';
   for (const [bucket, prefix] of [[bucketArn, `${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/transaction/`], [artifacts, `rls-receipts/${'a'.repeat(40)}/full-rls-verification/`]]) {
     assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix }), 'allowed');
-    for (const rejected of ['', 'other/', 'rls-receipts-unrelated/', 'env:/production/']) assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix: rejected }), 'implicitDeny');
+    for (const rejected of ['', 'other/', 'rls-receipts-unrelated/', 'rls-receipts/internal/', `rls-receipts/${'a'.repeat(40)}/internal/`, `rls-receipts/${'a'.repeat(40)}/full-rls-unknown/`, 'env:/production/']) assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix: rejected }), 'implicitDeny');
   }
   const receipt = `${artifacts}/rls-receipts/${'a'.repeat(40)}/full-rls-verification/receipt.json`;
   assert.equal(decision([policy], 's3:GetObject', receipt), 'allowed');
   for (const action of ['s3:PutObject', 's3:DeleteObject']) assert.equal(decision([policy], action, receipt), 'implicitDeny');
-  assert.equal(decision([policy], 's3:GetObject', `${artifacts}/unrelated/receipt.json`), 'implicitDeny');
+  for (const sibling of ['unrelated/receipt.json', 'rls-receipts/internal/receipt.json', `rls-receipts/${'a'.repeat(40)}/internal/receipt.json`, `rls-receipts/${'a'.repeat(40)}/full-rls-unknown/receipt.json`]) assert.equal(decision([policy], 's3:GetObject', `${artifacts}/${sibling}`), 'implicitDeny');
 });

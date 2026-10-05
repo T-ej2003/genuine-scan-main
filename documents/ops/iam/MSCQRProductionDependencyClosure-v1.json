@@ -8,8 +8,16 @@
       "action": "s3:GetObject",
       "identity": "RELEASE_DEPLOYER",
       "capabilityIds": [
-        "staged-broker-27dc6cc344ffe52e",
-        "staged-broker-36ece5ab8b6a75b1"
+        "staged-broker-1046174caa11457e",
+        "staged-broker-36ece5ab8b6a75b1",
+        "staged-broker-3c470a40c00dfd9c",
+        "staged-broker-4f1a8b6b634415c6",
+        "staged-broker-9c71ddb6335b7cbd",
+        "staged-broker-9cc6c03c11b73dff",
+        "staged-broker-a633f7f97ef87fbf",
+        "staged-broker-b37587799f94e642",
+        "staged-broker-be2dbe35f3473a94",
+        "staged-broker-e022dc5795bafcad"
       ],
       "reachableMode": [
         "NORMAL"

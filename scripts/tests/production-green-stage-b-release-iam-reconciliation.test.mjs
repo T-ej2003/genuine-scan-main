@@ -124,7 +124,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 261);
+  assert.equal(evaluations.required.length, 269);
   assert.equal(evaluations.forbidden.length, 38);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);

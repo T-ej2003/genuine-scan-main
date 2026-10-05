@@ -1,3 +1,4 @@
+import { STAGE_B, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import fs from "node:fs";
 import crypto from "node:crypto";
 import os from "node:os";
@@ -12,6 +13,7 @@ const legacyWorkspaceKey = "mscqr/production/rls-green/stage-b/terraform.tfstate
 const stateKey = `env:/production/${legacyWorkspaceKey}`;
 const lockKey = `${stateKey}.tflock`;
 const applyAttemptPrefix = "env:/production/mscqr/production/rls-green/stage-b/apply-attempts";
+export const FULL_RLS_RECEIPT_PREFIXES = Object.freeze(STAGE_B_MODES.map(mode => `rls-receipts/${"?".repeat(40)}/${mode}/*`));
 const legacyWorkspaceLockKey = `${legacyWorkspaceKey}.tflock`;
 
 export const STAGE_B_TERRAFORM_BACKEND = Object.freeze({
@@ -179,10 +181,10 @@ export const STAGE_B_TERRAFORM_BACKEND_POLICY = Object.freeze({
     Object.freeze({ Sid: "ListStageBReceiptNamespace", Effect: "Allow", Action: "s3:ListBucket", Resource: bucketArn,
       Condition: { StringLike: { "s3:prefix": `${applyAttemptPrefix}/*` } } }),
     Object.freeze({ Sid: "ReadFullRlsExecutorReceipts", Effect: "Allow", Action: "s3:GetObject",
-      Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/*" }),
+      Resource: FULL_RLS_RECEIPT_PREFIXES.map(prefix => `arn:aws:s3:::${STAGE_B.receiptBucket}/${prefix}`) }),
     Object.freeze({ Sid: "ListFullRlsExecutorReceipts", Effect: "Allow", Action: "s3:ListBucket",
       Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
-      Condition: { StringLike: { "s3:prefix": "rls-receipts/*" } } }),
+      Condition: { StringLike: { "s3:prefix": FULL_RLS_RECEIPT_PREFIXES } } }),
     Object.freeze({
       Sid: "ReadStageBApplyAttempts",
       Effect: "Allow",

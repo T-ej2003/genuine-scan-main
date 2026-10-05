@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { STAGE_B } from './production-green-stage-b-contract.mjs';
+import { STAGE_B, STAGE_B_MODES } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_TERRAFORM_BACKEND } from './stage-b-terraform-backend-contract.mjs';
 
 // Only the two canonical receipt namespaces; never bucket-wide discovery.
 function assertReceiptLocation(bucket, prefix) {
   assert.ok(bucket === STAGE_B_TERRAFORM_BACKEND.bucketName
     ? prefix.startsWith(`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/`)
-    : bucket === STAGE_B.receiptBucket && /^rls-receipts\/[a-f0-9]{40}\/full-rls-[a-z-]+\//.test(prefix), 'Unreviewed receipt namespace');
+    : bucket === STAGE_B.receiptBucket && STAGE_B_MODES.some(mode => new RegExp(`^rls-receipts/[a-f0-9]{40}/${mode}/`).test(prefix)), 'Unreviewed receipt namespace');
   assert.ok(!prefix.includes('..') && !prefix.includes('*'), 'Invalid receipt key');
 }
 
