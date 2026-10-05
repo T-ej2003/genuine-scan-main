@@ -33,6 +33,71 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
     },
     {
+      "Sid": "ListStageBReceiptNamespace",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+        }
+      }
+    },
+    {
+      "Sid": "ReadFullRlsExecutorReceipts",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-capability-preflight/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-admin-bootstrap/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-role-provision/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-role-verify/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-admin-ownership/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-runtime-policy/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-verification/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-application-canary/*",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-rollback/*"
+      ],
+      "Condition": {
+        "Null": {
+          "aws:PrincipalTag/MSCQRReceiptReleaseSha": "false"
+        }
+      }
+    },
+    {
+      "Sid": "ListFullRlsExecutorReceipts",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-capability-preflight/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-admin-bootstrap/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-role-provision/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-role-verify/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-admin-ownership/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-runtime-policy/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-verification/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-application-canary/*",
+            "rls-receipts/${aws:PrincipalTag/MSCQRReceiptReleaseSha}/full-rls-rollback/*"
+          ]
+        },
+        "Null": {
+          "aws:PrincipalTag/MSCQRReceiptReleaseSha": "false"
+        }
+      }
+    },
+    {
+      "Sid": "DenyAutomationReceiptBindingChanges",
+      "Effect": "Deny",
+      "Action": [
+        "iam:TagRole",
+        "iam:UntagRole"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+    },
+    {
       "Sid": "ReadStageBApplyAttempts",
       "Effect": "Allow",
       "Action": "s3:GetObject",

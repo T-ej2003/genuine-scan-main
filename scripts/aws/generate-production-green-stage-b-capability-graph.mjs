@@ -8,7 +8,7 @@ import { PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-sta
 import { RELEASE_POLICY_SOURCES, canonicalizeJson } from "./validate-production-green-stage-b-permissions.mjs";
 import { STAGE_B_DEPLOYMENT_EVIDENCE_TTL_SECONDS } from "./stage-b-evidence-freshness.mjs";
 import { ECS_EXEC_OPERATOR_FORBIDDEN, ECS_EXEC_OPERATOR_POLICY_ARN, ECS_EXEC_OPERATOR_POLICY_PATH, ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_ROLE_ARN } from "./production-ecs-exec-operator-contract.mjs";
-import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND, FULL_RLS_RECEIPT_PREFIXES } from "./stage-b-terraform-backend-contract.mjs";
 import { STAGE_A_TERRAFORM_BACKEND, STAGE_A_TERRAFORM_LOCK_ARN } from "./production-stage-a-root-drop-orphan-recovery.mjs";
 import { IMAGE_EVIDENCE_SIGNING_KEY_ARN } from "./production-green-stage-b-image-evidence.mjs";
 import { ROOT_DROP_SIGNING_KEY_ARN } from "./production-root-drop-evidence.mjs";
@@ -42,6 +42,7 @@ const bootstrapOperatorPolicyPath = BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.sou
 const normalDeployerPolicyPath = "infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json";
 const releaseTerminalStatePolicyPath = "infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json";
 const awsCliSourceFiles = [
+  "scripts/aws/production-receipt-read.mjs",
   "scripts/aws/stage-b-broker-policy-ownership.mjs",
   "scripts/aws/stage-b-broker-writer-session.mjs",
   'scripts/aws/stage-b-staged-broker-authorization.mjs',
@@ -463,7 +464,7 @@ export function assertBootstrapOperatorVerifierAuthority(policy = readJson(boots
 function authority(entry, forbidden, policies) {
   for (const policy of policies) for (const statement of policy.document.Statement || []) {
     const actions = asArray(statement.Action);
-    const resources = asArray(statement.Resource);
+    const resources = asArray(statement.Resource).map(resource => resource.replace(/\$\{([^}]+)\}/g, (_, key) => (entry.context || []).find(item => item.key === key)?.values?.[0] || '${' + key + '}'));
     const taskDefinitionValues = (entry.context || []).find(({ key }) => key === "ecs:task-definition")?.values || [];
     const taskDefinitionCondition = statement.Condition?.ArnEquals?.["ecs:task-definition"] ?? statement.Condition?.ArnLike?.["ecs:task-definition"];
     const taskDefinitionMatches = taskDefinitionValues.length === 0 || asArray(taskDefinitionCondition).filter((pattern) => typeof pattern === "string").some((pattern) => taskDefinitionValues.every((value) => pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)))));
@@ -732,6 +733,7 @@ export function appOnlyCapabilityNodes() {
 }
 
 export const STAGED_BROKER_CALLS = Object.freeze({
+  'scripts/aws/production-receipt-read.mjs': ['s3:GetObject', 's3:ListBucket', 'iam:GetRole'],
   'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
   'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
   'scripts/aws/stage-b-broker-writer-session.mjs': ['sts:GetCallerIdentity', 'cloudtrail:LookupEvents'],
@@ -751,9 +753,11 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
     const resources = action.startsWith('kms:') ? [STAGE_B.approvalKmsKeyArn]
       : action === 'cloudtrail:LookupEvents' || action === 'sts:GetCallerIdentity' || action === 'lambda:ListEventSourceMappings' || action === 'ecs:DescribeTaskDefinition' ? ['*']
       : action.startsWith('dynamodb:') ? [`arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${PRODUCTION_COMPONENT_STATE.table}`]
-      : action === 's3:GetObject' ? [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn]
+      : action === 's3:ListBucket' ? [STAGE_B_TERRAFORM_BACKEND.bucketArn, `arn:aws:s3:::${STAGE_B.receiptBucket}`]
+      : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, ...FULL_RLS_RECEIPT_PREFIXES.map(prefix => `arn:aws:s3:::${STAGE_B.receiptBucket}/${prefix}`)] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
       : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
+      : action === 'iam:GetRole' && sourceFile.endsWith('production-receipt-read.mjs') ? ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer']
       : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]
       : action === 'lambda:GetAlias' ? [STAGE_B.brokerAliasArn]
       : ['lambda:GetFunctionConfiguration', 'lambda:GetPolicy'].includes(action) ? [STAGE_B.brokerFunctionArn, `${STAGE_B.brokerFunctionArn}:*`]

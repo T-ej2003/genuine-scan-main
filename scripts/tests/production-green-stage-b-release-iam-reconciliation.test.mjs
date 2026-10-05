@@ -14,21 +14,22 @@ const policies = RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => ({ na
 const manifest = read("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json");
 const reconciliationDocument = fs.readFileSync("documents/ops/iam/PRODUCTION_GREEN_STAGE_B_RELEASE_IAM_RECONCILIATION_2026-08-04.md", "utf8");
 const contextMap = (evaluation) => new Map((evaluation.context || []).map(({ key, values }) => [key, values.map(String)]));
+const expandPolicyVariables = (value, evaluation) => String(value).replace(/\$\{([^}]+)\}/g, (_, key) => contextMap(evaluation).get(key)?.[0] ?? "__UNBOUND__");
 const conditionsMatch = (condition = {}, evaluation) => {
   const context = contextMap(evaluation);
   for (const [operator, entries] of Object.entries(condition)) {
     for (const [key, expectedValue] of Object.entries(entries)) {
-      const expected = list(expectedValue).map(String);
+      const expected = list(expectedValue).map(value => expandPolicyVariables(value, evaluation));
       const actual = context.get(key);
       if (operator === "StringEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
       if (operator === "ArnEquals" && (!actual || actual.length !== 1 || !expected.includes(actual[0]))) return false;
-      if (operator === "ArnLike" && (!actual || actual.length !== 1 || !expected.some((pattern) => matches(pattern, actual[0])))) return false;
+      if (["ArnLike", "StringLike"].includes(operator) && (!actual || actual.length !== 1 || !expected.some((pattern) => matches(pattern, actual[0])))) return false;
       if (operator === "StringEqualsIfExists" && actual && (actual.length !== expected.length || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "ForAllValues:StringEquals" && (!actual || !actual.every((value) => expected.includes(value)))) return false;
       if (operator === "Bool" && (!actual || actual.length !== 1 || actual[0].toLowerCase() !== expected[0].toLowerCase())) return false;
       if (operator === "NumericEquals" && (!actual || actual.length !== expected.length || !actual.every((value) => expected.some((candidate) => Number(candidate) === Number(value))))) return false;
       if (operator === "Null" && String(!actual) !== expected[0]) return false;
-      if (!["StringEquals", "ArnEquals", "ArnLike", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
+      if (!["StringEquals", "ArnEquals", "ArnLike", "StringLike", "StringEqualsIfExists", "ForAllValues:StringEquals", "Bool", "NumericEquals", "Null"].includes(operator)) throw new Error(`Unsupported IAM condition operator: ${operator}.`);
     }
   }
   return true;
@@ -36,7 +37,7 @@ const conditionsMatch = (condition = {}, evaluation) => {
 const allows = (evaluation) => policies.some(({ document }) => document.Statement.some((statement) => {
   return statement.Effect === "Allow" && conditionsMatch(statement.Condition, evaluation)
     && list(statement.Action).includes(evaluation.action)
-    && list(statement.Resource).some((resource) => matches(resource, evaluation.resource));
+    && list(statement.Resource).some((resource) => matches(expandPolicyVariables(resource, evaluation), evaluation.resource));
 }));
 
 test("release-role ownership is exactly nine managed policies and no inline authority", () => {
@@ -124,7 +125,7 @@ test("production-shaped required and forbidden resources reconcile to the source
   const plan = read("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json");
   validateManifest(manifest);
   const evaluations = deriveRequiredEvaluations(plan, manifest);
-  assert.equal(evaluations.required.length, 258);
+  assert.equal(evaluations.required.length, 277);
   assert.equal(evaluations.forbidden.length, 38);
   assert.deepEqual(evaluations.required.filter((evaluation) => !allows(evaluation)).map(({ id }) => id), []);
   assert.deepEqual(evaluations.forbidden.filter(allows).map(({ id }) => id), []);
@@ -204,7 +205,7 @@ test("rotation coordinator legacy-current secret access is exact and action-boun
   ];
   const context = [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }];
   for (const resource of legacy) for (const action of ["secretsmanager:GetSecretValue", "secretsmanager:PutSecretValue"]) assert.equal(allows({ action, resource, context }), true, `${action} ${resource}`);
-  const finalAllows = (evaluation) => finalWrite.Statement.some((statement) => statement.Effect === "Allow" && conditionsMatch(statement.Condition, evaluation) && list(statement.Action).includes(evaluation.action) && list(statement.Resource).some((resource) => matches(resource, evaluation.resource)));
+  const finalAllows = (evaluation) => finalWrite.Statement.some((statement) => statement.Effect === "Allow" && conditionsMatch(statement.Condition, evaluation) && list(statement.Action).includes(evaluation.action) && list(statement.Resource).some((resource) => matches(expandPolicyVariables(resource, evaluation), evaluation.resource)));
   assert.equal(finalAllows({ action: "secretsmanager:DescribeSecret", resource: legacy[0], context }), false);
   assert.equal(finalAllows({ action: "secretsmanager:GetSecretValue", resource: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/unrelated", context }), false);
   assert.deepEqual(finalWrite.Statement.find(({ Sid }) => Sid === "ManageExactLegacyCurrentRotationSecrets").Resource, legacy);

@@ -4,6 +4,61 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/production-receipt-read.mjs",
+      "action": "iam:GetRole",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-dfa08676ebc8d414"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-receipt-read.mjs",
+      "action": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-08b5fdfd5a70273c",
+        "staged-broker-12c1d2e2db1b1872",
+        "staged-broker-1a45061edb463a00",
+        "staged-broker-36ece5ab8b6a75b1",
+        "staged-broker-5072371293c95e92",
+        "staged-broker-53a0cc1a75710808",
+        "staged-broker-6201151e8cfd3cb4",
+        "staged-broker-6fa6899738a91cae",
+        "staged-broker-9a3b7350e1e5bc44",
+        "staged-broker-b0ebf0f08a9c20fb"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-receipt-read.mjs",
+      "action": "s3:ListBucket",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-1620d83247a01b2d",
+        "staged-broker-3d5ea73e34c17781"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
       "action": "kms:Sign",
       "identity": "INDEPENDENT_CHECKER",

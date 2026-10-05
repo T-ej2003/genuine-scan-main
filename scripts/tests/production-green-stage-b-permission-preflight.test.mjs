@@ -372,8 +372,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 20);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 20);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 22);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 22);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0
     && (key === "s3:if-none-match" ? values.length === 1 && values[0] === "*" : !values.includes("*"))));
 });
@@ -700,7 +700,7 @@ test("runtime wrapper ECS reads simulate with the actual DescribeTasks Resource 
     roleArn,
     evaluation: wrongRegion,
     run: (args) => {
-      assert.equal(args[args.indexOf("--context-entries") + 1], "ContextKeyName=aws:RequestedRegion,ContextKeyValues=us-east-1,ContextKeyType=string");
+      assert.ok(args.slice(args.indexOf("--context-entries") + 1).includes("ContextKeyName=aws:RequestedRegion,ContextKeyValues=us-east-1,ContextKeyType=string"));
       return JSON.stringify({ EvaluationResults: [{ EvalActionName: wrongRegion.action, EvalResourceName: "*", EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: [] }] });
     },
   });
@@ -716,7 +716,7 @@ test("predeployment DescribeTaskDefinition allows only eu-west-2", () => {
     evaluation,
     run: (args) => {
       const contextIndex = args.indexOf("--context-entries");
-      if (decision === "allowed") assert.equal(args[contextIndex + 1], "ContextKeyName=aws:RequestedRegion,ContextKeyValues=eu-west-2,ContextKeyType=string");
+      if (decision === "allowed") assert.ok(args.slice(contextIndex + 1).includes("ContextKeyName=aws:RequestedRegion,ContextKeyValues=eu-west-2,ContextKeyType=string"));
       return JSON.stringify({ EvaluationResults: [{ EvalActionName: evaluation.action, EvalResourceName: evaluation.resource, EvalDecision: decision, MatchedStatements: decision === "allowed" ? [{}] : [], MissingContextValues: missing }] });
     },
   });
@@ -726,7 +726,7 @@ test("predeployment DescribeTaskDefinition allows only eu-west-2", () => {
     roleArn,
     evaluation: otherRegion,
     run: (args) => {
-      assert.match(args[args.indexOf("--context-entries") + 1], /ContextKeyValues=us-east-1/);
+      assert.ok(args.slice(args.indexOf("--context-entries") + 1).includes("ContextKeyName=aws:RequestedRegion,ContextKeyValues=us-east-1,ContextKeyType=string"));
       return JSON.stringify({ EvaluationResults: [{ EvalActionName: otherRegion.action, EvalResourceName: "*", EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: [] }] });
     },
   });
@@ -862,7 +862,7 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 266);
+  assert.equal(report.requiredEvaluations.length, 277);
   assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId.startsWith("staged-broker-")).map(({ manifestId, action, resource }) => [manifestId, action, resource]).sort(), [
     ["staged-broker-lambda-listaliases", "lambda:ListAliases", STAGE_B.brokerFunctionArn],
     ["staged-broker-lambda-listfunctionurlconfigs", "lambda:ListFunctionUrlConfigs", STAGE_B.brokerFunctionArn],

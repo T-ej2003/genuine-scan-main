@@ -156,6 +156,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
   }
   const invocationSha = authority === "retained after backend/frontend transactions" ? "f".repeat(40) : historical.release;
   const aws = (args) => {
+    if (args[0] === 'iam' && args[1] === 'get-role') return { Role: { Arn: 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer', AssumeRolePolicyDocument: JSON.parse(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json')), Tags: [{Key:'MSCQRReceiptReleaseSha',Value:invocationSha}] } };
     if (args[0] === "lambda" && args[1] === "invoke") {
       const request = JSON.parse(fs.readFileSync(args.find((item) => item.startsWith("fileb://")).slice(8), "utf8"));
       assert.equal(request.historicalRuntimeReferenceSha256, historical.reference.referenceSha256);
@@ -172,7 +173,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
     if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ containers: [{ exitCode: 0 }] }] };
     if (args[0] === "s3api" && args[1] === "list-objects-v2") {
       const prefix = args[args.indexOf("--prefix") + 1];
-      return { Contents: [{ Key: `${prefix}fixture.json`, LastModified: new Date().toISOString() }] };
+      return { KeyCount: 1, IsTruncated: false, Contents: [{ Key: `${prefix}fixture.json`, LastModified: new Date().toISOString() }] };
     }
     if (args[0] === "s3api" && args[1] === "get-object") {
       const key = args[args.indexOf("--key") + 1];
@@ -204,7 +205,13 @@ for (const authority of ["initial transport", "retained without transport", "mat
     }
     throw new Error(`Unexpected AWS test call: ${args.join(" ")}`);
   };
-  const bundle = await applyProductionFullRlsRelease({ stagedBrokerDeps: { readClosure: async () => null }, env: { ...env, RELEASE_GIT_SHA: invocationSha, ...(authority.startsWith("retained") ? {} : { HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }) }, aws, historicalRuntimeDeps: { stateClient: { read: () => state }, reader: historical.reader, verify: historical.verify, now: historical.now }, outputPath });
+  const releaseOptions = { receiptBindingDeps: {readCheckout:()=>({mode:'production',toolingSha:invocationSha,currentHead:invocationSha,originMainHead:invocationSha,isAncestor:true,porcelainStatus:'',repositoryState:{remoteDefaultBranch:'main',shallow:false,mergeInProgress:false,rebaseInProgress:false,cherryPickInProgress:false}})}, stagedBrokerDeps: { readClosure: async () => null }, env: { ...env, RELEASE_GIT_SHA: invocationSha, ...(authority.startsWith("retained") ? {} : { HISTORICAL_RUNTIME_EVIDENCE_JSON: historicalJson, HISTORICAL_RUNTIME_EVIDENCE_SHA256: sha256(historicalJson) }) }, aws, historicalRuntimeDeps: { stateClient: { read: () => state }, reader: historical.reader, verify: historical.verify, now: historical.now }, outputPath };
+  let earlyCalls = 0;
+  await assert.rejects(applyProductionFullRlsRelease({ ...releaseOptions, receiptBindingDeps: { readCheckout: () => ({ ...releaseOptions.receiptBindingDeps.readCheckout(), currentHead: '0'.repeat(40), originMainHead: '0'.repeat(40), toolingSha: '0'.repeat(40) }) }, aws: () => { earlyCalls++; throw new Error('No AWS call permitted'); } }), /Receipt release differs/);
+  assert.equal(earlyCalls, 0);
+  await assert.rejects(applyProductionFullRlsRelease({ ...releaseOptions, aws: args => { assert.equal(args[0], 'iam'); assert.equal(args[1], 'get-role'); earlyCalls++; return { Role: { Arn: 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer', AssumeRolePolicyDocument: JSON.parse(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json')), Tags: [{ Key: 'MSCQRReceiptReleaseSha', Value: '0'.repeat(40) }] } }; } }), /Receipt authority is not the exact release/);
+  assert.equal(earlyCalls, 1, 'Stale IAM binding cannot invoke a task or touch S3');
+  const bundle = await applyProductionFullRlsRelease(releaseOptions);
   assert.deepEqual(modes, [
     "full-rls-capability-preflight",
     "full-rls-admin-bootstrap",

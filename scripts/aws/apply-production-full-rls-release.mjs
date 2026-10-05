@@ -16,6 +16,8 @@ import { readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 
+import { listProductionReceiptObjects, assertFullRlsReceiptReleaseAuthority, prepareFullRlsReceiptReleaseBinding } from './production-receipt-read.mjs';
+
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
 const CLUSTER_ARN = STAGE_B.clusterArn;
@@ -109,7 +111,7 @@ const waitForTask = (taskArn, config, aws) => {
 
 const readReceipt = (mode, config, aws, directory, startedAt) => {
   const prefix = `rls-receipts/${config.releaseSha}/${mode}/`;
-  const listed = aws(["s3api", "list-objects-v2", "--bucket", config.receiptBucket, "--prefix", prefix]);
+  const listed = { Contents: listProductionReceiptObjects({ run: aws, bucket: config.receiptBucket, prefix }) };
   const item = [...(listed.Contents || [])].sort((left, right) => String(right.LastModified).localeCompare(String(left.LastModified)))[0];
   if (!item?.Key?.startsWith(prefix)) throw new Error("Production executor receipt is missing.");
   const file = path.join(directory, `${mode}-receipt.json`);
@@ -143,6 +145,7 @@ export async function applyProductionFullRlsRelease({
   credentialSource,
   historicalRuntimeDeps,
   stagedBrokerDeps,
+  receiptBindingDeps,
   outputPath = env.PRODUCTION_RLS_RELEASE_RECEIPT_PATH,
 } = {}) {
   aws ||= createProductionFullRlsReleaseAws({ credentialSource, env });
@@ -166,6 +169,9 @@ export async function applyProductionFullRlsRelease({
   // A published or cutover-only source must never enter Full-RLS. Ordinary
   // releases without a staged source reservation keep their existing path.
   if (brokerClosure) await brokerClosure.revalidate();
+  const receiptBinding = prepareFullRlsReceiptReleaseBinding(receiptBindingDeps);
+  if (receiptBinding.sourceSha !== config.releaseSha) throw new Error('Receipt release differs from authenticated protected main');
+  assertFullRlsReceiptReleaseAuthority({ run: aws, releaseSha: config.releaseSha });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
   let mutationStarted = false;
