@@ -237,6 +237,18 @@ export async function executeTaskRegistration({ preparation: p, authorization },
   await deps.record(id, 'TASK_REGISTERED', result); return result;
 }
 
+export function assertRegistrationRecoveryIdentity(identity, preparation) {
+  assert.deepEqual(Object.keys(identity).sort(), ['mode', 'tooling', 'transaction']);
+  assert.equal(identity.mode, 'READ_ONLY_EXACT_SUCCESSOR');
+  for (const value of [identity.transaction, identity.tooling]) {
+    assert.deepEqual(Object.keys(value).sort(), ['sourceSha', 'treeSha256']);
+    assert.match(value.sourceSha || '', /^[a-f0-9]{40}$/);
+    assert.match(value.treeSha256 || '', /^[a-f0-9]{64}$/);
+  }
+  equal(identity.transaction, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+  return identity;
+}
+
 // Diagnosis consumes no new authority and never invokes Terraform apply/ECS writes.
 export async function recoverTaskRegistration({ preparation: p, authorization }, deps) {
   assert.equal(p.purpose, TASK_REGISTRATION);
@@ -246,7 +258,7 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
   assert.equal(brokerDigest(artifacts.bytes), p.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), p.logicalPlanSha256);
   assert.equal(artifacts.artifactSetSha256, p.artifactSetSha256);
   const mutations = assertPrerequisitePlan(artifacts.plan, p);
-  equal(await deps.readCheckout(), { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+  const recovery = assertRegistrationRecoveryIdentity(await deps.authenticateRegistrationRecoveryIdentity(), p);
   equal(await deps.getAlias(), p.alias); equal(await deps.readPrerequisites(), p.prerequisites);
   const stateBefore = await deps.readStateIdentity();
   assert.equal(stateBefore.lineage, p.state.lineage); assert.ok(stateBefore.serial > p.state.serial, 'Registration predecessor has not observably completed');
@@ -264,7 +276,13 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
   const result = { schemaVersion: 1, status: 'REGISTERED_NONTERMINAL', sourceSha: p.sourceSha, treeSha256: p.treeSha256,
     authorizationSha256: id, preparationSha256: brokerDigest(p), savedPlanSha256: p.savedPlanSha256, authorizedAt, mutations, definitions,
     taskMap: taskMapFromRegisteredDefinitions(definitions) };
+  equal(await deps.authenticateRegistrationRecoveryIdentity(), recovery);
   const persisted = await deps.readRecoveryReceipt(id, 'TASK_REGISTERED');
-  if (persisted) equal(persisted, result); else await deps.record(id, 'TASK_REGISTERED', result);
-  return result;
+  if (persisted) {
+    const { recovery: provenance, ...transaction } = persisted; equal(transaction, result);
+    if (provenance !== undefined) { assertRegistrationRecoveryIdentity(provenance, p); equal(await deps.authenticateRegistrationRecoveryIdentity(provenance), provenance); }
+    return persisted;
+  }
+  const recovered = { ...result, recovery };
+  await deps.record(id, 'TASK_REGISTERED', recovered); return recovered;
 }
