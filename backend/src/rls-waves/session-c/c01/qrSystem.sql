@@ -10,7 +10,8 @@ BEGIN
   THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
   SELECT * INTO STRICT actor FROM app_auth.require_authenticated_session(p_capability,p_purpose,p_request_id);
-  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN') THEN
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','MANUFACTURER_ADMIN','ORG_ADMIN')
+     OR (actor.role='ORG_ADMIN' AND p_purpose NOT IN ('qr-allocation-request-list','qr-allocation-request-create')) THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.qr_session_id',actor."sessionId",true),
@@ -48,7 +49,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM public."Organization" o WHERE o.id=target_org AND o."isActive") THEN
       RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
     END IF;
-    IF actor.role='LICENSEE_ADMIN' AND
+    IF actor.role IN ('LICENSEE_ADMIN','ORG_ADMIN') AND
        (actor."licenseeId" IS DISTINCT FROM p_target_licensee_id OR actor."organizationId" IS DISTINCT FROM target_org) THEN
       RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
     END IF;
@@ -71,15 +72,15 @@ BEGIN
      OR (p_status IS NOT NULL AND p_status NOT IN ('PENDING','APPROVED','REJECTED'))
   THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
-  IF actor.role NOT IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+  IF actor.role NOT IN ('LICENSEE_ADMIN','ORG_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
-  IF actor.role='LICENSEE_ADMIN' AND tenant_id IS NULL THEN
+  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN actor."licenseeId" END);
+  IF actor.role IN ('LICENSEE_ADMIN','ORG_ADMIN') AND tenant_id IS NULL THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
-  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT coalesce((SELECT jsonb_agg(to_jsonb(x) ORDER BY x."createdAt" DESC,x.id DESC) FROM (
@@ -113,13 +114,13 @@ BEGIN
      OR p_batch_name IS NULL OR length(btrim(p_batch_name)) NOT BETWEEN 2 AND 120 OR length(coalesce(p_note,''))>500
   THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,NULL);
-  IF actor.role NOT IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
+  IF actor.role NOT IN ('LICENSEE_ADMIN','ORG_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
+  tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role IN ('LICENSEE_ADMIN','ORG_ADMIN') THEN actor."licenseeId" END);
   IF tenant_id IS NULL THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
-  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
+  IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN','ORG_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.qr_target_request_id',new_id,true);
@@ -255,7 +256,7 @@ BEGIN
       (SELECT d.projection FROM decisions d WHERE d."batchId"=q."batchId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
       (SELECT count(*) FROM events e WHERE e."batchId"=q."batchId") AS "scanEventCount",
       (SELECT jsonb_object_agg(g.status,g.n) FROM grouped g WHERE g."batchId"=q."batchId") AS counts
-    FROM scoped q WHERE q."batchId" IS NOT NULL GROUP BY q."batchId" ORDER BY q."batchId" LIMIT page_limit OFFSET page_offset
+    FROM scoped q WHERE q."batchId" IS NOT NULL GROUP BY q."batchId" ORDER BY min(q."batchCreatedAt") DESC,q."batchId" ASC LIMIT page_limit OFFSET page_offset
   ), log_rows AS (
     SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt" AT TIME ZONE 'UTC' AS "scannedAt",e."isFirstScan",e."isTrustedOwnerContext",e."scanCount",e."displayCode" AS code,
       (SELECT d.projection FROM decisions d WHERE d."qrCodeId"=e."qrCodeId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
@@ -290,8 +291,8 @@ BEGIN
       'namedLocationEvents',count(*) FILTER(WHERE coalesce("locationName","locationCity","locationCountry",'')<>''),
       'knownDeviceEvents',count(*) FILTER(WHERE coalesce(device,'')<>'')) FROM events),
     'trend',coalesce((SELECT jsonb_agg((to_jsonb(d)-'day')||jsonb_build_object('label',to_char(day,'YYYY-MM-DD')) ORDER BY day) FROM daily d),'[]'::jsonb),
-    'batches',coalesce((SELECT jsonb_agg(to_jsonb(b)) FROM batch_rows b),'[]'::jsonb),
-    'logs',coalesce((SELECT jsonb_agg(to_jsonb(e)) FROM log_rows e),'[]'::jsonb),
+    'batches',coalesce((SELECT jsonb_agg(to_jsonb(b) ORDER BY b."createdAt" DESC,b.id ASC) FROM batch_rows b),'[]'::jsonb),
+    'logs',coalesce((SELECT jsonb_agg(to_jsonb(e) ORDER BY e."scannedAt" DESC,e.id DESC) FROM log_rows e),'[]'::jsonb),
     'pagination',jsonb_build_object('total',(SELECT count(*) FROM events),'limit',page_limit,'offset',page_offset),
     'supportedStatuses',jsonb_build_array('DORMANT','ACTIVE','ALLOCATED','ACTIVATED','PRINTED','REDEEMED','BLOCKED','SCANNED')
   ) INTO result;

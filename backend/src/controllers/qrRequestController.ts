@@ -60,6 +60,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     if (
       auth.role !== UserRole.LICENSEE_ADMIN &&
+      auth.role !== UserRole.ORG_ADMIN &&
       auth.role !== UserRole.SUPER_ADMIN &&
       auth.role !== UserRole.PLATFORM_SUPER_ADMIN
     ) {
@@ -133,6 +134,7 @@ export const getQrAllocationRequests = async (req: AuthRequest, res: Response) =
 
     if (
       auth.role !== UserRole.LICENSEE_ADMIN &&
+      auth.role !== UserRole.ORG_ADMIN &&
       auth.role !== UserRole.SUPER_ADMIN &&
       auth.role !== UserRole.PLATFORM_SUPER_ADMIN
     ) {

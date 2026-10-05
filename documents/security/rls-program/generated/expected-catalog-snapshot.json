@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635",
+  "sourceContractSha256": "366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "29feb00663bb221a9d2b22965f6a480147f724319a9735f20123e9191cee89f3"
+      "sha256": "8b10ea5dfde8a7c0f2b7009667a2b3c3de21b5be6cdaf4fc0148be8fe0ddfc09"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -126,7 +126,7 @@
     },
     {
       "path": "backend/tests/qrSystemPostgres18.test.js",
-      "sha256": "6297b4300da6f324586b30a6d0a844cd5c4d1823785ec9a09d3385556cfc6324"
+      "sha256": "5861d9282f42eead709ecaa8f6f376a6e0b3056c1ff92209d4339db6df779f71"
     },
     {
       "path": "documents/security/rls-program/staging-full-rls-executor-contract.json",
@@ -314,7 +314,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystem.sql",
-      "sha256": "c141d20031ff5bbdd8b088c38661e2a560e9adc7f99e96be71ef071767dac693"
+      "sha256": "4e3cafee89a347da8519b2a0b34b0e749a1903b9d27af9522884634f4d7e861f"
     },
     {
       "path": "backend/src/rls-waves/session-c/c01/qrSystemRollback.sql",
@@ -6044,7 +6044,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_target_licensee_id',true)='' OR id=current_setting('app.qr_target_licensee_id',true)) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND id=current_setting('app.qr_licensee_id',true)) OR current_setting('app.qr_role',true)='MANUFACTURER_ADMIN')",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND (current_setting('app.qr_target_licensee_id',true)='' OR id=current_setting('app.qr_target_licensee_id',true)) AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND id=current_setting('app.qr_licensee_id',true)) OR (current_setting('app.qr_role',true)='ORG_ADMIN' AND current_setting('app.qr_operation',true) IN ('qr-allocation-request-list','qr-allocation-request-create') AND id=current_setting('app.qr_licensee_id',true)) OR current_setting('app.qr_role',true)='MANUFACTURER_ADMIN')",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-allocate-range:Licensee:SELECT",
@@ -8643,7 +8643,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-allocation-request-create' AND current_setting('app.qr_role',true) IN ('LICENSEE_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true) AND status='PENDING'",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND current_setting('app.qr_operation',true)='qr-allocation-request-create' AND current_setting('app.qr_role',true) IN ('LICENSEE_ADMIN','ORG_ADMIN','SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true) AND status='PENDING'",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-create-allocation-request:QrAllocationRequest:INSERT"
@@ -8668,7 +8668,7 @@
         "release-fix-4-qr-system"
       ],
       "scopeType": "security-definer-owner-capability-and-row-local-qr-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true) IN ('qr-allocation-request-approve','qr-allocation-request-reject') AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)) OR (current_setting('app.qr_operation',true)='qr-allocation-request-list' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true)='LICENSEE_ADMIN' AND \"licenseeId\"=current_setting('app.qr_licensee_id',true))) AND (current_setting('app.qr_target_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.qr_target_licensee_id',true))) OR (current_setting('app.qr_operation',true)='qr-allocation-request-create' AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true)))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.auth_session_verified',true)='1' AND current_setting('app.qr_session_id',true)=current_setting('app.auth_session_id',true) AND current_setting('app.qr_user_id',true)=current_setting('app.user_id',true) AND current_setting('app.qr_role',true)=current_setting('app.role',true) AND current_setting('app.qr_operation',true) IN ('qr-range-allocate','qr-code-read','qr-code-stats','qr-code-delete','qr-code-token-bind','qr-code-scope','qr-batch-command','qr-allocation-request-approve','qr-allocation-request-list','qr-allocation-request-create','qr-allocation-request-reject','qr-inventory-read','qr-scan-analytics','qr-audit-export') AND EXISTS (SELECT 1 FROM public.\"RefreshToken\" qr_session WHERE qr_session.id=current_setting('app.qr_session_id',true) AND qr_session.\"userId\"=current_setting('app.qr_user_id',true) AND qr_session.\"sessionCapabilityHash\"=current_setting('app.auth_session_hash',true) AND qr_session.\"sessionCapabilityHashVersion\"='sha256-v1' AND qr_session.\"sessionCapabilityRevokedAt\" IS NULL AND qr_session.\"sessionCapabilityExpiresAt\">clock_timestamp() AND qr_session.\"revokedAt\" IS NULL AND qr_session.\"expiresAt\">clock_timestamp())) AND ((current_setting('app.qr_operation',true) IN ('qr-allocation-request-approve','qr-allocation-request-reject') AND current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.qr_target_request_id',true)) OR (current_setting('app.qr_operation',true)='qr-allocation-request-list' AND (current_setting('app.qr_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (current_setting('app.qr_role',true) IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=current_setting('app.qr_licensee_id',true))) AND (current_setting('app.qr_target_licensee_id',true)='' OR \"licenseeId\"=current_setting('app.qr_target_licensee_id',true))) OR (current_setting('app.qr_operation',true)='qr-allocation-request-create' AND id=current_setting('app.qr_target_request_id',true) AND \"licenseeId\"=current_setting('app.qr_target_licensee_id',true) AND \"requestedByUserId\"=current_setting('app.qr_user_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-4-approve-allocation-request:QrAllocationRequest:SELECT",
@@ -12486,55 +12486,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0a01b1b35e8ae6af95d4fb64440c851af6252a7be21d7175f8d301d4b5671635"
+      "marker": "mscqr-full-rls-clean-room:certification:366954c34804455476e8505f91b7713f0aeb8942241cc1ae07c891332c9ec566"
     }
   ]
 }

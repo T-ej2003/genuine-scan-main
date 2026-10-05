@@ -13,11 +13,12 @@ const ids = {
   orgA:"40000000-0000-4000-8000-000000000101",orgB:"40000000-0000-4000-8000-000000000102",
   licenseeA:"40000000-0000-4000-8000-000000000201",licenseeB:"40000000-0000-4000-8000-000000000202",
   platform:"40000000-0000-4000-8000-000000000301",platformSuper:"40000000-0000-4000-8000-000000000307",tenant:"40000000-0000-4000-8000-000000000302",
-  manufacturer:"40000000-0000-4000-8000-000000000303",deprecated:"40000000-0000-4000-8000-000000000304",
+  manufacturer:"40000000-0000-4000-8000-000000000303",orgAdmin:"40000000-0000-4000-8000-000000000304",
   expired:"40000000-0000-4000-8000-000000000305",revoked:"40000000-0000-4000-8000-000000000306",
   request:"40000000-0000-4000-8000-000000000401",oversizedRequest:"40000000-0000-4000-8000-000000000402",
 };
-const caps={platform:"A".repeat(43),tenant:"B".repeat(43),manufacturer:"C".repeat(43),deprecated:"D".repeat(43),expired:"E".repeat(43),revoked:"F".repeat(43),platformSuper:"G".repeat(43)};
+ids.otherLicensee="40000000-0000-4000-8000-000000000203";
+const caps={platform:"A".repeat(43),tenant:"B".repeat(43),manufacturer:"C".repeat(43),orgAdmin:"D".repeat(43),expired:"E".repeat(43),revoked:"F".repeat(43),platformSuper:"G".repeat(43)};
 const digest=(value)=>createHash("sha256").update(value).digest("hex");
 const connection=(raw,expected)=>{
   const parsed=new URL(String(raw||""));
@@ -57,16 +58,17 @@ async function main(){
 
   run(bootstrap,`
     INSERT INTO public."Organization"(id,name,"updatedAt") VALUES
-      ('${ids.orgA}','QR Org A',now()),('${ids.orgB}','QR Org B',now());
+      ('${ids.orgA}','QR Org A',now()),('${ids.orgB}','QR Org B',now()),('40000000-0000-4000-8000-000000000103','QR Org C',now());
     INSERT INTO public."Licensee"(id,"orgId",name,prefix,"updatedAt") VALUES
       ('${ids.licenseeA}','${ids.orgA}','QR Licensee A','QRA',now()),
-      ('${ids.licenseeB}','${ids.orgB}','QR Licensee B','QRB',now());
+      ('${ids.licenseeB}','${ids.orgB}','QR Licensee B','QRB',now()),
+      ('${ids.otherLicensee}','40000000-0000-4000-8000-000000000103','QR Other Licensee','QRC',now());
     INSERT INTO public."User"(id,email,name,role,"orgId","licenseeId",status,"isActive","updatedAt") VALUES
       ('${ids.platform}','qr-platform@example.invalid','QR Platform','SUPER_ADMIN',NULL,NULL,'ACTIVE',true,now()),
       ('${ids.platformSuper}','qr-platform-super@example.invalid','QR Platform Super','PLATFORM_SUPER_ADMIN',NULL,NULL,'ACTIVE',true,now()),
       ('${ids.tenant}','qr-tenant@example.invalid','QR Tenant','LICENSEE_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),
       ('${ids.manufacturer}','qr-maker@example.invalid','QR Maker','MANUFACTURER_ADMIN',NULL,NULL,'ACTIVE',true,now()),
-      ('${ids.deprecated}','qr-deprecated@example.invalid','QR Deprecated','ORG_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),
+      ('${ids.orgAdmin}','qr-orgAdmin@example.invalid','QR Organization Admin','ORG_ADMIN','${ids.orgA}','${ids.licenseeA}','ACTIVE',true,now()),
       ('${ids.expired}','qr-expired@example.invalid','QR Expired','SUPER_ADMIN',NULL,NULL,'ACTIVE',true,now()),
       ('${ids.revoked}','qr-revoked@example.invalid','QR Revoked','SUPER_ADMIN',NULL,NULL,'ACTIVE',true,now());
     INSERT INTO public."ManufacturerLicenseeLink"("manufacturerId","licenseeId","isPrimary","updatedAt")
@@ -86,7 +88,7 @@ async function main(){
   `);
   let index=0;
   for(const [name,capability] of Object.entries(caps)){
-    const user=ids[name], org=name==="tenant"||name==="deprecated"?`'${ids.orgA}'`:"NULL";
+    const user=ids[name], org=name==="tenant"||name==="orgAdmin"?`'${ids.orgA}'`:"NULL";
     run(bootstrap,`INSERT INTO public."RefreshToken"(id,"orgId","userId","tokenHash","expiresAt","sessionCapabilityHash","sessionCapabilityHashVersion","sessionCapabilityAssurance","sessionCapabilityExpiresAt","sessionCapabilityRevokedAt") VALUES
       ('40000000-0000-4000-9000-${String(++index).padStart(12,"0")}',${org},'${user}','${digest(`refresh-${name}`)}',now()+interval '1 day','${digest(capability)}','sha256-v1','ADMIN_MFA',${name==="expired"?"now()-interval '1 second'":"now()+interval '1 hour'"},${name==="revoked"?"now()":"NULL"})`);
   }
@@ -106,7 +108,7 @@ async function main(){
   assert.equal(Number(call("qr_delete_codes",`'${caps.platformSuper}','qr-code-delete','40000000-0000-4000-8000-000000000641',ARRAY['40000000-0000-4000-8000-000000000504'],ARRAY[]::text[]`)),1);
   assert.equal(Number(call("qr_delete_codes",`'${caps.tenant}','qr-code-delete','40000000-0000-4000-8000-000000000642',ARRAY['40000000-0000-4000-8000-000000000505'],ARRAY[]::text[]`)),1);
   denied(`SELECT app_rls.qr_delete_codes('${caps.manufacturer}','qr-code-delete','40000000-0000-4000-8000-000000000643',ARRAY['40000000-0000-4000-8000-000000000506'],ARRAY[]::text[])`);
-  denied(`SELECT app_rls.qr_delete_codes('${caps.deprecated}','qr-code-delete','40000000-0000-4000-8000-000000000644',ARRAY['40000000-0000-4000-8000-000000000507'],ARRAY[]::text[])`);
+  denied(`SELECT app_rls.qr_delete_codes('${caps.orgAdmin}','qr-code-delete','40000000-0000-4000-8000-000000000644',ARRAY['40000000-0000-4000-8000-000000000507'],ARRAY[]::text[])`);
   denied(`SELECT app_rls.qr_delete_codes('${caps.tenant}','qr-code-delete','40000000-0000-4000-8000-000000000645',ARRAY['40000000-0000-4000-8000-000000000508'],ARRAY[]::text[])`);
   const tenantRead=JSON.parse(last(app,`SELECT jsonb_build_object('rows',payload,'total',total)::text FROM app_rls.qr_read_codes('${caps.tenant}','qr-code-read','40000000-0000-4000-8000-000000000602','${ids.licenseeA}',NULL,NULL,100,0)`));
   assert.equal(tenantRead.total,7);
@@ -196,7 +198,7 @@ async function main(){
   assert.equal(Number(last(bootstrap,`SELECT count(*) FROM public."QRCode" WHERE "licenseeId"='${ids.licenseeA}'`)),before);
 
   denied(`SELECT * FROM app_rls.qr_read_codes('${caps.tenant}','qr-code-read','40000000-0000-4000-8000-000000000610','${ids.licenseeB}',NULL,NULL,100,0)`);
-  for(const cap of ["", "Z".repeat(43), caps.expired, caps.revoked, caps.deprecated])
+  for(const cap of ["", "Z".repeat(43), caps.expired, caps.revoked, caps.orgAdmin])
     denied(`SELECT * FROM app_rls.qr_read_codes('${cap}','qr-code-read','40000000-0000-4000-8000-000000000611','${ids.licenseeA}',NULL,NULL,100,0)`);
   run(bootstrap,`DELETE FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.manufacturer}' AND "licenseeId"='${ids.licenseeA}'`);
   denied(`SELECT * FROM app_rls.qr_read_codes('${caps.manufacturer}','qr-code-read','40000000-0000-4000-8000-000000000612','${ids.licenseeA}',NULL,NULL,100,0)`);
@@ -265,9 +267,30 @@ async function main(){
   assert.match(requestedRow.createdAt,/(Z|\+00:00)$/);
   denied(list(caps.tenant,ids.licenseeB)); denied(create(caps.tenant,ids.licenseeB));
   denied(reject(caps.tenant,incidentRequest.id)); denied(reject(caps.manufacturer,incidentRequest.id));
-  for(const cap of [caps.manufacturer,caps.deprecated,caps.expired,caps.revoked,"Z".repeat(43),""]){
+  for(const cap of [caps.manufacturer,caps.expired,caps.revoked,"Z".repeat(43),""]){
     denied(list(cap)); denied(create(cap));
   }
+  const orgRequest=JSON.parse(last(app,create(caps.orgAdmin)));
+  assert.equal(orgRequest.licenseeId,ids.licenseeA); assert.equal(orgRequest.requestedByUserId,ids.orgAdmin);
+  assert(JSON.parse(last(app,list(caps.orgAdmin))).some(row=>row.id===orgRequest.id));
+  assert(JSON.parse(last(app,list(caps.orgAdmin))).every(row=>row.licenseeId===ids.licenseeA));
+  for(const unauthorized of [ids.licenseeB,ids.otherLicensee]) {
+    denied(list(caps.orgAdmin,unauthorized)); denied(create(caps.orgAdmin,unauthorized));
+    denied(`SET app.organization_id='${ids.orgB}'; SET app.licensee_id='${unauthorized}'; ${create(caps.orgAdmin,unauthorized)}`);
+  }
+  assert(JSON.parse(last(app,`SELECT app_rls.qr_list_allocation_requests('${caps.orgAdmin}','qr-allocation-request-list','${requestId}',NULL,NULL,10,0)`)).every(row=>row.licenseeId===ids.licenseeA));
+  assert.equal(JSON.parse(last(app,`SELECT app_rls.qr_create_allocation_request('${caps.orgAdmin}','qr-allocation-request-create','${requestId}',NULL,2,'Default organization context',NULL)`)).licenseeId,ids.licenseeA);
+  assert.equal(JSON.parse(last(app,create(caps.platformSuper))).licenseeId,ids.licenseeA);
+  run(bootstrap,`UPDATE public."User" SET "licenseeId"='${ids.otherLicensee}' WHERE id='${ids.orgAdmin}'`);
+  denied(list(caps.orgAdmin,ids.otherLicensee)); denied(create(caps.orgAdmin,ids.otherLicensee));
+  run(bootstrap,`UPDATE public."User" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.orgAdmin}'`);
+  denied(reject(caps.orgAdmin,incidentRequest.id));
+  run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgB}' WHERE id='${ids.orgAdmin}'`);
+  denied(list(caps.orgAdmin)); denied(create(caps.orgAdmin));
+  run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgA}' WHERE id='${ids.orgAdmin}';
+    UPDATE public."RefreshToken" SET "sessionCapabilityAssurance"='PASSWORD' WHERE "userId"='${ids.orgAdmin}'`);
+  denied(list(caps.orgAdmin)); denied(create(caps.orgAdmin));
+  run(bootstrap,`UPDATE public."RefreshToken" SET "sessionCapabilityAssurance"='ADMIN_MFA' WHERE "userId"='${ids.orgAdmin}'`);
   const platformCreated=JSON.parse(last(app,create(caps.platform)));
   denied(reject(caps.platform,platformCreated.id));
   denied(`SELECT app_rls.qr_approve_allocation_request('${caps.platform}','qr-allocation-request-approve','${requestId}','${platformCreated.id}',NULL)`);
@@ -337,7 +360,7 @@ async function main(){
   assert.deepEqual(next.totals,a.totals); assert.deepEqual(next.eventSummary,a.eventSummary); assert.equal(next.logs.length,0);
   assert.equal(JSON.parse(last(app,analytics(caps.manufacturer,ids.licenseeA,{code:"SAFE"}))).logs[0].code,"SAFE1");
   denied(analytics(caps.tenant,ids.licenseeB)); denied(analytics(caps.manufacturer,ids.licenseeB));
-  for(const cap of [caps.deprecated,caps.expired,caps.revoked,"Z".repeat(43),""]) denied(analytics(cap));
+  for(const cap of [caps.orgAdmin,caps.expired,caps.revoked,"Z".repeat(43),""]) denied(analytics(cap));
   for(const filters of [{limit:201},{limit:0},{offset:-1},{offset:10001},{from:"invalid"},{from:"2020-01-01",to:"2021-01-01"},{firstScan:"true"},{unexpected:true}])
     denied(analytics(caps.tenant,ids.licenseeA,filters),/QR_INVALID_INPUT/);
   denied(`SET app.role='SUPER_ADMIN'; SET app.qr_licensee_id='${ids.licenseeB}'; ${list(caps.tenant,ids.licenseeB)}`);
@@ -379,8 +402,34 @@ async function main(){
   assert.equal(JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",status:"REDEEMED"}))).totals.redeemed,1);
   assert.equal(JSON.parse(last(app,analytics(caps.platform,ids.licenseeB,{code:"SAFE"}))).logs[0].latestDecision.outcome,"AUTHENTIC");
   denied(`SET app.qr_target_user_ids='${ids.platform}'; SELECT email FROM public."User"`,/permission denied|QR_|row-level security/);
+  // Five batches exceed a two-row page; UUID order disagrees with recency.
+  const batchId=n=>`40000000-0000-4000-8000-${String(9500+n).padStart(12,'0')}`;
+  const codeId=n=>`40000000-0000-4000-8000-${String(9600+n).padStart(12,'0')}`;
+  for(let n=1;n<=5;n++) run(bootstrap,`
+    INSERT INTO public."Batch"(id,name,"licenseeId","startCode","endCode","totalCodes","createdAt","updatedAt")
+      VALUES('${batchId(n)}','Recency ${n}','${ids.licenseeA}','RECENCY${n}','RECENCY${n}',1,'2026-10-01 ${String(10+Math.min(n,4)).padStart(2,'0')}:00:00',now());
+    INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt")
+      VALUES('${codeId(n)}','recency-secret-${n}','RECENCY${n}','${ids.licenseeA}','${batchId(n)}','PRINTED',now());
+    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","scannedAt")
+      VALUES('40000000-0000-4000-8000-${String(9800+n).padStart(12,'0')}','recency-secret-${n}','${codeId(n)}','${ids.licenseeA}','${batchId(n)}','PRINTED',true,'2026-10-01 ${String(10+Math.min(n,4)).padStart(2,'0')}:00:00');`);
+  run(bootstrap,`INSERT INTO public."VerificationDecision"(id,"qrCodeId","licenseeId","batchId","proofTier",outcome,"reasonCodes","riskBand","replacementStatus")
+    VALUES('40000000-0000-4000-8000-000000009700','${codeId(4)}','${ids.licenseeA}','${batchId(4)}','SIGNED_LABEL','AUTHENTIC',ARRAY[]::text[],'LOW','NONE')`);
+  const batchPage=offset=>JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:'RECENCY',limit:2,offset}))).batches;
+  const firstPage=batchPage(0);assert.deepEqual(firstPage.map(b=>b.id),[batchId(4),batchId(5)]);
+  assert(firstPage[0].createdAt>=firstPage[1].createdAt);assert.equal(firstPage[0].latestDecision.outcome,'AUTHENTIC');
+  assert.equal(firstPage[1].latestDecision,null); assert(firstPage.every(b=>b.counts.PRINTED===1&&b.scopeCodeCount===1));
+  assert.deepEqual(batchPage(1).map(b=>b.id),[batchId(5),batchId(3)]);
+  assert.deepEqual(batchPage(2).map(b=>b.id),[batchId(3),batchId(2)]);
+  assert.deepEqual(batchPage(4).map(b=>b.id),[batchId(1)]);
+  assert.deepEqual(batchPage(0),firstPage);
+  const logPage=offset=>JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:'RECENCY',limit:2,offset}))).logs;
+  const logId=n=>`40000000-0000-4000-8000-${String(9800+n).padStart(12,'0')}`;
+  assert.deepEqual(logPage(0).map(e=>e.id),[logId(5),logId(4)]);
+  assert.deepEqual(logPage(1).map(e=>e.id),[logId(4),logId(3)]);
+  assert.deepEqual(logPage(2).map(e=>e.id),[logId(3),logId(2)]);
+
   // Actual HTTP router/auth/tenant/MFA/capability chain; no database or Prisma mocks.
-  run(bootstrap,`UPDATE public."RefreshToken" SET "authenticatedAt"=now(),"mfaVerifiedAt"=now() WHERE "userId" IN ('${ids.tenant}','${ids.platform}','${ids.platformSuper}','${ids.manufacturer}')`);
+  run(bootstrap,`UPDATE public."RefreshToken" SET "authenticatedAt"=now(),"mfaVerifiedAt"=now() WHERE "userId" IN ('${ids.tenant}','${ids.platform}','${ids.platformSuper}','${ids.manufacturer}','${ids.orgAdmin}')`);
   const { createBackendApp } = require("../dist/app");
   const { signAccessToken } = require("../dist/services/auth/tokenService");
   const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
@@ -389,8 +438,8 @@ async function main(){
   const http=async (actor,path,method="GET",body,expected=200)=>{
     const headers={"content-type":"application/json"};
     if(actor){
-      const role=actor==="platform"?"SUPER_ADMIN":actor==="platformSuper"?"PLATFORM_SUPER_ADMIN":actor==="manufacturer"?"MANUFACTURER_ADMIN":"LICENSEE_ADMIN";
-      const licenseeId=actor==="tenant"?ids.licenseeA:actor==="manufacturer"?makerSelected:null;
+      const role=actor==="platform"?"SUPER_ADMIN":actor==="platformSuper"?"PLATFORM_SUPER_ADMIN":actor==="manufacturer"?"MANUFACTURER_ADMIN":actor==="orgAdmin"?"ORG_ADMIN":"LICENSEE_ADMIN";
+      const licenseeId=(actor==="tenant"||actor==="orgAdmin")?ids.licenseeA:actor==="manufacturer"?makerSelected:null;
       const orgId=licenseeId===ids.licenseeA?ids.orgA:licenseeId===ids.licenseeB?ids.orgB:null;
       const scopeVersion=actor==="manufacturer"&&licenseeId?last(bootstrap,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.manufacturer}' AND "licenseeId"='${licenseeId}'`):null;
       const sessionId=last(bootstrap,`SELECT id FROM public."RefreshToken" WHERE "userId"='${ids[actor]}' LIMIT 1`);
@@ -403,6 +452,15 @@ async function main(){
     return payload;
   };
   try {
+    await http("orgAdmin","/qr/requests");
+    const orgHttp=await http("orgAdmin","/qr/requests","POST",{quantity:2,batchName:"Organization request"},201);
+    assert.equal(orgHttp.data.licenseeId,ids.licenseeA);assert.equal(orgHttp.data.requestedByUserId,ids.orgAdmin);
+    for(const unauthorized of [ids.licenseeB,ids.otherLicensee]) {
+      await http("orgAdmin",`/qr/requests?licenseeId=${unauthorized}`,"GET",undefined,403);
+      await http("orgAdmin","/qr/requests","POST",{quantity:2,batchName:"Wrong tenant",licenseeId:unauthorized},403);
+    }
+    await http("orgAdmin","/qr/requests","POST",{quantity:2,batchName:"Forged organization",orgId:ids.orgB},400);
+    await http("orgAdmin",`/qr/requests?orgId=${ids.orgB}`,"GET",undefined,400);
     await http("tenant","/qr/requests");
     await http("tenant",`/qr/requests?licenseeId=${ids.licenseeB}`,"GET",undefined,403);
     await http(null,"/qr/requests","GET",undefined,401);
