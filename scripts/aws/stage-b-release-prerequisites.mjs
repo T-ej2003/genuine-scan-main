@@ -103,6 +103,90 @@ export function assertBrokerPolicyReconciliation(refresh, normal, preparation) {
   assert.equal((normal.resource_drift || []).length, 0);
 }
 
+// Only these provider/API defaults are equivalent to an absent configuration.
+const containerArrayDefaults = ['environment', 'mountPoints', 'portMappings', 'systemControls', 'volumesFrom'];
+function canonicalContainers(value) {
+  const containers = typeof value === 'string' ? JSON.parse(value) : structuredClone(value);
+  assert.ok(Array.isArray(containers));
+  assert.equal(new Set(containers.map(c => c.name)).size, containers.length, 'Duplicate container identity');
+  return containers.map(c => {
+    assert.equal(typeof c.name, 'string');
+    for (const field of containerArrayDefaults) {
+      if (c[field] == null) c[field] = [];
+      assert.ok(Array.isArray(c[field]), `Invalid container ${field}`);
+    }
+    if (c.cpu == null) c.cpu = 0;
+    for (const field of ['environment', 'secrets']) {
+      if (c[field] === undefined) continue;
+      assert.ok(Array.isArray(c[field]));
+      assert.equal(new Set(c[field].map(e => e.name)).size, c[field].length, `Duplicate ${field} identity`);
+      for (const entry of c[field]) assert.equal(typeof entry.name, 'string');
+      c[field].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return c;
+  });
+}
+function canonicalVolumes(value, aws = false) {
+  const volumes = aws ? value.map(v => {
+    assert.ok(v && typeof v === 'object' && !Array.isArray(v));
+    assert.ok(Object.keys(v).every(k => ['name', 'host', 'configureAtLaunch'].includes(k)), 'Unapproved ECS volume field');
+    if (v.host !== undefined) {
+      assert.ok(v.host && typeof v.host === 'object' && !Array.isArray(v.host));
+      assert.equal(Object.keys(v.host).length, 0, 'Only a structurally empty host is equivalent');
+    }
+    assert.ok(v.configureAtLaunch === undefined || v.configureAtLaunch === false, 'Unapproved launch configuration');
+    return { name: v.name };
+  }) : value;
+  return canonicalizeEcsTaskDefinitionVolumes(volumes).sort((a, b) => a.name.localeCompare(b.name));
+}
+const absentMode = value => {
+  assert.ok(value == null || typeof value === 'string', 'Invalid namespace mode');
+  return value ?? '';
+};
+const faultInjection = value => {
+  assert.ok(value == null || typeof value === 'boolean', 'Invalid fault-injection configuration');
+  return value ?? false;
+};
+function canonicalDefinition(value) {
+  const copy = structuredClone(value);
+  copy.container_definitions = canonicalContainers(copy.container_definitions);
+  copy.volume = canonicalVolumes(copy.volume ?? []);
+  copy.enable_fault_injection = faultInjection(copy.enable_fault_injection);
+  copy.ipc_mode = absentMode(copy.ipc_mode); copy.pid_mode = absentMode(copy.pid_mode);
+  return copy;
+}
+
+// Identity outputs are checked structurally here and against exact live ECS in
+// authenticateRegisteredDefinition. No other computed value supplies authority.
+export function assertRegisteredTaskDefinitionState(desired, state, unknown) {
+  const identities = ['arn', 'arn_without_revision', 'id', 'revision'];
+  const identity = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${desired.family}`;
+  assert.ok(Number.isSafeInteger(state.revision) && state.revision > 0);
+  assert.equal(state.arn, `${identity}:${state.revision}`);
+  if (state.id !== undefined) assert.equal(state.id, desired.family);
+  if (state.arn_without_revision !== undefined) assert.equal(state.arn_without_revision, identity);
+  if (unknown !== undefined) {
+    const check = (mask, path) => {
+      if (mask === false) return;
+      if (mask === true) {
+        assert.ok(identities.includes(path) || path === 'enable_fault_injection' || /^volume\.\d+\.configure_at_launch$/.test(path), `Unapproved computed task field: ${path}`);
+        return;
+      }
+      assert.ok(mask && typeof mask === 'object', 'Invalid computed-value mask');
+      for (const [key, child] of Object.entries(mask)) {
+        if (!path) assert.ok(Object.hasOwn(desired, key) || identities.includes(key) || key === 'enable_fault_injection', `Unknown provider field: ${key}`);
+        check(child, path ? `${path}.${key}` : key);
+      }
+    };
+    check(unknown, '');
+  }
+  const expected = structuredClone(desired);
+  for (const key of identities) if (unknown?.[key] === true || unknown === undefined && expected[key] == null) {
+    if (state[key] !== undefined) expected[key] = state[key];
+  }
+  equal(canonicalDefinition(state), canonicalDefinition(expected), 'Unexpected Terraform registration successor');
+}
+
 // Exact normalised input fields, shared with Terraform's canonical task templates.
 // Concrete identity is taken from this execution's state/readback, never a family lookup.
 export function authenticateRegisteredDefinition({ address, desired, observed, state }) {
@@ -118,15 +202,12 @@ export function authenticateRegisteredDefinition({ address, desired, observed, s
   const platform = Array.isArray(desired.runtime_platform) ? desired.runtime_platform[0] : desired.runtime_platform;
   equal(observed.runtimePlatform, { operatingSystemFamily: platform.operating_system_family, cpuArchitecture: platform.cpu_architecture });
   // Canonical Stage B volumes are empty named task-local volumes, not EFS/host mounts.
-  const volumes = canonicalizeEcsTaskDefinitionVolumes(desired.volume || []);
-  equal(observed.volumes, volumes.map(({ name }) => ({ name })));
-  equal(observed.ipcMode || '', desired.ipc_mode || ''); equal(observed.pidMode || '', desired.pid_mode || '');
+  equal(canonicalVolumes(observed.volumes, true), canonicalVolumes(desired.volume ?? []));
+  equal(absentMode(observed.ipcMode), absentMode(desired.ipc_mode)); equal(absentMode(observed.pidMode), absentMode(desired.pid_mode));
+  equal(faultInjection(observed.enableFaultInjection), faultInjection(desired.enable_fault_injection));
+  assertRegisteredTaskDefinitionState(desired, state);
   assert.equal(observed.ephemeralStorage, undefined, 'Unreviewed ephemeral-storage configuration');
-  equal(JSON.parse(state.container_definitions), JSON.parse(desired.container_definitions));
-  // AWS omits empty/null template fields; normalise only those documented defaults.
-  const normalize = value => Array.isArray(value) ? value.map(normalize) : value && typeof value === 'object'
-    ? Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null && !(Array.isArray(v) && !v.length)).map(([k, v]) => [k, normalize(v)])) : value;
-  equal(normalize(JSON.parse(desired.container_definitions)), normalize(observed.containerDefinitions), 'Registered executable container differs');
+  equal(canonicalContainers(desired.container_definitions), canonicalContainers(observed.containerDefinitions), 'Registered executable container differs');
   equal(desired.tags, Object.fromEntries(observed.tags.map(t => [t.key, t.value])));
   return { arn, revision: observed.revision, definitionSha256: brokerDigest({ desired, observed }), desired: structuredClone(desired) };
 }

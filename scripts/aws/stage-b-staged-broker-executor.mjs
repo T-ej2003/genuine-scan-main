@@ -22,7 +22,7 @@ import { assertStageBBrokerPackageManifest } from './package-production-green-st
 import { readStagedBrokerPrerequisites, readBrokerPolicyInventory } from './stage-b-staged-broker-observations.mjs';
 import { reserveStageBSharedApplyAttempt, reserveStageBApplyAttemptTransition, assertStageBApplyTerraformEnvironment } from '../apply-production-green-stage-b.mjs';
 import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from './stage-b-broker-policy-ownership.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan } from './stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan } from './stage-b-release-prerequisites.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
 
@@ -374,6 +374,9 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         assert.equal(r.mode, before.mode); assert.equal(r.type, before.type);
         if (!c || c.change.actions[0] === 'no-op') { equal(r.values, before.values); continue; }
         assert.ok(phase === 'REGISTRATION_RECOVERY' ? TASK_REGISTRATION_ADDRESSES.includes(r.address) : r.address === BROKER_FUNCTION);
+        if (phase === 'REGISTRATION_RECOVERY') {
+          assertRegisteredTaskDefinitionState(c.change.after, r.values, c.change.after_unknown); continue;
+        }
         const expected = structuredClone(c.change.after);
         for (const [key, unknown] of Object.entries(c.change.after_unknown || {})) {
           assert.equal(unknown, true); assert.ok((phase === 'REGISTRATION_RECOVERY' ? ['arn', 'arn_without_revision', 'id', 'revision'] : ['code_sha256', 'source_code_size', 'last_modified', 'qualified_arn', 'qualified_invoke_arn', 'version']).includes(key)); expected[key] = r.values[key];
