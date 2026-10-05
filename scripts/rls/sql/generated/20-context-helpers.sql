@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='66571358d685fe45344666d4df8ad19cc8272c5aeb768a7d46cc1c3420755867'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:66571358d685fe45344666d4df8ad19cc8272c5aeb768a7d46cc1c3420755867'
+    AND source_contract_sha256='d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:66571358d685fe45344666d4df8ad19cc8272c5aeb768a7d46cc1c3420755867')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d86f49e84fa5d2d3c5fc811a8f3842fbc8aa462f313b8775fd634ffe56196e0f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7147,7 +7147,7 @@ BEGIN
       AND (activity OR p_filters->>'status' IS NULL OR q.status::text=p_filters->>'status')
   ), events AS MATERIALIZED (
     SELECT s.id,s."qrCodeId",s."batchId",s.status,s."scannedAt",s."isFirstScan",
-      s."isTrustedOwnerContext",s.device,s."locationCountry",s."locationCity",s."locationName",q."displayCode",q.name
+      s."isTrustedOwnerContext",s."scanCount",s.device,s."locationCountry",s."locationCity",s."locationName",q."displayCode",q.name
     FROM public."QrScanLog" s JOIN inventory q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
       AND q."batchId" IS NOT DISTINCT FROM s."batchId"
     WHERE s."scannedAt">=from_at AND s."scannedAt"<=to_at
@@ -7181,7 +7181,7 @@ BEGIN
       (SELECT jsonb_object_agg(g.status,g.n) FROM grouped g WHERE g."batchId"=q."batchId") AS counts
     FROM scoped q WHERE q."batchId" IS NOT NULL GROUP BY q."batchId" ORDER BY q."batchId" LIMIT page_limit OFFSET page_offset
   ), log_rows AS (
-    SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt" AT TIME ZONE 'UTC' AS "scannedAt",e."isFirstScan",e."displayCode" AS code,
+    SELECT e.id,e."qrCodeId",e."batchId",e.status,e."scannedAt" AT TIME ZONE 'UTC' AS "scannedAt",e."isFirstScan",e."isTrustedOwnerContext",e."scanCount",e."displayCode" AS code,
       (SELECT d.projection FROM decisions d WHERE d."qrCodeId"=e."qrCodeId" ORDER BY d."createdAt" DESC,d.id DESC LIMIT 1) AS "latestDecision",
       jsonb_build_object('id',e."qrCodeId",'displayCode',e."displayCode",'batch',jsonb_build_object('id',e."batchId",'name',e.name)) AS "qrCode"
     FROM events e ORDER BY e."scannedAt" DESC,e.id DESC LIMIT page_limit OFFSET page_offset
@@ -7289,7 +7289,7 @@ $fn$;
 CREATE OR REPLACE FUNCTION app_rls.qr_write_audit(
   p_actor_id text,p_org_id text,p_licensee_id text,p_action text,p_entity_type text,p_entity_id text,p_details jsonb
 ) RETURNS void LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE audit_id text:=gen_random_uuid()::text; outbox_id text:=gen_random_uuid()::text; now_at timestamp without time zone:=transaction_timestamp();
+DECLARE audit_id text:=gen_random_uuid()::text; outbox_id text:=gen_random_uuid()::text; now_at timestamp without time zone:=transaction_timestamp(); payload jsonb; payload_digest text;
 BEGIN
   IF p_action !~ '^[A-Z0-9_]{1,120}$' OR p_entity_type NOT IN ('QRRange','QRCode','Batch','QrAllocationRequest') THEN
     RAISE EXCEPTION 'QR_INVALID_AUDIT';
@@ -7297,10 +7297,13 @@ BEGIN
   PERFORM set_config('app.qr_audit_id',audit_id,true),set_config('app.qr_outbox_id',outbox_id,true);
   INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"createdAt")
   VALUES(audit_id,p_actor_id,p_org_id,p_licensee_id,p_action,p_entity_type,p_entity_id,p_details,now_at);
-  INSERT INTO public."SecurityEventOutbox"(id,"eventType",payload,"requestId","organizationId","licenseeId","initiatingUserId","updatedAt")
-  VALUES(outbox_id,'AUDIT_LOG',jsonb_build_object('id',audit_id,'action',p_action,'entityType',p_entity_type,
-    'entityId',p_entity_id,'userId',p_actor_id,'orgId',p_org_id,'licenseeId',p_licensee_id,'details',p_details,'createdAt',now_at),
-    current_setting('app.request_id',true),p_org_id,p_licensee_id,p_actor_id,now_at);
+  payload:=jsonb_build_object('id',audit_id,'action',p_action,'entityType',p_entity_type,
+    'entityId',p_entity_id,'userId',p_actor_id,'orgId',p_org_id,'licenseeId',p_licensee_id,'details',p_details,'createdAt',now_at AT TIME ZONE 'UTC');
+  payload_digest:=encode(sha256(convert_to(app_rls.b03_stable_json(payload),'UTF8')),'hex');
+  -- Reuse the attributed, replay-safe outbox consumed by the existing B03 worker.
+  PERFORM app_rls.enqueue_security_event_outbox('AUDIT_LOG',payload,payload_digest,
+    encode(sha256(convert_to('AUDIT_LOG:'||audit_id,'UTF8')),'hex'),current_setting('app.request_id',true),
+    p_org_id,p_licensee_id,NULL,p_actor_id,transaction_timestamp()::timestamp+interval '1 day');
 END
 $fn$;
 

@@ -52,6 +52,25 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 describe("QRTracking", () => {
+  it("preserves owner context/count and renders absent fields as unavailable", async () => {
+    const result = await apiClient.getQrTrackingAnalytics({} as any);
+    vi.mocked(apiClient.getQrTrackingAnalytics).mockResolvedValue({ ...result, data: { ...(result.data as Record<string, unknown>),
+      logs: [
+        { id: "trusted", code: "TRUSTED", scannedAt: "2026-10-01T00:00:00Z", isTrustedOwnerContext: true, scanCount: 7 },
+        { id: "external", code: "EXTERNAL", scannedAt: "2026-10-01T00:00:00Z", isTrustedOwnerContext: false, scanCount: 2 },
+        { id: "unknown", code: "UNKNOWN", scannedAt: "2026-10-01T00:00:00Z" },
+      ],
+    }} as any);
+    render(<MemoryRouter><QRTracking /></MemoryRouter>);
+    const trusted = (await screen.findByText("TRUSTED")).closest("tr")!;
+    const external = screen.getByText("EXTERNAL").closest("tr")!;
+    const unknown = screen.getByText("UNKNOWN").closest("tr")!;
+    expect(trusted).toHaveTextContent("Trusted owner"); expect(trusted).toHaveTextContent("7");
+    expect(external).toHaveTextContent("External"); expect(external).toHaveTextContent("2");
+    expect(unknown).toHaveTextContent("Unavailable"); expect(unknown).toHaveTextContent("Context unavailable");
+    expect(unknown).not.toHaveTextContent("External"); expect(unknown).not.toHaveTextContent("Repeat");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     auth.user.role = "manufacturer";

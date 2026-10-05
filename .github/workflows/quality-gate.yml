@@ -111,6 +111,7 @@ jobs:
             export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/startex-evidence/$family.json"
             node scripts/rls/certify-clean-room-database.mjs
           done
+          node --test backend/tests/qrAllocationAuditProjection.test.js
       - name: Verify restored generated contracts and permission source
         run: |
           npm run rls:full-verify

@@ -829,7 +829,7 @@ const qrSystemSecurity = Object.freeze({
     ["InventoryStatusRollup","INSERT",["batchId","licenseeId","manufacturerId","totalCodes","dormant","active","activated","allocated","printed","redeemed","blocked","scanned","refreshedAt","createdAt","updatedAt"]],
     ["InventoryStatusRollup","SELECT",["batchId","licenseeId","manufacturerId","totalCodes","dormant","active","activated","allocated","printed","redeemed","blocked","scanned","refreshedAt","createdAt","updatedAt"]],
     ["InventoryStatusRollup","UPDATE",["licenseeId","manufacturerId","totalCodes","dormant","active","activated","allocated","printed","redeemed","blocked","scanned","refreshedAt","updatedAt"]],
-    ["QrScanLog","SELECT",["id","qrCodeId","licenseeId","batchId","status","scannedAt","isFirstScan","isTrustedOwnerContext","device","locationName","locationCountry","locationCity"]],
+    ["QrScanLog","SELECT",["id","qrCodeId","licenseeId","batchId","status","scannedAt","isFirstScan","isTrustedOwnerContext","scanCount","device","locationName","locationCountry","locationCity"]],
     ["VerificationDecision","SELECT",["id","qrCodeId","batchId","licenseeId","outcome","riskBand","replacementStatus","createdAt"]],
     ["CustomerTrustCredential","SELECT",["id","qrCodeId","reviewState","updatedAt"]],
     ["ScanMetricsHourlyRollup","INSERT",["id","bucketKey","hourBucket","licenseeId","batchId","manufacturerId","totalScanEvents","firstScanEvents","repeatScanEvents","blockedEvents","trustedOwnerEvents","externalEvents","namedLocationEvents","knownDeviceEvents","uniqueQrCodes","firstScannedAt","lastScannedAt","createdAt","updatedAt"]],

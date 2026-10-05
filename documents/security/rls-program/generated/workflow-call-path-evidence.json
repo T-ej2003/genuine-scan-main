@@ -9500,14 +9500,14 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-18577980c77fdf33",
-          "source": "backend/src/services/auditService.ts:133",
+          "accessId": "access-0508e1fd4dc8c060",
+          "source": "backend/src/services/auditService.ts:158",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         },
         {
-          "accessId": "access-978eae40103afe4d",
-          "source": "backend/src/services/auditService.ts:124",
+          "accessId": "access-adc8d04cc598f030",
+          "source": "backend/src/services/auditService.ts:149",
           "registration": "reachable-from-registered-entrypoint",
           "method": "create"
         }
@@ -9532,16 +9532,16 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-a325bdbe7cec9b66",
-          "source": "backend/src/services/auditService.ts:259",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
-          "accessId": "access-c97e5ea924e74f0c",
-          "source": "backend/src/services/auditService.ts:265",
+          "accessId": "access-7728b98c277fd744",
+          "source": "backend/src/services/auditService.ts:290",
           "registration": "reachable-from-registered-entrypoint",
           "method": "count"
+        },
+        {
+          "accessId": "access-b2b0ee0c078c794c",
+          "source": "backend/src/services/auditService.ts:284",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
         }
       ],
       "implementationFamilyId": null,
@@ -9564,8 +9564,8 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-b55caa16a26d2853",
-          "source": "backend/src/services/auditService.ts:57",
+          "accessId": "access-784d4ad69eaa4ece",
+          "source": "backend/src/services/auditService.ts:82",
           "registration": "reachable-from-registered-entrypoint",
           "method": "findUnique"
         }

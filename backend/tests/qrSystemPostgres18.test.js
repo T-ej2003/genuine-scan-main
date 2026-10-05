@@ -306,8 +306,11 @@ async function main(){
     denied(rejectNote(rolledBack.id,note),/QR_INVALID_INPUT/);
     assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
   }
-  run(bootstrap,`CREATE FUNCTION public.startex_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.payload->>'entityId'='${rolledBack.id}' AND NEW.payload->>'action'='REJECT_QR_ALLOCATION_REQUEST' THEN RAISE EXCEPTION 'STARTEX_TEST_OUTBOX_FAILURE'; END IF; RETURN NEW; END $$;
+  run(bootstrap,`CREATE FUNCTION public.startex_test_audit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF (NEW.payload->>'entityId'='${rolledBack.id}' AND NEW.payload->>'action'='REJECT_QR_ALLOCATION_REQUEST') OR (NEW.payload->>'action'='CREATE_QR_ALLOCATION_REQUEST' AND NEW.payload->'details'->>'batchName'='Outbox rollback probe') THEN RAISE EXCEPTION 'STARTEX_TEST_OUTBOX_FAILURE'; END IF; RETURN NEW; END $$;
     CREATE TRIGGER startex_test_audit_failure BEFORE INSERT ON public."SecurityEventOutbox" FOR EACH ROW EXECUTE FUNCTION public.startex_test_audit_failure()`);
+  denied(`SELECT app_rls.qr_create_allocation_request('${caps.tenant}','qr-allocation-request-create','${requestId}','${ids.licenseeA}',10,'Outbox rollback probe',NULL)`,/STARTEX_TEST_OUTBOX_FAILURE/);
+  assert.equal(Number(last(bootstrap,`SELECT count(*) FROM public."QrAllocationRequest" WHERE "batchName"='Outbox rollback probe'`)),0);
+  assert.equal(Number(last(bootstrap,`SELECT count(*) FROM public."AuditLog" WHERE details->>'batchName'='Outbox rollback probe'`)),0);
   denied(rejectNote(rolledBack.id,"must roll back"),/STARTEX_TEST_OUTBOX_FAILURE/);
   assert.deepEqual(mutable(rolledBack.id),{status:"PENDING",note:null}); assert.deepEqual(audit(rolledBack.id),[]);
   run(bootstrap,`DROP TRIGGER startex_test_audit_failure ON public."SecurityEventOutbox"; DROP FUNCTION public.startex_test_audit_failure()`);
@@ -321,11 +324,12 @@ async function main(){
     INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt") VALUES
     ('40000000-0000-4000-8000-000000000893','local-secret-own','SAFE1','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',now()),
     ('40000000-0000-4000-8000-000000000894','local-secret-foreign','SAFE2','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',now());
-    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","ipAddress","userAgent",latitude,longitude) VALUES
-    ('40000000-0000-4000-8000-000000000895','local-secret-own','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',true,'192.0.2.1','private-test-agent',1,1),
-    ('40000000-0000-4000-8000-000000000896','local-secret-foreign','40000000-0000-4000-8000-000000000894','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',true,'192.0.2.2','private-test-agent',2,2)`);
+    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","isTrustedOwnerContext","scanCount","ipAddress","userAgent",latitude,longitude) VALUES
+    ('40000000-0000-4000-8000-000000000895','local-secret-own','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',true,true,7,'192.0.2.1','private-test-agent',1,1),
+    ('40000000-0000-4000-8000-000000000896','local-secret-foreign','40000000-0000-4000-8000-000000000894','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',true,false,2,'192.0.2.2','private-test-agent',2,2)`);
   const a=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",limit:1})));
   assert.equal(a.eventSummary.totalScanEvents,1); assert.equal(a.logs.length,1); assert.equal(a.logs[0].code,"SAFE1");
+  assert.equal(a.logs[0].isTrustedOwnerContext,true); assert.equal(a.logs[0].scanCount,7);
   assert(!/ipAddress|userAgent|customerUserId|ownershipId|latitude|longitude|local-secret|private-test-agent/.test(JSON.stringify(a)));
   const next=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",limit:1,offset:1})));
   assert.deepEqual(next.totals,a.totals); assert.deepEqual(next.eventSummary,a.eventSummary); assert.equal(next.logs.length,0);
@@ -336,6 +340,14 @@ async function main(){
     denied(analytics(caps.tenant,ids.licenseeA,filters),/QR_INVALID_INPUT/);
   denied(`SET app.role='SUPER_ADMIN'; SET app.qr_licensee_id='${ids.licenseeB}'; ${list(caps.tenant,ids.licenseeB)}`);
   denied(`SET app.auth_session_verified='1'; SET app.role='SUPER_ADMIN'; ${analytics("")}`);
+  const durable=run(bootstrap,`SELECT jsonb_build_object('auditId',a.id,'action',a.action,'outboxId',o.id,'jobType',o."jobType",'digest',o."payloadDigest",'idempotencyKey',o."idempotencyKey",'requestId',o."requestId",'licenseeId',o."licenseeId",'expiresAt',o."expiresAt",'payload',o.payload)::text
+    FROM public."AuditLog" a JOIN public."SecurityEventOutbox" o ON o.payload->>'id'=a.id
+    WHERE a.action IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')`).map(JSON.parse);
+  assert.equal(Number(last(bootstrap,`SELECT count(*) FROM (SELECT action,"entityId" FROM public."AuditLog" WHERE action IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST') GROUP BY action,"entityId" HAVING count(*)<>1) duplicate_events`)),0);
+  assert(durable.some(e=>e.action==='CREATE_QR_ALLOCATION_REQUEST')); assert(durable.some(e=>e.action==='REJECT_QR_ALLOCATION_REQUEST'));
+  const {b03PayloadDigest}=require('../dist/rls-waves/session-b/b03/repositoryFunctions');
+  for(const e of durable){ assert.equal(e.jobType,'AUDIT_LOG');assert.equal(e.digest,b03PayloadDigest(e.payload));assert.match(e.idempotencyKey,/^[0-9a-f]{64}$/);assert.match(e.requestId,/^[0-9a-f-]{36}$/);assert.equal(e.licenseeId,e.payload.licenseeId);assert(e.expiresAt);assert.match(e.payload.createdAt,/(Z|\+00:00)$/); }
+  assert.equal(new Set(durable.map(e=>e.auditId)).size,durable.length);
   // Historical event state must not be inferred from the QR's current state.
   run(bootstrap,`UPDATE public."QRCode" SET status='REDEEMED' WHERE "displayCode"='SAFE1';
     INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"isFirstScan","scannedAt") VALUES
@@ -348,6 +360,7 @@ async function main(){
   const history={code:"SAFE",from:new Date(Date.now()-60000).toISOString(),to:new Date(Date.now()+60000).toISOString()};
   const blocked=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{...history,status:"BLOCKED"})));
   assert.equal(blocked.logs.length,1); assert.equal(blocked.logs[0].status,"BLOCKED");
+  assert.equal(blocked.logs[0].isTrustedOwnerContext,false);
   assert.equal(blocked.totals.blocked,1); assert.equal(blocked.totals.redeemed,0);
   assert.equal(blocked.eventSummary.totalScanEvents,1); assert.equal(blocked.eventSummary.blockedEvents,1);
   assert.equal(blocked.trend[0].blocked,1); assert.equal(blocked.trend[0].scanEvents,1);

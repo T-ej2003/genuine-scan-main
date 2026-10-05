@@ -2924,6 +2924,7 @@
         "scannedAt",
         "isFirstScan",
         "isTrustedOwnerContext",
+        "scanCount",
         "device",
         "locationName",
         "locationCountry",

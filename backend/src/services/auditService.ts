@@ -39,12 +39,37 @@ export const onAuditLog = (cb: Listener) => {
       emitAuditLog(payload.log);
     });
   }
-  listeners.add(cb);
-  return () => listeners.delete(cb);
+  // A live subscriber sees each durable audit ID once, including outbox replay.
+  // FIFO expiry is amortized O(1) and exceeds the maximum two-day outbox lifetime.
+  const seen = new Map<string, number>();
+  const listener: Listener = (log) => {
+    const now = Date.now();
+    for (const [id, expires] of seen) { if (expires > now) break; seen.delete(id); }
+    if (seen.has(log.id)) return;
+    seen.set(log.id, now + 172_800_000);
+    cb(log);
+  };
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 };
 
 const emitAuditLog = (log: any) => {
   for (const cb of listeners) cb(log);
+};
+
+// No database insert or forensic classification: these two actions have never
+// mapped to a forensic/trace event. Delivery retries reuse the durable audit ID.
+export const publishAllocationRequestAuditProjection = async (log: any) => {
+  if (!["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST"].includes(log.action)
+      || log.entityType !== "QrAllocationRequest" || !log.id || !log.licenseeId) {
+    throw new Error("AUDIT_PROJECTION_INVALID");
+  }
+  await Promise.all(["dashboard-snapshot", "attention-queue", "qr-batches", "print-jobs"]
+    .map(bumpCacheNamespaceVersion));
+  if (!await publishRedisJson(AUDIT_LOG_CHANNEL, { origin: getRedisInstanceId(), log })) {
+    throw new Error("AUDIT_PROJECTION_REDIS_UNAVAILABLE");
+  }
+  emitAuditLog(log);
 };
 
 const resolveOrgId = async (input: { orgId?: string; licenseeId?: string }) => {

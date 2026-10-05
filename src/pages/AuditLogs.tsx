@@ -403,7 +403,7 @@ export default function AuditLogs() {
     const stop = apiClient.streamAuditLogs(
       (log) => {
         if (!active || currentLicenseeFilter.current !== licenseeFilter || (isSuperAdmin && log.licenseeId !== licenseeFilter)) return;
-        setLogs((prev) => [log, ...prev].slice(0, 200));
+        setLogs((prev) => [log, ...prev.filter((entry) => entry.id !== log.id)].slice(0, 200));
         if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
           loadFraudReports({ silent: true });
         }
