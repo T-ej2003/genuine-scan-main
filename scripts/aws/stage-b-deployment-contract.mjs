@@ -1,6 +1,7 @@
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, assertPrerequisitePlan } from './stage-b-release-prerequisites.mjs';
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -730,10 +731,12 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
 export function classifyStageBPlan(plan, options = {}) {
   if (options.stagedBroker) {
     const p = options.stagedBroker; assertBrokerPreparation(p);
-    if (p.purpose === BROKER_PUBLICATION) assertBrokerPublicationPlan(plan, p);
+    const prerequisite = [TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE].includes(p.purpose);
+    if (prerequisite) assertPrerequisitePlan(plan, p);
+    else if (p.purpose === BROKER_PUBLICATION) assertBrokerPublicationPlan(plan, p);
     else { if (p.purpose !== BROKER_CUTOVER) throw new Error('Unknown staged broker profile'); assertBrokerCutoverPlan(plan, p); }
     const classifiedResources = plan.resource_changes.map(c => ({ address: c.address, type: c.type, actions: [...c.change.actions], classification: c.change.actions[0] === 'no-op' ? 'staged-broker-authenticated-prerequisite' : p.purpose }));
-    return { planProfile: p.purpose, aggregateMutationAddresses: [...BROKER_CENSUS], mutationAddresses: classifiedResources.filter(c => c.actions[0] !== 'no-op').map(c => c.address), classifiedResources, unclassifiedResources: [], taskDefinitionRotations: [], actionCounts: classifiedResources.reduce((counts, c) => ({ ...counts, [c.actions.join(',')]: (counts[c.actions.join(',')] || 0) + 1 }), {}) };
+    return { planProfile: p.purpose, aggregateMutationAddresses: prerequisite ? classifiedResources.filter(c => c.actions[0] !== 'no-op').map(c => c.address) : [...BROKER_CENSUS], mutationAddresses: classifiedResources.filter(c => c.actions[0] !== 'no-op').map(c => c.address), classifiedResources, unclassifiedResources: [], taskDefinitionRotations: [], actionCounts: classifiedResources.reduce((counts, c) => ({ ...counts, [c.actions.join(',')]: (counts[c.actions.join(',')] || 0) + 1 }), {}) };
   }
   const recoveryMode = resolveStageBRecoveryMode(options);
   const normalizedOptions = { ...options, partialApplyRecovery: recoveryMode === "PARTIAL_APPLY_RECOVERY", freshImagePartialApplyRecovery: recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY" };

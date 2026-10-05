@@ -196,6 +196,29 @@
           "aws:RequestedRegion": "eu-west-2"
         }
       }
+    },
+    {
+      "Sid": "OwnExactBrokerPolicyMutationDomain",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem"
+      ],
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+          ]
+        },
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        },
+        "Null": {
+          "dynamodb:LeadingKeys": "false"
+        }
+      }
     }
   ]
 }

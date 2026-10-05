@@ -204,7 +204,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 60, capabilities: 730, uniqueActions: 160, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 60, capabilities: 740, uniqueActions: 160, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",

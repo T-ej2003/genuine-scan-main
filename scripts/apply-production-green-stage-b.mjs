@@ -402,6 +402,7 @@ function stageBApplyBindings({ artifacts, verified, backendMetadata, env }) {
 export function assertOrdinaryStageBApplyCensus(plan) {
   if (!Array.isArray(plan?.resource_changes)) throw new Error("An authenticated saved-plan census is required before Terraform apply.");
   for (const { address, type, change } of plan.resource_changes) {
+    if (address === "aws_iam_policy.broker" && JSON.stringify(change?.actions) !== '["no-op"]') throw new Error("Broker policy mutation requires governed fixed policy-scoped ownership and native single-write execution.");
     if (["aws_lambda_function", "aws_lambda_alias"].includes(type) || ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].includes(address)) {
       if (JSON.stringify(change?.actions) !== JSON.stringify(["no-op"])) throw new Error("Broker function/alias mutations require the staged publication and native alias CAS protocol; normal Terraform apply is forbidden.");
     }
@@ -419,6 +420,7 @@ export function runApply({ argv = process.argv.slice(2), env = process.env, deps
   const artifacts = parseCli(argv);
   const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
   const governedEnvironment = { ...createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" }), TF_DATA_DIR: env.TF_DATA_DIR, TF_WORKSPACE: env.TF_WORKSPACE, MSCQR_STAGE_B_APPLY_ENABLED: env.MSCQR_STAGE_B_APPLY_ENABLED, MSCQR_STAGE_B_APPLY_CONFIRM: env.MSCQR_STAGE_B_APPLY_CONFIRM };
+  governedEnvironment.AWS_MAX_ATTEMPTS = "1";
   const defaultDeps = { getCaller: () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn, showPlan: (planPath) => showSavedPlan(planPath, { env: governedEnvironment }), validatePlan: assertStageBPlan, getBackendMetadata: readInitializedBackendMetadata, verifyPermissionSignature: (options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) }), verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => releaseRun(args) }), revalidateBootstrapReference: (reference, toolingSha) => { const reader = createAwsReader({ region: "eu-west-2", clusterArn: "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main", run: releaseRun }); reader.readProductionComponentDeploymentState = createProductionComponentDeploymentStateClient({ run: releaseRun }).read; return revalidateBootstrapForwardLivePredecessorReference({ reference, reader, toolingSha }); }, apply: (planPath, plan) => applyStageBInfrastructurePlan({ planPath, plan, env: governedEnvironment }) };
   const effectiveDeps = { ...defaultDeps, ...deps };
   const callerArn = effectiveDeps.getCaller();

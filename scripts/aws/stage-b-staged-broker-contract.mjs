@@ -53,7 +53,7 @@ function planEnvelope(plan, sourceSha, { targeted = false } = {}) {
   assert.ok(addresses.every(a => typeof a === "string" && a));
 }
 
-export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, canonicalAddresses }) {
+export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, canonicalAddresses, prerequisiteChain, configuration, packageSha256 }) {
   // Terraform marks targeted plans incomplete by definition. Only this exact
   // publication profile permits that marker; other phases require full plans.
   planEnvelope(plan, sourceSha, { targeted: true }); brokerPrerequisiteIdentity(prerequisites);
@@ -69,14 +69,22 @@ export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, ca
   const fn = plan.resource_changes.find(c => c.address === BROKER_FUNCTION);
   assert.ok(fn); equal(fn.change.actions, ["update"]); assertStageBBrokerFunctionUpdate(fn);
   assert.equal(fn.change.before.role, STAGE_B.brokerRoleArn); assert.equal(fn.change.after.role, STAGE_B.brokerRoleArn);
-  assert.equal(fn.change.before.source_code_hash, fn.change.after.source_code_hash, "Source-binding publication cannot change code");
+  if (!prerequisiteChain) assert.equal(fn.change.before.source_code_hash, fn.change.after.source_code_hash, "Source-binding publication cannot change code");
   assert.equal(fn.change.before.timeout, fn.change.after.timeout, "Publication cannot change timeout");
   const before = fn.change.before.environment?.[0]?.variables, after = fn.change.after.environment?.[0]?.variables;
   assert.ok(before && after);
   const oldExpected = JSON.parse(before.BROKER_APPROVAL_EXPECTED_JSON), newExpected = JSON.parse(after.BROKER_APPROVAL_EXPECTED_JSON);
   assert.equal(newExpected.releaseSha, sourceSha); assert.notEqual(oldExpected.releaseSha, sourceSha);
-  equal({ ...oldExpected, releaseSha: sourceSha }, newExpected, "Publication changes other approval inputs");
-  equal({ ...before, BROKER_APPROVAL_EXPECTED_JSON: after.BROKER_APPROVAL_EXPECTED_JSON }, after, "Publication changes task map/configuration");
+  if (prerequisiteChain) {
+    equal(after, configuration, "Publication differs from authenticated canonical successor");
+    assert.equal(fn.change.after.source_code_hash, Buffer.from(packageSha256, 'hex').toString('base64'));
+    equal(JSON.parse(after.BROKER_TASK_DEFINITIONS_JSON), prerequisiteChain.registration.result.taskMap);
+    assert.equal(prerequisiteChain.registration.result.sourceSha, sourceSha);
+    equal(prerequisites.policy, prerequisiteChain.policy.result.policy);
+  } else {
+    equal({ ...oldExpected, releaseSha: sourceSha }, newExpected, "Publication changes other approval inputs");
+    equal({ ...before, BROKER_APPROVAL_EXPECTED_JSON: after.BROKER_APPROVAL_EXPECTED_JSON }, after, "Publication changes task map/configuration");
+  }
   equal(JSON.parse(after.BROKER_TASK_DEFINITIONS_JSON), prerequisites.taskMap);
   assert.equal(fn.change.after.publish, true);
   assert.equal((plan.resource_drift || []).length, 0, "Publication cannot absorb drift");
@@ -124,8 +132,10 @@ export function brokerTargetIdentity(configuration, packageSha256) {
 }
 
 export function assertBrokerPreparation(p) {
-  keys(p, ["schemaVersion", "purpose", "sourceSha", "treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "state", "packageSha256", "alias", "prerequisites", "configuration", "canonicalAddresses", "publication", "target"]);
-  assert.equal(p.schemaVersion, 1); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER].includes(p.purpose));
+  const fields = ["schemaVersion", "purpose", "sourceSha", "treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "state", "packageSha256", "alias", "prerequisites", "configuration", "canonicalAddresses", "publication", "target"];
+  if (p.schemaVersion === 2) fields.push('prerequisiteChain');
+  keys(p, fields);
+  assert.ok([1, 2].includes(p.schemaVersion)); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER, 'STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose));
   assert.match(p.sourceSha || "", /^[a-f0-9]{40}$/);
   for (const k of ["treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "packageSha256"]) hash(p[k]);
   keys(p.state, ["lineage", "serial", "stateSha256"]); assert.match(p.state.lineage || "", /^[a-f0-9-]{36}$/);
@@ -134,6 +144,25 @@ export function assertBrokerPreparation(p) {
   assert.ok(p.configuration && Array.isArray(p.canonicalAddresses));
   assert.equal(new Set(p.canonicalAddresses).size, p.canonicalAddresses.length);
   assert.ok(BROKER_CENSUS.every(a => p.canonicalAddresses.includes(a)));
+  if (['STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose)) {
+    assert.equal(p.schemaVersion, 2); assert.equal(p.publication, null);
+    if (p.purpose === 'STAGE_B_TASK_REGISTRATION') { assert.equal(p.target, null); assert.equal(p.prerequisiteChain, null); }
+    else if (p.purpose === 'STAGE_B_BROKER_POLICY_PRUNING') { keys(p.target, ['versionId', 'inventory']); assert.match(p.target.versionId, /^v[1-9][0-9]*$/); assert.notEqual(p.target.versionId, p.prerequisites.policyVersion); }
+    else { assert.ok(p.prerequisiteChain?.registration); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
+    return p;
+  }
+  if (p.schemaVersion === 2) {
+    keys(p.prerequisiteChain, ['registration', 'policy']);
+    for (const phase of ['registration', 'policy']) {
+      const chain = p.prerequisiteChain[phase]; keys(chain, ['preparation', 'authorization', 'result']);
+      assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);
+      assert.equal(chain.preparation.treeSha256, p.treeSha256);
+      assert.equal(chain.result.preparationSha256, brokerDigest(chain.preparation));
+      assert.equal(chain.result.authorizationSha256, brokerDigest(chain.authorization));
+    }
+    equal(p.prerequisiteChain.registration.result.taskMap, p.prerequisites.taskMap);
+    equal(p.prerequisiteChain.policy.result.policy, p.prerequisites.policy);
+  }
   if (p.purpose === BROKER_PUBLICATION) { assert.equal(p.target, null); assert.equal(p.publication, null); }
   else {
     assert.ok(p.publication && p.target); assert.equal(p.publication.status, "PUBLISHED");

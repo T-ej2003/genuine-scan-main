@@ -4,6 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
+import { writerSession } from './fixtures/broker-writer-session.mjs';
+import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
@@ -12,6 +14,7 @@ import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemp
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
+import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
@@ -43,11 +46,12 @@ async function native(phase = "CUTOVER") {
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
   let mode = 'success', currentAlias = phase === 'RECONCILIATION' ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
+  let currentShow;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
     calls.push({ command, args, options });
     if (command === 'terraform') {
-      if (args.includes('show')) return JSON.stringify(capturedPlans.get(args.at(-1)) || plan);
+      if (args.includes('show')) return JSON.stringify(args.at(-1) === '-json' && currentShow ? currentShow : capturedPlans.get(args.at(-1)) || plan);
       if (args.includes('plan')) {
         assert.equal(phase, 'RECONCILIATION');
         const file = args.find(a => a.startsWith('-out=')).slice(5);
@@ -74,9 +78,10 @@ async function native(phase = "CUTOVER") {
     if (mode === 'uncertain') throw new Error('Timeout');
     currentAlias = { ...currentAlias, FunctionVersion: p.target.version, RevisionId: 'new-revision' }; return JSON.stringify(currentAlias);
   };
-  const adapter = createStagedBrokerExecutor({ phase, planPath, preparation: p, authorization: auth, files, directory, terraformDataDir: directory, env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: "default" }, exec });
+  const makeAdapter = (selectedPhase=phase, selectedAuth=auth) => createStagedBrokerExecutor({ phase:selectedPhase, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default' }, exec });
+  const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
-  return { adapter, input, binary, calls, p, auth, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
+  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
 }
 async function reserve(r) {
   const id = brokerDigest(r.auth);
@@ -133,7 +138,7 @@ test('native reconciliation applies only validated refresh saved plan, then capt
   const id = brokerDigest(r.auth), refreshPlanSha256 = brokerDigest(refresh.bytes);
   await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
   await r.adapter.reserve(brokerStateReservation(id), { purpose:'STAGE_B_BROKER_STATE_ONLY', parent:id, refreshPlanSha256 });
-  await r.adapter.record(id, 'STATE_REFRESH_INTENT', { refreshPlanSha256 });
+  await r.adapter.record(id, 'STATE_REFRESH_INTENT', { refreshPlanSha256, authorizedAt:new Date().toISOString() });
   await r.adapter.applyRefreshOnlyPlan(refresh.bytes);
   await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
   const closure = await r.adapter.captureNormalPlan(); assertBrokerClosurePlan(closure.plan, r.p);
@@ -179,4 +184,357 @@ test('complete stable traffic census authenticates the canonical prerequisite', 
 });
 for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
+});
+async function convergenceRecoveryFixture(failure = null, fault) {
+  await native(); // Reuse the private canonical package/backend fixture.
+  const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_CONVERGENCE;
+  p.packageSha256 = brokerDigest(fs.readFileSync(files.package));
+  const taskMap = failure === 'no-op' ? structuredClone(p.prerequisites.taskMap) : Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  if (failure === 'no-op') p.prerequisites.policy = deriveBrokerPolicy(p.prerequisites.policy, taskMap);
+  p.target = { policy: deriveBrokerPolicy(p.prerequisites.policy, taskMap) };
+  p.prerequisiteChain = { registration: { result: { taskMap } } };
+  p.canonicalAddresses.push('aws_iam_policy.broker');
+  const before = { arn: p.prerequisites.policyArn, policy: JSON.stringify(p.prerequisites.policy) }, after = { ...before, policy: JSON.stringify(p.target.policy) };
+  const change = { address: 'aws_iam_policy.broker', type: 'aws_iam_policy', mode: 'managed', change: { actions: [failure === 'no-op' ? 'no-op' : 'update'], before, after, after_unknown: {} } };
+  const plan = { variables: { tooling_sha: { value: sourceSha } }, complete: false, errored: false, resource_changes: [change] };
+  const planPath = path.join(directory, `owned-policy-${failure}.tfplan`), bytes = Buffer.from(`owned-${failure}`); fs.writeFileSync(planPath, bytes, { mode: 0o600 });
+  p.savedPlanSha256 = brokerDigest(bytes); p.logicalPlanSha256 = brokerDigest(plan); p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, p);
+  const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
+  const objects = new Map(), plans = new Map(); let item, writes = 0, refreshed = false, recovered = false, policy = p.prerequisites.policy;
+  const reader = prerequisiteReader();
+  const rawAws = args => {
+    const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
+    if (service === 'kms') return JSON.stringify({ SignatureValid: true });
+    if (service === 's3api') {
+      if (op === 'put-object') { const key = value('--key'); assert.ok(!objects.has(key)); objects.set(key, fs.readFileSync(value('--body'))); }
+      else if (value('--key') === 'env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate') {
+        fs.writeFileSync(args.find(a => a.startsWith(`${directory}/state-read`)), JSON.stringify({ resources: [{ mode: 'managed', type: 'aws_iam_policy', name: 'broker', instances: [{ attributes: { policy: refreshed ? after.policy : before.policy } }] }] }));
+      } else { const output = args.find(a => a.startsWith(directory+'/')); if (!objects.has(value('--key'))) throw Object.assign(new Error('missing'), { stderr: '(NoSuchKey)' }); fs.writeFileSync(output, objects.get(value('--key'))); }
+      return '{}';
+    }
+    if (service === 'dynamodb') {
+      if (op === 'get-item') return JSON.stringify(item ? { Item: item } : {});
+      if (op === 'put-item') { assert.equal(item, undefined); item = JSON.parse(value('--item')); }
+      else { const vals = JSON.parse(value('--expression-attribute-values')); assert.equal(item.state.S, vals[':current'].S); if (failure === 'release-crash' && JSON.parse(vals[':next'].S).status === 'RELEASED' && !recovered) throw new Error('crash before release'); item.state = vals[':next']; return JSON.stringify({ Attributes: item }); }
+      return '{}';
+    }
+    if (service === 'iam') {
+      if (op === 'get-policy') return JSON.stringify({ Policy: { Arn: before.arn, DefaultVersionId: writes ? 'v13' : 'v12' } });
+      if (op === 'get-policy-version') return JSON.stringify({ PolicyVersion: { VersionId: writes ? 'v13' : 'v12', IsDefaultVersion: true, Document: policy } });
+      if (op === 'list-policy-versions') return JSON.stringify({ Versions: [{ VersionId: 'v11', IsDefaultVersion: false }, { VersionId: 'v12', IsDefaultVersion: !writes }, ...(writes ? [{ VersionId: 'v13', IsDefaultVersion: true }] : [])] });
+      if (op === 'create-policy-version') {
+        assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.equal(value('--policy-arn'), before.arn); assert.ok(args.includes('--set-as-default'));
+        assert.equal(writes++, 0); policy = failure === 'wrong-successor' ? p.prerequisites.policy : JSON.parse(fs.readFileSync(value('--policy-document').slice(7)));
+        if (failure === 'uncertain') throw new Error('timeout after write');
+        return JSON.stringify({ PolicyVersion: { VersionId: 'v13', IsDefaultVersion: true } });
+      }
+    }
+    return reader(args);
+  };
+  const runAws = args => { fault?.(args, 'before', objects, item); const result = rawAws(args); fault?.(args, 'after', objects, item); return result; };
+  const exec = (command, args) => {
+    assert.equal(command, 'terraform');
+    if (args.includes('show')) return JSON.stringify(plans.get(args.at(-1)) || plan);
+    if (args.includes('plan')) {
+      const file = args.find(a => a.startsWith('-out=')).slice(5), c = structuredClone(change);
+      c.change = { actions: ['no-op'], before: structuredClone(after), after: structuredClone(after), after_unknown: {} };
+      const result = { ...plan, resource_changes: [c], resource_drift: args.includes('-refresh-only') || writes && !refreshed ? [change] : [] };
+      plans.set(file, result); fs.writeFileSync(file, `saved-${file}`); return '';
+    }
+    assert.ok(plans.get(args.at(-1))?.resource_drift.length === 1); refreshed = true; return '';
+  };
+  const adapter = createStagedBrokerExecutor({ phase: 'POLICY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws, writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }) } });
+  adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
+  adapter.readPrerequisites = async () => p.prerequisites; adapter.authenticatePrerequisiteChain = async () => {};
+  const recovery = createStagedBrokerExecutor({ phase: 'POLICY_RECOVERY', preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws,
+    writerSessionBoundary: { prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+  recovery.readCheckout = adapter.readCheckout; recovery.readStateIdentity = adapter.readStateIdentity; recovery.authenticatePrerequisiteChain = adapter.authenticatePrerequisiteChain;
+  return { execute: adapter, recovery, p, auth, objects, runAws, planPath, markRecovered: () => { recovered = true; }, reconcileFixtureState: () => { refreshed = true; }, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, state: () => ({ owner: item && JSON.parse(item.state.S), writes, refreshed }) };
+}
+for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) test(`native owned IAM convergence ${failure || 'success'} preserves one-write/state-only boundary`, async () => {
+  const r = await convergenceRecoveryFixture(failure);
+  if (failure === 'release-crash') {
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().owner.status, 'HELD'); assert.ok(r.state().owner.terminal);
+    r.markRecovered(); await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+  } else if (failure) {
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().owner.status, 'HELD');
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().writes, 1); assert.equal(r.state().refreshed, false);
+  } else {
+    await r.execute.executeBrokerPolicyConvergence(); assert.equal(r.state().writes, 1); assert.equal(r.state().refreshed, true); assert.equal(r.state().owner.status, 'RELEASED');
+    const acquired = r.state().owner.identity;
+    await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().writes, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.deepEqual(r.state().owner.identity, acquired);
+  }
+});
+
+for (const substitution of ['registration', 'target']) test(`physical prerequisite chain rejects ${substitution} receipt substitution`, async () => {
+  const r = await native('PUBLICATION');
+  const registration = { result: { taskMap: { execution: 'authenticated' } } };
+  const chain = { registration, policy: { preparation: { prerequisiteChain: { registration: structuredClone(registration) }, target: { policy: { exact: true } } }, result: { policy: { exact: true } } } };
+  if (substitution === 'registration') chain.policy.preparation.prerequisiteChain.registration.result.taskMap.execution = 'another-release';
+  else chain.policy.result.policy = { broader: true };
+  r.adapter.readCheckout = () => { assert.fail('Receipt substitution must fail before any downstream authority'); };
+  await assert.rejects(() => r.adapter.authenticatePrerequisiteChain(chain));
+});
+
+async function pruningRecoveryFixture(state = 'successor', fault) {
+  await native();
+  const p = preparation(); p.schemaVersion = 2; p.purpose = BROKER_POLICY_PRUNING; p.prerequisiteChain = null;
+  p.packageSha256 = brokerDigest(fs.readFileSync(files.package)); p.prerequisites.policyVersion = 'v5';
+  const inventory = ['v1','v2','v3','v4','v5'].map(VersionId => ({ VersionId, IsDefaultVersion: VersionId === 'v5' }));
+  p.target = { versionId: 'v2', inventory };
+  const plan = { purpose: p.purpose, sourceSha, policyArn: p.prerequisites.policyArn, defaultVersionId: 'v5', versionId: 'v2', inventory, mutation: 'iam:DeletePolicyVersion' };
+  const planPath = path.join(directory, `pruning-${state}.json`); fs.writeFileSync(planPath, JSON.stringify(plan), { mode: 0o600 });
+  p.savedPlanSha256 = brokerDigest(fs.readFileSync(planPath)); p.logicalPlanSha256 = brokerDigest(plan); p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, p);
+  const auth = authorization(p), now = Date.now(); auth.issuedAt = new Date(now-1000).toISOString(); auth.expiresAt = new Date(now+600000).toISOString();
+  const objects = new Map(), calls = []; let item, writes = 0, versions = structuredClone(inventory), policy = p.prerequisites.policy, version = 'v5', failCompletion = false;
+  const reader = prerequisiteReader();
+  const rawAws = args => {
+    calls.push(args); const [service, op] = args, value = flag => args[args.indexOf(flag)+1];
+    if (service === 'kms') return JSON.stringify({ SignatureValid: true });
+    if (service === 's3api') {
+      const key = value('--key');
+      if (op === 'put-object') { assert.ok(args.includes('--if-none-match')); assert.ok(!objects.has(key), 'consumed reservation'); objects.set(key, fs.readFileSync(value('--body'))); }
+      else { if (!objects.has(key)) throw Object.assign(new Error('missing'), { stderr: '(NoSuchKey)' }); fs.writeFileSync(args.find(a => a.startsWith(directory+'/')), objects.get(key)); }
+      return '{}';
+    }
+    if (service === 'dynamodb') {
+      if (op === 'get-item') return JSON.stringify(item ? { Item: item } : {});
+      if (op === 'put-item') { assert.equal(item, undefined); item = JSON.parse(value('--item')); }
+      else { const vals = JSON.parse(value('--expression-attribute-values')); assert.equal(item.state.S, vals[':current'].S);
+        if (failCompletion && JSON.parse(vals[':next'].S).terminal) { failCompletion = false; throw new Error('crash after receipt'); }
+        item.state = vals[':next']; return JSON.stringify({ Attributes: item }); }
+      return '{}';
+    }
+    if (service === 'iam') {
+      if (op === 'get-policy') return JSON.stringify({ Policy: { Arn: p.prerequisites.policyArn, DefaultVersionId: version } });
+      if (op === 'get-policy-version') return JSON.stringify({ PolicyVersion: { VersionId: version, IsDefaultVersion: true, Document: policy } });
+      if (op === 'list-policy-versions') return JSON.stringify({ Versions: versions });
+      if (op === 'delete-policy-version') {
+        assert.equal(JSON.parse(item.state.S).status, 'HELD'); assert.equal(value('--version-id'), 'v2'); assert.equal(writes++, 0);
+        if (state !== 'predecessor') versions = versions.filter(v => v.VersionId !== 'v2').reverse();
+        if (state === 'missing-other') versions = versions.filter(v => v.VersionId !== 'v3');
+        if (state === 'added') versions.push({ VersionId: 'v6', IsDefaultVersion: false });
+        if (state === 'default') { version = 'v4'; versions = versions.map(v => ({ ...v, IsDefaultVersion: v.VersionId === 'v4' })); }
+        if (state === 'policy') policy = { Version: '2012-10-17', Statement: [] };
+        if (state === 'normal') return '{}';
+        throw new Error('uncertain deletion result');
+      }
+    }
+    return reader(args);
+  };
+  const runAws = args => { fault?.(args, 'before', objects, item); const result = rawAws(args); fault?.(args, 'after', objects, item); return result; };
+  const make = phase => {
+    const adapter = createStagedBrokerExecutor({ phase, preparation: p, authorization: auth, planPath, files, directory, terraformDataDir: directory,
+      env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec: () => assert.fail('Pruning must not run Terraform'), runAws,
+      writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }),
+        prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
+    adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
+    adapter.readPrerequisites = async () => p.prerequisites; return adapter;
+  };
+  return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
+}
+for (const state of ['successor','predecessor','missing-other','added','default','policy']) test(`uncertain pruning recovery authenticates exact ${state} inventory without delete replay`, async () => {
+  const r = await pruningRecoveryFixture(state);
+  await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'HELD');
+  if (['successor','predecessor'].includes(state)) {
+    const result = await r.recovery.recoverBrokerPolicyOwnership();
+    assert.equal(result.status, state === 'successor' ? 'SUCCEEDED' : 'RECOVERED_NO_WRITE'); assert.equal(r.state().owner.status, 'RELEASED');
+    const terminals = [...r.objects.values()].map(b => JSON.parse(b)).filter(v => ['BROKER_POLICY_PRUNED','BROKER_POLICY_RECOVERED_NO_WRITE'].includes(v.status));
+    assert.equal(terminals.length, 1);
+    if (state === 'successor') assert.deepEqual(terminals[0].value.successor.versions.map(v => v.VersionId), ['v1','v3','v4','v5']);
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().owner.identity.generation, 1);
+  } else { await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD'); }
+  assert.equal(r.state().writes, 1); assert.equal(r.calls.filter(a => a[1] === 'delete-policy-version').length, 1);
+});
+
+for (const substitution of ['default-target','wrong-target','intent-target']) test(`pruning rejects authenticated ${substitution} substitution`, async () => {
+  const r = await pruningRecoveryFixture();
+  if (substitution === 'intent-target') {
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+    const key = stageBAttemptStepS3ObjectKey(brokerDigest(r.auth), 1), intent = JSON.parse(r.objects.get(key));
+    intent.value.versionId = 'v3'; r.objects.set(key, Buffer.from(JSON.stringify(intent)));
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+  } else {
+    r.plan.versionId = substitution === 'default-target' ? 'v5' : 'v9';
+    fs.writeFileSync(r.planPath, JSON.stringify(r.plan), { mode: 0o600 });
+    r.p.target.versionId = r.plan.versionId; r.p.savedPlanSha256 = brokerDigest(fs.readFileSync(r.planPath)); r.p.logicalPlanSha256 = brokerDigest(r.plan);
+    r.auth.preparationSha256 = brokerDigest(r.p);
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().writes, 0);
+  }
+  assert.ok(r.state().writes <= 1);
+});
+test('native same pruning authorization races: one reservation, one owner, one uncertain delete', async () => {
+  const r = await pruningRecoveryFixture();
+  const result = await Promise.allSettled([r.execute.executeBrokerPolicyPruning(), r.execute.executeBrokerPolicyPruning()]);
+  assert.equal(result.filter(v => v.status === 'rejected').length, 2);
+  assert.equal(r.calls.filter(a => a[1] === 'put-item').length, 1); assert.equal(r.state().writes, 1);
+  await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+});
+
+test('uncertain successful pruning persists terminal receipt once across a completion crash', async () => {
+  const r = await pruningRecoveryFixture(); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  r.crashAfterReceipt(); await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+  assert.equal(r.state().owner.status, 'HELD');
+  const puts = r.calls.filter(a => a[1] === 'put-object').length;
+  const result = await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(result.status, 'SUCCEEDED');
+  assert.equal(r.calls.filter(a => a[1] === 'put-object').length, puts); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 1);
+});
+
+function policyFaultLabel(args, item) {
+  const [service, operation] = args, value = flag => args[args.indexOf(flag)+1];
+  if (service === 's3api' && operation === 'put-object') {
+    const entry = JSON.parse(fs.readFileSync(value('--body')));
+    if (entry.kind === 'STAGED_BROKER_RESERVATION') return 'reservation';
+    if (entry.status.endsWith('_INTENT')) return 'intent';
+    return 'terminal';
+  }
+  if (service === 'dynamodb') {
+    if (operation === 'put-item') return 'acquire';
+    if (operation === 'update-item') {
+      const values = JSON.parse(value('--expression-attribute-values')), next = JSON.parse(values[':next'].S), current = JSON.parse(values[':current'].S);
+      return next.status === 'RELEASED' ? 'release' : next.terminal ? 'completion' : !current.mutation && next.mutation ? 'commit' : undefined;
+    }
+  }
+  if (service === 'iam') {
+    if (['create-policy-version','delete-policy-version'].includes(operation)) return 'iam';
+    if (operation === 'get-policy' && item) return JSON.parse(item.state.S).mutation ? 'successor' : 'predecessor';
+  }
+}
+const nativePolicyWindows = ['reservation-before','reservation-after','acquire-before','acquire-after','authentication-before','authentication-after',
+  'predecessor-before','predecessor-after','intent-before','intent-after','commit-before','commit-after','iam-before','iam-after',
+  'successor-before','successor-after','terminal-before','terminal-after','completion-before','completion-after','release-before','release-after'];
+for (const purpose of ['convergence','pruning']) for (const window of nativePolicyWindows) test(`native ${purpose} crash ${window} closes only an authenticated outcome`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && `${policyFaultLabel(args,item)}-${side}` === window) { fired = true; throw new Error(`exit ${window}`); } };
+  const r = purpose === 'convergence' ? await convergenceRecoveryFixture(null, fault) : await pruningRecoveryFixture('normal', fault);
+  const authenticate = r.execute.authenticatePrerequisiteAuthorization;
+  r.execute.authenticatePrerequisiteAuthorization = async (...args) => {
+    if (!fired && window === 'authentication-before') { fired = true; throw new Error('exit before authentication'); }
+    const value = await authenticate(...args);
+    if (!fired && window === 'authentication-after') { fired = true; throw new Error('exit after authentication'); }
+    return value;
+  };
+  const execute = () => purpose === 'convergence' ? r.execute.executeBrokerPolicyConvergence() : r.execute.executeBrokerPolicyPruning();
+  await assert.rejects(execute); assert.equal(fired, true); const before = r.state(); assert.ok(before.writes <= 1);
+  if (before.owner?.status === 'HELD') {
+    if (purpose === 'convergence' && before.writes && !before.refreshed) {
+      await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+      // Fixture supplies independently authenticated state-only reconciliation,
+      // never an IAM retry. Recovery still demands the exact normal no-op state.
+      r.reconcileFixtureState();
+    }
+    const result = await r.recovery.recoverBrokerPolicyOwnership();
+    assert.equal(result.status, before.writes ? 'SUCCEEDED' : 'RECOVERED_NO_WRITE'); assert.equal(r.state().owner.status, 'RELEASED');
+    await assert.rejects(execute); assert.equal(r.state().owner.identity.generation, before.owner.identity.generation);
+  } else if (before.owner) assert.equal(before.owner.status, 'RELEASED');
+  assert.equal(r.state().writes, before.writes);
+});
+for (const purpose of ['convergence','pruning']) test(`native ${purpose} no-write receipt survives a second recovery crash without replacement`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'intent' && side === 'before') { fired = true; throw new Error('before intent'); } };
+  const r = purpose === 'convergence' ? await convergenceRecoveryFixture(null, fault) : await pruningRecoveryFixture('normal', fault);
+  await assert.rejects(() => purpose === 'convergence' ? r.execute.executeBrokerPolicyConvergence() : r.execute.executeBrokerPolicyPruning());
+  const record = r.recovery.record; r.recovery.record = async (...args) => { await record(...args); throw new Error('crash after persisted recovery receipt'); };
+  await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD');
+  const existing = [...r.objects.values()].find(bytes => JSON.parse(bytes).status === 'BROKER_POLICY_RECOVERED_NO_WRITE'); assert.ok(existing);
+  r.recovery.record = () => assert.fail('Cannot replace durable no-write receipt');
+  await r.recovery.recoverBrokerPolicyOwnership(); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 0);
+});
+for (const field of ['operation','policy','generation','session','source','reservation','acquisition','intent','predecessor','terminal','target','successor']) test(`native recovery rejects ${field} substitution`, async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'commit' && side === 'after') { fired = true; throw new Error('committed but not invoked'); } };
+  const r = await pruningRecoveryFixture('normal', fault); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  const mutateObject = (key, mutate) => { const entry = JSON.parse(r.objects.get(key)); mutate(entry); r.objects.set(key, Buffer.from(JSON.stringify(entry))); };
+  if (field === 'operation') r.alterOwner(row => row.identity.operationIdentity = '0'.repeat(64));
+  else if (field === 'policy') r.alterOwner(row => row.identity.policyArn += '-other');
+  else if (field === 'generation') r.alterOwner(row => row.identity.generation++);
+  else if (field === 'session') r.alterOwner(row => row.identity.writerSession.accessKeyIdSha256 = '0'.repeat(64));
+  else if (field === 'source') r.alterOwner(row => row.identity.sourceSha = '0'.repeat(40));
+  else if (field === 'acquisition') r.alterOwner(row => row.acquisition.preparationSha256 = '0'.repeat(64));
+  else if (field === 'reservation') mutateObject(stageBApplyAttemptS3Key(brokerDigest(r.auth)), entry => entry.value.nonce = '0'.repeat(64));
+  else if (field === 'intent') mutateObject(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),1), entry => entry.value.owner.owner = '0'.repeat(36));
+  else if (field === 'predecessor' || field === 'target') { r.p.target[field === 'target' ? 'versionId' : 'inventory'] = field === 'target' ? 'v3' : []; }
+  else {
+    const record = r.recovery.record; r.recovery.record = async (...args) => { await record(...args); throw new Error('receipt committed'); };
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+    mutateObject(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2), entry => {
+      if (field === 'terminal') entry.value.owner.generation++;
+      else entry.value.successor.versions.pop();
+    }); r.recovery.record = record;
+  }
+  await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD'); assert.equal(r.state().writes, 0);
+});
+test('two native recoveries cannot both persist or complete a pre-intent generation', async () => {
+  let fired = false;
+  const fault = (args, side, objects, item) => { if (!fired && policyFaultLabel(args,item) === 'intent' && side === 'before') { fired = true; throw new Error('before intent'); } };
+  const r = await pruningRecoveryFixture('normal', fault); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  const results = await Promise.allSettled([r.recovery.recoverBrokerPolicyOwnership(), r.recovery.recoverBrokerPolicyOwnership()]);
+  assert.equal(results.filter(v => v.status === 'fulfilled').length, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 0);
+});
+
+
+test('alias operation metadata binds the exact consumed approval and cannot be inherited from caller environment',async()=>{
+ const r=await native();await reserve(r);await r.adapter.updateAlias(r.input);
+ const mutation=r.calls.find(c=>c.args[1]==='update-alias');assert.equal(mutation.options.env.AWS_EXECUTION_ENV,`mscqr-broker-cutover-${brokerDigest(r.auth)}`);
+ await assert.rejects(()=>r.adapter.updateAlias(r.input));assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,1);
+});
+test('read-only recovery authenticates original reservation and intent; reservation substitution fails',async()=>{
+ const r=await native();await reserve(r);const id=brokerDigest(r.auth),recovery=r.makeAdapter('CUTOVER_RECOVERY');
+ const expected={predecessor:r.p.alias,target:r.p.target};assert.equal((await recovery.authenticateRecoveryIntent('CUTOVER_INTENT',expected)).id,id);
+ await assert.rejects(()=>recovery.updateAlias(r.input));await assert.rejects(()=>recovery.applyPublication(r.binary));
+ const key=stageBApplyAttemptS3Key(id),original=r.objects.get(key);
+ for(const mutate of [e=>e.value.nonce='f'.repeat(64),e=>e.value.preparationSha256='f'.repeat(64),e=>e.id='f'.repeat(64)]){
+  const e=JSON.parse(original);mutate(e);r.objects.set(key,Buffer.from(JSON.stringify(e)));await assert.rejects(()=>recovery.authenticateRecoveryIntent('CUTOVER_INTENT',expected));
+ }
+ r.objects.set(key,original);assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,0);
+});
+test('publication state recovery admits only complete exact saved-plan successor and unchanged dependencies',async()=>{
+ const r=await native('PUBLICATION'),adapter=r.makeAdapter('PUBLICATION_RECOVERY'),plan=publicationPlan();
+ const resource={address:'aws_lambda_function.broker',mode:'managed',type:'aws_lambda_function',values:structuredClone(plan.resource_changes[0].change.before)};
+ plan.prior_state={values:{root_module:{resources:[resource]}}};
+ const successor={...resource,values:{...structuredClone(resource.values),...structuredClone(plan.resource_changes[0].change.after),version:'42'}};
+ const root={values:{root_module:{resources:[successor]}}};r.setShow(root);await adapter.authenticatePublicationRecoveryState(plan);
+ for(const mutate of [x=>x.values.root_module.resources[0].values.role='wrong',x=>x.values.root_module.resources.push({...resource,address:'aws_iam_policy.extra'}),x=>x.values.root_module.child_modules=[{}]]){
+  const changed=structuredClone(root);mutate(changed);r.setShow(changed);await assert.rejects(()=>adapter.authenticatePublicationRecoveryState(plan));
+ }
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
+});
+test('publication recovery selects exact state version and independently verifies state code/configuration identity',async()=>{
+ const r=await native('PUBLICATION'),adapter=r.makeAdapter('PUBLICATION_RECOVERY');
+ const attrs={version:'42',code_sha256:Buffer.from(r.p.packageSha256,'hex').toString('base64'),qualified_arn:`${r.input.FunctionName}:42`,environment:[{variables:structuredClone(r.p.configuration)}]};
+ const key='env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate';
+ const set=attributes=>r.objects.set(key,Buffer.from(JSON.stringify({resources:[{mode:'managed',type:'aws_lambda_function',name:'broker',instances:[{attributes}]}]})));
+ const input={savedPlanSha256:r.p.savedPlanSha256,authorizationSha256:brokerDigest(r.auth)};
+ set(attrs);assert.equal((await adapter.readPublicationResult(input)).version,'42');
+ for(const mutate of [x=>x.code_sha256='wrong',x=>x.qualified_arn=`${r.input.FunctionName}:99`,x=>x.environment[0].variables.EXTRA='unapproved']){
+  const changed=structuredClone(attrs);mutate(changed);set(changed);await assert.rejects(()=>adapter.readPublicationResult(input));
+ }
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,0);
+});
+
+test('no-op policy receipt rejects a concurrent successor observed after authorization, without acquiring ownership or mutating IAM',async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readPrerequisites=async()=>++reads===3?{...r.p.prerequisites,policyVersion:'v99',policy:deriveBrokerPolicy(r.p.prerequisites.policy,Object.fromEntries(Object.entries(r.p.prerequisites.taskMap).map(([mode,arn])=>[mode,arn.replace(/:[0-9]+$/,':99')])))}:r.p.prerequisites;
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.equal(r.state().owner,undefined);
+ assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)),'No contradictory terminal receipt');
+});
+
+test('exact no-op policy produces a coherent receipt without ownership/IAM mutation and remains one-use',async()=>{
+ const r=await convergenceRecoveryFixture('no-op'),result=await r.execute.executeBrokerPolicyConvergence();
+ assert.deepEqual(result.policy,result.successorIdentity.policy);assert.deepEqual(result.successorIdentity,r.p.prerequisites);assert.equal(result.owner,null);assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
+});
+for(const [name,mutate] of [['version',p=>p.policyVersion='v99'],['role',p=>p.role.RoleId='another'],['map',p=>p.taskMap['full-rls-preflight']+='wrong'],['traffic',p=>p.traffic.functionUrls=['unexpected']]])test(`no-op policy refuses concurrent ${name} prerequisite drift before terminal receipt`,async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readPrerequisites=async()=>{const p=structuredClone(r.p.prerequisites);if(++reads===3)mutate(p);return p;};
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.equal(r.state().owner,undefined);assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)));
+});
+test('no-op policy refuses changed state after its authorized prerequisite read',async()=>{
+ const r=await convergenceRecoveryFixture('no-op');let reads=0;
+ r.execute.readStateIdentity=async()=>++reads===3?{...r.p.state,serial:r.p.state.serial+1}:r.p.state;
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().writes,0);assert.ok(!r.objects.has(stageBAttemptStepS3ObjectKey(brokerDigest(r.auth),2)));
 });

@@ -372,8 +372,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 19);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 20);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 20);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0
     && (key === "s3:if-none-match" ? values.length === 1 && values[0] === "*" : !values.includes("*"))));
 });
@@ -2095,7 +2095,7 @@ test("ordinary Terraform executor blocks every broker mutation without spawning"
   let spawns = 0;
   const spawn = () => { spawns++; return { status: 0 }; };
   const invoke = plan => applyStageBInfrastructurePlan({ planPath: "/private/approved.tfplan", plan, spawn });
-  assert.throws(() => invoke(productionPlan), /staged publication and native alias CAS/);
+  assert.throws(() => invoke(productionPlan), /fixed policy-scoped ownership and native single-write/);
   for (const type of ["aws_lambda_function", "aws_lambda_alias"]) for (const actions of [["update"], ["create"], ["delete"], ["delete", "create"], ["create", "delete"], []]) {
     assert.throws(() => invoke({ resource_changes: [{ address: "unknown", type, change: { actions } }] }), /staged publication and native alias CAS/);
   }
@@ -2110,7 +2110,7 @@ test("ordinary saved-plan broker rejection occurs before any reservation or unce
   // Use the actual default executor, not a fake injected apply.
   delete input.deps.apply;
   assert.equal(fixture.sharedReservations.size, 0);
-  assert.throws(() => runApply(input), /staged publication and native alias CAS/);
+  assert.throws(() => runApply(input), /fixed policy-scoped ownership and native single-write/);
   assert.equal(fixture.sharedReservations.size, 0);
   assert.equal(input.applyCalls.length, 0);
 });
