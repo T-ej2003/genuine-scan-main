@@ -98,3 +98,94 @@ for (const purpose of ['publication', 'cutover']) test(`${purpose} signing authe
   const signed = await signBrokerAuthorization(r.p, options);
   assert.equal(signed.review.makerIdentity, maker); assert.equal(signs, 1); assert.ok(makerReads >= 2);
 });
+
+import { recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from '../aws/stage-b-staged-broker.mjs';
+import { authenticateBrokerAliasCasEvent } from '../aws/stage-b-broker-writer-session.mjs';
+function recoveryReaders(r) {
+  r.deps.authenticateRecoveryIntent = async (status, expected) => {
+    const entry = r.entries.find(e => e[1] === status); assert.ok(entry);
+    const { authorizedAt, ...fields } = entry[2]; assert.deepEqual(fields, expected);
+    const id = await assertBrokerAuthorization(r.auth, r.p, { verify: r.deps.verifyAuthorization, now: new Date(authorizedAt) });
+    assert.equal(id, entry[0]); return { id, authorizedAt };
+  };
+  r.deps.readRecoveryReceipt = async (id, status) => r.entries.find(e => e[0] === id && e[1] === status)?.[2] || null;
+  r.deps.readRecoveryStateIntent = async () => r.entries.find(e => e[1] === 'STATE_REFRESH_INTENT')?.[2];
+}
+function receiptCrash(r, status) {
+  const original = r.deps.record; let failed=false;
+  r.deps.record = async (...args) => { if(args[1] === status && !failed){failed=true;throw Error('external commit before durable receipt');} return original(...args); };
+}
+async function publicationRecovery() {
+  const r=rig();receiptCrash(r,'PUBLISHED');await assert.rejects(()=>executeBrokerPublication(r,r.deps));recoveryReaders(r);
+  r.deps.authenticatePublicationRecoveryState=async plan=>assert.deepEqual(plan,publicationPlan());
+  return {...r,recover:()=>recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps)};
+}
+function casEvent(r, observed) {
+  return {eventID:'a1111111-1111-4111-8111-111111111111',eventTime:now.toISOString(),eventSource:'lambda.amazonaws.com',eventName:'UpdateAlias20150331',awsRegion:'eu-west-2',recipientAccountId:STAGE_B.account,
+    userAgent:`aws-cli/2 exec-env/mscqr-broker-cutover-${brokerDigest(r.auth)}`,
+    userIdentity:{sessionContext:{sessionIssuer:{arn:'arn:aws:iam::368992683803:role/mscqr-production-release-deployer'}}},
+    requestParameters:{functionName:STAGE_B.brokerFunctionArn,name:r.p.alias.Name,functionVersion:r.p.target.version,revisionId:r.p.alias.RevisionId,description:r.p.alias.Description,routingConfig:{additionalVersionWeights:{}}},
+    responseElements:{aliasArn:observed.AliasArn,name:observed.Name,functionVersion:observed.FunctionVersion,revisionId:observed.RevisionId,description:observed.Description,routingConfig:{additionalVersionWeights:{}}}};
+}
+async function casRecovery() {
+  const r=await ready();receiptCrash(r,'CUTOVER_COMMITTED_STATE_PENDING');await assert.rejects(()=>executeBrokerAliasCas(r,r.deps));recoveryReaders(r);
+  const events=[casEvent(r,await r.deps.getAlias())];r.deps.authenticateAliasCasRecovery=async value=>authenticateBrokerAliasCasEvent(events,value);
+  return {...r,events,recover:()=>recoverBrokerAliasCas({preparation:r.p,authorization:r.auth},r.deps)};
+}
+async function reconciliationRecovery(status='RECONCILED_PENDING_RELEASE_CAS') {
+  const r=await ready(),casResult=await executeBrokerAliasCas(r,r.deps);receiptCrash(r,status);
+  if(status==='HANDOFF'){let failed=false; r.deps.publishTerminalHandoff=async()=>{if(!failed){failed=true;throw Error('handoff absent');}};}
+  await assert.rejects(()=>reconcileBrokerAlias({...r,casResult},r.deps));recoveryReaders(r);
+  return {...r,casResult,recover:()=>recoverBrokerReconciliation({preparation:r.p,authorization:r.auth,casResult},r.deps)};
+}
+for(const [phase,fixture] of [['publication',publicationRecovery],['alias CAS',casRecovery],['refresh reconciliation',reconciliationRecovery]]) {
+  test(`${phase} recovers post-commit missing receipt read-only and remains idempotent`,async()=>{
+    const r=await fixture(),calls=structuredClone(r.calls);r.deps.now=()=>new Date(now.getTime()+3600000);
+    const result=await r.recover();assert.ok(result);assert.deepEqual(r.calls,calls);assert.deepEqual(await r.recover(),result);assert.deepEqual(r.calls,calls);
+  });
+  for(const [name,mutate] of [
+    ['wrong source',r=>r.deps.readCheckout=async()=>({sourceSha:'f'.repeat(40),treeSha256:r.p.treeSha256})],
+    ['wrong target code',r=>r.deps.getVersion=async v=>({...configuration(v),CodeSha256:'bad'})],
+    ['role/policy drift',r=>r.deps.readPrerequisites=async()=>({...prerequisites,policy:{}})],
+  ]) test(`${phase} recovery rejects ${name} without replay`,async()=>{const r=await fixture(),calls=structuredClone(r.calls);mutate(r);await assert.rejects(r.recover);assert.deepEqual(r.calls,calls);});
+}
+test('publication recovery rejects wrong persisted Terraform identity',async()=>{const r=await publicationRecovery();r.deps.authenticatePublicationRecoveryState=async()=>{throw Error('unexpected state');};await assert.rejects(r.recover);assert.deepEqual(r.calls,['publish']);});
+test('publication recovery rejects unchanged predecessor or unrelated state version',async()=>{for(const version of ['12','99']){const r=await publicationRecovery();r.deps.readPublicationResult=async()=>({version,savedPlanSha256:r.p.savedPlanSha256,authorizationSha256:brokerDigest(r.auth)});if(version==='99')r.deps.getVersion=async()=>configuration('13');await assert.rejects(r.recover);assert.deepEqual(r.calls,['publish']);}});
+for(const [name,mutate] of [
+ ['wrong operation marker',r=>r.events[0].userAgent='aws-cli/2 exec-env/mscqr-broker-cutover-'+ 'f'.repeat(64)],['missing operation marker',r=>delete r.events[0].userAgent],
+ ['missing event',r=>r.events.length=0],['ambiguous duplicate events',r=>r.events.push(structuredClone(r.events[0]))],
+ ['omitted RevisionId',r=>delete r.events[0].requestParameters.revisionId],['wrong RevisionId',r=>r.events[0].requestParameters.revisionId='wrong'],
+ ['wrong target',r=>r.events[0].requestParameters.functionVersion='99'],['AWS failure',r=>r.events[0].errorCode='PreconditionFailedException'],
+ ['wrong actor',r=>r.events[0].userIdentity.sessionContext.sessionIssuer.arn+='-wrong'],['wrong response',r=>r.events[0].responseElements.revisionId='wrong'],
+ ['unavailable AWS response',r=>r.events[0].responseElements=null],['wrong region',r=>r.events[0].awsRegion='eu-west-1'],
+ ['event after approval expiry',r=>r.events[0].eventTime=r.auth.expiresAt],
+]) test(`alias recovery rejects ${name}; never calls UpdateAlias again`,async()=>{const r=await casRecovery(),calls=structuredClone(r.calls);mutate(r);await assert.rejects(r.recover);assert.deepEqual(r.calls,calls);});
+test('reconciliation recovery resumes missing handoff without another refresh apply',async()=>{const r=await reconciliationRecovery('HANDOFF');const calls=structuredClone(r.calls);await r.recover();assert.deepEqual(r.calls,calls);});
+test('reconciliation recovery rejects state/live drift and normal-plan alias mutation',async()=>{
+ for(const modify of [r=>r.deps.authenticateTerraformState=async()=>{throw Error('wrong state');},r=>r.deps.captureNormalPlan=async()=>({bytes:Buffer.from('wrong'),plan:cutoverPlan()})]){const r=await reconciliationRecovery(),calls=structuredClone(r.calls);modify(r);await assert.rejects(r.recover);assert.deepEqual(r.calls,calls);}
+});
+for (const [phase, fixture, status] of [['publication',publicationRecovery,'PUBLISHED'],['alias CAS',casRecovery,'CUTOVER_COMMITTED_STATE_PENDING'],['reconciliation',reconciliationRecovery,'RECONCILED_PENDING_RELEASE_CAS']]) {
+ test(`${phase} receipt write commits then response is lost: recovery authenticates persisted result once`,async()=>{
+  const r=await fixture(),record=r.deps.record;let lost=false;
+  r.deps.record=async(...args)=>{await record(...args);if(args[1]===status&&!lost){lost=true;throw Error('receipt response lost');}};
+  const calls=structuredClone(r.calls);await assert.rejects(r.recover);const result=await r.recover();assert.ok(result);
+  assert.equal(r.entries.filter(e=>e[1]===status).length,1);assert.deepEqual(r.calls,calls);
+ });
+ test(`${phase} concurrent read-only recoveries cannot substitute or duplicate the immutable receipt`,async()=>{
+  const r=await fixture(),record=r.deps.record;r.deps.record=async(...args)=>{assert.ok(!r.entries.some(e=>e[0]===args[0]&&e[1]===args[1]),'conditional occupied');await record(...args);};
+  const calls=structuredClone(r.calls),results=await Promise.allSettled([r.recover(),r.recover()]);
+  assert.ok(results.some(v=>v.status==='fulfilled'));assert.equal(r.entries.filter(e=>e[1]===status).length,1);await r.recover();assert.deepEqual(r.calls,calls);
+ });
+}
+test('native alias success with uncertain API response recovers from authenticated CAS event, not another mutation',async()=>{
+ const r=await ready(),update=r.deps.updateAlias;r.deps.updateAlias=async input=>{await update(input);throw Error('lost AWS response');};
+ await assert.rejects(()=>executeBrokerAliasCas(r,r.deps));recoveryReaders(r);
+ const events=[casEvent(r,await r.deps.getAlias())];r.deps.authenticateAliasCasRecovery=value=>authenticateBrokerAliasCasEvent(events,value);
+ const before=structuredClone(r.calls);await recoverBrokerAliasCas({preparation:r.p,authorization:r.auth},r.deps);assert.deepEqual(r.calls,before);
+});
+test('refresh-only apply commits then throws: recovery only reads and persists exact state closure',async()=>{
+ const r=await ready(),casResult=await executeBrokerAliasCas(r,r.deps),apply=r.deps.applyRefreshOnlyPlan;
+ r.deps.applyRefreshOnlyPlan=async bytes=>{await apply(bytes);throw Error('state commit response lost');};
+ await assert.rejects(()=>reconcileBrokerAlias({...r,casResult},r.deps));recoveryReaders(r);
+ const before=structuredClone(r.calls);await recoverBrokerReconciliation({preparation:r.p,authorization:r.auth,casResult},r.deps);assert.deepEqual(r.calls,before);
+});

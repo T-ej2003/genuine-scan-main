@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { brokerAliasIdentity, brokerDigest } from './stage-b-staged-broker-contract.mjs';
 import { canonicalJson, STAGE_B } from './production-green-stage-b-contract.mjs';
 import { createAssumedRoleSessionEnvironment, createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 
@@ -85,6 +86,31 @@ export async function proveBrokerWriterUnusable(owner, { readIssuance, readClock
   return { mechanism: 'AWS_STS_AUTHENTICATED_EXPIRY', ownerSha256: digest(canonicalJson(owner)), session: authenticated, observedAt,
     previousWriterCannotContinue: true, processTerminationProven: false };
 }
+export function authenticateBrokerAliasCasEvent(events, { preparation: p, authorization, authorizedAt, alias }) {
+  const lower = value => {
+    assert.ok(value && typeof value === 'object'); const pairs = Object.entries(value).map(([k, v]) => [k[0].toLowerCase() + k.slice(1), v]);
+    assert.equal(new Set(pairs.map(([k]) => k)).size, pairs.length); return Object.fromEntries(pairs);
+  };
+  const request = { functionName: STAGE_B.brokerFunctionArn, name: p.alias.Name, functionVersion: p.target.version, revisionId: p.alias.RevisionId,
+    description: p.alias.Description, routingConfig: { additionalVersionWeights: p.alias.RoutingConfig.AdditionalVersionWeights } };
+  const candidates = events.filter(e => e.eventSource === 'lambda.amazonaws.com' && e.eventName === 'UpdateAlias20150331'
+    && e.awsRegion === STAGE_B.region && e.recipientAccountId === STAGE_B.account && !e.errorCode && !e.errorMessage
+    && timestamp(e.eventTime) >= Math.floor(timestamp(authorizedAt) / 1000) * 1000
+    && timestamp(e.eventTime) < timestamp(authorization.expiresAt)
+    && typeof e.userAgent === 'string' && e.userAgent.split(/\s+/).filter(v => v.startsWith('exec-env/')).join(' ') === `exec-env/mscqr-broker-cutover-${brokerDigest(authorization)}`
+    && e.userIdentity?.sessionContext?.sessionIssuer?.arn === ROLE
+    && e.requestParameters && canonicalJson(lower(e.requestParameters)) === canonicalJson(request));
+  assert.equal(candidates.length, 1, 'Missing/ambiguous independently authenticated alias CAS execution');
+  const event = candidates[0], response = lower(event.responseElements);
+  assert.deepEqual(Object.keys(response).sort(), ['aliasArn', 'description', 'functionVersion', 'name', 'revisionId', 'routingConfig']);
+  const routing = lower(response.routingConfig); assert.deepEqual(Object.keys(routing), ['additionalVersionWeights']);
+  equal(brokerAliasIdentity({ AliasArn: response.aliasArn, Name: response.name, FunctionVersion: response.functionVersion,
+    RevisionId: response.revisionId, Description: response.description, RoutingConfig: { AdditionalVersionWeights: routing.additionalVersionWeights } }), alias);
+  assert.match(event.eventID || '', /^[a-f0-9-]{36}$/);
+  return { mechanism: 'AWS_CLOUDTRAIL_NATIVE_ALIAS_CAS', eventId: event.eventID, eventTime: event.eventTime,
+    authorizationSha256: brokerDigest(authorization), preparationSha256: brokerDigest(p), aliasSha256: brokerDigest(alias) };
+}
+
 export function createBrokerWriterSessionBoundary({ env = process.env, exec = execFileSync, independentRun } = {}) {
   const administrator = independentRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: 'mscqr-ops-admin', env, exec });
   const authenticateReader = () => {
@@ -114,6 +140,20 @@ export function createBrokerWriterSessionBoundary({ env = process.env, exec = ex
       // No profile/provider is left in the writer's environment. Expiry cannot
       // trigger CLI/provider refresh; a later invocation cannot replay its journal.
       return { session, run, environment: frozenEnvironment };
+    },
+    proveAliasCas(value) {
+      authenticateReader(); const events = new Map(), seen = new Set(); let token;
+      for (let page = 0; page < 100; page++) {
+        const result = parseIssuance(administrator(['cloudtrail', 'lookup-events', '--lookup-attributes', 'AttributeKey=EventName,AttributeValue=UpdateAlias20150331',
+          '--start-time', new Date(Math.floor(Date.parse(value.authorizedAt) / 1000) * 1000).toISOString(), '--end-time', value.authorization.expiresAt, '--max-results', '50', '--no-paginate',
+          ...(token ? ['--next-token', token] : []), '--region', STAGE_B.region, '--output', 'json', '--no-cli-pager']));
+        assert.ok(Array.isArray(result.Events));
+        for (const item of result.Events) { const event = parseIssuance(item.CloudTrailEvent); assert.equal(item.EventId, event.eventID);
+          if (events.has(event.eventID)) equal(events.get(event.eventID), event); events.set(event.eventID, event); }
+        token = result.NextToken; if (!token) return authenticateBrokerAliasCasEvent([...events.values()], value);
+        assert.ok(typeof token === 'string' && !seen.has(token)); seen.add(token);
+      }
+      throw Error('Incomplete alias CAS CloudTrail census');
     },
     prove: owner => { authenticateReader(); return proveBrokerWriterUnusable(owner, { readIssuance: session => readBrokerSessionIssuance(administrator,
       { accessKeyIdSha256: session.accessKeyIdSha256, callerArn: session.callerArn, callerUserId: session.callerUserId }), readClock: readBrokerRecoveryAwsClock }); },

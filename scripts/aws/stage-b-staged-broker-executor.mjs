@@ -26,11 +26,15 @@ import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TA
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
 
-const PHASES = ['PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'PREPARATION', 'CLOSURE', 'REGISTRATION', 'POLICY', 'POLICY_RECOVERY'];
+const PHASES = ['PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'PREPARATION', 'CLOSURE', 'REGISTRATION', 'POLICY', 'POLICY_RECOVERY', 'REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY'];
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
 STEPS.push('BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE');
 const PHASE_STEPS = { PUBLICATION: STEPS.slice(0, 3), CUTOVER: STEPS.slice(3, 7), RECONCILIATION: STEPS.slice(7) };
+PHASE_STEPS.PUBLICATION_RECOVERY = ['PUBLISHED'];
+PHASE_STEPS.CUTOVER_RECOVERY = ['CUTOVER_COMMITTED_STATE_PENDING'];
+PHASE_STEPS.RECONCILIATION_RECOVERY = ['RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
+PHASE_STEPS.REGISTRATION_RECOVERY = ['TASK_REGISTERED'];
 PHASE_STEPS.REGISTRATION = ['TASK_REGISTRATION_INTENT', 'TASK_REGISTERED'];
 PHASE_STEPS.POLICY_RECOVERY = ['BROKER_POLICY_CONVERGED', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE'];
 PHASE_STEPS.POLICY = ['BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED', 'BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED'];
@@ -115,7 +119,8 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   const credentialSource = PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
   let credential = createProductionAwsCredentialEnvironment({ credentialSource, profile: 'mscqr-production-release-deployer', env });
   let runAws = injectedAws || createProductionAwsCommandRunner({ credentialSource, profile: 'mscqr-production-release-deployer', env,
-    exec: (command, args, options) => exec(command, args, { ...options, cwd: root, env: { ...options.env, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard' } }) });
+    exec: (command, args, options) => exec(command, args, { ...options, cwd: root, env: { ...options.env, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard',
+      ...(phase === 'CUTOVER' && args[0] === 'lambda' && args[1] === 'update-alias' ? { AWS_EXECUTION_ENV: `mscqr-broker-cutover-${brokerDigest(authorization)}` } : {}) } }) });
   const json = args => JSON.parse(runAws([...args, '--output', 'json', '--no-cli-pager']));
   const kms = createBrokerKmsAuthorizationBoundary({ run: args => runAws(args) });
   const writerBoundary = writerSessionBoundary || createBrokerWriterSessionBoundary({ env, exec });
@@ -235,7 +240,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       assert.ok(PHASE_STEPS[phase]?.includes(status), 'Receipt phase crossover');
       assert.equal(id, status === 'STAGED_BROKER_TERMINAL_HANDOFF' ? stagedBrokerSourceReservation(preparation.sourceSha) : brokerDigest(authorization));
       assert.ok(ownedReservations.size, 'Receipt requires this phase reservation');
-      const attemptId = stateStep(status) ? receiptId(id, status, { refreshPlanSha256: brokerDigest(capturedRefresh.bytes) }) : id;
+      const attemptId = stateStep(status) ? brokerStateReservation(id) : id;
       return reserveStageBApplyAttemptTransition({ attemptId, sequence: SEQUENCES[status], bytes: Buffer.from(canonicalJson({ kind: 'STAGED_BROKER_STEP', id, status, value })), privateDirectory: directory, run: runAws });
     },
     applyPublication: async bytes => {
@@ -249,9 +254,12 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       terraform(['apply', '-input=false', planPath]);
     },
     readPublicationResult: async ({ savedPlanSha256, authorizationSha256 }) => {
-      assert.equal(phase, 'PUBLICATION'); const fn = stateResource(BROKER_FUNCTION);
+      assert.ok(['PUBLICATION', 'PUBLICATION_RECOVERY'].includes(phase)); const fn = stateResource(BROKER_FUNCTION);
       assert.match(fn.version || '', /^[1-9][0-9]*$/);
       assert.equal(savedPlanSha256, preparation.savedPlanSha256);
+      assert.equal(fn.code_sha256, Buffer.from(preparation.packageSha256, 'hex').toString('base64'));
+      equal(fn.environment[0].variables, preparation.configuration);
+      assert.equal(fn.qualified_arn, `${STAGE_B.brokerFunctionArn}:${fn.version}`);
       return { version: fn.version, savedPlanSha256, authorizationSha256 };
     },
     authenticatePublicationResult: async (result, id) => {
@@ -336,6 +344,46 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       assertPrerequisitePlan(JSON.parse(terraform(['show', '-json', planPath])), preparation);
       consumeMutation(id); terraform(['apply', '-input=false', planPath]);
     },
+    authenticateRecoveryIntent: async (status, expected) => {
+      const purpose = { REGISTRATION_RECOVERY: TASK_REGISTRATION, PUBLICATION_RECOVERY: BROKER_PUBLICATION, CUTOVER_RECOVERY: BROKER_CUTOVER, RECONCILIATION_RECOVERY: BROKER_CUTOVER }[phase];
+      assert.ok(purpose); assert.equal(preparation.purpose, purpose);
+      assert.equal(status, { REGISTRATION_RECOVERY: 'TASK_REGISTRATION_INTENT', PUBLICATION_RECOVERY: 'PUBLICATION_INTENT', CUTOVER_RECOVERY: 'CUTOVER_INTENT', RECONCILIATION_RECOVERY: 'STATE_REFRESH_INTENT' }[phase]);
+      const id = brokerDigest(authorization), intent = readReceipt(id, status), { authorizedAt, ...fields } = intent;
+      equal(fields, expected);
+      await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify, now: new Date(authorizedAt) });
+      const reservationId = phase === 'RECONCILIATION_RECOVERY' ? brokerStateReservation(id) : id;
+      const file = path.join(directory, `recovery-reservation-${randomUUID()}.json`);
+      try {
+        runAws(['s3api', 'get-object', '--bucket', STAGE_B_TERRAFORM_BACKEND.bucketName, '--key', stageBApplyAttemptS3Key(reservationId), '--expected-bucket-owner', STAGE_B.account, file]);
+        equal(JSON.parse(fs.readFileSync(file)), { kind: 'STAGED_BROKER_RESERVATION', id: reservationId, value: phase === 'RECONCILIATION_RECOVERY' ? { purpose: 'STAGE_B_BROKER_STATE_ONLY', parent: id, refreshPlanSha256: expected.refreshPlanSha256 } : policyReservation() });
+      } finally { fs.rmSync(file, { force: true }); }
+      if (phase === 'PUBLICATION_RECOVERY') { const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory }); assert.ok(source); equal(source.preparation, preparation); equal(source.authorization, authorization); }
+      ownedReservations.add(reservationId); return { id, authorizedAt };
+    },
+    readRecoveryReceipt: async (id, status) => {
+      try { return readReceipt(id, status); } catch (error) { if (/\(NoSuchKey\)/.test(String(error.stderr))) return null; throw error; }
+    },
+    authenticateRegistrationState: async plan => {
+      assert.ok(['REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY'].includes(phase));
+      const prior = plan.prior_state?.values?.root_module, current = JSON.parse(terraform(['show', '-json'])).values?.root_module;
+      assert.ok(prior && current); assert.equal((prior.child_modules || []).length, 0); assert.equal((current.child_modules || []).length, 0);
+      for (const resources of [prior.resources, current.resources]) assert.equal(new Set(resources.map(r => r.address)).size, resources.length, 'Ambiguous Terraform state census');
+      equal(prior.resources.map(r => r.address).sort(), current.resources.map(r => r.address).sort());
+      for (const r of current.resources) {
+        const before = prior.resources.find(v => v.address === r.address), c = plan.resource_changes.find(v => v.address === r.address);
+        assert.equal(r.mode, before.mode); assert.equal(r.type, before.type);
+        if (!c || c.change.actions[0] === 'no-op') { equal(r.values, before.values); continue; }
+        assert.ok(phase === 'REGISTRATION_RECOVERY' ? TASK_REGISTRATION_ADDRESSES.includes(r.address) : r.address === BROKER_FUNCTION);
+        const expected = structuredClone(c.change.after);
+        for (const [key, unknown] of Object.entries(c.change.after_unknown || {})) {
+          assert.equal(unknown, true); assert.ok((phase === 'REGISTRATION_RECOVERY' ? ['arn', 'arn_without_revision', 'id', 'revision'] : ['code_sha256', 'source_code_size', 'last_modified', 'qualified_arn', 'qualified_invoke_arn', 'version']).includes(key)); expected[key] = r.values[key];
+        }
+        equal(r.values, expected, 'Unexpected Terraform registration successor');
+      }
+    },
+    authenticatePublicationRecoveryState: async plan => adapter.authenticateRegistrationState(plan),
+    readRecoveryStateIntent: async () => readReceipt(brokerDigest(authorization), 'STATE_REFRESH_INTENT'),
+    authenticateAliasCasRecovery: async value => writerBoundary.proveAliasCas(value),
     executeBrokerPolicyConvergence: async () => {
       assert.equal(phase, 'POLICY');
       const session = pinPolicyWriter();
@@ -590,21 +638,23 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     applyRefreshOnlyPlan: async bytes => {
       assert.equal(phase, 'RECONCILIATION'); assert.ok(capturedRefresh && bytes.equals(capturedRefresh.bytes));
       const authHash = await requireAuthorization(BROKER_CUTOVER);
-      readReceipt(authHash, 'STATE_REFRESH_INTENT', { refreshPlanSha256: brokerDigest(bytes) });
+      readIntent(authHash, 'STATE_REFRESH_INTENT', { refreshPlanSha256: brokerDigest(bytes) });
       assertBrokerRefreshPlan(capturedRefresh.plan, preparation, await getAlias());
       consumeMutation(brokerStateReservation(brokerDigest(authorization)));
       assert.ok(fs.readFileSync(capturedRefresh.file).equals(bytes)); terraform(['apply', '-input=false', capturedRefresh.file]);
     },
-    captureNormalPlan: async () => { assert.ok(['RECONCILIATION', 'CLOSURE'].includes(phase)); return capture('closure', []); },
+    captureNormalPlan: async () => { assert.ok(['RECONCILIATION', 'RECONCILIATION_RECOVERY', 'CLOSURE'].includes(phase)); return capture('closure', []); },
     authenticateReconciliation: async (record, id) => readReceipt(id, 'RECONCILED_PENDING_RELEASE_CAS', record),
     publishTerminalHandoff: async value => {
-      assert.equal(phase, 'RECONCILIATION');
-      const id = await requireAuthorization(BROKER_CUTOVER);
+      assert.ok(['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase));
+      const id = phase === 'RECONCILIATION_RECOVERY' ? await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify, now: new Date(value.casResult.authorizedAt) }) : await requireAuthorization(BROKER_CUTOVER);
       assert.equal(value.record.cutoverAuthorizationSha256, id);
       readReceipt(id, 'RECONCILED_PENDING_RELEASE_CAS', value.record);
       const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory });
       assert.ok(source); assert.equal(brokerDigest(source.authorization), preparation.publication.authorizationSha256);
-      await adapter.record(stagedBrokerSourceReservation(preparation.sourceSha), 'STAGED_BROKER_TERMINAL_HANDOFF', value);
+      const sourceId = stagedBrokerSourceReservation(preparation.sourceSha);
+      if (phase === 'RECONCILIATION_RECOVERY') { const existing = await adapter.readRecoveryReceipt(sourceId, 'STAGED_BROKER_TERMINAL_HANDOFF'); if (existing) { equal(existing, value); return; } }
+      await adapter.record(sourceId, 'STAGED_BROKER_TERMINAL_HANDOFF', value);
     },
     authenticateTerraformState: async (target, alias) => {
       const fn = stateResource(BROKER_FUNCTION), a = stateResource(BROKER_ALIAS);

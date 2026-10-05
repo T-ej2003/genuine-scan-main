@@ -46,11 +46,12 @@ async function native(phase = "CUTOVER") {
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
   let mode = 'success', currentAlias = phase === 'RECONCILIATION' ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
+  let currentShow;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
     calls.push({ command, args, options });
     if (command === 'terraform') {
-      if (args.includes('show')) return JSON.stringify(capturedPlans.get(args.at(-1)) || plan);
+      if (args.includes('show')) return JSON.stringify(args.at(-1) === '-json' && currentShow ? currentShow : capturedPlans.get(args.at(-1)) || plan);
       if (args.includes('plan')) {
         assert.equal(phase, 'RECONCILIATION');
         const file = args.find(a => a.startsWith('-out=')).slice(5);
@@ -77,9 +78,10 @@ async function native(phase = "CUTOVER") {
     if (mode === 'uncertain') throw new Error('Timeout');
     currentAlias = { ...currentAlias, FunctionVersion: p.target.version, RevisionId: 'new-revision' }; return JSON.stringify(currentAlias);
   };
-  const adapter = createStagedBrokerExecutor({ phase, planPath, preparation: p, authorization: auth, files, directory, terraformDataDir: directory, env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: "default" }, exec });
+  const makeAdapter = (selectedPhase=phase, selectedAuth=auth) => createStagedBrokerExecutor({ phase:selectedPhase, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default' }, exec });
+  const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
-  return { adapter, input, binary, calls, p, auth, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
+  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
 }
 async function reserve(r) {
   const id = brokerDigest(r.auth);
@@ -136,7 +138,7 @@ test('native reconciliation applies only validated refresh saved plan, then capt
   const id = brokerDigest(r.auth), refreshPlanSha256 = brokerDigest(refresh.bytes);
   await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
   await r.adapter.reserve(brokerStateReservation(id), { purpose:'STAGE_B_BROKER_STATE_ONLY', parent:id, refreshPlanSha256 });
-  await r.adapter.record(id, 'STATE_REFRESH_INTENT', { refreshPlanSha256 });
+  await r.adapter.record(id, 'STATE_REFRESH_INTENT', { refreshPlanSha256, authorizedAt:new Date().toISOString() });
   await r.adapter.applyRefreshOnlyPlan(refresh.bytes);
   await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
   const closure = await r.adapter.captureNormalPlan(); assertBrokerClosurePlan(closure.plan, r.p);
@@ -471,4 +473,44 @@ test('two native recoveries cannot both persist or complete a pre-intent generat
   const r = await pruningRecoveryFixture('normal', fault); await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
   const results = await Promise.allSettled([r.recovery.recoverBrokerPolicyOwnership(), r.recovery.recoverBrokerPolicyOwnership()]);
   assert.equal(results.filter(v => v.status === 'fulfilled').length, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().writes, 0);
+});
+
+
+test('alias operation metadata binds the exact consumed approval and cannot be inherited from caller environment',async()=>{
+ const r=await native();await reserve(r);await r.adapter.updateAlias(r.input);
+ const mutation=r.calls.find(c=>c.args[1]==='update-alias');assert.equal(mutation.options.env.AWS_EXECUTION_ENV,`mscqr-broker-cutover-${brokerDigest(r.auth)}`);
+ await assert.rejects(()=>r.adapter.updateAlias(r.input));assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,1);
+});
+test('read-only recovery authenticates original reservation and intent; reservation substitution fails',async()=>{
+ const r=await native();await reserve(r);const id=brokerDigest(r.auth),recovery=r.makeAdapter('CUTOVER_RECOVERY');
+ const expected={predecessor:r.p.alias,target:r.p.target};assert.equal((await recovery.authenticateRecoveryIntent('CUTOVER_INTENT',expected)).id,id);
+ await assert.rejects(()=>recovery.updateAlias(r.input));await assert.rejects(()=>recovery.applyPublication(r.binary));
+ const key=stageBApplyAttemptS3Key(id),original=r.objects.get(key);
+ for(const mutate of [e=>e.value.nonce='f'.repeat(64),e=>e.value.preparationSha256='f'.repeat(64),e=>e.id='f'.repeat(64)]){
+  const e=JSON.parse(original);mutate(e);r.objects.set(key,Buffer.from(JSON.stringify(e)));await assert.rejects(()=>recovery.authenticateRecoveryIntent('CUTOVER_INTENT',expected));
+ }
+ r.objects.set(key,original);assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,0);
+});
+test('publication state recovery admits only complete exact saved-plan successor and unchanged dependencies',async()=>{
+ const r=await native('PUBLICATION'),adapter=r.makeAdapter('PUBLICATION_RECOVERY'),plan=publicationPlan();
+ const resource={address:'aws_lambda_function.broker',mode:'managed',type:'aws_lambda_function',values:structuredClone(plan.resource_changes[0].change.before)};
+ plan.prior_state={values:{root_module:{resources:[resource]}}};
+ const successor={...resource,values:{...structuredClone(resource.values),...structuredClone(plan.resource_changes[0].change.after),version:'42'}};
+ const root={values:{root_module:{resources:[successor]}}};r.setShow(root);await adapter.authenticatePublicationRecoveryState(plan);
+ for(const mutate of [x=>x.values.root_module.resources[0].values.role='wrong',x=>x.values.root_module.resources.push({...resource,address:'aws_iam_policy.extra'}),x=>x.values.root_module.child_modules=[{}]]){
+  const changed=structuredClone(root);mutate(changed);r.setShow(changed);await assert.rejects(()=>adapter.authenticatePublicationRecoveryState(plan));
+ }
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
+});
+test('publication recovery selects exact state version and independently verifies state code/configuration identity',async()=>{
+ const r=await native('PUBLICATION'),adapter=r.makeAdapter('PUBLICATION_RECOVERY');
+ const attrs={version:'42',code_sha256:Buffer.from(r.p.packageSha256,'hex').toString('base64'),qualified_arn:`${r.input.FunctionName}:42`,environment:[{variables:structuredClone(r.p.configuration)}]};
+ const key='env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate';
+ const set=attributes=>r.objects.set(key,Buffer.from(JSON.stringify({resources:[{mode:'managed',type:'aws_lambda_function',name:'broker',instances:[{attributes}]}]})));
+ const input={savedPlanSha256:r.p.savedPlanSha256,authorizationSha256:brokerDigest(r.auth)};
+ set(attrs);assert.equal((await adapter.readPublicationResult(input)).version,'42');
+ for(const mutate of [x=>x.code_sha256='wrong',x=>x.qualified_arn=`${r.input.FunctionName}:99`,x=>x.environment[0].variables.EXTRA='unapproved']){
+  const changed=structuredClone(attrs);mutate(changed);set(changed);await assert.rejects(()=>adapter.readPublicationResult(input));
+ }
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);assert.equal(r.calls.filter(c=>c.args[1]==='update-alias').length,0);
 });

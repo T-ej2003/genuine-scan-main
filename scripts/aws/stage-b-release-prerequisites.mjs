@@ -155,3 +155,35 @@ export async function executeTaskRegistration({ preparation: p, authorization },
     taskMap: taskMapFromRegisteredDefinitions(definitions) };
   await deps.record(id, 'TASK_REGISTERED', result); return result;
 }
+
+// Diagnosis consumes no new authority and never invokes Terraform apply/ECS writes.
+export async function recoverTaskRegistration({ preparation: p, authorization }, deps) {
+  assert.equal(p.purpose, TASK_REGISTRATION);
+  const { id, authorizedAt } = await deps.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT', { savedPlanSha256: p.savedPlanSha256 });
+  assert.equal(id, brokerDigest(authorization));
+  const artifacts = await deps.readPlan();
+  assert.equal(brokerDigest(artifacts.bytes), p.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), p.logicalPlanSha256);
+  assert.equal(artifacts.artifactSetSha256, p.artifactSetSha256);
+  const mutations = assertPrerequisitePlan(artifacts.plan, p);
+  equal(await deps.readCheckout(), { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+  equal(await deps.getAlias(), p.alias); equal(await deps.readPrerequisites(), p.prerequisites);
+  const stateBefore = await deps.readStateIdentity();
+  assert.equal(stateBefore.lineage, p.state.lineage); assert.ok(stateBefore.serial > p.state.serial, 'Registration predecessor has not observably completed');
+  await deps.authenticateRegistrationState(artifacts.plan);
+  const definitions = {};
+  for (const address of TASK_REGISTRATION_ADDRESSES) {
+    const c = artifacts.plan.resource_changes.find(c => c.address === address); assert.ok(c);
+    const state = await deps.readRegisteredTaskDefinition(address);
+    if (mutations.includes(address)) assert.notEqual(state.arn, c.change.before.arn, 'Partial/predecessor registration cannot authenticate success');
+    else assert.equal(state.arn, c.change.after.arn);
+    definitions[address] = authenticateRegisteredDefinition({ address, desired: c.change.after, state, observed: await deps.describeTaskDefinition(state.arn) });
+  }
+  equal(await deps.readStateIdentity(), stateBefore);
+  equal(await deps.getAlias(), p.alias); equal(await deps.readPrerequisites(), p.prerequisites);
+  const result = { schemaVersion: 1, status: 'REGISTERED_NONTERMINAL', sourceSha: p.sourceSha, treeSha256: p.treeSha256,
+    authorizationSha256: id, preparationSha256: brokerDigest(p), savedPlanSha256: p.savedPlanSha256, authorizedAt, mutations, definitions,
+    taskMap: taskMapFromRegisteredDefinitions(definitions) };
+  const persisted = await deps.readRecoveryReceipt(id, 'TASK_REGISTERED');
+  if (persisted) equal(persisted, result); else await deps.record(id, 'TASK_REGISTERED', result);
+  return result;
+}

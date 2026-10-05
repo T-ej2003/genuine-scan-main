@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
-import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from './stage-b-staged-broker.mjs';
+import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
 import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { assertStageBStaticConfigurationCoverage } from './stage-b-plan-semantic-contract.mjs';
@@ -12,13 +12,14 @@ import { assertStageBPlanResourceChange, classifyStageBPlan } from './stage-b-de
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from './stage-b-artifact-contract.mjs';
 import { readPlanningInputs, assertStageBPlanningBackendMetadata } from '../plan-production-green-stage-b.mjs';
 import { readStageBProtectedMainCheckout } from './stage-b-deployment-identity.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyPruningPlan } from './stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, executeTaskRegistration, recoverTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyPruningPlan } from './stage-b-release-prerequisites.mjs';
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const equal = (a, b) => assert.equal(brokerDigest(a), brokerDigest(b));
 const MODES = { 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
 Object.assign(MODES, { 'prepare-registration': 'PREPARATION', 'authorize-registration': 'PREPARATION', register: 'REGISTRATION', 'prepare-policy': 'PREPARATION', 'authorize-policy': 'PREPARATION', 'converge-policy': 'POLICY' });
 Object.assign(MODES, { 'prepare-pruning': 'PREPARATION', 'authorize-pruning': 'PREPARATION', prune: 'POLICY', 'recover-policy': 'POLICY_RECOVERY', 'verify-policy-writer-termination': 'POLICY_RECOVERY' });
+Object.assign(MODES, { 'recover-registration': 'REGISTRATION_RECOVERY', 'recover-publication': 'PUBLICATION_RECOVERY', 'recover-cutover': 'CUTOVER_RECOVERY', 'recover-reconciliation': 'RECONCILIATION_RECOVERY' });
 const read = (file, sha256) => {
   assertStageBPrivateFile({ filePath: file, repositoryRoot: root, label: 'Staged broker input' });
   const bytes = fs.readFileSync(file); assert.equal(brokerDigest(bytes), sha256); return JSON.parse(bytes);
@@ -38,6 +39,10 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
   const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir, prerequisiteChain });
   const checkout = await deps.readCheckout();
+  if (operation === 'recover-publication') return recoverBrokerPublication({ preparation, authorization }, deps);
+  if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
+  if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);
+  if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
   if (operation === 'recover-policy') return deps.recoverBrokerPolicyOwnership();
   if (operation === 'verify-policy-writer-termination') { const ownership = await deps.readBrokerPolicyOwnership(); assert.ok(ownership, 'No held broker policy writer'); return deps.authenticatePriorBrokerWriterTermination(ownership.identity); }
   const prerequisites = brokerPrerequisiteIdentity(await deps.readPrerequisites());

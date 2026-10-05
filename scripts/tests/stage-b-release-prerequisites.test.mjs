@@ -167,3 +167,61 @@ test('IAM reconciliation rejects unapproved output-state changes', () => {
   r.refresh.output_changes = { target: { actions: ['update'], before: 'approved', after: 'another' } };
   assert.throws(() => assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p));
 });
+
+import { recoverTaskRegistration } from '../aws/stage-b-release-prerequisites.mjs';
+async function registrationRecoveryFixture() {
+  const r = rig('b', 42), authorization = { sourceSha: r.p.sourceSha };
+  r.p.state = { lineage: '4e438e59-8b8b-194d-030c-5ede0c26344a', serial: 1, stateSha256: 'c'.repeat(64) };
+  r.p.alias = { identity: 'unchanged' }; r.p.prerequisites = { identity: 'unchanged' };
+  const record = r.deps.record; let fail = true;
+  r.deps.record = async (...args) => { if (args[1] === 'TASK_REGISTERED' && fail) { fail = false; throw Error('after external commit before receipt'); } return record(...args); };
+  await assert.rejects(() => executeTaskRegistration({ preparation: r.p, authorization }, r.deps));
+  r.deps.readCheckout = async () => ({ sourceSha: r.p.sourceSha, treeSha256: r.p.treeSha256 });
+  r.deps.getAlias = async () => structuredClone(r.p.alias); r.deps.readPrerequisites = async () => structuredClone(r.p.prerequisites);
+  r.deps.readStateIdentity = async () => ({ ...r.p.state, serial: 2, stateSha256: 'd'.repeat(64) });
+  r.deps.authenticateRecoveryIntent = async (status, expected) => {
+    const entry = r.receipts.find(e => e[1] === status); assert.ok(entry);
+    assert.equal(entry[0], brokerDigest(authorization));
+    const { authorizedAt, ...fields } = entry[2]; assert.deepEqual(fields, expected); return { id: entry[0], authorizedAt };
+  };
+  r.deps.authenticateRegistrationState = async () => {
+    for (const c of r.plan.resource_changes) {
+      const state = r.states[c.address]; assert.ok(state); assert.notEqual(state.arn, c.change.before.arn);
+      assert.deepEqual({ ...state, arn: c.change.after.arn, revision: c.change.after.revision }, c.change.after);
+    }
+  };
+  r.deps.readRecoveryReceipt = async (id, status) => r.receipts.find(e => e[0] === id && e[1] === status)?.[2] || null;
+  return { ...r, authorization, recover: () => recoverTaskRegistration({ preparation: r.p, authorization }, r.deps) };
+}
+test('completed registration recovers the exact normal receipt without registering or applying again', async () => {
+  const r = await registrationRecoveryFixture(), result = await r.recover();
+  assert.equal(r.writes(), 1); assert.equal(result.status, 'REGISTERED_NONTERMINAL');
+  const normal = rig('b', 42); Object.assign(normal.p, { state: r.p.state, alias: r.p.alias, prerequisites: r.p.prerequisites });
+  normal.deps.now = () => new Date(result.authorizedAt);
+  const ordinary = await executeTaskRegistration({ preparation: normal.p, authorization: r.authorization }, normal.deps);
+  assert.deepEqual(result, ordinary); assert.deepEqual(await r.recover(), result);
+  await assert.rejects(() => executeTaskRegistration({ preparation: r.p, authorization: r.authorization }, r.deps)); assert.equal(r.writes(), 1);
+});
+for (const [name, change] of [
+  ['wrong Terraform state', r => r.states[TASK_REGISTRATION_ADDRESSES[0]].cpu = '999'],
+  ['wrong live definition', r => { const describe = r.deps.describeTaskDefinition; r.deps.describeTaskDefinition = async arn => ({ ...await describe(arn), cpu: '999' }); }],
+  ['wrong image', r => { const s = r.states[TASK_REGISTRATION_ADDRESSES[0]], defs = JSON.parse(s.container_definitions); defs[0].image += '-wrong'; s.container_definitions = JSON.stringify(defs); }],
+  ['wrong source', r => r.deps.readCheckout = async () => ({ sourceSha: 'e'.repeat(40), treeSha256: r.p.treeSha256 })],
+  ['wrong tree', r => r.deps.readCheckout = async () => ({ sourceSha: r.p.sourceSha, treeSha256: 'e'.repeat(64) })],
+  ['partial registration', r => { const s=r.states[TASK_REGISTRATION_ADDRESSES[0]]; s.arn=r.plan.resource_changes[0].change.before.arn; }],
+  ['wrong returned revision', r => r.states[TASK_REGISTRATION_ADDRESSES[0]].revision = 99],
+  ['wrong intent', r => r.receipts[0][2].savedPlanSha256 = 'e'.repeat(64)],
+  ['exact predecessor state', r => r.deps.readStateIdentity = async () => r.p.state],
+  ['alias drift', r => r.deps.getAlias = async () => ({ identity: 'changed' })],
+]) test(`registration recovery rejects ${name} without mutation`, async () => { const r=await registrationRecoveryFixture(); change(r); await assert.rejects(r.recover); assert.equal(r.writes(),1); });
+test('unrelated newer registration is never queried or substituted', async () => {
+  const r=await registrationRecoveryFixture(), describe=r.deps.describeTaskDefinition, queried=[];
+  r.deps.describeTaskDefinition=async arn=>{queried.push(arn);assert.ok(arn.endsWith(':42'));return describe(arn);};
+  const result=await r.recover(); assert.equal(queried.length,TASK_REGISTRATION_ADDRESSES.length); assert.ok(Object.values(result.taskMap).every(arn=>arn.endsWith(':42'))); assert.equal(r.writes(),1);
+});
+test('registration receipt commits before lost response: exact receipt is reused and authorization stays consumed',async()=>{
+ const r=await registrationRecoveryFixture(),record=r.deps.record;let lost=false;
+ r.deps.record=async(...args)=>{await record(...args);if(args[1]==='TASK_REGISTERED'&&!lost){lost=true;throw Error('receipt response lost');}};
+ await assert.rejects(r.recover);const recovered=await r.recover();assert.ok(recovered);assert.equal(r.writes(),1);
+ await assert.rejects(()=>executeTaskRegistration({preparation:r.p,authorization:r.auth},r.deps));assert.equal(r.writes(),1);
+});
