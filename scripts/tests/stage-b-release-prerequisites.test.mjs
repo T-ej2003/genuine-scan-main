@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import test from 'node:test';
 import { taskChange, rotationVariables } from './fixtures/stage-b-task-rotation.mjs';
 import { canonicalBrokerPolicy } from './fixtures/staged-broker.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
 import { brokerDigest, assertBrokerPublicationPlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { preparation as brokerPreparation, publicationPlan, rig as brokerRig, configuration, authorization as brokerAuthorization, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
@@ -178,6 +181,7 @@ async function registrationRecoveryFixture() {
   r.deps.record = async (...args) => { if (args[1] === 'TASK_REGISTERED' && fail) { fail = false; throw Error('after external commit before receipt'); } return record(...args); };
   await assert.rejects(() => executeTaskRegistration({ preparation: r.p, authorization }, r.deps));
   r.deps.readCheckout = async () => ({ sourceSha: r.p.sourceSha, treeSha256: r.p.treeSha256 });
+  r.deps.authenticateRegistrationRecoveryIdentity = async prior => prior || ({ mode: 'READ_ONLY_EXACT_SUCCESSOR', transaction: await r.deps.readCheckout(), tooling: { sourceSha: 'd'.repeat(40), treeSha256: 'd'.repeat(64) } });
   r.deps.getAlias = async () => structuredClone(r.p.alias); r.deps.readPrerequisites = async () => structuredClone(r.p.prerequisites);
   r.deps.readStateIdentity = async () => ({ ...r.p.state, serial: 2, stateSha256: 'd'.repeat(64) });
   r.deps.authenticateRecoveryIntent = async (status, expected) => {
@@ -200,7 +204,7 @@ test('completed registration recovers the exact normal receipt without registeri
   const normal = rig('b', 42); Object.assign(normal.p, { state: r.p.state, alias: r.p.alias, prerequisites: r.p.prerequisites });
   normal.deps.now = () => new Date(result.authorizedAt);
   const ordinary = await executeTaskRegistration({ preparation: normal.p, authorization: r.authorization }, normal.deps);
-  assert.deepEqual(result, ordinary); assert.deepEqual(await r.recover(), result);
+  const { recovery, ...transaction } = result; assert.deepEqual(transaction, ordinary); assert.equal(recovery.transaction.sourceSha, r.p.sourceSha); assert.equal(recovery.tooling.sourceSha, "d".repeat(40)); assert.deepEqual(await r.recover(), result);
   await assert.rejects(() => executeTaskRegistration({ preparation: r.p, authorization: r.authorization }, r.deps)); assert.equal(r.writes(), 1);
 });
 for (const [name, change] of [
@@ -310,11 +314,12 @@ function recoverRows(rows, full) {
   const plan = full?.plan || { complete: false, errored: false, variables: { tooling_sha: { value: 'a'.repeat(40) } }, resource_changes: rows.map(r => ({ address: r.address, type: 'aws_ecs_task_definition', mode: 'managed', change: { before: { ...r.desired, skip_destroy: true, arn: r.state.arn.replace(/:[0-9]+$/, ':1') }, after: { ...r.desired, skip_destroy: true }, actions: ['create', 'delete'], after_unknown: r.after_unknown } })) };
   // Real/synthetic approved-plan validation is exercised by assertPrerequisitePlan
   // in existing tests. Recovery uses the original complete plan when provided.
-  const p = { purpose: 'STAGE_B_TASK_REGISTRATION', sourceSha: plan.variables.tooling_sha.value, treeSha256: 'b'.repeat(64),
+  const p = { purpose: 'STAGE_B_TASK_REGISTRATION', sourceSha: plan.variables.tooling_sha.value, treeSha256: full?.transaction?.treeSha256 || 'b'.repeat(64),
     savedPlanSha256: brokerDigest(Buffer.from('original-saved-plan')), logicalPlanSha256: brokerDigest(plan), artifactSetSha256: 'c'.repeat(64),
     canonicalAddresses: plan.resource_changes.map(c => c.address), state: { lineage: 'original', serial: 1 }, alias: {}, prerequisites: {} };
   let receipt; const deps = { authenticateRecoveryIntent: async () => ({ id, authorizedAt }),
     readPlan: async () => ({ plan, bytes: Buffer.from('original-saved-plan'), artifactSetSha256: p.artifactSetSha256 }),
+    authenticateRegistrationRecoveryIdentity: async prior => prior || ({ mode: 'READ_ONLY_EXACT_SUCCESSOR', transaction: { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }, tooling: full?.tooling || { sourceSha: 'd'.repeat(40), treeSha256: 'd'.repeat(64) } }),
     readCheckout: async () => ({ sourceSha: p.sourceSha, treeSha256: p.treeSha256 }), getAlias: async () => p.alias, readPrerequisites: async () => p.prerequisites,
     readStateIdentity: async () => ({ lineage: 'original', serial: 2 }), authenticateRegistrationState: async () => rows.forEach(recoveryState),
     readRegisteredTaskDefinition: async address => rows.find(r => r.address === address).state,
@@ -329,6 +334,48 @@ test('twelve captured production successors authenticate normally and in read-on
   const full = JSON.parse(fs.readFileSync(realPath)); assert.equal(full.rows.length, 12);
   const normalDefinitions = Object.fromEntries(full.rows.map(r => [r.address, normal(r)])); full.rows.forEach(recoveryState);
   const result = await recoverRows(full.rows, full);
+  if(full.transaction){assert.deepEqual(result.recovery.transaction,full.transaction);assert.deepEqual(result.recovery.tooling,full.tooling);assert.equal(result.sourceSha,full.transaction.sourceSha);}
   assert.deepEqual(result.definitions, normalDefinitions);
   assert.deepEqual(result.taskMap, taskMapFromRegisteredDefinitions(normalDefinitions));
+});
+
+for (const [name, change] of [
+  ['omitted recovery identity', r => delete r.deps.authenticateRegistrationRecoveryIdentity],
+  ['omitted recovery mode', r => r.deps.authenticateRegistrationRecoveryIdentity = async () => ({ transaction: { sourceSha: r.p.sourceSha, treeSha256: r.p.treeSha256 }, tooling: { sourceSha: 'd'.repeat(40), treeSha256: 'd'.repeat(64) } })],
+  ['tooling substituted for transaction', r => r.deps.authenticateRegistrationRecoveryIdentity = async () => ({ mode: 'READ_ONLY_EXACT_SUCCESSOR', transaction: { sourceSha: 'd'.repeat(40), treeSha256: 'd'.repeat(64) }, tooling: { sourceSha: 'd'.repeat(40), treeSha256: 'd'.repeat(64) } })],
+  ['unconsumed authority', r => r.deps.authenticateRecoveryIntent = async () => { throw Error('No consumed reservation'); }],
+  ['invalid authorization', r => r.authorization.sourceSha = 'd'.repeat(40)],
+  ['missing intent', r => r.receipts.length = 0],
+  ['altered saved plan', r => r.p.savedPlanSha256 = 'e'.repeat(64)],
+  ['altered artifact set', r => { const read=r.deps.readPlan; r.deps.readPlan=async()=>({...await read(),artifactSetSha256:'e'.repeat(64)}); }],
+  ['receipt source substitution', r => { const record=r.deps.record; r.deps.record=async (id,status,value)=>record(id,status,{...value,sourceSha:'d'.repeat(40)}); }],
+]) test(`read-only cross-source recovery rejects ${name}`, async () => {
+  const r=await registrationRecoveryFixture(); change(r);
+  if(name==='receipt source substitution'){await r.recover();await assert.rejects(r.recover);}else await assert.rejects(r.recover);
+  assert.equal(r.writes(),1);
+});
+test('cross-source recovery cannot call registration, apply, service or task mutation hooks',async()=>{
+  const r=await registrationRecoveryFixture();
+  for(const method of ['applyTaskRegistration','registerTaskDefinition','updateService','runTask','stopTask'])r.deps[method]=()=>assert.fail('Mutation attempted in recovery');
+  const result=await r.recover();assert.equal(result.sourceSha,r.p.sourceSha);assert.notEqual(result.sourceSha,result.recovery.tooling.sourceSha);assert.equal(r.writes(),1);
+});
+
+test('immutable recovered receipt retains its historical tooling provenance across later protected tooling',async()=>{
+ const r=await registrationRecoveryFixture(),original=await r.recover(),identity=r.deps.authenticateRegistrationRecoveryIdentity;
+ r.deps.authenticateRegistrationRecoveryIdentity=async prior=>prior||({...await identity(),tooling:{sourceSha:'e'.repeat(40),treeSha256:'e'.repeat(64)}});
+ assert.deepEqual(await r.recover(),original);assert.equal(r.writes(),1);
+});
+
+test('explicit recovery dispatch authenticates dual identity without weakening mutation dispatch',async()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'registration-recovery-dispatch-'));fs.chmodSync(directory,0o700);
+ try{
+  const r=await registrationRecoveryFixture(),identity=await r.deps.authenticateRegistrationRecoveryIdentity();
+  r.deps.authenticateRegistrationRecoveryIdentity=async prior=>prior||identity;
+  r.deps.readCheckout=async()=>{throw Error('Requested source SHA does not match the freshly fetched protected main.');};
+  const request={operation:'recover-registration',directory,preparation:r.p,authorization:r.authorization};
+  const result=await runStagedBrokerRequest(request,{adapterFactory:()=>r.deps});assert.equal(result.sourceSha,r.p.sourceSha);assert.notEqual(result.sourceSha,result.recovery.tooling.sourceSha);
+  await assert.rejects(()=>runStagedBrokerRequest({...request,operation:'register'},{adapterFactory:()=>r.deps}),/Requested source SHA/);
+  await assert.rejects(()=>runStagedBrokerRequest({...request,operation:'register',allowSourceShaMismatch:true},{adapterFactory:()=>r.deps}),/Unknown staged request field/);
+  assert.equal(r.writes(),1);
+ }finally{fs.rmSync(directory,{recursive:true});}
 });

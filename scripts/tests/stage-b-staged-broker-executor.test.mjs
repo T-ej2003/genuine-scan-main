@@ -8,7 +8,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
@@ -81,7 +81,7 @@ async function native(phase = "CUTOVER") {
   const makeAdapter = (selectedPhase=phase, selectedAuth=auth) => createStagedBrokerExecutor({ phase:selectedPhase, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default' }, exec });
   const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
-  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
+  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
 }
 async function reserve(r) {
   const id = brokerDigest(r.auth);
@@ -573,4 +573,54 @@ test('native registration recovery authenticates the captured complete productio
   r.setShow({ values: { root_module: full.current } });
   await adapter.authenticateRegistrationState(full.plan);
   assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
+});
+
+import { deriveStageBToolingInputTreeSha256 } from '../aws/validate-stage-b-image-reuse.mjs';
+import { readStageBProtectedMainCheckout } from '../aws/stage-b-deployment-identity.mjs';
+const originalRecoverySource='bbd498c3a4f83b7432153fec2730bdcc0a968b0b';
+const mergedRecoverySource='a4cb1f41e93c4425297e0701c6ccc2e24ccd0f89';
+function recoveryGit(args, { head=mergedRecoverySource, dirty='', ancestor=true }={}) {
+  if(args[0]==='remote')return 'https://github.com/T-ej2003/genuine-scan-main.git';
+  if(args[0]==='fetch')return '';
+  if(args[0]==='rev-parse')return args[1]==='--is-shallow-repository'?'false':args[1]==='HEAD'?head:mergedRecoverySource;
+  if(args[0]==='symbolic-ref')return 'refs/remotes/origin/main';
+  if(args[0]==='status')return dirty;
+  if(args[0]==='merge-base'){assert.ok(ancestor);return '';}
+  assert.fail('Unexpected recovery Git command');
+}
+for(const [name,args] of [
+  ['registration',['ecs','register-task-definition']],['service',['ecs','update-service']],['launch',['ecs','run-task']],['stop',['ecs','stop-task']],
+  ['IAM',['iam','create-policy-version']],['alias',['lambda','update-alias']],['reservation',['s3api','put-object']],
+])test(`recovery AWS firewall rejects ${name}`,()=>assert.throws(()=>assertRegistrationRecoveryReadCommand(args)));
+test('normal exact-main accepts matching source and rejects old registration source',()=>{
+  assert.equal(readStageBProtectedMainCheckout({cwd:root,run:recoveryGit,expectedSourceSha:mergedRecoverySource,requireCanonicalRepository:true}).currentHead,mergedRecoverySource);
+  assert.throws(()=>readStageBProtectedMainCheckout({cwd:root,run:recoveryGit,expectedSourceSha:originalRecoverySource,requireCanonicalRepository:true}),/Requested source SHA/);
+});
+async function recoveryIdentityFixture(options={}) {
+  const r=await native('REGISTRATION_RECOVERY');Object.assign(r.p,{schemaVersion:2,publication:null,target:null,prerequisiteChain:null,purpose:'STAGE_B_TASK_REGISTRATION',sourceSha:originalRecoverySource,treeSha256:deriveStageBToolingInputTreeSha256(originalRecoverySource)});
+  if(options.wrongTree)r.p.treeSha256='e'.repeat(64);
+  Object.assign(r.auth,{purpose:r.p.purpose,sourceSha:r.p.sourceSha,preparationSha256:brokerDigest(r.p)});
+  const id=brokerDigest(r.auth),at=new Date().toISOString();
+  r.objects.set(stageBApplyAttemptS3Key(id),Buffer.from(JSON.stringify({kind:'STAGED_BROKER_RESERVATION',id,value:{purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)}})));
+  r.objects.set(stageBAttemptStepS3ObjectKey(id,1),Buffer.from(JSON.stringify({kind:'STAGED_BROKER_STEP',id,status:'TASK_REGISTRATION_INTENT',value:{savedPlanSha256:r.p.savedPlanSha256,authorizedAt:at}})));
+  if(options.unconsumed)r.objects.delete(stageBApplyAttemptS3Key(id));
+  if(options.missingIntent)r.objects.delete(stageBAttemptStepS3ObjectKey(id,1));
+  if(options.wrongAuthorization)r.auth.sourceSha=mergedRecoverySource;
+  const exec=(cmd,args,opts)=>cmd==='aws'&&args[0]==='kms'&&options.invalidSignature?JSON.stringify({SignatureValid:false}):cmd==='git'?recoveryGit(args,options):cmd==='aws'&&args[0]==='sts'?JSON.stringify({Account:'368992683803',Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/recovery'}):r.exec(cmd,args,opts);
+  const adapter=createStagedBrokerExecutor({phase:options.phase||'REGISTRATION_RECOVERY',preparation:r.p,authorization:r.auth,files,directory,terraformDataDir:directory,planPath:path.join(directory,'unused-recovery.tfplan'),env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec});
+  return {...r,adapter,id};
+}
+test('native recovery authenticates consumed original transaction and independently pinned protected tooling',async()=>{
+  const r=await recoveryIdentityFixture();await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity());
+  await r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});
+  const identity=await r.adapter.authenticateRegistrationRecoveryIdentity();assert.equal(identity.transaction.sourceSha,originalRecoverySource);assert.equal(identity.tooling.sourceSha,mergedRecoverySource);assert.deepEqual(await r.adapter.authenticateRegistrationRecoveryIdentity(identity),identity);const forged=structuredClone(identity);forged.tooling.treeSha256='e'.repeat(64);await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity(forged));
+  await assert.rejects(()=>r.adapter.applyTaskRegistration(Buffer.from('never')));await assert.rejects(()=>r.adapter.applyPublication(Buffer.from('never')));await assert.rejects(()=>r.adapter.updateAlias({}));await assert.rejects(()=>r.adapter.captureTaskRegistrationPlan());await assert.rejects(()=>r.adapter.captureNormalPlan());
+});
+for(const [name,options] of [['non-main',{head:'e'.repeat(40)}],['dirty',{dirty:' M scripts/aws/example.mjs'}],['not ancestor',{ancestor:false}],['normal phase',{phase:'REGISTRATION'}],['wrong transaction tree',{wrongTree:true}]])test(`native recovery identity rejects ${name}`,async()=>{
+  const r=await recoveryIdentityFixture(options);
+  if(options.phase)await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity());else{await r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity());}
+});
+
+for(const [name,options] of [['unconsumed',{unconsumed:true}],['missing intent',{missingIntent:true}],['invalid signature',{invalidSignature:true}],['substituted transaction',{wrongAuthorization:true}]])test(`native registration recovery rejects ${name} before tooling authority`,async()=>{
+  const r=await recoveryIdentityFixture(options);await assert.rejects(()=>r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256}));await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity());
 });
