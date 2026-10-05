@@ -32,12 +32,14 @@ const globMatches = (pattern, value) => typeof value === 'string' && new RegExp(
 
 function matches(statement, action, resource, context) {
   const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+  const expand = value => value.replace(/\$\{([^}]+)\}/g, (_, key) => context[key] ?? '__UNBOUND__');
   const resources = Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource];
-  if (!actions.includes(action) || !resources.some((candidate) => globMatches(candidate, resource))) return false;
+  if (!actions.includes(action) || !resources.some((candidate) => globMatches(expand(candidate), resource))) return false;
   const expected = statement.Condition?.StringEquals?.["s3:prefix"];
   if (expected !== undefined && context.prefix !== expected) return false;
   const like = statement.Condition?.StringLike?.["s3:prefix"];
-  if (like !== undefined && !asArray(like).some(pattern => globMatches(pattern, context.prefix))) return false;
+  if (like !== undefined && !asArray(like).some(pattern => globMatches(expand(pattern), context.prefix))) return false;
+  for (const [key, value] of Object.entries(statement.Condition?.Null || {})) if (String(context[key] === undefined) !== value) return false;
   const nullCondition = statement.Condition?.Null?.["s3:if-none-match"];
   if (nullCondition !== undefined && String(context["s3:if-none-match"] === undefined) !== nullCondition) return false;
   return true;
@@ -338,11 +340,22 @@ test("the canonical Stage A managed contract is exact and recovery-scoped", () =
 test('receipt read scope covers both canonical namespaces and grants no artifact writes', () => {
   const artifacts = 'arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an';
   for (const [bucket, prefix] of [[bucketArn, `${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/transaction/`], [artifacts, `rls-receipts/${'a'.repeat(40)}/full-rls-verification/`]]) {
-    assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix }), 'allowed');
+    assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix, 'aws:PrincipalTag/MSCQRReceiptReleaseSha': 'a'.repeat(40) }), 'allowed');
     for (const rejected of ['', 'other/', 'rls-receipts-unrelated/', 'rls-receipts/internal/', `rls-receipts/${'a'.repeat(40)}/internal/`, `rls-receipts/${'a'.repeat(40)}/full-rls-unknown/`, 'env:/production/']) assert.equal(decision([policy], 's3:ListBucket', bucket, { prefix: rejected }), 'implicitDeny');
   }
   const receipt = `${artifacts}/rls-receipts/${'a'.repeat(40)}/full-rls-verification/receipt.json`;
-  assert.equal(decision([policy], 's3:GetObject', receipt), 'allowed');
+  assert.equal(decision([policy], 's3:GetObject', receipt, { 'aws:PrincipalTag/MSCQRReceiptReleaseSha': 'a'.repeat(40) }), 'allowed');
   for (const action of ['s3:PutObject', 's3:DeleteObject']) assert.equal(decision([policy], action, receipt), 'implicitDeny');
   for (const sibling of ['unrelated/receipt.json', 'rls-receipts/internal/receipt.json', `rls-receipts/${'a'.repeat(40)}/internal/receipt.json`, `rls-receipts/${'a'.repeat(40)}/full-rls-unknown/receipt.json`]) assert.equal(decision([policy], 's3:GetObject', `${artifacts}/${sibling}`), 'implicitDeny');
+});
+
+test('IAM receipt authority is the exact governed release, with no sibling/SHA/mode substitution',()=>{
+ const artifacts='arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an';const context={'aws:PrincipalTag/MSCQRReceiptReleaseSha':'a'.repeat(40)};
+ const exact=`rls-receipts/${'a'.repeat(40)}/full-rls-verification/receipt.json`;
+ assert.equal(decision([policy],'s3:GetObject',`${artifacts}/${exact}`,context),'allowed');
+ assert.equal(decision([policy],'s3:ListBucket',artifacts,{...context,prefix:exact}),'allowed');
+ for(const key of [`rls-receipts/internal/${'x'.repeat(31)}/full-rls-verification/receipt.json`,`rls-receipts/${'b'.repeat(40)}/full-rls-verification/receipt.json`,`rls-receipts/${'a'.repeat(40)}/internal/receipt.json`,`rls-receipts/${'a'.repeat(40)}/full-rls-unknown/receipt.json`]) {
+ assert.equal(decision([policy],'s3:GetObject',`${artifacts}/${key}`,context),'implicitDeny');assert.equal(decision([policy],'s3:ListBucket',artifacts,{...context,prefix:key}),'implicitDeny');}
+ assert.equal(decision([policy],'s3:GetObject',`${artifacts}/${exact}`),'implicitDeny');assert.equal(decision([policy],'s3:ListBucket',artifacts,{prefix:exact}),'implicitDeny');
+ for(const action of ['iam:TagRole','iam:UntagRole'])assert.equal(decision([policy],action,'arn:aws:iam::368992683803:role/mscqr-production-release-deployer',context),'explicitDeny');
 });

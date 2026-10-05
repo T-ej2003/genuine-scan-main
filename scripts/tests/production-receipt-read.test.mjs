@@ -18,3 +18,19 @@ test('present object needs no listing and provider NoSuchKey is distinct',()=>{a
 test('complete listing preserves objects on all pages',()=>{const run=reader([rows([{Key:key+'a'}],true,'x'),rows([{Key:key+'b'}])]);assert.deepEqual(listProductionReceiptObjects({run,bucket,prefix:key}).map(r=>r.Key),[key+'a',key+'b']);});
 
 test('Full-RLS sibling and unknown mode namespaces are rejected before any read',()=>{let calls=0;const run=()=>calls++;for(const prefix of ['rls-receipts/internal/',`rls-receipts/${'a'.repeat(40)}/internal/`,`rls-receipts/${'a'.repeat(40)}/full-rls-unknown/`])assert.throws(()=>listProductionReceiptObjects({run,bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',prefix}));assert.equal(calls,0);});
+
+import fs from 'node:fs';
+import { prepareFullRlsReceiptReleaseBinding, assertFullRlsReceiptReleaseAuthority } from '../aws/production-receipt-read.mjs';
+const release='a'.repeat(40), roleArn='arn:aws:iam::368992683803:role/mscqr-production-release-deployer';
+const trust=JSON.parse(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json'));
+const checkout=()=>({mode:'production',toolingSha:release,currentHead:release,originMainHead:release,isAncestor:true,porcelainStatus:'',repositoryState:{remoteDefaultBranch:'main',shallow:false,mergeInProgress:false,rebaseInProgress:false,cherryPickInProgress:false}});
+const role=()=>({Arn:roleArn,AssumeRolePolicyDocument:structuredClone(trust),Tags:[{Key:'MSCQRReceiptReleaseSha',Value:release}]});
+test('binding derives the exact source from authenticated clean main, without a caller SHA override',()=>{
+ const target=prepareFullRlsReceiptReleaseBinding({readCheckout:checkout});assert.equal(target.sourceSha,release);assert.equal(target.tag.Value,release);assert.equal(target.roleArn,roleArn);
+ for(const edit of [c=>c.porcelainStatus=' M file',c=>c.originMainHead='b'.repeat(40),c=>c.currentHead='b'.repeat(40),c=>c.mode='pull-request']){const c=checkout();edit(c);assert.throws(()=>prepareFullRlsReceiptReleaseBinding({readCheckout:()=>c}));}
+});
+test('exact role binding and canonical non-TagSession trust authenticate',()=>assert.equal(assertFullRlsReceiptReleaseAuthority({run:()=>({Role:role()}),releaseSha:release}),true));
+for(const [name,edit] of [
+ ['missing tag',r=>r.Tags=[]],['different valid SHA',r=>r.Tags[0].Value='b'.repeat(40)],['non-SHA tag',r=>r.Tags[0].Value='internal'],['wrong role',r=>r.Arn+='-other'],['duplicate tag',r=>r.Tags.push({Key:'msCQRreceiptReleaseSha',Value:release})],['session-tag override trust',r=>r.AssumeRolePolicyDocument.Statement.push({Effect:'Allow',Principal:{AWS:'*'},Action:'sts:TagSession'})]
+])test(`receipt authority fails closed for ${name}`,()=>{const r=role();edit(r);let s3=0;const run=args=>{if(args[0]==='iam')return{Role:r};s3++;throw new Error('S3 unreachable');};assert.throws(()=>listProductionReceiptObjects({run,bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',prefix:`rls-receipts/${release}/full-rls-verification/`}));assert.equal(s3,0);});
+test('missing independent IAM binding proof cannot become absence',()=>{let s3=0;assert.throws(()=>readProductionReceiptObject({run:args=>{if(args[0]==='iam')throw denied();s3++;return rows();},bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',key:`rls-receipts/${release}/full-rls-verification/receipt.json`,file:'unused'}),/denied/);assert.equal(s3,0);});

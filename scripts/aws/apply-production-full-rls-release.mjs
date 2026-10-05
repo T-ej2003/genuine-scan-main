@@ -16,7 +16,7 @@ import { readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 
-import { listProductionReceiptObjects } from './production-receipt-read.mjs';
+import { listProductionReceiptObjects, assertFullRlsReceiptReleaseAuthority, prepareFullRlsReceiptReleaseBinding } from './production-receipt-read.mjs';
 
 const ACCOUNT = STAGE_B.account;
 const REGION = STAGE_B.region;
@@ -145,6 +145,7 @@ export async function applyProductionFullRlsRelease({
   credentialSource,
   historicalRuntimeDeps,
   stagedBrokerDeps,
+  receiptBindingDeps,
   outputPath = env.PRODUCTION_RLS_RELEASE_RECEIPT_PATH,
 } = {}) {
   aws ||= createProductionFullRlsReleaseAws({ credentialSource, env });
@@ -168,6 +169,9 @@ export async function applyProductionFullRlsRelease({
   // A published or cutover-only source must never enter Full-RLS. Ordinary
   // releases without a staged source reservation keep their existing path.
   if (brokerClosure) await brokerClosure.revalidate();
+  const receiptBinding = prepareFullRlsReceiptReleaseBinding(receiptBindingDeps);
+  if (receiptBinding.sourceSha !== config.releaseSha) throw new Error('Receipt release differs from authenticated protected main');
+  assertFullRlsReceiptReleaseAuthority({ run: aws, releaseSha: config.releaseSha });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
   let mutationStarted = false;

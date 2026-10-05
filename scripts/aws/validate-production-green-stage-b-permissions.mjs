@@ -423,6 +423,7 @@ function sameStringSet(left, right) {
 }
 
 export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
+  { key: "aws:PrincipalTag/MSCQRReceiptReleaseSha", type: "string", values: Object.freeze(["a".repeat(40)]) },
   { key: "dynamodb:LeadingKeys", type: "stringList", values: Object.freeze([BROKER_POLICY_OWNERSHIP_KEY]) },
   { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },

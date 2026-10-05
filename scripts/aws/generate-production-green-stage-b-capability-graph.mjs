@@ -464,7 +464,7 @@ export function assertBootstrapOperatorVerifierAuthority(policy = readJson(boots
 function authority(entry, forbidden, policies) {
   for (const policy of policies) for (const statement of policy.document.Statement || []) {
     const actions = asArray(statement.Action);
-    const resources = asArray(statement.Resource);
+    const resources = asArray(statement.Resource).map(resource => resource.replace(/\$\{([^}]+)\}/g, (_, key) => (entry.context || []).find(item => item.key === key)?.values?.[0] || '${' + key + '}'));
     const taskDefinitionValues = (entry.context || []).find(({ key }) => key === "ecs:task-definition")?.values || [];
     const taskDefinitionCondition = statement.Condition?.ArnEquals?.["ecs:task-definition"] ?? statement.Condition?.ArnLike?.["ecs:task-definition"];
     const taskDefinitionMatches = taskDefinitionValues.length === 0 || asArray(taskDefinitionCondition).filter((pattern) => typeof pattern === "string").some((pattern) => taskDefinitionValues.every((value) => pattern === value || (pattern.endsWith("*") && value.startsWith(pattern.slice(0, -1)))));
@@ -733,7 +733,7 @@ export function appOnlyCapabilityNodes() {
 }
 
 export const STAGED_BROKER_CALLS = Object.freeze({
-  'scripts/aws/production-receipt-read.mjs': ['s3:GetObject', 's3:ListBucket'],
+  'scripts/aws/production-receipt-read.mjs': ['s3:GetObject', 's3:ListBucket', 'iam:GetRole'],
   'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
   'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
   'scripts/aws/stage-b-broker-writer-session.mjs': ['sts:GetCallerIdentity', 'cloudtrail:LookupEvents'],
@@ -757,6 +757,7 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
       : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, ...FULL_RLS_RECEIPT_PREFIXES.map(prefix => `arn:aws:s3:::${STAGE_B.receiptBucket}/${prefix}`)] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
       : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
+      : action === 'iam:GetRole' && sourceFile.endsWith('production-receipt-read.mjs') ? ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer']
       : action.startsWith('iam:') ? [STAGE_B.brokerRoleArn, ...(action === 'iam:GetRole' ? [] : ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer'])]
       : action === 'lambda:GetAlias' ? [STAGE_B.brokerAliasArn]
       : ['lambda:GetFunctionConfiguration', 'lambda:GetPolicy'].includes(action) ? [STAGE_B.brokerFunctionArn, `${STAGE_B.brokerFunctionArn}:*`]
