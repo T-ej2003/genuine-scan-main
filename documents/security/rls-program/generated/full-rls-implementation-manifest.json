@@ -15,20 +15,20 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083",
+  "sourceContractSha256": "66571358d685fe45344666d4df8ad19cc8272c5aeb768a7d46cc1c3420755867",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
-      "sha256": "9f6195ba85e36ea5beb734a6ce3769e23656e6458469ba1c52cc12692d5b0da5"
+      "sha256": "d0109edeeaecdd08fd2da4f6464aedc129b293901a1496677569a7a170b7bd08"
     },
     {
       "path": "documents/security/rls-program/workflows.json",
-      "sha256": "d9ef09777b25f3d7ebc31b6176f8858ac36c57c31a594aba46872c2180ac6444"
+      "sha256": "d49ad202fd4e6c35352451c7688760cf6f739fb32a45dfc1cf1b63e502589393"
     },
     {
       "path": "documents/security/rls-program/command-semantics.json",
-      "sha256": "8aca06528406b9d934b0279addc444b3146bc4f3e5a975dc10f705a950c4834c"
+      "sha256": "8dd43c7038001eff8e112c04c3caf2bfd835925d01b8ea61130fb9eda1b75ca4"
     },
     {
       "path": "documents/security/rls-program/runtime-identities.json",
@@ -44,11 +44,11 @@
     },
     {
       "path": "documents/security/rls-program/context-boundary-families.json",
-      "sha256": "428dd55f25786b07c2faeef07fe65b69a13787832fb5e2a5a2361f4ba8b47852"
+      "sha256": "a10e50db462ff25fa905a4bc97bb300852cef7d83c7141105a20ab45aae0bc05"
     },
     {
       "path": "documents/security/rls-program/workflow-three-session-partition.json",
-      "sha256": "b22306c54b5118ae6def2c5ad6f60c71e52251a39c68263e75870a2d59ae1cc1"
+      "sha256": "20aa5a165ef0fce5fd89712f540c3cffc89ddf0c44eac93b8d2ed3c66eb28e33"
     },
     {
       "path": "backend/prisma/schema.prisma",
@@ -104,7 +104,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "3470d067d8fb788467eaea7928ac653b37196717ff713be37efc467fc5ae1bf9"
+      "sha256": "674b4b1946bba9fc1dd9d6c9b9ef9bc0787db90268e76701aee570cfc21879f8"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -208,7 +208,7 @@
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
-      "sha256": "8e4ab4a40bee840f254bd8fad55668e81aceaef39e47ae0a59ad4fab3aec339f"
+      "sha256": "38d9d39d0904da00aadcd2e38b25a7b33e5a7c7f511d054828a85e1cb8c66910"
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs",
@@ -216,15 +216,15 @@
     },
     {
       "path": "scripts/aws/production-green-stage-b-contract.mjs",
-      "sha256": "694eba610c3cf04976a194c6bb7fb3102c3b8d4553b4f7dde6ab2315e2599ddd"
+      "sha256": "7c4483a75da85d7eb65185f1a0b6f110a14ec044a4f576617015a6db3834afe5"
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
-      "sha256": "97cd1fef21a6093d46685903e111daa62c165fcacf6b32092d9ff75dde789826"
+      "sha256": "aeade2e43e9604235972c5eb81f6ab65b73523ca5296ee70c99027004d4ba494"
     },
     {
       "path": "scripts/aws/apply-production-full-rls-release.mjs",
-      "sha256": "1af14bac73f73ca7574fa55c00ad681ed2652aeb8527a388120c8bd0af7adf52"
+      "sha256": "aa7af5239e20ca04905329d90335edd93b32a4912ea58d963409dfc2f6ded6a7"
     },
     {
       "path": "scripts/aws/deploy-ecs-service.sh",
@@ -240,7 +240,7 @@
     },
     {
       "path": "scripts/aws/production-credential-source-contract.mjs",
-      "sha256": "a000adb52e3f6501c9daf9fe3d50a8286773b84d8afae5c391b6104137d4aa28"
+      "sha256": "89e0a87e307b64c443e81f22c6dfde1469874576619aa75b71f8b582be9b82ca"
     },
     {
       "path": "scripts/aws/production-credential-source.sh",
@@ -256,11 +256,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "c55bb24bfd627e98d2a147bf474acaed3c1f81ef81e5c434aab015ce68151911"
+      "sha256": "ee497b2ae8e67ef546135992beac80a7d0be05cfd9253a1f46ebcf6a6c2cf0e6"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "b17fbbe28766ad9def54f47f4881af15430bc4a329b0e11a6200e43e567e817b"
+      "sha256": "79c5267937b78aaab509bd0394243e16d8c08752f2fe646bb231d2e582b21fad"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
@@ -374,7 +374,7 @@
     "columnPrivilegeCells": 60,
     "prismaMigrations": 56,
     "prismaEnums": 58,
-    "registeredWorkflowCallPaths": 330,
+    "registeredWorkflowCallPaths": 327,
     "applicationPathCertifiedWorkflows": 11
   },
   "roles": {
@@ -388,7 +388,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:07673b057575f357f57ebe460ae3952f596a7e3fd3e93b0a8dd3a1c141f7c083",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:66571358d685fe45344666d4df8ad19cc8272c5aeb768a7d46cc1c3420755867",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

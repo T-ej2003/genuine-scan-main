@@ -323,7 +323,7 @@ test("platform read scope is finite, attributed, projected, and fail closed", ()
   reject((boundary) => { boundary.purposeRules.required = false; }, /platform read purpose is absent/);
   reject((boundary) => { boundary.purposeRules.freeTextEstablishesAuthority = true; }, /free-text purpose establishes authority/);
   reject((boundary) => { boundary.workflowClassifications.find((item) => item.primaryClass === "licensee-bounded-read").pagination = null; }, /pagination bounds are missing/);
-  reject((boundary) => { boundary.workflowClassifications.find((item) => item.primaryClass === "platform-aggregate-read").tableProjections[0].allowedColumns.push("details"); }, /secret or raw audit detail/);
+  reject((boundary) => { boundary.workflowClassifications.find((item) => item.primaryClass === "licensee-bounded-read").tableProjections[0].allowedColumns.push("details"); }, /secret or raw audit detail/);
   reject((boundary) => { boundary.aggregateRestrictions.tenantPrivateRowsMaterializedInApplicationMemory = true; }, /aggregate exposes tenant-private rows/);
   reject((boundary) => { boundary.incidentReadRestrictions.incidentIdRequired = false; }, /incident read lacks incident binding/);
   reject((boundary) => { boundary.workflowClassifications.find((item) => item.workflowId.endsWith("get-licensees")).tableProjections[0].allowedColumns.push("suspendedReason"); }, /directory projection exposes security fields/);
@@ -412,14 +412,15 @@ test("bounded read-family batch is scoped, evidenced, and fail closed", () => {
   const families = JSON.parse(fs.readFileSync(contextBoundaryFamiliesPath, "utf8"));
   const batch = JSON.parse(fs.readFileSync(contextBoundaryReadBatchPath, "utf8"));
   assert(validateContextBoundaryReadBatch(batch, families, workflows, commandSemantics, tables));
-  assert.equal(batch.selectedFamilies.length, 16);
-  assert.equal(batch.selectionTotals.workflowsConsidered, 24);
+  assert.equal(batch.selectedFamilies.length, 15);
+  assert(!batch.selectedFamilies.some(family => family.workflowIds.includes("workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary")), "retired non-persistent telemetry cannot retain an active database read batch");
+  assert.equal(batch.selectionTotals.workflowsConsidered, 23);
   assert.equal(batch.selectionTotals.reclassifiedFamilies, 1);
   assert.equal(batch.selectionTotals.splitFamilies, 3);
   assert.equal(batch.selectionTotals.childFamiliesCreated, 6);
   assert.equal(batch.selectionTotals.contractOnlyWorkflows, 1);
   assert.equal(batch.selectionTotals.newlyImplementedWorkflows, 0);
-  assert.equal(batch.selectionTotals.blockedWorkflows, 23);
+  assert.equal(batch.selectionTotals.blockedWorkflows, 22);
 
   const reject = (mutate, pattern) => {
     const candidateBatch = structuredClone(batch);

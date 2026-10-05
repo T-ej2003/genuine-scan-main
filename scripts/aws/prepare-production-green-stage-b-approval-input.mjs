@@ -6,7 +6,7 @@ import { pathToFileURL, fileURLToPath } from "node:url";
 import {
   STAGE_B,
   STAGE_B_APPROVAL_ALGORITHM,
-  STAGE_B_APPROVAL_FIELDS,
+  stageBApprovalFields,
   STAGE_B_APPROVAL_SCHEMA_VERSION,
   STAGE_B_RUNTIME_APPROVAL_AUTHORITY,
   assertStageBBrokerConfigurationIdentity,
@@ -45,7 +45,7 @@ const option = (argv, name) => { const index = argv.indexOf(name); return index 
 const requiredOption = (argv, name) => option(argv, name) || (() => { throw new Error(`${name} is required.`); })();
 
 function assertEvidence(evidence) {
-  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, EVIDENCE_FIELDS)) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, [...EVIDENCE_FIELDS, ...(evidence.historicalRuntimeReferenceSha256 ? ["historicalRuntimeReferenceSha256"] : [])])) {
     throw new Error("Authenticated Stage B approval evidence fields are incomplete or unexpected.");
   }
   if (evidence.schemaVersion !== 1 || evidence.producer !== "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs" || evidence.authorityMode !== STAGE_B_RUNTIME_APPROVAL_AUTHORITY || evidence.sourceCurrent !== true || evidence.runtimeBindingsCurrent !== true || !/^\d{4}-\d\d-\d\dT/.test(evidence.observedAt || "")) throw new Error("Authenticated evidence provenance or currentness is incomplete.");
@@ -103,6 +103,7 @@ export async function prepareProductionGreenStageBApprovalInput({ evidence, prot
   if (!SHA.test(protectedSourceSha || "") || evidence.releaseSha !== protectedSourceSha) throw new Error("Approval evidence is not bound to the protected source.");
   const operatorFields = deriveOperatorFields(operator, now, randomUuid);
   const input = {
+    ...(evidence.historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256: evidence.historicalRuntimeReferenceSha256 } : {}),
     account: STAGE_B.account,
     approvalId: stageBApprovalIdForReleaseSha(evidence.releaseSha),
     backendImageDigest: evidence.backendImageDigest,
@@ -141,10 +142,11 @@ export async function prepareProductionGreenStageBApprovalInput({ evidence, prot
 }
 
 export function formatProductionGreenStageBApprovalReview(input, inputSha256) {
-  if (!exactKeys(input, STAGE_B_APPROVAL_FIELDS) || !DIGEST.test(inputSha256 || "")) throw new Error("Approval input review requires a complete validated unsigned input and digest.");
+  if (!exactKeys(input, stageBApprovalFields(input)) || !DIGEST.test(inputSha256 || "")) throw new Error("Approval input review requires a complete validated unsigned input and digest.");
   return [
     "MSCQR Stage B unsigned approval-input review",
     `approvalId=${input.approvalId}`,
+    ...(input.historicalRuntimeReferenceSha256 ? [`historicalRuntimeReferenceSha256=${input.historicalRuntimeReferenceSha256}`] : []),
     `ticketId=${input.ticketId}`,
     `releaseSha=${input.releaseSha}`,
     `account=${input.account}`,
@@ -201,6 +203,7 @@ export async function createApprovalInputEvidenceRunners({ createRunner = create
   const releaseIdentity = await establishReleaseDeployerIdentity({ adapter: { getCallerIdentity: async () => JSON.parse(releaseRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn } });
   return Object.freeze({
     checkerRun,
+    releaseRun,
     releaseIdentity,
     verifyImageEvidence: (options) => verifyImageEvidence({ ...options, run: releaseRun }),
     verifyReleasePreflightAttestationSignature: createReleasePreflightTrustVerifier({ releaseRun }),
@@ -213,13 +216,17 @@ export function authenticateApprovalInputCheckerIdentity(checkerRun) {
 
 async function run(argv = process.argv.slice(2)) {
   assertCleanSource();
-  const allowed = new Set(["--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
+  const allowed = new Set(["--historical-runtime-evidence", "--historical-runtime-evidence-sha256", "--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
   const runners = await createApprovalInputEvidenceRunners();
   const checkerIdentity = authenticateApprovalInputCheckerIdentity(runners.checkerRun);
   const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
   const imageAuthorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(imageAuthorizationBytes));
-  const { evidence } = collectProductionGreenStageBApprovalEvidence({ sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: runners.verifyImageEvidence, verifyReleasePreflightAttestationSignature: runners.verifyReleasePreflightAttestationSignature });
+  const historicalRuntimeEvidence = option(argv, "--historical-runtime-evidence") ? readHistoricalRuntimeTransport({ bytes: readStageBPrivateFileBytes({ filePath: option(argv, "--historical-runtime-evidence"), repositoryRoot: root, label: "Historical runtime handoff" }).bytes, expectedSha256: requiredOption(argv, "--historical-runtime-evidence-sha256") }) : undefined;
+  const runtimeReader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: runners.releaseRun });
+  const historicalRuntimeState = createProductionComponentDeploymentStateClient({ run: runners.releaseRun }).read();
+  verifyHistoricalRuntimeHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: runtimeReader, sourceSha: currentHead() });
+  const { evidence } = collectProductionGreenStageBApprovalEvidence({ historicalRuntimeEvidence, historicalRuntimeState, historicalRuntimeReader: runtimeReader, sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: runners.verifyImageEvidence, verifyReleasePreflightAttestationSignature: runners.verifyReleasePreflightAttestationSignature });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
     protectedSourceSha: currentHead(),

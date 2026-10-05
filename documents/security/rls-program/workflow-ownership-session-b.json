@@ -507,6 +507,7 @@
     "backend/src/controllers/incidentController.ts",
     "backend/src/controllers/licenseeController.ts",
     "backend/src/controllers/tracePolicyController.ts",
+    "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",
     "backend/src/rls-waves/session-c/c03/c03CompliancePackRepository.ts",
     "backend/src/rls-waves/session-c/c03/c03IncidentRepository.ts",

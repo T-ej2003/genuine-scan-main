@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { verifyHistoricalRuntimeHandoff } from "./verify-production-historical-runtime-handoff.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -14,7 +16,7 @@ import { buildNormalFrontendCandidate, captureFrontendPredecessor, assertFronten
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertProductionBackendReadiness } from "./production-backend-readiness-contract.mjs";
 import { CANONICAL_PRODUCTION_ORIGIN, CANONICAL_PRODUCTION_READINESS_URL } from "./production-backend-readiness-contract.mjs";
-import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
+import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, normalDeploymentLiveComponents, stateHash } from "./production-component-deployment-state.mjs";
 import { NORMAL_RECEIPT_WORKFLOW, normalReceiptHash, sameNormalIdentity } from "./production-normal-receipt-contract.mjs";
 import { replaceNormalDeploymentReceipt, reconcileNormalDeployment } from "./production-normal-reconciliation.mjs";
 export { classifyNormalLiveComponentState } from "./production-normal-receipt-contract.mjs";
@@ -242,7 +244,7 @@ export async function executeNormalComponentTransaction({ plan, sourceSha, state
     receipt = { schemaVersion: 1, kind: "NORMAL_DEPLOYMENT_RECEIPT", workflow: writerContext.updatedByWorkflow,
       githubRunId: String(writerContext.githubRunId), sourceSha, planSha256: plan.planSha256, phase: "PREPARED",
       predecessors: Object.fromEntries(names.map((name) => [name, state.components[name]])), images: plan.images, candidates: {} };
-    await verifyCandidates(receipt.predecessors);
+    await verifyCandidates(normalDeploymentLiveComponents(state));
     for (const previous of Object.values(receipt.predecessors)) assert.equal(isAncestor(previous.establishedThroughSha, sourceSha), true);
     state = replaceNormalDeploymentReceipt({ client: stateClient, expected: undefined, receipt, writerContext });
   }
@@ -257,7 +259,7 @@ export async function executeNormalComponentTransaction({ plan, sourceSha, state
   }) });
   const result = await executeNormalRelease({ plan, sourceSha,
     backend: plan.classification.backend ? wrap("backend", backend) : {}, frontend: plan.classification.frontend ? wrap("frontend", frontend) : {},
-    smoke: async (value) => { await smoke(value); if (names.length) await verifyCandidates(receipt.candidates); }, writeJournal });
+    smoke: async (value) => { await smoke(value); if (names.length) await verifyCandidates(normalDeploymentLiveComponents(state, receipt.candidates)); }, writeJournal });
   const changes = {};
   if (plan.classification.backend) {
     const activation = result.backend?.result || result.backend;
@@ -270,11 +272,12 @@ export async function executeNormalComponentTransaction({ plan, sourceSha, state
   if (Object.keys(changes).length) {
     assert.deepEqual(changes, receipt.candidates, "Activation did not bind all registered candidates before mutation");
     const verified = { ...receipt, phase: "VERIFIED", verification: "STABILITY_READINESS_AUTHENTICATED_SMOKE_PASSED" };
-    state = replaceNormalDeploymentReceipt({ client: stateClient, expected: receipt, receipt: verified, writerContext });
+    state = replaceNormalDeploymentReceipt({ client: stateClient, expected: receipt, receipt: verified, writerContext, maxRetries: 0 });
     // A persisted verified receipt survives both runner loss and main advancing.
     // Its removal and the complete component transition are one DynamoDB CAS.
     await writeJournal({ status: "STATE_CAS_INTENT", stateGeneration: state.generation, components: Object.keys(changes).sort() });
-    const committed = advanceProductionComponentDeploymentStateWithRetry({ client: stateClient, current: state, lane: "NORMAL_APPLICATION", changes, normalReceiptSha256: normalReceiptHash(verified), isAncestor, ...writerContext });
+    const committed = advanceProductionComponentDeploymentStateWithRetry({ client: stateClient, current: state, lane: "NORMAL_APPLICATION", changes, normalReceiptSha256: normalReceiptHash(verified), maxRetries: 0, isAncestor, ...writerContext });
+    await verifyCandidates(normalDeploymentLiveComponents(committed.state));
     await writeJournal({ status: "STATE_COMMITTED", stateGeneration: committed.state.generation });
     return Object.freeze({ ...result, componentState: committed.state, stateCommitAttempts: committed.attempts });
   }
@@ -339,7 +342,16 @@ export function createNormalReconciliationAdapters({ run, repositoryRoot }) {
       assertFrontendCandidateReadback({ definition: next, taskDefinitionArn: candidate.taskDefinitionArn, candidate: expected });
     }
   };
+  const verifyRetainedRuntime = () => {
+    const state = createProductionComponentDeploymentStateClient({ run }).read();
+    assert.ok(state, "Committed component state is missing");
+    const reader = createAwsReader({ region: NORMAL_RELEASE.region, clusterArn: `arn:aws:ecs:${NORMAL_RELEASE.region}:${NORMAL_RELEASE.account}:cluster/${NORMAL_RELEASE.cluster}`, run });
+    // Also detect removal of retention: a live historical worker never gains
+    // authority merely because its record was omitted from component state.
+    verifyHistoricalRuntimeHandoff({ state, reader });
+  };
   const verify = async (identities) => {
+    verifyRetainedRuntime();
     for (const [name, expected] of Object.entries(identities)) {
       const serviceName = name === "backend" ? NORMAL_RELEASE.backendService : NORMAL_RELEASE.frontendService;
       run(["ecs", "wait", "services-stable", "--cluster", NORMAL_RELEASE.cluster, "--services", serviceName]);
@@ -369,6 +381,7 @@ export function createNormalReconciliationAdapters({ run, repositoryRoot }) {
       }
     }
     runNormalSmoke(repositoryRoot);
+    verifyRetainedRuntime();
     for (const [name, expected] of Object.entries(identities)) assert.ok(sameNormalIdentity(await readLive(name), expected), "Normal live identity changed during smoke");
   };
   const rollback = async (name, previous, candidate) => {

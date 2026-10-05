@@ -126,6 +126,8 @@ function describeTasks(reader, taskArns) {
     lastStatus: task.lastStatus,
     desiredStatus: task.desiredStatus,
     group: task.group,
+    // Runtime overrides can change workload identity independently of its definition.
+    ...(task.overrides === undefined ? {} : { overrides: structuredClone(task.overrides) }),
   }));
 }
 
@@ -189,6 +191,8 @@ const COMMANDS = Object.freeze({
   describeImages: ["ecr", "describe-images"],
   getFunctionConfiguration: ["lambda", "get-function-configuration"],
   getAlias: ["lambda", "get-alias"],
+  describeNetworkInterfaces: ["ec2", "describe-network-interfaces"],
+  lookupEvents: ["cloudtrail", "lookup-events"],
 });
 
 export function observeStageBBrokerApprovalBindings({ reader, now = () => new Date() } = {}) {
@@ -221,11 +225,11 @@ function parseJson(value, label) {
   try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed JSON.`); }
 }
 
-function createAwsReader({ region, clusterArn, run }) {
+function createAwsReader({ region, clusterArn, run, attributionRun }) {
   if (region !== STAGE_B.region || clusterArn !== STAGE_B.clusterArn) throw new Error("Stage B ECS reader requires the exact production region and cluster.");
   if (typeof run !== "function") throw new Error("Stage B ECS reader requires an explicit credential-bound AWS command runner.");
   const call = (name, args) => {
-    try { return parseJson(run([...COMMANDS[name], ...args, "--region", region, "--output", "json", "--no-cli-pager"]), `AWS ${name}`); }
+    try { return parseJson((name === "lookupEvents" ? (() => { if (typeof attributionRun !== "function") throw new Error("Initial CloudTrail attribution requires the explicit administrator reader"); return attributionRun; })() : run)([...COMMANDS[name], ...args, "--region", region, "--output", "json", "--no-cli-pager"]), `AWS ${name}`); }
     catch (error) {
       if (error instanceof Error && /malformed|missing/.test(error.message)) throw error;
       throw new Error(`AWS read failed: ${name}`);
@@ -235,7 +239,7 @@ function createAwsReader({ region, clusterArn, run }) {
     const values = []; const seen = new Set(); let nextToken; let pageCount = 0;
     do {
       if (++pageCount > 100) throw new Error(`AWS ${name} pagination exceeded its bounded page limit.`);
-      const pageArgs = [...args, "--page-size", "100", "--max-items", "100", ...(nextToken ? ["--starting-token", nextToken] : [])];
+      const pageArgs = [...args, "--page-size", name === "lookupEvents" ? "50" : "100", "--max-items", "100", ...(nextToken ? ["--starting-token", nextToken] : [])];
       const response = call(name, pageArgs);
       values.push(...requireArray(response[key], `AWS ${name} ${key}`));
       if (Object.hasOwn(response, "nextToken")) throw new Error(`AWS ${name} pagination token uses an invalid response shape.`);
@@ -256,6 +260,8 @@ function createAwsReader({ region, clusterArn, run }) {
       return listAll("listTasks", ["--cluster", clusterArn, "--desired-status", status], "taskArns");
     },
     describeTasks: (taskArns) => call("describeTasks", ["--cluster", clusterArn, "--tasks", ...taskArns]),
+    describeNetworkInterfaces: (ids) => call("describeNetworkInterfaces", ["--network-interface-ids", ...ids]),
+    lookupEvents: (operation, start, end) => listAll("lookupEvents", ["--lookup-attributes", `AttributeKey=EventName,AttributeValue=${operation}`, "--start-time", start, "--end-time", end], "Events"),
     describeTaskDefinition: (taskDefinition) => call("describeTaskDefinition", ["--task-definition", taskDefinition]),
     describeRepositories: (repositoryNames) => call("describeRepositories", ["--repository-names", ...repositoryNames]),
     describeImages: (repositoryName, imageDigest) => call("describeImages", ["--repository-name", repositoryName, "--image-ids", `imageDigest=${imageDigest}`]),

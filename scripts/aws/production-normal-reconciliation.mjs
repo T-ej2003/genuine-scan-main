@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { assertNormalDeploymentReceipt, normalReceiptHash, sameNormalIdentity, classifyNormalLiveComponentState, NORMAL_RECEIPT_WORKFLOW } from "./production-normal-receipt-contract.mjs";
-import { assertProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry } from "./production-component-deployment-state.mjs";
+import { assertNormalDeploymentReceipt, normalReceiptHash, sameNormalIdentity, classifyNormalLiveComponentState, NORMAL_DEPLOYABLE_COMPONENTS, NORMAL_RECEIPT_WORKFLOW } from "./production-normal-receipt-contract.mjs";
+import { assertProductionComponentDeploymentState, advanceProductionComponentDeploymentStateWithRetry, normalDeploymentLiveComponents } from "./production-component-deployment-state.mjs";
 
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -34,40 +34,48 @@ export function replaceNormalDeploymentReceipt({ client, expected, receipt, writ
 export async function reconcileNormalDeployment({ client, sourceSha, isAncestor, readLive, authenticateCandidate, verify, rollback, writerContext, writeJournal = async () => {} }) {
   let state = assertProductionComponentDeploymentState(client.read());
   const receipt = state.normalDeploymentReceipt;
-  if (!receipt) return state;
-  assertNormalDeploymentReceipt(receipt);
-  assert.equal(isAncestor(receipt.sourceSha, sourceSha), true, "Receipt is not current protected-main history");
-  const live = {};
-  for (const [name, predecessor] of Object.entries(receipt.predecessors)) {
-    assert.deepEqual(state.components[name], predecessor, "Pending normal predecessor is stale");
-    assert.equal(isAncestor(predecessor.establishedThroughSha, receipt.sourceSha), true, "Receipt source is outside predecessor/current-main range");
-    assert.notEqual(predecessor.sourceSha, receipt.sourceSha);
-    if (receipt.candidates[name]) await authenticateCandidate(name, predecessor, receipt.candidates[name]);
-    live[name] = await readLive(name);
-    assert.ok(sameNormalIdentity(live[name], predecessor) || (receipt.candidates[name] && sameNormalIdentity(live[name], receipt.candidates[name])), "LIVE_IS_UNKNOWN: live component has no authenticated normal mutation receipt");
-  }
   let verificationError;
-  if (receipt.phase === "VERIFIED" && Object.keys(receipt.candidates).every((name) => classifyNormalLiveComponentState({ live: live[name], predecessor: receipt.predecessors[name], authenticatedReceipt: receipt, component: name }) === "LIVE_IS_RECONCILABLE_NORMAL_DEPLOYMENT")) {
-    try { await verify(receipt.candidates); } catch (error) { verificationError = error; }
-    if (!verificationError) {
-      await writeJournal({ status: "RECONCILIATION_STATE_CAS_INTENT", reconciledSourceSha: receipt.sourceSha });
-      const committed = advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "NORMAL_APPLICATION", changes: receipt.candidates, normalReceiptSha256: normalReceiptHash(receipt), isAncestor, ...writerContext });
-      return committed.state;
+  if (receipt) {
+    assertNormalDeploymentReceipt(receipt);
+    assert.equal(isAncestor(receipt.sourceSha, sourceSha), true, "Receipt is not current protected-main history");
+    const live = {};
+    for (const [name, predecessor] of Object.entries(receipt.predecessors)) {
+      assert.deepEqual(state.components[name], predecessor, "Pending normal predecessor is stale");
+      assert.equal(isAncestor(predecessor.establishedThroughSha, receipt.sourceSha), true, "Receipt source is outside predecessor/current-main range");
+      assert.notEqual(predecessor.sourceSha, receipt.sourceSha);
+      if (receipt.candidates[name]) await authenticateCandidate(name, predecessor, receipt.candidates[name]);
+      live[name] = await readLive(name);
+      assert.ok(sameNormalIdentity(live[name], predecessor) || (receipt.candidates[name] && sameNormalIdentity(live[name], receipt.candidates[name])), "LIVE_IS_UNKNOWN: live component has no authenticated normal mutation receipt");
+    }
+    if (receipt.phase === "VERIFIED" && Object.keys(receipt.candidates).every((name) => classifyNormalLiveComponentState({ live: live[name], predecessor: receipt.predecessors[name], authenticatedReceipt: receipt, component: name }) === "LIVE_IS_RECONCILABLE_NORMAL_DEPLOYMENT")) {
+      try { await verify(normalDeploymentLiveComponents(state, receipt.candidates)); } catch (error) { verificationError = error; }
+      if (!verificationError) {
+        await writeJournal({ status: "RECONCILIATION_STATE_CAS_INTENT", reconciledSourceSha: receipt.sourceSha });
+        // Full-set verification is tied to this exact generation. Never carry it
+        // across a concurrent state write; the next invocation re-reads/reverifies.
+        state = advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "NORMAL_APPLICATION", changes: receipt.candidates, normalReceiptSha256: normalReceiptHash(receipt), maxRetries: 0, isAncestor, ...writerContext }).state;
+      }
+    }
+    if (state.normalDeploymentReceipt) {
+      // An intent is NOT completion evidence. Restore exact recorded predecessors;
+      // the current main release can then start normally. Persist rollback intent
+      // first, so death during rollback cannot later turn into a successful commit.
+      const rollingBack = { ...receipt, phase: "ROLLING_BACK" };
+      delete rollingBack.verification;
+      state = replaceNormalDeploymentReceipt({ client, expected: receipt, receipt: rollingBack, writerContext });
+      for (const name of [...NORMAL_DEPLOYABLE_COMPONENTS].reverse().filter((name) => receipt.predecessors[name])) {
+        await writeJournal({ status: "RECONCILIATION_ROLLBACK_INTENT", component: name });
+        if (!sameNormalIdentity(live[name], receipt.predecessors[name])) await rollback(name, receipt.predecessors[name], receipt.candidates[name]);
+        assert.ok(sameNormalIdentity(await readLive(name), receipt.predecessors[name]), "Interrupted normal rollback did not restore exact predecessor");
+      }
+      await verify(normalDeploymentLiveComponents(state));
+      state = replaceNormalDeploymentReceipt({ client, expected: state.normalDeploymentReceipt, receipt: undefined, writerContext, maxRetries: 0 });
     }
   }
-  // An intent is NOT completion evidence. Restore exact recorded predecessors;
-  // the current main release can then start normally. Persist rollback intent
-  // first, so death during rollback cannot later turn into a successful commit.
-  const rollingBack = { ...receipt, phase: "ROLLING_BACK" };
-  delete rollingBack.verification;
-  state = replaceNormalDeploymentReceipt({ client, expected: receipt, receipt: rollingBack, writerContext });
-  for (const name of ["frontend", "backend"].filter((name) => receipt.predecessors[name])) {
-    await writeJournal({ status: "RECONCILIATION_ROLLBACK_INTENT", component: name });
-    if (!sameNormalIdentity(live[name], receipt.predecessors[name])) await rollback(name, receipt.predecessors[name], receipt.candidates[name]);
-    assert.ok(sameNormalIdentity(await readLive(name), receipt.predecessors[name]), "Interrupted normal rollback did not restore exact predecessor");
-  }
-  await verify(receipt.predecessors);
-  const restored = replaceNormalDeploymentReceipt({ client, expected: state.normalDeploymentReceipt, receipt: undefined, writerContext });
+  // Single successful exit: every represented live component in the resulting
+  // authoritative state is rechecked after the closure CAS. Classification can
+  // never receive a receipt-scoped or stale subset.
+  await verify(normalDeploymentLiveComponents(state));
   if (verificationError) throw verificationError;
-  return restored;
+  return state;
 }

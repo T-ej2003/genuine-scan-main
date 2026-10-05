@@ -1319,7 +1319,7 @@ export const NAMED_SQL_FUNCTION_CONTRACTS = Object.freeze([
       "workflow-http-backend-src-controllers-qr-log-controller-ts-get-qr-tracking-analytics-controller","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readScanAnalytics"],
     ["inventory-projection","qr_inventory_projection","text,text,text,text,text,text,text,text,integer,integer","p_capability text, p_purpose text, p_request_id text, p_licensee_id text, p_manufacturer_id text, p_batch_query text, p_code_query text, p_status text, p_limit integer, p_offset integer","TABLE(payload jsonb, total bigint)",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QRCode","SELECT"],["Batch","SELECT"]],
-      "workflow-internal-backend-src-services-qr-tracking-analytics-service-ts-build-inventory-analytics","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readInventoryProjection"],
+      "workflow-http-backend-src-controllers-qr-log-controller-ts-get-batch-summary","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readInventoryProjection"],
     ["audit-export","qr_export_codes","text,text,text,text","p_capability text, p_purpose text, p_request_id text, p_batch_id text","jsonb",
       [["RefreshToken","SELECT"],["RefreshToken","UPDATE"],["User","SELECT"],["Organization","SELECT"],["Licensee","SELECT"],["ManufacturerLicenseeLink","SELECT"],["QRCode","SELECT"],["Batch","SELECT"],["TraceEvent","SELECT"],["PolicyAlert","SELECT"]],
       "workflow-http-backend-src-controllers-trace-policy-controller-ts-export-batch-audit-package-controller","backend/src/rls-waves/session-c/c01/qrSystemRepository.ts:readAuditExport"],

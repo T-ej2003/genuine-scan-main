@@ -117,7 +117,7 @@ test("reconciliation raw backend-state CAS is an exact AWS CLI capability", () =
   }
 });
 
-test("release preflight routes every S3 and Lambda probe through the credential-bound AWS runner", () => {
+test("release preflight routes every DynamoDB, S3, and Lambda probe through the credential-bound AWS runner", () => {
   const calls = [];
   const run = createProductionCommandRunner({
     credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
@@ -132,22 +132,24 @@ test("release preflight routes every S3 and Lambda probe through the credential-
     },
   });
   const report = runRelease({ outputDirectory: temp(), run });
-  const affected = calls.filter(({ args }) => ["s3api", "lambda"].includes(args[0]));
+  const affected = calls.filter(({ args }) => ["dynamodb", "s3api", "lambda"].includes(args[0]));
 
   assert.equal(report.status, "valid");
   assert.deepEqual(affected.map(({ file, args }) => [file, args[0], args[1]]), [
     ["aws", "s3api", "get-bucket-location"],
     ["aws", "s3api", "get-object"],
     ["aws", "s3api", "get-object"],
+    ["aws", "dynamodb", "get-item"],
     ["aws", "lambda", "get-function-configuration"],
     ["aws", "lambda", "get-alias"],
   ]);
+  assert.equal(calls.filter(({ file }) => file === "dynamodb").length, 0);
   assert.equal(calls.filter(({ file }) => file === "s3api").length, 0);
   assert.equal(calls.filter(({ file }) => file === "lambda").length, 0);
   assert.equal(affected.every(({ options }) => options.env.AWS_PROFILE === "mscqr-production-release-deployer"), true);
 
-  run(["node", "fixture.mjs"]);
-  assert.equal(calls.at(-1).file, "node");
+  assert.throws(() => run(["dynamod", "get-item"]), (error) => error?.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
+  assert.equal(calls.filter(({ file }) => file !== "aws").length, 0);
 });
 
 test("identity matrix assigns IAM simulation only to administrator", () => {
@@ -155,7 +157,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 56);
+  assert.equal(matrix.phases.length, 60);
 });
 
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
@@ -202,7 +204,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 56, capabilities: 665, uniqueActions: 156, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 60, capabilities: 740, uniqueActions: 160, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",
@@ -752,4 +754,13 @@ test("administrator cannot promote an unsigned readiness report", () => {
       "--identity", "administrator", "--phase", "readiness", "--output", path.join(directory, "readiness.json"),
     ], { caller: () => "arn:aws:iam::368992683803:root" }), /phase initial/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("staged authorization verification has both exact execution principals", () => {
+  const graph = buildStageBDeploymentCapabilityGraph();
+  const verification = graph.capabilities.filter(({ sourceFile, action }) => sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && action === "kms:Verify");
+  assert.deepEqual(verification.map(({ identity }) => identity).sort(), ["INDEPENDENT_CHECKER", "RELEASE_DEPLOYER"]);
+  assert.equal(new Set(verification.map(({ id }) => id)).size, 2);
+  assert(verification.every(({ mutation, resources }) => !mutation && resources.length === 1));
+  assert.equal(graph.capabilities.some(({ sourceFile, action, identity }) => sourceFile === "scripts/aws/stage-b-staged-broker-authorization.mjs" && action === "kms:Sign" && identity !== "INDEPENDENT_CHECKER"), false);
 });

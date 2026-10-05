@@ -5,10 +5,10 @@
       "Sid": "ReadExactStageBRoles",
       "Effect": "Allow",
       "Action": [
-      "iam:GetRole",
-      "iam:GetRolePolicy",
-      "iam:ListAttachedRolePolicies",
-      "iam:ListRolePolicies",
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
         "iam:ListRoleTags"
       ],
       "Resource": [
@@ -20,7 +20,8 @@
         "arn:aws:iam::368992683803:role/mscqr-production-rls-green-canary-task",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task",
         "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker",
-        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"
+        "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task",
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
       ]
     },
     {
@@ -32,10 +33,10 @@
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-backend:*",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary",
         "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-canary:*",
-      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
-      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
-      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary",
-      "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:*",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary",
+        "arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-read-only-canary:*"
       ],
       "Condition": {
         "StringEquals": {
@@ -99,10 +100,12 @@
       "Sid": "ReadExactStageBBrokerFunction",
       "Effect": "Allow",
       "Action": [
-      "lambda:GetFunction",
-      "lambda:GetFunctionCodeSigningConfig",
-      "lambda:GetFunctionConfiguration",
-        "lambda:ListVersionsByFunction"
+        "lambda:GetFunction",
+        "lambda:GetFunctionCodeSigningConfig",
+        "lambda:GetFunctionConfiguration",
+        "lambda:ListVersionsByFunction",
+        "lambda:ListAliases",
+        "lambda:ListFunctionUrlConfigs"
       ],
       "Resource": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
       "Condition": {
@@ -120,7 +123,8 @@
       ],
       "Resource": [
         "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
-        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed",
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
       ],
       "Condition": {
         "StringEquals": {
@@ -132,11 +136,11 @@
       "Sid": "ReadExactStageARootDropProviderKey",
       "Effect": "Allow",
       "Action": [
-      "kms:DescribeKey",
-      "kms:GetKeyPolicy",
-      "kms:GetKeyRotationStatus",
-      "kms:GetPublicKey",
-      "kms:ListResourceTags"
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy",
+        "kms:GetKeyRotationStatus",
+        "kms:GetPublicKey",
+        "kms:ListResourceTags"
       ],
       "Resource": "arn:aws:kms:eu-west-2:368992683803:key/*",
       "Condition": {
@@ -147,6 +151,37 @@
           "aws:ResourceTag/Component": "full-rls-green-stage-a"
         }
       }
+    },
+    {
+      "Sid": "ListRegionalBrokerEventMappings",
+      "Effect": "Allow",
+      "Action": "lambda:ListEventSourceMappings",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactStagedBrokerCallerPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBBrokerCodeSigningRead",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ]
     }
   ]
 }

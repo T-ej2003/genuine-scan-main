@@ -1,3 +1,4 @@
+import { resolveHistoricalRuntimeAuthority } from "./verify-production-historical-runtime-handoff.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +37,7 @@ function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinit
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
 
-export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding } = {}) {
+export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding, historicalRuntimeEvidence, verifyHistoricalRuntimeSignature, historicalRuntimeState, historicalRuntimeReader } = {}) {
   if (!SHA.test(sourceSha || "") || !CHECKER.test(checkerIdentity || "")) throw new Error("Approval evidence source or checker identity is invalid.");
   validateImageAuthorization(imageAuthorization, sourceSha, { now, verifyImageEvidence });
   const imageEvidenceSha256 = imageAuthorization.imageEvidenceSha256;
@@ -118,7 +119,9 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, imageReleaseSha: imageAuthorization.imageReleaseSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
   const observedAt = live.observedAt;
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
+  const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: historicalRuntimeReader, sourceSha, now, verify: verifyHistoricalRuntimeSignature });
   const evidence = Object.freeze({
+    ...(historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256 } : {}),
     schemaVersion: STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION,
     producer: STAGE_B_APPROVAL_EVIDENCE_PRODUCER,
     observedAt,

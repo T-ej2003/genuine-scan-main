@@ -16,14 +16,14 @@
     "maximumNetProductionTestLines": 3000
   },
   "selectionTotals": {
-    "familiesConsidered": 16,
-    "workflowsConsidered": 24,
+    "familiesConsidered": 15,
+    "workflowsConsidered": 23,
     "reclassifiedFamilies": 1,
     "splitFamilies": 3,
     "childFamiliesCreated": 6,
     "contractOnlyWorkflows": 1,
     "newlyImplementedWorkflows": 0,
-    "blockedWorkflows": 23
+    "blockedWorkflows": 22
   },
   "blockerCountsBefore": {
     "unresolved-boundary": 12,
@@ -38,7 +38,7 @@
     "public-command-contract": 5,
     "authentication-bootstrap-scope-model": 1,
     "incompatible-shared-auth-roots": 1,
-    "unbounded-platform-scope": 8,
+    "unbounded-platform-scope": 7,
     "out-of-scope-mutation-root": 1,
     "incomplete-root-transaction": 1,
     "actor-command-contract": 1
@@ -547,46 +547,6 @@
       ],
       "blockerResolutionEvidence": [
         "The platform branch is an unbounded filename lookup and the required audit event is undefined."
-      ]
-    },
-    {
-      "familyId": "family-simple-tenant-scoped-reads-telemetrycontroller-8ca3469cbb",
-      "workflowIds": [
-        "workflow-http-backend-src-controllers-telemetry-controller-ts-get-route-transition-summary"
-      ],
-      "reviewedRisk": "medium",
-      "resolution": "blocked",
-      "resultingFamilyIds": [
-        "family-simple-tenant-scoped-reads-telemetrycontroller-fd2665de8e"
-      ],
-      "canonicalFiles": [
-        "backend/src/controllers/telemetryController.ts",
-        "backend/src/routes/index.ts"
-      ],
-      "routeRoots": [
-        "GET /telemetry/route-transition/summary"
-      ],
-      "actorClasses": [
-        "licensee-admin",
-        "platform-admin"
-      ],
-      "commandRuleIds": [
-        "command-route-transition-metric-select-1f0ef0300e15"
-      ],
-      "protectedTables": [
-        "table-route-transition-metric"
-      ],
-      "scopeSource": "Tenant admins use actor licensee; platform admins may currently omit licenseeId for a global aggregate.",
-      "assuranceSource": "No exact platform purpose or attribution is installed.",
-      "rootCallChainEvidence": [
-        "The controller performs three aggregate queries directly."
-      ],
-      "transactionStrategy": "Require an approved bounded platform scope and bounded time-window default before migration.",
-      "testPlan": [
-        "Prove null/foreign tenant exclusion, bounded time and identical aggregate scope."
-      ],
-      "blockerResolutionEvidence": [
-        "Current platform and time-window semantics are unbounded and the required audit event is undefined."
       ]
     },
     {

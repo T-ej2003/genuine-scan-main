@@ -6,7 +6,7 @@ import { NORMAL_DEPLOYER_POLICY, convergeNormalDeployerPolicy } from "../aws/con
 
 const target = JSON.parse(fs.readFileSync("infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json", "utf8"));
 const predecessor = structuredClone(target);
-predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries", "RollbackHistoricalBackendPredecessor"].includes(Sid));
+predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadRetainedWorkerNetworkOnly"].includes(Sid));
 assert.equal(digest(predecessor), NORMAL_DEPLOYER_POLICY.predecessorSha256);
 assert.equal(digest(target), NORMAL_DEPLOYER_POLICY.targetSha256);
 const discoveryActions = [
@@ -34,7 +34,7 @@ function fixture({ policy = predecessor, roleArn = NORMAL_DEPLOYER_POLICY.roleAr
   return { run, calls, live: () => live };
 }
 
-test("exact reviewed predecessor converges once to topology reads and bounded historical-backend rollback", () => {
+test("exact reviewed predecessor converges once to the exact component-state writer", () => {
   const value = fixture();
   const result = convergeNormalDeployerPolicy({ run: value.run, sourceSha: "a".repeat(40) });
   assert.equal(result.iamWrites, 1);
@@ -42,6 +42,11 @@ test("exact reviewed predecessor converges once to topology reads and bounded hi
   assert.equal(result.policySha256, NORMAL_DEPLOYER_POLICY.targetSha256);
   assert.equal(value.calls.filter(([service, operation]) => service === "iam" && operation === "put-role-policy").length, 1);
   assert.equal(digest(value.live()), NORMAL_DEPLOYER_POLICY.targetSha256);
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadAndAdvanceExactComponentState"), {
+    Sid: "ReadAndAdvanceExactComponentState", Effect: "Allow", Action: ["dynamodb:GetItem", "dynamodb:UpdateItem"],
+    Resource: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+    Condition: { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"] }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadClientIpTrustTopology"), {
     Sid: "ReadClientIpTrustTopology",
     Effect: "Allow",
@@ -69,20 +74,16 @@ test("exact reviewed predecessor converges once to topology reads and bounded hi
   });
 });
 
-test("topology discovery adds only five read actions and no representative mutation authority", () => {
+test("historical retention adds only regional network read authority", () => {
   const targetActions = target.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const predecessorActions = predecessor.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), [...discoveryActions].sort());
+  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), ["ec2:DescribeNetworkInterfaces"]);
   for (const action of [
     "ec2:RunInstances", "ec2:CreateSubnet", "ec2:AuthorizeSecurityGroupIngress", "ec2:CreateManagedPrefixList", "ec2:ModifyManagedPrefixList",
     "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:ModifyTargetGroup",
     "iam:PutRolePolicy", "iam:AttachRolePolicy",
   ]) assert.equal(targetActions.includes(action), false, `${action} must remain denied.`);
-  assert.deepEqual(
-    target.Statement.filter(({ Sid }) => !["ReadClientIpTrustTopology", "ReadCloudFrontOriginPrefixListEntries", "RollbackHistoricalBackendPredecessor"].includes(Sid)),
-    predecessor.Statement,
-    "existing bounded permissions changed",
-  );
+  assert.deepEqual(target.Statement.filter(({ Sid }) => !["ReadRetainedWorkerNetworkOnly"].includes(Sid)), predecessor.Statement, "existing bounded permissions changed");
 });
 
 test("already-converged policy is read-only and still verifies", () => {

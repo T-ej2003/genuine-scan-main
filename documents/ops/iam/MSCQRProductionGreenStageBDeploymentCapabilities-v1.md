@@ -2,9 +2,9 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 56
-- Capability nodes: 665
-- Unique AWS actions: 156
+- Phases: 60
+- Capability nodes: 740
+- Unique AWS actions: 160
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, NORMAL_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME, INITIAL_ACTIVATION_RECONCILER, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, MIXED_RECOVERY_EXECUTOR, APP_ONLY_DEPLOYER, APP_ONLY_VERIFIER_LAUNCHER, APP_ONLY_PERMISSION_PROVISIONER
 
 | Order | Phase | Source |
@@ -50,18 +50,22 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 39 | plan-bound-permission-report | `scripts/aws/validate-production-green-stage-b-permissions.mjs` |
 | 40 | production-closure | `scripts/aws/validate-stage-b-deployment-closure.mjs` |
 | 41 | validator | `scripts/plan-production-green-stage-b.mjs` |
-| 42 | wrapper-verify-only | `scripts/apply-production-green-stage-b.mjs` |
-| 43 | wrapper-apply | `scripts/apply-production-green-stage-b.mjs` |
-| 44 | post-apply-verification | `scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` |
-| 45 | runtime-activation-boundary | `scripts/aws/create-production-green-stage-b-approval.mjs` |
-| 46 | normal-backend-activation | `scripts/aws/production-normal-backend-activation.mjs` |
-| 47 | initial-activation-lifecycle | `scripts/aws/manage-production-initial-activation-lifecycle.mjs` |
-| 48 | dual-slot-rebaseline-durable-evidence | `scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs` |
-| 49 | stage-a-production-artifacts-policy-recovery | `scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs` |
-| 50 | stage-a-production-artifacts-state-reconciliation | `scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs` |
-| 51 | initial-activation-lifecycle-policy-reconciliation | `scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs` |
-| 52 | provider-readonly-policy-reconciliation | `scripts/aws/reconcile-production-provider-readonly-policy.mjs` |
-| 53 | bootstrap-operator-policy-reconciliation | `scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs` |
-| 54 | mixed-dual-slot-recovery-iam-preflight | `scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs` |
-| 55 | mixed-dual-slot-recovery-execution | `scripts/aws/recover-production-mixed-dual-slot-topology.mjs` |
-| 56 | stage-b-exact-refresh-only-state-reconciliation | `scripts/aws/reconcile-production-green-stage-b-state.mjs` |
+| 42 | staged-broker-publication | `scripts/aws/run-stage-b-staged-broker.mjs` |
+| 43 | staged-broker-cutover-approval | `scripts/aws/stage-b-staged-broker-authorization.mjs` |
+| 44 | staged-broker-alias-cas | `scripts/aws/stage-b-staged-broker-executor.mjs` |
+| 45 | staged-broker-state-reconciliation | `scripts/aws/stage-b-staged-broker-closure.mjs` |
+| 46 | wrapper-verify-only | `scripts/apply-production-green-stage-b.mjs` |
+| 47 | wrapper-apply | `scripts/apply-production-green-stage-b.mjs` |
+| 48 | post-apply-verification | `scripts/aws/verify-production-green-stage-b-ecs-observations.mjs` |
+| 49 | runtime-activation-boundary | `scripts/aws/create-production-green-stage-b-approval.mjs` |
+| 50 | normal-backend-activation | `scripts/aws/production-normal-backend-activation.mjs` |
+| 51 | initial-activation-lifecycle | `scripts/aws/manage-production-initial-activation-lifecycle.mjs` |
+| 52 | dual-slot-rebaseline-durable-evidence | `scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs` |
+| 53 | stage-a-production-artifacts-policy-recovery | `scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs` |
+| 54 | stage-a-production-artifacts-state-reconciliation | `scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs` |
+| 55 | initial-activation-lifecycle-policy-reconciliation | `scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs` |
+| 56 | provider-readonly-policy-reconciliation | `scripts/aws/reconcile-production-provider-readonly-policy.mjs` |
+| 57 | bootstrap-operator-policy-reconciliation | `scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs` |
+| 58 | mixed-dual-slot-recovery-iam-preflight | `scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs` |
+| 59 | mixed-dual-slot-recovery-execution | `scripts/aws/recover-production-mixed-dual-slot-topology.mjs` |
+| 60 | stage-b-exact-refresh-only-state-reconciliation | `scripts/aws/reconcile-production-green-stage-b-state.mjs` |

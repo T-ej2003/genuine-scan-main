@@ -50,7 +50,7 @@ const rules = [
   { id: "b03-worker-schedule-delivery-contract", waveId: "b-03-workers-scheduled-outbox-delivery", match: isWorkerDeliveryWorkflow },
   { id: "a09-system-integration-owner", waveId: "a-09-system-integration-owner", match: isSystemIntegrationRunner },
   { id: "a01-session-a-reviewed-repository", waveId: "a-01-tenant-manufacturer-platform-reads", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-a/") },
-  { id: "c01-session-c-administration-repository", waveId: "c-01-administration-general-mutations", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c01/") },
+  { id: "c01-session-c-administration-repository", waveId: "c-01-administration-general-mutations", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c01/") && !idMatches(workflow, /backend-src-controllers-(?:qr-controller|qr-log-controller|qr-request-controller)/) },
   { id: "c02-session-c-audit-repository", waveId: "c-02-audit-fraud-trace-alerts", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c02/") },
   { id: "c03-session-c-governance-repository", waveId: "c-03-governance-policies-incidents-compliance", match: (workflow) => !isSessionBWorkflow(workflow) && ownsSource(workflow, "backend/src/rls-waves/session-c/c03/") },
   { id: "c04-registered-operator-recovery-cli-or-startup", waveId: "c-04-operator-recovery-startup-migration-cli", match: (workflow) => !isSessionBWorkflow(workflow) && !isSystemIntegrationRunner(workflow) && ["cli", "startup"].includes(workflow.executionSurface) },
@@ -108,6 +108,7 @@ const sessionAOwnedSharedFiles = [
 ];
 const sessionBOwnedSharedFiles = ["backend/src/middleware/auth.ts"];
 const sessionCOwnedSharedFiles = [
+  "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts",
   "backend/src/controllers/incidentController.ts",
   "backend/src/controllers/tracePolicyController.ts",
   "backend/src/rls-waves/session-c/c03/c03ActorBoundary.ts",

@@ -14,6 +14,10 @@ test("component deployment state Terraform fixes the table, key, and exact write
   assert.equal(trust["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-normal-deploy");
   assert.deepEqual(Object.keys(trust).sort(), ["token.actions.githubusercontent.com:aud", "token.actions.githubusercontent.com:sub"]);
   const policy = read("normal-deployer-policy.json");
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadAndAdvanceExactComponentState"), {
+    Sid: "ReadAndAdvanceExactComponentState", Effect: "Allow", Action: ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource: table,
+    Condition: { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"] }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
   const backendCandidate = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*";
   const frontend = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:*";
   const tag = policy.Statement.find(({ Sid }) => Sid === "PreserveTaskDefinitionTags");
@@ -47,11 +51,11 @@ test("component deployment state Terraform fixes the table, key, and exact write
     "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
     "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
   ]);
-  assert.equal(policy.Statement.some(({ Action }) => JSON.stringify(Action).includes("dynamodb:")), false);
+  assert.equal(policy.Statement.filter(({ Action }) => JSON.stringify(Action).includes("dynamodb:")).length, 1);
 });
 
-test("legacy state identities retain exact-key access while the normal deployer has none", () => {
-  for (const file of ["bootstrap-policy.json", "release-terminal-state-policy.json"]) {
+test("component-state writers retain exact-key access and publishers receive none", () => {
+  for (const file of ["normal-deployer-policy.json", "bootstrap-policy.json", "release-terminal-state-policy.json"]) {
     const statements = read(file).Statement.filter((statement) => JSON.stringify(statement.Action).includes("dynamodb:"));
     assert.ok(statements.length > 0);
     for (const statement of statements) {

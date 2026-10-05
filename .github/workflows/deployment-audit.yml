@@ -172,14 +172,32 @@ jobs:
 
       - name: Install OSV Scanner
         run: |
-          curl -sSfL https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
+          curl -sSfL https://github.com/google/osv-scanner/releases/download/v2.6.0/osv-scanner_linux_amd64 -o osv-scanner
           chmod +x osv-scanner
 
+      - name: Setup Node for runtime audit
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install locked frontend build dependencies
+        run: npm ci
+
+      - name: Verify OSV runtime boundary
+        run: node --test scripts/tests/deployment-osv-policy.test.mjs scripts/tests/osv-non-runtime-acceptance.test.mjs scripts/tests/dependency-audit-policy.test.mjs scripts/tests/osv-deployment-expiry.test.mjs
+
+      - name: Report OSV source vulnerabilities (including dev)
+        # Findings remain visible in the uploaded audit artifact. Scanner errors
+        # still fail; only the documented findings exit code is non-blocking here.
+        run: |
+          status=0
+          ./osv-scanner --recursive --no-resolve --config=/dev/null --format=json --output-file=audit-artifacts/osv-source.json . || status=$?
+          test "$status" -eq 0 || test "$status" -eq 1
+
       - name: Run OSV Scanner
-        # Keep vulnerability coverage on committed manifests/lockfiles while
-        # avoiding transient deps.dev resolver outages from failing audits with
-        # no vulnerabilities found.
-        run: ./osv-scanner --recursive --no-resolve .
+        # Consume the unfiltered report and a fresh production browser build.
+        # Manifest dev grouping cannot override positive or unknown runtime use.
+        run: node scripts/check-osv-runtime.mjs audit-artifacts/osv-source.json
 
       - name: Pull Gitleaks
         run: docker pull ghcr.io/gitleaks/gitleaks:v8.24.2

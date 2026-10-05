@@ -105,11 +105,22 @@ export function createAssumedRoleSessionEnvironment({ credentials, env = process
   return Object.freeze({ ...copy(env, SAFE_PROCESS_KEYS), ...session, AWS_REGION: region, AWS_DEFAULT_REGION: region, AWS_EC2_METADATA_DISABLED: "true" });
 }
 
+export function normalizeProductionAwsCommandArguments(args, region = REGION) {
+  if (!Array.isArray(args) || args.length < 2 || args[0] === "aws" || !args.every((value) => typeof value === "string")) throw new Error("AWS command arguments are required without an executable prefix.");
+  const [service, operation] = args;
+  if (!service || service.trim() !== service || !operation || operation.trim() !== operation || operation.startsWith("-") || operation === service) throw new Error("AWS service and operation arguments are malformed.");
+  const regionIndexes = args.flatMap((value, index) => value === "--region" ? [index] : []);
+  if (args.some((value) => value.startsWith("--region=")) || regionIndexes.length > 1) throw new Error("AWS region arguments must use one canonical --region value.");
+  if (regionIndexes.length === 0) return Object.freeze([...args, "--region", region]);
+  const index = regionIndexes[0];
+  if (index === args.length - 1 || args[index + 1] !== region) throw new Error("AWS command region does not match the production region.");
+  return Object.freeze([...args]);
+}
+
 export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false } = {}) {
   const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, profile, env, region, injected });
   return (args) => {
-    if (!Array.isArray(args) || args.length === 0 || args[0] === "aws") throw new Error("AWS command arguments are required without an executable prefix.");
-    const command = args.includes("--region") ? args : [...args, "--region", region];
+    const command = normalizeProductionAwsCommandArguments(args, region);
     return exec("aws", command, { cwd: process.cwd(), env: commandEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   };
 }

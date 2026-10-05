@@ -3,6 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const WORKFLOW_DELEGATIONS = Object.freeze([
+  ...[
+    ["createAllocationRequest", "backend/src/controllers/qrRequestController.ts", "createQrAllocationRequest"],
+    ["listAllocationRequests", "backend/src/controllers/qrRequestController.ts", "getQrAllocationRequests"],
+    ["rejectAllocationRequest", "backend/src/controllers/qrRequestController.ts", "rejectQrAllocationRequest"],
+    ["readScanAnalytics", "backend/src/controllers/qrLogController.ts", "getQrTrackingAnalyticsController"],
+  ].map(([functionName, sourceFile, canonicalFunction]) => ({
+    delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-c/c01/qrSystemRepository.ts", function: functionName },
+    canonical: { executionSurface: "http", sourceFile, function: canonicalFunction },
+    reason: "The registered QR controller owns the operation; the repository supplies its exact session-capability-bound SQL projection or atomic mutation.",
+  })),
   {
     delegated: { executionSurface: "internal", sourceFile: "backend/src/rls-waves/session-a/tenantDirectoryRepository.ts", function: "readLicenseeDirectory" },
     canonical: { executionSurface: "http", sourceFile: "backend/src/controllers/licenseeController.ts", function: "getLicensees" },

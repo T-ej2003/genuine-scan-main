@@ -1,6 +1,7 @@
 {
   "Version": "2012-10-17",
   "Statement": [
+    { "Sid": "ReadAndAdvanceExactComponentState", "Effect": "Allow", "Action": ["dynamodb:GetItem", "dynamodb:UpdateItem"], "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state", "Condition": { "ForAllValues:StringEquals": { "dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"] }, "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
     { "Sid": "EcrAuthorizationTokenOnly", "Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*" },
     { "Sid": "PublishExactApplicationImages", "Effect": "Allow", "Action": ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload", "ecr:DescribeImages", "ecr:DescribeImageScanFindings", "ecr:DescribeRepositories", "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart"], "Resource": ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"], "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
     { "Sid": "ReadExactServices", "Effect": "Allow", "Action": "ecs:DescribeServices", "Resource": ["arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2", "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-frontend-servi-euw2"], "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" }, "ArnEquals": { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" } } },
@@ -14,6 +15,7 @@
     { "Sid": "ReadCloudFrontOriginPrefixListEntries", "Effect": "Allow", "Action": "ec2:GetManagedPrefixListEntries", "Resource": "arn:aws:ec2:eu-west-2:aws:prefix-list/*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
     { "Sid": "PreserveTaskDefinitionTags", "Effect": "Allow", "Action": "ecs:TagResource", "Resource": ["arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:*", "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:*"], "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2", "ecs:CreateAction": "RegisterTaskDefinition" } } },
     { "Sid": "PassExactTaskRoles", "Effect": "Allow", "Action": "iam:PassRole", "Resource": ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task", "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution", "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role", "arn:aws:iam::368992683803:role/mscqr-ecs-task-role"], "Condition": { "StringEquals": { "iam:PassedToService": "ecs-tasks.amazonaws.com" } } },
+    { "Sid": "ReadRetainedWorkerNetworkOnly", "Effect": "Allow", "Action": "ec2:DescribeNetworkInterfaces", "Resource": "*", "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } } },
     { "Sid": "ReadCallerIdentity", "Effect": "Allow", "Action": "sts:GetCallerIdentity", "Resource": "*" }
   ]
 }

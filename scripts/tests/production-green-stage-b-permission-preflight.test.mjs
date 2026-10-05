@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { assertApplyArtifacts, assertPermissionReport, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
+import { assertApplyArtifacts, assertPermissionReport, applyStageBInfrastructurePlan, parseCli as parseApplyCli, reserveStageBSharedApplyAttempt, runApply, showSavedPlan, stageBApplyArtifactSetIdentity, stageBApplyAttemptPath, stageBEffectiveOperatorHome } from "../apply-production-green-stage-b.mjs";
 import { stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { buildRootAttestationKeyPolicy, ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS } from "../aws/production-root-attestation-key.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
@@ -372,8 +372,8 @@ test("manifest is source-controlled, exact-accounted, and has no wildcard PassRo
   assert.equal(manifest.taskDefinitionMappings.length, 12);
   assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
-  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 19);
-  assert.equal(assertReviewedSimulationContextRegistry().length, 19);
+  assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 20);
+  assert.equal(assertReviewedSimulationContextRegistry().length, 20);
   assert.ok(REVIEWED_SIMULATION_CONTEXT_REGISTRY.every(({ key, type, values }) => key && type && values.length > 0
     && (key === "s3:if-none-match" ? values.length === 1 && values[0] === "*" : !values.includes("*"))));
 });
@@ -862,7 +862,17 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 258);
+  assert.equal(report.requiredEvaluations.length, 266);
+  assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId.startsWith("staged-broker-")).map(({ manifestId, action, resource }) => [manifestId, action, resource]).sort(), [
+    ["staged-broker-lambda-listaliases", "lambda:ListAliases", STAGE_B.brokerFunctionArn],
+    ["staged-broker-lambda-listfunctionurlconfigs", "lambda:ListFunctionUrlConfigs", STAGE_B.brokerFunctionArn],
+    ["staged-broker-lambda-listeventsourcemappings", "lambda:ListEventSourceMappings", "*"],
+    ["staged-broker-lambda-getpolicy", "lambda:GetPolicy", STAGE_B.brokerFunctionArn],
+    ["staged-broker-lambda-getpolicy", "lambda:GetPolicy", `${STAGE_B.brokerFunctionArn}:*`],
+    ["staged-broker-iam-listattachedrolepolicies", "iam:ListAttachedRolePolicies", roleArn],
+    ["staged-broker-iam-listrolepolicies", "iam:ListRolePolicies", roleArn],
+    ["staged-broker-iam-getrolepolicy", "iam:GetRolePolicy", roleArn],
+  ].sort());
   assert.equal(report.forbiddenEvaluations.length, 38);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
@@ -894,6 +904,15 @@ test("backend health recovery permissions fail the administrator preflight befor
     assert.equal(report.status, "invalid");
     assert.equal(report.deniedCount, 1);
     assert.equal(report.requiredEvaluations.find(({ manifestId }) => manifestId === deniedId).validation, "rejected");
+  }
+});
+
+test("every staged-broker prerequisite read must pass permission simulation", () => {
+  const staged = deriveRequiredEvaluations(productionPlan, manifest).required.filter(({ manifestId }) => manifestId.startsWith("staged-broker-"));
+  assert.equal(staged.length, 8);
+  for (const denied of staged) {
+    const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: productionPlanBytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "staged-broker-preflight", simulate: ({ evaluation }) => evaluation.manifestId === denied.manifestId && evaluation.resource === denied.resource ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: [] } : allowRequiredDenyForbidden({ evaluation }), cloudTrail: clearCloudTrail });
+    assert.equal(report.status, "invalid"); assert.equal(report.deniedCount, 1);
   }
 });
 
@@ -2030,6 +2049,7 @@ const validRealApplyInput = (fixture, checkoutReads = [fixture.protectedMainChec
       },
       showPlan: () => fixture.shownBytes,
       validatePlan: () => {},
+      revalidateHistoricalRuntime: () => true,
       verifyPermissionSignature: () => true,
       verifyImageEvidence: fixture.verifyImageEvidence,
       getBackendMetadata: () => structuredClone(initializedBackendMetadata),
@@ -2069,6 +2089,30 @@ test("missing permission report remains an artifact-gate failure", () => {
   const fixture = createValidStageBApplyFixture();
   fs.unlinkSync(fixture.permissionReportPath);
   assert.throws(() => runApply(validApplyInput(fixture)), (error) => error instanceof Error && error.message === "Permission-preflight report is missing.");
+});
+
+test("ordinary Terraform executor blocks every broker mutation without spawning", () => {
+  let spawns = 0;
+  const spawn = () => { spawns++; return { status: 0 }; };
+  const invoke = plan => applyStageBInfrastructurePlan({ planPath: "/private/approved.tfplan", plan, spawn });
+  assert.throws(() => invoke(productionPlan), /fixed policy-scoped ownership and native single-write/);
+  for (const type of ["aws_lambda_function", "aws_lambda_alias"]) for (const actions of [["update"], ["create"], ["delete"], ["delete", "create"], ["create", "delete"], []]) {
+    assert.throws(() => invoke({ resource_changes: [{ address: "unknown", type, change: { actions } }] }), /staged publication and native alias CAS/);
+  }
+  for (const address of ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"]) assert.throws(() => invoke({ resource_changes: [{ address, type: "spoofed", change: { actions: ["update"] } }] }), /staged publication and native alias CAS/);
+  assert.throws(() => invoke({}), /authenticated saved-plan census/); assert.equal(spawns, 0);
+  assert.equal(invoke({ resource_changes: [{ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["no-op"] } }, { address: "aws_ecs_task_definition.executor", type: "aws_ecs_task_definition", change: { actions: ["create"] } }] }).status, 0);
+  assert.equal(spawns, 1);
+});
+
+test("ordinary saved-plan broker rejection occurs before any reservation or uncertainty write", () => {
+  const fixture = createValidStageBApplyFixture(), input = validRealApplyInput(fixture);
+  // Use the actual default executor, not a fake injected apply.
+  delete input.deps.apply;
+  assert.equal(fixture.sharedReservations.size, 0);
+  assert.throws(() => runApply(input), /fixed policy-scoped ownership and native single-write/);
+  assert.equal(fixture.sharedReservations.size, 0);
+  assert.equal(input.applyCalls.length, 0);
 });
 
 test("valid Stage B apply fixture reaches ready-to-apply before checkout mutation", () => {
@@ -2699,6 +2743,7 @@ test("apply wrapper validates the canonical alias for any broker mutation regard
       callerArn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test",
       showPlan: () => fixture.shownBytes,
       validatePlan: () => {},
+      revalidateHistoricalRuntime: () => true,
       verifyPermissionSignature: () => true,
     });
   };

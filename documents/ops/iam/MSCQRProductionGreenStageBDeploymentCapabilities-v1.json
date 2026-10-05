@@ -211,76 +211,96 @@
     },
     {
       "order": 42,
+      "id": "staged-broker-publication",
+      "sourceFile": "scripts/aws/run-stage-b-staged-broker.mjs"
+    },
+    {
+      "order": 43,
+      "id": "staged-broker-cutover-approval",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs"
+    },
+    {
+      "order": 44,
+      "id": "staged-broker-alias-cas",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs"
+    },
+    {
+      "order": 45,
+      "id": "staged-broker-state-reconciliation",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs"
+    },
+    {
+      "order": 46,
       "id": "wrapper-verify-only",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 43,
+      "order": 47,
       "id": "wrapper-apply",
       "sourceFile": "scripts/apply-production-green-stage-b.mjs"
     },
     {
-      "order": 44,
+      "order": 48,
       "id": "post-apply-verification",
       "sourceFile": "scripts/aws/verify-production-green-stage-b-ecs-observations.mjs"
     },
     {
-      "order": 45,
+      "order": 49,
       "id": "runtime-activation-boundary",
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs"
     },
     {
-      "order": 46,
+      "order": 50,
       "id": "normal-backend-activation",
       "sourceFile": "scripts/aws/production-normal-backend-activation.mjs"
     },
     {
-      "order": 47,
+      "order": 51,
       "id": "initial-activation-lifecycle",
       "sourceFile": "scripts/aws/manage-production-initial-activation-lifecycle.mjs"
     },
     {
-      "order": 48,
+      "order": 52,
       "id": "dual-slot-rebaseline-durable-evidence",
       "sourceFile": "scripts/aws/persist-production-dual-slot-rebaseline-durable-evidence.mjs"
     },
     {
-      "order": 49,
+      "order": 53,
       "id": "stage-a-production-artifacts-policy-recovery",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs"
     },
     {
-      "order": 50,
+      "order": 54,
       "id": "stage-a-production-artifacts-state-reconciliation",
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs"
     },
     {
-      "order": 51,
+      "order": 55,
       "id": "initial-activation-lifecycle-policy-reconciliation",
       "sourceFile": "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs"
     },
     {
-      "order": 52,
+      "order": 56,
       "id": "provider-readonly-policy-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-provider-readonly-policy.mjs"
     },
     {
-      "order": 53,
+      "order": 57,
       "id": "bootstrap-operator-policy-reconciliation",
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"
     },
     {
-      "order": 54,
+      "order": 58,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     },
     {
-      "order": 55,
+      "order": 59,
       "id": "mixed-dual-slot-recovery-execution",
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     },
     {
-      "order": 56,
+      "order": 60,
       "id": "stage-b-exact-refresh-only-state-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-green-stage-b-state.mjs"
     }
@@ -5226,7 +5246,7 @@
         "sid": "ActivateBackendCandidate",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -5638,7 +5658,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -5678,7 +5698,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -5718,7 +5738,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -5758,7 +5778,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -5901,7 +5921,7 @@
         "sid": "ManageExactProductionSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -6232,7 +6252,7 @@
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -6267,7 +6287,7 @@
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -6858,7 +6878,7 @@
         "sid": "RecoverLegacyBackend",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -7444,7 +7464,7 @@
         "sid": "CreateExactStageBBackendEcsExecInlinePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -7645,7 +7665,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7685,7 +7705,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7725,7 +7745,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7765,7 +7785,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7805,7 +7825,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7845,7 +7865,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -7885,7 +7905,7 @@
         "sid": "BootstrapExactProductionSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8006,7 +8026,7 @@
         "sid": "ManageExactProductionSecretValues",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8039,7 +8059,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8072,7 +8092,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8105,7 +8125,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8138,7 +8158,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8171,7 +8191,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8204,7 +8224,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8237,7 +8257,7 @@
         "sid": "TagExactInitialRotationSecretContainers",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -8295,11 +8315,11 @@
         "runtime-ecs-managed-policy"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -8322,11 +8342,11 @@
         "runtime-ecs-managed-policy-version"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -8471,7 +8491,7 @@
         "sid": "UpdateBrokerRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -8542,7 +8562,7 @@
         "sid": "ReadExactStageBBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -8799,7 +8819,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -9498,7 +9518,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -9554,7 +9574,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -9608,7 +9628,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -9662,7 +9682,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -9861,8 +9881,10 @@
         }
       ],
       "classification": "TERRAFORM_REFRESH_READ",
-      "probe": "administrator-simulation",
-      "probeIds": [],
+      "probe": "direct",
+      "probeIds": [
+        "historical-runtime-network"
+      ],
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAProviderEndpointMetadata",
@@ -10176,7 +10198,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10209,7 +10231,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10242,7 +10264,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10275,7 +10297,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10341,7 +10363,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10374,7 +10396,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10411,7 +10433,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10449,7 +10471,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10484,7 +10506,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10521,7 +10543,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -10686,7 +10708,7 @@
         "sid": "PassEcsTaskRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -10719,7 +10741,7 @@
         "sid": "PassEcsTaskRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -10766,7 +10788,7 @@
         "sid": "RecoverLegacyBackend",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -10838,7 +10860,7 @@
         "sid": "ManageExactLegacyCurrentRotationSecrets",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": false
@@ -10975,7 +10997,226 @@
         "sid": "ReadExactStageBWorkerPublicationImage",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-iam-getrolepolicy",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-iam-getrolepolicy",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policy"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-iam-listattachedrolepolicies",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-iam-listattachedrolepolicies",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-attached-policies",
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-iam-listrolepolicies",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-iam-listrolepolicies",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-lambda-getpolicy",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-lambda-getpolicy",
+      "action": "lambda:GetPolicy",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker",
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-lambda-listaliases",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-lambda-listaliases",
+      "action": "lambda:ListAliases",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-lambda-listeventsourcemappings",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-lambda-listeventsourcemappings",
+      "action": "lambda:ListEventSourceMappings",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ListRegionalBrokerEventMappings",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "manifest-staged-broker-lambda-listfunctionurlconfigs",
+      "phase": "release-direct-read-preflight",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "terraform-or-aws-cli",
+      "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json",
+      "sourceFunction": "staged-broker-lambda-listfunctionurlconfigs",
+      "action": "lambda:ListFunctionUrlConfigs",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -11153,7 +11394,7 @@
         "sid": "UpdateBrokerRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -11207,7 +11448,7 @@
         "sid": "UpdateBrokerRelease",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -11232,7 +11473,7 @@
         "sid": "UpdateExactStageBBrokerManagedPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -11326,7 +11567,7 @@
         "sid": "UpdateBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "edf95331e5f636557765bbf5c7109a76da7aea38d724bfb67a587bbbae68796a"
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
       },
       "required": true,
       "mutation": true
@@ -12339,11 +12580,11 @@
         "runtime-ecs-managed-policy"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -12371,11 +12612,11 @@
         "runtime-ecs-managed-policy-version"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -12467,7 +12708,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
+        "expectedPolicySha256": "e84c3dfb3e0ae8712f15b52c0883b94200448c80e6c3e8765154552d1ba3d71a"
       },
       "required": true,
       "mutation": false
@@ -12496,7 +12737,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
+        "expectedPolicySha256": "e84c3dfb3e0ae8712f15b52c0883b94200448c80e6c3e8765154552d1ba3d71a"
       },
       "required": true,
       "mutation": false
@@ -12525,7 +12766,7 @@
         "sid": "ReadCloudFrontOriginPrefixListEntries",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
+        "expectedPolicySha256": "e84c3dfb3e0ae8712f15b52c0883b94200448c80e6c3e8765154552d1ba3d71a"
       },
       "required": true,
       "mutation": false
@@ -12554,7 +12795,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
+        "expectedPolicySha256": "e84c3dfb3e0ae8712f15b52c0883b94200448c80e6c3e8765154552d1ba3d71a"
       },
       "required": true,
       "mutation": false
@@ -12583,7 +12824,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d479902def065b7ae0bc231950973d58bb98501d70f2eef29fed848802d290f"
+        "expectedPolicySha256": "e84c3dfb3e0ae8712f15b52c0883b94200448c80e6c3e8765154552d1ba3d71a"
       },
       "required": true,
       "mutation": false
@@ -18087,7 +18328,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18117,7 +18358,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18147,7 +18388,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18177,7 +18418,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18664,7 +18905,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18694,7 +18935,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18724,7 +18965,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18754,7 +18995,7 @@
         "sid": "ReadExactStageBReplayTable",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18814,7 +19055,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18844,7 +19085,7 @@
         "sid": "ReadExactStageBBrokerFunction",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18881,7 +19122,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18919,7 +19160,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18957,7 +19198,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -18995,7 +19236,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -19275,7 +19516,7 @@
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -19310,7 +19551,7 @@
         "sid": "ReadExactLegacyBackendRecoveryRepository",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -20118,11 +20359,11 @@
         "runtime-ecs-managed-policy"
       ],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -20143,11 +20384,11 @@
       "probe": "direct",
       "probeIds": [],
       "policy": {
-        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
-        "sid": "ReadNormalActivationPolicy",
-        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -20218,7 +20459,7 @@
         "sid": "ReadExactStageBBrokerAlias",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -20913,7 +21154,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -20967,7 +21208,7 @@
         "sid": "ReadExactStageARootDropProviderKey",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21033,6 +21274,41 @@
       "policy": {
         "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
         "sid": "ReadExactStageAStorageKeys",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-release-preflight-manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-release-preflight.mjs",
+      "sourceFunction": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "resources": [
+        "*"
+      ],
+      "context": [
+        {
+          "key": "aws:RequestedRegion",
+          "type": "string",
+          "values": [
+            "eu-west-2"
+          ]
+        }
+      ],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "historical-runtime-network"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageAProviderEndpointMetadata",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
         "expectedVersion": "signed-administrator-evidence",
         "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
@@ -21279,7 +21555,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21317,7 +21593,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21350,7 +21626,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21387,7 +21663,7 @@
         "sid": "ReadExactStageBRoles",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21457,7 +21733,91 @@
         "sid": "ReadExactStageBWorkerPublicationImage",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
         "expectedVersion": "signed-administrator-evidence",
-        "expectedPolicySha256": "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade"
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-release-preflight-manifest-staged-broker-iam-getrolepolicy",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-release-preflight.mjs",
+      "sourceFunction": "manifest-staged-broker-iam-getrolepolicy",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-release-preflight-manifest-staged-broker-iam-listattachedrolepolicies",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-release-preflight.mjs",
+      "sourceFunction": "manifest-staged-broker-iam-listattachedrolepolicies",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-attached-policies",
+        "refresh-broker-attachments",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-attached-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-attached-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "stage-b-state-reconciliation-release-preflight-manifest-staged-broker-iam-listrolepolicies",
+      "phase": "stage-b-exact-refresh-only-state-reconciliation",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/produce-production-green-stage-b-release-preflight.mjs",
+      "sourceFunction": "manifest-staged-broker-iam-listrolepolicies",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": [],
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "direct",
+      "probeIds": [
+        "runtime-legacy-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-execution-inline-policies",
+        "refresh-mscqr-production-full-rls-green-read-only-canary-task-inline-policies"
+      ],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
       },
       "required": true,
       "mutation": false
@@ -21727,12 +22087,1887 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "staged-broker-09ee05944efb3682",
+      "phase": "staged-broker-cutover-approval",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "sourceFunction": "kms:Verify",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "SignExactStageBApproval",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "635cd235350c75e3c4e155a69c8097e0b1226b473129c7eebc9b73baa56ce8ff"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-0e8b666d5eab5daa",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-0ebf2398a1857568",
+      "phase": "staged-broker-cutover-approval",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "sourceFunction": "kms:Sign",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "action": "kms:Sign",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval"
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "SignExactStageBApproval",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "635cd235350c75e3c4e155a69c8097e0b1226b473129c7eebc9b73baa56ce8ff"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "staged-broker-18bb76cb6e8ff7e0",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetRolePolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-18dacebf50b000ed",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetRolePolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetRolePolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-1cbd51952e97b477",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListVersionsByFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-204dad07c0c5777d",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "sourceFunction": "sts:GetCallerIdentity",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+        "sid": "IndependentSessionIssuanceRead",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-246f9b033ff32e9d",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:ListRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-254398ff2b6016dc",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "ecs:DescribeTaskDefinition",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "DescribeStageBTaskDefinitionsReadOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-27ee15b1a9ec3329",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-28c43ba7655f292e",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-2b5b2ed33d49190a",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:ListAliases",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListAliases",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-2e3ca8f681ceaddc",
+      "phase": "staged-broker-policy-ownership",
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "sourceFunction": "dynamodb:PutItem",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "dynamodb:PutItem",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval",
+        "leadingKeys": [
+          "production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        ],
+        "ttl": false,
+        "stealing": false
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "OwnExactBrokerPolicyMutationDomain",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "staged-broker-339d8f607c4c5b4e",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "sourceFunction": "sts:GetCallerIdentity",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-credential-source-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-33c39140bd25b0a2",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-35a370c3fd1ab044",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-393f9c83b5da5656",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-39b7757eab99af08",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadWriteStageBProductionStateOnly",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-39e27cc1540524c0",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:ListAttachedRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBRoles",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-3f004025a291becd",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-3f5e0c4009f4c66e",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-45335b4a47cd6195",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-4acdfeee7e3f70b2",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-4b71e04e647bf298",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-4ec1525bbfffb2c1",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-54e99842c6e4924a",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetPolicy",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-5b14c1d106520237",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:ListAttachedRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:ListAttachedRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-5d18dfd63b844516",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetRole",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetRole",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-60904a8c5f8dd8a2",
+      "phase": "staged-broker-cutover-approval",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "sourceFunction": "sts:GetCallerIdentity",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-credential-source-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-6312fa198481c99f",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-6617c5a03cae00d1",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListVersionsByFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-6f0545f4778a8aa3",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-7004fb485b2324fb",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBBrokerCodeSigningRead"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-76f07d81663af64f",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "sts:GetCallerIdentity",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/production-credential-source-contract.mjs",
+        "sid": "identity-boundary",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-786242321712565f",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadStageBApplyAttempts",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-794bd402172066d6",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "sourceFunction": "kms:Verify",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "kms:Verify",
+      "resources": [
+        "arn:aws:kms:eu-west-2:368992683803:key/437cdebd-95e7-4aba-8f0f-2ca08edb0478"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "VerifyExactStageBPermissionReportSignature",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-87e41807257cf970",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-8cb83bf87bf5f0ce",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-901a947bd48123c8",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-951a30ff3784fae0",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-a73e12765e7afe65",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-b4b4efd7c776249c",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationLifecycle"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-c125afdc30085170",
+      "phase": "staged-broker-alias-cas",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "lambda:UpdateAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:UpdateAlias",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval"
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "staged-broker-c9ede75ef45e3bb6",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBBrokerCodeSigningRead"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-cabff8696e015a96",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json",
+        "sid": "ReadStageBApplyAttempts",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "5c45224bb53984f08d98ddeddb2210f26ebc8fc1c6de75beb6ba71ea30693d01"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-cbe3f02ac6d5c755",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-cc1417e799e7bf91",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetPolicy",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerAlias",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-cdf49114534e1d0f",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-ced383a995094db8",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListVersionsByFunction",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-cf1356b944bea5ba",
+      "phase": "staged-broker-policy-ownership",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "iam:CreatePolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval"
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "UpdateExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "staged-broker-cfd0774b64b6d223",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-d1fcb6a9f032b50d",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:ListFunctionUrlConfigs",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListFunctionUrlConfigs",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStageBBrokerFunction",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-db2c363d2686c5a2",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageBBrokerConfiguration",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-dd83ccd5721c9474",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "sourceFunction": "cloudtrail:LookupEvents",
+      "identity": "ADMINISTRATOR",
+      "executor": "aws-cli",
+      "action": "cloudtrail:LookupEvents",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+        "sid": "IndependentSessionIssuanceRead",
+        "livePolicyArn": null,
+        "expectedVersion": "source-bound",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-de2673d1f4df4fb6",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:ListPolicyVersions",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "ReadExactStageBBrokerManagedPolicy",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-df345be38df590b4",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "lambda:ListEventSourceMappings",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:ListEventSourceMappings",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ListRegionalBrokerEventMappings",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-e020c651ee25cabf",
+      "phase": "staged-broker-policy-ownership",
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "sourceFunction": "dynamodb:UpdateItem",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "dynamodb:UpdateItem",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval",
+        "leadingKeys": [
+          "production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        ],
+        "ttl": false,
+        "stealing": false
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "OwnExactBrokerPolicyMutationDomain",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "staged-broker-e2193b9419cf53b1",
+      "phase": "staged-broker-policy-ownership",
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "sourceFunction": "dynamodb:GetItem",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "dynamodb:GetItem",
+      "resources": [
+        "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite",
+        "leadingKeys": [
+          "production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        ],
+        "ttl": false,
+        "stealing": false
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json",
+        "sid": "OwnExactBrokerPolicyMutationDomain",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c259c8de472a8842ac7804a99955405029cd619aa989edf86f18c87b5ce8a9cc"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-ec0e0d1b5a65f968",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:ListRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:ListRolePolicies",
+      "resources": [
+        "arn:aws:iam::368992683803:role/mscqr-production-rls-approval-broker"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json",
+        "sid": "ReadExactStageACheckerRole",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c7e1a00cf47fdc409bfeec4125a81065de74189b39e3f95a54da63cdfa45fb02"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-f0f9c02e10f41185",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageBBrokerConfiguration",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-f11d9dba1b516b42",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-f27fbcb246feb20b",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "sourceFunction": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json",
+        "sid": "ReadExactStagedBrokerCallerPolicies",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-f510afd31ef5aa35",
+      "phase": "staged-broker-publication",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "lambda:GetFunctionConfiguration",
+      "resources": [
+        "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "read-only-prerequisite"
+      },
+      "classification": "RELEASE_DIRECT_READ",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+        "sid": "ReadStageBBrokerConfiguration",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBReferenceAuditReadOnly",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "c47d653427eaae883d502f920283b27f84281b08593fa4f1990e221588b63eac"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "staged-broker-f8478ebfeab351ce",
+      "phase": "staged-broker-policy-ownership",
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "sourceFunction": "iam:DeletePolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "executor": "aws-cli",
+      "action": "iam:DeletePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "authority": "purpose-bound-one-use-phase-approval"
+      },
+      "classification": "STAGED_BROKER_GOVERNED_MUTATION",
+      "probe": "administrator-simulation",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "documents/ops/iam/MSCQRProductionGreenStageBProviderRecovery-v4.json",
+        "sid": "PruneExactStageBBrokerManagedPolicyVersions",
+        "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderRecovery",
+        "expectedVersion": "signed-administrator-evidence",
+        "expectedPolicySha256": "107239d33bcdadc0afb6c6378de34e94c2310d620cf64b343f52ed4b3147d7a1"
+      },
+      "required": true,
+      "mutation": true
     }
   ],
   "directProbes": [
     {
       "id": "caller",
       "action": "sts:GetCallerIdentity"
+    },
+    {
+      "id": "historical-runtime-network",
+      "action": "ec2:DescribeNetworkInterfaces"
     },
     {
       "id": "stage-a-subnets",
@@ -22736,6 +24971,14 @@
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "cloudtrail:LookupEvents"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ec2:DescribeNetworkInterfaces"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
       "action": "ecr:DescribeImages"
     },
     {
@@ -22777,6 +25020,10 @@
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
       "action": "dynamodb:GetItem"
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ec2:DescribeNetworkInterfaces"
     },
     {
       "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
@@ -23666,6 +25913,148 @@
       "sourceFile": "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
       "action": "sts:GetCallerIdentity",
       "identity": "ROOT_OPERATOR"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:GetItem"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:PutItem"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:UpdateItem"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "action": "cloudtrail:LookupEvents"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "kms:Sign",
+      "identity": "INDEPENDENT_CHECKER"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "kms:Verify"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "INDEPENDENT_CHECKER"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:GetAlias"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:GetFunctionConfiguration"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:ListVersionsByFunction"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "s3:GetObject"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "iam:CreatePolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "iam:DeletePolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:GetAlias"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:GetFunctionConfiguration"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:ListVersionsByFunction"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:UpdateAlias"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "s3:GetObject"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "sts:GetCallerIdentity"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetPolicyVersion"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetRole"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetRolePolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListAttachedRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListPolicyVersions"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListRolePolicies"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetAlias"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetFunctionConfiguration"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetPolicy"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListAliases"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListEventSourceMappings"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListFunctionUrlConfigs"
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListVersionsByFunction"
     },
     {
       "sourceFile": "scripts/aws/validate-production-green-stage-b-permissions.mjs",

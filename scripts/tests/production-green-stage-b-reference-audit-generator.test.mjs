@@ -9,6 +9,7 @@ import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, ca
 import {
   createAwsReader,
   generateReferenceAudit,
+  revalidateBootstrapForwardLivePredecessorReference,
   batch,
   parseCli,
 } from "../aws/generate-production-green-stage-b-reference-audit.mjs";
@@ -30,6 +31,8 @@ import { assertStageBFreshImageReferenceAuditBinding, assertStageBPlanApprovalRe
 import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { NORMAL_RECEIPT_WORKFLOW } from "../aws/production-normal-receipt-contract.mjs";
+import { COMPONENT_STATE_BOOTSTRAP_WORKFLOW } from "../aws/production-bootstrap-stage-b-predecessor-contract.mjs";
+import { WEB_RELEASE } from "../aws/production-web-release-contract.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const planSha256 = "a".repeat(64);
@@ -402,6 +405,36 @@ function makeNormalDeploymentLivePredecessorFixture({ mutateState, mutateService
   fixture.reader.describeImages = () => ({ imageDetails: structuredClone(imageDetails) });
   fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
   fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+function makeBootstrapForwardLivePredecessorFixture({ mutateState, mutateFrontend, readChangedFiles } = {}) {
+  const fixture = makeNormalDeploymentLivePredecessorFixture();
+  const state = fixture.reader.readProductionComponentDeploymentState();
+  const updatedAt = state.updatedAt;
+  state.generation = 1; state.updatedByLane = "BOOTSTRAP"; state.updatedByWorkflow = COMPONENT_STATE_BOOTSTRAP_WORKFLOW; state.githubRunId = "123456789";
+  const provenance = { lane: "BOOTSTRAP", workflow: COMPONENT_STATE_BOOTSTRAP_WORKFLOW, githubRunId: "123456789", generation: 1, updatedAt };
+  state.componentProvenance.backend = { ...provenance };
+  const frontendSource = "3".repeat(40), frontendDigest = `sha256:${"4".repeat(64)}`;
+  const frontendArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${WEB_RELEASE.family}:22`;
+  state.components.frontend = { sourceSha: frontendSource, establishedThroughSha: frontendSource, imageDigest: frontendDigest, taskDefinitionArn: frontendArn, desiredCount: 2 };
+  state.componentProvenance.frontend = { ...provenance };
+  mutateState?.(state);
+  fixture.reader.readProductionComponentDeploymentState = () => structuredClone(state);
+  const backendService = fixture.reader.describeServices([APP_ONLY.serviceArn]).services[0];
+  const frontendService = { serviceArn: `arn:aws:ecs:eu-west-2:368992683803:service/${WEB_RELEASE.cluster}/${WEB_RELEASE.serviceName}`, serviceName: WEB_RELEASE.serviceName, clusterArn, status: "ACTIVE", taskDefinition: frontendArn, desiredCount: 2, runningCount: 2, pendingCount: 0, deployments: [{ status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: frontendArn }] };
+  const frontendTaskDefinition = { taskDefinitionArn: frontendArn, family: WEB_RELEASE.family, revision: 22, status: "ACTIVE", containerDefinitions: [{ name: WEB_RELEASE.container, image: `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${frontendDigest}` }] };
+  const frontendRepository = { repositoryName: WEB_RELEASE.repository, registryId: WEB_RELEASE.account, imageTagMutability: "IMMUTABLE" };
+  const frontendImageDetails = [{ imageDigest: frontendDigest, imageTags: [frontendSource] }];
+  const frontend = { service: frontendService, taskDefinition: frontendTaskDefinition, repository: frontendRepository, imageDetails: frontendImageDetails };
+  mutateFrontend?.(frontend);
+  fixture.reader.listServices = () => [APP_ONLY.serviceArn, frontendService.serviceArn];
+  fixture.reader.describeServices = (arns) => ({ services: arns.map((arn) => structuredClone(arn === APP_ONLY.serviceArn ? backendService : frontend.service)), failures: [] });
+  const describeTaskDefinition = fixture.reader.describeTaskDefinition;
+  fixture.reader.describeTaskDefinition = (reference) => reference === frontendArn ? { taskDefinition: structuredClone(frontend.taskDefinition) } : describeTaskDefinition(reference);
+  fixture.reader.describeRepositories = (names) => ({ repositories: names.map((name) => structuredClone(name === WEB_RELEASE.repository ? frontend.repository : { repositoryName: "mscqr-backend", registryId: APP_ONLY.account, imageTagMutability: "IMMUTABLE" })) });
+  fixture.reader.describeImages = (repositoryName) => ({ imageDetails: structuredClone(repositoryName === WEB_RELEASE.repository ? frontend.imageDetails : [{ imageDigest: state.components.backend.imageDigest, imageTags: [state.components.backend.sourceSha] }]) });
+  fixture.options.readChangedFiles = readChangedFiles || ((fromSha) => fromSha === frontendSource ? ["backend/src/services/auditLogOutboxService.ts", "scripts/plan-production-green-stage-b.mjs"] : ["scripts/plan-production-green-stage-b.mjs"]);
   return fixture;
 }
 
@@ -1514,6 +1547,34 @@ test("authenticated normal deployment state authorizes its exact live predecesso
   assert.equal(audit.normalDeploymentLivePredecessorReference.taskDefinitionArn, fixture.reader.readProductionComponentDeploymentState().components.backend.taskDefinitionArn);
   assert.equal(audit.normalDeploymentLivePredecessorReference.deploymentWorkflow, NORMAL_RECEIPT_WORKFLOW);
   validateBrokerPlan(fixture, audit);
+});
+
+test("authenticated complete BOOTSTRAP state authorizes a stronger-lane Stage B forward predecessor", () => {
+  const fixture = makeBootstrapForwardLivePredecessorFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.bootstrapForwardLivePredecessorReference.componentStateGeneration, 1);
+  assert.equal(audit.bootstrapForwardLivePredecessorReference.sourceRanges.backend.releaseClass, "EMERGENCY_RECOVERY");
+  assert.equal(audit.bootstrapForwardLivePredecessorReference.sourceRanges.frontend.fromSha, "3".repeat(40));
+  validateBrokerPlan(fixture, audit);
+});
+
+test("bootstrap-forward reference cannot be removed, substituted, or built from partial component evidence", () => {
+  const fixture = makeBootstrapForwardLivePredecessorFixture();
+  const absent = generate(fixture); delete absent.bootstrapForwardLivePredecessorReference;
+  assert.throws(() => validateBrokerPlan(fixture, absent), /unrecorded task-definition ARN/);
+  const substituted = structuredClone(generate(fixture)); substituted.bootstrapForwardLivePredecessorReference.componentStateGeneration = 2;
+  assert.throws(() => validateBrokerPlan(fixture, substituted), /malformed or unbound/);
+  assert.throws(() => generate(makeBootstrapForwardLivePredecessorFixture({ mutateState: (state) => { state.components.frontend = null; delete state.componentProvenance.frontend; } })));
+  assert.throws(() => generate(makeBootstrapForwardLivePredecessorFixture({ readChangedFiles: () => ["unknown/production-input"] })), /Ambiguous/);
+});
+
+test("bootstrap-forward predecessor is re-read at the Stage B mutation boundary", () => {
+  const fixture = makeBootstrapForwardLivePredecessorFixture();
+  const reference = generate(fixture).bootstrapForwardLivePredecessorReference;
+  assert.doesNotThrow(() => revalidateBootstrapForwardLivePredecessorReference({ reference, reader: fixture.reader, toolingSha: fixture.plan.variables.tooling_sha.value, readChangedFiles: fixture.options.readChangedFiles }));
+  const original = fixture.reader.describeServices;
+  fixture.reader.describeServices = (arns) => { const response = original(arns); if (arns.includes(APP_ONLY.serviceArn)) response.services[0].pendingCount = 1; return response; };
+  assert.throws(() => revalidateBootstrapForwardLivePredecessorReference({ reference, reader: fixture.reader, toolingSha: fixture.plan.variables.tooling_sha.value, readChangedFiles: fixture.options.readChangedFiles }));
 });
 
 test("legacy aggregate provenance remains accepted until its next authenticated component write", () => {
@@ -2890,4 +2951,154 @@ test("AWS reader uses argv arrays and only read-only commands", () => {
     clusterArn: `${clusterArn};touch /tmp/should-not-run`,
     run: () => JSON.stringify({ serviceArns: [] }),
   }), /exact production region and cluster/);
+});
+
+test("canonical reference audit permits only the exact bootstrap historical runtime, without trusting its family", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const fixture = makeBootstrapForwardLivePredecessorFixture(), runtime = historicalRuntimeFixture();
+  runtime.task.createdAt = runtime.launch.eventTime = "2026-07-30T10:00:00.000Z";
+  runtime.definition.registeredAt = runtime.registration.eventTime = "2026-07-30T09:00:00.000Z";
+  const original = { ...fixture.reader };
+  Object.assign(fixture.reader, {
+    listTasks: (status) => [...original.listTasks(status), ...(status === "RUNNING" ? runtime.tasks.map(({ taskArn }) => taskArn) : [])],
+    describeTasks: (arns) => ({ tasks: [...original.describeTasks(arns.filter((arn) => !runtime.tasks.some((task) => task.taskArn === arn))).tasks, ...runtime.reader.describeTasks(arns).tasks], failures: [] }),
+    describeTaskDefinition: (arn) => arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn),
+    describeImages: (name, digest) => name === "mscqr-worker" ? runtime.reader.describeImages(name, digest) : original.describeImages(name, digest),
+    describeRepositories: (names) => names.includes("mscqr-worker") ? runtime.reader.describeRepositories(names) : original.describeRepositories(names),
+    describeNetworkInterfaces: runtime.reader.describeNetworkInterfaces, lookupEvents: runtime.reader.lookupEvents,
+    isProtectedSource: () => true,
+  });
+  const options = { historicalRuntimeTaskArn: runtime.taskArn, readToolingTreeSha256: () => "f".repeat(64) };
+  const audit = generate(fixture, options);
+  assert.equal(audit.historicalRuntimeReference.runtime.taskArn, runtime.taskArn);
+  assert.equal(audit.historicalRuntimeReference.historicalGovernedDeploymentProvenance, false);
+  assert.equal(audit.historicalRuntimeReference.bootstrap.componentStateSha256, audit.bootstrapForwardLivePredecessorReference.componentStateSha256);
+  validateBrokerPlan(fixture, audit);
+  runtime.tasks.push({ ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2") });
+  assert.throws(() => generate(fixture, options), /additional workers/);
+  const { verifyHistoricalRuntimeInventory } = await import("../aws/production-historical-runtime-evidence.mjs");
+  for (const signal of ["role", "image", "command", "ambiguous", "backend", "frontend", "standalone-role-override", "standalone-command-override", "service-role-override", "service-command-override", "service-entrypoint-override", "ambiguous-override", "backend-overrides", "empty-overrides", "no-overrides"]) {
+    const definitionArn = runtime.definitionArn.replace("mscqr-production-rls-green-worker-candidate", "renamed-service");
+    const definition = { ...runtime.definition, family: "renamed-service", taskDefinitionArn: definitionArn,
+      taskRoleArn: `arn:aws:iam::368992683803:role/mscqr-${signal}-task`,
+      containerDefinitions: [{ name: signal, image: "example/non-worker@sha256:" + "a".repeat(64), command: ["node", "dist/server.js"] }] };
+    if (signal === "role") definition.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal === "image") definition.containerDefinitions[0].image = runtime.definition.containerDefinitions[0].image;
+    if (signal === "command") definition.containerDefinitions[0].command = ["node", "dist/worker.js"];
+    if (signal === "ambiguous") definition.containerDefinitions[0].name = "worker";
+    const extra = { ...runtime.task, taskArn: runtime.taskArn.replace(/1/g, "2"), taskDefinitionArn: definitionArn,
+      group: signal.startsWith("standalone-") ? "family:renamed-service" : "service:renamed-service", overrides: {} };
+    if (signal.endsWith("role-override")) extra.overrides.taskRoleArn = runtime.definition.taskRoleArn;
+    if (signal.endsWith("command-override")) extra.overrides.containerOverrides = [{ name: signal, command: ["node", "dist/worker.js"] }];
+    if (signal === "service-entrypoint-override") extra.overrides.containerOverrides = [{ name: signal, entryPoint: ["node", "dist/worker.js"] }];
+    if (signal === "ambiguous-override") extra.overrides.containerOverrides = [{ name: "worker" }];
+    if (signal === "backend-overrides") extra.overrides = { taskRoleArn: definition.taskRoleArn, containerOverrides: [{ name: signal, command: ["node", "dist/server.js"] }] };
+    if (signal === "empty-overrides") extra.overrides.containerOverrides = [];
+    if (signal === "no-overrides") delete extra.overrides;
+    runtime.tasks.splice(1, runtime.tasks.length, extra);
+    fixture.reader.describeTaskDefinition = arn => arn === definitionArn ? { taskDefinition: definition } : arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn);
+    const closure = () => verifyHistoricalRuntimeInventory({ reference: audit.historicalRuntimeReference, reader: fixture.reader });
+    if (["backend", "frontend", "backend-overrides", "empty-overrides", "no-overrides"].includes(signal)) {
+      assert.ok(generate(fixture, options).historicalRuntimeReference);
+      assert.equal(closure(), true);
+    } else {
+      assert.throws(() => generate(fixture, options), /additional workers|Ambiguous worker identity/, signal);
+      assert.throws(closure, /second worker|Ambiguous worker identity/, signal);
+    }
+  }
+});
+
+function makeConvergedBrokerNoOpFixture() {
+  const fixture = makeAtomicBrokerFixture({ brokerActions: ["no-op"] });
+  for (const change of fixture.plan.resource_changes.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address))) {
+    change.change.actions = ["no-op"];
+    change.change.before = structuredClone(change.change.after);
+    delete change.change.replace_paths;
+    fixture.plan.planned_values.root_module.resources.find((item) => item.address === change.address).values = structuredClone(change.change.after);
+  }
+  const configuration = fixture.reader.getFunctionConfiguration();
+  const targets = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, newArnFor(familyForMode(mode))]));
+  configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+  fixture.reader.getFunctionConfiguration = () => structuredClone(configuration);
+  const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+  broker.change.before = { environment: [{ variables: structuredClone(configuration.Environment.Variables) }] };
+  broker.change.after = structuredClone(broker.change.before);
+  delete broker.change.after_unknown;
+  fixture.plan.prior_state.values.root_module.resources.filter((item) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, item.address)).forEach((item) => {
+    item.values = structuredClone(fixture.plan.resource_changes.find((change) => change.address === item.address).change.before);
+  });
+  return rebindNoOpFixture(fixture);
+}
+
+function rebindNoOpFixture(fixture) {
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+test("converged broker current exact references with a no-op plan pass without invented rollovers", () => {
+  const fixture = makeConvergedBrokerNoOpFixture(), audit = generate(fixture);
+  assert.equal(audit.plannedAtomicBrokerRollovers.length, 0);
+  assert.equal(audit.currentTaskDefinitions.currentNoOps, 12);
+  validateBrokerPlan(fixture, audit);
+});
+
+for (const mode of STAGE_B_MODES) {
+  test(`converged broker rejects stale no-op reference for ${mode}`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const original = fixture.reader.getFunctionConfiguration;
+    fixture.reader.getFunctionConfiguration = () => {
+      const config = original(), targets = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+      targets[mode] = oldArnFor(familyForMode(mode));
+      config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+      return config;
+    };
+    assert.throws(() => generate(fixture), /superseded|no-op planned references/);
+  });
+}
+
+test("converged broker rejects unknown no-op reference", () => {
+  const fixture = makeConvergedBrokerNoOpFixture(), original = fixture.reader.getFunctionConfiguration;
+  fixture.reader.getFunctionConfiguration = () => {
+    const config = original(), targets = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    targets["full-rls-admin-bootstrap"] = newArnFor(familyForMode("full-rls-admin-bootstrap")).replace(":2", ":999");
+    config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+    return config;
+  };
+  assert.throws(() => generate(fixture), /not an explicitly retained or current no-op revision/);
+});
+
+for (const side of ["before", "after"]) {
+  test(`converged broker rejects conflicting ${side} no-op target`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+    const targets = JSON.parse(broker.change[side].environment[0].variables.BROKER_TASK_DEFINITIONS_JSON);
+    targets["full-rls-admin-bootstrap"] = oldArnFor(familyForMode("full-rls-admin-bootstrap"));
+    broker.change[side].environment[0].variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(targets);
+    assert.throws(() => generate(rebindNoOpFixture(fixture)), /planned references must equal/);
+  });
+}
+
+for (const mutation of ["broker", "definition", "planned-arn", "environment", "missing-map", "malformed-map", "unknown-map", "unknown-broker"]) {
+  test(`converged broker rejects ambiguous or incomplete ${mutation} authority`, () => {
+    const fixture = makeConvergedBrokerNoOpFixture();
+    const broker = fixture.plan.resource_changes.find((item) => item.address === "aws_lambda_function.broker");
+    const definition = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+    if (mutation === "broker") fixture.plan.resource_changes.push(structuredClone(broker));
+    if (mutation === "definition") fixture.plan.resource_changes.push(structuredClone(definition));
+    if (mutation === "planned-arn") definition.change.after.arn = definition.change.after.arn.replace(":2", ":3");
+    if (mutation === "environment") broker.change.after.environment.push(structuredClone(broker.change.after.environment[0]));
+    if (mutation === "missing-map") delete broker.change.after.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON;
+    if (mutation === "malformed-map") broker.change.after.environment[0].variables.BROKER_TASK_DEFINITIONS_JSON = "{";
+    if (mutation === "unknown-map") broker.change.after_unknown = { environment: [{ variables: true }] };
+    if (mutation === "unknown-broker") broker.change.after_unknown = true;
+    assert.throws(() => generate(rebindNoOpFixture(fixture)), /one exact|duplicate|planned ARN|environment must be exact|missing|malformed|unknown|no-op has drift/i);
+  });
+}
+
+test("converged broker no-op still rejects stale source/image content", () => {
+  const fixture = makeConvergedBrokerNoOpFixture();
+  const definition = fixture.plan.resource_changes.find((item) => item.address === executorAddressForMode("full-rls-admin-bootstrap"));
+  for (const side of ["before", "after"]) definition.change[side].container_definitions = definition.change[side].container_definitions.replace(releaseSha, "0".repeat(40));
+  assert.throws(() => generate(rebindNoOpFixture(fixture)), /provenance is stale|planned value drift/);
 });

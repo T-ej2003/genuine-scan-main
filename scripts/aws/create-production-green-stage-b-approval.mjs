@@ -6,7 +6,7 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import {
   STAGE_B,
-  STAGE_B_APPROVAL_FIELDS,
+  stageBApprovalFields,
   STAGE_B_APPROVAL_ALGORITHM,
   canonicalStageBApproval,
   stageBApprovalSha256,
@@ -20,7 +20,7 @@ const option = (name) => {
   return index < 0 ? "" : String(process.argv[index + 1] || "").trim();
 };
 const required = (name) => option(name) || (() => { throw new Error(`${name} is required.`); })();
-const exactInput = (input) => Object.keys(input || {}).sort().join(",") === [...STAGE_B_APPROVAL_FIELDS].sort().join(",");
+const exactInput = (input) => Object.keys(input || {}).sort().join(",") === stageBApprovalFields(input).sort().join(",");
 const awsJson = (run, args) => JSON.parse(run([...args, "--output", "json"]) || "{}");
 const withMessage = (callback) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-approval-"));
@@ -32,7 +32,7 @@ export async function prepareStageBApproval(input, { now = new Date() } = {}) {
   if (!exactInput(input)) throw new Error("Stage B approval input fields do not match schema version 2.");
   if (input.signatureAlgorithm !== STAGE_B_APPROVAL_ALGORITHM) throw new Error("Stage B approval signing algorithm is outside the reviewed contract.");
   await validateStageBApprovalPayload(input, undefined, { now });
-  return { approval: Object.fromEntries(STAGE_B_APPROVAL_FIELDS.map((field) => [field, input[field]])), approvalContractSha256: stageBApprovalSha256(input) };
+  return { approval: Object.fromEntries(stageBApprovalFields(input).map((field) => [field, input[field]])), approvalContractSha256: stageBApprovalSha256(input) };
 }
 
 export async function signStageBApproval(input, {

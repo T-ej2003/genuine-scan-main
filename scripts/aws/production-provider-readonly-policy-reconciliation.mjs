@@ -6,7 +6,7 @@ import JSZip from "jszip";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity, createProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
-import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE } from "./production-green-stage-b-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -50,12 +50,50 @@ export const PROVIDER_READONLY_RECONCILIATION = Object.freeze({
 
 export const providerReadonlyProductionSleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
+// Enumerated staged-inventory evolution; these are reviewed policy identities,
+// not release/source identities. Future policy evolution requires a new contract.
+const STAGED_TARGET = "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5";
+const STAGED_PREDECESSOR = "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade";
+const STAGED_SIDS = ["ReadExactStageBRoles", "ReadExactStageBBrokerFunction", "ReadExactStageBBrokerAlias", "ListRegionalBrokerEventMappings", "ReadExactStagedBrokerCallerPolicies"];
+function stagedInventoryTransition(document) {
+  if (sha256(document) !== STAGED_TARGET) throw new Error("ProviderReadOnly canonical target requires independent transition review.");
+  const before = structuredClone(document);
+  const statement = sid => {
+    const matches = before.Statement.filter(s => s.Sid === sid);
+    if (matches.length !== 1) throw new Error("ProviderReadOnly staged statement identity is ambiguous.");
+    return matches[0];
+  };
+  const removeExact = (values, removed) => {
+    if (!Array.isArray(values) || removed.some(value => values.filter(v => v === value).length !== 1)) throw new Error("ProviderReadOnly staged semantic addition is invalid.");
+    return values.filter(value => !removed.includes(value));
+  };
+  const roles = statement(STAGED_SIDS[0]);
+  roles.Resource = removeExact(roles.Resource, [PROVIDER_READONLY_RECONCILIATION.releaseRoleArn]);
+  const fn = statement(STAGED_SIDS[1]);
+  fn.Action = removeExact(fn.Action, ["lambda:ListAliases", "lambda:ListFunctionUrlConfigs"]);
+  const alias = statement(STAGED_SIDS[2]);
+  alias.Resource = removeExact(alias.Resource, [`${STAGE_B.brokerFunctionArn}:*`]);
+  statement(STAGED_SIDS[3]); statement(STAGED_SIDS[4]);
+  before.Statement = before.Statement.filter(s => !STAGED_SIDS.slice(3).includes(s.Sid));
+  if (sha256(before) !== STAGED_PREDECESSOR) throw new Error("ProviderReadOnly staged semantic predecessor is invalid.");
+  return { document: before, hash: STAGED_PREDECESSOR, delta: { add: document.Statement.filter(s => STAGED_SIDS.slice(3).includes(s.Sid)), remove: [], change: STAGED_SIDS.slice(0, 3).map(sid => ({ sid, before: before.Statement.find(s => s.Sid === sid), after: document.Statement.find(s => s.Sid === sid) })) } };
+}
+const assertCanonicalDesired = desired => {
+  if (canonicalJson(desired) !== canonicalJson(readProviderReadonlyDesiredPolicy())) throw new Error("ProviderReadOnly desired policy is not the protected canonical target.");
+};
+const transitionDelta = (desired, hash) => {
+  if (hash === desired.predecessorPolicySha256) return delta;
+  if (hash === desired.stagedPredecessorPolicySha256) return desired.stagedSemanticDelta;
+  throw new Error("ProviderReadOnly predecessor transition is unknown.");
+};
+
 export function readProviderReadonlyDesiredPolicy({ repositoryRoot = root } = {}) {
   const document = normalizeIamPolicyDocument(fs.readFileSync(path.resolve(repositoryRoot, PROVIDER_READONLY_RECONCILIATION.sourcePath), "utf8"), "ProviderReadOnly source policy");
   const worker = document.Statement?.filter(({ Sid }) => Sid === WORKER_SID) || [];
   if (worker.length !== 1 || canonicalJson(worker[0]) !== canonicalJson({ Sid: WORKER_SID, Effect: "Allow", Action: "ecr:DescribeImages", Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } })) throw new Error("ProviderReadOnly source policy does not contain the exact reviewed worker statement.");
+  const staged = stagedInventoryTransition(document);
   const predecessorDocument = { ...document, Statement: document.Statement.filter(({ Sid }) => Sid !== WORKER_SID) };
-  return Object.freeze({ sourcePath: PROVIDER_READONLY_RECONCILIATION.sourcePath, document, sourcePolicySha256: sha256(document), predecessorDocument, predecessorPolicySha256: sha256(predecessorDocument) });
+  return Object.freeze({ sourcePath: PROVIDER_READONLY_RECONCILIATION.sourcePath, document, sourcePolicySha256: sha256(document), predecessorDocument, predecessorPolicySha256: sha256(predecessorDocument), stagedPredecessorDocument: staged.document, stagedPredecessorPolicySha256: staged.hash, stagedSemanticDelta: staged.delta });
 }
 
 const normalizeVersions = (versions) => {
@@ -69,13 +107,14 @@ const normalizeVersions = (versions) => {
 };
 
 export function authenticateProviderReadonlyLiveState(value, { desired = readProviderReadonlyDesiredPolicy(), allowPostState = true } = {}) {
+  assertCanonicalDesired(desired);
   exactKeys(value, ["policyArn", "defaultVersionId", "document", "versions", "attachedRoles", "attachedUsers", "attachedGroups", "permissionsBoundaryUsageCount"], "ProviderReadOnly live state");
   const versions = normalizeVersions(value.versions);
   const document = normalizeIamPolicyDocument(value.document, "ProviderReadOnly live policy");
   const documentSha256 = sha256(document);
   const attachedRoles = [...value.attachedRoles].sort(); const attachedUsers = [...value.attachedUsers].sort(); const attachedGroups = [...value.attachedGroups].sort();
   if (value.policyArn !== PROVIDER_READONLY_RECONCILIATION.policyArn || !VERSION.test(value.defaultVersionId || "") || versions.find(({ isDefault }) => isDefault)?.versionId !== value.defaultVersionId || canonicalJson(attachedRoles) !== canonicalJson([PROVIDER_READONLY_RECONCILIATION.releaseRoleName]) || attachedUsers.length || attachedGroups.length || value.permissionsBoundaryUsageCount !== 0) throw new Error("ProviderReadOnly target or attachment topology is invalid.");
-  const pre = documentSha256 === desired.predecessorPolicySha256;
+  const pre = documentSha256 === desired.predecessorPolicySha256 || documentSha256 === desired.stagedPredecessorPolicySha256;
   const post = allowPostState && documentSha256 === desired.sourcePolicySha256;
   if (!pre && !post) throw new Error("ProviderReadOnly live policy contains unexpected drift.");
   return Object.freeze({ ...value, document, versions, attachedRoles, attachedUsers, attachedGroups, documentSha256, versionInventorySha256: sha256(versions), attachmentTopologySha256: sha256({ roles: attachedRoles, users: attachedUsers, groups: attachedGroups, permissionsBoundaryUsageCount: 0 }), status: post ? "EXPECTED_POST_STATE" : "AUTHENTICATED_PRE_STATE" });
@@ -95,12 +134,13 @@ export const providerReadonlyOperationId = ({ sourceSha, currentDefaultVersionId
   attachmentTopologySha256,
 });
 const preparationBody = ({ sourceSha, state, desired, preparedAt }) => {
+  const semanticDelta = transitionDelta(desired, state.documentSha256);
   const created = iso(preparedAt, "ProviderReadOnly preparation createdAt");
   const operationId = providerReadonlyOperationId({ sourceSha, currentDefaultVersionId: state.defaultVersionId, currentDefaultDocumentSha256: state.documentSha256, desiredDocumentSha256: desired.sourcePolicySha256, versionInventorySha256: state.versionInventorySha256, attachmentTopologySha256: state.attachmentTopologySha256 });
   return {
     schemaVersion: 1, kind: "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_PREPARATION", operation: PROVIDER_READONLY_RECONCILIATION.operation, operationId,
     sourceSha, account: PROVIDER_READONLY_RECONCILIATION.account, targetPolicyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, sourcePolicyPath: desired.sourcePath, sourcePolicySha256: desired.sourcePolicySha256,
-    currentDefaultVersionId: state.defaultVersionId, currentDefaultDocumentSha256: state.documentSha256, desiredDocumentSha256: desired.sourcePolicySha256, semanticDelta: delta, semanticDeltaSha256: sha256(delta),
+    currentDefaultVersionId: state.defaultVersionId, currentDefaultDocumentSha256: state.documentSha256, desiredDocumentSha256: desired.sourcePolicySha256, semanticDelta, semanticDeltaSha256: sha256(semanticDelta),
     versionInventory: state.versions, versionInventorySha256: state.versionInventorySha256, policyVersionCount: state.versions.length, versionLimitReached: state.versions.length === 5, deletionRequired: false, deletionCandidate: null, deletionPolicySource: PROVIDER_READONLY_RECONCILIATION.retentionRule,
     attachmentTopology: { roles: state.attachedRoles, users: state.attachedUsers, groups: state.attachedGroups, permissionsBoundaryUsageCount: 0 }, attachmentTopologySha256: state.attachmentTopologySha256,
     expectedWritePlan: [{ action: "iam:CreatePolicyVersion", policyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, policyDocumentSha256: desired.sourcePolicySha256, setAsDefault: true }], expectedWritePlanSha256: sha256([{ action: "iam:CreatePolicyVersion", policyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, policyDocumentSha256: desired.sourcePolicySha256, setAsDefault: true }]),
@@ -119,11 +159,13 @@ export function createProviderReadonlyPreparation({ sourceSha, liveState, desire
 }
 
 export function assertProviderReadonlyPreparation(value, { sourceSha, desired = readProviderReadonlyDesiredPolicy(), now = new Date(), allowExpired = false } = {}) {
+  assertCanonicalDesired(desired);
+  const semanticDelta = transitionDelta(desired, value?.currentDefaultDocumentSha256);
   exactKeys(value, PREPARATION_FIELDS, "ProviderReadOnly preparation");
   const body = { ...value }; delete body.preparationSha256;
   const versions = normalizeVersions(value.versionInventory);
   const expectedOperationId = providerReadonlyOperationId({ sourceSha, currentDefaultVersionId: value.currentDefaultVersionId, currentDefaultDocumentSha256: value.currentDefaultDocumentSha256, desiredDocumentSha256: value.desiredDocumentSha256, versionInventorySha256: value.versionInventorySha256, attachmentTopologySha256: value.attachmentTopologySha256 });
-  if (!value || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_PREPARATION" || value.operation !== PROVIDER_READONLY_RECONCILIATION.operation || value.operationId !== expectedOperationId || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== PROVIDER_READONLY_RECONCILIATION.account || value.targetPolicyArn !== PROVIDER_READONLY_RECONCILIATION.policyArn || value.sourcePolicyPath !== desired.sourcePath || value.sourcePolicySha256 !== desired.sourcePolicySha256 || value.currentDefaultDocumentSha256 !== desired.predecessorPolicySha256 || value.desiredDocumentSha256 !== desired.sourcePolicySha256 || versions.find(({ isDefault }) => isDefault)?.versionId !== value.currentDefaultVersionId || value.semanticDeltaSha256 !== sha256(delta) || canonicalJson(value.semanticDelta) !== canonicalJson(delta) || value.versionLimitReached !== false || value.deletionRequired !== false || value.deletionCandidate !== null || value.deletionPolicySource !== "NONE_FAIL_CLOSED" || value.policyVersionCount !== versions.length || value.policyVersionCount < 1 || value.policyVersionCount > 4 || value.versionInventorySha256 !== sha256(versions) || value.attachmentTopologySha256 !== sha256(value.attachmentTopology) || canonicalJson(value.attachmentTopology) !== canonicalJson({ roles: [PROVIDER_READONLY_RECONCILIATION.releaseRoleName], users: [], groups: [], permissionsBoundaryUsageCount: 0 }) || canonicalJson(value.expectedWritePlan) !== canonicalJson([{ action: "iam:CreatePolicyVersion", policyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, policyDocumentSha256: desired.sourcePolicySha256, setAsDefault: true }]) || value.expectedWritePlanSha256 !== sha256(value.expectedWritePlan) || value.preparationEligible !== true || !SHA256.test(value.preparationSha256 || "") || value.preparationSha256 !== sha256(body)) throw new Error("ProviderReadOnly preparation binding is invalid.");
+  if (!value || value.schemaVersion !== 1 || value.kind !== "PRODUCTION_PROVIDER_READONLY_POLICY_RECONCILIATION_PREPARATION" || value.operation !== PROVIDER_READONLY_RECONCILIATION.operation || value.operationId !== expectedOperationId || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== PROVIDER_READONLY_RECONCILIATION.account || value.targetPolicyArn !== PROVIDER_READONLY_RECONCILIATION.policyArn || value.sourcePolicyPath !== desired.sourcePath || value.sourcePolicySha256 !== desired.sourcePolicySha256 || value.desiredDocumentSha256 !== desired.sourcePolicySha256 || versions.find(({ isDefault }) => isDefault)?.versionId !== value.currentDefaultVersionId || value.semanticDeltaSha256 !== sha256(semanticDelta) || canonicalJson(value.semanticDelta) !== canonicalJson(semanticDelta) || value.versionLimitReached !== false || value.deletionRequired !== false || value.deletionCandidate !== null || value.deletionPolicySource !== "NONE_FAIL_CLOSED" || value.policyVersionCount !== versions.length || value.policyVersionCount < 1 || value.policyVersionCount > 4 || value.versionInventorySha256 !== sha256(versions) || value.attachmentTopologySha256 !== sha256(value.attachmentTopology) || canonicalJson(value.attachmentTopology) !== canonicalJson({ roles: [PROVIDER_READONLY_RECONCILIATION.releaseRoleName], users: [], groups: [], permissionsBoundaryUsageCount: 0 }) || canonicalJson(value.expectedWritePlan) !== canonicalJson([{ action: "iam:CreatePolicyVersion", policyArn: PROVIDER_READONLY_RECONCILIATION.policyArn, policyDocumentSha256: desired.sourcePolicySha256, setAsDefault: true }]) || value.expectedWritePlanSha256 !== sha256(value.expectedWritePlan) || value.preparationEligible !== true || !SHA256.test(value.preparationSha256 || "") || value.preparationSha256 !== sha256(body)) throw new Error("ProviderReadOnly preparation binding is invalid.");
   const created = iso(value.createdAt, "ProviderReadOnly preparation createdAt"); const expires = iso(value.expiresAt, "ProviderReadOnly preparation expiresAt"); const current = now instanceof Date ? now : new Date(now);
   if (!Number.isFinite(current.getTime()) || expires.getTime() - created.getTime() !== PROVIDER_READONLY_RECONCILIATION.maxAgeMs || current < created || (!allowExpired && current > expires)) throw new Error("ProviderReadOnly preparation is stale.");
   return value;

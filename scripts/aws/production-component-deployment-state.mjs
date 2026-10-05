@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import { assertHistoricalRuntimeRetention } from "./production-historical-runtime-contract.mjs";
 import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
-import { assertNormalDeploymentReceipt, normalReceiptHash } from "./production-normal-receipt-contract.mjs";
+import { assertNormalDeploymentReceipt, normalReceiptHash, NORMAL_DEPLOYABLE_COMPONENTS } from "./production-normal-receipt-contract.mjs";
 
 export const PRODUCTION_COMPONENT_STATE = Object.freeze({ table: "mscqr-production-component-deployment-state", key: "production#T-ej2003/genuine-scan-main", account: "368992683803", region: "eu-west-2", repository: "T-ej2003/genuine-scan-main" });
 const SHA = /^[a-f0-9]{40}$/, DIGEST = /^sha256:[a-f0-9]{64}$/;
-const components = new Set(["backend", "frontend", "database", "security"]);
+const components = new Set([...NORMAL_DEPLOYABLE_COMPONENTS, "database", "security"]);
 const lanes = new Set(["BOOTSTRAP", "NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"]);
 const canonical = (value) => JSON.stringify(value);
 const clone = (value) => structuredClone(value);
@@ -18,6 +19,7 @@ export function assertProductionComponentDeploymentState(value) {
   assert.ok(lanes.has(value.updatedByLane));
   assert.match(value.updatedByWorkflow || "", /^[A-Za-z0-9_.:/@-]{1,512}$/); assert.match(String(value.githubRunId || ""), /^(?:[1-9][0-9]*|bootstrap|local-test)$/);
   assert.deepEqual(Object.keys(value.components || {}).sort(), [...components].sort());
+  if (value.historicalRuntimeRetention !== undefined) { assertHistoricalRuntimeRetention(value.historicalRuntimeRetention); assert.ok(value.historicalRuntimeRetention.closure.generation <= value.generation); }
   if (value.normalDeploymentReceipt !== undefined) assertNormalDeploymentReceipt(value.normalDeploymentReceipt);
   if (value.completedEmergencyWork !== undefined) {
     assert.notEqual(value.updatedByLane, "BOOTSTRAP", "Bootstrap cannot attest completed emergency operations");
@@ -32,7 +34,7 @@ export function assertProductionComponentDeploymentState(value) {
     assert.ok(component === null || typeof component === "object", `${name} state malformed`);
     if (!component) continue;
     assert.match(component.sourceSha || "", SHA); assert.match(component.releaseIdentity || component.imageDigest || "", component.imageDigest ? DIGEST : /^.{1,512}$/);
-    if (["backend", "frontend"].includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
+    if (NORMAL_DEPLOYABLE_COMPONENTS.includes(name)) { assert.match(component.establishedThroughSha || "", SHA); assert.match(component.imageDigest || "", DIGEST); assert.match(component.taskDefinitionArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[^:]+:[1-9][0-9]*$/); assert.ok(Number.isSafeInteger(component.desiredCount) && component.desiredCount > 0, `${name} desired count malformed`); }
   }
   if (value.schemaVersion === 1) assert.equal(value.componentProvenance, undefined, "Legacy component state cannot claim v2 provenance");
   else {
@@ -54,12 +56,28 @@ export function componentDeploymentProvenance(state, name) {
   return Object.freeze(clone(state.schemaVersion === 1 ? aggregateProvenance(state) : state.componentProvenance[name]));
 }
 
+// Normal reconciliation is component-scoped, but its authority is the whole
+// committed live-service baseline. Derive that set from the canonical schema,
+// never from the receipt subset being reconciled.
+export function normalDeploymentLiveComponents(state, changes = {}) {
+  assertProductionComponentDeploymentState(state);
+  assert.ok(changes && typeof changes === "object" && !Array.isArray(changes));
+  for (const [name, component] of Object.entries(changes)) {
+    assert.ok(NORMAL_DEPLOYABLE_COMPONENTS.includes(name), `${name} is not a normal deployable component`);
+    assert.ok(component && typeof component === "object" && !Array.isArray(component), `${name} normal deployment identity is malformed`);
+  }
+  return Object.freeze(Object.fromEntries(NORMAL_DEPLOYABLE_COMPONENTS
+    .map((name) => [name, Object.hasOwn(changes, name) ? changes[name] : state.components[name]])
+    .filter(([, component]) => component)
+    .map(([name, component]) => [name, clone(component)])));
+}
+
 export function createProductionComponentDeploymentState({ components: stateComponents, now = new Date().toISOString(), updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
   const provenance = { lane: "BOOTSTRAP", workflow: updatedByWorkflow, githubRunId: String(githubRunId), generation: 1, updatedAt: now };
   return Object.freeze(assertProductionComponentDeploymentState({ schemaVersion: 2, environment: "production", repository: PRODUCTION_COMPONENT_STATE.repository, generation: 1, updatedAt: now, updatedByLane: "BOOTSTRAP", updatedByWorkflow, githubRunId: String(githubRunId), components: stateComponents, componentProvenance: Object.fromEntries(Object.entries(stateComponents).filter(([, component]) => component).map(([name]) => [name, { ...provenance }])) }));
 }
 
-export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, emergencyCompletion, normalReceiptSha256, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
+export function advanceProductionComponentDeploymentState({ current, expectedGeneration, lane, changes, historicalRuntimeRetention, emergencyCompletion, normalReceiptSha256, now = new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow = "local-test", githubRunId = "local-test" } = {}) {
   assertProductionComponentDeploymentState(current); assert.equal(expectedGeneration, current.generation); assert.ok(["NORMAL_APPLICATION", "SECURITY_INFRASTRUCTURE", "EMERGENCY_RECOVERY"].includes(lane));
   assert.ok(changes && typeof changes === "object" && !Array.isArray(changes));
   assert.ok(Object.keys(changes).length > 0, "A component-state transition must declare an authenticated component mutation set");
@@ -72,7 +90,7 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
   } else assert.equal(normalReceiptSha256, undefined, "Normal receipt is unavailable to this terminal");
   for (const [name, next] of Object.entries(changes)) {
     assert.ok(components.has(name)); assert.ok(next && typeof next === "object"); assert.match(next.sourceSha || "", SHA);
-    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (["backend", "frontend"].includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
+    if (lane === "NORMAL_APPLICATION") { assert.ok(current.components[name], "Normal deployment requires bootstrapped component state"); assert.equal(recovery, false); if (NORMAL_DEPLOYABLE_COMPONENTS.includes(name)) assert.equal(next.establishedThroughSha, next.sourceSha, "Normal deployment must establish the deployed candidate source"); }
     if (current.components[name]) {
       const sameSource = next.sourceSha === current.components[name].sourceSha;
       if (sameSource) {
@@ -88,7 +106,19 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
       }
     }
   }
+  if (historicalRuntimeRetention !== undefined) {
+    assertHistoricalRuntimeRetention(historicalRuntimeRetention);
+    if (current.historicalRuntimeRetention) assert.deepEqual(historicalRuntimeRetention, current.historicalRuntimeRetention, "Retained runtime cannot be deleted, replaced or superseded without governed successor authority");
+    else {
+      assert.equal(lane, "SECURITY_INFRASTRUCTURE"); assert.equal(current.generation, 1); assert.equal(current.updatedByLane, "BOOTSTRAP");
+      assert.equal(current.normalDeploymentReceipt, undefined); assert.equal(stateHash(current), historicalRuntimeRetention.reference.bootstrap.componentStateSha256);
+      assert.equal(updatedByWorkflow, historicalRuntimeRetention.closure.workflow); assert.equal(String(githubRunId), historicalRuntimeRetention.closure.githubRunId);
+      assert.equal(historicalRuntimeRetention.closure.generation, current.generation + 1);
+      assert.equal(changes.security?.sourceSha, historicalRuntimeRetention.reference.recoverySourceSha);
+    }
+  }
   const next = clone(current); next.generation++; next.updatedAt = now; next.updatedByLane = lane; next.updatedByWorkflow = updatedByWorkflow; next.githubRunId = String(githubRunId);
+  if (historicalRuntimeRetention !== undefined) next.historicalRuntimeRetention = clone(historicalRuntimeRetention);
   // Schema v1 recorded only the last aggregate writer. Its next authenticated
   // mutation snapshots that legacy provenance per unchanged component, then v2
   // updates provenance only for components changed by this operation.
@@ -126,6 +156,15 @@ export function advanceProductionComponentDeploymentState({ current, expectedGen
 
 export function componentStateCasRequest({ current, next } = {}) {
   assertProductionComponentDeploymentState(current); assertProductionComponentDeploymentState(next); assert.equal(next.generation, current.generation + 1);
+  if (current.historicalRuntimeRetention) assert.deepEqual(next.historicalRuntimeRetention, current.historicalRuntimeRetention, "CAS cannot remove or alter historical retention");
+  else if (next.historicalRuntimeRetention) {
+    const retention = next.historicalRuntimeRetention;
+    assert.equal(current.generation, 1); assert.equal(current.updatedByLane, "BOOTSTRAP"); assert.equal(current.normalDeploymentReceipt, undefined);
+    assert.equal(next.updatedByLane, "SECURITY_INFRASTRUCTURE"); assert.equal(next.normalDeploymentReceipt, undefined);
+    assert.equal(retention.reference.bootstrap.componentStateSha256, stateHash(current));
+    assert.equal(retention.closure.generation, next.generation); assert.equal(retention.closure.workflow, next.updatedByWorkflow); assert.equal(retention.closure.githubRunId, String(next.githubRunId));
+    assert.equal(next.components.security?.sourceSha, retention.reference.recoverySourceSha);
+  }
   return Object.freeze({ TableName: PRODUCTION_COMPONENT_STATE.table, Key: { stateKey: { S: PRODUCTION_COMPONENT_STATE.key } }, UpdateExpression: "SET #state = :state, #generation = :nextGeneration", ConditionExpression: "#generation = :generation", ExpressionAttributeNames: { "#state": "state", "#generation": "generation" }, ExpressionAttributeValues: { ":state": { S: canonical(next) }, ":generation": { N: String(current.generation) }, ":nextGeneration": { N: String(next.generation) } } });
 }
 
@@ -153,7 +192,7 @@ export function createProductionComponentDeploymentStateClient({ run } = {}) {
 // DynamoDB only provides document-level conditional writes. A writer may retry
 // after an unrelated component advances, but never after its own predecessor
 // changed. This keeps one durable item without lost component updates.
-export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, emergencyCompletion, normalReceiptSha256, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
+export function advanceProductionComponentDeploymentStateWithRetry({ client, current, lane, changes, historicalRuntimeRetention, emergencyCompletion, normalReceiptSha256, maxRetries = 2, now = () => new Date().toISOString(), recovery = false, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId } = {}) {
   assert.equal(typeof client?.read, "function"); assert.equal(typeof client?.advance, "function");
   assert.ok(Number.isSafeInteger(maxRetries) && maxRetries >= 0 && maxRetries <= 5);
   assertProductionComponentDeploymentState(current);
@@ -161,12 +200,13 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
   // Terminal writers are retry-safe: after a successful conditional write the
   // exact same authenticated terminal may rerun without another state write.
   if (Object.entries(changes).every(([name, value]) => same(current.components[name], value))
+    && (historicalRuntimeRetention === undefined || same(current.historicalRuntimeRetention, historicalRuntimeRetention))
     && (!emergencyCompletion || same(current.completedEmergencyWork?.[emergencyCompletion.mode], { sourceSha: emergencyCompletion.sourceSha, evidenceSha256: emergencyCompletion.evidenceSha256 })))
     return Object.freeze({ state: current, attempts: 0, reconciledUnrelatedConcurrentUpdate: false, alreadyCurrent: true });
   const expectedComponents = Object.fromEntries(Object.keys(changes || {}).map((name) => [name, clone(current.components[name])]));
   let observed = current;
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, emergencyCompletion, normalReceiptSha256, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
+    const next = advanceProductionComponentDeploymentState({ current: observed, expectedGeneration: observed.generation, lane, changes, historicalRuntimeRetention, emergencyCompletion, normalReceiptSha256, now: now(), recovery, isAncestor, authenticateRecovery, updatedByWorkflow, githubRunId });
     try {
       client.advance(observed, next);
       return Object.freeze({ state: next, attempts: attempt + 1, reconciledUnrelatedConcurrentUpdate: attempt > 0 });
@@ -177,6 +217,8 @@ export function advanceProductionComponentDeploymentStateWithRetry({ client, cur
       for (const [name, expected] of Object.entries(expectedComponents))
         assert.ok(same(latest.components[name], expected), `Concurrent update changed ${name}; reconcile before retrying.`);
       if (emergencyCompletion) assert.ok(same(latest.completedEmergencyWork?.[emergencyCompletion.mode], current.completedEmergencyWork?.[emergencyCompletion.mode]), "Concurrent emergency completion changed; reconcile before retrying.");
+      assert.deepEqual(latest.historicalRuntimeRetention, current.historicalRuntimeRetention, "Concurrent historical retention changed; reconcile before retrying.");
+      if (historicalRuntimeRetention && !current.historicalRuntimeRetention) throw new Error("Initial historical retention requires the exact bootstrap generation; do not retry a changed baseline");
       observed = latest;
     }
   }

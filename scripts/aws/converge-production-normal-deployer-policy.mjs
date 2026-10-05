@@ -16,7 +16,7 @@ export const NORMAL_DEPLOYER_POLICY = Object.freeze({
   role: "mscqr-production-normal-deployer",
   roleArn: "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer",
   policyName: "MSCQRProductionNormalDeployment",
-  predecessorSha256: "6f15654278bc411879af39e944e3dd8145193110a91c1e3ee676815e4bfcf3c4",
+  predecessorSha256: "8739434ebc28b519d5b51e89fe02b31d34343038308a057270f4f47aa0a1d669",
   targetSha256: digest(sourcePolicy),
 });
 

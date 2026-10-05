@@ -4,6 +4,588 @@
   "status": "PASS",
   "newAwsCalls": [
     {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "kms:Sign",
+      "identity": "INDEPENDENT_CHECKER",
+      "capabilityIds": [
+        "staged-broker-0ebf2398a1857568"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "kms:Verify",
+      "identity": "INDEPENDENT_CHECKER",
+      "capabilityIds": [
+        "staged-broker-09ee05944efb3682"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "kms:Verify",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-794bd402172066d6"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-authorization.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "INDEPENDENT_CHECKER",
+      "capabilityIds": [
+        "staged-broker-60904a8c5f8dd8a2"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "ecs:DescribeTaskDefinition",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-254398ff2b6016dc"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "iam:CreatePolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-cf1356b944bea5ba"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "iam:DeletePolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-f8478ebfeab351ce"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-3f5e0c4009f4c66e"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-cbe3f02ac6d5c755",
+        "staged-broker-f510afd31ef5aa35"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-1cbd51952e97b477"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "lambda:UpdateAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-c125afdc30085170"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-39b7757eab99af08",
+        "staged-broker-786242321712565f"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-76f07d81663af64f"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "action": "cloudtrail:LookupEvents",
+      "identity": "ADMINISTRATOR",
+      "capabilityIds": [
+        "staged-broker-dd83ccd5721c9474"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "ADMINISTRATOR",
+      "capabilityIds": [
+        "staged-broker-204dad07c0c5777d"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-writer-session.mjs",
+      "action": "sts:GetCallerIdentity",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-339d8f607c4c5b4e"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:GetItem",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-e2193b9419cf53b1"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:PutItem",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-2e3ca8f681ceaddc"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-broker-policy-ownership.mjs",
+      "action": "dynamodb:UpdateItem",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-e020c651ee25cabf"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-4acdfeee7e3f70b2"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-a73e12765e7afe65",
+        "staged-broker-f0f9c02e10f41185"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-6617c5a03cae00d1"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-closure.mjs",
+      "action": "s3:GetObject",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-28c43ba7655f292e",
+        "staged-broker-cabff8696e015a96"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-0e8b666d5eab5daa",
+        "staged-broker-27ee15b1a9ec3329",
+        "staged-broker-393f9c83b5da5656",
+        "staged-broker-3f004025a291becd",
+        "staged-broker-4b71e04e647bf298",
+        "staged-broker-4ec1525bbfffb2c1",
+        "staged-broker-6f0545f4778a8aa3",
+        "staged-broker-7004fb485b2324fb",
+        "staged-broker-951a30ff3784fae0",
+        "staged-broker-f27fbcb246feb20b"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetPolicyVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-33c39140bd25b0a2",
+        "staged-broker-35a370c3fd1ab044",
+        "staged-broker-6312fa198481c99f",
+        "staged-broker-87e41807257cf970",
+        "staged-broker-8cb83bf87bf5f0ce",
+        "staged-broker-b4b4efd7c776249c",
+        "staged-broker-c9ede75ef45e3bb6",
+        "staged-broker-cdf49114534e1d0f",
+        "staged-broker-cfd0774b64b6d223",
+        "staged-broker-f11d9dba1b516b42"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetRole",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-5d18dfd63b844516"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:GetRolePolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-18bb76cb6e8ff7e0",
+        "staged-broker-18dacebf50b000ed"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListAttachedRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-39e27cc1540524c0",
+        "staged-broker-5b14c1d106520237"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListPolicyVersions",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-de2673d1f4df4fb6"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "iam:ListRolePolicies",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-246f9b033ff32e9d",
+        "staged-broker-ec0e0d1b5a65f968"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetAlias",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-45335b4a47cd6195"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetFunctionConfiguration",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-901a947bd48123c8",
+        "staged-broker-db2c363d2686c5a2"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:GetPolicy",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-54e99842c6e4924a",
+        "staged-broker-cc1417e799e7bf91"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListAliases",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-2b5b2ed33d49190a"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListEventSourceMappings",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-df345be38df590b4"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListFunctionUrlConfigs",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-d1fcb6a9f032b50d"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-observations.mjs",
+      "action": "lambda:ListVersionsByFunction",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-ced383a995094db8"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/prepare-production-app-only-deployment.mjs",
       "action": "sts:GetCallerIdentity",
       "identity": "APP_ONLY_VERIFIER_LAUNCHER",
@@ -1076,6 +1658,63 @@
       "executionPrincipal": "APP_ONLY_PERMISSION_PROVISIONER",
       "sourcePolicyPresent": true,
       "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "capabilityId": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
+      "action": "cloudtrail:LookupEvents",
+      "capabilityId": "admin-cloudtrail-denials",
+      "identity": "ADMINISTRATOR",
+      "resources": [
+        "reviewed-exact-resource"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "ADMINISTRATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-green-stage-b-identity-capabilities.mjs",
+      "action": "ec2:DescribeNetworkInterfaces",
+      "capabilityId": "manifest-refresh-stage-a-vpc-endpoint-interfaces",
+      "identity": "RELEASE_DEPLOYER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
     },
     {
       "sourceFile": "scripts/aws/produce-production-green-stage-b-prerequisite-bundle.mjs",

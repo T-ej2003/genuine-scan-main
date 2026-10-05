@@ -242,6 +242,7 @@ export function createHandler({ config, executingBrokerVersion, readApproval, ve
         || !exact(approval.approval.taskDefinitionArns, config.taskDefinitionArns)) {
       throw new Error("Stage B broker request is not bound to the signed approval.");
     }
+    if (request.historicalRuntimeReferenceSha256 !== approval.approval.historicalRuntimeReferenceSha256) throw new Error("Stage B execution historical runtime differs from signed approval");
     const taskDefinition = config.taskDefinitionArns[request.mode];
     await claimApproval({ approvalId: approval.approval.approvalId, nonce: approval.approval.nonce, mode: request.mode, expiresAt: approval.approval.expiresAt });
     const networkConfiguration = { awsvpcConfiguration: {

@@ -6,7 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import { verifyArtifactSigningDomain } from "../aws/production-artifact-signing-domain.mjs";
 import { createProductionRuntimeInventoryAdapter, PRODUCTION_RUNTIME_INVENTORY_COMMAND } from "../aws/production-runtime-inventory-adapter.mjs";
-import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { createConditionalMfaResolvers, createProductionCommandRunner, createProductionOverlapDeploymentAdapter, ProductionCommandRouteError, PRODUCTION_AWS_CREDENTIAL_SOURCE, PRODUCTION_COMMAND_AWS_SERVICES } from "../aws/production-cutover-production-adapters.mjs";
+import { createProductionComponentDeploymentStateClient } from "../aws/production-component-deployment-state.mjs";
 import { loadApprovedArtifactSigningBindings } from "../aws/production-artifact-signing-secrets-adapter.mjs";
 import { assertNoOnboardingEvidenceLeak } from "../security/production-strict-onboarding.mjs";
 import { createProductionInteractiveEcsExecRunner } from "../aws/production-ecs-exec-command.mjs";
@@ -130,7 +131,7 @@ test("artifact secret bindings are loaded only from reviewed IAM configuration",
   assert.throws(() => loadApprovedArtifactSigningBindings("/tmp/unreviewed-artifact-bindings.json", { expectedSourceSha: "a".repeat(40) }), /canonical external runtime path/);
 });
 
-test("production AWS command runner executes service operations through aws", () => {
+test("production command runner routes only reviewed AWS services, Node, and Terraform", () => {
   const previous = Object.fromEntries(["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_DEFAULT_PROFILE"].map((name) => [name, process.env[name]]));
   Object.assign(process.env, { AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient", AWS_DEFAULT_PROFILE: "ambient" });
   const calls = [];
@@ -143,9 +144,11 @@ test("production AWS command runner executes service operations through aws", ()
     run(["ecs", "describe-services", "--cluster", "cluster", "--region", "eu-west-2"]);
     run(["aws", "iam", "get-role", "--role-name", "role"]);
     run(["node", "fixture.mjs"]);
-    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "node"]);
+    run(["terraform", "version", "-json"]);
+    assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", process.execPath, "terraform"]);
     assert.equal(calls[0].args.at(-1), "eu-west-2");
     assert.equal(calls[1].args.filter((arg) => arg === "--region").length, 1);
+    assert.equal(calls[1].args[0], "ecs");
     assert.equal(calls[2].args[0], "iam");
     assert.equal(calls[0].options.env.AWS_PROFILE, "mscqr-test");
     assert.equal(calls[0].options.env.AWS_DEFAULT_REGION, "eu-west-2");
@@ -156,11 +159,132 @@ test("production AWS command runner executes service operations through aws", ()
   }
 });
 
+test("every approved AWS namespace preserves its service token for implicit and explicit production regions", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: {},
+    exec: (file, args) => { calls.push({ file, args }); return "{}"; },
+  });
+  for (const service of PRODUCTION_COMMAND_AWS_SERVICES) {
+    run([service, "operation"]);
+    run([service, "operation", "--region", "eu-west-2"]);
+  }
+  assert.equal(new Set(PRODUCTION_COMMAND_AWS_SERVICES).size, PRODUCTION_COMMAND_AWS_SERVICES.length);
+  assert.equal(calls.length, PRODUCTION_COMMAND_AWS_SERVICES.length * 2);
+  for (let index = 0; index < calls.length; index += 1) {
+    const service = PRODUCTION_COMMAND_AWS_SERVICES[Math.floor(index / 2)];
+    assert.equal(calls[index].file, "aws");
+    assert.equal(calls[index].args[0], service);
+    assert.equal(calls[index].args.filter((value) => value === service).length, 1);
+    assert.deepEqual(calls[index].args.slice(-2), ["--region", "eu-west-2"]);
+  }
+});
+
+test("production command routing rejects malformed, duplicate, and non-production region syntax before process creation", () => {
+  let spawnCount = 0;
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: {},
+    exec: () => { spawnCount += 1; return "{}"; },
+  });
+  for (const args of [
+    ["dynamodb"],
+    ["dynamodb", "dynamodb", "get-item"],
+    ["dynamodb", "get-item", "--region"],
+    ["dynamodb", "get-item", "--region", ""],
+    ["dynamodb", "get-item", "--region", "us-east-1"],
+    ["dynamodb", "get-item", "--region", "eu-west-2", "--region", "eu-west-2"],
+    ["dynamodb", "get-item", "--region", "eu-west-2", "--region", "us-east-1"],
+    ["dynamodb", "get-item", "--region=eu-west-2"],
+  ]) assert.throws(() => run(args), /AWS (?:command arguments|service and operation|command region|region arguments)/);
+  assert.equal(spawnCount, 0);
+});
+
+test("canonical component-state read preserves DynamoDB namespace and cannot use a PATH-shadowed local executable", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INJECTED_TEST,
+    env: { PATH: "/attacker/bin" },
+    exec: (file, args, options) => { calls.push({ file, args, options }); return "{}"; },
+  });
+  assert.equal(createProductionComponentDeploymentStateClient({ run }).read(), null);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, "aws");
+  assert.equal(calls[0].args[0], "dynamodb");
+  assert.equal(calls[0].args.filter((value) => value === "dynamodb").length, 1);
+  assert.deepEqual(calls[0].args.slice(calls[0].args.indexOf("--region"), calls[0].args.indexOf("--region") + 2), ["--region", "eu-west-2"]);
+});
+
+test("production command routing rejects every unclassified command before process creation", () => {
+  let spawnCount = 0;
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-test",
+    env: { PATH: "/attacker/bin", AWS_ACCESS_KEY_ID: "ambient", AWS_SECRET_ACCESS_KEY: "ambient", AWS_SESSION_TOKEN: "ambient" },
+    exec: () => { spawnCount += 1; return "{}"; },
+  });
+  const attacks = [
+    [""], ["   "], ["dynamod", "get-item"], ["cloudwatch", "get-metric-data"],
+    ["nodejs", "fixture.mjs"], ["/usr/bin/node", "fixture.mjs"], ["./node", "fixture.mjs"], ["../node", "fixture.mjs"],
+    ["/usr/bin/aws", "dynamodb", "get-item"], ["./dynamodb", "get-item"], ["../dynamodb", "get-item"],
+    ["DynamoDB", "get-item"], ["AWS", "dynamodb", "get-item"], ["aws "], ["aws"], ["aws", "dynamod", "get-item"],
+    ["aws", "node", "fixture.mjs"], ["ecs;touch", "/tmp/pwned"], ["$(touch /tmp/pwned)"],
+    ["sh", "-c", "id"], ["bash", "-c", "id"], ["env", "node"], ["python3", "fixture.py"],
+    ["tofu", "apply"], ["/usr/bin/terraform", "version"], ["./terraform", "version"], ["../terraform", "version"], ["Terraform", "version"],
+    ["git", "status"], ["gh", "api", "user"],
+  ];
+  for (const args of attacks) assert.throws(() => run(args), (error) => error instanceof ProductionCommandRouteError && error.code === "UNCLASSIFIED_PRODUCTION_COMMAND");
+  for (const malformed of [null, undefined, "dynamodb", { command: "dynamodb" }, []]) assert.throws(() => run(malformed), /arguments are required/);
+  for (const malformed of [[null], [{ command: "dynamodb" }]]) assert.throws(() => run(malformed), (error) => error instanceof ProductionCommandRouteError);
+  assert.equal(spawnCount, 0);
+});
+
+test("production command routing cannot be redirected by PATH or shell syntax", () => {
+  const calls = [];
+  const run = createProductionCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-test",
+    env: { PATH: "/attacker/bin" },
+    exec: (file, args) => { calls.push({ file, args }); return "{}"; },
+  });
+  run(["dynamodb", "get-item", "--table-name", "fixture"]);
+  run(["ecs", "describe-services", "--cluster", "fixture", "; touch /tmp/pwned"]);
+  run(["ecs", "describe-services", "dynamodb-like=value"]);
+  run(["dynamodb", "ecs", "--table-name", "fixture"]);
+  run(["kms", "verify", "--key-id", "fixture"]);
+  run(["iam", "get-role", "--role-name", "iam"]);
+  run(["node", "fixture.mjs"]);
+  run(["terraform", "version", "-json"]);
+  assert.deepEqual(calls.map(({ file }) => file), ["aws", "aws", "aws", "aws", "aws", "aws", process.execPath, "terraform"]);
+  assert.equal(calls[0].args[0], "dynamodb");
+  assert.equal(calls[1].args.includes("; touch /tmp/pwned"), true);
+  assert.deepEqual(calls[2].args.slice(0, 3), ["ecs", "describe-services", "dynamodb-like=value"]);
+  assert.deepEqual(calls[3].args.slice(0, 2), ["dynamodb", "ecs"]);
+  assert.deepEqual(calls[5].args.slice(0, 4), ["iam", "get-role", "--role-name", "iam"]);
+});
+
+test("production credential runners contain no unclassified executable fallback", () => {
+  const commandRunner = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
+  assert.doesNotMatch(commandRunner, /exec\([^,]*\[0\]/);
+  assert.doesNotMatch(commandRunner, /:\s*normalized\[0\]/);
+  for (const file of [
+    "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs",
+    "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
+  ]) {
+    const source = fs.readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /execFileSync\(args\[0\]/);
+    assert.match(source, /executable !== "terraform"/);
+    assert.match(source, /execFileSync\("terraform", args/);
+  }
+});
+
 test("production cutover adapters use the shared release-bound attestation verifier", () => {
   const source = fs.readFileSync("scripts/aws/production-cutover-production-adapters.mjs", "utf8");
   assert.match(source, /createReleasePreflightCheckerTrustSignatureVerifier\(\{ releaseRun: commandRun \}\)/);
   assert.match(source, /verifyImageEvidenceSignature\(\{ \.\.\.options, run: \(args\) => commandRun\(args\) \}\)/);
   assert.match(source, /imageAuthorizationValidation: \{ verifyImageEvidence:/);
+  assert.match(source, /createTerraformStageAAdapter\(\{[^;]+run: commandRun/);
   for (const entrypoint of ["scripts/aws/prepare-production-cutover-runtime.mjs", "scripts/aws/run-production-cutover.mjs"]) {
     assert.match(fs.readFileSync(entrypoint, "utf8"), /createProductionCutoverRuntimeComposition/);
   }

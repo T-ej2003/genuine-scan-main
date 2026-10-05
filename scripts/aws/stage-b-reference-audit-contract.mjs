@@ -7,6 +7,7 @@ import { STAGE_B_BACKEND_PORT_MAPPING } from "./production-green-stage-b-task-de
 import { assertB01LivePredecessor, B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
 import { assertNormalDeploymentLivePredecessor } from "./production-normal-live-predecessor-contract.mjs";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
+import { assertBootstrapStageBLivePredecessor, BOOTSTRAP_STAGE_B_REFERENCE_KIND } from "./production-bootstrap-stage-b-predecessor-contract.mjs";
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
@@ -108,6 +109,37 @@ export function assertStageBNormalDeploymentLivePredecessorReference(audit) {
   if (services.length !== 1 || services[0].taskDefinition !== expected.taskDefinitionArn || definitions.length !== 1
     || definitions[0].family !== expected.family || definitions[0].status !== "ACTIVE" || definitions[0].stageBScoped !== true) {
     throw new Error("Stage B normal-deployment live-predecessor reference does not match authoritative runtime observations.");
+  }
+  return reference;
+}
+
+export function assertStageBBootstrapForwardLivePredecessorReference(audit) {
+  const reference = audit?.bootstrapForwardLivePredecessorReference;
+  if (reference === undefined) return undefined;
+  const authenticated = assertBootstrapStageBLivePredecessor({ ...reference.evidence, sourceRanges: reference.sourceRanges, toolingSha: audit.toolingSha });
+  const expected = {
+    schemaVersion: 1,
+    kind: BOOTSTRAP_STAGE_B_REFERENCE_KIND,
+    authenticatedAt: audit.auditedAt,
+    auditSourceSha: audit.toolingSha,
+    account: APP_ONLY.account,
+    region: APP_ONLY.region,
+    serviceArn: APP_ONLY.serviceArn,
+    taskDefinitionArn: authenticated.components.backend.taskDefinitionArn,
+    family: STAGE_B_TASK_DEFINITION_FAMILIES['aws_ecs_task_definition.candidate["backend"]'],
+    imageDigest: authenticated.components.backend.imageDigest,
+    imageSourceSha: authenticated.components.backend.sourceSha,
+    componentStateGeneration: reference.evidence.componentState.generation,
+    componentStateSha256: authenticated.componentStateSha256,
+    sourceRanges: reference.sourceRanges,
+  };
+  const { evidence, ...actual } = reference || {};
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error("Stage B bootstrap-forward live-predecessor reference attestation is malformed or unbound.");
+  const services = (audit.services || []).filter((entry) => entry?.serviceName === APP_ONLY.service);
+  const definitions = (audit.taskDefinitions || []).filter((entry) => entry?.taskDefinitionArn === expected.taskDefinitionArn);
+  if (services.length !== 1 || services[0].taskDefinition !== expected.taskDefinitionArn || definitions.length !== 1
+    || definitions[0].family !== expected.family || definitions[0].status !== "ACTIVE" || definitions[0].stageBScoped !== true) {
+    throw new Error("Stage B bootstrap-forward live-predecessor reference does not match authoritative runtime observations.");
   }
   return reference;
 }
