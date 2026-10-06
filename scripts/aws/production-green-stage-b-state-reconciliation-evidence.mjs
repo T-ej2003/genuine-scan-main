@@ -14,7 +14,7 @@ const HEX = /^[a-f0-9]{64}$/;
 const authenticated = new WeakSet();
 const fileBytes = (run, args, options) => Buffer.from(run("gh", args, options));
 const json = (bytes, label) => { try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new Error(`${label} is malformed.`); } };
-const timestamp = (value, label) => { const date = new Date(value); if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) throw new Error(`${label} is invalid.`); return date; };
+const timestamp = (value, label) => { const date = new Date(value); const normalized = Number.isFinite(date.getTime()) ? date.toISOString() : ""; if (typeof value !== "string" || (normalized !== value && normalized.replace(".000Z", "Z") !== value)) throw new Error(`${label} is invalid.`); return date; };
 
 function assertRun(run, { runId, attempt, workflowPath, sourceSha, completedBefore } = {}) {
   if (!RUN_ID.test(String(runId || "")) || String(run.id) !== String(runId) || String(run.run_attempt) !== String(attempt) || String(attempt) !== "1"

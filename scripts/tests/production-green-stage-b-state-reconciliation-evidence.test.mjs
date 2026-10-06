@@ -106,6 +106,15 @@ test("authenticated OUTPUT_ONLY run artifacts compose the historical serial 115 
   assert.throws(() => assertHistoricalFinalApplyWriteV16Successor({ authenticated, supplemental: { artifacts: f.historicalArtifacts, protectedMainAncestorAuthenticated: true, reconciliationEvidence: structuredClone(proof) } }), /authenticated from canonical workflow artifacts/);
 });
 
+test("canonical GitHub timestamps without fractional seconds authenticate as the same run instants", (t) => {
+  const f = createFixture(); t.after(() => fs.rmSync(f.historicalTmp, { recursive: true, force: true }));
+  for (const run of Object.values(f.runs)) for (const field of ["created_at", "run_started_at", "updated_at"]) run[field] = run[field].replace(".000Z", "Z");
+  assert.doesNotThrow(() => resolve(f));
+  const invalid = createFixture(); t.after(() => fs.rmSync(invalid.historicalTmp, { recursive: true, force: true }));
+  invalid.runs[invalid.runIds.preparation].created_at = "2026-02-30T10:00:00Z";
+  assert.throws(() => resolve(invalid), /creation time is invalid/);
+});
+
 test("the authenticated-successor primitive accepts generic evidence-derived serial transitions", (t) => {
   const f = createFixture({ predecessorSerial: 41, successorSerial: 42 }); t.after(() => fs.rmSync(f.historicalTmp, { recursive: true, force: true }));
   const proof = resolve(f);
