@@ -225,6 +225,9 @@ jobs:
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 
+      - name: Test authenticated Stage B reconciliation evidence
+        run: node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs
+
       - name: Record Stage B image-impact evidence availability
         if: always()
         shell: bash

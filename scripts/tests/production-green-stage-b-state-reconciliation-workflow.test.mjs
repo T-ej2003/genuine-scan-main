@@ -39,6 +39,27 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.match(read(names[0]), /produce-production-green-stage-b-release-preflight\.yml/);
 });
 
+test("preparation, authorization, and result artifacts retain the complete successor proof for 90 days", () => {
+  const artifacts = [
+    ["prepare-production-green-stage-b-state-reconciliation.yml", "production-green-stage-b-state-reconciliation-preparation"],
+    ["authorize-production-green-stage-b-state-reconciliation.yml", "production-green-stage-b-state-reconciliation-authorization"],
+    ["execute-production-green-stage-b-state-reconciliation.yml", "production-green-stage-b-state-reconciliation-result"],
+  ];
+  for (const [workflowName, artifactName] of artifacts) {
+    const workflow = parse(workflowName);
+    const upload = Object.values(workflow.jobs).flatMap(({ steps }) => steps).find((step) => step.with?.name === artifactName);
+    assert.ok(upload, `${artifactName} upload exists`);
+    assert.equal(upload.with["retention-days"], 90, `${artifactName} retention`);
+  }
+});
+
+test("Stage B closure CI runs the authenticated reconciliation evidence regression suite", () => {
+  const workflow = yaml.load(fs.readFileSync(path.join(root, ".github/workflows/quality-gate.yml"), "utf8"));
+  const steps = workflow.jobs["stage-b-deployment-closure"].steps;
+  const testStep = steps.find(({ name }) => name === "Test authenticated Stage B reconciliation evidence");
+  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs");
+});
+
 test("preparation passes the required dispatch mode explicitly under nounset", () => {
   const workflow = parse("prepare-production-green-stage-b-state-reconciliation.yml");
   const input = workflow.on.workflow_dispatch.inputs.reconciliation_mode;
@@ -132,6 +153,17 @@ test("state-reconciliation prerequisite runbook names the non-deploy image-autho
   assert.match(runbook, /produce-production-green-stage-b-state-reconciliation-image-authorization\.yml/);
   assert.match(runbook, /production-green-stage-b-state-reconciliation-image-authorization/);
   assert.doesNotMatch(runbook, /Release Gate image-authorization artifact/);
+});
+
+test("the successor-proof runbook documents all authenticated workflow references", () => {
+  const evidenceFlags = ["--reconciliation-preparation-run-id", "--reconciliation-authorization-run-id", "--reconciliation-execution-run-id", "--reconciliation-result-sha256", "--reconciliation-result-artifact-id", "--reconciliation-result-artifact-digest"];
+  for (const file of ["PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md", "MSCQRProductionGreenStageBFinalApplyWrite-v16-migration.md"]) {
+    const runbook = fs.readFileSync(path.join(root, "documents/ops/iam", file), "utf8");
+    for (const argument of evidenceFlags) assert.ok(runbook.includes(`\`${argument}\``), `${argument} is documented in ${file}`);
+  }
+  const runbook = fs.readFileSync(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v16-migration.md"), "utf8");
+  assert.match(runbook, /verifier fetches those source-bound workflow artifacts and authenticates/);
+  assert.match(runbook, /raw result JSON or caller-asserted state fields are not accepted/i);
 });
 
 test("reconciliation readers authenticate and consume private JSON directly", () => {

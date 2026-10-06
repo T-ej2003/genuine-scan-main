@@ -355,6 +355,24 @@ export function assertStageBStateReconciliationAuthorization(value, { preparatio
   return value;
 }
 
+export function assertStageBOutputOnlyReconciliationResult(value, { preparation, authorization, sourceSha, now } = {}) {
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime())) throw new Error("Stage B reconciliation result verification requires authenticated execution time.");
+  const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now });
+  assertStageBStateReconciliationAuthorization(authorization, { preparation: prepared, sourceSha, now });
+  const fields = ["schemaVersion", "kind", "reconciliationMode", "status", "sourceSha", "authorizationSha256", "predecessorState", "successorState", "successorEvidenceSha256", "outputAllowlist", "boundImagesTransitionSha256", "remoteResourceMutationCount", "terraformStateMutationCount"];
+  exactKeys(value, fields, "Stage B output-only reconciliation result");
+  const predecessor = prepared.predecessorState;
+  const successor = value.successorState;
+  const expectedSuccessorEvidence = { stateIdentity: successor, boundImages: prepared.boundImagesTransition.after, taskDefinitionArns: prepared.outputOnlyEvidence.taskDefinitionArns, registeredSuccessors: prepared.outputOnlyEvidence.registeredSuccessors };
+  const terminalSuccess = value.status === "complete" || value.status === "recovered-complete";
+  if (prepared.planSemantics?.remoteResourceMutationCount !== 0 || prepared.planSemantics?.resourceStateChangeCount !== 0 || prepared.planSemantics?.outputStateChangeCount !== 1 || prepared.planSemantics?.stateRecordChangeCount !== 1
+    || value.schemaVersion !== 2 || value.kind !== "PRODUCTION_GREEN_STAGE_B_STATE_RECONCILIATION_RESULT" || value.reconciliationMode !== STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY || !terminalSuccess || value.sourceSha !== sourceSha || value.sourceSha !== prepared.sourceSha || value.authorizationSha256 !== authorization.authorizationSha256
+    || !equal(value.predecessorState, predecessor) || successor?.lineage !== predecessor.lineage || successor?.serial !== predecessor.serial + 1 || !SHA256.test(successor?.stateSha256 || "")
+    || value.successorEvidenceSha256 !== sha256(expectedSuccessorEvidence) || !equal(value.outputAllowlist, ["bound_images"]) || value.boundImagesTransitionSha256 !== prepared.boundImagesTransition.transitionSha256 || value.remoteResourceMutationCount !== 0
+    || value.terraformStateMutationCount !== (value.status === "complete" ? 1 : 0)) throw new Error("Stage B output-only reconciliation result is not the exact authenticated terminal successor.");
+  return Object.freeze({ preparation: prepared, authorization, result: value, sourceSha, predecessorState: predecessor, successorState: successor, savedPlanSha256: prepared.refreshOnlyPlanSha256, boundImagesTransition: prepared.boundImagesTransition });
+}
+
 export function executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, terraformConfiguration, planBytes, planJson, readState, readOutputOnlyEvidence, applyRefreshOnlyPlan, renderPreApplyNormalPlan, renderRefreshClosurePlan, renderNormalClosurePlan, reauthenticateSource, now = new Date() } = {}) {
   const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now });
   const outputOnly = prepared.reconciliationMode === STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY;
