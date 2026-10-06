@@ -149,10 +149,14 @@ test("state-reconciliation prerequisite runbook names the non-deploy image-autho
 });
 
 test("the successor-proof runbook documents all authenticated workflow references", () => {
-  const runbook = fs.readFileSync(path.join(root, "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md"), "utf8");
-  for (const argument of ["--reconciliation-preparation-run-id", "--reconciliation-authorization-run-id", "--reconciliation-execution-run-id", "--reconciliation-result-sha256", "--reconciliation-result-artifact-id", "--reconciliation-result-artifact-digest"]) assert.ok(runbook.includes(`\`${argument}\``), `${argument} is documented`);
-  assert.match(runbook, /verifier independently retrieves and validates the preparation, authorization, execution, and result artifacts/);
-  assert.match(runbook, /raw receipt JSON.*not substitutes/i);
+  const evidenceFlags = ["--reconciliation-preparation-run-id", "--reconciliation-authorization-run-id", "--reconciliation-execution-run-id", "--reconciliation-result-sha256", "--reconciliation-result-artifact-id", "--reconciliation-result-artifact-digest"];
+  for (const file of ["PRODUCTION_GREEN_STAGE_B_REFRESH_ONLY_STATE_RECONCILIATION.md", "MSCQRProductionGreenStageBFinalApplyWrite-v16-migration.md"]) {
+    const runbook = fs.readFileSync(path.join(root, "documents/ops/iam", file), "utf8");
+    for (const argument of evidenceFlags) assert.ok(runbook.includes(`\`${argument}\``), `${argument} is documented in ${file}`);
+  }
+  const runbook = fs.readFileSync(path.join(root, "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v16-migration.md"), "utf8");
+  assert.match(runbook, /verifier fetches those source-bound workflow artifacts and authenticates/);
+  assert.match(runbook, /raw result JSON or caller-asserted state fields are not accepted/i);
 });
 
 test("reconciliation readers authenticate and consume private JSON directly", () => {
