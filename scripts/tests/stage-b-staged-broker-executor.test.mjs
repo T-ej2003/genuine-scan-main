@@ -624,3 +624,19 @@ for(const [name,options] of [['non-main',{head:'e'.repeat(40)}],['dirty',{dirty:
 for(const [name,options] of [['unconsumed',{unconsumed:true}],['missing intent',{missingIntent:true}],['invalid signature',{invalidSignature:true}],['substituted transaction',{wrongAuthorization:true}]])test(`native registration recovery rejects ${name} before tooling authority`,async()=>{
   const r=await recoveryIdentityFixture(options);await assert.rejects(()=>r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256}));await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity());
 });
+
+test('read-only registration adoption cannot reserve or reach any external mutation', async () => {
+  const r = await native('PUBLICATION'), adapter = r.makeAdapter('ADOPTION');
+  for (const attempt of [
+    () => adapter.reserve(brokerDigest(r.auth), { purpose: r.p.purpose }),
+    () => adapter.record(brokerDigest(r.auth), 'TASK_REGISTERED', {}),
+    () => adapter.applyTaskRegistration(r.binary),
+    () => adapter.applyPublication(r.binary),
+    () => adapter.updateAlias(r.input),
+    () => adapter.applyRefreshOnlyPlan(r.binary),
+    () => adapter.executeBrokerPolicyConvergence(),
+    () => adapter.executeBrokerPolicyPruning(),
+  ]) await assert.rejects(attempt);
+  assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
+  assert.equal(r.calls.filter(c => ['put-object', 'update-alias', 'create-policy-version', 'delete-policy-version', 'register-task-definition', 'run-task', 'stop-task', 'update-service'].includes(c.args[1])).length, 0);
+});
