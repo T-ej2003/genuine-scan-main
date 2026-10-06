@@ -40,11 +40,12 @@ function exactArtifact(githubRun, { runId, runAttempt, sourceSha, runMetadata, n
   return Object.freeze({ metadata: matches[0], archive });
 }
 
+const localUnzip = (_command, args, options = {}) => execFileSync("/usr/bin/unzip", args, { stdio: ["ignore", "pipe", "pipe"], ...options });
 function listZip(run, archivePath) { return String(run("unzip", ["-Z1", archivePath])).trim().split("\n").filter(Boolean); }
 function unzip(run, archivePath, member) { return Buffer.from(run("unzip", ["-p", archivePath, member], { encoding: null, maxBuffer: 64 * 1024 * 1024 })); }
 function deepFreeze(value) { if (!value || typeof value !== "object" || Object.isFrozen(value)) return value; Object.values(value).forEach(deepFreeze); return Object.freeze(value); }
 
-export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, githubRun = createProductionGithubCommandRunner(), unzipRun = githubRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!/^[a-f0-9]{40}$/.test(currentProtectedMainSha || "") || !HEX.test(expectedResultSha256 || "") || !/^sha256:[a-f0-9]{64}$/.test(expectedResultArtifactDigest || "")) throw new Error("Stage B reconciliation evidence references are incomplete.");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-reconciliation-proof-")); fs.chmodSync(directory, 0o700);
   try {
