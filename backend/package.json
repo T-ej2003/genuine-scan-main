@@ -130,7 +130,8 @@
     },
     "@opentelemetry/resources": "2.8.0",
     "@opentelemetry/sdk-trace-base": "2.8.0",
-    "deepmerge-ts": "8.0.0"
+    "deepmerge-ts": "8.0.0",
+    "proxy-addr": "2.0.8"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
