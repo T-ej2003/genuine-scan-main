@@ -236,3 +236,34 @@ This revalidates the specific CVE reachability decision, not universal browser
 plugin provenance. The finding remains HIGH and unpatched. Only the acceptance
 input hash is rebound; owner, scope, rationale, advisory, version and exclusive
 2026-11-02 expiry remain unchanged. Future source changes still invalidate it.
+
+
+### FinalApplyWrite policy compaction revalidation (2026-10-06)
+
+Exact-head review of PR #627 reproduced the prior protected-main fingerprint
+`6afc66c6b2e0c38595e609223c7c1fa1e3ac54c3c59f51ef85ed1ece009252db` and the
+candidate fingerprint
+`7ce208d9b0bd5f0a2f8762fb370b4148d12e4fa371e2cefad3b5d415c618649e`.
+Each of the three covered changes independently invalidates the broad snapshot:
+the FinalApplyWrite policy builder, its governed convergence command, and its
+focused test. Dependency locks, Tailwind configuration, Dockerfiles, application
+source and runtime-image inputs are unchanged.
+
+Raw OSV Scanner 2.6.0 reports the same single advisory before and after:
+GHSA-vfj7-8cjw-p6xm / CVE-2026-93687 for dev-only braces 3.0.3. The dependency
+paths remain Tailwind through chokidar and through micromatch/fast-glob. The
+changed release scripts use Node standard-library and local IAM/release modules;
+the test additionally uses js-yaml. None imports braces, Tailwind, chokidar,
+micromatch or fast-glob, supplies content globs, or enters the browser bundle.
+
+A fresh canonical production build again excludes braces from the browser
+closure. Backend and worker retain a separate lockfile with no braces instance,
+and the frontend runtime remains static Nginx output. The only vulnerable
+execution remains trusted Tailwind compilation with the four repository-owned
+content globs documented above; production requests cannot control those
+patterns. PR #627 adds no call site, attacker-controlled pattern or runtime-image
+input for the affected recursive walker.
+
+The advisory remains visible and fail-closed for runtime or unknown reachability.
+Only the existing acceptance input hash is rebound. Its advisory, package,
+version, scope, rationale, owner and exclusive 2026-11-02 expiry are unchanged.
