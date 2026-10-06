@@ -211,11 +211,17 @@ test("GitHub authorization runner rejects write-shaped gh api invocations", () =
   for (const member of ["other.json", "../authorization.json", "arbitrary.json", "recovery/authorization.json"]) assert.throws(() => run("unzip", ["-p", "/tmp/authorization.zip", member]), /reviewed local/);
 });
 
-test("GitHub authorization runner permits only the two canonical authorization archive members", () => {
+test("GitHub runner permits only exact members of canonical authorization and reconciliation archives", () => {
   const seen = [];
   const run = createProductionGithubCommandRunner({ env: { GH_TOKEN: "fixture-token" }, exec: (file, args) => { seen.push({ file, args }); return "{}"; } });
   for (const member of ["authorization.json", "recovery-authorization.json"]) run("unzip", ["-p", "/tmp/authorization.zip", member]);
-  assert.deepEqual(seen.map(({ args }) => args[2]), ["authorization.json", "recovery-authorization.json"]);
+  run("unzip", ["-Z1", "/tmp/stage-b-reconciliation-preparation.zip"]);
+  run("unzip", ["-p", "/tmp/stage-b-reconciliation-preparation.zip", "preparation-bundle.zip"]);
+  run("unzip", ["-p", "/tmp/preparation-bundle.zip", "refresh.tfplan"]);
+  run("unzip", ["-p", "/tmp/stage-b-reconciliation-authorization.zip", "authorization.json"]);
+  run("unzip", ["-p", "/tmp/stage-b-reconciliation-result.zip", "result.json"]);
+  for (const [archive, member] of [["stage-b-reconciliation-result.zip", "authorization.json"], ["stage-b-reconciliation-authorization.zip", "result.json"], ["preparation-bundle.zip", "result.json"], ["authorization.zip", "result.json"]]) assert.throws(() => run("unzip", ["-p", `/tmp/${archive}`, member]), /reviewed local/);
+  assert.equal(seen.length, 7);
 });
 
 test("runtime preparation's real composition root pins the release profile before KMS verification", () => {

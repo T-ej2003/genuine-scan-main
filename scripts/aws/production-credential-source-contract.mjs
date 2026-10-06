@@ -144,8 +144,16 @@ export function createProductionGithubCommandRunner({ env = process.env, exec = 
     }
     if (command === "unzip") {
       const archive = args?.[0] === "-Z" ? args?.[2] : args?.[1];
-      const archivePathValid = typeof archive === "string" && path.isAbsolute(archive) && path.basename(archive) === "authorization.zip";
-      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && new Set(["authorization.json", "bootstrap-authorization.json", "recovery-authorization.json"]).has(args[2])));
+      const archiveMembers = new Map([
+        ["authorization.zip", new Set(["authorization.json", "bootstrap-authorization.json", "recovery-authorization.json"])],
+        ["stage-b-reconciliation-preparation.zip", new Set(["preparation-bundle.zip"])],
+        ["stage-b-reconciliation-authorization.zip", new Set(["authorization.json"])],
+        ["stage-b-reconciliation-result.zip", new Set(["result.json"])],
+        ["preparation-bundle.zip", new Set(["preparation.json", "refresh.tfplan", "prerequisite-bundle.zip", "release-preflight.json"])],
+      ]);
+      const basename = typeof archive === "string" ? path.basename(archive) : "";
+      const archivePathValid = typeof archive === "string" && path.isAbsolute(archive) && archiveMembers.has(basename);
+      const allowed = Array.isArray(args) && archivePathValid && ((args.length === 2 && args[0] === "-Z1") || (args.length === 3 && args[0] === "-Z" && args[1] === "-l") || (args.length === 3 && args[0] === "-p" && archiveMembers.get(basename).has(args[2])));
       if (!allowed) throw new Error("Production GitHub runner permits only the reviewed local authorization archive reads.");
       return exec("unzip", args, { cwd: process.cwd(), env: localEnvironment, encoding, stdio: ["ignore", "pipe", "pipe"], ...(maxBuffer === undefined ? {} : { maxBuffer }) });
     }

@@ -12,9 +12,11 @@ import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
+import { stageBBoundImagesFromBindingReport } from "./generate-production-green-stage-b-tfvars.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { BROKER_POLICY_OWNERSHIP_KEY } from "./stage-b-broker-policy-ownership.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { assertAuthenticatedStageBOutputOnlySuccessor, resolveStageBStateReconciliationEvidence } from "./production-green-stage-b-state-reconciliation-evidence.mjs";
 
 export { NORMAL_ACTIVATION, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy } from "./production-normal-backend-activation-policy.mjs";
 
@@ -22,6 +24,7 @@ const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const canonical = canonicalNormalActivationValue;
+const equal = (left, right) => canonical(left) === canonical(right);
 const POLICY_VERSION = /^v[1-9][0-9]*$/;
 const WORKFLOW_RUN_ID = /^[1-9][0-9]*$/;
 const BACKEND_IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
@@ -142,6 +145,33 @@ export function assertHistoricalFinalApplyWriteV16Predecessor({ authenticated = 
   const successor = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn, targetArn }));
   assertNormalActivationTransactionPolicy(successor, { sourceArn, targetArn });
   if (!successor.Statement.some((statement) => canonical(statement).includes(BROKER_POLICY_OWNERSHIP_KEY))) throw new Error("Historical FinalApplyWrite successor lacks broker ownership authority.");
+  return true;
+}
+
+export function assertHistoricalFinalApplyWriteV16Successor({ authenticated = {}, supplemental = {} } = {}) {
+  const supplementalKeys = Object.keys(supplemental).sort();
+  if (canonical(supplementalKeys) !== canonical(["artifacts", "protectedMainAncestorAuthenticated", "reconciliationEvidence"])) throw new Error("Historical FinalApplyWrite successor evidence fields are not exact.");
+  const { artifacts, protectedMainAncestorAuthenticated, reconciliationEvidence } = supplemental;
+  const expected = HISTORICAL_FINAL_APPLY_WRITE_V16;
+  const liveState = authenticated.state;
+  const liveStateSha256 = authenticated.stateSha256;
+  const historicalState = { lineage: expected.stateLineage, serial: expected.stateSerial, stateSha256: expected.stateSha256 };
+  const historicalReport = assertHistoricalFinalApplyWriteV16ArtifactIdentity(artifacts).refreshReport;
+  const boundImagesChanges = (historicalReport.outputChanges || []).filter(({ name, actions }) => name === "bound_images" && actions?.includes("update"));
+  if (boundImagesChanges.length !== 1) throw new Error("Historical FinalApplyWrite refresh evidence lacks the exact bound_images transition.");
+  const authenticatedHistorical = { ...authenticated, state: historicalState, stateSha256: expected.stateSha256 };
+  assertHistoricalFinalApplyWriteV16Predecessor({ authenticated: authenticatedHistorical, supplemental: { artifacts, protectedMainAncestorAuthenticated } });
+  const outputTransition = boundImagesChanges[0];
+  const expectedBoundImages = stageBBoundImagesFromBindingReport(artifacts.bindingReport);
+  if (!equal(outputTransition.actions, ["update"]) || !equal(outputTransition.after, expectedBoundImages)) throw new Error("Historical FinalApplyWrite output evidence differs from its authenticated binding report.");
+  assertAuthenticatedStageBOutputOnlySuccessor(reconciliationEvidence, {
+    currentProtectedMainSha: authenticated.sourceSha,
+    historicalState,
+    liveState,
+    liveStateSha256,
+    historicalBoundImages: outputTransition.before,
+    expectedBoundImages,
+  });
   return true;
 }
 
@@ -359,10 +389,9 @@ export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha
     catch (strictError) {
       if (!historicalPredecessor) throw strictError;
       const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
-      assertHistoricalFinalApplyWriteV16Predecessor({
-        authenticated: { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256: sha256(liveState.bytes) },
-        supplemental: historicalPredecessor,
-      });
+      const authenticated = { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256: sha256(liveState.bytes) };
+      if (historicalPredecessor.reconciliationEvidence) assertHistoricalFinalApplyWriteV16Successor({ authenticated, supplemental: historicalPredecessor });
+      else assertHistoricalFinalApplyWriteV16Predecessor({ authenticated, supplemental: historicalPredecessor });
       historicalPredecessorUsed = true;
     }
     const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationTransactionPolicy(document, { sourceArn, targetArn }), progress });
@@ -492,7 +521,19 @@ export function runCli(argv = process.argv.slice(2)) {
     if (historicalArguments.some(Boolean)) {
       if (historicalArguments.some((value) => !value)) throw new Error("Historical FinalApplyWrite migration artifacts are incomplete.");
       execFileSync("git", ["merge-base", "--is-ancestor", HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha, sourceSha], { cwd: process.cwd(), stdio: "ignore" });
-      historicalPredecessor = { artifacts: readHistoricalFinalApplyWriteV16Artifacts({ refreshReportPath: historicalArguments[0], refreshReportSha256: historicalArguments[1], bindingReportPath: historicalArguments[2], bindingReportSha256: historicalArguments[3] }), protectedMainAncestorAuthenticated: true };
+      const evidenceArguments = ["--reconciliation-preparation-run-id", "--reconciliation-authorization-run-id", "--reconciliation-execution-run-id", "--reconciliation-result-sha256", "--reconciliation-result-artifact-id", "--reconciliation-result-artifact-digest"].map((name) => values.get(name));
+      if (evidenceArguments.some(Boolean) && evidenceArguments.some((value) => !value)) throw new Error("Authenticated Stage B reconciliation evidence references are incomplete.");
+      const artifacts = readHistoricalFinalApplyWriteV16Artifacts({ refreshReportPath: historicalArguments[0], refreshReportSha256: historicalArguments[1], bindingReportPath: historicalArguments[2], bindingReportSha256: historicalArguments[3] });
+      historicalPredecessor = { artifacts, protectedMainAncestorAuthenticated: true };
+      if (evidenceArguments.every(Boolean)) historicalPredecessor.reconciliationEvidence = resolveStageBStateReconciliationEvidence({
+        currentProtectedMainSha: sourceSha,
+        preparationRunId: evidenceArguments[0],
+        authorizationRunId: evidenceArguments[1],
+        executionRunId: evidenceArguments[2],
+        expectedResultSha256: evidenceArguments[3],
+        expectedResultArtifactId: evidenceArguments[4],
+        expectedResultArtifactDigest: evidenceArguments[5],
+      });
     }
     const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha"), historicalPredecessor });
     process.stdout.write(`${JSON.stringify(result)}\n`);
