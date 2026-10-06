@@ -177,6 +177,7 @@ test("requirements producer is source-only, main-bound and uses compact identiti
 
 test("CI runs real PostgreSQL and full package serially without AWS identity or mock fallback", () => {
   const workflow = yaml.load(fs.readFileSync(".github/workflows/quality-gate.yml", "utf8"));
+  const certificationCompose = yaml.load(fs.readFileSync("docker-compose.rls-certification.yml", "utf8"));
   const job = workflow.jobs["app-only-deployment-contract"];
   assert.equal(job["timeout-minutes"], 30);
   assert.equal(job.environment, undefined); assert.deepEqual(workflow.permissions, { contents: "read" });
@@ -190,6 +191,10 @@ test("CI runs real PostgreSQL and full package serially without AWS identity or 
   assert.equal(job.steps[real].env.MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST, "true");
   assert.match(job.steps[real].env.MSCQR_PRODUCTION_PACKAGE_POSTGRES18_ADMIN_URL, /@127\.0\.0\.1:55432\/mscqr_p2_admin_test$/);
   assert.ok(commands.some((run) => run.includes("npm run test:p2:db:up") && run.includes("node scripts/p2-test-db-tls.mjs")));
+  assert.deepEqual(certificationCompose.services["rls-cert-postgres"].command, ["postgres", "-c", "autovacuum=off"]);
+  const certifications = commands.filter((run) => run.includes("node scripts/rls/certify-clean-room-database.mjs"));
+  assert.equal(certifications.length, 2);
+  assert(certifications.every((run) => run.includes("SELECT count(*) FROM pg_stat_activity WHERE datname LIKE 'mscqr_full_rls_cert_%'")));
   assert.doesNotMatch(JSON.stringify(job), /configure-aws-credentials|role-to-assume|id-token|secrets\./);
   assert.match(commands[staticCheck], /init -backend=false -input=false -lockfile=readonly/);
   assert.match(commands[staticCheck], /eslint scripts\/aws\/\*app-only\*\.mjs/);
