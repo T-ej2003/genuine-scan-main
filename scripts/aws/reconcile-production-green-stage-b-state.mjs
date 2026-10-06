@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
-import { STAGE_B_TERRAFORM_BACKEND_CONFIG, assertStageBTerraformInitializedBackendMetadata, readStageBTerraformStateIdentity, readStageBTerraformStateSnapshot } from "./stage-b-terraform-backend-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND_CONFIG, assertStageBTerraformInitializedBackendMetadata, readStageBTerraformStateIdentity, writeStageBTerraformStateBackup } from "./stage-b-terraform-backend-contract.mjs";
 import { readStageBProtectedMainCheckout, assertStageBProtectedCheckoutMatchesDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertStageBTfvarsBinding } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertExactStageBRefreshOnlyPlan, assertStageBStateReconciliationSourceAlignment, createStageBOutputOnlyEvidence, createStageBStateReconciliationPreparation, executeStageBStateReconciliation, STAGE_B_STATE_RECONCILIATION, STAGE_B_STATE_RECONCILIATION_MODES } from "./production-green-stage-b-state-reconciliation.mjs";
@@ -27,8 +28,18 @@ export function runStageBStateReconciliationTerraform(args, env, spawn = spawnSy
 const privateJson = (filePath, expectedSha256, label) => readBoundStageBPrivateJson({ filePath: path.resolve(filePath), expectedSha256, repositoryRoot: root, label });
 const stateIdentity = (run) => readStageBTerraformStateIdentity(run);
 const outputOnlyEvidence = (run) => {
-  const snapshot = readStageBTerraformStateSnapshot(run); const arns = {};
-  for (const resource of snapshot.state?.resources || []) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-output-only-"));
+  let bytes;
+  try {
+    const output = path.join(directory, "terraform.tfstate");
+    writeStageBTerraformStateBackup({ run, output });
+    bytes = fs.readFileSync(output);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  let state;
+  try { state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch { throw new Error("Stage B output-only reconciliation requires valid UTF-8 JSON state bytes."); }
+  const arns = {};
+  for (const resource of state?.resources || []) {
     if (resource?.mode !== "managed" || resource?.type !== "aws_ecs_task_definition" || !["candidate", "executor"].includes(resource?.name)) continue;
     for (const instance of resource.instances || []) if (!instance?.deposed) arns[`aws_ecs_task_definition.${resource.name}[${JSON.stringify(instance?.index_key)}]`] = instance?.attributes?.arn;
   }
@@ -36,7 +47,7 @@ const outputOnlyEvidence = (run) => {
     const response = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", arn, "--region", STAGE_B_STATE_RECONCILIATION.region, "--output", "json", "--no-cli-pager"]));
     return [key, response.taskDefinition];
   }));
-  return createStageBOutputOnlyEvidence({ stateBytes: snapshot.bytes, observedTaskDefinitions });
+  return createStageBOutputOnlyEvidence({ stateBytes: bytes, observedTaskDefinitions });
 };
 
 function initialize({ data, env, terraform = runStageBStateReconciliationTerraform }) {
