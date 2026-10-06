@@ -42,7 +42,7 @@ export const STAGE_B_TERRAFORM_BACKEND = Object.freeze({
 // This is the sole raw-state identity used by stale-rotation execution.  It
 // reads the configured remote backend directly; it never initializes or
 // mutates Terraform state.
-export function readStageBTerraformStateIdentity(run) {
+export function readStageBTerraformStateSnapshot(run) {
   if (typeof run !== "function") throw new Error("Stage B state identity requires the credential-bound production runner.");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-state-"));
   const output = path.join(directory, "terraform.tfstate");
@@ -52,8 +52,13 @@ export function readStageBTerraformStateIdentity(run) {
     let state;
     try { state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new Error("Stage B state identity requires valid UTF-8 JSON state bytes."); }
     if (state?.version !== 4 || !/^[0-9a-f-]{36}$/.test(state.lineage || "") || !Number.isSafeInteger(state.serial) || state.serial < 0) throw new Error("Stage B state identity is invalid.");
-    return Object.freeze({ lineage: state.lineage, serial: state.serial, stateSha256: crypto.createHash("sha256").update(bytes).digest("hex") });
+    const identity = Object.freeze({ lineage: state.lineage, serial: state.serial, stateSha256: crypto.createHash("sha256").update(bytes).digest("hex") });
+    return Object.freeze({ bytes, state, identity });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
+
+export function readStageBTerraformStateIdentity(run) {
+  return readStageBTerraformStateSnapshot(run).identity;
 }
 
 export function writeStageBTerraformStateBackup({ run, output } = {}) {

@@ -4,6 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Exact protected-main source SHA, required: true, type: string }
+      reconciliation_mode:
+        description: Exact fail-closed reconciliation contract
+        required: true
+        type: choice
+        default: HISTORICAL_TEN_ADDRESS
+        options: [HISTORICAL_TEN_ADDRESS, OUTPUT_ONLY]
       ticket_id: { description: Externally issued change-ticket identifier, required: true, type: string }
       prerequisite_bundle_artifact_id: { description: Exact canonical prerequisite artifact ID, required: true, type: string }
       prerequisite_bundle_artifact_digest: { description: Exact canonical prerequisite artifact digest, required: true, type: string }
@@ -12,7 +18,6 @@ on:
       release_preflight_artifact_id: { description: Exact canonical release-preflight artifact ID, required: true, type: string }
       release_preflight_artifact_digest: { description: Exact canonical release-preflight artifact digest, required: true, type: string }
       prerequisite_producer_workflow_run_id: { description: Successful canonical prerequisite producer workflow run ID, required: true, type: string }
-      prerequisite_producer_workflow_run_attempt: { description: Canonical prerequisite producer workflow run attempt, required: true, type: string }
 
 permissions: { actions: read, contents: read, id-token: write }
 concurrency: { group: production-deploy, cancel-in-progress: false }
@@ -35,8 +40,9 @@ jobs:
       - name: Download and authenticate the canonical prerequisite bundle
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          RECONCILIATION_MODE: ${{ inputs.reconciliation_mode }}
           PRODUCER_RUN: ${{ inputs.prerequisite_producer_workflow_run_id }}
-          PRODUCER_ATTEMPT: ${{ inputs.prerequisite_producer_workflow_run_attempt }}
+          PRODUCER_ATTEMPT: "1"
           PRODUCER_ARTIFACT: ${{ inputs.prerequisite_bundle_artifact_id }}
           PRODUCER_DIGEST: ${{ inputs.prerequisite_bundle_artifact_digest }}
           GITHUB_TOKEN: ${{ github.token }}
@@ -105,7 +111,7 @@ jobs:
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
-          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-preflight "$d/release-preflight.json" --release-preflight-sha256 "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(cat "$d/producer-run-id")" --prerequisite-producer-workflow-run-attempt "$(cat "$d/producer-run-attempt")" --prerequisite-bundle-artifact-id "$(cat "$d/producer-artifact-id")" --prerequisite-bundle-artifact-digest "$(cat "$d/producer-artifact-digest")" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
+          node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --reconciliation-mode "$RECONCILIATION_MODE" --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-preflight "$d/release-preflight.json" --release-preflight-sha256 "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(cat "$d/producer-run-id")" --prerequisite-producer-workflow-run-attempt "$(cat "$d/producer-run-attempt")" --prerequisite-bundle-artifact-id "$(cat "$d/producer-artifact-id")" --prerequisite-bundle-artifact-digest "$(cat "$d/producer-artifact-digest")" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
           (cd "$d" && zip -q preparation-bundle.zip preparation.json refresh.tfplan release-preflight.json prerequisite-bundle.zip)
       - uses: actions/upload-artifact@v4
         with:
