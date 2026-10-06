@@ -53,6 +53,13 @@ test("preparation, authorization, and result artifacts retain the complete succe
   }
 });
 
+test("Stage B closure CI runs the authenticated reconciliation evidence regression suite", () => {
+  const workflow = yaml.load(fs.readFileSync(path.join(root, ".github/workflows/quality-gate.yml"), "utf8"));
+  const steps = workflow.jobs["stage-b-deployment-closure"].steps;
+  const testStep = steps.find(({ name }) => name === "Test authenticated Stage B reconciliation evidence");
+  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs");
+});
+
 test("preparation passes the required dispatch mode explicitly under nounset", () => {
   const workflow = parse("prepare-production-green-stage-b-state-reconciliation.yml");
   const input = workflow.on.workflow_dispatch.inputs.reconciliation_mode;
