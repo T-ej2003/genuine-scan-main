@@ -50,11 +50,14 @@ const historicalBinding = () => ({
   taskDefinitionArns: { backend: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn },
 });
 const historicalPredecessorInput = () => ({
-  before: { document: historicalV16Policy(), defaultVersionId: HISTORICAL_FINAL_APPLY_WRITE_V16.defaultVersionId },
-  versions: historicalVersions(), sourceSha: "f".repeat(40), imageReleaseSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
-  sourceArn: HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn, targetArn: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn,
-  state: { lineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage, serial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial },
-  stateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256, binding: historicalBinding(), protectedMainAncestorAuthenticated: true,
+  authenticated: {
+    before: { document: historicalV16Policy(), defaultVersionId: HISTORICAL_FINAL_APPLY_WRITE_V16.defaultVersionId },
+    versions: historicalVersions(), sourceSha: "f".repeat(40), imageReleaseSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
+    sourceArn: HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn, targetArn: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn,
+    state: { lineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage, serial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial },
+    stateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
+  },
+  supplemental: { binding: historicalBinding(), protectedMainAncestorAuthenticated: true },
 });
 
 function simulatedTarget(args) {
@@ -135,35 +138,51 @@ test("normal activation policies separate steady recovery from exact SOURCE/TARG
 test("historical FinalApplyWrite v16 is one exact authenticated predecessor", () => {
   const input = historicalPredecessorInput();
   assert.equal(assertHistoricalFinalApplyWriteV16Predecessor(input), true);
-  const transaction = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn: input.sourceArn, targetArn: input.targetArn }));
+  const transaction = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn: input.authenticated.sourceArn, targetArn: input.authenticated.targetArn }));
   assert.equal(Buffer.byteLength(JSON.stringify(transaction)), 5841);
   assert.ok(transaction.Statement.some((statement) => JSON.stringify(statement).includes("production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime")));
 
   const rejects = [
-    (value) => { value.before.defaultVersionId = "v15"; },
-    (value) => { value.before.document.Statement[0].Action = "ecs:DeleteService"; },
-    (value) => { value.before.document.Statement[0].Resource += "-other"; },
-    (value) => { value.before.document.Statement.push(structuredClone(value.before.document.Statement[0])); },
-    (value) => { value.before.document.Statement.pop(); },
-    (value) => { value.before.document.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"] = HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn; },
-    (value) => { value.sourceArn = value.sourceArn.replace(":24", ":23"); },
-    (value) => { value.targetArn = value.targetArn.replace(":27", ":28"); },
-    (value) => { value.state.lineage = "00000000-0000-0000-0000-000000000000"; },
-    (value) => { value.state.serial = 116; },
-    (value) => { value.stateSha256 = "0".repeat(64); },
-    (value) => { value.binding.bindingReportSha256 = "0".repeat(64); },
-    (value) => { value.binding.taskDefinitionArns.backend = value.binding.taskDefinitionArns.backend.replace(":27", ":28"); },
-    (value) => { value.versions = value.versions.filter(({ VersionId }) => VersionId !== "v12"); },
-    (value) => { value.protectedMainAncestorAuthenticated = false; },
-    (value) => { value.sourceSha = HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha; },
+    (value) => { value.authenticated.before.defaultVersionId = "v15"; },
+    (value) => { value.authenticated.before.document.Statement[0].Action = "ecs:DeleteService"; },
+    (value) => { value.authenticated.before.document.Statement[0].Resource += "-other"; },
+    (value) => { value.authenticated.before.document.Statement.push(structuredClone(value.authenticated.before.document.Statement[0])); },
+    (value) => { value.authenticated.before.document.Statement.pop(); },
+    (value) => { value.authenticated.before.document.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"] = HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn; },
+    (value) => { value.authenticated.sourceArn = value.authenticated.sourceArn.replace(":24", ":23"); },
+    (value) => { value.authenticated.targetArn = value.authenticated.targetArn.replace(":27", ":28"); },
+    (value) => { value.authenticated.state.lineage = "00000000-0000-0000-0000-000000000000"; },
+    (value) => { value.authenticated.state.serial = 116; },
+    (value) => { value.authenticated.stateSha256 = "0".repeat(64); },
+    (value) => { value.supplemental.binding.bindingReportSha256 = "0".repeat(64); },
+    (value) => { value.supplemental.binding.taskDefinitionArns.backend = value.supplemental.binding.taskDefinitionArns.backend.replace(":27", ":28"); },
+    (value) => { value.authenticated.versions = value.authenticated.versions.filter(({ VersionId }) => VersionId !== "v12"); },
+    (value) => { value.supplemental.protectedMainAncestorAuthenticated = false; },
+    (value) => { value.authenticated.sourceSha = HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha; },
   ];
   for (const mutate of rejects) {
     const changed = structuredClone(input); mutate(changed);
     assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /Historical FinalApplyWrite/);
   }
 
+  const maliciousOverrides = {
+    before: { document: buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn), defaultVersionId: "v99" },
+    versions: [{ VersionId: "v99", IsDefaultVersion: true }],
+    sourceSha: "0".repeat(40),
+    imageReleaseSha: "1".repeat(40),
+    sourceArn: HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn.replace(":24", ":23"),
+    targetArn: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn.replace(":27", ":28"),
+    state: { lineage: "00000000-0000-0000-0000-000000000000", serial: 999 },
+    stateSha256: "0".repeat(64),
+  };
+  for (const [field, value] of Object.entries(maliciousOverrides)) {
+    const changed = structuredClone(input);
+    changed.supplemental[field] = value;
+    assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /supplemental predecessor fields are not exact/);
+  }
+
   const after = structuredClone(input);
-  after.before = { document: transaction, defaultVersionId: "v17" };
+  after.authenticated.before = { document: transaction, defaultVersionId: "v17" };
   assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(after), /live policy identity/);
   assert.throws(() => assertNormalActivationPolicy(transaction, HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn), /does not exactly match/);
 });

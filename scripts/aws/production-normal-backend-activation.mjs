@@ -98,7 +98,11 @@ function readLivePolicy(run) {
 }
 
 const policySha256 = (document) => sha256(canonical(compactNormalActivationPolicy(document)));
-export function assertHistoricalFinalApplyWriteV16Predecessor({ before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256, binding, protectedMainAncestorAuthenticated } = {}) {
+export function assertHistoricalFinalApplyWriteV16Predecessor({ authenticated = {}, supplemental = {} } = {}) {
+  const supplementalKeys = Object.keys(supplemental).sort();
+  if (canonical(supplementalKeys) !== canonical(["binding", "protectedMainAncestorAuthenticated"])) throw new Error("Historical FinalApplyWrite supplemental predecessor fields are not exact.");
+  const { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256 } = authenticated;
+  const { binding, protectedMainAncestorAuthenticated } = supplemental;
   const expected = HISTORICAL_FINAL_APPLY_WRITE_V16;
   if (protectedMainAncestorAuthenticated !== true || !SHA.test(sourceSha || "") || sourceSha === expected.minimumProtectedMainSha) throw new Error("Historical FinalApplyWrite migration requires the exact protected-main successor checkout.");
   if (imageReleaseSha !== expected.imageReleaseSha || sourceArn !== expected.sourceArn || targetArn !== expected.targetArn) throw new Error("Historical FinalApplyWrite migration SOURCE/TARGET or image release binding changed.");
@@ -329,7 +333,10 @@ export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha
     catch (strictError) {
       if (!historicalPredecessor) throw strictError;
       const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
-      assertHistoricalFinalApplyWriteV16Predecessor({ before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256: sha256(liveState.bytes), ...historicalPredecessor });
+      assertHistoricalFinalApplyWriteV16Predecessor({
+        authenticated: { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256: sha256(liveState.bytes) },
+        supplemental: historicalPredecessor,
+      });
       historicalPredecessorUsed = true;
     }
     const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationTransactionPolicy(document, { sourceArn, targetArn }), progress });
