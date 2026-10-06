@@ -102,6 +102,7 @@ jobs:
       - name: Prepare and bundle only the authenticated refresh-only transition
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
+          RECONCILIATION_MODE: ${{ inputs.reconciliation_mode }}
           TICKET_ID: ${{ inputs.ticket_id }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
