@@ -7,6 +7,7 @@ import { createAssumedRoleSessionEnvironment, createProductionAwsCommandRunner, 
 
 const ROLE = 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer';
 const PROFILE = 'mscqr-production-release-deployer';
+const MAX_WRITER_SESSION_MS = 12 * 60 * 60 * 1000;
 const digest = value => createHash('sha256').update(value).digest('hex');
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
 const assumptions = ['AssumeRole', 'AssumeRoleWithWebIdentity', 'AssumeRoleWithSAML'];
@@ -27,10 +28,19 @@ export function assertBrokerWriterSession(session) {
   assert.ok(duration >= 900000 && duration <= 43200000, 'Unbounded role session');
   return session;
 }
-export function authenticateBrokerSessionIssuance(events, identity) {
+function assertIssuanceWindow(window) {
+  assert.ok(window && typeof window === 'object', 'Authenticated issuance interval required');
+  const start = timestamp(window.startTime), end = timestamp(window.endTime);
+  assert.ok(start < end && end - start <= MAX_WRITER_SESSION_MS, 'Invalid authenticated issuance interval');
+  return { startTime: new Date(start).toISOString(), endTime: new Date(end).toISOString(), start, end };
+}
+export function authenticateBrokerSessionIssuance(events, identity, window) {
+  const interval = assertIssuanceWindow(window);
   const matches = events.filter(event => digest(event.responseElements?.credentials?.accessKeyId || '') === identity.accessKeyIdSha256);
   assert.equal(matches.length, 1, 'Missing/ambiguous independently authenticated STS issuance');
   const event = matches[0];
+  const issuedAt = timestamp(event.eventTime);
+  assert.ok(issuedAt >= interval.start && issuedAt <= interval.end, 'STS issuance is outside the authenticated interval');
   assert.equal(event.eventSource, 'sts.amazonaws.com'); assert.ok(assumptions.includes(event.eventName));
   assert.equal(event.awsRegion, STAGE_B.region); assert.equal(event.recipientAccountId, STAGE_B.account);
   assert.equal(event.errorCode, undefined); assert.equal(event.errorMessage, undefined);
@@ -43,13 +53,15 @@ export function authenticateBrokerSessionIssuance(events, identity) {
 
 // Only AWS-returned events enter this function in production. Reduce them before
 // persisting anything: CloudTrail can contain session tokens; never log raw events.
-export function readBrokerSessionIssuance(run, identity) {
+export function readBrokerSessionIssuance(run, identity, window) {
+  const interval = assertIssuanceWindow(window);
   const events = new Map();
   for (const eventName of assumptions) {
     let token; const seen = new Set();
     for (let page = 0; page < 100; page++) {
       const result = parseIssuance(run(['cloudtrail', 'lookup-events', '--lookup-attributes', `AttributeKey=EventName,AttributeValue=${eventName}`,
-        '--max-results', '50', '--no-paginate', ...(token ? ['--next-token', token] : []), '--region', STAGE_B.region, '--output', 'json', '--no-cli-pager']));
+        '--start-time', interval.startTime, '--end-time', interval.endTime, '--max-results', '50', '--no-paginate',
+        ...(token ? ['--next-token', token] : []), '--region', STAGE_B.region, '--output', 'json', '--no-cli-pager']));
       assert.ok(Array.isArray(result.Events));
       for (const item of result.Events) {
         const event = parseIssuance(item.CloudTrailEvent);
@@ -64,7 +76,11 @@ export function readBrokerSessionIssuance(run, identity) {
       assert.ok(page < 99, 'CloudTrail issuance search incomplete');
     }
   }
-  return authenticateBrokerSessionIssuance([...events.values()], identity);
+  return authenticateBrokerSessionIssuance([...events.values()], identity, interval);
+}
+function writerSessionIssuanceWindow(expiration) {
+  const end = timestamp(expiration, true);
+  return { startTime: new Date(end - MAX_WRITER_SESSION_MS).toISOString(), endTime: new Date(end).toISOString() };
 }
 export async function readBrokerRecoveryAwsClock(fetcher = fetch) {
   // Same regional STS authority that issued the credential. No signed operation,
@@ -136,7 +152,9 @@ export function createBrokerWriterSessionBoundary({ env = process.env, exec = ex
       };
       const caller = JSON.parse(run(['sts', 'get-caller-identity', '--output', 'json', '--no-cli-pager']));
       assert.equal(caller.Account, STAGE_B.account);
-      const session = readBrokerSessionIssuance(administrator, { accessKeyIdSha256: digest(credentials.AccessKeyId), callerArn: caller.Arn, callerUserId: caller.UserId });
+      const window = writerSessionIssuanceWindow(credentials.Expiration);
+      const session = readBrokerSessionIssuance(administrator, { accessKeyIdSha256: digest(credentials.AccessKeyId), callerArn: caller.Arn, callerUserId: caller.UserId }, window);
+      assert.equal(session.expiresAt, window.endTime, 'Pinned credential expiration differs from authenticated STS issuance');
       // No profile/provider is left in the writer's environment. Expiry cannot
       // trigger CLI/provider refresh; a later invocation cannot replay its journal.
       return { session, run, environment: frozenEnvironment };
@@ -156,6 +174,7 @@ export function createBrokerWriterSessionBoundary({ env = process.env, exec = ex
       throw Error('Incomplete alias CAS CloudTrail census');
     },
     prove: owner => { authenticateReader(); return proveBrokerWriterUnusable(owner, { readIssuance: session => readBrokerSessionIssuance(administrator,
-      { accessKeyIdSha256: session.accessKeyIdSha256, callerArn: session.callerArn, callerUserId: session.callerUserId }), readClock: readBrokerRecoveryAwsClock }); },
+      { accessKeyIdSha256: session.accessKeyIdSha256, callerArn: session.callerArn, callerUserId: session.callerUserId },
+      { startTime: session.issuedAt, endTime: session.expiresAt }), readClock: readBrokerRecoveryAwsClock }); },
   };
 }
