@@ -20,6 +20,15 @@ export const canonicalNormalActivationValue = (value) => Array.isArray(value)
     ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalNormalActivationValue(value[key])}`).join(",")}}`
     : JSON.stringify(value);
 
+export function compactNormalActivationPolicy(policy) {
+  const normalized = structuredClone(normalizeIamPolicyDocument(policy, "normal activation policy"));
+  if (!Array.isArray(normalized.Statement)) throw new Error("Normal activation policy statements are malformed.");
+  normalized.Statement = normalized.Statement.map(({ Sid, ...statement }) => statement);
+  return normalized;
+}
+
+const canonicalNormalActivationAuthorization = (policy) => canonicalNormalActivationValue(compactNormalActivationPolicy(policy));
+
 export function normalActivationCandidateArnFromState(state) {
   const candidates = (state?.resources || []).filter(({ mode, type, name }) => mode === "managed" && type === "aws_ecs_task_definition" && name === "candidate")
     .flatMap(({ instances = [] }) => instances)
@@ -45,7 +54,7 @@ export function buildNormalActivationPolicy(targetArn, sourcePolicy = JSON.parse
   if (!NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation policy requires one exact candidate revision.");
   const { policy, activation } = baseNormalActivationPolicy(sourcePolicy);
   activation.Condition.ArnEquals["ecs:task-definition"] = targetArn;
-  if (Buffer.byteLength(JSON.stringify(policy)) > AWS_MANAGED_POLICY_DOCUMENT_LIMIT) throw new Error("Normal activation policy exceeds the AWS managed-policy document limit.");
+  if (Buffer.byteLength(JSON.stringify(compactNormalActivationPolicy(policy))) > AWS_MANAGED_POLICY_DOCUMENT_LIMIT) throw new Error("Normal activation policy exceeds the AWS managed-policy document limit.");
   return policy;
 }
 
@@ -55,13 +64,13 @@ export function buildNormalActivationTransactionPolicy({ sourceArn, targetArn },
   const targets = [...new Set([sourceArn, targetArn])].sort();
   activation.Condition.ArnEquals["ecs:task-definition"] = targets.length === 1 ? targets[0] : targets;
   policy.Statement = policy.Statement.filter((statement) => statement !== recovery);
-  if (Buffer.byteLength(JSON.stringify(policy)) > AWS_MANAGED_POLICY_DOCUMENT_LIMIT) throw new Error("Normal activation transaction policy exceeds the AWS managed-policy document limit.");
+  if (Buffer.byteLength(JSON.stringify(compactNormalActivationPolicy(policy))) > AWS_MANAGED_POLICY_DOCUMENT_LIMIT) throw new Error("Normal activation transaction policy exceeds the AWS managed-policy document limit.");
   return policy;
 }
 
 export function assertNormalActivationPolicy(policy, targetArn) {
   const expected = buildNormalActivationPolicy(targetArn);
-  if (canonicalNormalActivationValue(normalizeIamPolicyDocument(policy, "live normal activation policy")) !== canonicalNormalActivationValue(expected)) throw new Error("Live FinalApplyWrite policy does not exactly match the state-derived normal activation target.");
+  if (canonicalNormalActivationAuthorization(policy) !== canonicalNormalActivationAuthorization(expected)) throw new Error("Live FinalApplyWrite policy does not exactly match the state-derived normal activation target.");
   const update = expected.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate");
   const recovery = expected.Statement.find(({ Sid }) => Sid === "RecoverLegacyBackend");
   if (update.Resource !== NORMAL_ACTIVATION.serviceArn || update.Action !== "ecs:UpdateService" || update.Condition?.StringEquals?.["ecs:cluster"] !== NORMAL_ACTIVATION.clusterArn || update.Condition?.StringEquals?.["aws:RequestedRegion"] !== NORMAL_ACTIVATION.region || update.Condition?.ArnEquals?.["ecs:task-definition"] !== targetArn || recovery?.Resource !== NORMAL_ACTIVATION.serviceArn || recovery.Action !== "ecs:UpdateService" || recovery.Condition?.StringEquals?.["ecs:cluster"] !== NORMAL_ACTIVATION.clusterArn || recovery.Condition?.ArnLike?.["ecs:task-definition"] !== "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*") throw new Error("Normal activation and recovery update policies are broader than their separate service/cluster/revision contracts.");
@@ -71,7 +80,7 @@ export function assertNormalActivationPolicy(policy, targetArn) {
 
 export function assertNormalActivationTransactionPolicy(policy, { sourceArn, targetArn }) {
   const expected = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
-  if (canonicalNormalActivationValue(normalizeIamPolicyDocument(policy, "live normal activation transaction policy")) !== canonicalNormalActivationValue(expected)) throw new Error("Live FinalApplyWrite policy does not exactly match the SOURCE/TARGET normal activation transaction.");
+  if (canonicalNormalActivationAuthorization(policy) !== canonicalNormalActivationAuthorization(expected)) throw new Error("Live FinalApplyWrite policy does not exactly match the SOURCE/TARGET normal activation transaction.");
   const update = expected.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate");
   const targets = asList(update?.Condition?.ArnEquals?.["ecs:task-definition"]);
   if (expected.Statement.some(({ Sid }) => Sid === "RecoverLegacyBackend") || targets.length !== new Set([sourceArn, targetArn]).size || targets.some((arn) => !exactNormalSource(arn)) || !targets.includes(sourceArn) || !targets.includes(targetArn)) throw new Error("Normal activation transaction authority is broader than exact SOURCE and TARGET.");
@@ -80,9 +89,9 @@ export function assertNormalActivationTransactionPolicy(policy, { sourceArn, tar
 
 export function assertNormalActivationPolicyDeltaOnly(policy) {
   const normalized = structuredClone(normalizeIamPolicyDocument(policy, "current normal activation policy"));
-  const statement = normalized.Statement?.filter(({ Sid }) => Sid === "ActivateBackendCandidate");
+  const statement = normalized.Statement?.filter(({ Action, Resource, Condition }) => Action === "ecs:UpdateService" && Resource === NORMAL_ACTIVATION.serviceArn && Condition?.ArnEquals?.["ecs:task-definition"]);
   const currentTarget = statement?.[0]?.Condition?.ArnEquals?.["ecs:task-definition"];
-  if (statement?.length !== 1 || !NORMAL_CANDIDATE_ARN.test(currentTarget || "") || canonicalNormalActivationValue(normalized) !== canonicalNormalActivationValue(buildNormalActivationPolicy(currentTarget))) throw new Error("FinalApplyWrite policy contains changes outside the exact normal candidate revision binding.");
+  if (statement?.length !== 1 || !NORMAL_CANDIDATE_ARN.test(currentTarget || "") || canonicalNormalActivationAuthorization(normalized) !== canonicalNormalActivationAuthorization(buildNormalActivationPolicy(currentTarget))) throw new Error("FinalApplyWrite policy contains changes outside the exact normal candidate revision binding.");
   return currentTarget;
 }
 
@@ -96,7 +105,7 @@ export function assertNormalActivationPolicyTransitionOnly(policy, { sourceArn, 
     assertNormalActivationTransactionPolicy(normalized, { sourceArn, targetArn });
     return "TRANSACTION";
   } catch {}
-  const activation = normalized.Statement?.find(({ Sid }) => Sid === "ActivateBackendCandidate");
+  const activation = normalized.Statement?.find(({ Action, Resource, Condition }) => Action === "ecs:UpdateService" && Resource === NORMAL_ACTIVATION.serviceArn && Condition?.ArnEquals?.["ecs:task-definition"]);
   const targets = asList(activation?.Condition?.ArnEquals?.["ecs:task-definition"]);
   if (targets.length === 1 && NORMAL_CANDIDATE_ARN.test(targets[0] || "")) {
     assertNormalActivationPolicy(normalized, targets[0]);

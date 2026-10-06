@@ -10,7 +10,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
-import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue } from "./production-normal-backend-activation-policy.mjs";
+import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
@@ -227,9 +227,10 @@ function convergenceFailure({ mutationAttempted, readbackVerified, confirmedIamW
 }
 
 function publishNormalActivationPolicy({ run, before, expected, assertAfter, progress }) {
+  const published = compactNormalActivationPolicy(expected);
   let ambiguousMutationError = null;
   let policyVersionCreateAttempted = false;
-  if (canonical(before.document) !== canonical(expected)) {
+  if (canonical(compactNormalActivationPolicy(before.document)) !== canonical(published)) {
     try {
       const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
       const versionToDelete = oldestDeletablePolicyVersion(versions, before.defaultVersionId);
@@ -239,7 +240,7 @@ function publishNormalActivationPolicy({ run, before, expected, assertAfter, pro
       }
       progress.mutationAttempted = true;
       policyVersionCreateAttempted = true;
-      run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(expected), "--set-as-default", "--no-cli-pager"]); progress.confirmedIamWrites += 1;
+      run(["iam", "create-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--policy-document", JSON.stringify(published), "--set-as-default", "--no-cli-pager"]); progress.confirmedIamWrites += 1;
     } catch (error) { ambiguousMutationError = error; }
   }
   const after = readLivePolicy(run);
