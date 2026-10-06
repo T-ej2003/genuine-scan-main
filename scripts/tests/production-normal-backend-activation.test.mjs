@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
-import { HISTORICAL_FINAL_APPLY_WRITE_V16, NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertHistoricalFinalApplyWriteV16Predecessor, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
+import { HISTORICAL_FINAL_APPLY_WRITE_V16, NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertHistoricalFinalApplyWriteV16ArtifactIdentity, assertHistoricalFinalApplyWriteV16Predecessor, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext, readHistoricalFinalApplyWriteV16Artifacts } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { AWS_MANAGED_POLICY_DOCUMENT_LIMIT, assertNormalActivationPolicyDeltaOnly, compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
@@ -41,15 +43,41 @@ const contextArgsFor = (arn) => [
 const historicalV16Source = () => JSON.parse(execFileSync("git", ["show", `${HISTORICAL_FINAL_APPLY_WRITE_V16.sourcePolicyCommit}:${NORMAL_ACTIVATION.policyPath}`], { encoding: "utf8" }));
 const historicalV16Policy = () => buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn, historicalV16Source());
 const historicalVersions = () => HISTORICAL_FINAL_APPLY_WRITE_V16.versionIds.map((VersionId, index) => ({ VersionId, IsDefaultVersion: VersionId === "v16", CreateDate: new Date(Date.UTC(2026, 7, 12 + index)).toISOString() }));
-const historicalBinding = () => ({
+const historicalRefreshReport = () => ({
+  schemaVersion: 1,
   toolingSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
-  bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingSha256,
+  bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256,
   stageBStateLineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage,
   stageBStateSerial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial,
   stageBStateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
   taskDefinitionArns: { backend: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn },
 });
-const historicalPredecessorInput = () => ({
+const historicalBindingReport = () => ({
+  schemaVersion: 2,
+  toolingSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
+  imageReleaseSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
+  stateLineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage,
+  stateSerial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial,
+  stateBackupSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
+});
+const historicalArtifacts = () => ({
+  refreshReport: historicalRefreshReport(),
+  refreshReportByteSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.refreshReportSha256,
+  bindingReport: historicalBindingReport(),
+  bindingReportByteSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256,
+});
+const historicalFixtureDirectory = path.resolve("scripts/tests/fixtures/historical-final-apply-write-v16");
+function copyHistoricalArtifacts() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-final-apply-v16-"));
+  fs.chmodSync(directory, 0o700);
+  const refreshReportPath = path.join(directory, "refresh-report.json");
+  const bindingReportPath = path.join(directory, "stage-b-tfvars-binding.json");
+  fs.copyFileSync(path.join(historicalFixtureDirectory, "refresh-report.json"), refreshReportPath);
+  fs.copyFileSync(path.join(historicalFixtureDirectory, "stage-b-tfvars-binding.json"), bindingReportPath);
+  fs.chmodSync(refreshReportPath, 0o600); fs.chmodSync(bindingReportPath, 0o600);
+  return { directory, refreshReportPath, bindingReportPath };
+}
+const historicalPredecessorInput = (artifacts = historicalArtifacts()) => ({
   authenticated: {
     before: { document: historicalV16Policy(), defaultVersionId: HISTORICAL_FINAL_APPLY_WRITE_V16.defaultVersionId },
     versions: historicalVersions(), sourceSha: "f".repeat(40), imageReleaseSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
@@ -57,7 +85,7 @@ const historicalPredecessorInput = () => ({
     state: { lineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage, serial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial },
     stateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
   },
-  supplemental: { binding: historicalBinding(), protectedMainAncestorAuthenticated: true },
+  supplemental: { artifacts, protectedMainAncestorAuthenticated: true },
 });
 
 function simulatedTarget(args) {
@@ -136,11 +164,19 @@ test("normal activation policies separate steady recovery from exact SOURCE/TARG
 });
 
 test("historical FinalApplyWrite v16 is one exact authenticated predecessor", () => {
-  const input = historicalPredecessorInput();
-  assert.equal(assertHistoricalFinalApplyWriteV16Predecessor(input), true);
-  const transaction = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn: input.authenticated.sourceArn, targetArn: input.authenticated.targetArn }));
-  assert.equal(Buffer.byteLength(JSON.stringify(transaction)), 5841);
-  assert.ok(transaction.Statement.some((statement) => JSON.stringify(statement).includes("production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime")));
+  const fixture = copyHistoricalArtifacts();
+  const artifacts = readHistoricalFinalApplyWriteV16Artifacts({
+    refreshReportPath: fixture.refreshReportPath,
+    refreshReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.refreshReportSha256,
+    bindingReportPath: fixture.bindingReportPath,
+    bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256,
+  });
+  const input = historicalPredecessorInput(artifacts);
+  try {
+    assert.equal(assertHistoricalFinalApplyWriteV16Predecessor(input), true);
+    const transaction = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn: input.authenticated.sourceArn, targetArn: input.authenticated.targetArn }));
+    assert.equal(Buffer.byteLength(JSON.stringify(transaction)), 5841);
+    assert.ok(transaction.Statement.some((statement) => JSON.stringify(statement).includes("production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime")));
 
   const rejects = [
     (value) => { value.authenticated.before.defaultVersionId = "v15"; },
@@ -154,16 +190,15 @@ test("historical FinalApplyWrite v16 is one exact authenticated predecessor", ()
     (value) => { value.authenticated.state.lineage = "00000000-0000-0000-0000-000000000000"; },
     (value) => { value.authenticated.state.serial = 116; },
     (value) => { value.authenticated.stateSha256 = "0".repeat(64); },
-    (value) => { value.supplemental.binding.bindingReportSha256 = "0".repeat(64); },
-    (value) => { value.supplemental.binding.taskDefinitionArns.backend = value.supplemental.binding.taskDefinitionArns.backend.replace(":27", ":28"); },
     (value) => { value.authenticated.versions = value.authenticated.versions.filter(({ VersionId }) => VersionId !== "v12"); },
     (value) => { value.supplemental.protectedMainAncestorAuthenticated = false; },
     (value) => { value.authenticated.sourceSha = HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha; },
   ];
   for (const mutate of rejects) {
-    const changed = structuredClone(input); mutate(changed);
+    const changed = historicalPredecessorInput(artifacts); mutate(changed);
     assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /Historical FinalApplyWrite/);
   }
+  assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(historicalPredecessorInput()), /not authenticated from exact private files/);
 
   const maliciousOverrides = {
     before: { document: buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn), defaultVersionId: "v99" },
@@ -176,15 +211,57 @@ test("historical FinalApplyWrite v16 is one exact authenticated predecessor", ()
     stateSha256: "0".repeat(64),
   };
   for (const [field, value] of Object.entries(maliciousOverrides)) {
-    const changed = structuredClone(input);
+    const changed = historicalPredecessorInput(artifacts);
     changed.supplemental[field] = value;
     assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /supplemental predecessor fields are not exact/);
   }
 
-  const after = structuredClone(input);
+  const after = historicalPredecessorInput(artifacts);
   after.authenticated.before = { document: transaction, defaultVersionId: "v17" };
   assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(after), /live policy identity/);
   assert.throws(() => assertNormalActivationPolicy(transaction, HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn), /does not exactly match/);
+  } finally { fs.rmSync(fixture.directory, { recursive: true, force: true }); }
+});
+
+test("historical FinalApplyWrite refresh and binding artifacts keep distinct identities", () => {
+  const authentic = historicalArtifacts();
+  assert.equal(assertHistoricalFinalApplyWriteV16ArtifactIdentity(authentic).refreshReport.bindingReportSha256, authentic.bindingReportByteSha256);
+  for (const mutate of [
+    (value) => { value.refreshReportByteSha256 = "0".repeat(64); },
+    (value) => { value.bindingReportByteSha256 = "0".repeat(64); },
+    (value) => { value.refreshReportByteSha256 = value.bindingReportByteSha256; },
+    (value) => { value.bindingReportByteSha256 = value.refreshReportByteSha256; },
+    (value) => { value.refreshReport.bindingReportSha256 = value.refreshReportByteSha256; },
+    (value) => { value.bindingReport.stateBackupSha256 = "0".repeat(64); },
+    (value) => { value.bindingReport.imageReleaseSha = "0".repeat(40); },
+  ]) {
+    const changed = structuredClone(authentic); mutate(changed);
+    assert.throws(() => assertHistoricalFinalApplyWriteV16ArtifactIdentity(changed), /Historical FinalApplyWrite/);
+  }
+});
+
+test("exact historical FinalApplyWrite artifacts authenticate by separate byte identities", () => {
+  const fixture = copyHistoricalArtifacts();
+  const read = (overrides = {}) => readHistoricalFinalApplyWriteV16Artifacts({
+    refreshReportPath: fixture.refreshReportPath,
+    refreshReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.refreshReportSha256,
+    bindingReportPath: fixture.bindingReportPath,
+    bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256,
+    ...overrides,
+  });
+  try {
+    const authentic = read();
+    assert.equal(authentic.refreshReport.bindingReportSha256, authentic.bindingReportByteSha256);
+    assert.throws(() => read({ refreshReportSha256: "0".repeat(64) }), /not exact and distinct/);
+    assert.throws(() => read({ bindingReportSha256: "0".repeat(64) }), /not exact and distinct/);
+    assert.throws(() => read({ refreshReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256, bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.refreshReportSha256 }), /not exact and distinct/);
+    assert.throws(() => read({ refreshReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256 }), /not exact and distinct/);
+    fs.appendFileSync(fixture.refreshReportPath, " ");
+    assert.throws(() => read(), /artifact byte identities changed/);
+    fs.copyFileSync(path.join(historicalFixtureDirectory, "refresh-report.json"), fixture.refreshReportPath); fs.chmodSync(fixture.refreshReportPath, 0o600);
+    fs.appendFileSync(fixture.bindingReportPath, " ");
+    assert.throws(() => read(), /artifact byte identities changed/);
+  } finally { fs.rmSync(fixture.directory, { recursive: true, force: true }); }
 });
 
 test("live preparation authenticates caller, state, exact policy, target, service, and current revision", () => {
