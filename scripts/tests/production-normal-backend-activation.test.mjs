@@ -6,7 +6,7 @@ import test from "node:test";
 import yaml from "js-yaml";
 import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
-import { assertNormalActivationPolicyDeltaOnly } from "../aws/production-normal-backend-activation-policy.mjs";
+import { AWS_MANAGED_POLICY_DOCUMENT_LIMIT, assertNormalActivationPolicyDeltaOnly, compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 
@@ -80,6 +80,12 @@ test("normal image reuse binds authenticated image SHA through the real candidat
 
 test("normal activation policies separate steady recovery from exact SOURCE/TARGET transaction authority", () => {
   const policy = buildNormalActivationPolicy(targetArn);
+  const compact = compactNormalActivationPolicy(policy);
+  assert.equal(Buffer.byteLength(JSON.stringify(JSON.parse(fs.readFileSync(NORMAL_ACTIVATION.policyPath, "utf8")))), 6634);
+  assert.equal(Buffer.byteLength(JSON.stringify(compact)), 6136);
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) <= AWS_MANAGED_POLICY_DOCUMENT_LIMIT);
+  assert.deepEqual(compact.Statement, policy.Statement.map(({ Sid, ...statement }) => statement));
+  assertNormalActivationPolicy(compact, targetArn);
   assertNormalActivationPolicy(policy, targetArn);
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], targetArn);
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "RecoverLegacyBackend").Condition.ArnLike["ecs:task-definition"], "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:*");
@@ -91,6 +97,17 @@ test("normal activation policies separate steady recovery from exact SOURCE/TARG
   assert.throws(() => buildNormalActivationPolicy(targetArn.replace(":12", ":12345678901234567890")), /managed-policy document limit/);
   const transaction = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
   assertNormalActivationTransactionPolicy(transaction, { sourceArn, targetArn });
+  const compactTransaction = compactNormalActivationPolicy(transaction);
+  for (const [sid, mutate] of [
+    ["ActivateBackendCandidate", (statement) => { statement.Resource = `${NORMAL_ACTIVATION.serviceArn}-other`; }],
+    ["OwnExactBrokerPolicyMutationDomain", (statement) => { statement.Resource = `${statement.Resource}/other`; }],
+    ["UpdateBrokerAlias", (statement) => { statement.Resource = `${statement.Resource}:other`; }],
+    ["PassEcsTaskRoles", (statement) => { statement.Resource = "*"; }],
+  ]) {
+    const changed = structuredClone(compactTransaction);
+    mutate(changed.Statement[transaction.Statement.findIndex((statement) => statement.Sid === sid)]);
+    assert.throws(() => assertNormalActivationTransactionPolicy(changed, { sourceArn, targetArn }), /does not exactly match/);
+  }
   assert.deepEqual(transaction.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"], [sourceArn, targetArn].sort());
   assert.equal(transaction.Statement.some(({ Sid }) => Sid === "RecoverLegacyBackend"), false);
   assert.throws(() => assertNormalActivationTransactionPolicy(transaction, { sourceArn: sourceArn.replace(":48", ":49"), targetArn }), /does not exactly match/);
@@ -166,6 +183,7 @@ test("administrator convergence changes only the exact candidate binding and is 
   const converged = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(converged.status, "CONVERGED");
   assert.equal(converged.iamWrites, 1);
+  assert.equal(livePolicy.Statement.some(({ Sid }) => Sid), false);
   assertNormalActivationTransactionPolicy(livePolicy, { sourceArn, targetArn });
   const noOp = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(noOp.status, "ALREADY_CONVERGED");
