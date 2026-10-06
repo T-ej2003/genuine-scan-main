@@ -39,6 +39,28 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
   assert.match(read(names[0]), /produce-production-green-stage-b-release-preflight\.yml/);
 });
 
+test("preparation passes the required dispatch mode explicitly under nounset", () => {
+  const workflow = parse("prepare-production-green-stage-b-state-reconciliation.yml");
+  const input = workflow.on.workflow_dispatch.inputs.reconciliation_mode;
+  const step = workflow.jobs.prepare.steps.find(({ name }) => name === "Prepare and bundle only the authenticated refresh-only transition");
+  assert.equal(input.required, true);
+  assert.equal(input.default, "HISTORICAL_TEN_ADDRESS");
+  assert.deepEqual(input.options, ["HISTORICAL_TEN_ADDRESS", "OUTPUT_ONLY"]);
+  assert.equal(step.env.RECONCILIATION_MODE, "${{ inputs.reconciliation_mode }}");
+  assert.match(step.run, /^set -euo pipefail$/m);
+  assert.match(step.run, /--reconciliation-mode "\$RECONCILIATION_MODE"/);
+
+  const reconciler = fs.readFileSync(path.join(root, "scripts/aws/reconcile-production-green-stage-b-state.mjs"), "utf8");
+  assert.match(reconciler, /argv\.includes\("--reconciliation-mode"\) \? required\(argv, "--reconciliation-mode"\) : STAGE_B_STATE_RECONCILIATION_MODES\.HISTORICAL_TEN_ADDRESS/);
+  assert.match(reconciler, /!Object\.values\(STAGE_B_STATE_RECONCILIATION_MODES\)\.includes\(reconciliationMode\)/);
+  for (const mode of ["OUTPUT_ONLY", "HISTORICAL_TEN_ADDRESS"]) {
+    const result = execFileSync("/bin/bash", ["-u", "-c", 'printf "%s" "$RECONCILIATION_MODE"'], { env: { ...process.env, RECONCILIATION_MODE: mode }, encoding: "utf8" });
+    assert.equal(result, mode);
+  }
+  assert.throws(() => execFileSync("/bin/bash", ["-u", "-c", 'printf "%s" "$RECONCILIATION_MODE"'], { env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "RECONCILIATION_MODE")), encoding: "utf8", stdio: "pipe" }), /RECONCILIATION_MODE: unbound variable/);
+  assert.doesNotMatch(step.run, /RECONCILIATION_MODE:-|RECONCILIATION_MODE:=/);
+});
+
 test("execution workflow creates the complete private staging hierarchy before reconciliation", () => {
   const workflow = parse("execute-production-green-stage-b-state-reconciliation.yml");
   const steps = workflow.jobs.execute.steps;

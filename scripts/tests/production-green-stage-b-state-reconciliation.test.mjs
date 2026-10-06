@@ -11,10 +11,13 @@ import {
   assertStageBStateReconciliationPreparation,
   assertStageBStateReconciliationSourceAlignment,
   createStageBStateReconciliationAuthorization,
+  createStageBOutputOnlyEvidence,
   createStageBStateReconciliationPreparation,
   executeStageBStateReconciliation,
+  STAGE_B_STATE_RECONCILIATION_MODES,
   stageBStateReconciliationSha256,
 } from "../aws/production-green-stage-b-state-reconciliation.mjs";
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
 const fixture = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-state-reconciliation-serial-104.json", "utf8"));
 const sourceSha = fixture.sourceSha;
@@ -66,6 +69,17 @@ function refreshClosurePlan() {
 
 const prepare = (normalPlan = preWriteNormalPlan()) => createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20260925-001", stateIdentity: state, tfvarsSha256: digest, bindingSha256: digest, bindingReport: bindingReport(), terraformConfiguration, preflightSha256: digest, ...closure, planBytes: bytes, planJson: refreshPlan(), normalPlan, createdAt: now.toISOString() });
 
+const outputOldImages = { backend: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:6b84c2b64cbcc4d81769f7544f20525bbe4a50fc53ab899211c64252548d5aa9", canary: expectedImages.canary.replace(/sha256:[a-f0-9]{64}$/, `sha256:${"1".repeat(64)}`), executor: expectedImages.executor.replace(/sha256:[a-f0-9]{64}$/, `sha256:${"2".repeat(64)}`), read_only_canary: expectedImages.read_only_canary.replace(/sha256:[a-f0-9]{64}$/, `sha256:${"3".repeat(64)}`), worker: expectedImages.worker.replace(/sha256:[a-f0-9]{64}$/, `sha256:${"4".repeat(64)}`) };
+const imageForAddress = (address, images = expectedImages) => address.includes('["backend"]') ? images.backend : address.includes('["worker"]') ? images.worker : address.includes('["canary"]') ? images.canary : address.includes('["read_only_canary"]') ? images.read_only_canary : images.executor;
+const outputOnlyState = (serial = 115, images = outputOldImages) => ({ version: 4, terraform_version: "1.15.8", lineage: CONTRACT.expectedLineage, serial, outputs: { bound_images: { value: images, type: ["object", Object.fromEntries(Object.keys(images).map((key) => [key, "string"]))] } }, resources: ["candidate", "executor"].map((name) => ({ mode: "managed", type: "aws_ecs_task_definition", name, instances: Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).filter(([address]) => address.startsWith(`aws_ecs_task_definition.${name}[`)).map(([address, family], index) => ({ index_key: address.match(/\["([^"]+)"\]/)[1], attributes: { arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index + 20}` } })) })) });
+const outputOnlyEvidence = (stateValue = outputOnlyState()) => {
+  const observedTaskDefinitions = Object.fromEntries(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES).map(([address, family], index) => [address, { taskDefinitionArn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${index % 8 + 20}`, family, status: "ACTIVE", containerDefinitions: [{ image: imageForAddress(address) }] }]));
+  for (const resource of stateValue.resources) for (const instance of resource.instances) { const address = `aws_ecs_task_definition.${resource.name}[${JSON.stringify(instance.index_key)}]`; observedTaskDefinitions[address].taskDefinitionArn = instance.attributes.arn; }
+  return createStageBOutputOnlyEvidence({ stateBytes: Buffer.from(JSON.stringify(stateValue)), observedTaskDefinitions });
+};
+const outputPlan = (evidence = outputOnlyEvidence()) => ({ format_version: "1.2", terraform_version: "1.15.8", variables: { tooling_sha: { value: sourceSha } }, errored: false, complete: true, applyable: true, resource_changes: [], resource_drift: [], output_changes: { bound_images: { actions: ["update"], before: evidence.boundImages, after: expectedImages, after_unknown: false, before_sensitive: false, after_sensitive: false } } });
+const outputOptions = (evidence = outputOnlyEvidence()) => ({ ...options(), stateIdentity: evidence.stateIdentity, reconciliationMode: STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY, outputOnlyEvidence: evidence });
+
 function relocateBrokerPackage(plan, packagePath) {
   plan.variables.broker_package_path.value = packagePath;
   plan.resource_changes.find(({ address }) => address === "aws_lambda_function.broker").change.after.filename = packagePath;
@@ -79,6 +93,31 @@ test("captured serial-104 plan authenticates the exact output and pending ordina
   assert.equal(aligned.pendingConvergenceSemantics.planProfile, "ECS_TASK_DEFINITION_ROTATION");
   assert.deepEqual(aligned.pendingConvergenceSemantics.actionCounts, { replacement: 12, update: 3 });
   assert.equal(aligned.pendingConvergenceSemantics.resourceChanges.length, 15);
+});
+
+test("authenticated output-only reconciliation binds zero resources, exact outputs, twelve successors, and serial +1", () => {
+  const evidence = outputOnlyEvidence(); const plan = outputPlan(evidence); const planBytes = Buffer.from("serial-115-output-only-plan");
+  const semantics = assertExactStageBRefreshOnlyPlan(plan, outputOptions(evidence));
+  assert.equal(semantics.resourceStateChangeCount, 0); assert.deepEqual(semantics.outputAllowlist, ["bound_images"]); assert.equal(Object.keys(evidence.registeredSuccessors).length, 12);
+  const preparation = createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20261006-001", stateIdentity: evidence.stateIdentity, tfvarsSha256: digest, bindingSha256: digest, bindingReport: bindingReport(), terraformConfiguration, preflightSha256: digest, ...closure, planBytes, planJson: plan, reconciliationMode: STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY, outputOnlyEvidence: evidence, createdAt: now.toISOString() });
+  const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now });
+  assert.equal(preparation.expectedSuccessorState.serial, 116); assert.equal(assertStageBStateReconciliationAuthorization(authorization, { preparation, sourceSha, now }), authorization);
+  const successor = outputOnlyEvidence(outputOnlyState(116, expectedImages)); let current = evidence; let applies = 0;
+  const result = executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), terraformConfiguration, planBytes, planJson: plan, readOutputOnlyEvidence: () => current, applyRefreshOnlyPlan: () => { applies += 1; current = successor; }, renderRefreshClosurePlan: refreshClosurePlan, reauthenticateSource: () => {}, now });
+  assert.equal(applies, 1); assert.equal(result.status, "complete"); assert.equal(result.successorState.serial, 116); assert.equal(result.successorState.stateSha256, successor.stateIdentity.stateSha256);
+});
+
+test("output-only reconciliation rejects resource changes, unapproved outputs, images, predecessor identity, and successor identity", () => {
+  const evidence = outputOnlyEvidence();
+  for (const [actions, expected] of [["update", /managed-resource/], ["create", /managed-resource/], ["delete", /managed-resource/]]) {
+    const plan = outputPlan(evidence); plan.resource_changes = [{ address: "aws_s3_bucket.escape", change: { actions: [actions] } }]; assert.throws(() => assertExactStageBRefreshOnlyPlan(plan, outputOptions(evidence)), expected);
+  }
+  const extraOutput = outputPlan(evidence); extraOutput.output_changes.escape = structuredClone(extraOutput.output_changes.bound_images); assert.throws(() => assertExactStageBRefreshOnlyPlan(extraOutput, outputOptions(evidence)), /exactly/);
+  const wrongImageState = outputOnlyState(); const wrongAddress = 'aws_ecs_task_definition.candidate["backend"]'; const wrongEvidence = outputOnlyEvidence(wrongImageState); wrongEvidence.registeredSuccessors[wrongAddress].image = expectedImages.worker; assert.throws(() => assertExactStageBRefreshOnlyPlan(outputPlan(wrongEvidence), outputOptions(wrongEvidence)));
+  for (const mutate of [(value) => { value.stateIdentity.stateSha256 = "f".repeat(64); }, (value) => { value.stateIdentity.serial = 114; }, (value) => { value.stateIdentity.lineage = "wrong"; }]) { const changed = structuredClone(evidence); mutate(changed); assert.throws(() => assertExactStageBRefreshOnlyPlan(outputPlan(evidence), outputOptions(changed))); }
+  const plan = outputPlan(evidence); const planBytes = Buffer.from("serial-115-output-only-plan"); const preparation = createStageBStateReconciliationPreparation({ sourceSha, ticketId: "CHG-20261006-001", stateIdentity: evidence.stateIdentity, tfvarsSha256: digest, bindingSha256: digest, bindingReport: bindingReport(), terraformConfiguration, preflightSha256: digest, ...closure, planBytes, planJson: plan, reconciliationMode: STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY, outputOnlyEvidence: evidence, createdAt: now.toISOString() }); const authorization = createStageBStateReconciliationAuthorization({ preparation, approval: approval(), now });
+  const wrongSuccessor = outputOnlyEvidence(outputOnlyState(117, expectedImages)); let current = evidence;
+  assert.throws(() => executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings: execBindings(), terraformConfiguration, planBytes, planJson: plan, readOutputOnlyEvidence: () => current, applyRefreshOnlyPlan: () => { current = wrongSuccessor; }, renderRefreshClosurePlan: refreshClosurePlan, reauthenticateSource: () => {}, now }), (error) => error.reconciliationResult?.status === "state-write-completed-postverify-failed");
 });
 
 test("bound_images is an exact one-output serial-104 transition", () => {
