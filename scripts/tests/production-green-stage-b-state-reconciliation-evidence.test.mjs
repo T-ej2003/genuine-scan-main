@@ -54,6 +54,8 @@ function createFixture({ predecessorSerial = HISTORICAL_FINAL_APPLY_WRITE_V16.st
   const artifactNames = { preparation: "production-green-stage-b-state-reconciliation-preparation", authorization: "production-green-stage-b-state-reconciliation-authorization", result: "production-green-stage-b-state-reconciliation-result" };
   const artifactDigest = Object.fromEntries([...archives].map(([key, value]) => [key, `sha256:${sha(value)}`]));
   const runIds = { preparation: "201", authorization: "202", execution: "203" };
+  const expiredArtifacts = new Set();
+  const missingArtifacts = new Set();
   const runPaths = { preparation: ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", authorization: ".github/workflows/authorize-production-green-stage-b-state-reconciliation.yml", execution: CONTRACT.executionWorkflowPath };
   const runTimes = { preparation: [timestamp.prepCreated, timestamp.prepStarted, timestamp.prepCompleted], authorization: [timestamp.authCreated, timestamp.authStarted, timestamp.authCompleted], execution: [timestamp.executeCreated, timestamp.executeStarted, timestamp.executeCompleted] };
   const runs = Object.fromEntries(Object.entries(runIds).map(([key, id]) => [id, { id: Number(id), run_attempt: 1, path: runPaths[key], head_sha: sourceSha, event: "workflow_dispatch", status: "completed", conclusion: "success", repository: { id: 99, full_name: CONTRACT.repository }, ...Object.fromEntries(["created_at", "run_started_at", "updated_at"].map((field, index) => [field, runTimes[key][index]])) }]));
@@ -61,7 +63,7 @@ function createFixture({ predecessorSerial = HISTORICAL_FINAL_APPLY_WRITE_V16.st
     assert.equal(command, "gh"); assert.equal(args[0], "api"); const endpoint = args[1];
     const runMatch = /actions\/runs\/(\d+)$/.exec(endpoint); if (runMatch) return JSON.stringify(runs[runMatch[1]]);
     const artifactRunMatch = /actions\/runs\/(\d+)\/artifacts$/.exec(endpoint);
-    if (artifactRunMatch) { const runKey = Object.keys(runIds).find((name) => runIds[name] === artifactRunMatch[1]); const key = runKey === "execution" ? "result" : runKey; return JSON.stringify({ artifacts: [{ id: artifactIds[key], name: artifactNames[key], expired: false, digest: artifactDigest[key], workflow_run: { id: Number(artifactRunMatch[1]), head_sha: sourceSha, repository_id: 99 } }] }); }
+    if (artifactRunMatch) { const runKey = Object.keys(runIds).find((name) => runIds[name] === artifactRunMatch[1]); const key = runKey === "execution" ? "result" : runKey; return JSON.stringify({ artifacts: missingArtifacts.has(key) ? [] : [{ id: artifactIds[key], name: artifactNames[key], expired: expiredArtifacts.has(key), digest: artifactDigest[key], workflow_run: { id: Number(artifactRunMatch[1]), head_sha: sourceSha, repository_id: 99 } }] }); }
     const artifactMatch = /actions\/artifacts\/(\d+)\/zip$/.exec(endpoint); if (artifactMatch) { const key = Object.keys(artifactIds).find((name) => artifactIds[name] === Number(artifactMatch[1])); return options.encoding === null ? archives.get(key) : archives.get(key).toString(); }
     throw new Error(`Unexpected GitHub API endpoint ${endpoint}`);
   };
@@ -77,7 +79,7 @@ function createFixture({ predecessorSerial = HISTORICAL_FINAL_APPLY_WRITE_V16.st
   const reportPath = path.join(historicalTmp, "refresh-report.json"); const bindingPath = path.join(historicalTmp, "binding.json");
   fs.copyFileSync(path.join(historicalDirectory, "refresh-report.json"), reportPath); fs.copyFileSync(path.join(historicalDirectory, "stage-b-tfvars-binding.json"), bindingPath); fs.chmodSync(reportPath, 0o600); fs.chmodSync(bindingPath, 0o600);
   const historicalArtifacts = readHistoricalFinalApplyWriteV16Artifacts({ refreshReportPath: reportPath, refreshReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.refreshReportSha256, bindingReportPath: bindingPath, bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingReportSha256 });
-  const artifacts = { files, archives, artifactIds, artifactNames, artifactDigest, runIds, runPaths, runTimes, runs, githubRun, unzipRun, preparation, authorization, result, historicalArtifacts, reportPath, bindingPath, historicalTmp, before, after, predecessorState, successorState };
+  const artifacts = { files, archives, artifactIds, artifactNames, artifactDigest, runIds, runPaths, runTimes, runs, githubRun, unzipRun, expiredArtifacts, missingArtifacts, preparation, authorization, result, historicalArtifacts, reportPath, bindingPath, historicalTmp, before, after, predecessorState, successorState };
   return artifacts;
 }
 
@@ -120,6 +122,9 @@ test("canonical artifact authentication rejects mismatched runs, altered receipt
   expectReject((v) => { v.artifactDigest.result = `sha256:${"0".repeat(64)}`; });
   expectReject((v) => { v.files["result.json"] = Buffer.from(`${JSON.stringify({ ...v.result, status: "state-write-outcome-ambiguous" }, null, 2)}\n`); });
   expectReject((v) => { v.result.authorizationSha256 = "0".repeat(64); v.files["result.json"] = Buffer.from(`${JSON.stringify(v.result, null, 2)}\n`); });
+  expectReject((v) => { v.expiredArtifacts.add("preparation"); });
+  expectReject((v) => { v.missingArtifacts.add("preparation"); });
+  expectReject((v) => { v.files["preparation.json"] = Buffer.from("{}\n"); });
 });
 
 test("canonical result validator rejects wrong predecessor, successor, source, authorization, plan, status, and output semantics", (t) => {

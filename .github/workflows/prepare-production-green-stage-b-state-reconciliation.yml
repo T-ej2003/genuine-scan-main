@@ -119,4 +119,4 @@ jobs:
           name: production-green-stage-b-state-reconciliation-preparation
           path: ${{ runner.temp }}/stage-b-state-reconciliation/preparation-bundle.zip
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 90
