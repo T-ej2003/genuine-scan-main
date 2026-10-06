@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "status": "REVIEWED_OUTPUT_RECONCILIATION",
+  "reason": "Only reviewed output reconciliation was detected.",
+  "deployablePlan": false,
+  "toolingSha": "5028c2e44c1ed1a0c49fa51df706cc85c26cb7cf",
+  "toolingTreeSha256": "0b0a4a95fb017abfd482fc4e9c91afa30df2113b090a9231db7251173b222861",
+  "tfvarsSha256": "44331637500c376a77303002cd2a931c2d255cf66484e66f996910e2eaa12804",
+  "bindingReportSha256": "2f575ae3b5fc5d944dffe3d70d02d7b2202b7b4d8e73e60798976cb8675c4710",
+  "imageEvidenceSha256": "25e6ed23cd4b2b5060e635d3cd1d1e2d88ef86d78d1294994a95ef37305e05b6",
+  "stageAStateSha256": "1eaf3177bd0e36b6629f29651487e1635fecbb042f0978f75b673df2965dd2a9",
+  "stageAStateLineage": "02afb75a-f902-ab8a-f4c1-751d4aef7837",
+  "stageAStateSerial": 57,
+  "stageBStateSha256": "20dd673d1f0db6e6e4185ac3fa3843ff24f753426d9835d3380ad706034a2b26",
+  "stageBStateLineage": "4e438e59-8b8b-194d-030c-5ede0c26344a",
+  "stageBStateSerial": 115,
+  "backendMetadataSha256": "528c5e42610ea545154bfc74028ce34b1cce2ba8dffe8a527f57d6280e7a2c06",
+  "backendMetadataMode": "0600",
+  "privateModeValidated": true,
+  "backendMetadataPath": "/private/tmp/mscqr-release-5028c2e-evidence.j7vXqH/terraform-data/terraform.tfstate",
+  "terraformDataDir": "/private/tmp/mscqr-release-5028c2e-evidence.j7vXqH/terraform-data",
+  "workspace": "default",
+  "terraformExitCode": 2,
+  "terraformOutputSha256": "ccd89b89590f398c3027ce3b0c7ca1ab5d05ce183233aa001d67aaf3f0ca4426",
+  "terraformStderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "acquisitionStatus": "valid",
+  "acquisitionReason": "Terraform show -json returned a validated refresh-only plan.",
+  "diagnosticArtifactPath": null,
+  "diagnosticArtifactSha256": null,
+  "terraformVersion": "1.15.8",
+  "terraformVersionSha256": "45e2f5ae5c9adb092d87acbbf3932ff71fee256b607986ed47883c3483fbae6f",
+  "formatVersion": "1.2",
+  "planCommandExitCode": 2,
+  "showCommandExitCode": 0,
+  "refreshPlanPath": "/private/tmp/mscqr-release-5028c2e-evidence.j7vXqH/freshness/serial-115/.stage-b-refresh-JziATP/refresh-only.tfplan",
+  "refreshPlanSha256": "a790c11e38e8f2e4ad16a293db83bc9d9314ddb902abc59df87b925acc90636f",
+  "refreshPlanJsonSha256": "7627d7a5c493c85d35a68aeba5019ddb719dc729165afe5281948fb1e37a6e90",
+  "showStdoutSha256": "7627d7a5c493c85d35a68aeba5019ddb719dc729165afe5281948fb1e37a6e90",
+  "showStderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "acquisitionDiagnostics": [],
+  "checkCount": 16,
+  "infrastructureCheckCount": 11,
+  "variableCheckCount": 4,
+  "resourcePreconditionCheckCount": 1,
+  "passedCheckCount": 16,
+  "failedCheckCount": 0,
+  "malformedCheckCount": 0,
+  "missingCheckCount": 0,
+  "unknownCheckCount": 0,
+  "duplicateCheckCount": 0,
+  "checkInventoryHash": "13904c9d081c72cdd4709e2184ac2c034341d62177f9f0df62aa17a17a9d33e2",
+  "taskDefinitionArns": {
+    "backend": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:27",
+    "full-rls-admin-bootstrap": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-admin-bootstrap:17",
+    "full-rls-admin-ownership": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-admin-ownership:25",
+    "full-rls-application-canary": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-application-canary:23",
+    "full-rls-capability-preflight": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-capability-preflight:18",
+    "full-rls-role-provision": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-role-provision:17",
+    "full-rls-role-verify": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-role-verify:17",
+    "full-rls-rollback": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-rollback:16",
+    "full-rls-runtime-policy": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-runtime-policy:18",
+    "full-rls-verification": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-full-rls-green-full-rls-verification:21",
+    "worker": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-worker-candidate:18"
+  },
+  "emittedInstanceCount": 16,
+  "passedInstanceCount": 16,
+  "failedInstanceCount": 0,
+  "malformedInstanceCount": 0,
+  "duplicateInstanceCount": 0,
+  "instanceInventoryHash": "3793b6f20663b7f811a423fc640aaf3dc0799babf1fcacb8601444bab0cdc6a8",
+  "failedChecks": [],
+  "checks": [
+    {
+      "address": "aws_lambda_function.broker",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "aws_lambda_function.broker",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.immutable_images",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.immutable_images",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.overlap_execution_role_secret_contract",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.overlap_execution_role_secret_contract",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.production_only",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.production_only",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.production_rotation_contract",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.production_rotation_contract",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.read_only_canary_secret",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.read_only_canary_secret",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.recovery_mode_bindings",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.recovery_mode_bindings",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.release_bindings",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.release_bindings",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.retained_task_definition_families",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.retained_task_definition_families",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.stage_a_bindings",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.stage_a_bindings",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.stage_a_release_resources",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.stage_a_release_resources",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "check.stage_a_runtime_secrets",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "check.stage_a_runtime_secrets",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "var.production_rotation_secret_value_from",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "var.production_rotation_secret_value_from",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "var.retained_candidate_task_definitions",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "var.retained_candidate_task_definitions",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "var.retained_executor_task_definitions",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "var.retained_executor_task_definitions",
+          "status": "pass"
+        }
+      ]
+    },
+    {
+      "address": "var.stage_b_recovery_alias_target_version",
+      "status": "pass",
+      "instances": [
+        {
+          "address": "var.stage_b_recovery_alias_target_version",
+          "status": "pass"
+        }
+      ]
+    }
+  ],
+  "resourceChanges": {
+    "nonNoOp": 0,
+    "changes": []
+  },
+  "outputChanges": [
+    {
+      "name": "bound_images",
+      "classification": "reviewed",
+      "matchesEvidence": true,
+      "actions": [
+        "update"
+      ],
+      "before": {
+        "backend": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:6b84c2b64cbcc4d81769f7544f20525bbe4a50fc53ab899211c64252548d5aa9",
+        "canary": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:f75192f6ea1b284a9b52b6d84169f51cdb4cb4d1d48a8d773be7dd4873203e6f",
+        "executor": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:e298295894a9952aeaa13beabd3adc239d2c3b17cf329cf6c8161cc3ff878da7",
+        "read_only_canary": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:f75192f6ea1b284a9b52b6d84169f51cdb4cb4d1d48a8d773be7dd4873203e6f",
+        "worker": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:36cea6f34b1dbfc35fcb26052a3f94405309e1a1b56dbae0ce2aecac046d0014"
+      },
+      "after": {
+        "backend": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:5510d33d8141ad39331a0bc5a942989ed0801595ed3f70bdbb72e8aaa1f1e1af",
+        "canary": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:b02ffb3411e2bf8dde5c9bd9435d1b8d71fe82f11e1643454574c256efa1561b",
+        "executor": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:ba6d2daab7f84f86f85a6a0bcdfbbc7423aceb1e0cc8efcc31bfebc38989970c",
+        "read_only_canary": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:b02ffb3411e2bf8dde5c9bd9435d1b8d71fe82f11e1643454574c256efa1561b",
+        "worker": "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@sha256:76b4add9b027a5b0f855722d6f512d57fe0ee07b72487cabf2cdfa570027f661"
+      }
+    }
+  ]
+}
