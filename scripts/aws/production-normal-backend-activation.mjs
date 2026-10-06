@@ -13,6 +13,7 @@ import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
+import { BROKER_POLICY_OWNERSHIP_KEY } from "./stage-b-broker-policy-ownership.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 export { NORMAL_ACTIVATION, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy } from "./production-normal-backend-activation-policy.mjs";
@@ -25,6 +26,22 @@ const POLICY_VERSION = /^v[1-9][0-9]*$/;
 const WORKFLOW_RUN_ID = /^[1-9][0-9]*$/;
 const BACKEND_IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@(sha256:[a-f0-9]{64})$/;
 const TASK_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/;
+
+export const HISTORICAL_FINAL_APPLY_WRITE_V16 = Object.freeze({
+  sourcePolicyCommit: "b5e5851076ddf1acfcab7c107ff17b46cb057479",
+  minimumProtectedMainSha: "24bec15c546299907fed35fe84176f931c68edd7",
+  policySha256: "4b2a7d59601eae34f9ab9b9c6ce7a211eee13460fd45774594ed964cd60e05c6",
+  defaultVersionId: "v16",
+  versionIds: Object.freeze(["v12", "v13", "v14", "v15", "v16"]),
+  activationTargetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
+  sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:24",
+  targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:27",
+  stateLineage: NORMAL_ACTIVATION.lineage,
+  stateSerial: 115,
+  stateSha256: "20dd673d1f0db6e6e4185ac3fa3843ff24f753426d9835d3380ad706034a2b26",
+  bindingSha256: "2f575ae3b5fc5d944dffe3d70d02d7b2202b7b4d8e73e60798976cb8675c4710",
+  imageReleaseSha: "5028c2e44c1ed1a0c49fa51df706cc85c26cb7cf",
+});
 
 export class NormalActivationPolicyConvergenceError extends Error {
   constructor(report, cause) {
@@ -78,6 +95,28 @@ function readLivePolicy(run) {
   if (!/^v[1-9][0-9]*$/.test(metadata?.DefaultVersionId || "")) throw new Error("FinalApplyWrite live policy has no valid default version.");
   const version = parseJson(run, ["iam", "get-policy-version", "--policy-arn", NORMAL_ACTIVATION.policyArn, "--version-id", metadata.DefaultVersionId]).PolicyVersion;
   return { document: normalizeIamPolicyDocument(version?.Document, "live FinalApplyWrite policy"), defaultVersionId: metadata.DefaultVersionId };
+}
+
+const policySha256 = (document) => sha256(canonical(compactNormalActivationPolicy(document)));
+export function assertHistoricalFinalApplyWriteV16Predecessor({ authenticated = {}, supplemental = {} } = {}) {
+  const supplementalKeys = Object.keys(supplemental).sort();
+  if (canonical(supplementalKeys) !== canonical(["binding", "protectedMainAncestorAuthenticated"])) throw new Error("Historical FinalApplyWrite supplemental predecessor fields are not exact.");
+  const { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256 } = authenticated;
+  const { binding, protectedMainAncestorAuthenticated } = supplemental;
+  const expected = HISTORICAL_FINAL_APPLY_WRITE_V16;
+  if (protectedMainAncestorAuthenticated !== true || !SHA.test(sourceSha || "") || sourceSha === expected.minimumProtectedMainSha) throw new Error("Historical FinalApplyWrite migration requires the exact protected-main successor checkout.");
+  if (imageReleaseSha !== expected.imageReleaseSha || sourceArn !== expected.sourceArn || targetArn !== expected.targetArn) throw new Error("Historical FinalApplyWrite migration SOURCE/TARGET or image release binding changed.");
+  if (before?.defaultVersionId !== expected.defaultVersionId || policySha256(before?.document) !== expected.policySha256) throw new Error("Historical FinalApplyWrite live policy identity changed.");
+  const inventory = oldestDeletablePolicyVersion(versions, before.defaultVersionId);
+  if (inventory !== "v12" || canonical(versions.map(({ VersionId }) => VersionId).sort()) !== canonical([...expected.versionIds].sort())) throw new Error("Historical FinalApplyWrite version topology changed.");
+  const activation = before.document.Statement?.filter(({ Sid }) => Sid === "ActivateBackendCandidate");
+  if (activation?.length !== 1 || activation[0].Condition?.ArnEquals?.["ecs:task-definition"] !== expected.activationTargetArn || before.document.Statement.length !== 12 || before.document.Statement.some((statement) => canonical(statement).includes(BROKER_POLICY_OWNERSHIP_KEY))) throw new Error("Historical FinalApplyWrite statement topology changed.");
+  if (state?.lineage !== expected.stateLineage || state?.serial !== expected.stateSerial || stateSha256 !== expected.stateSha256) throw new Error("Historical FinalApplyWrite Terraform state binding changed.");
+  if (binding?.stageBStateLineage !== expected.stateLineage || binding?.stageBStateSerial !== expected.stateSerial || binding?.stageBStateSha256 !== expected.stateSha256 || binding?.bindingReportSha256 !== expected.bindingSha256 || binding?.toolingSha !== expected.imageReleaseSha || binding?.taskDefinitionArns?.backend !== expected.targetArn) throw new Error("Historical FinalApplyWrite serial-115 release binding changed.");
+  const successor = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn, targetArn }));
+  assertNormalActivationTransactionPolicy(successor, { sourceArn, targetArn });
+  if (!successor.Statement.some((statement) => canonical(statement).includes(BROKER_POLICY_OWNERSHIP_KEY))) throw new Error("Historical FinalApplyWrite successor lacks broker ownership authority.");
+  return true;
 }
 
 function readLiveState(run) {
@@ -279,7 +318,7 @@ function normalActivationDeniedTargets(sourceArn, targetArn) {
   return [...new Set([...candidates, ...legacy])].filter((arn) => arn !== sourceArn && arn !== targetArn);
 }
 
-export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha } = {}) {
+export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha, historicalPredecessor } = {}) {
   const progress = { mutationAttempted: false, readbackVerified: false, confirmedIamWrites: 0 };
   try {
     if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "")) throw new Error("Governed normal activation convergence inputs are invalid.");
@@ -289,12 +328,22 @@ export function convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha
     const { service, sourceArn, source, alreadyAtTarget } = readNormalActivationServiceSource(run, targetArn);
     const expected = buildNormalActivationTransactionPolicy({ sourceArn, targetArn });
     const before = readLivePolicy(run);
-    assertNormalActivationPolicyTransitionOnly(before.document, { sourceArn, targetArn });
+    let historicalPredecessorUsed = false;
+    try { assertNormalActivationPolicyTransitionOnly(before.document, { sourceArn, targetArn }); }
+    catch (strictError) {
+      if (!historicalPredecessor) throw strictError;
+      const versions = parseJson(run, ["iam", "list-policy-versions", "--policy-arn", NORMAL_ACTIVATION.policyArn]).Versions;
+      assertHistoricalFinalApplyWriteV16Predecessor({
+        authenticated: { before, versions, sourceSha, imageReleaseSha, sourceArn, targetArn, state, stateSha256: sha256(liveState.bytes) },
+        supplemental: historicalPredecessor,
+      });
+      historicalPredecessorUsed = true;
+    }
     const publication = publishNormalActivationPolicy({ run, before, expected, assertAfter: (document) => assertNormalActivationTransactionPolicy(document, { sourceArn, targetArn }), progress });
     const { after, ambiguousMutationError } = publication;
     for (const allowedTargetArn of new Set([sourceArn, targetArn])) if (simulateNormalActivationTarget(run, allowedTargetArn) !== "allowed") throw new Error("Exact normal activation SOURCE or TARGET revision is not authorized after IAM convergence.");
     for (const deniedTargetArn of normalActivationDeniedTargets(sourceArn, targetArn)) if (simulateNormalActivationTarget(run, deniedTargetArn) !== "implicitDeny") throw new Error("Unrelated normal or recovery task-definition revision is unexpectedly authorized during normal activation.");
-    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, imageReleaseSha, sourceArn, sourceClass: source.sourceClass, sourceDigest: source.sourceDigest, targetArn, desiredCount: service.desiredCount, alreadyAtTarget, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, iamWrites: progress.confirmedIamWrites, mutationAttempted: progress.mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : progress.mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified: progress.readbackVerified, validationComplete: true, unknownMutations: 0 });
+    return Object.freeze({ status: progress.mutationAttempted ? ambiguousMutationError ? "RECONCILED_AFTER_AMBIGUOUS_WRITE" : "CONVERGED" : "ALREADY_CONVERGED", sourceSha, imageReleaseSha, sourceArn, sourceClass: source.sourceClass, sourceDigest: source.sourceDigest, targetArn, desiredCount: service.desiredCount, alreadyAtTarget, stateLineage: state.lineage, stateSerial: state.serial, stateSha256: sha256(liveState.bytes), policyVersionId: after.defaultVersionId, historicalPredecessorUsed, iamWrites: progress.confirmedIamWrites, mutationAttempted: progress.mutationAttempted, mutationOutcome: ambiguousMutationError ? "CONFIRMED_SUCCESS_READBACK" : progress.mutationAttempted ? "CONFIRMED_SUCCESS" : "NO_MUTATION", readbackVerified: progress.readbackVerified, validationComplete: true, unknownMutations: 0 });
   } catch (error) {
     if (error instanceof NormalActivationPolicyConvergenceError) throw error;
     throw convergenceFailure(progress, error);
@@ -412,7 +461,15 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "converge-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation convergence must run from exact protected main.");
-    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha") });
+    let historicalPredecessor;
+    const bindingPath = values.get("--historical-predecessor-binding");
+    const bindingSha256 = values.get("--historical-predecessor-binding-sha256");
+    if (bindingPath || bindingSha256) {
+      if (!bindingPath || bindingSha256 !== HISTORICAL_FINAL_APPLY_WRITE_V16.bindingSha256) throw new Error("Historical FinalApplyWrite migration binding is not exact.");
+      execFileSync("git", ["merge-base", "--is-ancestor", HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha, sourceSha], { cwd: process.cwd(), stdio: "ignore" });
+      historicalPredecessor = { binding: readBoundStageBPrivateJson({ filePath: bindingPath, expectedSha256: bindingSha256, label: "Historical FinalApplyWrite serial-115 binding" }), protectedMainAncestorAuthenticated: true };
+    }
+    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha"), historicalPredecessor });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }

@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
-import { NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
+import { HISTORICAL_FINAL_APPLY_WRITE_V16, NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertHistoricalFinalApplyWriteV16Predecessor, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { AWS_MANAGED_POLICY_DOCUMENT_LIMIT, assertNormalActivationPolicyDeltaOnly, compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
@@ -37,6 +37,28 @@ const contextArgsFor = (arn) => [
   `ContextKeyName=ecs:cluster,ContextKeyValues=${NORMAL_ACTIVATION.clusterArn},ContextKeyType=string`,
   `ContextKeyName=ecs:task-definition,ContextKeyValues=${arn},ContextKeyType=string`,
 ];
+
+const historicalV16Source = () => JSON.parse(execFileSync("git", ["show", `${HISTORICAL_FINAL_APPLY_WRITE_V16.sourcePolicyCommit}:${NORMAL_ACTIVATION.policyPath}`], { encoding: "utf8" }));
+const historicalV16Policy = () => buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn, historicalV16Source());
+const historicalVersions = () => HISTORICAL_FINAL_APPLY_WRITE_V16.versionIds.map((VersionId, index) => ({ VersionId, IsDefaultVersion: VersionId === "v16", CreateDate: new Date(Date.UTC(2026, 7, 12 + index)).toISOString() }));
+const historicalBinding = () => ({
+  toolingSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
+  bindingReportSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.bindingSha256,
+  stageBStateLineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage,
+  stageBStateSerial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial,
+  stageBStateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
+  taskDefinitionArns: { backend: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn },
+});
+const historicalPredecessorInput = () => ({
+  authenticated: {
+    before: { document: historicalV16Policy(), defaultVersionId: HISTORICAL_FINAL_APPLY_WRITE_V16.defaultVersionId },
+    versions: historicalVersions(), sourceSha: "f".repeat(40), imageReleaseSha: HISTORICAL_FINAL_APPLY_WRITE_V16.imageReleaseSha,
+    sourceArn: HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn, targetArn: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn,
+    state: { lineage: HISTORICAL_FINAL_APPLY_WRITE_V16.stateLineage, serial: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSerial },
+    stateSha256: HISTORICAL_FINAL_APPLY_WRITE_V16.stateSha256,
+  },
+  supplemental: { binding: historicalBinding(), protectedMainAncestorAuthenticated: true },
+});
 
 function simulatedTarget(args) {
   const start = args.indexOf("--context-entries");
@@ -113,6 +135,58 @@ test("normal activation policies separate steady recovery from exact SOURCE/TARG
   assert.throws(() => assertNormalActivationTransactionPolicy(transaction, { sourceArn: sourceArn.replace(":48", ":49"), targetArn }), /does not exactly match/);
 });
 
+test("historical FinalApplyWrite v16 is one exact authenticated predecessor", () => {
+  const input = historicalPredecessorInput();
+  assert.equal(assertHistoricalFinalApplyWriteV16Predecessor(input), true);
+  const transaction = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({ sourceArn: input.authenticated.sourceArn, targetArn: input.authenticated.targetArn }));
+  assert.equal(Buffer.byteLength(JSON.stringify(transaction)), 5841);
+  assert.ok(transaction.Statement.some((statement) => JSON.stringify(statement).includes("production#iam-policy-owner#arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime")));
+
+  const rejects = [
+    (value) => { value.authenticated.before.defaultVersionId = "v15"; },
+    (value) => { value.authenticated.before.document.Statement[0].Action = "ecs:DeleteService"; },
+    (value) => { value.authenticated.before.document.Statement[0].Resource += "-other"; },
+    (value) => { value.authenticated.before.document.Statement.push(structuredClone(value.authenticated.before.document.Statement[0])); },
+    (value) => { value.authenticated.before.document.Statement.pop(); },
+    (value) => { value.authenticated.before.document.Statement.find(({ Sid }) => Sid === "ActivateBackendCandidate").Condition.ArnEquals["ecs:task-definition"] = HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn; },
+    (value) => { value.authenticated.sourceArn = value.authenticated.sourceArn.replace(":24", ":23"); },
+    (value) => { value.authenticated.targetArn = value.authenticated.targetArn.replace(":27", ":28"); },
+    (value) => { value.authenticated.state.lineage = "00000000-0000-0000-0000-000000000000"; },
+    (value) => { value.authenticated.state.serial = 116; },
+    (value) => { value.authenticated.stateSha256 = "0".repeat(64); },
+    (value) => { value.supplemental.binding.bindingReportSha256 = "0".repeat(64); },
+    (value) => { value.supplemental.binding.taskDefinitionArns.backend = value.supplemental.binding.taskDefinitionArns.backend.replace(":27", ":28"); },
+    (value) => { value.authenticated.versions = value.authenticated.versions.filter(({ VersionId }) => VersionId !== "v12"); },
+    (value) => { value.supplemental.protectedMainAncestorAuthenticated = false; },
+    (value) => { value.authenticated.sourceSha = HISTORICAL_FINAL_APPLY_WRITE_V16.minimumProtectedMainSha; },
+  ];
+  for (const mutate of rejects) {
+    const changed = structuredClone(input); mutate(changed);
+    assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /Historical FinalApplyWrite/);
+  }
+
+  const maliciousOverrides = {
+    before: { document: buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn), defaultVersionId: "v99" },
+    versions: [{ VersionId: "v99", IsDefaultVersion: true }],
+    sourceSha: "0".repeat(40),
+    imageReleaseSha: "1".repeat(40),
+    sourceArn: HISTORICAL_FINAL_APPLY_WRITE_V16.sourceArn.replace(":24", ":23"),
+    targetArn: HISTORICAL_FINAL_APPLY_WRITE_V16.targetArn.replace(":27", ":28"),
+    state: { lineage: "00000000-0000-0000-0000-000000000000", serial: 999 },
+    stateSha256: "0".repeat(64),
+  };
+  for (const [field, value] of Object.entries(maliciousOverrides)) {
+    const changed = structuredClone(input);
+    changed.supplemental[field] = value;
+    assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(changed), /supplemental predecessor fields are not exact/);
+  }
+
+  const after = structuredClone(input);
+  after.authenticated.before = { document: transaction, defaultVersionId: "v17" };
+  assert.throws(() => assertHistoricalFinalApplyWriteV16Predecessor(after), /live policy identity/);
+  assert.throws(() => assertNormalActivationPolicy(transaction, HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn), /does not exactly match/);
+});
+
 test("live preparation authenticates caller, state, exact policy, target, service, and current revision", () => {
   const service = stableService();
   let runningDigest = sourceDigest;
@@ -182,11 +256,13 @@ test("administrator convergence changes only the exact candidate binding and is 
   };
   const converged = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(converged.status, "CONVERGED");
+  assert.equal(converged.historicalPredecessorUsed, false);
   assert.equal(converged.iamWrites, 1);
   assert.equal(livePolicy.Statement.some(({ Sid }) => Sid), false);
   assertNormalActivationTransactionPolicy(livePolicy, { sourceArn, targetArn });
   const noOp = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha });
   assert.equal(noOp.status, "ALREADY_CONVERGED");
+  assert.equal(noOp.historicalPredecessorUsed, false);
   assert.equal(noOp.iamWrites, 0);
   assert.equal(writes, 1);
   const createIndex = commands.findIndex((args) => args[0] === "iam" && args[1] === "create-policy-version");

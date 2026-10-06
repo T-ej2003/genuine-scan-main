@@ -5,6 +5,11 @@ services:
     image: postgres:18
     container_name: mscqr-full-rls-certification-postgres
     restart: "no"
+    # The disposable clean-room harness requires every green-database session
+    # to be owned by the certification process. PostgreSQL autovacuum would
+    # otherwise enter short-lived candidates independently and correctly trip
+    # the fail-closed pg_stat_activity gate.
+    command: ["postgres", "-c", "autovacuum=off"]
     environment:
       POSTGRES_DB: mscqr_full_rls_admin
       POSTGRES_USER: mscqr_rls_cert_admin

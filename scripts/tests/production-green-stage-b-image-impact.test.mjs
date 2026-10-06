@@ -269,7 +269,7 @@ test("rotation evidence schema is canonical tooling-only input", () => {
 });
 
 test("tooling and deployment Compose inputs are image-reuse compatible while unknown paths remain fail-closed", () => {
-  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker/nginx-root-entrypoint.sh"];
+  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker/nginx-root-entrypoint.sh"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);
