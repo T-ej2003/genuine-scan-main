@@ -29,16 +29,26 @@ for (const [name, mutate] of [
   ['unbounded expiry', e => e.responseElements.credentials.expiration = '2026-10-05T00:00:00.000Z'],
   ['wrong session name', e => e.requestParameters.roleSessionName = 'other'],
 ]) test(`issuance ${name} fails closed`, () => { const e = writerIssuance(); mutate(e); assert.throws(() => authenticateBrokerSessionIssuance([e], identity(), issuanceWindow)); });
+const stsClockError = '<ErrorResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/"><Error><Code>MissingAuthenticationToken</Code></Error></ErrorResponse>';
+const clockResponse = (status, url, headers, body = stsClockError, redirected = false) => ({ status, url, redirected, headers: new Headers(headers), text: async () => body });
 test('duplicate/ambiguous issuance and untrusted clock metadata fail closed', async () => {
   assert.throws(() => authenticateBrokerSessionIssuance([writerIssuance(), writerIssuance()], identity(), issuanceWindow));
-  for (const headers of [{}, { date: 'not a date' }, { date: 'Sun, 04 Oct 2026 01:00:01 GMT', age: '2' }]) {
-    await assert.rejects(() => readBrokerRecoveryAwsClock(async () => ({ status: 400, url: 'https://sts.eu-west-2.amazonaws.com/', headers: new Headers(headers) })));
+  for (const headers of [{}, { date: 'not a date' }, { date: '0' }, { date: 'Sun, 04 Oct 2026 01:00:01 GMT', age: '2' }]) {
+    await assert.rejects(() => readBrokerRecoveryAwsClock(async () => clockResponse(403, 'https://sts.eu-west-2.amazonaws.com/', headers)));
   }
 });
-test('production clock is fixed AWS TLS endpoint with redirects and caching disabled', async () => {
+test('regional STS HEAD redirect cannot establish the recovery clock', async () => {
+  await assert.rejects(() => readBrokerRecoveryAwsClock(async (url, options) => {
+    assert.equal(url, 'https://sts.eu-west-2.amazonaws.com/'); assert.equal(options.method, 'POST');
+    return clockResponse(302, 'https://aws.amazon.com/iam', { date: 'Sun, 04 Oct 2026 01:00:01 GMT' }, '', true);
+  }));
+});
+test('production clock uses a non-mutating regional STS Query request with redirects and caching disabled', async () => {
   const result = await readBrokerRecoveryAwsClock(async (url, options) => {
-    assert.equal(url, 'https://sts.eu-west-2.amazonaws.com/'); assert.equal(options.method, 'HEAD'); assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
-    return { status: 400, url, headers: new Headers({ date: 'Sun, 04 Oct 2026 01:00:01 GMT' }) };
+    assert.equal(url, 'https://sts.eu-west-2.amazonaws.com/'); assert.equal(options.method, 'POST'); assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
+    assert.equal(options.headers['content-type'], 'application/x-www-form-urlencoded');
+    assert.equal(options.body, 'Action=GetCallerIdentity&Version=2011-06-15');
+    return clockResponse(403, url, { date: 'Sun, 04 Oct 2026 01:00:01 GMT' });
   }); assert.equal(result, '2026-10-04T01:00:01.000Z');
 });
 test('CloudTrail lookup uses the credential-expiration interval and preserves it across pages', () => {
