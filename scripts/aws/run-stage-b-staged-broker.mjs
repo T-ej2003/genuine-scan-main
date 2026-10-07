@@ -44,12 +44,16 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
   const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir, prerequisiteChain: operation === 'prepare-registration-adoption' ? undefined : prerequisiteChain });
   if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
+  if (['recover-policy', 'verify-policy-writer-termination'].includes(operation)) {
+    // Historical source is authenticated by the durable transaction chain inside recovery, not by today's checkout SHA.
+    await deps.readRecoveryCheckout();
+    if (operation === 'recover-policy') return deps.recoverBrokerPolicyOwnership();
+    const ownership = await deps.readBrokerPolicyOwnership(); assert.ok(ownership, 'No held broker policy writer'); return deps.authenticatePriorBrokerWriterTermination(ownership.identity);
+  }
   const checkout = await deps.readCheckout();
   if (operation === 'recover-publication') return recoverBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
   if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);
-  if (operation === 'recover-policy') return deps.recoverBrokerPolicyOwnership();
-  if (operation === 'verify-policy-writer-termination') { const ownership = await deps.readBrokerPolicyOwnership(); assert.ok(ownership, 'No held broker policy writer'); return deps.authenticatePriorBrokerWriterTermination(ownership.identity); }
   const prerequisites = brokerPrerequisiteIdentity(await deps.readPrerequisites());
   if (['prepare-registration-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
     // Reuse exact tfvars/package/image/refresh authority before capturing this

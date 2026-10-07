@@ -137,6 +137,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   const kms = createBrokerKmsAuthorizationBoundary({ run: args => runAws(args) });
   const writerBoundary = writerSessionBoundary || createBrokerWriterSessionBoundary({ env, exec });
   let writerSession;
+  let recoveryCheckout;
   const pinPolicyWriter = () => {
     if (!writerSession) {
       const pinned = writerBoundary.pin(); writerSession = pinned.session;
@@ -248,6 +249,16 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       await readMakerCaller();
       const treeSha256 = deriveStageBToolingInputTreeSha256(checkout.currentHead);
       return { sourceSha: checkout.currentHead, treeSha256 };
+    },
+    readRecoveryCheckout: async () => {
+      assert.equal(phase, 'POLICY_RECOVERY');
+      const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, requireCanonicalRepository: true });
+      assert.equal(checkout.currentHead, checkout.originMainHead, 'Recovery code must be the current protected main');
+      await readMakerCaller();
+      const current = { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
+      if (recoveryCheckout) equal(current, recoveryCheckout);
+      else recoveryCheckout = current;
+      return current;
     },
     authenticateRegistrationRecoveryIdentity: async prior => {
       assert.equal(phase, 'REGISTRATION_RECOVERY'); assert.equal(preparation.purpose, TASK_REGISTRATION);
@@ -623,7 +634,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
             else assert.equal(intent.savedPlanSha256, preparation.savedPlanSha256);
           }
           if (current.mutation) { assert.ok(intent, 'Committed mutation requires its authenticated intent'); equal(current.mutation, { intentSha256: brokerDigest(intent) }); }
-          equal(await adapter.readCheckout(), { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+          await adapter.readRecoveryCheckout();
           const file = path.join(directory, `recovery-reservation-${randomUUID()}.json`);
           let reservation;
           try {
