@@ -50,3 +50,11 @@ They preserve receipt-bound checker disclosure and prerequisite authentication
 through the exact publication, cutover, reconciliation, and matching recovery
 phases. No dependency, frontend, build configuration, advisory, acceptance
 scope, or expiry changed.
+
+The post-publication Terraform-state authentication correction updates the
+fingerprint to
+`02f90c67d940c2e0c5c09142aaadca356f8e15adc22425b3d500015f3d4747e8`.
+It preserves the exact state captured by the durable adoption receipt while
+accepting only a strictly newer serial on the same lineage after the governed
+publication apply. No dependency, advisory, acceptance scope, or expiry
+changed.

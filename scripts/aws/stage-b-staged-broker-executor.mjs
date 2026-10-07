@@ -38,6 +38,19 @@ export function assertReceiptBoundAuthenticationPhase(phase) {
   assert.ok(RECEIPT_BOUND_AUTHENTICATION_PHASES.includes(phase), `Receipt-bound prerequisites are not valid during ${phase}`);
   return true;
 }
+const RECEIPT_BOUND_POST_PUBLICATION_STATE_PHASES = Object.freeze([
+  'PREPARATION', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION',
+  'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY',
+]);
+export function assertReceiptBoundPolicyTerraformState(phase, current, adopted) {
+  if (canonicalJson(current) === canonicalJson(adopted)) return true;
+  assert.ok(RECEIPT_BOUND_POST_PUBLICATION_STATE_PHASES.includes(phase),
+    `Receipt-bound policy Terraform state changed during ${phase}`);
+  assert.equal(current.lineage, adopted.lineage, 'Receipt-bound policy Terraform lineage changed');
+  assert.ok(current.serial > adopted.serial, 'Receipt-bound policy Terraform state did not advance');
+  assert.match(current.stateSha256 || '', /^[a-f0-9]{64}$/);
+  return true;
+}
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
 STEPS.push('BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE');
@@ -413,11 +426,12 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     const live = normalizePolicyInventory(readBrokerPolicyInventory(runAws));
     assert.equal(live.version, r.successorVersion); equal(live.policy, entry.terminal.policy);
     const state = await adapter.readStateIdentity();
-    equal(state, { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 });
+    const adoptedState = { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 };
+    assertReceiptBoundPolicyTerraformState(phase, state, adoptedState);
     const policyState = stateResource('aws_iam_policy.broker');
     assert.equal(policyState.arn, r.policyArn); equal(JSON.parse(policyState.policy), entry.terminal.policy);
     const corroboration = { ownership: r.ownership, policyArn: STAGE_B_BROKER_POLICY.arn, version: live.version,
-      policy: live.policy, versions: live.versions, terraform: state };
+      policy: live.policy, versions: live.versions, terraform: adoptedState };
     assert.equal(brokerDigest(corroboration), r.liveCorroborationSha256);
     return live;
   };
