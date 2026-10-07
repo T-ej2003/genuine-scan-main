@@ -108,8 +108,10 @@ export function stagedBrokerArtifactSet(files, root, preparation) {
 }
 
 export function assertAuthenticatedHistoricalBrokerPrerequisiteSource(options) {
-  assert.deepEqual(Object.keys(options).sort(), ['currentCheckout', 'isAncestor', 'preparation', 'preparationSha256']);
-  const { preparation, preparationSha256, currentCheckout, isAncestor } = options;
+  assert.deepEqual(Object.keys(options).sort(), ['currentCheckout', 'isAncestor', 'phase', 'preparation', 'preparationSha256']);
+  const { preparation, preparationSha256, currentCheckout, isAncestor, phase } = options;
+  assert.equal(phase, 'POLICY_RECOVERY', 'Historical prerequisite binding is recovery-only');
+  assert.ok([BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING].includes(preparation.purpose), 'Unsupported historical policy recovery purpose');
   assert.equal(brokerDigest(preparation), preparationSha256, 'Historical source must come from the authenticated preparation');
   assert.equal(typeof isAncestor, 'function');
   const historical = { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 };
@@ -418,12 +420,11 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       let checkout;
       if (historicalRecovery) {
         assert.equal(phase, 'POLICY_RECOVERY', 'Historical prerequisite binding is recovery-only');
-        assert.equal(preparation.purpose, BROKER_POLICY_CONVERGENCE, 'Historical prerequisite binding is convergence-recovery-only');
         assert.deepEqual(Object.keys(recoveryBinding).sort(), ['preparationSha256']);
         equal(chain, preparation.prerequisiteChain);
         recoveryCheckoutForChain = await adapter.readRecoveryCheckout();
         checkout = assertAuthenticatedHistoricalBrokerPrerequisiteSource({
-          preparation, preparationSha256: recoveryBinding.preparationSha256, currentCheckout: recoveryCheckoutForChain,
+          phase, preparation, preparationSha256: recoveryBinding.preparationSha256, currentCheckout: recoveryCheckoutForChain,
           isAncestor: (ancestor, descendant) => {
             try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; }
             catch { return false; }

@@ -386,18 +386,21 @@ test('historical policy recovery rejects tampered preparation or authorization s
   }
 });
 
-test('historical prerequisite source is derived from the authenticated preparation and anchored to current main', () => {
-  const preparation = { sourceSha: 'bb55eb02aa37255139f0e4edb89d6fbabade1a65', treeSha256: deriveStageBToolingInputTreeSha256('bb55eb02aa37255139f0e4edb89d6fbabade1a65') };
+for (const purpose of [BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING]) test(`historical ${purpose} prerequisite source is authenticated and anchored to current main`, () => {
+  const preparation = { purpose, sourceSha: 'bb55eb02aa37255139f0e4edb89d6fbabade1a65', treeSha256: deriveStageBToolingInputTreeSha256('bb55eb02aa37255139f0e4edb89d6fbabade1a65') };
   const preparationSha256 = brokerDigest(preparation);
   const currentCheckout = { sourceSha: '932293987ff34bfb7ad802fcb22361eab6bb33dd', treeSha256: deriveStageBToolingInputTreeSha256('932293987ff34bfb7ad802fcb22361eab6bb33dd') };
   const isAncestor = (ancestor, descendant) => ancestor === preparation.sourceSha && descendant === currentCheckout.sourceSha;
-  assert.deepEqual(assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor }), preparation);
-  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation: { ...preparation, sourceSha: 'a'.repeat(40) }, preparationSha256, currentCheckout, isAncestor }), /authenticated preparation/);
-  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor: () => false }), /not an ancestor/);
-  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor, requestedSourceSha: 'a'.repeat(40) }), /strictly deep-equal/);
+  const options = { phase: 'POLICY_RECOVERY', preparation, preparationSha256, currentCheckout, isAncestor };
+  assert.deepEqual(assertAuthenticatedHistoricalBrokerPrerequisiteSource(options), { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, preparation: { ...preparation, sourceSha: 'a'.repeat(40) } }), /authenticated preparation/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, isAncestor: () => false }), /not an ancestor/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, preparation: { ...preparation, purpose: 'UNRELATED' } }), /Unsupported historical policy recovery purpose/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, phase: 'POLICY' }), /recovery-only/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, requestedSourceSha: 'a'.repeat(40) }), /strictly deep-equal/);
 });
 
-test('recover-policy uses current protected-main identity while normal prune keeps exact historical checkout binding', async () => {
+test('recover-policy uses current protected-main identity while normal policy preparation keeps exact-main binding', async () => {
   const calls = [];
   const adapterFactory = () => ({
     readCheckout: async () => { calls.push('normal'); throw new Error('Requested source SHA does not match protected main'); },
@@ -407,9 +410,11 @@ test('recover-policy uses current protected-main identity while normal prune kee
   const request = { operation: 'recover-policy', directory, terraformDataDir: directory };
   assert.equal((await runStagedBrokerRequest(request, { adapterFactory })).status, 'RECOVERED_NO_WRITE');
   assert.deepEqual(calls, ['recovery']);
-  calls.length = 0;
-  await assert.rejects(() => runStagedBrokerRequest({ ...request, operation: 'prune' }, { adapterFactory }), /does not match protected main/);
-  assert.deepEqual(calls, ['normal']);
+  for (const operation of ['prepare-policy', 'prune']) {
+    calls.length = 0;
+    await assert.rejects(() => runStagedBrokerRequest({ ...request, operation }, { adapterFactory }), /does not match protected main/);
+    assert.deepEqual(calls, ['normal']);
+  }
 });
 
 for (const substitution of ['default-target','wrong-target','intent-target']) test(`pruning rejects authenticated ${substitution} substitution`, async () => {
