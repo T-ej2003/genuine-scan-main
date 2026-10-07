@@ -65,7 +65,7 @@ const normalizeVersions = versions => {
     const normalizedDocument = normalizeIamPolicyDocument(document, "WorkspaceState version document");
     return { versionId, isDefault, createDate: created.toISOString(), document: normalizedDocument, documentSha256: sha256(normalizedDocument) };
   }).sort((a, b) => Number(a.versionId.slice(1)) - Number(b.versionId.slice(1)));
-  if (new Set(normalized.map(({ versionId }) => versionId)).size !== normalized.length || normalized.filter(({ isDefault }) => isDefault).length !== 1 || new Set(normalized.map(({ createDate }) => createDate)).size !== normalized.length) throw new Error("WorkspaceState version topology is ambiguous.");
+  if (new Set(normalized.map(({ versionId }) => versionId)).size !== normalized.length || normalized.filter(({ isDefault }) => isDefault).length !== 1) throw new Error("WorkspaceState version topology is ambiguous.");
   return normalized;
 };
 
@@ -83,9 +83,12 @@ export function authenticateWorkspaceStateLiveState(value, { desired = readWorks
 }
 
 const chooseDeletionCandidate = versions => {
-  const candidates = versions.filter(version => !version.isDefault).sort((a, b) => Date.parse(a.createDate) - Date.parse(b.createDate));
-  if (candidates.length !== 4 || Date.parse(candidates[0].createDate) >= Date.parse(candidates[1].createDate)) throw new Error("WorkspaceState has no uniquely oldest safe non-default version.");
-  return candidates[0];
+  const candidates = versions.filter(version => !version.isDefault);
+  if (candidates.length !== 4) throw new Error("WorkspaceState has no uniquely oldest safe non-default version.");
+  const oldestDate = Math.min(...candidates.map(version => Date.parse(version.createDate)));
+  const oldest = candidates.filter(version => Date.parse(version.createDate) === oldestDate);
+  if (oldest.length !== 1) throw new Error("WorkspaceState has no uniquely oldest safe non-default version.");
+  return oldest[0];
 };
 
 const operationId = body => sha256({ schemaVersion: 1, operation: WORKSPACE_STATE_RECONCILIATION.operation, account: WORKSPACE_STATE_RECONCILIATION.account, targetPolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, ...body });

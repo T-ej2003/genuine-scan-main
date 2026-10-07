@@ -53,6 +53,33 @@ test("oldest default is protected and the oldest non-default becomes the reviewe
   assert.equal(prep.deletionCandidate.versionId, "v2");
 });
 
+test("duplicate timestamps among newer versions do not obscure the unique oldest non-default", () => {
+  const inventory = versions().map(version => ["v2", "v3"].includes(version.versionId) ? { ...version, createDate: "2026-02-01T00:00:00.000Z" } : version);
+  const prep = createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: inventory }) });
+  assert.equal(prep.deletionCandidate.versionId, "v1");
+});
+
+test("a tie for the oldest eligible non-default fails closed", () => {
+  const inventory = versions().map((version, index) => ({ ...version, createDate: index < 2 ? "2026-01-01T00:00:00.000Z" : version.createDate }));
+  assert.throws(() => createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: inventory }) }), /uniquely oldest/);
+});
+
+test("default timestamp ties do not affect a uniquely oldest eligible non-default", () => {
+  const inventory = versions().map(version => version.versionId === "v1" || version.versionId === "v5" ? { ...version, createDate: "2026-01-01T00:00:00.000Z" } : version);
+  const prep = createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: inventory }) });
+  assert.equal(prep.deletionCandidate.versionId, "v1");
+  assert.notEqual(prep.deletionCandidate.versionId, prep.currentDefaultVersionId);
+});
+
+test("duplicate version identities and zero or multiple defaults fail closed", () => {
+  const duplicateId = versions(); duplicateId[1] = { ...duplicateId[1], versionId: "v1" };
+  assert.throws(() => createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: duplicateId }) }), /topology is ambiguous/);
+  for (const defaults of [[false, false, false, false, false], [true, false, false, false, true]]) {
+    const inventory = versions().map((version, index) => ({ ...version, isDefault: defaults[index] }));
+    assert.throws(() => createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: inventory }) }), /topology is ambiguous/);
+  }
+});
+
 test("live reader authenticates every policy version document and exact attachment topology", () => {
   const calls = [];
   const run = args => {

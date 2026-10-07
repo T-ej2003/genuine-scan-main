@@ -4,6 +4,8 @@ This target-specific operation converges only `MSCQRProductionGreenStageBWorkspa
 
 Preparation authenticates the exact default, all five version documents, attachment topology, declared one-statement delta, and the uniquely oldest non-default deletion candidate. The dedicated protected-environment workflow independently authorizes the exact preparation. Execution reauthenticates the complete inventory immediately before the single approved deletion, creates one successor as default, and verifies the declared document. Conditional S3 journal records prevent either mutation from being replayed and support fail-closed reconciliation after interruption.
 
+`CreateDate` is used only to choose that candidate: repeated timestamps on newer versions are allowed, but a tie for the oldest eligible non-default version fails closed. The default version is never eligible for deletion.
+
 An existing reservation can be adopted only by a fresh authorization for the same source and exact transition, with an unchanged authenticated pre-state and no deletion, creation, or terminal journal record. The old reservation remains unchanged; after the first mutation-attempt record, recovery follows the original transaction and never reinterprets it as zero-write. After an authorized write, only explicitly retryable IAM read failures or the exact authenticated pre-write state are retried, using the bounded delays in the contract. Stable contradictions and permanent read errors fail closed.
 
 Use a clean protected-main checkout and private output directory (`umask 077`):
