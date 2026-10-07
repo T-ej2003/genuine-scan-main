@@ -84,3 +84,18 @@ Only `reachability.inputsSha256` changed in the acceptance. Advisory identity,
 package/version, scope, rationale, owner, creation date, execution claims, and
 exclusive expiry `2026-11-02` are unchanged. The current acceptance and this
 final revalidation record both bind the digest above.
+
+## Final frozen PR #640 continuation recovery revalidation
+
+Date: 2026-10-08 UTC. After the WorkspaceState continuation and restart
+recovery implementation was frozen and its required local test gates passed,
+the canonical `reachabilityInputsSha256(process.cwd())` result was
+`8c8980f2318590552657955caabffb50d5268ca513a673eddf1bd4d71f0fee56`. A fresh
+unfiltered OSV Scanner 2.6.0 source scan found exactly one HIGH finding:
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`, `braces@3.0.3`, in the root
+development dependency lockfile. The fresh canonical browser-closure build
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` was absent. The exact hosted OSV/runtime gate passed against
+these frozen inputs. The existing acceptance remains limited to this advisory
+and its existing scope, rationale, owner, and expiry `2026-11-02`; no
+reachability or expiry claim was broadened.

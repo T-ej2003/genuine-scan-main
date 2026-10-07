@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import test from "node:test";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { WORKSPACE_STATE_RECONCILIATION as CONTRACT, assertWorkspaceStateAuthorization, createWorkspaceStateAuthorization, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, WorkspaceStateRetryableObservationError, workspaceStateJournalKey } from "../aws/production-workspace-state-policy-reconciliation.mjs";
+import { WORKSPACE_STATE_RECONCILIATION as CONTRACT, assertWorkspaceStateAuthorization, createWorkspaceStateAuthorization, createWorkspaceStateContinuationPreparation, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, WorkspaceStateRetryableObservationError, workspaceStateJournalKey } from "../aws/production-workspace-state-policy-reconciliation.mjs";
 import { readWorkspaceStateLiveState } from "../aws/reconcile-production-workspace-state-policy.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -209,6 +209,102 @@ test("fresh reservation adoption resumes its own authenticated mutation records"
   const resumed = executor({ prep, authorization: auth, journal: original.journal, live: capacity, now: () => at });
   assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "COMPLETED");
   assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 1]);
+});
+
+test("expired adopted authorization can finish read-only after the exact successor is present", async () => {
+  const original = executor();
+  await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
+  const { prep, auth, at } = freshAuthorization(); const successor = post();
+  await seedRecord(original, auth, prep, "deletion-attempt.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT");
+  await seedRecord(original, auth, prep, "deletion-complete.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE");
+  await seedRecord(original, auth, prep, "creation-attempt.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT");
+  const resumed = executor({ prep, authorization: auth, journal: original.journal, live: successor, now: () => new Date(at.getTime() + CONTRACT.maxAgeMs + 1) });
+  assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "EXPECTED_POST_STATE_RECOVERED");
+  assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
+});
+
+test("expired adopted outcome recovery rejects changed successor, tampered creation record, and source substitution", async () => {
+  const at = new Date(now.getTime() + 31 * 60 * 1000); const expiredAt = new Date(at.getTime() + CONTRACT.maxAgeMs + 1);
+  for (const mode of ["successor", "record", "source"]) {
+    const original = executor(); const { prep, auth } = freshAuthorization();
+    await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
+    for (const [file, kind] of [["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-complete.json", "DELETION_COMPLETE"], ["creation-attempt.json", "CREATION_ATTEMPT"]]) await seedRecord(original, auth, prep, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);
+    let live = post(); const args = { prep, authorization: auth, journal: original.journal, live, now: () => expiredAt };
+    if (mode === "successor") args.live = post({ versions: post().versions.map(version => version.versionId === "v2" ? { ...version, document: oldDocument(3) } : version) });
+    const resumed = executor(args);
+    if (mode === "record") { const key = workspaceStateJournalKey(prep.operationId, "creation-attempt.json"); const row = JSON.parse(resumed.journal.values.get(key)); row.sourceSha = "b".repeat(40); resumed.journal.values.set(key, Buffer.from(`${canonicalJson(row)}\n`)); }
+    if (mode === "source") resumed.args.sourceSha = "b".repeat(40);
+    await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args));
+    assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
+  }
+});
+
+test("fresh authorization adopts only an authentic proved-no-delete continuation", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind] of [["reservation.json", "RESERVATION"], ["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED"]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const { prep: base, auth: ignored, at } = freshAuthorization();
+  // The retry preparation is freshly timed but retains the exact original transition identity.
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+  const auth = authorization(continuation, at, "124"); const retry = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at });
+  const result = await executeWorkspaceStateReconciliation(retry.args);
+  assert.equal(result.status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([retry.box.deletes, retry.box.creates], [1, 0]);
+  assert.equal(ignored.operationId, continuation.operationId);
+});
+
+test("proved-no-write continuation rejects tampered journal, changed live state, and expired fresh authorization without writes", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind] of [["reservation.json", "RESERVATION"], ["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED"]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const at = new Date(now.getTime() + 31 * 60 * 1000);
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+  const auth = authorization(continuation, at, "124");
+  const expiredAt = new Date(at.getTime() + CONTRACT.maxAgeMs + 1);
+  const expired = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => expiredAt });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(expired.args), /stale/);
+  assert.deepEqual([expired.box.deletes, expired.box.creates], [0, 0]);
+  for (const edit of [
+    run => { run.box.live = afterDelete(); },
+    run => { const key = workspaceStateJournalKey(continuation.operationId, "deletion-prewrite-failed.json"); const row = JSON.parse(run.journal.values.get(key)); row.sourceSha = "f".repeat(40); run.journal.values.set(key, Buffer.from(`${canonicalJson(row)}\n`)); },
+  ]) {
+    const run = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at }); edit(run);
+    await assert.rejects(() => executeWorkspaceStateReconciliation(run.args));
+    assert.deepEqual([run.box.deletes, run.box.creates], [0, 0]);
+  }
+});
+
+test("fresh create continuation cannot adopt an existing create-attempt or changed successor state", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind] of [["reservation.json", "RESERVATION"], ["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-complete.json", "DELETION_COMPLETE"]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const attempt = await seedRecord(original, old.authorization, old.preparation, "creation-attempt.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT");
+  assert.throws(() => createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_CREATE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-complete.json"), creationAttempt: attempt, liveState: afterDelete(), preparedAt: new Date(now.getTime() + 31 * 60 * 1000).toISOString() }), /prior create/);
+  assert.throws(() => createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_CREATE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-complete.json"), liveState: state(), preparedAt: new Date(now.getTime() + 31 * 60 * 1000).toISOString() }), /live state changed/);
+  assert.deepEqual([original.box.deletes, original.box.creates], [0, 0]);
+});
+
+test("fresh create continuation follows proved deletion without repeating it and terminalizes read-only after expiry", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind] of [["reservation.json", "RESERVATION"], ["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED"]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const at = new Date(now.getTime() + 31 * 60 * 1000);
+  const deletePrep = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+  const deleteAuth = authorization(deletePrep, at, "124"); const deleted = executor({ prep: deletePrep, authorization: deleteAuth, journal: original.journal, now: () => at });
+  assert.equal((await executeWorkspaceStateReconciliation(deleted.args)).status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([deleted.box.deletes, deleted.box.creates], [1, 0]);
+  const at2 = new Date(at.getTime() + 60_000);
+  const createPrep = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_CREATE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-complete.json"), deletionPrewriteFailed: read("deletion-prewrite-failed.json"), deletionRetryAttempt: read("deletion-retry-attempt.json"), liveState: afterDelete(), preparedAt: at2.toISOString() });
+  const createAuth = authorization(createPrep, at2, "125"); let clock = at2;
+  const expiredBeforeCreate = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => new Date(at2.getTime() + CONTRACT.maxAgeMs + 1) });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(expiredBeforeCreate.args), /stale/);
+  assert.deepEqual([expiredBeforeCreate.box.deletes, expiredBeforeCreate.box.creates], [0, 0]);
+  const creating = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => clock, createPolicyVersion: async () => { creating.box.creates += 1; creating.box.live = post(); clock = new Date(at2.getTime() + CONTRACT.maxAgeMs + 1); return { PolicyVersion: { VersionId: "v6" } }; } });
+  assert.equal((await executeWorkspaceStateReconciliation(creating.args)).status, "COMPLETED");
+  assert.deepEqual([creating.box.deletes, creating.box.creates], [0, 1]);
+  const expired = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: post(), now: () => clock });
+  assert.equal((await executeWorkspaceStateReconciliation(expired.args)).status, "CONSUMED");
+  assert.deepEqual([expired.box.deletes, expired.box.creates], [0, 0]);
 });
 
 test("fresh reservation adoption rejects progress records bound to a different authorization", async () => {
