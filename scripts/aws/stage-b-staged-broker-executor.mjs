@@ -107,6 +107,18 @@ export function stagedBrokerArtifactSet(files, root, preparation) {
   return brokerDigest(hashes);
 }
 
+export function assertAuthenticatedHistoricalBrokerPrerequisiteSource(options) {
+  assert.deepEqual(Object.keys(options).sort(), ['currentCheckout', 'isAncestor', 'preparation', 'preparationSha256']);
+  const { preparation, preparationSha256, currentCheckout, isAncestor } = options;
+  assert.equal(brokerDigest(preparation), preparationSha256, 'Historical source must come from the authenticated preparation');
+  assert.equal(typeof isAncestor, 'function');
+  const historical = { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 };
+  assert.equal(deriveStageBToolingInputTreeSha256(historical.sourceSha), historical.treeSha256, 'Historical preparation tree is not source-bound');
+  assert.equal(deriveStageBToolingInputTreeSha256(currentCheckout.sourceSha), currentCheckout.treeSha256, 'Recovery checkout tree is not source-bound');
+  assert.ok(isAncestor(historical.sourceSha, currentCheckout.sourceSha), 'Historical transaction source is not an ancestor of current protected main');
+  return Object.freeze(historical);
+}
+
 // Extends the existing governed runner/reservations, with a fixed phase census.
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
@@ -399,13 +411,33 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         deriveStageBImageImpactReport({ imageReleaseSha: entry.preparation.sourceSha, toolingSha: checkout.sourceSha }));
       equal(await adapter.readCheckout(), checkout); return adopted;
     },
-    authenticatePrerequisiteChain: async chain => {
+    authenticatePrerequisiteChain: async (chain, recoveryBinding) => {
       assert.ok(chain?.registration);
+      const historicalRecovery = recoveryBinding !== undefined;
+      let recoveryCheckoutForChain;
+      let checkout;
+      if (historicalRecovery) {
+        assert.equal(phase, 'POLICY_RECOVERY', 'Historical prerequisite binding is recovery-only');
+        assert.equal(preparation.purpose, BROKER_POLICY_CONVERGENCE, 'Historical prerequisite binding is convergence-recovery-only');
+        assert.deepEqual(Object.keys(recoveryBinding).sort(), ['preparationSha256']);
+        equal(chain, preparation.prerequisiteChain);
+        recoveryCheckoutForChain = await adapter.readRecoveryCheckout();
+        checkout = assertAuthenticatedHistoricalBrokerPrerequisiteSource({
+          preparation, preparationSha256: recoveryBinding.preparationSha256, currentCheckout: recoveryCheckoutForChain,
+          isAncestor: (ancestor, descendant) => {
+            try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; }
+            catch { return false; }
+          },
+        });
+      } else checkout = await adapter.readCheckout();
+      const assertCheckoutUnchanged = async () => {
+        if (historicalRecovery) equal(await adapter.readRecoveryCheckout(), recoveryCheckoutForChain);
+        else equal(await adapter.readCheckout(), checkout);
+      };
       if (chain.policy) {
         equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
-      const checkout = await adapter.readCheckout();
       for (const [name, entry] of Object.entries(chain)) {
         assert.ok(['registration', 'policy'].includes(name));
         const { preparation: p, authorization: auth, result } = entry;
@@ -428,6 +460,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         equal(authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed }), definition);
       }
       if (chain.policy) equal(chain.policy.result.policy, deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, chain.registration.result.taskMap));
+      await assertCheckoutUnchanged();
     },
     applyTaskRegistration: async bytes => {
       assert.equal(phase, 'REGISTRATION'); const id = await requireAuthorization(TASK_REGISTRATION);
@@ -650,7 +683,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
             reservation = JSON.parse(fs.readFileSync(file));
           } finally { fs.rmSync(file, { force: true }); }
           equal(reservation, { kind: 'STAGED_BROKER_RESERVATION', id, value: policyReservation() }); assert.equal(brokerDigest(reservation), acquisition.reservationSha256);
-          if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain);
+          if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain, { preparationSha256: acquisition.preparationSha256 });
           equal(await getAlias(), preparation.alias);
           const snapshot = readBrokerPolicyInventory(runAws);
           let pruningPredecessor, pruningSuccessor;

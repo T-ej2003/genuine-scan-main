@@ -8,7 +8,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -384,6 +384,17 @@ test('historical policy recovery rejects tampered preparation or authorization s
     await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
     assert.equal(r.state().owner.status, 'HELD');
   }
+});
+
+test('historical prerequisite source is derived from the authenticated preparation and anchored to current main', () => {
+  const preparation = { sourceSha: 'bb55eb02aa37255139f0e4edb89d6fbabade1a65', treeSha256: deriveStageBToolingInputTreeSha256('bb55eb02aa37255139f0e4edb89d6fbabade1a65') };
+  const preparationSha256 = brokerDigest(preparation);
+  const currentCheckout = { sourceSha: '932293987ff34bfb7ad802fcb22361eab6bb33dd', treeSha256: deriveStageBToolingInputTreeSha256('932293987ff34bfb7ad802fcb22361eab6bb33dd') };
+  const isAncestor = (ancestor, descendant) => ancestor === preparation.sourceSha && descendant === currentCheckout.sourceSha;
+  assert.deepEqual(assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor }), preparation);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation: { ...preparation, sourceSha: 'a'.repeat(40) }, preparationSha256, currentCheckout, isAncestor }), /authenticated preparation/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor: () => false }), /not an ancestor/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ preparation, preparationSha256, currentCheckout, isAncestor, requestedSourceSha: 'a'.repeat(40) }), /strictly deep-equal/);
 });
 
 test('recover-policy uses current protected-main identity while normal prune keeps exact historical checkout binding', async () => {
