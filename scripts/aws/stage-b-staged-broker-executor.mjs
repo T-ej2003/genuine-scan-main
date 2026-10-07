@@ -1,6 +1,7 @@
 import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -121,6 +122,35 @@ export function assertAuthenticatedHistoricalBrokerPrerequisiteSource(options) {
   return Object.freeze(historical);
 }
 
+export function materializeHistoricalTerraformConfiguration({ repositoryRoot, sourceSha }) {
+  assert.match(sourceSha || '', /^[a-f0-9]{40}$/, 'Historical Terraform source must be a full commit SHA');
+  const resolved = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${sourceSha}^{commit}`], { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  assert.equal(resolved, sourceSha, 'Historical Terraform source must resolve to its exact commit');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-terraform-'));
+  try {
+    const relative = 'infra/aws/terraform/production-green-stage-b';
+    const archive = execFileSync('git', ['archive', '--format=tar', sourceSha, relative], { cwd: repositoryRoot, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync('tar', ['-xf', '-', '-C', directory], { input: archive, maxBuffer: 64 * 1024 * 1024 });
+    const moduleDirectory = path.join(directory, relative);
+    const expected = execFileSync('git', ['ls-tree', '-r', '--name-only', sourceSha, '--', relative], { cwd: repositoryRoot, encoding: 'utf8' }).trim().split('\n').filter(Boolean).sort();
+    const observed = [];
+    const visit = current => {
+      for (const name of fs.readdirSync(current).sort()) {
+        const file = path.join(current, name), stat = fs.lstatSync(file);
+        assert.ok(!stat.isSymbolicLink(), 'Historical Terraform source cannot contain symlinks');
+        if (stat.isDirectory()) visit(file);
+        else { assert.ok(stat.isFile(), 'Historical Terraform source contains an unsupported file'); observed.push(path.relative(directory, file).split(path.sep).join('/')); }
+      }
+    };
+    visit(moduleDirectory);
+    assert.deepEqual(observed.sort(), expected, 'Historical Terraform archive does not match its Git tree');
+    return { moduleDirectory, dispose: () => fs.rmSync(directory, { recursive: true, force: true }) };
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 // Extends the existing governed runner/reservations, with a fixed phase census.
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
@@ -160,13 +190,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     return writerSession;
   };
   const ownedReservations = new Set(); let mutationAttempted = false;
-  const terraform = args => {
+  const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b')) => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
     if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
     const metadata = path.join(terraformDataDir, 'terraform.tfstate');
     assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
     stagedBrokerArtifactSet(files, root, preparation);
-    return exec('terraform', [`-chdir=${path.join(root, 'infra/aws/terraform/production-green-stage-b')}`, ...args],
+    return exec('terraform', [`-chdir=${moduleDirectory}`, ...args],
       { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   };
   const stateFile = path.join(directory, 'state-read.json');
@@ -240,12 +270,22 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       } finally { fs.rmSync(file, { force: true }); }
     },
   });
-  const readAdoptionPlan = () => {
+  const readAdoptionPlan = historicalCheckout => {
     const file = path.join(directory, `adoption-read-${randomUUID()}.tfplan`);
+    let historicalSource;
     try {
-      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`]);
-      return JSON.parse(terraform(['show', '-json', file]));
-    } finally { fs.rmSync(file, { force: true }); }
+      let moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b');
+      if (historicalCheckout) {
+        assert.equal(phase, 'POLICY_RECOVERY', 'Historical adoption plans are recovery-only');
+        assert.equal(historicalCheckout.sourceSha, preparation.sourceSha, 'Historical adoption plan source must come from the authenticated preparation');
+        assert.equal(historicalCheckout.treeSha256, preparation.treeSha256);
+        assert.equal(deriveStageBToolingInputTreeSha256(historicalCheckout.sourceSha), historicalCheckout.treeSha256);
+        historicalSource = materializeHistoricalTerraformConfiguration({ repositoryRoot: root, sourceSha: historicalCheckout.sourceSha });
+        moduleDirectory = historicalSource.moduleDirectory;
+      }
+      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`], moduleDirectory);
+      return JSON.parse(terraform(['show', '-json', file], moduleDirectory));
+    } finally { fs.rmSync(file, { force: true }); historicalSource?.dispose(); }
   };
   let capturedRefresh;
   const adapter = {
@@ -445,7 +485,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
         if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
           assertRegistrationHandoff(entry, checkout); await readHistoricalRegistration(entry, checkout);
-          equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(),
+          equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(historicalRecovery ? checkout : undefined),
             deriveStageBImageImpactReport({ imageReleaseSha: p.sourceSha, toolingSha: checkout.sourceSha })));
         } else { assert.equal(entry.adoption, undefined); assert.equal(p.sourceSha, checkout.sourceSha); assert.equal(p.treeSha256, checkout.treeSha256); }
         assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
