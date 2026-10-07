@@ -2,8 +2,8 @@
 
 Generated from the permission manifest, reviewed source policies, release probes, canonical recovery, zero-registration forward recovery, publisher policy, Terraform runtime policy actions, and the production path. Do not edit generated capability rows manually.
 
-- Phases: 60
-- Capability nodes: 758
+- Phases: 61
+- Capability nodes: 767
 - Unique AWS actions: 161
 - Identities: GITHUB_IMAGE_PUBLISHER, ADMINISTRATOR, ROOT_OPERATOR, BOOTSTRAP_OPERATOR, RELEASE_DEPLOYER, NORMAL_DEPLOYER, INDEPENDENT_CHECKER, ECS_EXEC_VERIFIER_OPERATOR, SERVICE_RUNTIME, INITIAL_ACTIVATION_RECONCILER, BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, MIXED_RECOVERY_EXECUTOR, APP_ONLY_DEPLOYER, APP_ONLY_VERIFIER_LAUNCHER, APP_ONLY_PERMISSION_PROVISIONER
 
@@ -65,7 +65,8 @@ Generated from the permission manifest, reviewed source policies, release probes
 | 54 | stage-a-production-artifacts-state-reconciliation | `scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs` |
 | 55 | initial-activation-lifecycle-policy-reconciliation | `scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs` |
 | 56 | provider-readonly-policy-reconciliation | `scripts/aws/reconcile-production-provider-readonly-policy.mjs` |
-| 57 | bootstrap-operator-policy-reconciliation | `scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs` |
-| 58 | mixed-dual-slot-recovery-iam-preflight | `scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs` |
-| 59 | mixed-dual-slot-recovery-execution | `scripts/aws/recover-production-mixed-dual-slot-topology.mjs` |
-| 60 | stage-b-exact-refresh-only-state-reconciliation | `scripts/aws/reconcile-production-green-stage-b-state.mjs` |
+| 57 | workspace-state-policy-reconciliation | `scripts/aws/reconcile-production-workspace-state-policy.mjs` |
+| 58 | bootstrap-operator-policy-reconciliation | `scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs` |
+| 59 | mixed-dual-slot-recovery-iam-preflight | `scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs` |
+| 60 | mixed-dual-slot-recovery-execution | `scripts/aws/recover-production-mixed-dual-slot-topology.mjs` |
+| 61 | stage-b-exact-refresh-only-state-reconciliation | `scripts/aws/reconcile-production-green-stage-b-state.mjs` |

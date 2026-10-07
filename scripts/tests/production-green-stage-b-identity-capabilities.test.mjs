@@ -157,7 +157,7 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
-  assert.equal(matrix.phases.length, 60);
+  assert.equal(matrix.phases.length, 61);
 });
 
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
@@ -204,7 +204,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 60, capabilities: 758, uniqueActions: 161, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 767, uniqueActions: 161, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",
@@ -263,6 +263,10 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert.equal(providerReadonlyCapabilities.length, 9);
   assert(providerReadonlyCapabilities.every(({ context }) => context.targetPolicyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly"));
   assert.equal(first.capabilities.filter(({ identity, phase }) => identity === "ROOT_OPERATOR" && phase === "provider-readonly-policy-reconciliation").length, 5);
+  const workspaceStateCapabilities = first.capabilities.filter(({ phase }) => phase === "workspace-state-policy-reconciliation");
+  assert.equal(workspaceStateCapabilities.length, 9);
+  assert(workspaceStateCapabilities.every(({ identity, context }) => identity === "ROOT_OPERATOR" && context.targetPolicyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"));
+  assert.deepEqual(workspaceStateCapabilities.filter(({ mutation }) => mutation).map(({ action }) => action).sort(), ["iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "s3:PutObject"]);
   const bootstrapOperatorReconciliation = first.capabilities.filter(({ phase }) => phase === "bootstrap-operator-policy-reconciliation");
   assert.equal(bootstrapOperatorReconciliation.length, 21);
   assert(bootstrapOperatorReconciliation.filter(({ id }) => id.startsWith("bootstrap-operator-policy-reconciliation-")).every(({ id, identity, policy }) => identity === "ROOT_OPERATOR" && (id.includes("reservation") ? policy.sourceFile === "infra/aws/terraform/production-green-stage-a/main.tf" : policy.sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs")));

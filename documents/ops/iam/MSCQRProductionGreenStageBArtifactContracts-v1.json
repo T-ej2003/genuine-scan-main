@@ -2230,6 +2230,63 @@
       "rollback": "remove-committed-or-restore-backups"
     },
     {
+      "id": "workspace-state-policy-reconciliation-preparation",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-workspace-state-policy.mjs:runWorkspaceStateReconciliation --mode prepare",
+      "consumers": [
+        ".github/workflows/authorize-production-workspace-state-policy-reconciliation.yml",
+        "scripts/aws/authorize-production-workspace-state-policy-reconciliation.mjs",
+        "scripts/aws/reconcile-production-workspace-state-policy.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "workspace-state-policy-reconciliation-preparation",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "workspace-state-policy-reconciliation-authorization",
+      "kind": "file",
+      "producer": ".github/workflows/authorize-production-workspace-state-policy-reconciliation.yml",
+      "consumers": [
+        "scripts/aws/reconcile-production-workspace-state-policy.mjs"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "externalProducer": true,
+      "atomicGroup": "workspace-state-policy-reconciliation-authorization",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
+      "id": "workspace-state-policy-reconciliation-result",
+      "kind": "file",
+      "producer": "scripts/aws/reconcile-production-workspace-state-policy.mjs:runWorkspaceStateReconciliation --mode execute",
+      "consumers": [
+        "documents/ops/iam/MSCQRProductionWorkspaceState-reconciliation.md"
+      ],
+      "directoryMode": "0700",
+      "fileMode": "0600",
+      "symlink": "reject",
+      "outsideRepository": true,
+      "atomic": true,
+      "overwrite": false,
+      "hashBound": true,
+      "atomicGroup": "workspace-state-policy-reconciliation-result",
+      "allOrNone": true,
+      "rollback": "remove-committed-or-restore-backups"
+    },
+    {
       "id": "backend-recovery-candidate",
       "kind": "file",
       "producer": "scripts/aws/prepare-production-backend-recovery-candidate.mjs:runCli",

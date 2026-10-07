@@ -1,0 +1,25 @@
+# WorkspaceState policy version-capacity reconciliation
+
+This target-specific operation converges only `MSCQRProductionGreenStageBWorkspaceState` when its five managed-policy version slots are occupied. It adds no policy authority beyond the protected-main document at `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`.
+
+Preparation authenticates the exact default, all five version documents, attachment topology, declared one-statement delta, and the uniquely oldest non-default deletion candidate. The dedicated protected-environment workflow independently authorizes the exact preparation. Execution reauthenticates the complete inventory immediately before the single approved deletion, creates one successor as default, and verifies the declared document. Conditional S3 journal records prevent either mutation from being replayed and support fail-closed reconciliation after interruption.
+
+Use a clean protected-main checkout and private output directory (`umask 077`):
+
+```sh
+npm run production:workspace-state-reconciliation -- --mode prepare --source-sha "$PROTECTED_MAIN_SHA" --admin-profile "$ADMIN_PROFILE" --preparation-out "$PRIVATE_DIR/preparation.json"
+
+gh workflow run authorize-production-workspace-state-policy-reconciliation.yml --ref main \
+  -f source_sha="$PROTECTED_MAIN_SHA" \
+  -f preparation_json_base64="$(base64 < "$PRIVATE_DIR/preparation.json" | tr -d '\n')" \
+  -f preparation_file_sha256="$(shasum -a 256 "$PRIVATE_DIR/preparation.json" | awk '{print $1}')"
+
+npm run production:workspace-state-reconciliation -- --mode execute --source-sha "$PROTECTED_MAIN_SHA" \
+  --preparation "$PRIVATE_DIR/preparation.json" \
+  --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+  --authorization-workflow-run-id "$AUTHORIZATION_WORKFLOW_RUN_ID" \
+  --authorization-workflow-run-attempt 1 --admin-profile "$ADMIN_PROFILE" \
+  --result-out "$PRIVATE_DIR/result.json"
+```
+
+The production mutation is never performed by tests, PR validation, or authorization. The operator must stop if preparation cannot identify one safe non-default version or if any live binding changes.
