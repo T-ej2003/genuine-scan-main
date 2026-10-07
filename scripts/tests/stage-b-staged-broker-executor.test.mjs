@@ -105,6 +105,13 @@ test('native executor rejects phase crossover and conflicting predecessor', asyn
   await assert.rejects(() => r.adapter.updateAlias(r.input)); await assert.rejects(() => r.adapter.applyPublication(Buffer.from('wrong')));
   assert.equal(r.calls.filter(c => c.args[1] === 'update-alias').length, 0);
 });
+test('ADOPTION may read the broker ownership row but cannot write it', () => {
+  assert.doesNotThrow(() => assertRegistrationRecoveryReadCommand(['dynamodb', 'get-item']));
+  assert.throws(() => assertRegistrationRecoveryReadCommand(['dynamodb', 'put-item']), /cannot mutate AWS resources/);
+  for (const command of [['iam', 'create-policy-version'], ['iam', 'delete-policy-version'], ['iam', 'set-default-policy-version'], ['lambda', 'update-alias'], ['ecs', 'register-task-definition']]) {
+    assert.throws(() => assertRegistrationRecoveryReadCommand(command), /cannot mutate AWS resources/);
+  }
+});
 for (const resource of ['*', alias.AliasArn.replace(':reviewed', ''), alias.AliasArn.replace(':reviewed', ':12'), alias.AliasArn.replace(':reviewed', ':*')]) test(`unreviewed caller invocation ${resource} fails`, () => {
   assert.throws(() => assertBrokerCallerPolicy({ Statement: [{ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: resource }] }));
 });

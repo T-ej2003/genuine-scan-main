@@ -175,3 +175,30 @@ and checked before spawning Terraform. Existing full-profile plan classification
 remains usable for auditing and capture, without granting an unconditional alias
 update path. Broker publication and alias cutover use their separately authorized
 staged phases. Broker no-op and ordinary application deployments retain their paths.
+
+## Terminal broker-policy successor adoption
+
+When a later protected-main release must consume a policy successor whose
+preparation was signed under an earlier source SHA, use
+`prepare-policy-adoption` with the historical policy preparation,
+authorization, result and the current release's registration prerequisite.
+The command emits a `TERMINAL_POLICY_SUCCESSOR_ADOPTION` binding; it does not
+rewrite historical artifacts or create mutation authority.
+
+The adoption verifier rechecks the historical source tree and ancestry,
+KMS authorization, policy intent and one-use reservation, terminal S3 receipt,
+the exact DynamoDB transaction in `RELEASED`/`SUCCEEDED` state, live default
+policy version/document, and the Terraform lineage/serial/state hash. It also
+checks the historical registration chain used by policy preparation and the
+current registered task-definition adoption. The adoption is bound to one
+consumer source/tree and one Terraform state identity; later releases or state
+changes require a new read-only adoption. Publication reauthenticates these
+facts before accepting the chain, and its independent-checker signature binds
+the resulting preparation. Same-source policy preparation remains unchanged.
+
+This path is distinct from `recover-policy`: recovery terminalizes a held
+transaction, while adoption consumes an already-terminal released successor.
+Both paths remain read-only with respect to AWS resources during preparation;
+adoption permits only `GetItem` for ownership verification in addition to the
+existing adoption reads. It cannot create, delete or promote an IAM policy
+version.

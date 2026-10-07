@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -168,6 +168,7 @@ export function initializeHistoricalTerraform({ moduleDirectory, terraformDataDi
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
   const reads = ['sts:get-caller-identity', 'kms:verify', 's3api:get-object', 's3api:list-objects-v2',
+    'dynamodb:get-item',
     'ecs:describe-task-definition', 'iam:get-policy', 'iam:get-policy-version', 'iam:get-role',
     'iam:get-role-policy', 'iam:list-policy-versions', 'iam:list-attached-role-policies', 'iam:list-role-policies',
     'lambda:get-alias', 'lambda:get-policy', 'lambda:list-aliases', 'lambda:list-versions-by-function',
@@ -284,6 +285,95 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       } finally { fs.rmSync(file, { force: true }); }
     },
   });
+  const authenticateTerminalPolicySuccessor = async (entry, release, expectedState) => {
+    const { preparation: p, authorization: auth, result } = entry;
+    assertBrokerPreparation(p); assert.equal(p.purpose, BROKER_POLICY_CONVERGENCE);
+    assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
+    const git = args => exec('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+    git(['merge-base', '--is-ancestor', p.sourceSha, release.sourceSha]);
+    assert.equal(deriveStageBToolingInputTreeSha256(release.sourceSha), release.treeSha256);
+    const historicalRegistration = p.prerequisiteChain.registration;
+    assert.equal(historicalRegistration.preparation.sourceSha, p.sourceSha);
+    assert.equal(historicalRegistration.preparation.treeSha256, p.treeSha256);
+    assertRegistrationHandoff(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+    equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
+    equal(p.target.policy, deriveBrokerPolicy(p.prerequisites.policy, historicalRegistration.result.taskMap));
+    await readHistoricalRegistration(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+
+    const id = await assertBrokerAuthorization(auth, p, { verify: kms.verify, now: new Date(result.authorizedAt) });
+    assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
+    assert.equal(result.authorizationSha256, id); assert.equal(result.preparationSha256, brokerDigest(p));
+    assert.equal(result.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL'); equal(result.policy, p.target.policy);
+    readReceipt(id, 'BROKER_POLICY_CONVERGED', result);
+    const intent = readReceipt(id, 'BROKER_POLICY_INTENT');
+    const owner = intent.owner;
+    equal(owner.policyArn, STAGE_B_BROKER_POLICY.arn);
+    assert.equal(owner.operationIdentity, id); assert.equal(owner.sourceSha, p.sourceSha);
+    const { authorizedAt, ...intentFields } = intent;
+    equal(intentFields, { owner, acquisitionSha256: intent.acquisitionSha256, savedPlanSha256: p.savedPlanSha256,
+      predecessorInventory: intent.predecessorInventory });
+    assert.ok(Array.isArray(intent.predecessorInventory) && intent.predecessorInventory.length > 0 && intent.predecessorInventory.length < 5);
+    assert.equal(new Set(intent.predecessorInventory.map(v => v.VersionId)).size, intent.predecessorInventory.length);
+    for (const version of intent.predecessorInventory) {
+      assert.deepEqual(Object.keys(version).sort(), ['IsDefaultVersion', 'VersionId']);
+      assert.match(version.VersionId || '', /^v[1-9][0-9]*$/); assert.equal(typeof version.IsDefaultVersion, 'boolean');
+    }
+    equal(intent.predecessorInventory, [...intent.predecessorInventory].sort((a, b) => a.VersionId.localeCompare(b.VersionId)));
+    equal(intent.predecessorInventory.filter(v => v.IsDefaultVersion).map(v => v.VersionId), [p.prerequisites.policyVersion]);
+    assert.ok(Date.parse(auth.issuedAt) <= Date.parse(authorizedAt) && Date.parse(authorizedAt) < Date.parse(auth.expiresAt));
+    assert.equal(authorizedAt, result.authorizedAt);
+    await assertBrokerAuthorization(auth, p, { verify: kms.verify, now: new Date(authorizedAt) });
+
+    const reservationValue = { kind: 'STAGED_BROKER_RESERVATION', id,
+      value: { purpose: p.purpose, nonce: auth.nonce, preparationSha256: brokerDigest(p) } };
+    const reservationFile = path.join(directory, `policy-adoption-reservation-${randomUUID()}.json`);
+    let reservation;
+    try {
+      runAws(['s3api', 'get-object', '--bucket', STAGE_B_TERRAFORM_BACKEND.bucketName,
+        '--key', stageBApplyAttemptS3Key(id), '--expected-bucket-owner', STAGE_B.account, reservationFile]);
+      reservation = JSON.parse(fs.readFileSync(reservationFile));
+    } finally { fs.rmSync(reservationFile, { force: true }); }
+    equal(reservation, reservationValue);
+
+    const ownership = createBrokerPolicyOwnershipClient({ run: runAws }).read(); assert.ok(ownership);
+    assert.equal(ownership.status, 'RELEASED'); assert.equal(ownership.terminal?.outcome, 'SUCCEEDED');
+    equal(ownership.identity, owner); assert.ok(ownership.mutation);
+    equal(ownership.mutation, { intentSha256: brokerDigest(intent) });
+    assert.equal(intent.acquisitionSha256, brokerDigest(ownership.acquisition));
+    equal(ownership.acquisition, { purpose: p.purpose, preparationSha256: brokerDigest(p),
+      reservationSha256: brokerDigest(reservation), authorizedAt: ownership.acquisition.authorizedAt });
+    assert.ok(Date.parse(auth.issuedAt) <= Date.parse(ownership.acquisition.authorizedAt)
+      && Date.parse(ownership.acquisition.authorizedAt) < Date.parse(auth.expiresAt));
+    await assertBrokerAuthorization(auth, p, { verify: kms.verify, now: new Date(ownership.acquisition.authorizedAt) });
+    const terminal = readStagedBrokerReceipt({ run: runAws, id, status: 'BROKER_POLICY_CONVERGED', directory, allowPolicyNoWrite: true });
+    assert.equal(ownership.terminal.receiptSha256, brokerDigest(terminal));
+    assert.equal(terminal.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL');
+    assert.equal(terminal.sourceSha, p.sourceSha); assert.equal(terminal.treeSha256, p.treeSha256);
+    assert.equal(terminal.preparationSha256, brokerDigest(p)); assert.equal(terminal.authorizationSha256, id);
+    assert.equal(terminal.savedPlanSha256, p.savedPlanSha256); assert.equal(terminal.authorizedAt, authorizedAt);
+    equal(terminal.owner, ownership.identity); equal(terminal.acquisitionSha256, brokerDigest(ownership.acquisition));
+    equal(terminal.policy, p.target.policy);
+
+    const live = normalizePolicyInventory(readBrokerPolicyInventory(runAws));
+    equal(live.policy, terminal.policy); assert.equal(live.version, terminal.successorIdentity.policyVersion);
+    const expectedInventory = [...intent.predecessorInventory.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: false })),
+      { VersionId: terminal.successorIdentity.policyVersion, IsDefaultVersion: true }].sort((a, b) => a.VersionId.localeCompare(b.VersionId));
+    assert.ok(!intent.predecessorInventory.some(v => v.VersionId === terminal.successorIdentity.policyVersion));
+    equal(live.versions, expectedInventory);
+    const state = await adapter.readStateIdentity(); equal(state, expectedState);
+    const policyState = stateResource('aws_iam_policy.broker');
+    assert.equal(policyState.arn, STAGE_B_BROKER_POLICY.arn); equal(JSON.parse(policyState.policy), terminal.policy);
+    assert.equal(state.lineage, p.state.lineage); assert.ok(state.serial >= p.state.serial);
+
+    const adopted = createTerminalPolicySuccessorAdoption({ ...entry, terminal }, release, state, live.versions);
+    assertTerminalPolicySuccessorState(adopted, release, { ownership, live: { policyArn: STAGE_B_BROKER_POLICY.arn,
+      version: live.version, policy: live.policy, versions: live.versions }, terraform: { ...state,
+      policyArn: policyState.arn, policy: JSON.parse(policyState.policy) } });
+    if (entry.adoption) {
+      assertTerminalPolicyHandoff(entry, release); equal(entry, adopted);
+    }
+    return adopted;
+  };
   const readAdoptionPlan = historicalCheckout => {
     const file = path.join(directory, `adoption-read-${randomUUID()}.tfplan`);
     let historicalSource, historicalDataDir;
@@ -356,7 +446,8 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         await adapter.authenticatePrerequisiteChain(prerequisiteChain);
         const live = readBrokerPolicyInventory(runAws).policy;
         if (canonicalJson(live) === canonicalJson(deriveBrokerPolicy(live, prerequisiteChain.registration.result.taskMap))) authenticatedTaskMap = prerequisiteChain.registration.result.taskMap;
-        if (prerequisiteChain.policy) equal(live, prerequisiteChain.policy.result.policy);
+        if (prerequisiteChain.policy) equal(live, prerequisiteChain.policy.adoption
+          ? prerequisiteChain.policy.terminal.policy : prerequisiteChain.policy.result.policy);
       }
       return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap });
     },
@@ -470,6 +561,18 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         deriveStageBImageImpactReport({ imageReleaseSha: entry.preparation.sourceSha, toolingSha: checkout.sourceSha }));
       equal(await adapter.readCheckout(), checkout); return adopted;
     },
+    adoptPolicySuccessor: async (entry, release, plan, state) => {
+      assert.equal(phase, 'ADOPTION'); assert.equal(entry.adoption, undefined);
+      const adopted = await authenticateTerminalPolicySuccessor(entry, release, state);
+      const policy = plan.resource_changes.find(change => change.address === 'aws_iam_policy.broker');
+      assert.ok(policy, 'Current-main plan omitted the broker policy');
+      assert.equal(policy.mode, 'managed'); assert.equal(policy.deposed, undefined);
+      equal(policy.change.actions, ['no-op'], 'Current-main broker policy differs from the authenticated terminal successor');
+      equal(policy.change.before, policy.change.after);
+      equal(JSON.parse(policy.change.after.policy), adopted.terminal.policy);
+      equal(await adapter.readCheckout(), release); equal(await adapter.readStateIdentity(), state);
+      return adopted;
+    },
     authenticatePrerequisiteChain: async (chain, recoveryBinding) => {
       assert.ok(chain?.registration);
       const historicalRecovery = recoveryBinding !== undefined;
@@ -492,7 +595,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         if (historicalRecovery) equal(await adapter.readRecoveryCheckout(), recoveryCheckoutForChain);
         else equal(await adapter.readCheckout(), checkout);
       };
-      if (chain.policy) {
+      if (chain.policy && !chain.policy.adoption) {
         equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
@@ -500,7 +603,10 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         assert.ok(['registration', 'policy'].includes(name));
         const { preparation: p, authorization: auth, result } = entry;
         assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
-        if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
+        if (name === 'policy' && entry.adoption) {
+          await authenticateTerminalPolicySuccessor(entry, checkout, await adapter.readStateIdentity());
+          continue;
+        } else if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
           assertRegistrationHandoff(entry, checkout); await readHistoricalRegistration(entry, checkout);
           equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(historicalRecovery ? checkout : undefined),
             deriveStageBImageImpactReport({ imageReleaseSha: p.sourceSha, toolingSha: checkout.sourceSha })));
@@ -517,7 +623,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         const state = await adapter.readRegisteredTaskDefinition(address), observed = await adapter.describeTaskDefinition(definition.arn);
         equal(authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed }), definition);
       }
-      if (chain.policy) equal(chain.policy.result.policy, deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, chain.registration.result.taskMap));
+      if (chain.policy) {
+        const historicalRegistration = chain.policy.preparation.prerequisiteChain.registration;
+        equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
+        equal(historicalRegistration.result.taskMap, chain.registration.result.taskMap);
+        equal(chain.policy.adoption ? chain.policy.terminal.policy : chain.policy.result.policy,
+          deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, historicalRegistration.result.taskMap));
+      }
       await assertCheckoutUnchanged();
     },
     applyTaskRegistration: async bytes => {

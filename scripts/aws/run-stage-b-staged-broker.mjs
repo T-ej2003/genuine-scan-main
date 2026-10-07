@@ -16,7 +16,7 @@ import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TA
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const equal = (a, b) => assert.equal(brokerDigest(a), brokerDigest(b));
-const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
+const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
 Object.assign(MODES, { 'prepare-registration': 'PREPARATION', 'authorize-registration': 'PREPARATION', register: 'REGISTRATION', 'prepare-policy': 'PREPARATION', 'authorize-policy': 'PREPARATION', 'converge-policy': 'POLICY' });
 Object.assign(MODES, { 'prepare-pruning': 'PREPARATION', 'authorize-pruning': 'PREPARATION', prune: 'POLICY', 'recover-policy': 'POLICY_RECOVERY', 'verify-policy-writer-termination': 'POLICY_RECOVERY' });
 Object.assign(MODES, { 'recover-registration': 'REGISTRATION_RECOVERY', 'recover-publication': 'PUBLICATION_RECOVERY', 'recover-cutover': 'CUTOVER_RECOVERY', 'recover-reconciliation': 'RECONCILIATION_RECOVERY' });
@@ -33,7 +33,7 @@ function staticPlan(plan) {
 export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs } = {}) {
   const { operation, files, directory, terraformDataDir, preparation, authorization, planPath } = request;
   assert.ok(Object.hasOwn(MODES, operation), 'Unknown staged operation');
-  if (operation === 'prepare-registration-adoption') {
+  if (['prepare-registration-adoption', 'prepare-policy-adoption'].includes(operation)) {
     assert.equal(preparation, undefined, 'Adoption cannot execute an old preparation');
     assert.equal(authorization, undefined, 'Adoption cannot consume mutation authority');
     assert.equal(planPath, undefined, 'Adoption cannot execute a saved plan');
@@ -42,7 +42,9 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
   const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
-  const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir, prerequisiteChain: operation === 'prepare-registration-adoption' ? undefined : prerequisiteChain });
+  const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
+    : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
+  const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir, prerequisiteChain: adapterPrerequisites });
   if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
   if (['recover-policy', 'verify-policy-writer-termination'].includes(operation)) {
     // Historical source is authenticated by the durable transaction chain inside recovery, not by today's checkout SHA.
@@ -55,7 +57,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
   if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);
   const prerequisites = brokerPrerequisiteIdentity(await deps.readPrerequisites());
-  if (['prepare-registration-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
+  if (['prepare-registration-adoption', 'prepare-policy-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
     // Reuse exact tfvars/package/image/refresh authority before capturing this
     // narrower plan. A stale/recovery-mode input cannot authorize this profile.
     const protectedCheckout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
@@ -72,6 +74,15 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       equal(await deps.readCheckout(), checkout); equal(await deps.readStateIdentity(), state);
       return { status: 'REGISTERED_OUTPUTS_ADOPTED_NONTERMINAL', sourceSha: checkout.sourceSha,
         prerequisiteChain: { registration } };
+    }
+    if (operation === 'prepare-policy-adoption') {
+      assert.ok(prerequisiteChain?.registration && prerequisiteChain?.policy);
+      assert.equal(prerequisiteChain.policy.adoption, undefined);
+      const policy = await deps.adoptPolicySuccessor(prerequisiteChain.policy,
+        { sourceSha: checkout.sourceSha, treeSha256: checkout.treeSha256 }, diagnostic.plan, state);
+      equal(await deps.readCheckout(), checkout); equal(await deps.readStateIdentity(), state);
+      return { status: 'TERMINAL_POLICY_SUCCESSOR_ADOPTED_NONTERMINAL', sourceSha: checkout.sourceSha,
+        prerequisiteChain: { registration: prerequisiteChain.registration, policy } };
     }
     const mutations = diagnostic.plan.resource_changes.filter(c => JSON.stringify(c.change.actions) !== '["no-op"]');
     if (operation === 'prepare-publication') {
