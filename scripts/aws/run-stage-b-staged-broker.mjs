@@ -56,7 +56,13 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   if (operation === 'recover-publication') return recoverBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
   if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);
-  const prerequisites = brokerPrerequisiteIdentity(await deps.readPrerequisites());
+  if (operation === 'prepare-registration-adoption') {
+    assert.ok(prerequisiteChain?.registration, 'Registration adoption requires authenticated registration evidence');
+    assert.equal(prerequisiteChain.policy, undefined);
+  }
+  const prerequisites = brokerPrerequisiteIdentity(operation === 'prepare-registration-adoption'
+    ? await deps.readRegistrationAdoptionPrerequisites(prerequisiteChain.registration, checkout)
+    : await deps.readPrerequisites());
   if (['prepare-registration-adoption', 'prepare-policy-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
     // Reuse exact tfvars/package/image/refresh authority before capturing this
     // narrower plan. A stale/recovery-mode input cannot authorize this profile.
