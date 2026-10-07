@@ -240,6 +240,7 @@ async function convergenceRecoveryFixture(failure = null, fault) {
       const file = args.find(a => a.startsWith('-out=')).slice(5), c = structuredClone(change);
       c.change = { actions: ['no-op'], before: structuredClone(after), after: structuredClone(after), after_unknown: {} };
       const result = { ...plan, resource_changes: [c], resource_drift: args.includes('-refresh-only') || writes && !refreshed ? [change] : [] };
+      if (failure === 'omitted-resource-changes' && args.includes('-refresh-only')) delete result.resource_changes;
       plans.set(file, result); fs.writeFileSync(file, `saved-${file}`); return '';
     }
     assert.ok(plans.get(args.at(-1))?.resource_drift.length === 1); refreshed = true; return '';
@@ -269,6 +270,15 @@ for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) t
     const acquired = r.state().owner.identity;
     await assert.rejects(() => r.execute.executeBrokerPolicyConvergence()); assert.equal(r.state().writes, 1); assert.equal(r.state().owner.status, 'RELEASED'); assert.deepEqual(r.state().owner.identity, acquired);
   }
+});
+test('native convergence accepts Terraform refresh-only plan with omitted resource_changes and applies only its state-only saved plan', async () => {
+  const r = await convergenceRecoveryFixture('omitted-resource-changes');
+  const result = await r.execute.executeBrokerPolicyConvergence();
+  assert.equal(result.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL');
+  assert.equal(r.state().writes, 1);
+  assert.equal(r.state().refreshed, true);
+  assert.equal(r.state().owner.status, 'RELEASED');
+  assert.equal(result.reconciliation.policyVersion, 'v13');
 });
 
 for (const substitution of ['registration', 'target']) test(`physical prerequisite chain rejects ${substitution} receipt substitution`, async () => {

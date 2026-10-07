@@ -149,6 +149,12 @@ function policyReconciliation() {
   return { p, refresh, normal };
 }
 test('IAM reconciliation is state-only and proves the exact declarative target', () => { const r = policyReconciliation(); assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p); });
+test('Terraform refresh-only reconciliation accepts omitted resource_changes and authenticates the exact policy drift', () => {
+  const r = policyReconciliation();
+  r.refresh.format_version = '1.2'; r.refresh.terraform_version = '1.15.8'; r.refresh.applyable = true;
+  delete r.refresh.resource_changes;
+  assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p);
+});
 for (const [name, mutate] of [
   ['remote mutation', r => r.refresh.resource_changes[0].change.actions = ['update']],
   ['unknown drift', r => r.refresh.resource_drift.push(structuredClone(r.refresh.resource_drift[0]))],
@@ -158,6 +164,15 @@ for (const [name, mutate] of [
   ['unknown value', r => r.normal.resource_changes[0].change.after_unknown = { policy: true }],
   ['wrong source', r => r.normal.variables.tooling_sha.value = 'b'.repeat(40)],
 ]) test(`IAM reconciliation rejects ${name}`, () => { const r = policyReconciliation(); mutate(r); assert.throws(() => assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p)); });
+for (const malformed of [null, {}]) test(`IAM reconciliation rejects malformed refresh resource_changes ${JSON.stringify(malformed)}`, () => {
+  const r = policyReconciliation(); r.refresh.resource_changes = malformed;
+  assert.throws(() => assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p));
+});
+test('IAM reconciliation rejects an omitted-property plan with a wrong predecessor policy', () => {
+  const r = policyReconciliation(); delete r.refresh.resource_changes;
+  r.refresh.resource_drift[0].change.before.policy = JSON.stringify(r.p.target.policy);
+  assert.throws(() => assertBrokerPolicyReconciliation(r.refresh, r.normal, r.p));
+});
 test('pruning approval binds one exact nondefault version and policy inventory', () => {
   const plan = { purpose: BROKER_POLICY_PRUNING, sourceSha: 'a'.repeat(40), policyArn: 'arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime',
     defaultVersionId: 'v12', versionId: 'v9', inventory: [{ VersionId: 'v9', IsDefaultVersion: false }, { VersionId: 'v12', IsDefaultVersion: true }], mutation: 'iam:DeletePolicyVersion' };
