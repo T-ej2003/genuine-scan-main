@@ -177,7 +177,7 @@ export function assertWorkspaceStateAuthorizationProvenance(value, { authorizati
   return value;
 }
 
-const RECORDS = Object.freeze(["reservation.json", "deletion-attempt.json", "deletion-complete.json", "creation-attempt.json", "terminal.json"]);
+const RECORDS = Object.freeze(["reservation.json", "deletion-attempt.json", "deletion-prewrite-failed.json", "deletion-retry-attempt.json", "deletion-complete.json", "creation-attempt.json", "terminal.json"]);
 export const workspaceStateJournalKey = (operationIdValue, record) => {
   if (!SHA256.test(operationIdValue || "") || !RECORDS.includes(record)) throw new Error("WorkspaceState journal key is invalid.");
   return `${WORKSPACE_STATE_RECONCILIATION.journalPrefix}${operationIdValue}/${record}`;
@@ -251,16 +251,42 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   }
   else { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reservation = await journal.create(authorization, "reservation.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation.createdAt)); if (!reservation) throw new Error("WorkspaceState reservation raced another executor."); }
   const deletionAttempt = await journal.read(authorization, "deletion-attempt.json");
+  const deletionPrewriteFailed = await journal.read(authorization, "deletion-prewrite-failed.json");
+  const deletionRetryAttempt = await journal.read(authorization, "deletion-retry-attempt.json");
   let deletionComplete = await journal.read(authorization, "deletion-complete.json");
   if (deletionAttempt) assertRecord(deletionAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", deletionAttempt.createdAt));
+  if (deletionPrewriteFailed) assertRecord(deletionPrewriteFailed, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", deletionPrewriteFailed.createdAt));
+  if (deletionRetryAttempt) assertRecord(deletionRetryAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", deletionRetryAttempt.createdAt));
   if (deletionComplete) assertRecord(deletionComplete, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", deletionComplete.createdAt));
+  if ((deletionPrewriteFailed && !deletionAttempt) || (deletionRetryAttempt && !deletionPrewriteFailed) || (deletionRetryAttempt && !deletionAttempt)) throw new Error("WorkspaceState deletion retry journal is inconsistent.");
+  const deleteOnce = async () => {
+    try { iamDeleteCount += 1; await deletePolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, VersionId: preparation.deletionCandidate.versionId }); }
+    catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
+  };
   if (!deletionAttempt) {
     assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reauthenticateSource();
     const before = await observe(readLiveState, desired); if (!stateMatchesPreparation(before, preparation)) throw new Error("WorkspaceState final pre-deletion CAS changed after authorization.");
     const attempt = await journal.create(authorization, "deletion-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", new Date(clock()).toISOString())); if (!attempt) throw new Error("WorkspaceState deletion-attempt raced another executor.");
-    reauthenticateSource(); const latest = await observe(readLiveState, desired); if (!stateMatchesPreparation(latest, preparation)) throw new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
-    try { iamDeleteCount += 1; await deletePolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, VersionId: preparation.deletionCandidate.versionId }); }
-    catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
+    reauthenticateSource();
+    try {
+      const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, preparation), sleep);
+      if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
+    } catch (error) {
+      if (error.cause instanceof WorkspaceStateRetryableObservationError) {
+        const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString()));
+        if (!recorded) throw new Error("WorkspaceState pre-delete failure record raced another executor.", { cause: error });
+        throw Object.assign(new Error("WorkspaceState pre-delete observation exhausted its retry budget; DeletePolicyVersion was not called.", { cause: error }), { mutationOutcome: "DELETE_NOT_ISSUED" });
+      }
+      throw error;
+    }
+    await deleteOnce();
+  } else if (deletionPrewriteFailed && !deletionRetryAttempt && !deletionComplete) {
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reauthenticateSource();
+    const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, preparation), sleep);
+    if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed during recovery.");
+    const retryAttempt = await journal.create(authorization, "deletion-retry-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", new Date(clock()).toISOString()));
+    if (!retryAttempt) throw new Error("WorkspaceState deletion retry-attempt raced another executor.");
+    await deleteOnce();
   }
   if (!deletionComplete) {
     reauthenticateSource(); const capacity = await boundedOutcome(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }, "DELETE_OUTCOME_AMBIGUOUS");

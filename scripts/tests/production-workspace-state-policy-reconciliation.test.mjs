@@ -127,7 +127,7 @@ test("fresh authorization performs exactly one delete and one successor publicat
 
 test("changed complete inventory at the final deletion CAS performs no IAM mutation", async () => {
   let reads = 0; const run = executor({ readLiveState: async () => ++reads < 2 ? state() : state({ versions: versions().map(version => version.versionId === "v1" ? { ...version, document: oldDocument(2) } : version) }) });
-  await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), /CAS changed|drift/);
+  await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), /CAS changed|drift|contradicts/);
   assert.deepEqual([run.box.deletes, run.box.creates], [0, 0]);
 });
 
@@ -223,6 +223,56 @@ test("bounded post-delete observations retry a transient snapshot and never repe
   const delays = []; run.args.sleep = async milliseconds => delays.push(milliseconds);
   assert.equal((await executeWorkspaceStateReconciliation(run.args)).status, "COMPLETED");
   assert.deepEqual(delays, [100, 300]); assert.deepEqual([run.box.deletes, run.box.creates], [1, 1]);
+});
+
+test("post-journal pre-delete CAS retries transient reads and deletes once", async () => {
+  for (const failures of [1, 3]) {
+    const run = executor(); let reads = 0; const originalRead = run.args.readLiveState;
+    run.args.readLiveState = async () => {
+      if (run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-attempt.json")) && !run.box.deletes && reads++ < failures) throw new WorkspaceStateRetryableObservationError("transient final pre-delete read");
+      return originalRead();
+    };
+    assert.equal((await executeWorkspaceStateReconciliation(run.args)).status, "COMPLETED");
+    assert.equal(run.box.deletes, 1);
+    assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-prewrite-failed.json")), false);
+    assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-attempt.json")), true);
+  }
+});
+
+test("exhausted post-journal pre-delete retries record no-write evidence and restart safely", async () => {
+  const run = executor(); const originalRead = run.args.readLiveState;
+  run.args.readLiveState = async () => {
+    if (run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-attempt.json")) && !run.box.deletes) throw new WorkspaceStateRetryableObservationError("transient final pre-delete read");
+    return originalRead();
+  };
+  await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), error => error.mutationOutcome === "DELETE_NOT_ISSUED" && /DeletePolicyVersion was not called/.test(error.message));
+  assert.equal(run.box.deletes, 0);
+  assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-prewrite-failed.json")), true);
+  run.args.readLiveState = originalRead;
+  assert.equal((await executeWorkspaceStateReconciliation(run.args)).status, "COMPLETED");
+  assert.deepEqual([run.box.deletes, run.box.creates], [1, 1]);
+  assert.equal((await executeWorkspaceStateReconciliation(run.args)).status, "CONSUMED");
+  assert.deepEqual([run.box.deletes, run.box.creates], [1, 1]);
+});
+
+test("post-journal stable CAS mismatch and permanent read errors fail immediately without deletion", async () => {
+  const changed = executor(); let changedReads = 0; const baseRead = changed.args.readLiveState;
+  changed.args.readLiveState = async () => {
+    changedReads += 1;
+    if (changed.journal.values.has(workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-attempt.json"))) return state({ policyArn: "arn:aws:iam::368992683803:policy/unexpected" });
+    return baseRead();
+  };
+  await assert.rejects(() => executeWorkspaceStateReconciliation(changed.args));
+  assert.equal(changedReads, 2); assert.equal(changed.box.deletes, 0);
+
+  const denied = executor(); let deniedReads = 0; const deniedBaseRead = denied.args.readLiveState;
+  denied.args.readLiveState = async () => {
+    if (denied.journal.values.has(workspaceStateJournalKey(denied.args.preparation.operationId, "deletion-attempt.json"))) { deniedReads += 1; throw new Error("AccessDenied: not authorized"); }
+    return deniedBaseRead();
+  };
+  await assert.rejects(() => executeWorkspaceStateReconciliation(denied.args), /AccessDenied/);
+  assert.equal(deniedReads, 1); assert.equal(denied.box.deletes, 0);
+  assert.equal(denied.journal.values.has(workspaceStateJournalKey(denied.args.preparation.operationId, "deletion-prewrite-failed.json")), false);
 });
 
 test("a single transient post-delete observation resolves on the next bounded read", async () => {
