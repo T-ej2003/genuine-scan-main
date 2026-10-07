@@ -9,6 +9,7 @@ import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
+import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
@@ -251,6 +252,7 @@ async function convergenceRecoveryFixture(failure = null, fault) {
     env: { PATH: process.env.PATH, HOME: process.env.HOME, TF_WORKSPACE: 'default' }, exec, runAws,
     writerSessionBoundary: { prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
   recovery.readCheckout = adapter.readCheckout; recovery.readStateIdentity = adapter.readStateIdentity; recovery.authenticatePrerequisiteChain = adapter.authenticatePrerequisiteChain;
+  recovery.readRecoveryCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 });
   return { execute: adapter, recovery, p, auth, objects, runAws, planPath, markRecovered: () => { recovered = true; }, reconcileFixtureState: () => { refreshed = true; }, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, state: () => ({ owner: item && JSON.parse(item.state.S), writes, refreshed }) };
 }
 for (const failure of [null, 'uncertain', 'wrong-successor', 'release-crash']) test(`native owned IAM convergence ${failure || 'success'} preserves one-write/state-only boundary`, async () => {
@@ -332,6 +334,7 @@ async function pruningRecoveryFixture(state = 'successor', fault) {
       writerSessionBoundary: { pin: () => ({ session: writerSession, run: runAws, environment: { PATH: process.env.PATH } }),
         prove: held => proveBrokerWriterUnusable(held, { readIssuance: () => writerSession, readClock: () => '2026-10-04T01:00:01.000Z' }) } });
     adapter.readCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 }); adapter.readStateIdentity = async () => p.state;
+    adapter.readRecoveryCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 });
     adapter.readPrerequisites = async () => p.prerequisites; return adapter;
   };
   return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
@@ -349,6 +352,43 @@ for (const state of ['successor','predecessor','missing-other','added','default'
     await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'RELEASED'); assert.equal(r.state().owner.identity.generation, 1);
   } else { await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership()); assert.equal(r.state().owner.status, 'HELD'); }
   assert.equal(r.state().writes, 1); assert.equal(r.calls.filter(a => a[1] === 'delete-policy-version').length, 1);
+});
+
+test('historical policy recovery accepts authenticated transaction source after protected main advances', async () => {
+  const r = await pruningRecoveryFixture('predecessor');
+  await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+  const deleteCalls = r.calls.filter(a => a[1] === 'delete-policy-version').length;
+  r.recovery.readRecoveryCheckout = async () => ({ sourceSha: 'b'.repeat(40), treeSha256: 'c'.repeat(64) });
+  const result = await r.recovery.recoverBrokerPolicyOwnership();
+  assert.equal(result.status, 'RECOVERED_NO_WRITE');
+  assert.equal(r.calls.filter(a => a[1] === 'delete-policy-version').length, deleteCalls);
+  assert.equal(r.state().owner.status, 'RELEASED');
+});
+
+test('historical policy recovery rejects tampered preparation or authorization source binding', async () => {
+  for (const field of ['preparation', 'authorization']) {
+    const r = await pruningRecoveryFixture('predecessor');
+    await assert.rejects(() => r.execute.executeBrokerPolicyPruning());
+    if (field === 'preparation') r.p.sourceSha = 'f'.repeat(40);
+    else r.auth.sourceSha = 'f'.repeat(40);
+    await assert.rejects(() => r.recovery.recoverBrokerPolicyOwnership());
+    assert.equal(r.state().owner.status, 'HELD');
+  }
+});
+
+test('recover-policy uses current protected-main identity while normal prune keeps exact historical checkout binding', async () => {
+  const calls = [];
+  const adapterFactory = () => ({
+    readCheckout: async () => { calls.push('normal'); throw new Error('Requested source SHA does not match protected main'); },
+    readRecoveryCheckout: async () => { calls.push('recovery'); return { sourceSha: 'b'.repeat(40), treeSha256: 'c'.repeat(64) }; },
+    recoverBrokerPolicyOwnership: async () => ({ status: 'RECOVERED_NO_WRITE' }),
+  });
+  const request = { operation: 'recover-policy', directory, terraformDataDir: directory };
+  assert.equal((await runStagedBrokerRequest(request, { adapterFactory })).status, 'RECOVERED_NO_WRITE');
+  assert.deepEqual(calls, ['recovery']);
+  calls.length = 0;
+  await assert.rejects(() => runStagedBrokerRequest({ ...request, operation: 'prune' }, { adapterFactory }), /does not match protected main/);
+  assert.deepEqual(calls, ['normal']);
 });
 
 for (const substitution of ['default-target','wrong-target','intent-target']) test(`pruning rejects authenticated ${substitution} substitution`, async () => {
