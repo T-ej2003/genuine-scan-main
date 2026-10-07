@@ -253,6 +253,72 @@ test("fresh authorization adopts only an authentic proved-no-delete continuation
   assert.equal(ignored.operationId, continuation.operationId);
 });
 
+test("delete retry restart accepts the exact post-delete state without repeating deletion", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind, createdAt] of [
+    ["reservation.json", "RESERVATION", now.toISOString()],
+    ["deletion-attempt.json", "DELETION_ATTEMPT", new Date(now.getTime() + 1).toISOString()],
+    ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED", new Date(now.getTime() + 2).toISOString()],
+  ]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`, createdAt);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const { at } = freshAuthorization();
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+  const auth = authorization(continuation, at, "124");
+  const first = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at });
+  const normalRead = first.args.readLiveState;
+  first.args.readLiveState = async () => {
+    if (first.box.deletes) throw new WorkspaceStateRetryableObservationError("transient post-delete observation");
+    return normalRead();
+  };
+  await assert.rejects(() => executeWorkspaceStateReconciliation(first.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS");
+  assert.deepEqual([first.box.deletes, first.box.creates], [1, 0]);
+  assert.equal(first.journal.values.has(workspaceStateJournalKey(continuation.operationId, "deletion-retry-attempt.json")), true);
+  assert.equal(first.journal.values.has(workspaceStateJournalKey(continuation.operationId, "deletion-complete.json")), false);
+
+  const expiredAt = new Date(at.getTime() + CONTRACT.maxAgeMs + 1);
+  const restarted = executor({ prep: continuation, authorization: auth, journal: original.journal, live: afterDelete(), now: () => expiredAt });
+  const result = await executeWorkspaceStateReconciliation(restarted.args);
+  assert.equal(result.status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([restarted.box.deletes, restarted.box.creates], [0, 0]);
+  assert.equal(restarted.journal.values.has(workspaceStateJournalKey(continuation.operationId, "deletion-complete.json")), true);
+  const createContinuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_CREATE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: JSON.parse(original.journal.values.get(workspaceStateJournalKey(continuation.operationId, "deletion-complete.json"))), deletionPrewriteFailed: read("deletion-prewrite-failed.json"), deletionRetryAttempt: JSON.parse(original.journal.values.get(workspaceStateJournalKey(continuation.operationId, "deletion-retry-attempt.json"))), liveState: afterDelete(), preparedAt: expiredAt.toISOString() });
+  assert.equal(createContinuation.continuation.kind, "PROVED_NO_CREATE_WRITE");
+});
+
+test("retry record plus pre-state is uncertain, and contradictory retry states fail without another delete", async () => {
+  const interruptedRetry = async () => {
+    const original = executor(); const old = original.args;
+    for (const [file, kind, createdAt] of [["reservation.json", "RESERVATION", now.toISOString()], ["deletion-attempt.json", "DELETION_ATTEMPT", new Date(now.getTime() + 1).toISOString()], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED", new Date(now.getTime() + 2).toISOString()]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`, createdAt);
+    const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+    const { at } = freshAuthorization();
+    const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+    const auth = authorization(continuation, at, "124");
+    const first = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at, deletePolicyVersion: async () => { first.box.deletes += 1; } });
+    // The API was invoked but live state remains pre-delete, so the outcome is uncertain.
+    await assert.rejects(() => executeWorkspaceStateReconciliation(first.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS");
+    assert.equal(first.box.deletes, 1);
+    return { original, continuation, auth, at };
+  };
+
+  const uncertain = await interruptedRetry();
+  const preStateRestart = executor({ prep: uncertain.continuation, authorization: uncertain.auth, journal: uncertain.original.journal, live: state(), now: () => uncertain.at });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(preStateRestart.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS" && /another delete is forbidden/.test(error.message));
+  assert.deepEqual([preStateRestart.box.deletes, preStateRestart.box.creates], [0, 0]);
+
+  const postState = afterDelete();
+  const badStates = [
+    afterDelete({ versions: postState.versions.filter(version => version.versionId !== "v2") }),
+    state({ versions: [...postState.versions, { versionId: "v6", isDefault: false, createDate: "2026-10-07T12:06:00.000Z", document: oldDocument(6) }] }),
+    afterDelete({ defaultVersionId: "v4", versions: postState.versions.map(version => ({ ...version, isDefault: version.versionId === "v4" })) }),
+  ];
+  for (const live of badStates) {
+    const fixture = await interruptedRetry();
+    const resumed = executor({ prep: fixture.continuation, authorization: fixture.auth, journal: fixture.original.journal, live, now: () => fixture.at });
+    await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args));
+    assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
+  }
+});
+
 test("proved-no-write continuation rejects tampered journal, changed live state, and expired fresh authorization without writes", async () => {
   const original = executor(); const old = original.args;
   for (const [file, kind] of [["reservation.json", "RESERVATION"], ["deletion-attempt.json", "DELETION_ATTEMPT"], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED"]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`);

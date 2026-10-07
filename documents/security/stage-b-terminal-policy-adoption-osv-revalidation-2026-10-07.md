@@ -99,3 +99,16 @@ transformed 3,993 modules into 96 chunks and resolved 204 packages;
 these frozen inputs. The existing acceptance remains limited to this advisory
 and its existing scope, rationale, owner, and expiry `2026-11-02`; no
 reachability or expiry claim was broadened.
+
+## Final PR #640 delete-retry recovery revalidation
+
+Date: 2026-10-08 UTC. After the exact-head review correction for deletion
+retry recovery was implemented, the implementation was frozen and the
+required local suites passed. The canonical `reachabilityInputsSha256(process.cwd())`
+result was `7ea49721e3dfd4cad4bd00ce492a54de0036886e46fcf99e37b94998c443023c`.
+A fresh unfiltered OSV Scanner 2.6.0 scan again found exactly the existing HIGH
+`braces@3.0.3` development-only advisory `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. The fresh browser/runtime gate transformed 3,993 modules into
+96 chunks and resolved 204 packages; `braces@3.0.3` was absent, and the gate
+passed. The acceptance remains bound only to that existing advisory and keeps
+its prior scope, rationale, owner, and expiry `2026-11-02`.

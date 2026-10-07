@@ -265,6 +265,12 @@ const stateMatchesPost = (state, preparation) => {
   const retained = preparation.versionInventory.filter(version => version.versionId !== preparation.deletionCandidate.versionId);
   return retained.every(version => state.versions.some(current => current.versionId === version.versionId && current.documentSha256 === version.documentSha256 && current.isDefault === false)) && state.versions.filter(version => !retained.some(old => old.versionId === version.versionId)).length === 1;
 };
+const classifyDeleteContinuationState = (state, preparation, retryAttempt) => {
+  if (!retryAttempt) return stateMatchesPreparation(state, preparation) ? "PROVED_NO_RETRY_WRITE" : "CONTRADICTION";
+  if (stateMatchesAfterDeletion(state, preparation)) return "RETRY_WRITE_COMPLETED";
+  if (stateMatchesPreparation(state, preparation)) return "RETRY_WRITE_OUTCOME_UNCERTAIN";
+  return "CONTRADICTION";
+};
 
 async function observe(readLiveState, desired) { return authenticateWorkspaceStateLiveState(await readLiveState(), { desired }); }
 async function bounded(readLiveState, desired, predicate, sleep, { intermediate = () => false } = {}) {
@@ -327,8 +333,11 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
           if (createAttempt) assertRecord(createAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", createAttempt.createdAt));
         }
         const current = await observe(readLiveState, desired);
-        const stateValid = refs.kind === "PROVED_NO_DELETE_WRITE" ? stateMatchesPreparation(current, basePreparation) : stateMatchesAfterDeletion(current, basePreparation) || Boolean(createAttempt && stateMatchesPost(current, basePreparation));
-        if (!stateValid) throw new Error("WorkspaceState continuation live state differs from its proved no-write boundary.");
+        if (refs.kind === "PROVED_NO_DELETE_WRITE") {
+          const stateClass = classifyDeleteContinuationState(current, basePreparation, retryAttempt);
+          if (stateClass === "RETRY_WRITE_OUTCOME_UNCERTAIN") throw Object.assign(new Error("WorkspaceState deletion retry outcome is uncertain; another delete is forbidden."), { mutationOutcome: "DELETE_OUTCOME_AMBIGUOUS" });
+          if (stateClass === "CONTRADICTION") throw new Error("WorkspaceState continuation live state differs from its authenticated delete boundary.");
+        } else if (!stateMatchesAfterDeletion(current, basePreparation) && !(createAttempt && stateMatchesPost(current, basePreparation))) throw new Error("WorkspaceState continuation live state differs from its proved no-write boundary.");
       } else if (laterRecords.some(Boolean)) {
         const kinds = ["DELETION_ATTEMPT", "DELETION_PREWRITE_FAILED", "DELETION_RETRY_ATTEMPT", "DELETION_COMPLETE", "CREATION_ATTEMPT"];
         laterRecords.forEach((record, index) => { if (record) assertRecord(record, expected(`PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kinds[index]}`, record.createdAt)); });
