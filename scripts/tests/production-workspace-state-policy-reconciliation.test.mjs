@@ -176,6 +176,28 @@ test("fresh matching authorization adopts a zero-write reservation without rewri
   assert.deepEqual(original.journal.values.get(workspaceStateJournalKey(auth.operationId, "reservation.json")), originalBytes);
 });
 
+test("fresh reservation adoption resumes its own authenticated mutation records", async () => {
+  const original = executor();
+  await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
+  const { prep, auth, at } = freshAuthorization();
+  const capacity = afterDelete();
+  await seedRecord(original, auth, prep, "deletion-attempt.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT");
+  await seedRecord(original, auth, prep, "deletion-complete.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE");
+  const resumed = executor({ prep, authorization: auth, journal: original.journal, live: capacity, now: () => at });
+  assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "COMPLETED");
+  assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 1]);
+});
+
+test("fresh reservation adoption rejects progress records bound to a different authorization", async () => {
+  const original = executor();
+  await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
+  await seedRecord(original, original.args.authorization, original.args.preparation, "deletion-attempt.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT");
+  const { prep, auth, at } = freshAuthorization();
+  const resumed = executor({ prep, authorization: auth, journal: original.journal, now: () => at });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args), /journal record differs/);
+  assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
+});
+
 test("zero-write reservation adoption rejects changed pre-state, successor, or deletion candidate", async () => {
   for (const mutate of [
     run => { run.box.live = state({ versions: versions().map(version => version.versionId === "v2" ? { ...version, document: oldDocument(7) } : version) }); },
@@ -195,7 +217,7 @@ test("zero-write reservation adoption rejects every recorded mutation boundary a
     const kind = ({ "deletion-attempt.json": "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", "deletion-complete.json": "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", "creation-attempt.json": "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT" })[record];
     await seedRecord(original, original.args.authorization, original.args.preparation, record, kind);
     const { prep, auth, at } = freshAuthorization(); const resumed = executor({ prep, authorization: auth, journal: original.journal, now: () => at });
-    await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args), /cannot be adopted after a mutation-attempt/);
+    await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args), /cannot be adopted after a mutation-attempt|journal record differs/);
     assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
   }
   const original = executor(); const terminal = post();

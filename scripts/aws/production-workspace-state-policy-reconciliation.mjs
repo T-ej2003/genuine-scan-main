@@ -243,10 +243,17 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
     catch (error) {
       assertZeroWriteReservation(reservation, preparation, authorization, provenance);
       assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
-      const laterRecords = await Promise.all(["deletion-attempt.json", "deletion-complete.json", "creation-attempt.json"].map(record => journal.read(authorization, record)));
-      if (laterRecords.some(Boolean)) throw new Error("WorkspaceState reservation cannot be adopted after a mutation-attempt boundary.", { cause: error });
-      const current = await observe(readLiveState, desired);
-      if (!stateMatchesPreparation(current, preparation)) throw new Error("WorkspaceState zero-write reservation cannot be adopted after live pre-state changed.");
+      const laterNames = ["deletion-attempt.json", "deletion-prewrite-failed.json", "deletion-retry-attempt.json", "deletion-complete.json", "creation-attempt.json"];
+      const laterRecords = await Promise.all(laterNames.map(record => journal.read(authorization, record)));
+      if (laterRecords.some(Boolean)) {
+        const kinds = ["DELETION_ATTEMPT", "DELETION_PREWRITE_FAILED", "DELETION_RETRY_ATTEMPT", "DELETION_COMPLETE", "CREATION_ATTEMPT"];
+        laterRecords.forEach((record, index) => { if (record) assertRecord(record, expected(`PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kinds[index]}`, record.createdAt)); });
+        if ((laterRecords[3] || laterRecords[4]) && !laterRecords[0] || laterRecords[4] && !laterRecords[3]) throw new Error("WorkspaceState adopted reservation continuation has an invalid mutation order.");
+      } else {
+        assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+        const current = await observe(readLiveState, desired);
+        if (!stateMatchesPreparation(current, preparation)) throw new Error("WorkspaceState zero-write reservation cannot be adopted after live pre-state changed.");
+      }
     }
   }
   else { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reservation = await journal.create(authorization, "reservation.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation.createdAt)); if (!reservation) throw new Error("WorkspaceState reservation raced another executor."); }

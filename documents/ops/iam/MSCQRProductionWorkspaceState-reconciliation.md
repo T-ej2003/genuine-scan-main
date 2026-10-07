@@ -8,6 +8,8 @@ Preparation authenticates the exact default, all five version documents, attachm
 
 An existing reservation can be adopted only by a fresh authorization for the same source and exact transition, with an unchanged authenticated pre-state and no deletion, creation, or terminal journal record. The old reservation remains unchanged; after the first mutation-attempt record, recovery follows the original transaction and never reinterprets it as zero-write. After an authorized write, only explicitly retryable IAM read failures or the exact authenticated pre-write state are retried, using the bounded delays in the contract. Stable contradictions and permanent read errors fail closed.
 
+When an adopted reservation already has progress records, each record must bind to the current authorization before normal reconciliation resumes. If the final pre-delete read exhausts only its transient retry budget, a durable prewrite-failure record proves that `DeletePolicyVersion` was not called; restart may perform one bounded CAS and write attempt, while a recorded retry attempt is never replayed.
+
 Use a clean protected-main checkout and private output directory (`umask 077`):
 
 ```sh
