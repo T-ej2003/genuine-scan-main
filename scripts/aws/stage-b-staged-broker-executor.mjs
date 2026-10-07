@@ -285,6 +285,17 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       } finally { fs.rmSync(file, { force: true }); }
     },
   });
+  const authenticateRegistrationForAdoption = async (entry, checkout) => {
+    assert.equal(phase, 'ADOPTION');
+    await readHistoricalRegistration(entry, checkout);
+    equal(Object.keys(entry.result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+    equal(entry.result.taskMap, taskMapFromRegisteredDefinitions(entry.result.definitions));
+    for (const [address, definition] of Object.entries(entry.result.definitions)) {
+      equal(authenticateRegisteredDefinition({ address, desired: definition.desired,
+        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) }), definition);
+    }
+    return entry.result.taskMap;
+  };
   const authenticateTerminalPolicySuccessor = async (entry, release, expectedState) => {
     const { preparation: p, authorization: auth, result } = entry;
     assertBrokerPreparation(p); assert.equal(p.purpose, BROKER_POLICY_CONVERGENCE);
@@ -449,6 +460,12 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       }
       return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap });
     },
+    readRegistrationAdoptionPrerequisites: async (entry, checkout) => {
+      assert.equal(phase, 'ADOPTION');
+      const authenticatedTaskMap = await authenticateRegistrationForAdoption(entry, checkout);
+      equal(await adapter.readCheckout(), checkout);
+      return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap });
+    },
     readStateIdentity: async () => readStageBTerraformStateIdentity(runAws),
     getAlias,
     getVersion: async version => { assert.match(version || '', /^[1-9][0-9]*$/); return json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', version]); },
@@ -550,11 +567,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     adoptRegistration: async (entry, plan) => {
       assert.equal(phase, 'ADOPTION'); assert.equal(entry.adoption, undefined);
       const checkout = await adapter.readCheckout();
-      await readHistoricalRegistration(entry, checkout);
-      for (const [address, definition] of Object.entries(entry.result.definitions)) {
-        equal(authenticateRegisteredDefinition({ address, desired: definition.desired,
-          state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) }), definition);
-      }
+      await authenticateRegistrationForAdoption(entry, checkout);
       const adopted = adoptRegisteredOutputs(entry, checkout, plan,
         deriveStageBImageImpactReport({ imageReleaseSha: entry.preparation.sourceSha, toolingSha: checkout.sourceSha }));
       equal(await adapter.readCheckout(), checkout); return adopted;

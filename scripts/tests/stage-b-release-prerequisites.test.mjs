@@ -478,3 +478,56 @@ for (const field of ['preparation', 'authorization', 'planPath']) test(`adoption
     { adapterFactory: () => { called = true; throw new Error('must not execute'); } }));
   assert.equal(called, false);
 });
+
+test('registration adoption authenticates its historical handoff before reading live prerequisites', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-adoption-order-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const registration = (await handoffRig()).entry, order = [];
+    const checkout = { sourceSha: 'c'.repeat(40), treeSha256: 'c'.repeat(64) };
+    const deps = {
+      readCheckout: async () => checkout,
+      readRegistrationAdoptionPrerequisites: async (entry, current) => {
+        order.push('authenticate-registration'); assert.deepEqual(entry, registration); assert.deepEqual(current, checkout);
+        return brokerPreparation().prerequisites;
+      },
+      readPrerequisites: async () => { order.push('unauthenticated-prerequisites'); throw new Error('must not use alias task map'); },
+    };
+    await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration-adoption', directory,
+      prerequisiteChain: { registration } }, { adapterFactory: () => deps }), /protected main|clean|checkout/i);
+    assert.deepEqual(order, ['authenticate-registration']);
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
+test('registration adoption stops before live prerequisite read when historical authentication fails', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-adoption-tamper-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const registration = (await handoffRig()).entry, order = [];
+    const deps = {
+      readCheckout: async () => ({ sourceSha: 'c'.repeat(40), treeSha256: 'c'.repeat(64) }),
+      readRegistrationAdoptionPrerequisites: async () => { order.push('authenticate-registration'); throw new Error('historical registration evidence failed authentication'); },
+      readPrerequisites: async () => { order.push('unauthenticated-prerequisites'); return brokerPreparation().prerequisites; },
+    };
+    await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration-adoption', directory,
+      prerequisiteChain: { registration } }, { adapterFactory: () => deps }), /failed authentication/);
+    assert.deepEqual(order, ['authenticate-registration']);
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
+test('normal policy preparation keeps using the strict ordinary prerequisite reader', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-policy-prerequisite-order-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const registration = (await handoffRig()).entry;
+    let ordinaryRead = 0, adoptionRead = 0;
+    const deps = {
+      readCheckout: async () => ({ sourceSha: 'c'.repeat(40), treeSha256: 'c'.repeat(64) }),
+      readPrerequisites: async () => { ordinaryRead++; return {}; },
+      readRegistrationAdoptionPrerequisites: async () => { adoptionRead++; throw new Error('adoption reader must not be used'); },
+    };
+    await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-policy', directory,
+      prerequisiteChain: { registration } }, { adapterFactory: () => deps }), /Unknown\/missing staged broker fields/);
+    assert.equal(ordinaryRead, 1); assert.equal(adoptionRead, 0);
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});

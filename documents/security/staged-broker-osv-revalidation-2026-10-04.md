@@ -224,3 +224,15 @@ The signing boundary now requires the real release-profile STS caller in additio
 ### Required-CI regression integration
 
 `package.json` is the additional broad-boundary input: only the existing Stage B control-plane test command gains the three new staged-broker suites. Dependencies, lockfile, production build command and runtime package semantics remain identical to the reviewed tree. The actual production build was rerun after this final manifest edit; every executable artifact hash and all four trusted brace patterns remain exact. This brings the complete reviewed changed-input census to 33, including this root-manifest test-command edit. The acceptance remains exact, visible and expiring.
+
+### 2026-10-07 registration-adoption ordering correction
+
+The source-bound reachability fingerprint was rebound from
+`837f680d50f7a9b203cb91a7b497717ae8d7bc29d02af17a06ae1e1072a2d2ba` to
+`5b140ef2d286013a8eb6f10538839d4c3083e3f433e774e60fad9b692cdfa1e5` for the
+registration-adoption executor/dispatch and focused test changes. No application,
+dependency manifest/lockfile, Docker packaging, or runtime source changed. The
+existing braces finding, disposition, rationale, owner, and 2026-11-02 expiry are
+unchanged. The local Stage-B control-plane run hit temporary-disk exhaustion; the
+hosted deployment audit must complete its fresh browser build, scanner report, and
+OSV runtime gate on the exact PR head before merge.

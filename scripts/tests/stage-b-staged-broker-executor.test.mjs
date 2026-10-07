@@ -159,8 +159,9 @@ test('native reconciliation applies only validated refresh saved plan, then capt
 
 // Mutations happen after the first traffic census, immediately before its final
 // consistency guard. A fixed alias cannot hide a newly created invocation route.
-function prerequisiteReader(drift = null) {
-  const p = preparation().prerequisites;
+function prerequisiteReader(drift = null, liveTaskMap) {
+  const p = structuredClone(preparation().prerequisites);
+  if (liveTaskMap) p.policy = deriveBrokerPolicy(p.policy, liveTaskMap);
   let changed = false;
   return args => {
     const [service, operation] = args, value = flag => args[args.indexOf(flag) + 1];
@@ -190,6 +191,16 @@ function prerequisiteReader(drift = null) {
 }
 test('complete stable traffic census authenticates the canonical prerequisite', () => {
   assert.deepEqual(readStagedBrokerPrerequisites(prerequisiteReader()), preparation().prerequisites);
+});
+test('authenticated registration map explains only the expected pre-cutover live policy difference', () => {
+  const aliasMap = preparation().prerequisites.taskMap;
+  const registeredMap = Object.fromEntries(Object.entries(aliasMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap)), /task revisions differ/);
+  const observed = readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), { authenticatedTaskMap: registeredMap });
+  assert.deepEqual(observed.taskMap, registeredMap);
+  const firstMode = Object.keys(registeredMap)[0];
+  const unrelatedMap = { ...registeredMap, [firstMode]: registeredMap[firstMode].replace(':43', ':44') };
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), { authenticatedTaskMap: unrelatedMap }), /task revisions differ/);
 });
 for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
