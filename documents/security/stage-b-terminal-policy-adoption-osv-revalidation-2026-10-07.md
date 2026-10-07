@@ -42,3 +42,11 @@ locks, frontend sources, and build configuration remain unchanged. The prior
 unfiltered scanner report still contains the same one `braces@3.0.3` advisory;
 the canonical runtime check is rerun against the amended executable-input
 fingerprint before push. Acceptance scope and expiry are unchanged.
+
+The downstream publication-to-cutover lifecycle corrections update the
+fingerprint to
+`a29e47ed72fa56865a1cfd62520525fcbdcee5f52b72320bd43b17150d417900`.
+They preserve receipt-bound checker disclosure and prerequisite authentication
+through the exact publication, cutover, reconciliation, and matching recovery
+phases. No dependency, frontend, build configuration, advisory, acceptance
+scope, or expiry changed.

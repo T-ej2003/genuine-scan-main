@@ -8,4 +8,6 @@ Invoke only with `operation: prepare-receipt-bound-adoption` and the two durable
 
 Registration handoffs also bind the canonical image-impact report and its digest for the historical registration source through the current consumer source. The verifier recomputes that report when consuming the handoff and applies the same compatibility check as normal registration adoption. Publication consumption rechecks Git ancestry for both historical sources; Git errors fail closed. Each historical authorization digest must equal its authorization and transaction ID, as established by the durable receipt chain.
 
+The same prerequisite chain is reauthenticated during publication preparation and execution, cutover preparation and execution, reconciliation, and the matching publication, cutover, or reconciliation recovery operation. This authentication does not authorize an operation: publication and cutover retain separate checker signatures, and cutover retains its freshly read alias predecessor and `RevisionId` compare-and-swap. Unknown phases fail closed. Cutover disclosure remains receipt-bound and is signed over the exact cutover preparation rather than reusing publication authority.
+
 This path does not archive new evidence or change retention policy. Durable evidence archival remains separate post-release work.

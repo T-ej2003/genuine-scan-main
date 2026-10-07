@@ -215,7 +215,17 @@ export function assertReceiptBoundPolicyReceipts(entry, release, { reservation, 
 export function receiptBoundCheckerDisclosure(preparation) {
   const chain = preparation?.prerequisiteChain;
   if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
-  assert.equal(preparation.purpose, BROKER_PUBLICATION, 'Receipt-bound recovery can authorize only the new publication package');
+  const operation = {
+    [BROKER_PUBLICATION]: {
+      intendedOperation: 'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN',
+      authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE',
+    },
+    [BROKER_CUTOVER]: {
+      intendedOperation: 'LAMBDA_ALIAS_COMPARE_AND_SWAP',
+      authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_CUTOVER_PACKAGE',
+    },
+  }[preparation.purpose];
+  assert.ok(operation, 'Receipt-bound recovery can authorize only publication or cutover packages');
   assert.ok(chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption);
   const identity = entry => {
     const r = entry.receiptBoundAdoption;
@@ -239,10 +249,10 @@ export function receiptBoundCheckerDisclosure(preparation) {
       'COMPLETED_OUTPUTS_AND_TERMINAL_TRANSACTION_VERIFIED', 'LIVE_SUCCESSOR_INDEPENDENTLY_CORROBORATED',
       'REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED',
       'TERRAFORM_OWNERSHIP_AND_STATE_CORROBORATED', 'RECEIPT_BOUND_HANDOFF_PREPARATION_IS_NON_MUTATING',
-      'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE'],
+      operation.authorizationStatement],
     recoveryArtifactSha256: brokerDigest({ registration: chain.registration, policy: chain.policy }),
     registration: identity(chain.registration), policy: identity(chain.policy),
-    consumerSourceSha: preparation.sourceSha, intendedOperation: 'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN',
+    consumerSourceSha: preparation.sourceSha, intendedOperation: operation.intendedOperation,
     packageSha256: preparation.packageSha256, savedPlanSha256: preparation.savedPlanSha256,
     logicalPlanSha256: preparation.logicalPlanSha256, preparationSha256: brokerDigest(preparation),
     freshIndependentCheckerRequired: true };
@@ -487,8 +497,14 @@ export function assertBrokerPreparation(p) {
       } else if (phase === 'policy' && chain.receiptBoundAdoption) {
         assertReceiptBoundPolicyAdoption(chain, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
         equal(chain.terminal.policy, p.prerequisites.policy);
-        equal({ lineage: chain.receiptBoundAdoption.terraformLineage, serial: chain.receiptBoundAdoption.terraformSerial,
-          stateSha256: chain.receiptBoundAdoption.terraformStateSha256 }, p.state, 'Receipt-bound policy Terraform state changed');
+        const adoptedState = { lineage: chain.receiptBoundAdoption.terraformLineage, serial: chain.receiptBoundAdoption.terraformSerial,
+          stateSha256: chain.receiptBoundAdoption.terraformStateSha256 };
+        if (p.purpose === BROKER_PUBLICATION) equal(adoptedState, p.state, 'Receipt-bound policy Terraform state changed');
+        else {
+          assert.equal(p.purpose, BROKER_CUTOVER);
+          assert.equal(p.state.lineage, adoptedState.lineage, 'Receipt-bound policy Terraform lineage changed');
+          assert.ok(p.state.serial > adoptedState.serial, 'Cutover state must postdate the receipt-bound policy adoption');
+        }
       } else {
         keys(chain, ['preparation', 'authorization', 'result']);
         assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);

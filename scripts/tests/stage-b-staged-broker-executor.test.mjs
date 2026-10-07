@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -133,6 +133,15 @@ test('receipt-adoption executor phase cannot reach mutation hooks',async()=>{
  for(const invoke of [()=>r.adapter.reserve('a'.repeat(64),{}),()=>r.adapter.applyPublication(r.binary),()=>r.adapter.applyTaskRegistration(r.binary),()=>r.adapter.updateAlias(r.input),()=>r.adapter.executeBrokerPolicyConvergence(),()=>r.adapter.executeBrokerPolicyPruning()]) await assert.rejects(invoke);
  assert.equal(r.calls.some(c=>c.command==='terraform'&&c.args[0]==='apply'),false);
  assert.equal(r.calls.some(c=>c.command==='aws'&&['create-policy-version','delete-policy-version','set-default-policy-version','update-alias','register-task-definition','update-service','run-task'].includes(c.args[1])),false);
+});
+test('receipt-bound authentication phase matrix is explicit and fail-closed',()=>{
+ assert.deepEqual(RECEIPT_BOUND_AUTHENTICATION_PHASES,[
+  'RECEIPT_ADOPTION','PREPARATION','PUBLICATION','CUTOVER','RECONCILIATION',
+  'PUBLICATION_RECOVERY','CUTOVER_RECOVERY','RECONCILIATION_RECOVERY',
+ ]);
+ for(const phase of RECEIPT_BOUND_AUTHENTICATION_PHASES)assert.equal(assertReceiptBoundAuthenticationPhase(phase),true);
+ for(const phase of ['ADOPTION','CLOSURE','REGISTRATION','POLICY','POLICY_RECOVERY','REGISTRATION_RECOVERY','UNKNOWN'])
+  assert.throws(()=>assertReceiptBoundAuthenticationPhase(phase),/not valid during/);
 });
 test('receipt-bound historical source must be an ancestor of the protected consumer',()=>{
  const historical='a'.repeat(40),consumer='b'.repeat(40),seen=[];

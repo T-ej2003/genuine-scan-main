@@ -30,6 +30,14 @@ import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
 
 const PHASES = ['ADOPTION', 'RECEIPT_ADOPTION', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'PREPARATION', 'CLOSURE', 'REGISTRATION', 'POLICY', 'POLICY_RECOVERY', 'REGISTRATION_RECOVERY', 'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY'];
+export const RECEIPT_BOUND_AUTHENTICATION_PHASES = Object.freeze([
+  'RECEIPT_ADOPTION', 'PREPARATION', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION',
+  'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY',
+]);
+export function assertReceiptBoundAuthenticationPhase(phase) {
+  assert.ok(RECEIPT_BOUND_AUTHENTICATION_PHASES.includes(phase), `Receipt-bound prerequisites are not valid during ${phase}`);
+  return true;
+}
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
 STEPS.push('BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE');
@@ -512,7 +520,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     return { registration, policy };
   };
   const authenticateReceiptBoundPrerequisiteChain = async (chain, release) => {
-    assert.ok(['RECEIPT_ADOPTION', 'PREPARATION', 'PUBLICATION'].includes(phase));
+    assertReceiptBoundAuthenticationPhase(phase);
     assert.deepEqual(Object.keys(chain || {}).sort(), ['policy', 'registration']);
     assert.ok(chain.registration.receiptBoundAdoption && chain.policy.receiptBoundAdoption,
       'Receipt-bound handoff must be explicit for both completed prerequisites');

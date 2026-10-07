@@ -198,6 +198,46 @@ test('fresh checker disclosure binds the new publication package and discloses u
  const ordinary=publicationWithTerminalPolicyAdoption();assert.equal(receiptBoundCheckerDisclosure(ordinary),null);
 });
 
+test('receipt-bound publication carries verified provenance into a distinct cutover authorization',async()=>{
+ const x=receiptBoundFixture(),publicationPreparation=publicationWithTerminalPolicyAdoption(x.f);
+ publicationPreparation.prerequisiteChain={registration:x.registration,policy:x.policy};assertBrokerPreparation(publicationPreparation);
+ const publicationDisclosure=receiptBoundCheckerDisclosure(publicationPreparation);
+ const maker='arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/authenticated-maker';
+ const checker='arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/authenticated-checker';
+ const signer={makerIdentity:maker,humanReviewId:'review',makerCaller:async()=>({Account:'368992683803',Arn:maker}),caller:async()=>({Arn:checker}),sign:async()=> 'c2ln',verify:async()=>true,now};
+ const publicationAuthorization=await signBrokerAuthorization(publicationPreparation,signer);
+ assert.deepEqual(publicationAuthorization.recoveryDisclosure,publicationDisclosure);
+ const publicationResult={schemaVersion:1,status:'PUBLISHED',sourceSha:publicationPreparation.sourceSha,
+  authorizationSha256:brokerDigest(publicationAuthorization),preparationSha256:brokerDigest(publicationPreparation),
+  savedPlanSha256:publicationPreparation.savedPlanSha256,target:clone(target),alias:clone(publicationPreparation.alias),authorizedAt:now.toISOString()};
+ const plan=cutoverPlan(),bytes=Buffer.from('cutover'),cutoverState={...clone(publicationPreparation.state),serial:publicationPreparation.state.serial+1,stateSha256:'f'.repeat(64)};
+ let prerequisiteAuthentications=0;
+ const deps={verifyAuthorization:async()=>true,authenticatePublicationResult:async(result,id)=>{assert.deepEqual(result,publicationResult);assert.equal(id,publicationResult.authorizationSha256);},
+  authenticatePrerequisiteChain:async chain=>{prerequisiteAuthentications++;assert.deepEqual(chain,publicationPreparation.prerequisiteChain);},
+  getVersion:async version=>{assert.equal(version,target.version);return configuration(version);},getAlias:async()=>clone(publicationPreparation.alias),
+  readPrerequisites:async()=>clone(publicationPreparation.prerequisites),readCheckout:async()=>({sourceSha:publicationPreparation.sourceSha,treeSha256:publicationPreparation.treeSha256}),
+  readStateIdentity:async()=>clone(cutoverState)};
+ const cutoverPreparation=await prepareBrokerCutover({publicationPreparation,publicationAuthorization,publicationResult,plan,bytes,state:cutoverState,artifactSetSha256:'4'.repeat(64)},deps);
+ const cutoverDisclosure=receiptBoundCheckerDisclosure(cutoverPreparation);
+ assert.equal(publicationDisclosure.intendedOperation,'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN');
+ assert.equal(cutoverDisclosure.intendedOperation,'LAMBDA_ALIAS_COMPARE_AND_SWAP');
+ assert.ok(cutoverDisclosure.statements.includes('FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_CUTOVER_PACKAGE'));
+ assert.equal(cutoverDisclosure.recoveryArtifactSha256,publicationDisclosure.recoveryArtifactSha256);
+ assert.notEqual(cutoverDisclosure.preparationSha256,publicationDisclosure.preparationSha256);
+ assert.equal(prerequisiteAuthentications,1);
+ const cutoverAuthorization=await signBrokerAuthorization(cutoverPreparation,{...signer,humanReviewId:'cutover-review'});
+ assert.equal(cutoverAuthorization.purpose,BROKER_CUTOVER);assert.deepEqual(cutoverAuthorization.recoveryDisclosure,cutoverDisclosure);
+ await assert.rejects(()=>assertBrokerAuthorization(publicationAuthorization,cutoverPreparation,{verify:async()=>true,now}));
+ assert.throws(()=>receiptBoundCheckerDisclosure({...cutoverPreparation,purpose:'UNRELATED'}),/only publication or cutover/);
+ for(const mutate of [
+  chain=>{chain.registration.receiptBoundAdoption.historicalResultSha256='f'.repeat(64);},
+  chain=>{const r=chain.registration.receiptBoundAdoption;r.imageImpactReport.imageReuseCompatible=false;r.imageImpactReport.newImagesRequired=true;r.imageImpactReport.imageAffectingFiles=['src/backend/app.mjs'];r.imageImpactSha256=brokerDigest(r.imageImpactReport);},
+ ]){
+  const tampered=clone(cutoverPreparation);mutate(tampered.prerequisiteChain);
+  await assert.rejects(()=>signBrokerAuthorization(tampered,{...signer,humanReviewId:'cutover-review'}));
+ }
+});
+
 test('receipt recovery cannot be selected implicitly or through normal adoption',async()=>{
  const request={operation:'prepare-registration-adoption',receiptRecovery:{registrationTransactionId:'a'.repeat(64),policyTransactionId:'b'.repeat(64)}};
  await assert.rejects(()=>runStagedBrokerRequest(request,{adapterFactory:()=>{throw new Error('executor must not be constructed');}}),/explicit operation|Unknown\/missing/);
