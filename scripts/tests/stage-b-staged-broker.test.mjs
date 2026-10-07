@@ -68,7 +68,8 @@ function receiptBoundFixture() {
   historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,
   historicalSourceSha:oldSha,historicalPurpose:TASK_REGISTRATION,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),toolingTreeSha256:regResult.treeSha256,savedPlanSha256:regResult.savedPlanSha256,
   transactionId:registrationId,authorizationId:registrationId,consumerSourceSha:f.release.sourceSha,consumerTreeSha256:f.release.treeSha256,receiptObjects:receiptObjects(registrationId,{reservation:regReservation,intent:regIntent,result:regReceipt}),
-  receiptChainSha256:'0'.repeat(64),registeredOutputCount:12,definitionsSha256:brokerDigest(definitions),liveCorroborationSha256:'c'.repeat(64),originalMutationReplayable:false,originalMutationAuthorizationAvailable:false,freshHandoffOnly:true}};
+  receiptChainSha256:'0'.repeat(64),registeredOutputCount:12,definitionsSha256:brokerDigest(definitions),imageImpactReport:{imageReleaseSha:oldSha,toolingSha:f.release.sourceSha,toolingInputTreeSha256:f.release.treeSha256,imageReuseCompatible:true,newImagesRequired:false,imageAffectingFiles:[]},imageImpactSha256:'0'.repeat(64),liveCorroborationSha256:'c'.repeat(64),originalMutationReplayable:false,originalMutationAuthorizationAvailable:false,freshHandoffOnly:true}};
+ regEntry.receiptBoundAdoption.imageImpactSha256=brokerDigest(regEntry.receiptBoundAdoption.imageImpactReport);
  const d=regEntry.receiptBoundAdoption.receiptObjects; regEntry.receiptBoundAdoption.receiptChainSha256=brokerDigest({transactionId:registrationId,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),receiptObjects:d});
  const intentValue={owner:f.entry.terminal.owner,acquisitionSha256:'0'.repeat(64),savedPlanSha256:f.entry.terminal.savedPlanSha256,authorizedAt:'2026-10-07T11:32:01.389Z',predecessorInventory:[{VersionId:'v9',IsDefaultVersion:false},{VersionId:'v10',IsDefaultVersion:false},{VersionId:'v11',IsDefaultVersion:false},{VersionId:'v12',IsDefaultVersion:true}]};
  const polReservation={kind:'STAGED_BROKER_RESERVATION',id:policyId,value:{purpose:BROKER_POLICY_CONVERGENCE,nonce:'d'.repeat(64),preparationSha256:f.entry.terminal.preparationSha256}};
@@ -112,6 +113,7 @@ for(const [name,mutate] of [
  ['purpose',x=>x.receiptBoundAdoption.historicalPurpose='STAGE_B_BROKER_POLICY_PRUNING'],
  ['preparation digest',x=>x.receiptBoundAdoption.historicalPreparationSha256='f'.repeat(64)],
  ['authorization digest',x=>x.receiptBoundAdoption.historicalAuthorizationSha256='f'.repeat(64)],
+ ['arbitrary valid authorization digest after receipt-chain recomputation',x=>{const r=x.receiptBoundAdoption;r.historicalAuthorizationSha256='e'.repeat(64);r.receiptChainSha256=brokerDigest({transactionId:r.transactionId,historicalPreparationSha256:r.historicalPreparationSha256,historicalAuthorizationSha256:r.historicalAuthorizationSha256,historicalResultSha256:r.historicalResultSha256,receiptObjects:r.receiptObjects});}],
  ['result digest',x=>x.receiptBoundAdoption.historicalResultSha256='f'.repeat(64)],
  ['tooling tree digest',x=>x.receiptBoundAdoption.toolingTreeSha256='f'.repeat(64)],
  ['saved plan digest',x=>x.receiptBoundAdoption.savedPlanSha256='f'.repeat(64)],
@@ -124,6 +126,12 @@ for(const [name,mutate] of [
  ['implicit historical signature claim',x=>x.receiptBoundAdoption.historicalSignatureVerified=true],
  ['replayable original mutation',x=>x.receiptBoundAdoption.originalMutationReplayable=true],
 ]) test(`receipt-bound registration rejects ${name}`,()=>{const x=receiptBoundFixture(),entry=clone(x.registration);mutate(entry);assert.throws(()=>assertReceiptBoundRegistrationAdoption(entry,x.f.release));});
+
+for(const [name,mutate] of [
+ ['image-affecting range',r=>{r.imageImpactReport.imageReuseCompatible=false;r.imageImpactReport.newImagesRequired=true;r.imageImpactReport.imageAffectingFiles=['src/backend/app.mjs'];r.imageImpactSha256=brokerDigest(r.imageImpactReport);}],
+ ['tampered image-impact report',r=>{r.imageImpactReport.toolingSha='f'.repeat(40);r.imageImpactSha256=brokerDigest(r.imageImpactReport);}],
+ ['tampered image-impact digest',r=>{r.imageImpactSha256='f'.repeat(64);}],
+]) test(`receipt-bound registration rejects ${name}`,()=>{const x=receiptBoundFixture(),entry=clone(x.registration);mutate(entry.receiptBoundAdoption);assert.throws(()=>assertReceiptBoundRegistrationAdoption(entry,x.f.release));});
 
 for(const [name,mutate] of [
  ['historical source',x=>x.receiptBoundAdoption.historicalSourceSha='f'.repeat(40)],
@@ -153,6 +161,22 @@ test('receipt receipt-byte, transaction, result, and ownership links are cross-c
   assert.throws(()=>assertReceiptBoundPolicyReceipts(x.policy,release,{...receipts,ownership}));
  }
 });
+test('receipt-bound authorization digest is transaction identity even if its chain digest is recomputed',()=>{
+ const x=receiptBoundFixture();
+ for(const entry of [x.registration,x.policy]){
+  const tampered=clone(entry),r=tampered.receiptBoundAdoption;
+  r.historicalAuthorizationSha256='e'.repeat(64);
+  r.receiptChainSha256=brokerDigest({transactionId:r.transactionId,historicalPreparationSha256:r.historicalPreparationSha256,
+   historicalAuthorizationSha256:r.historicalAuthorizationSha256,historicalResultSha256:r.historicalResultSha256,receiptObjects:r.receiptObjects});
+  assert.throws(()=>entry===x.registration?assertReceiptBoundRegistrationAdoption(tampered,x.f.release):assertReceiptBoundPolicyAdoption(tampered,x.f.release),/authorization digest must identify/);
+ }
+ for(const field of ['transactionId','authorizationId']){
+  const tampered=clone(x.registration),r=tampered.receiptBoundAdoption;r[field]='f'.repeat(64);
+  r.receiptChainSha256=brokerDigest({transactionId:r.transactionId,historicalPreparationSha256:r.historicalPreparationSha256,
+   historicalAuthorizationSha256:r.historicalAuthorizationSha256,historicalResultSha256:r.historicalResultSha256,receiptObjects:r.receiptObjects});
+  assert.throws(()=>assertReceiptBoundRegistrationAdoption(tampered,x.f.release));
+ }
+});
 
 test('fresh checker disclosure binds the new publication package and discloses unavailable historical signatures',async()=>{
  const x=receiptBoundFixture(),p=publicationWithTerminalPolicyAdoption(x.f);p.prerequisiteChain={registration:x.registration,policy:x.policy};
@@ -161,7 +185,9 @@ test('fresh checker disclosure binds the new publication package and discloses u
  assert.equal(disclosure.kind,'RECEIPT_BOUND_RECOVERY_DISCLOSURE');assert.equal(disclosure.consumerSourceSha,p.sourceSha);
  assert.equal(disclosure.intendedOperation,'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN');
  assert.equal(disclosure.registration.artifactSha256,brokerDigest(x.registration));assert.equal(disclosure.policy.artifactSha256,brokerDigest(x.policy));
+ assert.equal(disclosure.registration.imageImpactSha256,x.registration.receiptBoundAdoption.imageImpactSha256);
  assert.ok(disclosure.statements.includes('HISTORICAL_CHECKER_SIGNATURE_NOT_REVERIFIED'));
+ assert.ok(disclosure.statements.includes('REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED'));
  assert.ok(disclosure.statements.includes('FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE'));
  const auth=authorization(p);auth.recoveryDisclosure=disclosure;
  await assertBrokerAuthorization(auth,p,{verify:async()=>true,now});

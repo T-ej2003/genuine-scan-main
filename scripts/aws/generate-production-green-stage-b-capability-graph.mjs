@@ -647,6 +647,9 @@ export function discoverAwsCliActions() {
         calls.push(sourceFile === "scripts/aws/produce-production-root-drop-evidence.mjs" && action === "kms:Sign"
           ? { sourceFile, sourceFunction: "produce-production-root-drop-evidence", phase: "root-drop-evidence-signing", identity: "ROOT_OPERATOR", action, resources: [ROOT_DROP_SIGNING_KEY_ARN], capabilityId: "root-drop-sign-evidence" }
           : { sourceFile, action });
+        if (sourceFile === "scripts/aws/stage-b-staged-broker-executor.mjs" && action === "s3:GetObject" && ["get-object", "head-object"].includes(match[2]) && source.slice(match.index, source.indexOf("]", match.index)).includes("--version-id")) {
+          calls.push({ sourceFile, action: "s3:GetObjectVersion" });
+        }
       }
     }
   }
@@ -736,7 +739,7 @@ export function appOnlyCapabilityNodes() {
 export const STAGED_BROKER_CALLS = Object.freeze({
   'scripts/aws/production-receipt-read.mjs': ['s3:GetObject', 's3:ListBucket', 'iam:GetRole'],
   'scripts/aws/stage-b-staged-broker-authorization.mjs': ['kms:Sign', 'kms:Verify', 'sts:GetCallerIdentity'],
-  'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
+  'scripts/aws/stage-b-staged-broker-executor.mjs': ['s3:GetObject', 's3:GetObjectVersion', 'sts:GetCallerIdentity', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:UpdateAlias', 'lambda:ListVersionsByFunction', 'ecs:DescribeTaskDefinition', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'],
   'scripts/aws/stage-b-broker-writer-session.mjs': ['sts:GetCallerIdentity', 'cloudtrail:LookupEvents'],
   'scripts/aws/stage-b-broker-policy-ownership.mjs': ['dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem'],
   'scripts/aws/stage-b-staged-broker-closure.mjs': ['s3:GetObject', 'lambda:GetAlias', 'lambda:GetFunctionConfiguration', 'lambda:ListVersionsByFunction'],
@@ -756,6 +759,7 @@ export function stagedBrokerCapabilityNodes(policies = sourcePolicies()) {
       : action.startsWith('dynamodb:') ? [`arn:aws:dynamodb:${STAGE_B.region}:${STAGE_B.account}:table/${PRODUCTION_COMPONENT_STATE.table}`]
       : action === 's3:ListBucket' ? [STAGE_B_TERRAFORM_BACKEND.bucketArn, `arn:aws:s3:::${STAGE_B.receiptBucket}`]
       : action === 's3:GetObject' ? (sourceFile.endsWith('production-receipt-read.mjs') ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn, ...FULL_RLS_RECEIPT_PREFIXES.map(prefix => `arn:aws:s3:::${STAGE_B.receiptBucket}/${prefix}`)] : [STAGE_B_TERRAFORM_BACKEND.stateArn, STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn])
+      : action === 's3:GetObjectVersion' ? [STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefixArn]
       : ['iam:GetPolicy', 'iam:GetPolicyVersion'].includes(action) ? [...RELEASE_POLICY_SOURCES.map(p => p.arn), STAGE_B_BROKER_POLICY.arn]
       : ['iam:ListPolicyVersions', 'iam:CreatePolicyVersion', 'iam:DeletePolicyVersion'].includes(action) ? [STAGE_B_BROKER_POLICY.arn]
       : action === 'iam:GetRole' && sourceFile.endsWith('production-receipt-read.mjs') ? ['arn:aws:iam::368992683803:role/mscqr-production-release-deployer']

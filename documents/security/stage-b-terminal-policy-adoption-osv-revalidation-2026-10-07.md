@@ -34,3 +34,11 @@ OSV Scanner 2.6.0 source report again contains exactly the same single HIGH
 finding: `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`, `braces@3.0.3`, dev-only,
 unpatched. The existing acceptance remains unchanged apart from its input
 fingerprint: scope, rationale, owner, and expiry `2026-11-02` are preserved.
+
+The three exact-head review corrections update the fingerprint to
+`838538ddc496668d36f116cc3bba49878df1e63a5aedfaeba3e0b38815ad05db`.
+They change only Stage-B receipt verification and tests; dependency manifests,
+locks, frontend sources, and build configuration remain unchanged. The prior
+unfiltered scanner report still contains the same one `braces@3.0.3` advisory;
+the canonical runtime check is rerun against the amended executable-input
+fingerprint before push. Acceptance scope and expiry are unchanged.

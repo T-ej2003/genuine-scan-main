@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -23,12 +23,13 @@ const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects identity or digest substitution',()=>{
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-versioned-receipt-')),file=path.join(directory,'receipt.json');
  const id='a'.repeat(64),key=stageBApplyAttemptS3Key(id),bytes=Buffer.from('{"id":"receipt"}'),objectSha256=createHash('sha256').update(bytes).digest('hex');
- const run=args=>{if(args[1]==='head-object')return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});if(args[1]==='get-object'){fs.writeFileSync(args.at(-1),bytes);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}throw new Error('unexpected S3 operation');};
+ const calls=[];let expectedVersion;const run=args=>{calls.push(args);if(args[1]==='head-object'){if(expectedVersion)assert.deepEqual(args.slice(args.indexOf('--version-id'),args.indexOf('--version-id')+2),['--version-id',expectedVersion]);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}if(args[1]==='get-object'){assert.deepEqual(args.slice(args.indexOf('--version-id'),args.indexOf('--version-id')+2),['--version-id','version-1']);fs.writeFileSync(args.at(-1),bytes);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}throw new Error('unexpected S3 operation');};
  try{
   const result=readVersionedStageBReceiptObject({run,id,key,file});
   assert.deepEqual(result.object,{bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key,versionId:'version-1',etag:'"etag"',objectSha256});
+  assert.equal(calls.filter(args=>args[1]==='get-object').length,1);
   assert.equal(result.bytes.toString(),bytes.toString());
-  for(const expected of [{...result.object,versionId:'version-2'},{...result.object,etag:'"other"'},{...result.object,objectSha256:'f'.repeat(64)}]) assert.throws(()=>readVersionedStageBReceiptObject({run,id,key,file,expected}));
+  for(const expected of [{...result.object,versionId:'version-2'},{...result.object,etag:'"other"'},{...result.object,objectSha256:'f'.repeat(64)}]) { expectedVersion=expected.versionId; assert.throws(()=>readVersionedStageBReceiptObject({run,id,key,file,expected})); }
   assert.throws(()=>readVersionedStageBReceiptObject({run,id,key:'unreviewed/key',file}));
  }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });
@@ -139,6 +140,26 @@ test('receipt-bound historical source must be an ancestor of the protected consu
  assert.deepEqual(seen,[[historical,consumer]]);
  assert.throws(()=>assertReceiptBoundHistoricalSourceAncestry({historicalSourceSha:historical,consumerSourceSha:consumer,isAncestor:()=>false}),/not an ancestor/);
  assert.throws(()=>assertReceiptBoundHistoricalSourceAncestry({historicalSourceSha:'caller',consumerSourceSha:consumer,isAncestor:()=>true}));
+});
+test('receipt-bound handoff rechecks both historical ancestors at consumption',()=>{
+ const registration={receiptBoundAdoption:{historicalSourceSha:'a'.repeat(40)}},policy={receiptBoundAdoption:{historicalSourceSha:'b'.repeat(40)}};
+ const release={sourceSha:'c'.repeat(40)},calls=[];
+ assert.equal(assertReceiptBoundPrerequisiteAncestry({registration,policy},release,(command,args)=>{calls.push(args);return '';},'/repo'),true);
+ assert.deepEqual(calls,[['merge-base','--is-ancestor','a'.repeat(40),release.sourceSha],['merge-base','--is-ancestor','b'.repeat(40),release.sourceSha]]);
+ for(const chain of [{registration:{receiptBoundAdoption:{historicalSourceSha:'d'.repeat(40)}},policy}, {registration,policy:{receiptBoundAdoption:{historicalSourceSha:'d'.repeat(40)}}}])
+  assert.throws(()=>assertReceiptBoundPrerequisiteAncestry(chain,release,(_command,args)=>{if(args[2]==='d'.repeat(40))throw Object.assign(new Error('not ancestor'),{status:1});return '';},'/repo'),/not an ancestor/);
+ assert.throws(()=>assertReceiptBoundGitAncestry({historicalSourceSha:'a'.repeat(40),consumerSourceSha:release.sourceSha,cwd:'/repo',exec:()=>{throw Object.assign(new Error('git failed'),{status:128});}}),/git failed/);
+ assert.throws(()=>assertReceiptBoundPrerequisiteAncestry({registration,policy},{sourceSha:'e'.repeat(40)},(_command,args)=>{if(args[3]==='e'.repeat(40))throw Object.assign(new Error('not ancestor'),{status:1});return '';}, '/repo'),/not an ancestor/);
+});
+test('receipt-bound registration recomputes canonical image impact at consumption',()=>{
+ const historical='a'.repeat(40),consumer='b'.repeat(40),release={sourceSha:consumer,treeSha256:'c'.repeat(64)},seen=[];
+ const imageImpactReport={imageReleaseSha:historical,toolingSha:consumer,toolingInputTreeSha256:release.treeSha256,imageReuseCompatible:true,newImagesRequired:false,imageAffectingFiles:[]};
+ const recovery={historicalSourceSha:historical,imageImpactReport,imageImpactSha256:brokerDigest(imageImpactReport)};
+ assert.equal(verifyReceiptBoundRegistrationImageImpact(recovery,release,input=>{seen.push(input);return imageImpactReport;}),true);
+ assert.deepEqual(seen,[{imageReleaseSha:historical,toolingSha:consumer}]);
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactReport:{...imageImpactReport,imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['src/backend/app.mjs']}},release,()=>({...imageImpactReport,imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['src/backend/app.mjs']})),/true/);
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactSha256:'f'.repeat(64)},release,()=>imageImpactReport));
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactReport:{...imageImpactReport,toolingSha:'d'.repeat(40)}},release,()=>imageImpactReport));
 });
 for (const resource of ['*', alias.AliasArn.replace(':reviewed', ''), alias.AliasArn.replace(':reviewed', ':12'), alias.AliasArn.replace(':reviewed', ':*')]) test(`unreviewed caller invocation ${resource} fails`, () => {
   assert.throws(() => assertBrokerCallerPolicy({ Statement: [{ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: resource }] }));

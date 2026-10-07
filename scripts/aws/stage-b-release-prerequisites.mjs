@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { canonicalJson, STAGE_B, assertStageBBrokerTaskDefinitionMap } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_TASK_DEFINITION_FAMILIES, assertStageBTaskDefinitionRotation, canonicalizeEcsTaskDefinitionVolumes } from './stage-b-reference-audit-contract.mjs';
 import { assertStageBBrokerPolicyDocument, STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
-import { brokerDigest, assertRegistrationHandoff, assertBrokerAuthorization, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest, assertBrokerImageReuseCompatibility, assertRegistrationHandoff, assertBrokerAuthorization, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 
 export const TASK_REGISTRATION = 'STAGE_B_TASK_REGISTRATION';
 export const BROKER_POLICY_CONVERGENCE = 'STAGE_B_BROKER_POLICY_CONVERGENCE';
@@ -297,10 +297,7 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
 export function adoptRegisteredOutputs(entry, release, plan, imageImpact) {
   const { preparation: p, result } = entry;
   assert.notEqual(p.sourceSha, release.sourceSha, 'Same-main outputs need no adoption');
-  equal(imageImpact.imageReleaseSha, p.sourceSha); equal(imageImpact.toolingSha, release.sourceSha);
-  equal(imageImpact.toolingInputTreeSha256, release.treeSha256);
-  assert.equal(imageImpact.imageReuseCompatible, true); assert.equal(imageImpact.newImagesRequired, false);
-  equal(imageImpact.imageAffectingFiles, []);
+  assertBrokerImageReuseCompatibility(imageImpact, p.sourceSha, release);
   assert.equal(plan.variables.tooling_sha.value, release.sourceSha); assert.equal(plan.errored, false);
   equal(plan.deferred_changes || [], []);
   assert.ok(!(plan.resource_drift || []).some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address)), 'Registration state drift');

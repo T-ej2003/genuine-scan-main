@@ -196,6 +196,12 @@ export const STAGE_B_TERRAFORM_BACKEND_POLICY = Object.freeze({
       Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
     }),
     Object.freeze({
+      Sid: "ReadStageBApplyAttemptVersions",
+      Effect: "Allow",
+      Action: "s3:GetObjectVersion",
+      Resource: `${bucketArn}/${applyAttemptPrefix}/*`,
+    }),
+    Object.freeze({
       Sid: "CreateStageBApplyAttemptsOnly",
       Effect: "Allow",
       Action: "s3:PutObject",
@@ -250,6 +256,7 @@ export const STAGE_B_TERRAFORM_BACKEND_MANIFEST = Object.freeze({
     "s3:PutObject(lock)",
     "s3:DeleteObject(lock)",
     "s3:GetObject(apply-attempt)",
+    "s3:GetObjectVersion(apply-attempt)",
     "s3:PutObject(apply-attempt,If-None-Match:*)",
   ]),
 });

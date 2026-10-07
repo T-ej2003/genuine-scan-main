@@ -17,6 +17,16 @@ const hash = value => assert.match(value || "", /^[a-f0-9]{64}$/);
 const version = value => assert.match(value || "", /^[1-9][0-9]*$/);
 const keys = (value, expected) => equal(Object.keys(value || {}).sort(), [...expected].sort(), "Unknown/missing staged broker fields");
 
+export function assertBrokerImageReuseCompatibility(imageImpact, imageReleaseSha, release) {
+  equal(imageImpact.imageReleaseSha, imageReleaseSha);
+  equal(imageImpact.toolingSha, release.sourceSha);
+  equal(imageImpact.toolingInputTreeSha256, release.treeSha256);
+  assert.equal(imageImpact.imageReuseCompatible, true);
+  assert.equal(imageImpact.newImagesRequired, false);
+  equal(imageImpact.imageAffectingFiles, []);
+  return true;
+}
+
 export function brokerAliasIdentity(alias) {
   keys(alias, ["AliasArn", "Name", "FunctionVersion", "RevisionId", "Description", "RoutingConfig"]);
   assert.equal(alias.AliasArn, STAGE_B.brokerAliasArn); assert.equal(alias.Name, STAGE_B.brokerAliasQualifier);
@@ -64,6 +74,8 @@ function assertReceiptBoundBase(recovery, release, kind) {
   assert.match(recovery.transactionId || '', /^[a-f0-9]{64}$/);
   assert.equal(recovery.authorizationId, recovery.transactionId);
   hash(recovery.historicalPreparationSha256); hash(recovery.historicalAuthorizationSha256);
+  assert.equal(recovery.historicalAuthorizationSha256, recovery.authorizationId,
+    'Historical authorization digest must identify the authenticated transaction authorization');
   hash(recovery.historicalResultSha256); hash(recovery.toolingTreeSha256); hash(recovery.savedPlanSha256);
   keys(recovery.receiptObjects, ['reservation', 'intent', 'result']);
   for (const name of ['reservation', 'intent', 'result']) receiptObject(recovery.receiptObjects?.[name]);
@@ -85,7 +97,7 @@ export function assertReceiptBoundRegistrationAdoption(entry, release) {
     'durableReceiptChainVerified', 'liveSuccessorCorroborated', 'freshIndependentCheckerRequired', 'historicalSourceSha',
     'historicalPurpose', 'historicalPreparationSha256', 'historicalAuthorizationSha256', 'historicalResultSha256',
     'toolingTreeSha256', 'savedPlanSha256', 'transactionId', 'authorizationId', 'consumerSourceSha', 'consumerTreeSha256',
-    'receiptObjects', 'receiptChainSha256', 'registeredOutputCount', 'definitionsSha256', 'liveCorroborationSha256',
+    'receiptObjects', 'receiptChainSha256', 'registeredOutputCount', 'definitionsSha256', 'imageImpactReport', 'imageImpactSha256', 'liveCorroborationSha256',
     'originalMutationReplayable', 'originalMutationAuthorizationAvailable', 'freshHandoffOnly']);
   assertReceiptBoundBase(r, release, 'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION');
   assert.equal(r.historicalPurpose, 'STAGE_B_TASK_REGISTRATION');
@@ -99,6 +111,8 @@ export function assertReceiptBoundRegistrationAdoption(entry, release) {
   assert.equal(r.registeredOutputCount, 12);
   assertStageBBrokerTaskDefinitionMap(result.taskMap);
   hash(r.definitionsSha256); assert.equal(r.definitionsSha256, brokerDigest(result.definitions));
+  assertBrokerImageReuseCompatibility(r.imageImpactReport, r.historicalSourceSha, release);
+  hash(r.imageImpactSha256); assert.equal(r.imageImpactSha256, brokerDigest(r.imageImpactReport));
   return true;
 }
 
@@ -216,12 +230,14 @@ export function receiptBoundCheckerDisclosure(preparation) {
           policyArn: r.policyArn, successorVersion: r.successorVersion,
           successorDocumentSha256: r.successorDocumentSha256,
           terraform: { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 } }
-        : { registeredOutputCount: r.registeredOutputCount, definitionsSha256: r.definitionsSha256 }) };
+        : { registeredOutputCount: r.registeredOutputCount, definitionsSha256: r.definitionsSha256,
+          imageImpactSha256: r.imageImpactSha256 }) };
   };
   return { kind: 'RECEIPT_BOUND_RECOVERY_DISCLOSURE',
     statements: ['ORIGINAL_HISTORICAL_PREPARATION_AND_AUTHORIZATION_BYTES_UNAVAILABLE',
       'HISTORICAL_CHECKER_SIGNATURE_NOT_REVERIFIED', 'RETAINED_HISTORICAL_DIGESTS_VERIFIED_AGAINST_DURABLE_RECEIPTS',
       'COMPLETED_OUTPUTS_AND_TERMINAL_TRANSACTION_VERIFIED', 'LIVE_SUCCESSOR_INDEPENDENTLY_CORROBORATED',
+      'REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED',
       'TERRAFORM_OWNERSHIP_AND_STATE_CORROBORATED', 'RECEIPT_BOUND_HANDOFF_PREPARATION_IS_NON_MUTATING',
       'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE'],
     recoveryArtifactSha256: brokerDigest({ registration: chain.registration, policy: chain.policy }),

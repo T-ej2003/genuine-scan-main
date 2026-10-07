@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -127,6 +127,30 @@ export function assertReceiptBoundHistoricalSourceAncestry({ historicalSourceSha
   assert.match(historicalSourceSha || '', /^[a-f0-9]{40}$/); assert.match(consumerSourceSha || '', /^[a-f0-9]{40}$/);
   assert.equal(typeof isAncestor, 'function');
   assert.equal(isAncestor(historicalSourceSha, consumerSourceSha), true, 'Receipt-bound source is not an ancestor of the current release');
+  return true;
+}
+
+export function assertReceiptBoundGitAncestry({ historicalSourceSha, consumerSourceSha, exec = execFileSync, cwd }) {
+  return assertReceiptBoundHistoricalSourceAncestry({ historicalSourceSha, consumerSourceSha,
+    isAncestor: (ancestor, descendant) => {
+      try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; }
+      catch (error) { if (error?.status === 1) return false; throw error; }
+    } });
+}
+
+export function assertReceiptBoundPrerequisiteAncestry(chain, release, exec = execFileSync, cwd) {
+  assert.ok(chain?.registration?.receiptBoundAdoption && chain?.policy?.receiptBoundAdoption);
+  for (const entry of [chain.registration, chain.policy])
+    assertReceiptBoundGitAncestry({ historicalSourceSha: entry.receiptBoundAdoption.historicalSourceSha,
+      consumerSourceSha: release.sourceSha, exec, cwd });
+  return true;
+}
+
+export function verifyReceiptBoundRegistrationImageImpact(recovery, release, derive = deriveStageBImageImpactReport) {
+  const report = derive({ imageReleaseSha: recovery.historicalSourceSha, toolingSha: release.sourceSha });
+  assertBrokerImageReuseCompatibility(report, recovery.historicalSourceSha, release);
+  equal(report, recovery.imageImpactReport, 'Receipt-bound image-impact report differs from the canonical historical-to-consumer recomputation');
+  assert.equal(brokerDigest(report), recovery.imageImpactSha256);
   return true;
 }
 
@@ -348,6 +372,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   const verifyReceiptBoundRegistration = async (entry, release) => {
     assertReceiptBoundRegistrationAdoption(entry, release);
     const r = entry.receiptBoundAdoption, id = r.transactionId;
+    verifyReceiptBoundRegistrationImageImpact(r, release);
     const reservation = readReceiptAt(id, 'RESERVATION', r.receiptObjects.reservation);
     const intent = readReceiptAt(id, 'TASK_REGISTRATION_INTENT', r.receiptObjects.intent);
     const result = readReceiptAt(id, 'TASK_REGISTERED', r.receiptObjects.result);
@@ -407,9 +432,10 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assert.equal(result.authorizationSha256, registrationId); assert.equal(result.status, 'REGISTERED_NONTERMINAL');
     assert.equal(result.savedPlanSha256, savedPlanSha256); assert.equal(result.definitions && Object.keys(result.definitions).length, 12);
     equal(result.taskMap, taskMapFromRegisteredDefinitions(result.definitions));
-    assertReceiptBoundHistoricalSourceAncestry({ historicalSourceSha: result.sourceSha, consumerSourceSha: release.sourceSha,
-      isAncestor: (ancestor, descendant) => { try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; } catch { return false; } } });
+    assertReceiptBoundGitAncestry({ historicalSourceSha: result.sourceSha, consumerSourceSha: release.sourceSha, exec, cwd: root });
     assert.equal(deriveStageBToolingInputTreeSha256(result.sourceSha), result.treeSha256);
+    const imageImpactReport = deriveStageBImageImpactReport({ imageReleaseSha: result.sourceSha, toolingSha: release.sourceSha });
+    assertBrokerImageReuseCompatibility(imageImpactReport, result.sourceSha, release);
     const registration = { result, receiptBoundAdoption: {
       kind: 'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION', schemaVersion: 1, recoveryMode: 'RECEIPT_BOUND',
       historicalSignatureVerified: false, historicalEvidenceAvailability: 'ORIGINAL_AUTHORIZATION_UNAVAILABLE',
@@ -419,6 +445,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       historicalResultSha256: brokerDigest(result), toolingTreeSha256: result.treeSha256, savedPlanSha256,
       transactionId: registrationId, authorizationId: registrationId, consumerSourceSha: release.sourceSha,
       consumerTreeSha256: release.treeSha256,
+      imageImpactReport, imageImpactSha256: brokerDigest(imageImpactReport),
       receiptObjects: { reservation: reg.reservation.object, intent: reg.intent.object, result: reg.result.object },
       receiptChainSha256: brokerDigest({ transactionId: registrationId, historicalPreparationSha256: result.preparationSha256,
         historicalAuthorizationSha256: registrationId, historicalResultSha256: brokerDigest(result),
@@ -438,8 +465,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     const pol = readTriplet(policyId, 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
     const ownership = createBrokerPolicyOwnershipClient({ run: runAws }).read();
     const terminal = pol.result.value;
-    assertReceiptBoundHistoricalSourceAncestry({ historicalSourceSha: terminal.sourceSha, consumerSourceSha: release.sourceSha,
-      isAncestor: (ancestor, descendant) => { try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; } catch { return false; } } });
+    assertReceiptBoundGitAncestry({ historicalSourceSha: terminal.sourceSha, consumerSourceSha: release.sourceSha, exec, cwd: root });
     assert.ok(ownership); assert.equal(ownership.identity.operationIdentity, policyId);
     assert.equal(ownership.identity.sourceSha, terminal.sourceSha); assert.equal(ownership.status, 'RELEASED');
     assert.equal(ownership.terminal?.outcome, 'SUCCEEDED'); assert.ok(ownership.mutation);
@@ -490,6 +516,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assert.deepEqual(Object.keys(chain || {}).sort(), ['policy', 'registration']);
     assert.ok(chain.registration.receiptBoundAdoption && chain.policy.receiptBoundAdoption,
       'Receipt-bound handoff must be explicit for both completed prerequisites');
+    assertReceiptBoundPrerequisiteAncestry(chain, release, exec, root);
     await verifyReceiptBoundRegistration(chain.registration, release);
     await verifyReceiptBoundPolicy(chain.policy, release);
     const definitions = chain.registration.result.definitions;
