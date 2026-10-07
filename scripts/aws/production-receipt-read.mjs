@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import { STAGE_B, STAGE_B_MODES } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, FULL_RLS_RECEIPT_RELEASE_TAG } from './stage-b-terraform-backend-contract.mjs';
 
@@ -81,6 +83,29 @@ export function readProductionReceiptObject({ run, bucket, key, file }) {
     if (rows.some(row => row.Key === key)) throw error;
     return false;
   }
+}
+
+// Receipt-bound recovery pins the exact retained S3 version and hashes its
+// bytes. It never falls back to listing or to the latest object version.
+export function readVersionedProductionReceiptObject({ run, bucket, key, file, expected }) {
+  assertReceiptLocation(bucket, key);
+  const owner = STAGE_B.account;
+  if (expected) { assert.equal(expected.bucket, bucket); assert.equal(expected.key, key); }
+  if (bucket === STAGE_B.receiptBucket) assertFullRlsReceiptReleaseAuthority({ run, releaseSha: key.split('/')[1] });
+  const head = JSON.parse(run(['s3api', 'head-object', '--bucket', bucket, '--key', key,
+    ...(expected ? ['--version-id', expected.versionId] : []),
+    '--expected-bucket-owner', owner, '--output', 'json', '--no-cli-pager']));
+  assert.ok(typeof head.VersionId === 'string' && head.VersionId && head.VersionId !== 'null', 'Versioned receipt identity is required');
+  assert.ok(typeof head.ETag === 'string' && head.ETag);
+  if (expected) { assert.equal(head.VersionId, expected.versionId); assert.equal(head.ETag, expected.etag); }
+  const response = JSON.parse(run(['s3api', 'get-object', '--bucket', bucket, '--key', key, '--version-id', head.VersionId,
+    '--expected-bucket-owner', owner, '--output', 'json', '--no-cli-pager', file]));
+  assert.equal(response.VersionId, head.VersionId); assert.equal(response.ETag, head.ETag);
+  fs.chmodSync(file, 0o600);
+  const bytes = fs.readFileSync(file);
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  if (expected) assert.equal(expected.objectSha256, sha256);
+  return { bytes, object: { bucket, key, versionId: head.VersionId, etag: head.ETag, objectSha256: sha256 } };
 }
 
 export function receiptAbsentError() {

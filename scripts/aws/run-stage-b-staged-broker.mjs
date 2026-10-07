@@ -20,6 +20,7 @@ const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-ado
 Object.assign(MODES, { 'prepare-registration': 'PREPARATION', 'authorize-registration': 'PREPARATION', register: 'REGISTRATION', 'prepare-policy': 'PREPARATION', 'authorize-policy': 'PREPARATION', 'converge-policy': 'POLICY' });
 Object.assign(MODES, { 'prepare-pruning': 'PREPARATION', 'authorize-pruning': 'PREPARATION', prune: 'POLICY', 'recover-policy': 'POLICY_RECOVERY', 'verify-policy-writer-termination': 'POLICY_RECOVERY' });
 Object.assign(MODES, { 'recover-registration': 'REGISTRATION_RECOVERY', 'recover-publication': 'PUBLICATION_RECOVERY', 'recover-cutover': 'CUTOVER_RECOVERY', 'recover-reconciliation': 'RECONCILIATION_RECOVERY' });
+Object.assign(MODES, { 'prepare-receipt-bound-adoption': 'RECEIPT_ADOPTION' });
 const read = (file, sha256) => {
   assertStageBPrivateFile({ filePath: file, repositoryRoot: root, label: 'Staged broker input' });
   const bytes = fs.readFileSync(file); assert.equal(brokerDigest(bytes), sha256); return JSON.parse(bytes);
@@ -38,7 +39,13 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.equal(authorization, undefined, 'Adoption cannot consume mutation authority');
     assert.equal(planPath, undefined, 'Adoption cannot execute a saved plan');
   }
-  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId'];
+  if (operation === 'prepare-receipt-bound-adoption') {
+    assert.equal(preparation, undefined); assert.equal(authorization, undefined); assert.equal(planPath, undefined);
+    assert.equal(request.prerequisiteChain, undefined, 'Receipt recovery cannot consume caller-built prerequisite evidence');
+    assert.deepEqual(Object.keys(request.receiptRecovery || {}).sort(), ['policyTransactionId', 'registrationTransactionId']);
+    for (const id of Object.values(request.receiptRecovery)) assert.match(id || '', /^[a-f0-9]{64}$/);
+  } else assert.equal(request.receiptRecovery, undefined, 'Receipt recovery requires its explicit operation');
+  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery'];
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
   const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
@@ -53,6 +60,11 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     const ownership = await deps.readBrokerPolicyOwnership(); assert.ok(ownership, 'No held broker policy writer'); return deps.authenticatePriorBrokerWriterTermination(ownership.identity);
   }
   const checkout = await deps.readCheckout();
+  if (operation === 'prepare-receipt-bound-adoption') {
+    const prerequisiteChain = await deps.makeReceiptBoundAdoptions({ registrationId: request.receiptRecovery.registrationTransactionId,
+      policyId: request.receiptRecovery.policyTransactionId }, checkout);
+    return { status: 'RECEIPT_BOUND_ADOPTIONS_PREPARED', sourceSha: checkout.sourceSha, prerequisiteChain };
+  }
   if (operation === 'recover-publication') return recoverBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
   if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);

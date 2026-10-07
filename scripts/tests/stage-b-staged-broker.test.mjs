@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import { canonicalBrokerPolicy, resolvedBrokerEnvironment } from './fixtures/staged-broker.mjs';
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from '../aws/production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerTargetIdentity,
  assertBrokerPublicationPlan, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan, assertBrokerAuthorization,
  assertBrokerPreparation, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, createTerminalPolicySuccessorAdoption, assertTerminalPolicySuccessorState,
+ assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, receiptBoundCheckerDisclosure,
  } from '../aws/stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication as publish, prepareBrokerCutover, executeBrokerAliasCas as cutover, reconcileBrokerAlias as reconcile, brokerTransitionRequired } from '../aws/stage-b-staged-broker.mjs';
 import { BROKER_POLICY_CONVERGENCE, TASK_REGISTRATION, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION_ADDRESSES } from '../aws/stage-b-release-prerequisites.mjs';
+import { STAGE_B_TERRAFORM_BACKEND } from '../aws/stage-b-terraform-backend-contract.mjs';
+import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 const phaseInput = r => Object.hasOwn(r, 'p') ? { ...r, preparation: r.p, authorization: r.auth } : r;
 const executeBrokerPublication = (r, d) => publish(phaseInput(r), d);
 const executeBrokerAliasCas = (r, d) => cutover(phaseInput(r), d);
@@ -46,6 +52,144 @@ function publicationWithTerminalPolicyAdoption(f=terminalPolicyFixture()) {
  p.prerequisiteChain={registration:currentRegistration,policy:f.entry};
  return p;
 }
+
+function receiptBoundFixture() {
+ const f=terminalPolicyFixture(),registrationId='a'.repeat(64),policyId=f.entry.terminal.owner.operationIdentity;
+ const object=(id,seq,body)=>({bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,
+  key:seq===0?`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}.json`:`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}/${String(seq).padStart(4,'0')}.json`,
+  versionId:`version-${seq}-${id.slice(0,4)}`,etag:`"etag-${seq}"`,objectSha256:brokerDigest(body)});
+ const receiptObjects=(id,bodies)=>({reservation:object(id,0,bodies.reservation),intent:object(id,1,bodies.intent),result:object(id,2,bodies.result)});
+ const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>[address,{arn:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`} ]));
+ const regResult={status:'REGISTERED_NONTERMINAL',sourceSha:oldSha,treeSha256:'8'.repeat(64),savedPlanSha256:'5'.repeat(64),preparationSha256:'6'.repeat(64),authorizationSha256:registrationId,authorizedAt:'2026-10-06T11:40:35.838Z',definitions,taskMap:clone(prerequisites.taskMap)};
+ const regReservation={kind:'STAGED_BROKER_RESERVATION',id:registrationId,value:{purpose:TASK_REGISTRATION,nonce:'b'.repeat(64),preparationSha256:regResult.preparationSha256}};
+ const regIntent={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTRATION_INTENT',value:{savedPlanSha256:regResult.savedPlanSha256,authorizedAt:regResult.authorizedAt}};
+ const regReceipt={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTERED',value:regResult};
+ const regEntry={result:regResult,receiptBoundAdoption:{kind:'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION',schemaVersion:1,recoveryMode:'RECEIPT_BOUND',
+  historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,
+  historicalSourceSha:oldSha,historicalPurpose:TASK_REGISTRATION,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),toolingTreeSha256:regResult.treeSha256,savedPlanSha256:regResult.savedPlanSha256,
+  transactionId:registrationId,authorizationId:registrationId,consumerSourceSha:f.release.sourceSha,consumerTreeSha256:f.release.treeSha256,receiptObjects:receiptObjects(registrationId,{reservation:regReservation,intent:regIntent,result:regReceipt}),
+  receiptChainSha256:'0'.repeat(64),registeredOutputCount:12,definitionsSha256:brokerDigest(definitions),liveCorroborationSha256:'c'.repeat(64),originalMutationReplayable:false,originalMutationAuthorizationAvailable:false,freshHandoffOnly:true}};
+ const d=regEntry.receiptBoundAdoption.receiptObjects; regEntry.receiptBoundAdoption.receiptChainSha256=brokerDigest({transactionId:registrationId,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),receiptObjects:d});
+ const intentValue={owner:f.entry.terminal.owner,acquisitionSha256:'0'.repeat(64),savedPlanSha256:f.entry.terminal.savedPlanSha256,authorizedAt:'2026-10-07T11:32:01.389Z',predecessorInventory:[{VersionId:'v9',IsDefaultVersion:false},{VersionId:'v10',IsDefaultVersion:false},{VersionId:'v11',IsDefaultVersion:false},{VersionId:'v12',IsDefaultVersion:true}]};
+ const polReservation={kind:'STAGED_BROKER_RESERVATION',id:policyId,value:{purpose:BROKER_POLICY_CONVERGENCE,nonce:'d'.repeat(64),preparationSha256:f.entry.terminal.preparationSha256}};
+ const polIntent={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_INTENT',value:intentValue};
+ const terminal=clone(f.entry.terminal); terminal.owner.owner='123e4567-e89b-12d3-a456-426614174000'; terminal.treeSha256='7'.repeat(64); terminal.savedPlanSha256=intentValue.savedPlanSha256; terminal.authorizedAt=intentValue.authorizedAt; terminal.reconciliation={state:clone(f.state)};
+ intentValue.owner=clone(terminal.owner);
+ terminal.successorIdentity={policyArn:prerequisites.policyArn,policyVersion:'v13',policy:clone(terminal.policy),taskMap:clone(prerequisites.taskMap)};
+ const polResult={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_CONVERGED',value:terminal};
+ const ownership={identity:clone(terminal.owner),acquisition:{authorizedAt:intentValue.authorizedAt,purpose:BROKER_POLICY_CONVERGENCE,preparationSha256:terminal.preparationSha256,reservationSha256:brokerDigest(polReservation)},mutation:{intentSha256:brokerDigest(intentValue)},status:'RELEASED',terminal:{outcome:'SUCCEEDED',receiptSha256:brokerDigest(terminal)}};
+ intentValue.acquisitionSha256=brokerDigest(ownership.acquisition);
+ ownership.mutation.intentSha256=brokerDigest(intentValue);
+ ownership.terminal.receiptSha256=brokerDigest(terminal);
+ const policyIdDescriptors=receiptObjects(policyId,{reservation:polReservation,intent:polIntent,result:polResult});
+ const successorInventory=[...intentValue.predecessorInventory.map(v=>({...v,IsDefaultVersion:false})),{VersionId:'v13',IsDefaultVersion:true}].sort((a,b)=>a.VersionId.localeCompare(b.VersionId));
+ const state=clone(f.state),corroboration={ownership,policyArn:prerequisites.policyArn,version:'v13',policy:terminal.policy,versions:successorInventory,terraform:state};
+ const recovery={kind:'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION',schemaVersion:1,recoveryMode:'RECEIPT_BOUND',historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,
+  historicalSourceSha:oldSha,historicalPurpose:BROKER_POLICY_CONVERGENCE,historicalPreparationSha256:terminal.preparationSha256,historicalAuthorizationSha256:policyId,historicalResultSha256:brokerDigest(terminal),toolingTreeSha256:terminal.treeSha256,savedPlanSha256:intentValue.savedPlanSha256,transactionId:policyId,authorizationId:policyId,
+  consumerSourceSha:f.release.sourceSha,consumerTreeSha256:f.release.treeSha256,receiptObjects:policyIdDescriptors,receiptChainSha256:'0'.repeat(64),ownershipStatus:'RELEASED',transactionReplayable:false,ownership,
+  predecessorInventory:intentValue.predecessorInventory,predecessor:{policyArn:prerequisites.policyArn,defaultVersion:'v12'},successor:terminal.successorIdentity,policyArn:prerequisites.policyArn,successorVersion:'v13',successorDocumentSha256:brokerDigest(terminal.policy),successorInventory,terraformLineage:state.lineage,terraformSerial:state.serial,terraformStateSha256:state.stateSha256,liveCorroborationSha256:brokerDigest(corroboration)};
+ recovery.receiptChainSha256=brokerDigest({transactionId:policyId,historicalPreparationSha256:terminal.preparationSha256,historicalAuthorizationSha256:policyId,historicalResultSha256:brokerDigest(terminal),receiptObjects:policyIdDescriptors});
+ const policyEntry={terminal,receiptBoundAdoption:recovery};
+ const registrationReceipts={reservation:{envelope:regReservation,value:regReservation.value},intent:{envelope:regIntent,value:regIntent.value},result:{envelope:regReceipt,value:regResult}};
+ const policyReceipts={reservation:{envelope:polReservation,value:polReservation.value},intent:{envelope:polIntent,value:intentValue},result:{envelope:polResult,value:terminal}};
+ return {f,registration:regEntry,policy:policyEntry,registrationReceipts,policyReceipts,ownership,state};
+}
+
+test('receipt-bound adoption keeps missing historical signature explicit and verifies both durable chains',()=>{
+ const x=receiptBoundFixture(),release=x.f.release;
+ assert.equal(assertReceiptBoundRegistrationAdoption(x.registration,release),true);
+ assert.equal(assertReceiptBoundPolicyAdoption(x.policy,release),true);
+ assert.equal(assertReceiptBoundRegistrationReceipts(x.registration,release,x.registrationReceipts),true);
+ assert.equal(assertReceiptBoundPolicyReceipts(x.policy,release,{...x.policyReceipts,ownership:x.ownership}),true);
+ assert.equal(x.registration.receiptBoundAdoption.historicalSignatureVerified,false);
+ assert.equal(x.registration.receiptBoundAdoption.freshIndependentCheckerRequired,true);
+ assert.equal(x.policy.receiptBoundAdoption.historicalSignatureVerified,false);
+ assert.equal(x.policy.receiptBoundAdoption.freshIndependentCheckerRequired,true);
+});
+
+for(const [name,mutate] of [
+ ['historical source',x=>x.receiptBoundAdoption.historicalSourceSha='f'.repeat(40)],
+ ['purpose',x=>x.receiptBoundAdoption.historicalPurpose='STAGE_B_BROKER_POLICY_PRUNING'],
+ ['preparation digest',x=>x.receiptBoundAdoption.historicalPreparationSha256='f'.repeat(64)],
+ ['authorization digest',x=>x.receiptBoundAdoption.historicalAuthorizationSha256='f'.repeat(64)],
+ ['result digest',x=>x.receiptBoundAdoption.historicalResultSha256='f'.repeat(64)],
+ ['tooling tree digest',x=>x.receiptBoundAdoption.toolingTreeSha256='f'.repeat(64)],
+ ['saved plan digest',x=>x.receiptBoundAdoption.savedPlanSha256='f'.repeat(64)],
+ ['transaction id',x=>x.receiptBoundAdoption.transactionId='f'.repeat(64)],
+ ['authorization id',x=>x.receiptBoundAdoption.authorizationId='f'.repeat(64)],
+ ['receipt object version',x=>x.receiptBoundAdoption.receiptObjects.result.versionId='changed'],
+ ['receipt bytes digest',x=>x.receiptBoundAdoption.receiptObjects.result.objectSha256='f'.repeat(64)],
+ ['live output count',x=>x.receiptBoundAdoption.registeredOutputCount=11],
+ ['missing checker requirement',x=>x.receiptBoundAdoption.freshIndependentCheckerRequired=false],
+ ['implicit historical signature claim',x=>x.receiptBoundAdoption.historicalSignatureVerified=true],
+ ['replayable original mutation',x=>x.receiptBoundAdoption.originalMutationReplayable=true],
+]) test(`receipt-bound registration rejects ${name}`,()=>{const x=receiptBoundFixture(),entry=clone(x.registration);mutate(entry);assert.throws(()=>assertReceiptBoundRegistrationAdoption(entry,x.f.release));});
+
+for(const [name,mutate] of [
+ ['historical source',x=>x.receiptBoundAdoption.historicalSourceSha='f'.repeat(40)],
+ ['wrong purpose',x=>x.receiptBoundAdoption.historicalPurpose='STAGE_B_BROKER_POLICY_PRUNING'],
+ ['predecessor version',x=>x.receiptBoundAdoption.predecessor.defaultVersion='v11'],
+ ['successor version',x=>x.receiptBoundAdoption.successorVersion='v12'],
+ ['successor document digest',x=>x.receiptBoundAdoption.successorDocumentSha256='f'.repeat(64)],
+ ['terminal receipt digest',x=>x.receiptBoundAdoption.ownership.terminal.receiptSha256='f'.repeat(64)],
+ ['nonterminal outcome',x=>x.receiptBoundAdoption.ownership.terminal.outcome='RECOVERED_NO_WRITE'],
+ ['held ownership',x=>x.receiptBoundAdoption.ownershipStatus='HELD'],
+ ['replayable transaction',x=>x.receiptBoundAdoption.transactionReplayable=true],
+ ['Terraform lineage',x=>x.receiptBoundAdoption.terraformLineage='f'.repeat(36)],
+ ['Terraform serial',x=>x.receiptBoundAdoption.terraformSerial++],
+ ['Terraform state digest',x=>x.receiptBoundAdoption.terraformStateSha256='f'.repeat(64)],
+ ['consumer SHA',x=>x.receiptBoundAdoption.consumerSourceSha='f'.repeat(40)],
+ ['historical signature claim',x=>x.receiptBoundAdoption.historicalSignatureVerified=true],
+ ['fresh checker requirement',x=>x.receiptBoundAdoption.freshIndependentCheckerRequired=false],
+]) test(`receipt-bound policy rejects ${name}`,()=>{const x=receiptBoundFixture(),entry=clone(x.policy);mutate(entry);assert.throws(()=>assertReceiptBoundPolicyAdoption(entry,x.f.release));});
+
+test('receipt receipt-byte, transaction, result, and ownership links are cross-checked',()=>{
+ const x=receiptBoundFixture(),release=x.f.release;
+ for(const mutate of [v=>v.reservation.value.preparationSha256='f'.repeat(64),v=>v.intent.value.savedPlanSha256='f'.repeat(64),v=>v.result.envelope.id='f'.repeat(64),v=>v.result.value.sourceSha='f'.repeat(40)]){
+  const receipts=clone(x.registrationReceipts);mutate(receipts);assert.throws(()=>assertReceiptBoundRegistrationReceipts(x.registration,release,receipts));
+ }
+ for(const mutate of [v=>v.reservation.value.preparationSha256='f'.repeat(64),v=>v.intent.value.owner.operationIdentity='f'.repeat(64),v=>v.intent.value.predecessorInventory[0].VersionId='v99',v=>v.intent.value.authorizedAt='2026-10-01T00:00:00.000Z',v=>v.result.value.policy.Statement[0].Effect='Deny',v=>v.ownership.status='HELD']){
+  const receipts=clone(x.policyReceipts),ownership=clone(x.ownership);mutate({...receipts,...{ownership}});
+  assert.throws(()=>assertReceiptBoundPolicyReceipts(x.policy,release,{...receipts,ownership}));
+ }
+});
+
+test('fresh checker disclosure binds the new publication package and discloses unavailable historical signatures',async()=>{
+ const x=receiptBoundFixture(),p=publicationWithTerminalPolicyAdoption(x.f);p.prerequisiteChain={registration:x.registration,policy:x.policy};
+ assertBrokerPreparation(p);
+ const disclosure=receiptBoundCheckerDisclosure(p);
+ assert.equal(disclosure.kind,'RECEIPT_BOUND_RECOVERY_DISCLOSURE');assert.equal(disclosure.consumerSourceSha,p.sourceSha);
+ assert.equal(disclosure.intendedOperation,'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN');
+ assert.equal(disclosure.registration.artifactSha256,brokerDigest(x.registration));assert.equal(disclosure.policy.artifactSha256,brokerDigest(x.policy));
+ assert.ok(disclosure.statements.includes('HISTORICAL_CHECKER_SIGNATURE_NOT_REVERIFIED'));
+ assert.ok(disclosure.statements.includes('FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE'));
+ const auth=authorization(p);auth.recoveryDisclosure=disclosure;
+ await assertBrokerAuthorization(auth,p,{verify:async()=>true,now});
+ const tampered=clone(auth);delete tampered.recoveryDisclosure;
+ await assert.rejects(()=>assertBrokerAuthorization(tampered,p,{verify:async()=>true,now}));
+ const changed=clone(auth);changed.recoveryDisclosure.policy.terraform.serial++;
+ await assert.rejects(()=>assertBrokerAuthorization(changed,p,{verify:async()=>true,now}));
+ const ordinary=publicationWithTerminalPolicyAdoption();assert.equal(receiptBoundCheckerDisclosure(ordinary),null);
+});
+
+test('receipt recovery cannot be selected implicitly or through normal adoption',async()=>{
+ const request={operation:'prepare-registration-adoption',receiptRecovery:{registrationTransactionId:'a'.repeat(64),policyTransactionId:'b'.repeat(64)}};
+ await assert.rejects(()=>runStagedBrokerRequest(request,{adapterFactory:()=>{throw new Error('executor must not be constructed');}}),/explicit operation|Unknown\/missing/);
+ const x=receiptBoundFixture();assert.throws(()=>assertRegistrationHandoff({result:x.registration.result},x.f.release));
+ assert.throws(()=>assertTerminalPolicyHandoff({terminal:x.policy.terminal},x.f.release));
+});
+
+test('receipt-bound adoption requires the explicit operation and derives its consumer from protected checkout',async()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'receipt-adoption-dispatch-'));fs.chmodSync(directory,0o700);
+ try{
+  const checkout={sourceSha:'c'.repeat(40),treeSha256:'d'.repeat(64)},calls=[];
+  const result=await runStagedBrokerRequest({operation:'prepare-receipt-bound-adoption',directory,
+    receiptRecovery:{registrationTransactionId:'a'.repeat(64),policyTransactionId:'b'.repeat(64)}},
+    {adapterFactory:()=>({readCheckout:async()=>checkout,makeReceiptBoundAdoptions:async(ids,release)=>{calls.push({ids,release});return {registration:{},policy:{}};}})});
+  assert.deepEqual(calls,[{ids:{registrationId:'a'.repeat(64),policyId:'b'.repeat(64)},release:checkout}]);
+  assert.equal(result.sourceSha,checkout.sourceSha);assert.equal(result.status,'RECEIPT_BOUND_ADOPTIONS_PREPARED');
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
 
 test('terminal policy successor adoption preserves historical provenance and binds exact current release/state',()=>{
  const f=terminalPolicyFixture();assertTerminalPolicyHandoff(f.entry,f.release);

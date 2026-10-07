@@ -591,6 +591,7 @@ export function discoverAwsCliActions() {
       const service = match[1] === "s3api" ? "s3" : match[1] === "elbv2" ? "elasticloadbalancing" : match[1];
       const operation = match[2].split("-").map((part) => part[0].toUpperCase() + part.slice(1)).join("").replaceAll("Db", "DB").replaceAll("Vpc", "VPC").replaceAll("Url", service === 'lambda' ? 'Url' : 'URL').replace("Mfa", "MFA").replace("OpenIdConnect", "OpenIDConnect");
       const action = service === "s3" && operation === "ListObjectsV2" ? "s3:ListBucket"
+        : service === "s3" && operation === "HeadObject" ? "s3:GetObject"
         : service === "ecs" && operation === "Wait" ? "ecs:DescribeServices"
         : `${service}:${service === "lambda" && operation === "Invoke" ? "InvokeFunction" : operation}`;
       if (sourceFile === 'scripts/aws/stage-b-staged-broker-authorization.mjs' && ['kms:Sign', 'sts:GetCallerIdentity'].includes(action)) {

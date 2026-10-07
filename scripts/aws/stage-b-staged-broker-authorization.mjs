@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { brokerDigest, assertBrokerPreparation, assertBrokerAuthorization } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest, assertBrokerPreparation, assertBrokerAuthorization, receiptBoundCheckerDisclosure } from './stage-b-staged-broker-contract.mjs';
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 
 export const brokerAuthorizationMessage = ({ signature, ...body }) => Buffer.from(canonicalJson(body));
@@ -19,8 +19,10 @@ export async function signBrokerAuthorization(preparation, { makerIdentity, huma
   assert.match(maker.Arn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
   assert.equal(makerIdentity, maker.Arn, 'Requested maker differs from authenticated release caller');
   const checkerIdentity = (await caller()).Arn;
+  const recoveryDisclosure = receiptBoundCheckerDisclosure(preparation);
   const body = { schemaVersion: 1, purpose: preparation.purpose, preparationSha256: brokerDigest(preparation), sourceSha: preparation.sourceSha,
-    nonce: randomBytes(32).toString('hex'), issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 30 * 60000).toISOString(), review: { makerIdentity, checkerIdentity, humanReviewId } };
+    nonce: randomBytes(32).toString('hex'), issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 30 * 60000).toISOString(), review: { makerIdentity, checkerIdentity, humanReviewId },
+    ...(recoveryDisclosure ? { recoveryDisclosure } : {}) };
   const signature = { keyArn: STAGE_B.approvalKmsKeyArn, algorithm: STAGE_B_APPROVAL_ALGORITHM, signatureBase64: 'cGVuZGluZw==' };
   // Validate identity and phase before reaching Sign, not only afterward.
   await assertBrokerAuthorization({ ...body, signature }, preparation, { now, verify: async () => true });
