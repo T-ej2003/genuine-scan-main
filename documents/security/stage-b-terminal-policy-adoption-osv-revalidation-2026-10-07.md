@@ -27,7 +27,7 @@ scope, rationale, owner, and exclusive expiry `2026-11-02` are unchanged.
 
 The receipt-bound Stage-B adoption source change updates the same input
 fingerprint to
-`63fb9633e68e6e31f2b7f8a887fb57da5dc4fe9ea1d2dd29e39b8090ad6d1667`.
+`ff011494708c2949ae2ebe78deb10a709d967e4fa99442afc0453e774de05bef`.
 The canonical browser-closure build completed again (3,993 modules, 96 chunks,
 204 runtime packages) and still excludes `braces@3.0.3`. A fresh unfiltered
 OSV Scanner 2.6.0 source report again contains exactly the same single HIGH

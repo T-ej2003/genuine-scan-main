@@ -4,20 +4,34 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
-import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
+import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+
+test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects identity or digest substitution',()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-versioned-receipt-')),file=path.join(directory,'receipt.json');
+ const id='a'.repeat(64),key=stageBApplyAttemptS3Key(id),bytes=Buffer.from('{"id":"receipt"}'),objectSha256=createHash('sha256').update(bytes).digest('hex');
+ const run=args=>{if(args[1]==='head-object')return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});if(args[1]==='get-object'){fs.writeFileSync(args.at(-1),bytes);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}throw new Error('unexpected S3 operation');};
+ try{
+  const result=readVersionedStageBReceiptObject({run,id,key,file});
+  assert.deepEqual(result.object,{bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key,versionId:'version-1',etag:'"etag"',objectSha256});
+  assert.equal(result.bytes.toString(),bytes.toString());
+  for(const expected of [{...result.object,versionId:'version-2'},{...result.object,etag:'"other"'},{...result.object,objectSha256:'f'.repeat(64)}]) assert.throws(()=>readVersionedStageBReceiptObject({run,id,key,file,expected}));
+  assert.throws(()=>readVersionedStageBReceiptObject({run,id,key:'unreviewed/key',file}));
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
 let files;

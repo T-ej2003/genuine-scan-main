@@ -1,11 +1,11 @@
-import { readProductionReceiptObject, readVersionedProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
+import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
@@ -183,12 +183,30 @@ export function assertRegistrationRecoveryReadCommand(args) {
   assert.ok(reads.includes(`${args[0]}:${args[1]}`), 'Registration recovery cannot mutate AWS resources');
 }
 
-function readVersionedStageBReceipt({ run, id, key, directory, expected, sequence }) {
+export function readVersionedStageBReceiptObject({ run, id, key, file, expected }) {
   assert.match(id || '', /^[a-f0-9]{64}$/);
+  const bucket = STAGE_B_TERRAFORM_BACKEND.bucketName;
+  assert.ok(key === stageBApplyAttemptS3Key(id) || [1, 2, 3].some(sequence => key === stageBAttemptStepS3ObjectKey(id, sequence)), 'Receipt key is outside this transaction');
+  if (expected) { assert.equal(expected.bucket, bucket); assert.equal(expected.key, key); }
+  const head = JSON.parse(run(['s3api', 'head-object', '--bucket', bucket, '--key', key,
+    ...(expected ? ['--version-id', expected.versionId] : []), '--expected-bucket-owner', STAGE_B.account,
+    '--output', 'json', '--no-cli-pager']));
+  assert.ok(typeof head.VersionId === 'string' && head.VersionId && head.VersionId !== 'null', 'Versioned receipt identity is required');
+  assert.ok(typeof head.ETag === 'string' && head.ETag);
+  if (expected) { assert.equal(head.VersionId, expected.versionId); assert.equal(head.ETag, expected.etag); }
+  const response = JSON.parse(run(['s3api', 'get-object', '--bucket', bucket, '--key', key, '--version-id', head.VersionId,
+    '--expected-bucket-owner', STAGE_B.account, '--output', 'json', '--no-cli-pager', file]));
+  assert.equal(response.VersionId, head.VersionId); assert.equal(response.ETag, head.ETag);
+  fs.chmodSync(file, 0o600);
+  const bytes = fs.readFileSync(file), objectSha256 = createHash('sha256').update(bytes).digest('hex');
+  if (expected) assert.equal(expected.objectSha256, objectSha256);
+  return { bytes, object: { bucket, key, versionId: head.VersionId, etag: head.ETag, objectSha256 } };
+}
+
+function readVersionedStageBReceipt({ run, id, key, directory, expected, sequence }) {
   const file = path.join(directory, `receipt-version-${randomUUID()}.json`);
   try {
-    const { bytes, object } = readVersionedProductionReceiptObject({ run, bucket: STAGE_B_TERRAFORM_BACKEND.bucketName,
-      key, file, expected });
+    const { bytes, object } = readVersionedStageBReceiptObject({ run, id, key, file, expected });
     const envelope = JSON.parse(bytes);
     if (sequence === 0) {
       assert.deepEqual(Object.keys(envelope).sort(), ['id', 'kind', 'value']);

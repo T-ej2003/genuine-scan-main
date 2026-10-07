@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readProductionReceiptObject, readVersionedProductionReceiptObject, listProductionReceiptObjects } from '../aws/production-receipt-read.mjs';
+import { readProductionReceiptObject, listProductionReceiptObjects } from '../aws/production-receipt-read.mjs';
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { createHash } from 'node:crypto';
 import { STAGE_B_TERRAFORM_BACKEND as backend } from '../aws/stage-b-terraform-backend-contract.mjs';
 const bucket=backend.bucketName, key=`${backend.applyAttemptPrefix}/${'a'.repeat(64)}/0002.json`;
 const denied=()=>Object.assign(new Error('denied'),{stderr:'(AccessDenied)'});
@@ -37,15 +34,3 @@ for(const [name,edit] of [
  ['missing tag',r=>r.Tags=[]],['different valid SHA',r=>r.Tags[0].Value='b'.repeat(40)],['non-SHA tag',r=>r.Tags[0].Value='internal'],['wrong role',r=>r.Arn+='-other'],['duplicate tag',r=>r.Tags.push({Key:'msCQRreceiptReleaseSha',Value:release})],['session-tag override trust',r=>r.AssumeRolePolicyDocument.Statement.push({Effect:'Allow',Principal:{AWS:'*'},Action:'sts:TagSession'})]
 ])test(`receipt authority fails closed for ${name}`,()=>{const r=role();edit(r);let s3=0;const run=args=>{if(args[0]==='iam')return{Role:r};s3++;throw new Error('S3 unreachable');};assert.throws(()=>listProductionReceiptObjects({run,bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',prefix:`rls-receipts/${release}/full-rls-verification/`}));assert.equal(s3,0);});
 test('missing independent IAM binding proof cannot become absence',()=>{let s3=0;assert.throws(()=>readProductionReceiptObject({run:args=>{if(args[0]==='iam')throw denied();s3++;return rows();},bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',key:`rls-receipts/${release}/full-rls-verification/receipt.json`,file:'unused'}),/denied/);assert.equal(s3,0);});
-
-test('receipt-bound reads pin the exact S3 version and byte digest',()=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'receipt-version-test-')),file=path.join(dir,'receipt.json'),bytes=Buffer.from('{"receipt":true}'),objectSha256=createHash('sha256').update(bytes).digest('hex');
- const bucket=backend.bucketName,key=`${backend.applyAttemptPrefix}/${'a'.repeat(64)}.json`;
- const run=args=>{if(args[1]==='head-object')return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});if(args[1]==='get-object'){fs.writeFileSync(args.at(-1),bytes);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}throw new Error('unexpected API');};
- try{const result=readVersionedProductionReceiptObject({run,bucket,key,file});assert.equal(result.bytes.toString(),bytes.toString());assert.deepEqual(result.object,{bucket,key,versionId:'version-1',etag:'"etag"',objectSha256});
-  assert.throws(()=>readVersionedProductionReceiptObject({run,bucket,key,file,expected:{...result.object,versionId:'version-2'}}));
-  assert.throws(()=>readVersionedProductionReceiptObject({run,bucket,key,file,expected:{...result.object,objectSha256:'f'.repeat(64)}}));
-  assert.throws(()=>readVersionedProductionReceiptObject({run,bucket,key,file,expected:{...result.object,etag:'"different"'}}));
-  assert.throws(()=>readVersionedProductionReceiptObject({run,bucket,key:'other/key',file,expected:result.object}),/Unreviewed receipt namespace/);
- }finally{fs.rmSync(dir,{recursive:true,force:true});}
-});
