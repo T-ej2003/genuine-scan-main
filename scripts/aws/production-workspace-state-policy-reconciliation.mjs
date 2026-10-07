@@ -286,11 +286,13 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
       }
       throw error;
     }
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
     await deleteOnce();
   } else if (deletionPrewriteFailed && !deletionRetryAttempt && !deletionComplete) {
     assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reauthenticateSource();
     const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, preparation), sleep);
     if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed during recovery.");
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
     const retryAttempt = await journal.create(authorization, "deletion-retry-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", new Date(clock()).toISOString()));
     if (!retryAttempt) throw new Error("WorkspaceState deletion retry-attempt raced another executor.");
     await deleteOnce();
@@ -309,6 +311,7 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
     return Object.freeze({ status: "EXPECTED_POST_STATE_RECOVERED", iamDeleteCount: 0, iamCreateCount: 0, postState: recovered });
   }
   reauthenticateSource(); const capacity = await observe(readLiveState, desired); if (!stateMatchesAfterDeletion(capacity, preparation)) throw new Error("WorkspaceState capacity state changed before successor publication.");
+  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
   const createAttempt = await journal.create(authorization, "creation-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", new Date(clock()).toISOString())); if (!createAttempt) throw new Error("WorkspaceState creation-attempt raced another executor.");
   let response;
   try { iamCreateCount += 1; response = await createPolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }

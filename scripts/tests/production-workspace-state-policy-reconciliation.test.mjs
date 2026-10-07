@@ -137,6 +137,29 @@ test("interruption after deletion reconciles without a second deletion", async (
   assert.deepEqual([run.box.deletes, run.box.creates], [1, 1]);
 });
 
+test("expired authorization cannot authorize successor creation after deletion", async () => {
+  let clock = now;
+  const run = executor({
+    now: () => clock,
+    deletePolicyVersion: async () => { run.box.deletes += 1; run.box.live = afterDelete(); clock = new Date(now.getTime() + CONTRACT.maxAgeMs + 1); },
+  });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), /stale/);
+  assert.deepEqual([run.box.deletes, run.box.creates], [1, 0]);
+  assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-complete.json")), true);
+  assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "creation-attempt.json")), false);
+});
+
+test("expired authorization after the final deletion CAS cannot authorize deletion", async () => {
+  let clock = now; let reads = 0;
+  const run = executor({
+    now: () => clock,
+    readLiveState: async () => { if (++reads === 2) clock = new Date(now.getTime() + CONTRACT.maxAgeMs + 1); return run.box.live; },
+  });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), /stale/);
+  assert.deepEqual([run.box.deletes, run.box.creates], [0, 0]);
+  assert.equal(run.journal.values.has(workspaceStateJournalKey(run.args.preparation.operationId, "deletion-attempt.json")), true);
+});
+
 test("ambiguous deletion pre-state is never retried", async () => {
   const run = executor({ deletePolicyVersion: async () => { run.box.deletes += 1; throw new Error("unknown"); } });
   await assert.rejects(() => executeWorkspaceStateReconciliation(run.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS");

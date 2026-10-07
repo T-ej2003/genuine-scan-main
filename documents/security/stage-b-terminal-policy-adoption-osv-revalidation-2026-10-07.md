@@ -64,12 +64,23 @@ The historical policy tooling-tree recomputation updates the fingerprint to
 It adds only source-to-tree authentication at receipt-bound handoff creation
 and consumption. The accepted finding and expiry remain unchanged.
 
-The WorkspaceState policy-capacity transaction update rebinds the fingerprint
-to `8d18bc437e1b2af948109498dc1196003ba18d3de0d2fe443e075a8b324873e1`. A fresh
-unfiltered OSV Scanner 2.6.0 report matched the prior PR #640 hosted report
-exactly: one HIGH dev-only `braces@3.0.3` finding, GHSA-vfj7-8cjw-p6xm /
-CVE-2026-93687. The fresh canonical browser build transformed 3,993 modules
-into 96 chunks and resolved 204 packages; `braces@3.0.3` was absent. Only
-`reachability.inputsSha256` changed; the accepted advisory, package/version,
-scope, rationale, owner, creation date, and exclusive expiry 2026-11-02 are
-unchanged.
+The earlier PR #640 WorkspaceState policy-capacity review was historically
+bound to `8d18bc437e1b2af948109498dc1196003ba18d3de0d2fe443e075a8b324873e1`.
+That digest is superseded and is not the final executable/build-input review.
+
+## Final frozen PR #640 input revalidation
+
+Date: 2026-10-08 UTC. After hostile review and final relevant tests, the
+implementation was frozen. The canonical `reachabilityInputsSha256(process.cwd())`
+result was `56358825a3f222b8161f16aa87a72d59a651797881ef183574e7fb229d9826af`.
+An unfiltered OSV Scanner 2.6.0 source scan produced the same finding set as the
+previous report: one HIGH dev-only `braces@3.0.3` finding,
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The fresh canonical browser-closure
+build transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` was absent. The exact hosted OSV/runtime gate passed against
+that fresh report and fingerprint.
+
+Only `reachability.inputsSha256` changed in the acceptance. Advisory identity,
+package/version, scope, rationale, owner, creation date, execution claims, and
+exclusive expiry `2026-11-02` are unchanged. The current acceptance and this
+final revalidation record both bind the digest above.

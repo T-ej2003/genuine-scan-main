@@ -10,6 +10,8 @@ An existing reservation can be adopted only by a fresh authorization for the sam
 
 When an adopted reservation already has progress records, each record must bind to the current authorization before normal reconciliation resumes. If the final pre-delete read exhausts only its transient retry budget, a durable prewrite-failure record proves that `DeletePolicyVersion` was not called; restart may perform one bounded CAS and write attempt, while a recorded retry attempt is never replayed.
 
+The checker authorization is revalidated after the final live-state CAS and before each policy mutation. If it expires after the approved deletion, reconciliation stops before creating the successor; an expired authorization never authorizes a write.
+
 Use a clean protected-main checkout and private output directory (`umask 077`):
 
 ```sh
