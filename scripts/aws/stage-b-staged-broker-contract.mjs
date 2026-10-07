@@ -80,7 +80,7 @@ export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, ca
     assert.equal(fn.change.after.source_code_hash, Buffer.from(packageSha256, 'hex').toString('base64'));
     equal(JSON.parse(after.BROKER_TASK_DEFINITIONS_JSON), prerequisiteChain.registration.result.taskMap);
     if (prerequisiteChain.registration.result.sourceSha !== sourceSha) assertRegistrationHandoff(prerequisiteChain.registration, { sourceSha, treeSha256 });
-    equal(prerequisites.policy, prerequisiteChain.policy.result.policy);
+    equal(prerequisites.policy, prerequisiteChain.policy.adoption ? prerequisiteChain.policy.terminal.policy : prerequisiteChain.policy.result.policy);
   } else {
     equal({ ...oldExpected, releaseSha: sourceSha }, newExpected, "Publication changes other approval inputs");
     equal({ ...before, BROKER_APPROVAL_EXPECTED_JSON: after.BROKER_APPROVAL_EXPECTED_JSON }, after, "Publication changes task map/configuration");
@@ -151,6 +151,91 @@ export function assertRegistrationHandoff(entry, release) {
   assert.equal(adoption.definitionsSha256, brokerDigest(result.definitions));
 }
 
+export function assertHistoricalPolicyRegistrationHandoff(entry, policyRelease) {
+  if (!entry.adoption) {
+    assert.equal(entry.preparation.sourceSha, policyRelease.sourceSha);
+    assert.equal(entry.preparation.treeSha256, policyRelease.treeSha256);
+  }
+  assertRegistrationHandoff(entry, policyRelease);
+}
+
+export function assertTerminalPolicyHandoff(entry, release) {
+  keys(entry, ['preparation', 'authorization', 'result', 'terminal', 'adoption']);
+  const { preparation: p, authorization, result, terminal, adoption } = entry;
+  assert.equal(p.purpose, 'STAGE_B_BROKER_POLICY_CONVERGENCE');
+  assert.equal(authorization.purpose, p.purpose); assert.equal(authorization.sourceSha, p.sourceSha);
+  assert.equal(authorization.preparationSha256, brokerDigest(p));
+  assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
+  assert.equal(result.preparationSha256, brokerDigest(p)); assert.equal(result.authorizationSha256, brokerDigest(authorization));
+  assert.equal(result.savedPlanSha256, p.savedPlanSha256);
+  assert.equal(result.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL');
+  assert.equal(terminal.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL');
+  assert.equal(terminal.sourceSha, p.sourceSha); assert.equal(terminal.treeSha256, p.treeSha256);
+  assert.equal(terminal.preparationSha256, brokerDigest(p)); assert.equal(terminal.authorizationSha256, brokerDigest(authorization));
+  assert.equal(terminal.owner.policyArn, STAGE_B_BROKER_POLICY.arn);
+  assert.match(terminal.successorIdentity?.policyVersion || '', /^v[1-9][0-9]*$/);
+  assertStageBBrokerPolicyDocument(terminal.policy);
+  equal(result.policy, terminal.policy);
+  if (p.sourceSha === release.sourceSha) {
+    assert.equal(adoption, undefined); assert.equal(p.treeSha256, release.treeSha256); return;
+  }
+  keys(adoption, ['kind', 'schemaVersion', 'historicalSourceSha', 'consumerSourceSha', 'consumerTreeSha256',
+    'historicalPreparationSha256', 'historicalAuthorizationSha256', 'historicalResultSha256', 'historicalTerminalReceiptSha256',
+    'ownershipStatus', 'transactionReplayable', 'policyArn', 'successorVersion', 'successorDocumentSha256',
+    'successorInventory', 'terraformLineage', 'terraformSerial', 'terraformStateSha256']);
+  assert.equal(adoption.kind, 'TERMINAL_POLICY_SUCCESSOR_ADOPTION'); assert.equal(adoption.schemaVersion, 1);
+  assert.equal(adoption.historicalSourceSha, p.sourceSha); assert.equal(adoption.consumerSourceSha, release.sourceSha);
+  assert.equal(adoption.consumerTreeSha256, release.treeSha256);
+  assert.equal(adoption.historicalPreparationSha256, brokerDigest(p));
+  assert.equal(adoption.historicalAuthorizationSha256, brokerDigest(authorization));
+  assert.equal(adoption.historicalResultSha256, brokerDigest(result));
+  assert.equal(adoption.historicalTerminalReceiptSha256, brokerDigest(terminal));
+  assert.equal(adoption.ownershipStatus, 'RELEASED'); assert.equal(adoption.transactionReplayable, false);
+  assert.equal(adoption.policyArn, STAGE_B_BROKER_POLICY.arn); assert.equal(adoption.successorVersion, terminal.successorIdentity.policyVersion);
+  assert.equal(adoption.successorDocumentSha256, brokerDigest(terminal.policy));
+  assert.ok(Array.isArray(adoption.successorInventory) && adoption.successorInventory.length <= 5);
+  assert.equal(new Set(adoption.successorInventory.map(v => v.VersionId)).size, adoption.successorInventory.length);
+  for (const item of adoption.successorInventory) {
+    keys(item, ['VersionId', 'IsDefaultVersion']); assert.match(item.VersionId || '', /^v[1-9][0-9]*$/);
+    assert.equal(typeof item.IsDefaultVersion, 'boolean');
+  }
+  equal(adoption.successorInventory, [...adoption.successorInventory].sort((a, b) => a.VersionId.localeCompare(b.VersionId)));
+  equal(adoption.successorInventory.filter(v => v.IsDefaultVersion).map(v => v.VersionId), [adoption.successorVersion]);
+  assert.match(adoption.terraformLineage || '', /^[a-f0-9-]{36}$/);
+  assert.ok(Number.isSafeInteger(adoption.terraformSerial) && adoption.terraformSerial >= 0);
+  hash(adoption.terraformStateSha256);
+}
+
+export function createTerminalPolicySuccessorAdoption(entry, release, state, successorInventory) {
+  assert.notEqual(entry.preparation.sourceSha, release.sourceSha, 'Same-main policy results need no adoption');
+  const adopted = { ...entry, adoption: {
+    kind: 'TERMINAL_POLICY_SUCCESSOR_ADOPTION', schemaVersion: 1,
+    historicalSourceSha: entry.preparation.sourceSha, consumerSourceSha: release.sourceSha, consumerTreeSha256: release.treeSha256,
+    historicalPreparationSha256: brokerDigest(entry.preparation), historicalAuthorizationSha256: brokerDigest(entry.authorization),
+    historicalResultSha256: brokerDigest(entry.result), historicalTerminalReceiptSha256: brokerDigest(entry.terminal),
+    ownershipStatus: 'RELEASED', transactionReplayable: false,
+    policyArn: STAGE_B_BROKER_POLICY.arn, successorVersion: entry.terminal.successorIdentity.policyVersion,
+    successorDocumentSha256: brokerDigest(entry.terminal.policy), successorInventory: structuredClone(successorInventory), terraformLineage: state.lineage,
+    terraformSerial: state.serial, terraformStateSha256: state.stateSha256,
+  } };
+  assertTerminalPolicyHandoff(adopted, release);
+  return adopted;
+}
+
+export function assertTerminalPolicySuccessorState(entry, release, { ownership, live, terraform }) {
+  assertTerminalPolicyHandoff(entry, release);
+  const { adoption, terminal } = entry;
+  assert.equal(ownership.status, 'RELEASED'); assert.equal(ownership.terminal?.outcome, 'SUCCEEDED');
+  equal(ownership.identity, terminal.owner); assert.ok(ownership.mutation, 'Terminal success requires committed intent');
+  assert.equal(ownership.terminal.receiptSha256, brokerDigest(terminal));
+  assert.equal(live.policyArn, adoption.policyArn); assert.equal(live.version, adoption.successorVersion);
+  equal(live.policy, terminal.policy);
+  equal(live.versions, adoption.successorInventory);
+  equal({ lineage: terraform.lineage, serial: terraform.serial, stateSha256: terraform.stateSha256 },
+    { lineage: adoption.terraformLineage, serial: adoption.terraformSerial, stateSha256: adoption.terraformStateSha256 });
+  assert.equal(terraform.policyArn, adoption.policyArn); equal(terraform.policy, terminal.policy);
+}
+
 export function assertBrokerPreparation(p) {
   const fields = ["schemaVersion", "purpose", "sourceSha", "treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "state", "packageSha256", "alias", "prerequisites", "configuration", "canonicalAddresses", "publication", "target"];
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
@@ -176,14 +261,21 @@ export function assertBrokerPreparation(p) {
     for (const phase of ['registration', 'policy']) {
       const chain = p.prerequisiteChain[phase];
       if (phase === 'registration') { assertRegistrationHandoff(chain, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); continue; }
-      keys(chain, ['preparation', 'authorization', 'result']);
-      assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);
-      assert.equal(chain.preparation.treeSha256, p.treeSha256);
-      assert.equal(chain.result.preparationSha256, brokerDigest(chain.preparation));
-      assert.equal(chain.result.authorizationSha256, brokerDigest(chain.authorization));
+      if (phase === 'policy' && chain.adoption) {
+        assertTerminalPolicyHandoff(chain, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+        equal(chain.terminal.policy, p.prerequisites.policy);
+        equal({ lineage: chain.adoption.terraformLineage, serial: chain.adoption.terraformSerial,
+          stateSha256: chain.adoption.terraformStateSha256 }, p.state, 'Terminal policy adoption Terraform state changed');
+      } else {
+        keys(chain, ['preparation', 'authorization', 'result']);
+        assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);
+        assert.equal(chain.preparation.treeSha256, p.treeSha256);
+        assert.equal(chain.result.preparationSha256, brokerDigest(chain.preparation));
+        assert.equal(chain.result.authorizationSha256, brokerDigest(chain.authorization));
+      }
     }
     equal(p.prerequisiteChain.registration.result.taskMap, p.prerequisites.taskMap);
-    equal(p.prerequisiteChain.policy.result.policy, p.prerequisites.policy);
+    equal(p.prerequisiteChain.policy.adoption ? p.prerequisiteChain.policy.terminal.policy : p.prerequisiteChain.policy.result.policy, p.prerequisites.policy);
   }
   if (p.purpose === BROKER_PUBLICATION) { assert.equal(p.target, null); assert.equal(p.publication, null); }
   else {

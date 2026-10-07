@@ -5,14 +5,129 @@ import { canonicalBrokerPolicy, resolvedBrokerEnvironment } from './fixtures/sta
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from '../aws/production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerTargetIdentity,
  assertBrokerPublicationPlan, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan, assertBrokerAuthorization,
+ assertBrokerPreparation, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, createTerminalPolicySuccessorAdoption, assertTerminalPolicySuccessorState,
  } from '../aws/stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication as publish, prepareBrokerCutover, executeBrokerAliasCas as cutover, reconcileBrokerAlias as reconcile, brokerTransitionRequired } from '../aws/stage-b-staged-broker.mjs';
+import { BROKER_POLICY_CONVERGENCE, TASK_REGISTRATION, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const phaseInput = r => Object.hasOwn(r, 'p') ? { ...r, preparation: r.p, authorization: r.auth } : r;
 const executeBrokerPublication = (r, d) => publish(phaseInput(r), d);
 const executeBrokerAliasCas = (r, d) => cutover(phaseInput(r), d);
 const reconcileBrokerAlias = (r, d) => reconcile(phaseInput(r), d);
 const clone = structuredClone;
 import { rig, ready, configuration, preparation, authorization, cutoverPlan, publicationPlan, envelope, change, tfFn, tfAlias, alias, state, env, prerequisites, sourceSha, oldSha, packageSha256, now, target } from './fixtures/staged-broker-runtime.mjs';
+
+function terminalPolicyFixture() {
+ const treeSha256='9'.repeat(64), historicalState={...state,serial:117,stateSha256:'d'.repeat(64)}, release={sourceSha,treeSha256};
+ const registrationPreparation={purpose:TASK_REGISTRATION,sourceSha:oldSha,treeSha256:'8'.repeat(64)}, registrationAuthorization={schemaVersion:1};
+ const historicalRegistration={preparation:registrationPreparation,authorization:registrationAuthorization,result:{sourceSha:oldSha,treeSha256:registrationPreparation.treeSha256,
+   preparationSha256:brokerDigest(registrationPreparation),authorizationSha256:brokerDigest(registrationAuthorization),taskMap:clone(prerequisites.taskMap),definitions:{}}};
+ const p=preparation(); p.schemaVersion=2;p.purpose=BROKER_POLICY_CONVERGENCE;p.sourceSha=oldSha;p.treeSha256='7'.repeat(64);p.state={...state,serial:110};p.publication=null;
+ registrationPreparation.treeSha256=p.treeSha256;historicalRegistration.result.treeSha256=p.treeSha256;
+ historicalRegistration.result.preparationSha256=brokerDigest(registrationPreparation);
+ p.prerequisites={...clone(prerequisites),policyVersion:'v12'};p.target={policy:deriveBrokerPolicy(p.prerequisites.policy,historicalRegistration.result.taskMap)};
+ p.prerequisiteChain={registration:historicalRegistration};
+ const auth=authorization(p);auth.purpose=p.purpose;auth.sourceSha=oldSha;auth.preparationSha256=brokerDigest(p);
+ const result={status:'BROKER_POLICY_CONVERGED_NONTERMINAL',sourceSha:oldSha,treeSha256:p.treeSha256,preparationSha256:brokerDigest(p),authorizationSha256:brokerDigest(auth),savedPlanSha256:p.savedPlanSha256,policy:clone(p.target.policy),authorizedAt:now.toISOString()};
+ const owner={policyArn:prerequisites.policyArn,operationIdentity:brokerDigest(auth),sourceSha:oldSha,owner:'owner-1',generation:1};
+ const terminal={...clone(result),owner,successorIdentity:{policyVersion:'v13'}};
+ const inventory=[{VersionId:'v13',IsDefaultVersion:true}];
+ const entry=createTerminalPolicySuccessorAdoption({preparation:p,authorization:auth,result,terminal},release,historicalState,inventory);
+ const ownership={identity:owner,status:'RELEASED',terminal:{outcome:'SUCCEEDED',receiptSha256:brokerDigest(terminal)},mutation:{intentSha256:'e'.repeat(64)}};
+ const live={policyArn:prerequisites.policyArn,version:'v13',policy:clone(terminal.policy),versions:inventory};
+ return {entry,release,state:historicalState,ownership,live};
+}
+function publicationWithTerminalPolicyAdoption(f=terminalPolicyFixture()) {
+ const currentRegistrationPreparation={purpose:TASK_REGISTRATION,sourceSha,treeSha256:f.release.treeSha256};
+ const currentRegistrationAuthorization={schemaVersion:1};
+ const currentRegistration={preparation:currentRegistrationPreparation,authorization:currentRegistrationAuthorization,result:{sourceSha,treeSha256:f.release.treeSha256,
+  preparationSha256:brokerDigest(currentRegistrationPreparation),authorizationSha256:brokerDigest(currentRegistrationAuthorization),taskMap:clone(prerequisites.taskMap),definitions:{}}};
+ const p=preparation();p.schemaVersion=2;p.sourceSha=sourceSha;p.treeSha256=f.release.treeSha256;p.state=clone(f.state);
+ p.prerequisites={...clone(prerequisites),policyVersion:'v13',policy:clone(f.entry.terminal.policy)};
+ p.prerequisiteChain={registration:currentRegistration,policy:f.entry};
+ return p;
+}
+
+test('terminal policy successor adoption preserves historical provenance and binds exact current release/state',()=>{
+ const f=terminalPolicyFixture();assertTerminalPolicyHandoff(f.entry,f.release);
+ assertTerminalPolicySuccessorState(f.entry,f.release,{ownership:f.ownership,live:f.live,terraform:{...f.state,policyArn:prerequisites.policyArn,policy:f.entry.terminal.policy}});
+ const sameSource=clone(f.entry);sameSource.adoption=undefined;
+ assertTerminalPolicyHandoff(sameSource,{sourceSha:oldSha,treeSha256:sameSource.preparation.treeSha256});
+ const p=publicationWithTerminalPolicyAdoption(f);assertBrokerPreparation(p);
+ assertBrokerPublicationPlan(publicationPlan(),p);
+});
+
+function adoptedRegistrationForPolicy(f=terminalPolicyFixture()) {
+ const entry=clone(f.entry.preparation.prerequisiteChain.registration),p=f.entry.preparation;
+ entry.preparation.sourceSha='a'.repeat(40);entry.preparation.treeSha256='6'.repeat(64);entry.preparation.savedPlanSha256='5'.repeat(64);
+ entry.result.sourceSha=entry.preparation.sourceSha;entry.result.treeSha256=entry.preparation.treeSha256;
+ entry.result.preparationSha256=brokerDigest(entry.preparation);entry.result.savedPlanSha256=entry.preparation.savedPlanSha256;
+ entry.adoption={kind:'REGISTERED_OUTPUT_ADOPTION',schemaVersion:1,
+  transaction:{sourceSha:entry.preparation.sourceSha,treeSha256:entry.preparation.treeSha256,
+   preparationSha256:brokerDigest(entry.preparation),authorizationSha256:brokerDigest(entry.authorization),resultSha256:brokerDigest(entry.result)},
+  release:{sourceSha:p.sourceSha,treeSha256:p.treeSha256},imageImpactSha256:'4'.repeat(64),definitionsSha256:brokerDigest(entry.result.definitions)};
+ return {f,entry};
+}
+test('historical policy preparation accepts direct same-source registration evidence',()=>{
+ const f=terminalPolicyFixture(),registration=f.entry.preparation.prerequisiteChain.registration;
+ registration.preparation.treeSha256=f.entry.preparation.treeSha256;registration.result.treeSha256=registration.preparation.treeSha256;
+ registration.result.preparationSha256=brokerDigest(registration.preparation);
+ assertHistoricalPolicyRegistrationHandoff(registration,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256});
+ assertBrokerPreparation(f.entry.preparation);
+});
+test('historical policy preparation accepts an authenticated older registration adoption',()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();
+ f.entry.preparation.prerequisiteChain.registration=entry;
+ assert.notEqual(entry.preparation.sourceSha,f.entry.preparation.sourceSha);
+ assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256});
+ assertBrokerPreparation(f.entry.preparation);
+});
+test('historical policy registration cannot cross source/tree without its canonical adoption',()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();delete entry.adoption;
+ assert.throws(()=>assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256}));
+});
+for(const [name,mutate] of [
+ ['tampered adoption',entry=>entry.adoption.transaction.resultSha256='0'.repeat(64)],
+ ['wrong consumer',entry=>entry.adoption.release.sourceSha='c'.repeat(40)],
+ ['substituted registration outputs',entry=>entry.result.taskMap={...entry.result.taskMap,backend:'substituted'}],
+ ['tampered original registration source',entry=>entry.preparation.sourceSha='b'.repeat(40)],
+]) test(`historical policy registration rejects ${name}`,()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();mutate(entry);
+ assert.throws(()=>assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256}));
+});
+
+for(const [name,mutate] of [
+ ['historical preparation source',f=>f.entry.preparation.sourceSha=sourceSha],
+ ['adoption consumer source',f=>f.entry.adoption.consumerSourceSha=oldSha],
+ ['authorization binding',f=>f.entry.authorization.signature.signatureBase64='dGFtcGVy'],
+ ['terminal receipt',f=>f.entry.terminal.policy.Statement[0].Effect='Deny'],
+ ['successor version',f=>f.entry.adoption.successorVersion='v12'],
+ ['successor document hash',f=>f.entry.adoption.successorDocumentSha256='0'.repeat(64)],
+ ['successor inventory',f=>f.entry.adoption.successorInventory[0].IsDefaultVersion=false],
+ ['caller-selected historical source',f=>f.entry.adoption.historicalSourceSha='c'.repeat(40)],
+ ['unsupported pruning purpose',f=>{f.entry.preparation.purpose='STAGE_B_BROKER_POLICY_PRUNING';f.entry.authorization.purpose=f.entry.preparation.purpose;}],
+ ['transaction replayability',f=>f.entry.adoption.transactionReplayable=true],
+]) test(`terminal policy adoption rejects tampered ${name}`,()=>{
+ const f=terminalPolicyFixture();mutate(f);assert.throws(()=>assertTerminalPolicyHandoff(f.entry,f.release));
+});
+
+for(const [name,mutate] of [
+ ['wrong live policy version',f=>f.live.version='v12'],
+ ['wrong live policy document',f=>f.live.policy.Statement[0].Effect='Deny'],
+ ['wrong Terraform serial',f=>f.state.serial++],
+ ['wrong Terraform state hash',f=>f.state.stateSha256='0'.repeat(64)],
+ ['held ownership',f=>f.ownership.status='HELD'],
+ ['nonterminal transaction',f=>f.ownership.terminal.outcome='RECOVERED_NO_WRITE'],
+]) test(`terminal policy adoption rejects ${name}`,()=>{
+ const f=terminalPolicyFixture();mutate(f);assert.throws(()=>assertTerminalPolicySuccessorState(f.entry,f.release,{ownership:f.ownership,live:f.live,terraform:{...f.state,policyArn:prerequisites.policyArn,policy:f.entry.terminal.policy}}));
+});
+test('terminal policy adoption rejects a mismatched Terraform policy document',()=>{
+ const f=terminalPolicyFixture(),policy=clone(f.entry.terminal.policy);policy.Statement[0].Effect='Deny';
+ assert.throws(()=>assertTerminalPolicySuccessorState(f.entry,f.release,{ownership:f.ownership,live:f.live,terraform:{...f.state,policyArn:prerequisites.policyArn,policy}}));
+});
+
+test('terminal policy adoption is not reusable by a later release SHA',()=>{
+ const f=terminalPolicyFixture();assert.throws(()=>assertTerminalPolicyHandoff(f.entry,{sourceSha:'f'.repeat(40),treeSha256:f.release.treeSha256}));
+});
 test('four phases preserve alias before independent cutover and stop short of release CAS', async () => {
  const r = await ready(); assert.deepEqual(r.calls, ['publish']); assert.deepEqual(await r.deps.getAlias(), alias);
  const casResult = await executeBrokerAliasCas(r, r.deps); assert.equal(r.calls[1].RevisionId, alias.RevisionId); assert.equal(r.calls[1].FunctionVersion, '13');
