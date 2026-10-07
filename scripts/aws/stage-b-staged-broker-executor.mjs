@@ -1,6 +1,7 @@
 import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -12,6 +13,7 @@ import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRun
 import {
   readStageBTerraformStateIdentity,
   STAGE_B_TERRAFORM_BACKEND,
+  STAGE_B_TERRAFORM_BACKEND_CONFIG,
   assertStageBTerraformInitializedBackendMetadata,
   stageBAttemptStepS3ObjectKey,
   stageBApplyAttemptS3Key,
@@ -107,6 +109,61 @@ export function stagedBrokerArtifactSet(files, root, preparation) {
   return brokerDigest(hashes);
 }
 
+export function assertAuthenticatedHistoricalBrokerPrerequisiteSource(options) {
+  assert.deepEqual(Object.keys(options).sort(), ['currentCheckout', 'isAncestor', 'phase', 'preparation', 'preparationSha256']);
+  const { preparation, preparationSha256, currentCheckout, isAncestor, phase } = options;
+  assert.equal(phase, 'POLICY_RECOVERY', 'Historical prerequisite binding is recovery-only');
+  assert.ok([BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING].includes(preparation.purpose), 'Unsupported historical policy recovery purpose');
+  assert.equal(brokerDigest(preparation), preparationSha256, 'Historical source must come from the authenticated preparation');
+  assert.equal(typeof isAncestor, 'function');
+  const historical = { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 };
+  assert.equal(deriveStageBToolingInputTreeSha256(historical.sourceSha), historical.treeSha256, 'Historical preparation tree is not source-bound');
+  assert.equal(deriveStageBToolingInputTreeSha256(currentCheckout.sourceSha), currentCheckout.treeSha256, 'Recovery checkout tree is not source-bound');
+  assert.ok(isAncestor(historical.sourceSha, currentCheckout.sourceSha), 'Historical transaction source is not an ancestor of current protected main');
+  return Object.freeze(historical);
+}
+
+export function materializeHistoricalTerraformConfiguration({ repositoryRoot, sourceSha }) {
+  assert.match(sourceSha || '', /^[a-f0-9]{40}$/, 'Historical Terraform source must be a full commit SHA');
+  const resolved = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${sourceSha}^{commit}`], { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  assert.equal(resolved, sourceSha, 'Historical Terraform source must resolve to its exact commit');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-terraform-'));
+  try {
+    const relative = 'infra/aws/terraform/production-green-stage-b';
+    const archive = execFileSync('git', ['archive', '--format=tar', sourceSha, relative], { cwd: repositoryRoot, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync('tar', ['-xf', '-', '-C', directory], { input: archive, maxBuffer: 64 * 1024 * 1024 });
+    const moduleDirectory = path.join(directory, relative);
+    const expected = execFileSync('git', ['ls-tree', '-r', '--name-only', sourceSha, '--', relative], { cwd: repositoryRoot, encoding: 'utf8' }).trim().split('\n').filter(Boolean).sort();
+    const observed = [];
+    const visit = current => {
+      for (const name of fs.readdirSync(current).sort()) {
+        const file = path.join(current, name), stat = fs.lstatSync(file);
+        assert.ok(!stat.isSymbolicLink(), 'Historical Terraform source cannot contain symlinks');
+        if (stat.isDirectory()) visit(file);
+        else { assert.ok(stat.isFile(), 'Historical Terraform source contains an unsupported file'); observed.push(path.relative(directory, file).split(path.sep).join('/')); }
+      }
+    };
+    visit(moduleDirectory);
+    assert.deepEqual(observed.sort(), expected, 'Historical Terraform archive does not match its Git tree');
+    return { moduleDirectory, dispose: () => fs.rmSync(directory, { recursive: true, force: true }) };
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function initializeHistoricalTerraform({ moduleDirectory, terraformDataDir, repositoryRoot, env, exec = execFileSync } = {}) {
+  ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot, label: 'Historical Terraform data directory' });
+  const backendMetadata = path.join(terraformDataDir, 'terraform.tfstate');
+  const backendArguments = Object.entries(STAGE_B_TERRAFORM_BACKEND_CONFIG).map(([key, value]) => `-backend-config=${key}=${value}`);
+  exec('terraform', [`-chdir=${moduleDirectory}`, 'init', '-input=false', '-upgrade=false', '-lockfile=readonly', ...backendArguments], {
+    cwd: repositoryRoot, env: { ...env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: 'default' }, encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+  });
+  assertStageBPrivateFile({ filePath: backendMetadata, repositoryRoot, label: 'Historical Terraform backend metadata' });
+  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadata, 'utf8')).backend);
+}
+
 // Extends the existing governed runner/reservations, with a fixed phase census.
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
@@ -146,14 +203,15 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     return writerSession;
   };
   const ownedReservations = new Set(); let mutationAttempted = false;
-  const terraform = args => {
+  const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b'), dataDirectory = terraformDataDir) => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
     if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
-    const metadata = path.join(terraformDataDir, 'terraform.tfstate');
-    assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
+    const metadata = path.join(dataDirectory, 'terraform.tfstate');
+    if (dataDirectory === terraformDataDir) assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
+    else assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(metadata, 'utf8')).backend);
     stagedBrokerArtifactSet(files, root, preparation);
-    return exec('terraform', [`-chdir=${path.join(root, 'infra/aws/terraform/production-green-stage-b')}`, ...args],
-      { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+    return exec('terraform', [`-chdir=${moduleDirectory}`, ...args],
+      { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: dataDirectory, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   };
   const stateFile = path.join(directory, 'state-read.json');
   const readRawState = () => {
@@ -226,12 +284,25 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       } finally { fs.rmSync(file, { force: true }); }
     },
   });
-  const readAdoptionPlan = () => {
+  const readAdoptionPlan = historicalCheckout => {
     const file = path.join(directory, `adoption-read-${randomUUID()}.tfplan`);
+    let historicalSource, historicalDataDir;
     try {
-      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`]);
-      return JSON.parse(terraform(['show', '-json', file]));
-    } finally { fs.rmSync(file, { force: true }); }
+      let moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b');
+      if (historicalCheckout) {
+        assert.equal(phase, 'POLICY_RECOVERY', 'Historical adoption plans are recovery-only');
+        assert.equal(historicalCheckout.sourceSha, preparation.sourceSha, 'Historical adoption plan source must come from the authenticated preparation');
+        assert.equal(historicalCheckout.treeSha256, preparation.treeSha256);
+        assert.equal(deriveStageBToolingInputTreeSha256(historicalCheckout.sourceSha), historicalCheckout.treeSha256);
+        historicalSource = materializeHistoricalTerraformConfiguration({ repositoryRoot: root, sourceSha: historicalCheckout.sourceSha });
+        moduleDirectory = historicalSource.moduleDirectory;
+        historicalDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-data-'));
+        initializeHistoricalTerraform({ moduleDirectory, terraformDataDir: historicalDataDir, repositoryRoot: root,
+          env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard' }, exec });
+      }
+      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`], moduleDirectory, historicalDataDir || terraformDataDir);
+      return JSON.parse(terraform(['show', '-json', file], moduleDirectory, historicalDataDir || terraformDataDir));
+    } finally { fs.rmSync(file, { force: true }); historicalSource?.dispose(); if (historicalDataDir) fs.rmSync(historicalDataDir, { recursive: true, force: true }); }
   };
   let capturedRefresh;
   const adapter = {
@@ -399,20 +470,39 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         deriveStageBImageImpactReport({ imageReleaseSha: entry.preparation.sourceSha, toolingSha: checkout.sourceSha }));
       equal(await adapter.readCheckout(), checkout); return adopted;
     },
-    authenticatePrerequisiteChain: async chain => {
+    authenticatePrerequisiteChain: async (chain, recoveryBinding) => {
       assert.ok(chain?.registration);
+      const historicalRecovery = recoveryBinding !== undefined;
+      let recoveryCheckoutForChain;
+      let checkout;
+      if (historicalRecovery) {
+        assert.equal(phase, 'POLICY_RECOVERY', 'Historical prerequisite binding is recovery-only');
+        assert.deepEqual(Object.keys(recoveryBinding).sort(), ['preparationSha256']);
+        equal(chain, preparation.prerequisiteChain);
+        recoveryCheckoutForChain = await adapter.readRecoveryCheckout();
+        checkout = assertAuthenticatedHistoricalBrokerPrerequisiteSource({
+          phase, preparation, preparationSha256: recoveryBinding.preparationSha256, currentCheckout: recoveryCheckoutForChain,
+          isAncestor: (ancestor, descendant) => {
+            try { exec('git', ['merge-base', '--is-ancestor', ancestor, descendant], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); return true; }
+            catch { return false; }
+          },
+        });
+      } else checkout = await adapter.readCheckout();
+      const assertCheckoutUnchanged = async () => {
+        if (historicalRecovery) equal(await adapter.readRecoveryCheckout(), recoveryCheckoutForChain);
+        else equal(await adapter.readCheckout(), checkout);
+      };
       if (chain.policy) {
         equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
-      const checkout = await adapter.readCheckout();
       for (const [name, entry] of Object.entries(chain)) {
         assert.ok(['registration', 'policy'].includes(name));
         const { preparation: p, authorization: auth, result } = entry;
         assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
         if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
           assertRegistrationHandoff(entry, checkout); await readHistoricalRegistration(entry, checkout);
-          equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(),
+          equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(historicalRecovery ? checkout : undefined),
             deriveStageBImageImpactReport({ imageReleaseSha: p.sourceSha, toolingSha: checkout.sourceSha })));
         } else { assert.equal(entry.adoption, undefined); assert.equal(p.sourceSha, checkout.sourceSha); assert.equal(p.treeSha256, checkout.treeSha256); }
         assert.equal(result.sourceSha, p.sourceSha); assert.equal(result.treeSha256, p.treeSha256);
@@ -428,6 +518,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         equal(authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed }), definition);
       }
       if (chain.policy) equal(chain.policy.result.policy, deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, chain.registration.result.taskMap));
+      await assertCheckoutUnchanged();
     },
     applyTaskRegistration: async bytes => {
       assert.equal(phase, 'REGISTRATION'); const id = await requireAuthorization(TASK_REGISTRATION);
@@ -650,7 +741,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
             reservation = JSON.parse(fs.readFileSync(file));
           } finally { fs.rmSync(file, { force: true }); }
           equal(reservation, { kind: 'STAGED_BROKER_RESERVATION', id, value: policyReservation() }); assert.equal(brokerDigest(reservation), acquisition.reservationSha256);
-          if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain);
+          if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain, { preparationSha256: acquisition.preparationSha256 });
           equal(await getAlias(), preparation.alias);
           const snapshot = readBrokerPolicyInventory(runAws);
           let pruningPredecessor, pruningSuccessor;

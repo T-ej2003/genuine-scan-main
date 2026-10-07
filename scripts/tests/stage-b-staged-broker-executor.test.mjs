@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -386,7 +387,63 @@ test('historical policy recovery rejects tampered preparation or authorization s
   }
 });
 
-test('recover-policy uses current protected-main identity while normal prune keeps exact historical checkout binding', async () => {
+for (const purpose of [BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING]) test(`historical ${purpose} prerequisite source is authenticated and anchored to current main`, () => {
+  const preparation = { purpose, sourceSha: 'bb55eb02aa37255139f0e4edb89d6fbabade1a65', treeSha256: deriveStageBToolingInputTreeSha256('bb55eb02aa37255139f0e4edb89d6fbabade1a65') };
+  const preparationSha256 = brokerDigest(preparation);
+  const currentCheckout = { sourceSha: '932293987ff34bfb7ad802fcb22361eab6bb33dd', treeSha256: deriveStageBToolingInputTreeSha256('932293987ff34bfb7ad802fcb22361eab6bb33dd') };
+  const isAncestor = (ancestor, descendant) => ancestor === preparation.sourceSha && descendant === currentCheckout.sourceSha;
+  const options = { phase: 'POLICY_RECOVERY', preparation, preparationSha256, currentCheckout, isAncestor };
+  assert.deepEqual(assertAuthenticatedHistoricalBrokerPrerequisiteSource(options), { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, preparation: { ...preparation, sourceSha: 'a'.repeat(40) } }), /authenticated preparation/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, isAncestor: () => false }), /not an ancestor/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, preparation: { ...preparation, purpose: 'UNRELATED' } }), /Unsupported historical policy recovery purpose/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, phase: 'POLICY' }), /recovery-only/);
+  assert.throws(() => assertAuthenticatedHistoricalBrokerPrerequisiteSource({ ...options, requestedSourceSha: 'a'.repeat(40) }), /strictly deep-equal/);
+});
+
+test('historical recovery adoption plan material uses the authenticated source tree, not newer current Terraform files', () => {
+  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-source-history-test-'));
+  const module = path.join(repositoryRoot, 'infra/aws/terraform/production-green-stage-b');
+  fs.mkdirSync(path.join(module, 'task-definitions'), { recursive: true });
+  const taskDefinition = path.join(module, 'task-definitions/green-backend-candidate.json');
+  const git = (...args) => execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8' }).trim();
+  try {
+    git('init', '-b', 'main'); git('config', 'user.email', 'stage-b-test@example.invalid'); git('config', 'user.name', 'Stage B test');
+    fs.writeFileSync(taskDefinition, '{"container":"historical"}\n');
+    git('add', '.'); git('commit', '-m', 'historical Terraform'); const historicalSourceSha = git('rev-parse', 'HEAD');
+    fs.writeFileSync(taskDefinition, '{"container":"current"}\n');
+    git('add', '.'); git('commit', '-m', 'current Terraform');
+    const historical = materializeHistoricalTerraformConfiguration({ repositoryRoot, sourceSha: historicalSourceSha });
+    try {
+      assert.equal(fs.readFileSync(path.join(historical.moduleDirectory, 'task-definitions/green-backend-candidate.json'), 'utf8'), '{"container":"historical"}\n');
+      assert.notEqual(fs.readFileSync(taskDefinition, 'utf8'), fs.readFileSync(path.join(historical.moduleDirectory, 'task-definitions/green-backend-candidate.json'), 'utf8'));
+    } finally { historical.dispose(); }
+    assert.throws(() => materializeHistoricalTerraformConfiguration({ repositoryRoot, sourceSha: 'f'.repeat(40) }));
+  } finally { fs.rmSync(repositoryRoot, { recursive: true, force: true }); }
+});
+
+test('historical Terraform initializes isolated providers from its read-only lockfile and canonical backend', () => {
+  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-init-test-'));
+  const terraformDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-data-test-'));
+  fs.chmodSync(terraformDataDir, 0o700);
+  const calls = [];
+  try {
+    initializeHistoricalTerraform({ moduleDirectory: path.join(repositoryRoot, 'historical-module'), terraformDataDir, repositoryRoot,
+      env: { PATH: '/usr/bin', AWS_PROFILE: 'release-deployer' }, exec: (command, args, options) => {
+        calls.push({ command, args, options });
+        fs.writeFileSync(path.join(terraformDataDir, 'terraform.tfstate'), JSON.stringify({ backend: { type: 's3', hash: 1, config: STAGE_B_TERRAFORM_BACKEND_CONFIG } }), { mode: 0o600 });
+      } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'terraform');
+    assert.deepEqual(calls[0].args.slice(0, 5), [`-chdir=${path.join(repositoryRoot, 'historical-module')}`, 'init', '-input=false', '-upgrade=false', '-lockfile=readonly']);
+    assert.ok(calls[0].args.includes('-lockfile=readonly'));
+    assert.ok(Object.entries(STAGE_B_TERRAFORM_BACKEND_CONFIG).every(([key, value]) => calls[0].args.includes(`-backend-config=${key}=${value}`)));
+    assert.equal(calls[0].options.env.TF_DATA_DIR, terraformDataDir);
+    assert.equal(calls[0].options.env.TF_WORKSPACE, 'default');
+  } finally { fs.rmSync(repositoryRoot, { recursive: true, force: true }); fs.rmSync(terraformDataDir, { recursive: true, force: true }); }
+});
+
+test('recover-policy uses current protected-main identity while normal policy preparation keeps exact-main binding', async () => {
   const calls = [];
   const adapterFactory = () => ({
     readCheckout: async () => { calls.push('normal'); throw new Error('Requested source SHA does not match protected main'); },
@@ -396,9 +453,11 @@ test('recover-policy uses current protected-main identity while normal prune kee
   const request = { operation: 'recover-policy', directory, terraformDataDir: directory };
   assert.equal((await runStagedBrokerRequest(request, { adapterFactory })).status, 'RECOVERED_NO_WRITE');
   assert.deepEqual(calls, ['recovery']);
-  calls.length = 0;
-  await assert.rejects(() => runStagedBrokerRequest({ ...request, operation: 'prune' }, { adapterFactory }), /does not match protected main/);
-  assert.deepEqual(calls, ['normal']);
+  for (const operation of ['prepare-policy', 'prune']) {
+    calls.length = 0;
+    await assert.rejects(() => runStagedBrokerRequest({ ...request, operation }, { adapterFactory }), /does not match protected main/);
+    assert.deepEqual(calls, ['normal']);
+  }
 });
 
 for (const substitution of ['default-target','wrong-target','intent-target']) test(`pruning rejects authenticated ${substitution} substitution`, async () => {
