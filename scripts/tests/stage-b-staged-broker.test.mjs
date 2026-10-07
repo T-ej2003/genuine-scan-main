@@ -5,7 +5,7 @@ import { canonicalBrokerPolicy, resolvedBrokerEnvironment } from './fixtures/sta
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from '../aws/production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerTargetIdentity,
  assertBrokerPublicationPlan, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan, assertBrokerAuthorization,
- assertBrokerPreparation, assertTerminalPolicyHandoff, createTerminalPolicySuccessorAdoption, assertTerminalPolicySuccessorState,
+ assertBrokerPreparation, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, createTerminalPolicySuccessorAdoption, assertTerminalPolicySuccessorState,
  } from '../aws/stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication as publish, prepareBrokerCutover, executeBrokerAliasCas as cutover, reconcileBrokerAlias as reconcile, brokerTransitionRequired } from '../aws/stage-b-staged-broker.mjs';
 import { BROKER_POLICY_CONVERGENCE, TASK_REGISTRATION, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
@@ -22,6 +22,8 @@ function terminalPolicyFixture() {
  const historicalRegistration={preparation:registrationPreparation,authorization:registrationAuthorization,result:{sourceSha:oldSha,treeSha256:registrationPreparation.treeSha256,
    preparationSha256:brokerDigest(registrationPreparation),authorizationSha256:brokerDigest(registrationAuthorization),taskMap:clone(prerequisites.taskMap),definitions:{}}};
  const p=preparation(); p.schemaVersion=2;p.purpose=BROKER_POLICY_CONVERGENCE;p.sourceSha=oldSha;p.treeSha256='7'.repeat(64);p.state={...state,serial:110};p.publication=null;
+ registrationPreparation.treeSha256=p.treeSha256;historicalRegistration.result.treeSha256=p.treeSha256;
+ historicalRegistration.result.preparationSha256=brokerDigest(registrationPreparation);
  p.prerequisites={...clone(prerequisites),policyVersion:'v12'};p.target={policy:deriveBrokerPolicy(p.prerequisites.policy,historicalRegistration.result.taskMap)};
  p.prerequisiteChain={registration:historicalRegistration};
  const auth=authorization(p);auth.purpose=p.purpose;auth.sourceSha=oldSha;auth.preparationSha256=brokerDigest(p);
@@ -52,6 +54,45 @@ test('terminal policy successor adoption preserves historical provenance and bin
  assertTerminalPolicyHandoff(sameSource,{sourceSha:oldSha,treeSha256:sameSource.preparation.treeSha256});
  const p=publicationWithTerminalPolicyAdoption(f);assertBrokerPreparation(p);
  assertBrokerPublicationPlan(publicationPlan(),p);
+});
+
+function adoptedRegistrationForPolicy(f=terminalPolicyFixture()) {
+ const entry=clone(f.entry.preparation.prerequisiteChain.registration),p=f.entry.preparation;
+ entry.preparation.sourceSha='a'.repeat(40);entry.preparation.treeSha256='6'.repeat(64);entry.preparation.savedPlanSha256='5'.repeat(64);
+ entry.result.sourceSha=entry.preparation.sourceSha;entry.result.treeSha256=entry.preparation.treeSha256;
+ entry.result.preparationSha256=brokerDigest(entry.preparation);entry.result.savedPlanSha256=entry.preparation.savedPlanSha256;
+ entry.adoption={kind:'REGISTERED_OUTPUT_ADOPTION',schemaVersion:1,
+  transaction:{sourceSha:entry.preparation.sourceSha,treeSha256:entry.preparation.treeSha256,
+   preparationSha256:brokerDigest(entry.preparation),authorizationSha256:brokerDigest(entry.authorization),resultSha256:brokerDigest(entry.result)},
+  release:{sourceSha:p.sourceSha,treeSha256:p.treeSha256},imageImpactSha256:'4'.repeat(64),definitionsSha256:brokerDigest(entry.result.definitions)};
+ return {f,entry};
+}
+test('historical policy preparation accepts direct same-source registration evidence',()=>{
+ const f=terminalPolicyFixture(),registration=f.entry.preparation.prerequisiteChain.registration;
+ registration.preparation.treeSha256=f.entry.preparation.treeSha256;registration.result.treeSha256=registration.preparation.treeSha256;
+ registration.result.preparationSha256=brokerDigest(registration.preparation);
+ assertHistoricalPolicyRegistrationHandoff(registration,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256});
+ assertBrokerPreparation(f.entry.preparation);
+});
+test('historical policy preparation accepts an authenticated older registration adoption',()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();
+ f.entry.preparation.prerequisiteChain.registration=entry;
+ assert.notEqual(entry.preparation.sourceSha,f.entry.preparation.sourceSha);
+ assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256});
+ assertBrokerPreparation(f.entry.preparation);
+});
+test('historical policy registration cannot cross source/tree without its canonical adoption',()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();delete entry.adoption;
+ assert.throws(()=>assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256}));
+});
+for(const [name,mutate] of [
+ ['tampered adoption',entry=>entry.adoption.transaction.resultSha256='0'.repeat(64)],
+ ['wrong consumer',entry=>entry.adoption.release.sourceSha='c'.repeat(40)],
+ ['substituted registration outputs',entry=>entry.result.taskMap={...entry.result.taskMap,backend:'substituted'}],
+ ['tampered original registration source',entry=>entry.preparation.sourceSha='b'.repeat(40)],
+]) test(`historical policy registration rejects ${name}`,()=>{
+ const {f,entry}=adoptedRegistrationForPolicy();mutate(entry);
+ assert.throws(()=>assertHistoricalPolicyRegistrationHandoff(entry,{sourceSha:f.entry.preparation.sourceSha,treeSha256:f.entry.preparation.treeSha256}));
 });
 
 for(const [name,mutate] of [

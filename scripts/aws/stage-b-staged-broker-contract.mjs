@@ -151,6 +151,14 @@ export function assertRegistrationHandoff(entry, release) {
   assert.equal(adoption.definitionsSha256, brokerDigest(result.definitions));
 }
 
+export function assertHistoricalPolicyRegistrationHandoff(entry, policyRelease) {
+  if (!entry.adoption) {
+    assert.equal(entry.preparation.sourceSha, policyRelease.sourceSha);
+    assert.equal(entry.preparation.treeSha256, policyRelease.treeSha256);
+  }
+  assertRegistrationHandoff(entry, policyRelease);
+}
+
 export function assertTerminalPolicyHandoff(entry, release) {
   keys(entry, ['preparation', 'authorization', 'result', 'terminal', 'adoption']);
   const { preparation: p, authorization, result, terminal, adoption } = entry;

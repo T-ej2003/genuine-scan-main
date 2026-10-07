@@ -4,8 +4,8 @@ Date: 2026-10-07 UTC. This is a fingerprint refresh for the existing
 `braces@3.0.3` non-runtime review, not a new finding acceptance.
 
 The executable/build-input fingerprint is now
-`26a65664caca54c9bf8b4ef27856235451614f2339072b0acb03f4adc9425c19`. Only
-Stage-B AWS control-plane scripts and their tests changed. The changed runtime
+`837f680d50f7a9b203cb91a7b497717ae8d7bc29d02af17a06ae1e1072a2d2ba`. Only
+PR #637 follow-up changed only Stage-B AWS control-plane validation and focused tests. The changed runtime
 scripts authenticate and compare release metadata, KMS signatures, S3 receipts,
 DynamoDB ownership, IAM policy state and Terraform state; they do not import
 frontend build tooling, evaluate content globs, or enter the browser bundle.

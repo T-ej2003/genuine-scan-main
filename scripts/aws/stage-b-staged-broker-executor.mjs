@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -293,9 +293,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     git(['merge-base', '--is-ancestor', p.sourceSha, release.sourceSha]);
     assert.equal(deriveStageBToolingInputTreeSha256(release.sourceSha), release.treeSha256);
     const historicalRegistration = p.prerequisiteChain.registration;
-    assert.equal(historicalRegistration.preparation.sourceSha, p.sourceSha);
-    assert.equal(historicalRegistration.preparation.treeSha256, p.treeSha256);
-    assertRegistrationHandoff(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+    assertHistoricalPolicyRegistrationHandoff(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
     equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
     equal(p.target.policy, deriveBrokerPolicy(p.prerequisites.policy, historicalRegistration.result.taskMap));
     await readHistoricalRegistration(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
