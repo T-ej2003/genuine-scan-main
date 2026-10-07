@@ -9,7 +9,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, materializeHistoricalTerraformConfiguration } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -420,6 +420,27 @@ test('historical recovery adoption plan material uses the authenticated source t
     } finally { historical.dispose(); }
     assert.throws(() => materializeHistoricalTerraformConfiguration({ repositoryRoot, sourceSha: 'f'.repeat(40) }));
   } finally { fs.rmSync(repositoryRoot, { recursive: true, force: true }); }
+});
+
+test('historical Terraform initializes isolated providers from its read-only lockfile and canonical backend', () => {
+  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-init-test-'));
+  const terraformDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-data-test-'));
+  fs.chmodSync(terraformDataDir, 0o700);
+  const calls = [];
+  try {
+    initializeHistoricalTerraform({ moduleDirectory: path.join(repositoryRoot, 'historical-module'), terraformDataDir, repositoryRoot,
+      env: { PATH: '/usr/bin', AWS_PROFILE: 'release-deployer' }, exec: (command, args, options) => {
+        calls.push({ command, args, options });
+        fs.writeFileSync(path.join(terraformDataDir, 'terraform.tfstate'), JSON.stringify({ backend: { type: 's3', hash: 1, config: STAGE_B_TERRAFORM_BACKEND_CONFIG } }), { mode: 0o600 });
+      } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, 'terraform');
+    assert.deepEqual(calls[0].args.slice(0, 5), [`-chdir=${path.join(repositoryRoot, 'historical-module')}`, 'init', '-input=false', '-upgrade=false', '-lockfile=readonly']);
+    assert.ok(calls[0].args.includes('-lockfile=readonly'));
+    assert.ok(Object.entries(STAGE_B_TERRAFORM_BACKEND_CONFIG).every(([key, value]) => calls[0].args.includes(`-backend-config=${key}=${value}`)));
+    assert.equal(calls[0].options.env.TF_DATA_DIR, terraformDataDir);
+    assert.equal(calls[0].options.env.TF_WORKSPACE, 'default');
+  } finally { fs.rmSync(repositoryRoot, { recursive: true, force: true }); fs.rmSync(terraformDataDir, { recursive: true, force: true }); }
 });
 
 test('recover-policy uses current protected-main identity while normal policy preparation keeps exact-main binding', async () => {

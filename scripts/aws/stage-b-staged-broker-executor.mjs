@@ -13,6 +13,7 @@ import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRun
 import {
   readStageBTerraformStateIdentity,
   STAGE_B_TERRAFORM_BACKEND,
+  STAGE_B_TERRAFORM_BACKEND_CONFIG,
   assertStageBTerraformInitializedBackendMetadata,
   stageBAttemptStepS3ObjectKey,
   stageBApplyAttemptS3Key,
@@ -151,6 +152,18 @@ export function materializeHistoricalTerraformConfiguration({ repositoryRoot, so
   }
 }
 
+export function initializeHistoricalTerraform({ moduleDirectory, terraformDataDir, repositoryRoot, env, exec = execFileSync } = {}) {
+  ensureStageBPrivateDirectory({ directory: terraformDataDir, repositoryRoot, label: 'Historical Terraform data directory' });
+  const backendMetadata = path.join(terraformDataDir, 'terraform.tfstate');
+  const backendArguments = Object.entries(STAGE_B_TERRAFORM_BACKEND_CONFIG).map(([key, value]) => `-backend-config=${key}=${value}`);
+  exec('terraform', [`-chdir=${moduleDirectory}`, 'init', '-input=false', '-upgrade=false', '-lockfile=readonly', ...backendArguments], {
+    cwd: repositoryRoot, env: { ...env, TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: 'default' }, encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024,
+  });
+  assertStageBPrivateFile({ filePath: backendMetadata, repositoryRoot, label: 'Historical Terraform backend metadata' });
+  assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(backendMetadata, 'utf8')).backend);
+}
+
 // Extends the existing governed runner/reservations, with a fixed phase census.
 // The normal cutover plan is diagnostic evidence and is never applyable here.
 export function assertRegistrationRecoveryReadCommand(args) {
@@ -190,14 +203,15 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     return writerSession;
   };
   const ownedReservations = new Set(); let mutationAttempted = false;
-  const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b')) => {
+  const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b'), dataDirectory = terraformDataDir) => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
     if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
-    const metadata = path.join(terraformDataDir, 'terraform.tfstate');
-    assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
+    const metadata = path.join(dataDirectory, 'terraform.tfstate');
+    if (dataDirectory === terraformDataDir) assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
+    else assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(metadata, 'utf8')).backend);
     stagedBrokerArtifactSet(files, root, preparation);
     return exec('terraform', [`-chdir=${moduleDirectory}`, ...args],
-      { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: terraformDataDir, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
+      { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: dataDirectory, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   };
   const stateFile = path.join(directory, 'state-read.json');
   const readRawState = () => {
@@ -272,7 +286,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   });
   const readAdoptionPlan = historicalCheckout => {
     const file = path.join(directory, `adoption-read-${randomUUID()}.tfplan`);
-    let historicalSource;
+    let historicalSource, historicalDataDir;
     try {
       let moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b');
       if (historicalCheckout) {
@@ -282,10 +296,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         assert.equal(deriveStageBToolingInputTreeSha256(historicalCheckout.sourceSha), historicalCheckout.treeSha256);
         historicalSource = materializeHistoricalTerraformConfiguration({ repositoryRoot: root, sourceSha: historicalCheckout.sourceSha });
         moduleDirectory = historicalSource.moduleDirectory;
+        historicalDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-historical-data-'));
+        initializeHistoricalTerraform({ moduleDirectory, terraformDataDir: historicalDataDir, repositoryRoot: root,
+          env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard' }, exec });
       }
-      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`], moduleDirectory);
-      return JSON.parse(terraform(['show', '-json', file], moduleDirectory));
-    } finally { fs.rmSync(file, { force: true }); historicalSource?.dispose(); }
+      terraform(['plan', `-var-file=${files.tfvars}`, '-input=false', '-lock=false', `-out=${file}`], moduleDirectory, historicalDataDir || terraformDataDir);
+      return JSON.parse(terraform(['show', '-json', file], moduleDirectory, historicalDataDir || terraformDataDir));
+    } finally { fs.rmSync(file, { force: true }); historicalSource?.dispose(); if (historicalDataDir) fs.rmSync(historicalDataDir, { recursive: true, force: true }); }
   };
   let capturedRefresh;
   const adapter = {
