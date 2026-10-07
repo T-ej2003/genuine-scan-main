@@ -554,6 +554,14 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
           assert.equal(published.VersionId, successorIdentity.policyVersion);
           const refresh = capture('policy-refresh', ['-refresh-only', '-target=aws_iam_policy.broker']);
           const proposed = { ...structuredClone(refresh.plan), resource_drift: [] };
+          if (proposed.resource_changes === undefined || Array.isArray(proposed.resource_changes) && proposed.resource_changes.length === 0) {
+            const drift = refresh.plan.resource_drift;
+            assert.ok(Array.isArray(drift), 'Terraform refresh-only resource_drift must be an array');
+            proposed.resource_changes = drift.map(entry => {
+              const after = structuredClone(entry.change.after);
+              return { ...structuredClone(entry), change: { ...structuredClone(entry.change), actions: ['no-op'], before: after, after: structuredClone(after) } };
+            });
+          }
           assertBrokerPolicyReconciliation(refresh.plan, proposed, preparation);
           assert.ok(fs.readFileSync(refresh.file).equals(refresh.bytes));
           terraform(['apply', '-input=false', refresh.file]); // Validated state-only saved plan; no IAM call.

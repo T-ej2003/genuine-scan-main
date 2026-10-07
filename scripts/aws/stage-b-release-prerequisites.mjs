@@ -83,12 +83,17 @@ export function assertBrokerPolicyClosurePlan(plan, preparation) {
       equal(output.actions, ['no-op']); equal(output.before, output.after);
       assert.ok(output.after_unknown === undefined || known(output.after_unknown), 'Unknown reconciliation output');
     }
-    assert.equal(new Set(plan.resource_changes.map(c => c.address)).size, plan.resource_changes.length);
-    for (const c of plan.resource_changes) {
+    const changes = plan.resource_changes === undefined ? [] : plan.resource_changes;
+    assert.ok(Array.isArray(changes), 'Terraform resource_changes must be an array when present');
+    const drift = plan.resource_drift === undefined ? [] : plan.resource_drift;
+    assert.ok(Array.isArray(drift), 'Terraform resource_drift must be an array when present');
+    assert.equal(new Set(changes.map(c => c.address)).size, changes.length);
+    for (const c of changes) {
       assert.ok(preparation.canonicalAddresses.includes(c.address)); assert.equal(c.mode, 'managed'); assert.equal(c.deposed, undefined);
       equal(c.change.actions, ['no-op']); equal(c.change.before, c.change.after); requireKnown(c.change);
     }
-    const policy = plan.resource_changes.find(c => c.address === 'aws_iam_policy.broker'); assert.ok(policy);
+    const policy = changes.find(c => c.address === 'aws_iam_policy.broker')
+      || drift.find(c => c.address === 'aws_iam_policy.broker'); assert.ok(policy);
     assert.equal(policy.change.after.arn, STAGE_B_BROKER_POLICY.arn);
     equal(JSON.parse(policy.change.after.policy), preparation.target.policy);
 }
