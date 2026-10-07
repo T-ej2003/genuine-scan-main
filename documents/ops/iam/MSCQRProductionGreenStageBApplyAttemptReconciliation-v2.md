@@ -6,6 +6,11 @@ approval from a distinct reviewer, and a new successor identity bound to the
 complete immutable predecessor. Caller-supplied evidence labels or digests do
 not establish reconciliation authority.
 
+Version-pinned receipt verification uses `s3:GetObjectVersion` only on the
+Stage-B apply-attempt object prefix. It reads a known object version and does
+not require `s3:ListBucketVersions`; write and version-delete authority remain
+separately constrained by the workspace policy.
+
 The historical schema-v2 reservation
 `1aefb5f358412d102e68be79c324e221c6a7af4114f12ce18a9ddbd465d85021`
 is permanently non-retryable. It can be parsed and reported as immutable

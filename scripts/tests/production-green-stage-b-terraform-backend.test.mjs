@@ -24,6 +24,7 @@ import { assertSteadyStateReleasePolicy } from "../aws/production-stage-a-tempor
 
 const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json", "utf8"));
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
+const deploymentClosure = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBDeploymentClosure-v1.json", "utf8"));
 const stageA = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8"));
 const initializedMetadata = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-s3-backend-metadata.json", "utf8"));
 const asArray = (value) => Array.isArray(value) ? value : [value];
@@ -61,6 +62,25 @@ test("the canonical backend policy and manifest are exact and complete", () => {
   assert.equal(validateManifest(manifest), true);
   assert.deepEqual(manifest.backendContract, STAGE_B_TERRAFORM_BACKEND_MANIFEST);
   assert.deepEqual(policy, STAGE_B_TERRAFORM_BACKEND_POLICY);
+});
+
+test("version-pinned receipt reads are scoped only to the Stage-B apply-attempt namespace", () => {
+  const unrelatedArn = `${bucketArn}/env:/production/mscqr/production/rls-green/stage-b/other.json`;
+  assert.equal(decision([policy], "s3:GetObjectVersion", applyAttemptArn), "allowed");
+  assert.equal(decision([policy], "s3:GetObjectVersion", unrelatedArn), "implicitDeny");
+  assert.equal(decision([policy], "s3:GetObjectVersion", "arn:aws:s3:::unrelated-bucket/object"), "implicitDeny");
+  assert.equal(policy.Statement.some(({ Action }) => (Array.isArray(Action) ? Action : [Action]).includes("s3:ListBucketVersions")), false);
+  assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadStageBApplyAttemptVersions"), {
+    Sid: "ReadStageBApplyAttemptVersions", Effect: "Allow", Action: "s3:GetObjectVersion", Resource: applyAttemptPrefixArn,
+  });
+  assert.equal(manifest.backendContract.requiredActions.includes("s3:GetObjectVersion(apply-attempt)"), true);
+  assert.equal(deploymentClosure.backendContract.requiredActions.includes("s3:GetObjectVersion(apply-attempt)"), true);
+  for (const statement of policy.Statement.filter(({ Effect }) => Effect === "Allow")) {
+    const actions = Array.isArray(statement.Action) ? statement.Action : [statement.Action];
+    if (actions.includes("s3:GetObjectVersion")) assert.deepEqual(statement.Resource, applyAttemptPrefixArn);
+  }
+  assert.equal(decision([policy], "s3:PutObject", unrelatedArn), "implicitDeny");
+  assert.equal(decision([policy], "s3:DeleteObjectVersion", applyAttemptArn), "explicitDeny");
 });
 
 test("the direct production-state config uses the default CLI workspace", () => {

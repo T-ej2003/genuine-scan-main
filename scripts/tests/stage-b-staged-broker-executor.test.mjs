@@ -4,20 +4,35 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
-import { STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
+import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+
+test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects identity or digest substitution',()=>{
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-versioned-receipt-')),file=path.join(directory,'receipt.json');
+ const id='a'.repeat(64),key=stageBApplyAttemptS3Key(id),bytes=Buffer.from('{"id":"receipt"}'),objectSha256=createHash('sha256').update(bytes).digest('hex');
+ const calls=[];let expectedVersion;const run=args=>{calls.push(args);if(args[1]==='head-object'){if(expectedVersion)assert.deepEqual(args.slice(args.indexOf('--version-id'),args.indexOf('--version-id')+2),['--version-id',expectedVersion]);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}if(args[1]==='get-object'){assert.deepEqual(args.slice(args.indexOf('--version-id'),args.indexOf('--version-id')+2),['--version-id','version-1']);fs.writeFileSync(args.at(-1),bytes);return JSON.stringify({VersionId:'version-1',ETag:'"etag"'});}throw new Error('unexpected S3 operation');};
+ try{
+  const result=readVersionedStageBReceiptObject({run,id,key,file});
+  assert.deepEqual(result.object,{bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key,versionId:'version-1',etag:'"etag"',objectSha256});
+  assert.equal(calls.filter(args=>args[1]==='get-object').length,1);
+  assert.equal(result.bytes.toString(),bytes.toString());
+  for(const expected of [{...result.object,versionId:'version-2'},{...result.object,etag:'"other"'},{...result.object,objectSha256:'f'.repeat(64)}]) { expectedVersion=expected.versionId; assert.throws(()=>readVersionedStageBReceiptObject({run,id,key,file,expected})); }
+  assert.throws(()=>readVersionedStageBReceiptObject({run,id,key:'unreviewed/key',file}));
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
 let files;
@@ -107,10 +122,68 @@ test('native executor rejects phase crossover and conflicting predecessor', asyn
 });
 test('ADOPTION may read the broker ownership row but cannot write it', () => {
   assert.doesNotThrow(() => assertRegistrationRecoveryReadCommand(['dynamodb', 'get-item']));
+  assert.doesNotThrow(() => assertRegistrationRecoveryReadCommand(['s3api', 'head-object']));
   assert.throws(() => assertRegistrationRecoveryReadCommand(['dynamodb', 'put-item']), /cannot mutate AWS resources/);
-  for (const command of [['iam', 'create-policy-version'], ['iam', 'delete-policy-version'], ['iam', 'set-default-policy-version'], ['lambda', 'update-alias'], ['ecs', 'register-task-definition']]) {
+  for (const command of [['iam', 'create-policy-version'], ['iam', 'delete-policy-version'], ['iam', 'set-default-policy-version'], ['lambda', 'update-alias'], ['ecs', 'register-task-definition'], ['ecs', 'update-service'], ['ecs', 'run-task'], ['terraform', 'apply'], ['terraform', 'state'], ['rds-data', 'execute-statement']]) {
     assert.throws(() => assertRegistrationRecoveryReadCommand(command), /cannot mutate AWS resources/);
   }
+});
+test('receipt-adoption executor phase cannot reach mutation hooks',async()=>{
+ const r=await native('RECEIPT_ADOPTION');
+ for(const invoke of [()=>r.adapter.reserve('a'.repeat(64),{}),()=>r.adapter.applyPublication(r.binary),()=>r.adapter.applyTaskRegistration(r.binary),()=>r.adapter.updateAlias(r.input),()=>r.adapter.executeBrokerPolicyConvergence(),()=>r.adapter.executeBrokerPolicyPruning()]) await assert.rejects(invoke);
+ assert.equal(r.calls.some(c=>c.command==='terraform'&&c.args[0]==='apply'),false);
+ assert.equal(r.calls.some(c=>c.command==='aws'&&['create-policy-version','delete-policy-version','set-default-policy-version','update-alias','register-task-definition','update-service','run-task'].includes(c.args[1])),false);
+});
+test('receipt-bound authentication phase matrix is explicit and fail-closed',()=>{
+ assert.deepEqual(RECEIPT_BOUND_AUTHENTICATION_PHASES,[
+  'RECEIPT_ADOPTION','PREPARATION','PUBLICATION','CUTOVER','RECONCILIATION',
+  'PUBLICATION_RECOVERY','CUTOVER_RECOVERY','RECONCILIATION_RECOVERY',
+ ]);
+ for(const phase of RECEIPT_BOUND_AUTHENTICATION_PHASES)assert.equal(assertReceiptBoundAuthenticationPhase(phase),true);
+ for(const phase of ['ADOPTION','CLOSURE','REGISTRATION','POLICY','POLICY_RECOVERY','REGISTRATION_RECOVERY','UNKNOWN'])
+  assert.throws(()=>assertReceiptBoundAuthenticationPhase(phase),/not valid during/);
+});
+test('receipt-bound policy state preserves adoption identity and admits only a later same-lineage publication state',()=>{
+ const adopted={lineage:'a'.repeat(36),serial:117,stateSha256:'b'.repeat(64)};
+ assert.equal(assertReceiptBoundPolicyTerraformState('RECEIPT_ADOPTION',adopted,adopted),true);
+ for(const phase of ['PREPARATION','PUBLICATION','CUTOVER','RECONCILIATION','PUBLICATION_RECOVERY','CUTOVER_RECOVERY','RECONCILIATION_RECOVERY'])
+  assert.equal(assertReceiptBoundPolicyTerraformState(phase,{...adopted,serial:118,stateSha256:'c'.repeat(64)},adopted),true);
+ assert.throws(()=>assertReceiptBoundPolicyTerraformState('RECEIPT_ADOPTION',{...adopted,serial:118,stateSha256:'c'.repeat(64)},adopted),/changed during/);
+ assert.throws(()=>assertReceiptBoundPolicyTerraformState('PUBLICATION',{...adopted,lineage:'d'.repeat(36),serial:118,stateSha256:'c'.repeat(64)},adopted),/lineage changed/);
+ assert.throws(()=>assertReceiptBoundPolicyTerraformState('PUBLICATION',{...adopted,stateSha256:'c'.repeat(64)},adopted),/did not advance/);
+});
+test('receipt-bound policy tooling tree is recomputed from its authenticated historical source',()=>{
+ const source='a'.repeat(40),tree='b'.repeat(64),seen=[];
+ assert.equal(assertReceiptBoundHistoricalToolingTree(source,tree,sha=>{seen.push(sha);return tree;}),true);
+ assert.deepEqual(seen,[source]);
+ assert.throws(()=>assertReceiptBoundHistoricalToolingTree(source,tree,()=> 'c'.repeat(64)),/tooling tree changed/);
+});
+test('receipt-bound historical source must be an ancestor of the protected consumer',()=>{
+ const historical='a'.repeat(40),consumer='b'.repeat(40),seen=[];
+ assert.equal(assertReceiptBoundHistoricalSourceAncestry({historicalSourceSha:historical,consumerSourceSha:consumer,isAncestor:(a,b)=>{seen.push([a,b]);return true;}}),true);
+ assert.deepEqual(seen,[[historical,consumer]]);
+ assert.throws(()=>assertReceiptBoundHistoricalSourceAncestry({historicalSourceSha:historical,consumerSourceSha:consumer,isAncestor:()=>false}),/not an ancestor/);
+ assert.throws(()=>assertReceiptBoundHistoricalSourceAncestry({historicalSourceSha:'caller',consumerSourceSha:consumer,isAncestor:()=>true}));
+});
+test('receipt-bound handoff rechecks both historical ancestors at consumption',()=>{
+ const registration={receiptBoundAdoption:{historicalSourceSha:'a'.repeat(40)}},policy={receiptBoundAdoption:{historicalSourceSha:'b'.repeat(40)}};
+ const release={sourceSha:'c'.repeat(40)},calls=[];
+ assert.equal(assertReceiptBoundPrerequisiteAncestry({registration,policy},release,(command,args)=>{calls.push(args);return '';},'/repo'),true);
+ assert.deepEqual(calls,[['merge-base','--is-ancestor','a'.repeat(40),release.sourceSha],['merge-base','--is-ancestor','b'.repeat(40),release.sourceSha]]);
+ for(const chain of [{registration:{receiptBoundAdoption:{historicalSourceSha:'d'.repeat(40)}},policy}, {registration,policy:{receiptBoundAdoption:{historicalSourceSha:'d'.repeat(40)}}}])
+  assert.throws(()=>assertReceiptBoundPrerequisiteAncestry(chain,release,(_command,args)=>{if(args[2]==='d'.repeat(40))throw Object.assign(new Error('not ancestor'),{status:1});return '';},'/repo'),/not an ancestor/);
+ assert.throws(()=>assertReceiptBoundGitAncestry({historicalSourceSha:'a'.repeat(40),consumerSourceSha:release.sourceSha,cwd:'/repo',exec:()=>{throw Object.assign(new Error('git failed'),{status:128});}}),/git failed/);
+ assert.throws(()=>assertReceiptBoundPrerequisiteAncestry({registration,policy},{sourceSha:'e'.repeat(40)},(_command,args)=>{if(args[3]==='e'.repeat(40))throw Object.assign(new Error('not ancestor'),{status:1});return '';}, '/repo'),/not an ancestor/);
+});
+test('receipt-bound registration recomputes canonical image impact at consumption',()=>{
+ const historical='a'.repeat(40),consumer='b'.repeat(40),release={sourceSha:consumer,treeSha256:'c'.repeat(64)},seen=[];
+ const imageImpactReport={imageReleaseSha:historical,toolingSha:consumer,toolingInputTreeSha256:release.treeSha256,imageReuseCompatible:true,newImagesRequired:false,imageAffectingFiles:[]};
+ const recovery={historicalSourceSha:historical,imageImpactReport,imageImpactSha256:brokerDigest(imageImpactReport)};
+ assert.equal(verifyReceiptBoundRegistrationImageImpact(recovery,release,input=>{seen.push(input);return imageImpactReport;}),true);
+ assert.deepEqual(seen,[{imageReleaseSha:historical,toolingSha:consumer}]);
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactReport:{...imageImpactReport,imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['src/backend/app.mjs']}},release,()=>({...imageImpactReport,imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['src/backend/app.mjs']})),/true/);
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactSha256:'f'.repeat(64)},release,()=>imageImpactReport));
+ assert.throws(()=>verifyReceiptBoundRegistrationImageImpact({...recovery,imageImpactReport:{...imageImpactReport,toolingSha:'d'.repeat(40)}},release,()=>imageImpactReport));
 });
 for (const resource of ['*', alias.AliasArn.replace(':reviewed', ''), alias.AliasArn.replace(':reviewed', ':12'), alias.AliasArn.replace(':reviewed', ':*')]) test(`unreviewed caller invocation ${resource} fails`, () => {
   assert.throws(() => assertBrokerCallerPolicy({ Statement: [{ Effect: 'Allow', Action: 'lambda:InvokeFunction', Resource: resource }] }));

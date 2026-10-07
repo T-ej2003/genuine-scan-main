@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson, assertStageBBrokerTaskDefinitionMap, assertStageBBrokerLambdaConfiguration } from "./production-green-stage-b-contract.mjs";
 import { assertStageBBrokerFunctionUpdate, assertStageBBrokerPolicyDocument, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
+import { STAGE_B_TERRAFORM_BACKEND } from './stage-b-terraform-backend-contract.mjs';
+import { STAGE_B_TASK_DEFINITION_FAMILIES } from './stage-b-reference-audit-contract.mjs';
 
 export const BROKER_PUBLICATION = "STAGE_B_BROKER_PUBLICATION";
 export const BROKER_CUTOVER = "STAGE_B_BROKER_ALIAS_CAS";
@@ -14,6 +16,16 @@ const equal = (a, b, message) => assert.equal(canonicalJson(a), canonicalJson(b)
 const hash = value => assert.match(value || "", /^[a-f0-9]{64}$/);
 const version = value => assert.match(value || "", /^[1-9][0-9]*$/);
 const keys = (value, expected) => equal(Object.keys(value || {}).sort(), [...expected].sort(), "Unknown/missing staged broker fields");
+
+export function assertBrokerImageReuseCompatibility(imageImpact, imageReleaseSha, release) {
+  equal(imageImpact.imageReleaseSha, imageReleaseSha);
+  equal(imageImpact.toolingSha, release.sourceSha);
+  equal(imageImpact.toolingInputTreeSha256, release.treeSha256);
+  assert.equal(imageImpact.imageReuseCompatible, true);
+  assert.equal(imageImpact.newImagesRequired, false);
+  equal(imageImpact.imageAffectingFiles, []);
+  return true;
+}
 
 export function brokerAliasIdentity(alias) {
   keys(alias, ["AliasArn", "Name", "FunctionVersion", "RevisionId", "Description", "RoutingConfig"]);
@@ -40,6 +52,210 @@ export function brokerPrerequisiteIdentity(snapshot) {
   const allowedTasks = snapshot.policy.Statement.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions").Resource;
   equal([...allowedTasks].sort(), Object.values(snapshot.taskMap).sort(), "IAM task revisions differ from task map");
   return structuredClone(snapshot);
+}
+
+const receiptObject = value => {
+  keys(value, ['bucket', 'key', 'versionId', 'etag', 'objectSha256']);
+  assert.equal(value.bucket, STAGE_B_TERRAFORM_BACKEND.bucketName);
+  assert.ok(value.key.startsWith(`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/`));
+  assert.ok(value.versionId && value.etag); hash(value.objectSha256);
+};
+function assertReceiptBoundBase(recovery, release, kind) {
+  assert.equal(recovery.kind, kind); assert.equal(recovery.schemaVersion, 1);
+  assert.equal(recovery.recoveryMode, 'RECEIPT_BOUND');
+  assert.equal(recovery.historicalSignatureVerified, false);
+  assert.equal(recovery.historicalEvidenceAvailability, 'ORIGINAL_AUTHORIZATION_UNAVAILABLE');
+  assert.equal(recovery.durableReceiptChainVerified, true);
+  assert.equal(recovery.liveSuccessorCorroborated, true);
+  assert.equal(recovery.freshIndependentCheckerRequired, true);
+  assert.match(recovery.historicalSourceSha || '', /^[a-f0-9]{40}$/);
+  assert.equal(recovery.consumerSourceSha, release.sourceSha); assert.match(recovery.consumerSourceSha || '', /^[a-f0-9]{40}$/);
+  assert.equal(recovery.consumerTreeSha256, release.treeSha256); hash(recovery.consumerTreeSha256);
+  assert.match(recovery.transactionId || '', /^[a-f0-9]{64}$/);
+  assert.equal(recovery.authorizationId, recovery.transactionId);
+  hash(recovery.historicalPreparationSha256); hash(recovery.historicalAuthorizationSha256);
+  assert.equal(recovery.historicalAuthorizationSha256, recovery.authorizationId,
+    'Historical authorization digest must identify the authenticated transaction authorization');
+  hash(recovery.historicalResultSha256); hash(recovery.toolingTreeSha256); hash(recovery.savedPlanSha256);
+  keys(recovery.receiptObjects, ['reservation', 'intent', 'result']);
+  for (const name of ['reservation', 'intent', 'result']) receiptObject(recovery.receiptObjects?.[name]);
+  equal(recovery.receiptObjects.reservation.bucket, recovery.receiptObjects.intent.bucket);
+  equal(recovery.receiptObjects.reservation.bucket, recovery.receiptObjects.result.bucket);
+  hash(recovery.receiptChainSha256); hash(recovery.liveCorroborationSha256);
+  equal(recovery.receiptChainSha256, brokerDigest({ transactionId: recovery.transactionId,
+    historicalPreparationSha256: recovery.historicalPreparationSha256, historicalAuthorizationSha256: recovery.historicalAuthorizationSha256,
+    historicalResultSha256: recovery.historicalResultSha256, receiptObjects: recovery.receiptObjects }));
+}
+
+// This path explicitly records that historical KMS authorization is unavailable.
+// Its authority comes only from durable receipt linkage plus current read-only
+// corroboration, and the next release still requires a fresh checker signature.
+export function assertReceiptBoundRegistrationAdoption(entry, release) {
+  keys(entry, ['result', 'receiptBoundAdoption']);
+  const { result, receiptBoundAdoption: r } = entry;
+  keys(r, ['kind', 'schemaVersion', 'recoveryMode', 'historicalSignatureVerified', 'historicalEvidenceAvailability',
+    'durableReceiptChainVerified', 'liveSuccessorCorroborated', 'freshIndependentCheckerRequired', 'historicalSourceSha',
+    'historicalPurpose', 'historicalPreparationSha256', 'historicalAuthorizationSha256', 'historicalResultSha256',
+    'toolingTreeSha256', 'savedPlanSha256', 'transactionId', 'authorizationId', 'consumerSourceSha', 'consumerTreeSha256',
+    'receiptObjects', 'receiptChainSha256', 'registeredOutputCount', 'definitionsSha256', 'imageImpactReport', 'imageImpactSha256', 'liveCorroborationSha256',
+    'originalMutationReplayable', 'originalMutationAuthorizationAvailable', 'freshHandoffOnly']);
+  assertReceiptBoundBase(r, release, 'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION');
+  assert.equal(r.historicalPurpose, 'STAGE_B_TASK_REGISTRATION');
+  assert.equal(r.originalMutationReplayable, false); assert.equal(r.originalMutationAuthorizationAvailable, false); assert.equal(r.freshHandoffOnly, true);
+  assert.equal(result.status, 'REGISTERED_NONTERMINAL');
+  assert.equal(result.sourceSha, r.historicalSourceSha); assert.equal(result.treeSha256, r.toolingTreeSha256);
+  assert.equal(result.savedPlanSha256, r.savedPlanSha256); assert.equal(result.preparationSha256, r.historicalPreparationSha256);
+  assert.equal(result.authorizationSha256, r.authorizationId); assert.equal(brokerDigest(result), r.historicalResultSha256);
+  assert.equal(Object.keys(result.definitions || {}).length, 12);
+  equal(Object.keys(result.definitions).sort(), Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort());
+  assert.equal(r.registeredOutputCount, 12);
+  assertStageBBrokerTaskDefinitionMap(result.taskMap);
+  hash(r.definitionsSha256); assert.equal(r.definitionsSha256, brokerDigest(result.definitions));
+  assertBrokerImageReuseCompatibility(r.imageImpactReport, r.historicalSourceSha, release);
+  hash(r.imageImpactSha256); assert.equal(r.imageImpactSha256, brokerDigest(r.imageImpactReport));
+  return true;
+}
+
+export function assertReceiptBoundRegistrationReceipts(entry, release, { reservation, intent, result }) {
+  assertReceiptBoundRegistrationAdoption(entry, release);
+  const r = entry.receiptBoundAdoption, id = r.transactionId;
+  assert.equal(reservation.envelope.kind, 'STAGED_BROKER_RESERVATION'); assert.equal(reservation.envelope.id, id);
+  equal(reservation.value, { purpose: r.historicalPurpose, nonce: reservation.value.nonce,
+    preparationSha256: r.historicalPreparationSha256 }); assert.match(reservation.value.nonce || '', /^[a-f0-9]{64}$/);
+  assert.equal(intent.envelope.kind, 'STAGED_BROKER_STEP'); assert.equal(intent.envelope.id, id);
+  assert.equal(intent.envelope.status, 'TASK_REGISTRATION_INTENT');
+  keys(intent.value, ['savedPlanSha256', 'authorizedAt']);
+  assert.equal(result.envelope.kind, 'STAGED_BROKER_STEP'); assert.equal(result.envelope.id, id);
+  assert.equal(result.envelope.status, 'TASK_REGISTERED'); equal(result.value, entry.result);
+  assert.equal(intent.value.savedPlanSha256, r.savedPlanSha256);
+  assert.equal(intent.value.authorizedAt, result.value.authorizedAt);
+  return true;
+}
+
+export function assertReceiptBoundPolicyAdoption(entry, release) {
+  keys(entry, ['terminal', 'receiptBoundAdoption']);
+  const { terminal, receiptBoundAdoption: r } = entry;
+  keys(r, ['kind', 'schemaVersion', 'recoveryMode', 'historicalSignatureVerified', 'historicalEvidenceAvailability',
+    'durableReceiptChainVerified', 'liveSuccessorCorroborated', 'freshIndependentCheckerRequired', 'historicalSourceSha',
+    'historicalPurpose', 'historicalPreparationSha256', 'historicalAuthorizationSha256', 'historicalResultSha256',
+    'toolingTreeSha256', 'savedPlanSha256', 'transactionId', 'authorizationId', 'consumerSourceSha', 'consumerTreeSha256',
+    'receiptObjects', 'receiptChainSha256', 'ownershipStatus', 'transactionReplayable', 'ownership',
+    'predecessorInventory', 'predecessor', 'successor', 'policyArn', 'successorVersion', 'successorDocumentSha256',
+    'successorInventory', 'terraformLineage', 'terraformSerial', 'terraformStateSha256', 'liveCorroborationSha256']);
+  assertReceiptBoundBase(r, release, 'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION');
+  assert.equal(r.historicalPurpose, 'STAGE_B_BROKER_POLICY_CONVERGENCE');
+  assert.equal(terminal.status, 'BROKER_POLICY_CONVERGED_NONTERMINAL');
+  assert.equal(terminal.sourceSha, r.historicalSourceSha); assert.equal(terminal.treeSha256, r.toolingTreeSha256);
+  assert.equal(terminal.preparationSha256, r.historicalPreparationSha256);
+  assert.equal(terminal.authorizationSha256, r.authorizationId);
+  assert.equal(terminal.savedPlanSha256, r.savedPlanSha256); assert.equal(brokerDigest(terminal), r.historicalResultSha256);
+  assert.ok(terminal.owner && terminal.successorIdentity);
+  assert.equal(r.transactionReplayable, false); assert.equal(r.ownershipStatus, 'RELEASED');
+  assert.equal(r.ownership?.status, 'RELEASED'); assert.equal(r.ownership?.terminal?.outcome, 'SUCCEEDED');
+  assert.ok(r.ownership?.mutation); hash(r.ownership.terminal.receiptSha256);
+  keys(r.ownership, ['acquisition', 'identity', 'mutation', 'status', 'terminal']);
+  keys(r.ownership.acquisition, ['authorizedAt', 'preparationSha256', 'purpose', 'reservationSha256']);
+  keys(r.ownership.mutation, ['intentSha256']); hash(r.ownership.mutation.intentSha256);
+  keys(r.ownership.terminal, ['outcome', 'receiptSha256']);
+  const ownerFields = ['generation', 'operationIdentity', 'owner', 'policyArn', 'sourceSha', ...(r.ownership.identity.writerSession ? ['writerSession'] : [])];
+  keys(r.ownership.identity, ownerFields); assert.match(r.ownership.identity.owner || '', /^[a-f0-9-]{36}$/);
+  assert.ok(Number.isSafeInteger(r.ownership.identity.generation) && r.ownership.identity.generation > 0);
+  assert.match(r.ownership.identity.sourceSha || '', /^[a-f0-9]{40}$/); hash(r.ownership.identity.operationIdentity);
+  equal(r.ownership.identity, terminal.owner); assert.equal(r.ownership.identity.operationIdentity, r.authorizationId);
+  equal(r.ownership.acquisition.preparationSha256, r.historicalPreparationSha256);
+  equal(r.ownership.acquisition.purpose, r.historicalPurpose);
+  assert.equal(r.ownership.terminal.receiptSha256, r.historicalResultSha256);
+  assert.equal(terminal.owner.policyArn, STAGE_B_BROKER_POLICY.arn);
+  assert.match(terminal.successorIdentity.policyVersion || '', /^v[1-9][0-9]*$/);
+  assertStageBBrokerPolicyDocument(terminal.policy);
+  assert.equal(r.policyArn, STAGE_B_BROKER_POLICY.arn);
+  assert.equal(r.successorVersion, terminal.successorIdentity.policyVersion);
+  assert.equal(r.successorDocumentSha256, brokerDigest(terminal.policy));
+  assert.ok(Array.isArray(r.predecessorInventory) && r.predecessorInventory.length > 0 && r.predecessorInventory.length < 5);
+  assert.equal(new Set(r.predecessorInventory.map(v => v.VersionId)).size, r.predecessorInventory.length);
+  for (const item of r.predecessorInventory) { keys(item, ['VersionId', 'IsDefaultVersion']); assert.match(item.VersionId || '', /^v[1-9][0-9]*$/); assert.equal(typeof item.IsDefaultVersion, 'boolean'); }
+  assert.deepEqual(Object.keys(r.predecessor || {}).sort(), ['defaultVersion', 'policyArn']);
+  assert.equal(r.predecessor.policyArn, STAGE_B_BROKER_POLICY.arn);
+  equal(r.predecessorInventory.filter(v => v.IsDefaultVersion).map(v => v.VersionId), [r.predecessor.defaultVersion]);
+  equal(r.successor, terminal.successorIdentity);
+  assert.ok(Array.isArray(r.successorInventory) && r.successorInventory.length === r.predecessorInventory.length + 1 && r.successorInventory.length <= 5);
+  equal(r.successorInventory, [...r.predecessorInventory.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: false })),
+    { VersionId: r.successorVersion, IsDefaultVersion: true }].sort((a, b) => a.VersionId.localeCompare(b.VersionId)));
+  assert.match(r.terraformLineage || '', /^[a-f0-9-]{36}$/); assert.ok(Number.isSafeInteger(r.terraformSerial) && r.terraformSerial >= 0); hash(r.terraformStateSha256);
+  assert.ok(terminal.reconciliation?.state, 'Durable terminal result must contain the Terraform state identity');
+  equal({ lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 }, terminal.reconciliation.state);
+  return true;
+}
+
+export function assertReceiptBoundPolicyReceipts(entry, release, { reservation, intent, result, ownership }) {
+  assertReceiptBoundPolicyAdoption(entry, release);
+  const r = entry.receiptBoundAdoption, id = r.transactionId;
+  assert.equal(reservation.envelope.kind, 'STAGED_BROKER_RESERVATION'); assert.equal(reservation.envelope.id, id);
+  equal(Object.keys(reservation.value).sort(), ['nonce', 'preparationSha256', 'purpose']);
+  assert.equal(reservation.value.purpose, r.historicalPurpose);
+  assert.equal(reservation.value.preparationSha256, r.historicalPreparationSha256);
+  assert.match(reservation.value.nonce || '', /^[a-f0-9]{64}$/);
+  assert.equal(intent.envelope.kind, 'STAGED_BROKER_STEP'); assert.equal(intent.envelope.id, id);
+  assert.equal(intent.envelope.status, 'BROKER_POLICY_INTENT');
+  keys(intent.value, ['owner', 'acquisitionSha256', 'savedPlanSha256', 'authorizedAt', 'predecessorInventory']);
+  assert.equal(result.envelope.kind, 'STAGED_BROKER_STEP'); assert.equal(result.envelope.id, id);
+  assert.equal(result.envelope.status, 'BROKER_POLICY_CONVERGED'); equal(result.value, entry.terminal);
+  equal(ownership, r.ownership); equal(ownership.identity, entry.terminal.owner);
+  assert.equal(brokerDigest(reservation.envelope), ownership.acquisition.reservationSha256);
+  assert.equal(brokerDigest(intent.value), ownership.mutation.intentSha256);
+  assert.equal(intent.value.savedPlanSha256, r.savedPlanSha256);
+  assert.equal(intent.value.acquisitionSha256, brokerDigest(ownership.acquisition));
+  equal(intent.value.owner, ownership.identity);
+  equal(intent.value.predecessorInventory, r.predecessorInventory);
+  assert.equal(intent.value.authorizedAt, result.value.authorizedAt);
+  assert.equal(ownership.terminal.receiptSha256, brokerDigest(result.value));
+  return true;
+}
+
+export function receiptBoundCheckerDisclosure(preparation) {
+  const chain = preparation?.prerequisiteChain;
+  if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
+  const operation = {
+    [BROKER_PUBLICATION]: {
+      intendedOperation: 'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN',
+      authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE',
+    },
+    [BROKER_CUTOVER]: {
+      intendedOperation: 'LAMBDA_ALIAS_COMPARE_AND_SWAP',
+      authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_CUTOVER_PACKAGE',
+    },
+  }[preparation.purpose];
+  assert.ok(operation, 'Receipt-bound recovery can authorize only publication or cutover packages');
+  assert.ok(chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption);
+  const identity = entry => {
+    const r = entry.receiptBoundAdoption;
+    return { artifactSha256: brokerDigest(entry), transactionId: r.transactionId,
+      historicalSourceSha: r.historicalSourceSha, historicalPurpose: r.historicalPurpose,
+      preparationSha256: r.historicalPreparationSha256, authorizationDigest: r.historicalAuthorizationSha256,
+      resultSha256: r.historicalResultSha256, receiptObjects: r.receiptObjects,
+      receiptChainSha256: r.receiptChainSha256, liveCorroborationSha256: r.liveCorroborationSha256,
+      ...(r.kind === 'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION'
+        ? { ownershipSha256: brokerDigest(r.ownership), ownershipStatus: r.ownershipStatus,
+          terminalOutcome: r.ownership.terminal.outcome, transactionReplayable: r.transactionReplayable,
+          policyArn: r.policyArn, successorVersion: r.successorVersion,
+          successorDocumentSha256: r.successorDocumentSha256,
+          terraform: { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 } }
+        : { registeredOutputCount: r.registeredOutputCount, definitionsSha256: r.definitionsSha256,
+          imageImpactSha256: r.imageImpactSha256 }) };
+  };
+  return { kind: 'RECEIPT_BOUND_RECOVERY_DISCLOSURE',
+    statements: ['ORIGINAL_HISTORICAL_PREPARATION_AND_AUTHORIZATION_BYTES_UNAVAILABLE',
+      'HISTORICAL_CHECKER_SIGNATURE_NOT_REVERIFIED', 'RETAINED_HISTORICAL_DIGESTS_VERIFIED_AGAINST_DURABLE_RECEIPTS',
+      'COMPLETED_OUTPUTS_AND_TERMINAL_TRANSACTION_VERIFIED', 'LIVE_SUCCESSOR_INDEPENDENTLY_CORROBORATED',
+      'REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED',
+      'TERRAFORM_OWNERSHIP_AND_STATE_CORROBORATED', 'RECEIPT_BOUND_HANDOFF_PREPARATION_IS_NON_MUTATING',
+      operation.authorizationStatement],
+    recoveryArtifactSha256: brokerDigest({ registration: chain.registration, policy: chain.policy }),
+    registration: identity(chain.registration), policy: identity(chain.policy),
+    consumerSourceSha: preparation.sourceSha, intendedOperation: operation.intendedOperation,
+    packageSha256: preparation.packageSha256, savedPlanSha256: preparation.savedPlanSha256,
+    logicalPlanSha256: preparation.logicalPlanSha256, preparationSha256: brokerDigest(preparation),
+    freshIndependentCheckerRequired: true };
 }
 
 function planEnvelope(plan, sourceSha, { targeted = false } = {}) {
@@ -80,7 +296,8 @@ export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, ca
     assert.equal(fn.change.after.source_code_hash, Buffer.from(packageSha256, 'hex').toString('base64'));
     equal(JSON.parse(after.BROKER_TASK_DEFINITIONS_JSON), prerequisiteChain.registration.result.taskMap);
     if (prerequisiteChain.registration.result.sourceSha !== sourceSha) assertRegistrationHandoff(prerequisiteChain.registration, { sourceSha, treeSha256 });
-    equal(prerequisites.policy, prerequisiteChain.policy.adoption ? prerequisiteChain.policy.terminal.policy : prerequisiteChain.policy.result.policy);
+    equal(prerequisites.policy, prerequisiteChain.policy.adoption || prerequisiteChain.policy.receiptBoundAdoption
+      ? prerequisiteChain.policy.terminal.policy : prerequisiteChain.policy.result.policy);
   } else {
     equal({ ...oldExpected, releaseSha: sourceSha }, newExpected, "Publication changes other approval inputs");
     equal({ ...before, BROKER_APPROVAL_EXPECTED_JSON: after.BROKER_APPROVAL_EXPECTED_JSON }, after, "Publication changes task map/configuration");
@@ -134,6 +351,7 @@ export function brokerTargetIdentity(configuration, packageSha256) {
 // Adoption binds an immutable historical result to independently approved current-main
 // preparation. It is never registration authority and never rewrites the result.
 export function assertRegistrationHandoff(entry, release) {
+  if (entry?.receiptBoundAdoption !== undefined) return assertReceiptBoundRegistrationAdoption(entry, release);
   keys(entry, entry.adoption ? ['preparation', 'authorization', 'result', 'adoption'] : ['preparation', 'authorization', 'result']);
   const { preparation: p, authorization, result, adoption } = entry;
   assert.equal(p.purpose, 'STAGE_B_TASK_REGISTRATION');
@@ -160,6 +378,7 @@ export function assertHistoricalPolicyRegistrationHandoff(entry, policyRelease) 
 }
 
 export function assertTerminalPolicyHandoff(entry, release) {
+  if (entry?.receiptBoundAdoption !== undefined) return assertReceiptBoundPolicyAdoption(entry, release);
   keys(entry, ['preparation', 'authorization', 'result', 'terminal', 'adoption']);
   const { preparation: p, authorization, result, terminal, adoption } = entry;
   assert.equal(p.purpose, 'STAGE_B_BROKER_POLICY_CONVERGENCE');
@@ -224,6 +443,15 @@ export function createTerminalPolicySuccessorAdoption(entry, release, state, suc
 
 export function assertTerminalPolicySuccessorState(entry, release, { ownership, live, terraform }) {
   assertTerminalPolicyHandoff(entry, release);
+  if (entry.receiptBoundAdoption) {
+    const r = entry.receiptBoundAdoption;
+    assert.equal(ownership.status, 'RELEASED'); assert.equal(ownership.terminal?.outcome, 'SUCCEEDED');
+    equal(ownership, r.ownership); equal(live.policyArn, r.policyArn); equal(live.version, r.successorVersion);
+    equal(live.policy, entry.terminal.policy); equal(live.versions, r.successorInventory);
+    equal({ lineage: terraform.lineage, serial: terraform.serial, stateSha256: terraform.stateSha256 },
+      { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 });
+    equal(terraform.policyArn, r.policyArn); equal(terraform.policy, entry.terminal.policy); return true;
+  }
   const { adoption, terminal } = entry;
   assert.equal(ownership.status, 'RELEASED'); assert.equal(ownership.terminal?.outcome, 'SUCCEEDED');
   equal(ownership.identity, terminal.owner); assert.ok(ownership.mutation, 'Terminal success requires committed intent');
@@ -266,6 +494,17 @@ export function assertBrokerPreparation(p) {
         equal(chain.terminal.policy, p.prerequisites.policy);
         equal({ lineage: chain.adoption.terraformLineage, serial: chain.adoption.terraformSerial,
           stateSha256: chain.adoption.terraformStateSha256 }, p.state, 'Terminal policy adoption Terraform state changed');
+      } else if (phase === 'policy' && chain.receiptBoundAdoption) {
+        assertReceiptBoundPolicyAdoption(chain, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+        equal(chain.terminal.policy, p.prerequisites.policy);
+        const adoptedState = { lineage: chain.receiptBoundAdoption.terraformLineage, serial: chain.receiptBoundAdoption.terraformSerial,
+          stateSha256: chain.receiptBoundAdoption.terraformStateSha256 };
+        if (p.purpose === BROKER_PUBLICATION) equal(adoptedState, p.state, 'Receipt-bound policy Terraform state changed');
+        else {
+          assert.equal(p.purpose, BROKER_CUTOVER);
+          assert.equal(p.state.lineage, adoptedState.lineage, 'Receipt-bound policy Terraform lineage changed');
+          assert.ok(p.state.serial > adoptedState.serial, 'Cutover state must postdate the receipt-bound policy adoption');
+        }
       } else {
         keys(chain, ['preparation', 'authorization', 'result']);
         assert.equal(chain.preparation.sourceSha, p.sourceSha); assert.equal(chain.result.sourceSha, p.sourceSha);
@@ -275,7 +514,8 @@ export function assertBrokerPreparation(p) {
       }
     }
     equal(p.prerequisiteChain.registration.result.taskMap, p.prerequisites.taskMap);
-    equal(p.prerequisiteChain.policy.adoption ? p.prerequisiteChain.policy.terminal.policy : p.prerequisiteChain.policy.result.policy, p.prerequisites.policy);
+    equal(p.prerequisiteChain.policy.adoption || p.prerequisiteChain.policy.receiptBoundAdoption
+      ? p.prerequisiteChain.policy.terminal.policy : p.prerequisiteChain.policy.result.policy, p.prerequisites.policy);
   }
   if (p.purpose === BROKER_PUBLICATION) { assert.equal(p.target, null); assert.equal(p.publication, null); }
   else {
@@ -295,7 +535,9 @@ export function assertBrokerPreparation(p) {
 
 export async function assertBrokerAuthorization(authorization, preparation, { verify, now = new Date() }) {
   assertBrokerPreparation(preparation);
-  keys(authorization, ["schemaVersion", "purpose", "preparationSha256", "sourceSha", "nonce", "issuedAt", "expiresAt", "review", "signature"]);
+  const disclosure = receiptBoundCheckerDisclosure(preparation);
+  keys(authorization, ["schemaVersion", "purpose", "preparationSha256", "sourceSha", "nonce", "issuedAt", "expiresAt", "review", "signature", ...(disclosure ? ['recoveryDisclosure'] : [])]);
+  if (disclosure) equal(authorization.recoveryDisclosure, disclosure, 'Fresh checker must sign the complete receipt-recovery disclosure');
   assert.equal(authorization.schemaVersion, 1); assert.equal(authorization.purpose, preparation.purpose);
   assert.equal(authorization.sourceSha, preparation.sourceSha);
   assert.equal(authorization.preparationSha256, brokerDigest(preparation));

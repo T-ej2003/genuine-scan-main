@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readProductionReceiptObject, listProductionReceiptObjects } from '../aws/production-receipt-read.mjs';
+import fs from 'node:fs';
 import { STAGE_B_TERRAFORM_BACKEND as backend } from '../aws/stage-b-terraform-backend-contract.mjs';
 const bucket=backend.bucketName, key=`${backend.applyAttemptPrefix}/${'a'.repeat(64)}/0002.json`;
 const denied=()=>Object.assign(new Error('denied'),{stderr:'(AccessDenied)'});
@@ -19,7 +20,6 @@ test('complete listing preserves objects on all pages',()=>{const run=reader([ro
 
 test('Full-RLS sibling and unknown mode namespaces are rejected before any read',()=>{let calls=0;const run=()=>calls++;for(const prefix of ['rls-receipts/internal/',`rls-receipts/${'a'.repeat(40)}/internal/`,`rls-receipts/${'a'.repeat(40)}/full-rls-unknown/`])assert.throws(()=>listProductionReceiptObjects({run,bucket:'mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an',prefix}));assert.equal(calls,0);});
 
-import fs from 'node:fs';
 import { prepareFullRlsReceiptReleaseBinding, assertFullRlsReceiptReleaseAuthority } from '../aws/production-receipt-read.mjs';
 const release='a'.repeat(40), roleArn='arn:aws:iam::368992683803:role/mscqr-production-release-deployer';
 const trust=JSON.parse(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_RELEASE_DEPLOYER_TRUST_POLICY.json'));

@@ -41,6 +41,7 @@
       "s3:PutObject(lock)",
       "s3:DeleteObject(lock)",
       "s3:GetObject(apply-attempt)",
+      "s3:GetObjectVersion(apply-attempt)",
       "s3:PutObject(apply-attempt,If-None-Match:*)"
     ]
   },

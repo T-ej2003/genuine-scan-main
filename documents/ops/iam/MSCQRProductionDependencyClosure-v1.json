@@ -242,6 +242,21 @@
     },
     {
       "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
+      "action": "s3:GetObjectVersion",
+      "identity": "RELEASE_DEPLOYER",
+      "capabilityIds": [
+        "staged-broker-04ac92a2ca9c7bcc"
+      ],
+      "reachableMode": [
+        "NORMAL"
+      ],
+      "executionPrincipal": "RELEASE_DEPLOYER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/stage-b-staged-broker-executor.mjs",
       "action": "sts:GetCallerIdentity",
       "identity": "RELEASE_DEPLOYER",
       "capabilityIds": [

@@ -104,6 +104,12 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
     },
     {
+      "Sid": "ReadStageBApplyAttemptVersions",
+      "Effect": "Allow",
+      "Action": "s3:GetObjectVersion",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/*"
+    },
+    {
       "Sid": "CreateStageBApplyAttemptsOnly",
       "Effect": "Allow",
       "Action": "s3:PutObject",
