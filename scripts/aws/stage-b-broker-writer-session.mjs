@@ -83,14 +83,22 @@ function writerSessionIssuanceWindow(expiration) {
   return { startTime: new Date(end - MAX_WRITER_SESSION_MS).toISOString(), endTime: new Date(end).toISOString() };
 }
 export async function readBrokerRecoveryAwsClock(fetcher = fetch) {
-  // Same regional STS authority that issued the credential. No signed operation,
-  // credential, local clock, cached file, or caller-selected endpoint is used.
-  const response = await fetcher('https://sts.eu-west-2.amazonaws.com/', { method: 'HEAD', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10000) });
-  assert.ok([200, 400, 403, 405].includes(response.status));
+  // STS Query API uses POST; a bare HEAD is not a supported clock probe and
+  // the regional endpoint may redirect it outside the service authority.
+  // Its TLS-authenticated, unsigned GetCallerIdentity rejection still carries
+  // an AWS Date, without credentials or a mutating operation.
+  const response = await fetcher('https://sts.eu-west-2.amazonaws.com/', { method: 'POST', redirect: 'error', cache: 'no-store',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'Action=GetCallerIdentity&Version=2011-06-15', signal: AbortSignal.timeout(10000) });
+  assert.equal(response.status, 403, 'Unexpected regional STS clock-probe response');
   assert.equal(response.url, 'https://sts.eu-west-2.amazonaws.com/');
+  assert.equal(response.redirected, false, 'Redirected STS response is not clock authority');
+  assert.match(await response.text(), /<ErrorResponse xmlns="https:\/\/sts\.amazonaws\.com\/doc\/2011-06-15\/">[\s\S]*<Code>MissingAuthenticationToken<\/Code>[\s\S]*<\/ErrorResponse>/,
+    'Response is not the expected STS Query API authentication rejection');
   const date = response.headers.get('date'); assert.ok(date, 'Missing authenticated AWS clock');
   assert.equal(response.headers.get('age'), null, 'Cached clock is not authority');
-  return new Date(timestamp(date)).toISOString();
+  const milliseconds = timestamp(date);
+  assert.equal(new Date(milliseconds).toUTCString(), date, 'Malformed AWS HTTP Date');
+  return new Date(milliseconds).toISOString();
 }
 export async function proveBrokerWriterUnusable(owner, { readIssuance, readClock }) {
   assert.ok(owner.writerSession, 'Legacy/unbound ownership cannot be recovered automatically');
