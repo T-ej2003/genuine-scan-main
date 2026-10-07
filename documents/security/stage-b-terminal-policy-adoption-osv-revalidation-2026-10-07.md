@@ -58,3 +58,8 @@ It preserves the exact state captured by the durable adoption receipt while
 accepting only a strictly newer serial on the same lineage after the governed
 publication apply. No dependency, advisory, acceptance scope, or expiry
 changed.
+
+The historical policy tooling-tree recomputation updates the fingerprint to
+`c570635d7a4de415ccfcb86af96c0343e01129e31c2277de3a993175ef2deb63`.
+It adds only source-to-tree authentication at receipt-bound handoff creation
+and consumption. The accepted finding and expiry remain unchanged.

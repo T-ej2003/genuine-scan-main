@@ -51,6 +51,11 @@ export function assertReceiptBoundPolicyTerraformState(phase, current, adopted) 
   assert.match(current.stateSha256 || '', /^[a-f0-9]{64}$/);
   return true;
 }
+export function assertReceiptBoundHistoricalToolingTree(sourceSha, treeSha256, derive = deriveStageBToolingInputTreeSha256) {
+  assert.match(sourceSha || '', /^[a-f0-9]{40}$/); assert.match(treeSha256 || '', /^[a-f0-9]{64}$/);
+  assert.equal(derive(sourceSha), treeSha256, 'Receipt-bound historical tooling tree changed');
+  return true;
+}
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
 STEPS.push('BROKER_POLICY_PRUNING_INTENT', 'BROKER_POLICY_PRUNED', 'BROKER_POLICY_RECOVERED_NO_WRITE');
@@ -418,6 +423,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
   const verifyReceiptBoundPolicy = async (entry, release) => {
     assertReceiptBoundPolicyAdoption(entry, release);
     const r = entry.receiptBoundAdoption, id = r.transactionId;
+    assertReceiptBoundHistoricalToolingTree(r.historicalSourceSha, r.toolingTreeSha256);
     const reservation = readReceiptAt(id, 'RESERVATION', r.receiptObjects.reservation);
     const intent = readReceiptAt(id, 'BROKER_POLICY_INTENT', r.receiptObjects.intent);
     const result = readReceiptAt(id, 'BROKER_POLICY_CONVERGED', r.receiptObjects.result);
@@ -488,6 +494,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     const ownership = createBrokerPolicyOwnershipClient({ run: runAws }).read();
     const terminal = pol.result.value;
     assertReceiptBoundGitAncestry({ historicalSourceSha: terminal.sourceSha, consumerSourceSha: release.sourceSha, exec, cwd: root });
+    assertReceiptBoundHistoricalToolingTree(terminal.sourceSha, terminal.treeSha256);
     assert.ok(ownership); assert.equal(ownership.identity.operationIdentity, policyId);
     assert.equal(ownership.identity.sourceSha, terminal.sourceSha); assert.equal(ownership.status, 'RELEASED');
     assert.equal(ownership.terminal?.outcome, 'SUCCEEDED'); assert.ok(ownership.mutation);

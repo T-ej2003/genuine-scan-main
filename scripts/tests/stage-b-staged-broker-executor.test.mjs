@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -151,6 +151,12 @@ test('receipt-bound policy state preserves adoption identity and admits only a l
  assert.throws(()=>assertReceiptBoundPolicyTerraformState('RECEIPT_ADOPTION',{...adopted,serial:118,stateSha256:'c'.repeat(64)},adopted),/changed during/);
  assert.throws(()=>assertReceiptBoundPolicyTerraformState('PUBLICATION',{...adopted,lineage:'d'.repeat(36),serial:118,stateSha256:'c'.repeat(64)},adopted),/lineage changed/);
  assert.throws(()=>assertReceiptBoundPolicyTerraformState('PUBLICATION',{...adopted,stateSha256:'c'.repeat(64)},adopted),/did not advance/);
+});
+test('receipt-bound policy tooling tree is recomputed from its authenticated historical source',()=>{
+ const source='a'.repeat(40),tree='b'.repeat(64),seen=[];
+ assert.equal(assertReceiptBoundHistoricalToolingTree(source,tree,sha=>{seen.push(sha);return tree;}),true);
+ assert.deepEqual(seen,[source]);
+ assert.throws(()=>assertReceiptBoundHistoricalToolingTree(source,tree,()=> 'c'.repeat(64)),/tooling tree changed/);
 });
 test('receipt-bound historical source must be an ancestor of the protected consumer',()=>{
  const historical='a'.repeat(40),consumer='b'.repeat(40),seen=[];
