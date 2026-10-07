@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
-import { brokerPrerequisiteIdentity } from './stage-b-staged-broker-contract.mjs';
+import { brokerAliasIdentity, brokerPrerequisiteIdentity } from './stage-b-staged-broker-contract.mjs';
 import { RELEASE_POLICY_SOURCES } from './validate-production-green-stage-b-permissions.mjs';
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
 const matches = (pattern, value) => new RegExp(`^${pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.')}$`).test(value);
@@ -35,7 +35,7 @@ export function assertBrokerCallerPolicy(document) {
   }
 }
 
-export function readStagedBrokerPrerequisites(run, { authenticatedTaskMap } = {}) {
+export function readStagedBrokerPrerequisites(run, { authenticatedTaskMap, expectedPredecessor } = {}) {
   const json = args => JSON.parse(run([...args, '--output', 'json', '--no-cli-pager']));
   const complete = response => { assert.ok(!response.NextMarker && !response.NextToken && !response.Marker && !response.IsTruncated, 'Incomplete invocation/role census'); return response; };
   const policy = json(['iam', 'get-policy', '--policy-arn', STAGE_B_BROKER_POLICY.arn]).Policy;
@@ -86,7 +86,14 @@ export function readStagedBrokerPrerequisites(run, { authenticatedTaskMap } = {}
   const trafficSnapshot = readTraffic();
   const { aliases, urls, events } = trafficSnapshot;
   const configuration = json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', aliases[0].FunctionVersion]);
-  const taskMap = authenticatedTaskMap || JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+  const predecessorTaskMap = JSON.parse(configuration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+  if (expectedPredecessor !== undefined) {
+    assert.deepEqual(Object.keys(expectedPredecessor).sort(), ['alias', 'taskMap']);
+    const observedAlias = brokerAliasIdentity({ ...aliases[0], Description: aliases[0].Description ?? '', RoutingConfig: aliases[0].RoutingConfig ?? { AdditionalVersionWeights: {} } });
+    equal(observedAlias, brokerAliasIdentity(expectedPredecessor.alias), 'Observed alias differs from reviewed predecessor');
+    equal(predecessorTaskMap, expectedPredecessor.taskMap, 'Observed predecessor runtime task map differs from reviewed predecessor');
+  }
+  const taskMap = authenticatedTaskMap || predecessorTaskMap;
   // Guard the snapshot against an alias move during the inventory.
   const finalAlias = json(['lambda', 'get-alias', '--function-name', STAGE_B.brokerFunctionArn, '--name', STAGE_B.brokerAliasQualifier]);
   assert.equal(finalAlias.FunctionVersion, aliases[0].FunctionVersion); assert.equal(finalAlias.RevisionId, aliases[0].RevisionId);

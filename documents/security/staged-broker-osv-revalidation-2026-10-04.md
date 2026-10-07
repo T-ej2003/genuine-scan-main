@@ -236,3 +236,13 @@ existing braces finding, disposition, rationale, owner, and 2026-11-02 expiry ar
 unchanged. The local Stage-B control-plane run hit temporary-disk exhaustion; the
 hosted deployment audit must complete its fresh browser build, scanner report, and
 OSV runtime gate on the exact PR head before merge.
+
+### 2026-10-07 registration-adoption predecessor validation correction
+
+The adoption reader now separately verifies the observed Lambda alias/runtime
+against the authenticated historical preparation before using the authenticated
+registration map for live-policy comparison. The binding hash is refreshed to
+`910610244b814597a73d7d077a3173d7d590b8d2a6fb70de24577759e527c09d`; finding,
+rationale, scope, disposition, owner, expiry, dependencies, and application
+runtime files are unchanged. The clean hosted audit must repeat the full
+reachability build and scanner gate for this new exact head.

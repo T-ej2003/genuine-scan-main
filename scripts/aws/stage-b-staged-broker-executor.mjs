@@ -464,7 +464,8 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       assert.equal(phase, 'ADOPTION');
       const authenticatedTaskMap = await authenticateRegistrationForAdoption(entry, checkout);
       equal(await adapter.readCheckout(), checkout);
-      return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap });
+      return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap,
+        expectedPredecessor: { alias: entry.preparation.alias, taskMap: entry.preparation.prerequisites.taskMap } });
     },
     readStateIdentity: async () => readStageBTerraformStateIdentity(runAws),
     getAlias,

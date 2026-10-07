@@ -159,7 +159,7 @@ test('native reconciliation applies only validated refresh saved plan, then capt
 
 // Mutations happen after the first traffic census, immediately before its final
 // consistency guard. A fixed alias cannot hide a newly created invocation route.
-function prerequisiteReader(drift = null, liveTaskMap) {
+function prerequisiteReader(drift = null, liveTaskMap, { liveAlias = alias, predecessorTaskMap } = {}) {
   const p = structuredClone(preparation().prerequisites);
   if (liveTaskMap) p.policy = deriveBrokerPolicy(p.policy, liveTaskMap);
   let changed = false;
@@ -173,9 +173,12 @@ function prerequisiteReader(drift = null, liveTaskMap) {
       else if (operation === 'list-attached-role-policies') result = { AttachedPolicies: value('--role-name') === 'mscqr-production-release-deployer' ? [] : [{ PolicyArn: p.policyArn }] };
       else if (operation === 'list-role-policies') result = { PolicyNames: [] };
     } else if (service === 'lambda') {
-      if (operation === 'get-alias') { changed = true; result = alias; }
-      else if (operation === 'list-aliases') result = { Aliases: [alias] };
-      else if (operation === 'get-function-configuration') result = configuration('12');
+      if (operation === 'get-alias') { changed = true; result = liveAlias; }
+      else if (operation === 'list-aliases') result = { Aliases: [liveAlias] };
+      else if (operation === 'get-function-configuration') {
+        result = configuration('12');
+        if (predecessorTaskMap) result.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON = JSON.stringify(predecessorTaskMap);
+      }
       else if (operation === 'list-versions-by-function') result = { Versions: [{ Version: '$LATEST' }, { Version: '12' }, ...(changed && drift === 'version' ? [{ Version: '13' }] : [])] };
       else if (operation === 'get-policy') {
         if (value('--qualifier') !== 'reviewed') {
@@ -196,11 +199,43 @@ test('authenticated registration map explains only the expected pre-cutover live
   const aliasMap = preparation().prerequisites.taskMap;
   const registeredMap = Object.fromEntries(Object.entries(aliasMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap)), /task revisions differ/);
-  const observed = readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), { authenticatedTaskMap: registeredMap });
+  const observed = readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), {
+    authenticatedTaskMap: registeredMap, expectedPredecessor: { alias, taskMap: aliasMap },
+  });
   assert.deepEqual(observed.taskMap, registeredMap);
   const firstMode = Object.keys(registeredMap)[0];
   const unrelatedMap = { ...registeredMap, [firstMode]: registeredMap[firstMode].replace(':43', ':44') };
-  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), { authenticatedTaskMap: unrelatedMap }), /task revisions differ/);
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, registeredMap), {
+    authenticatedTaskMap: unrelatedMap, expectedPredecessor: { alias, taskMap: aliasMap },
+  }), /task revisions differ/);
+});
+test('adopted policy map cannot substitute for an unexpected reviewed predecessor alias', () => {
+  const oldMap = preparation().prerequisites.taskMap;
+  const adoptedMap = Object.fromEntries(Object.entries(oldMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  const wrongAlias = { ...alias, FunctionVersion: '13' };
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, adoptedMap, { liveAlias: wrongAlias }), {
+    authenticatedTaskMap: adoptedMap, expectedPredecessor: { alias, taskMap: oldMap },
+  }));
+});
+test('adopted policy map cannot substitute for an unexpected predecessor runtime task map', () => {
+  const oldMap = preparation().prerequisites.taskMap;
+  const adoptedMap = Object.fromEntries(Object.entries(oldMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  const changedMap = { ...oldMap, [Object.keys(oldMap)[0]]: oldMap[Object.keys(oldMap)[0]].replace(/:[0-9]+$/, ':44') };
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, adoptedMap, { predecessorTaskMap: changedMap }), {
+    authenticatedTaskMap: adoptedMap, expectedPredecessor: { alias, taskMap: oldMap },
+  }));
+});
+test('tampered historical alias or task map fails before adopted policy comparison', () => {
+  const oldMap = preparation().prerequisites.taskMap;
+  const adoptedMap = Object.fromEntries(Object.entries(oldMap).map(([mode, arn]) => [mode, arn.replace(/:[0-9]+$/, ':43')]));
+  const tamperedAlias = { ...alias, RevisionId: 'tampered' };
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, adoptedMap), {
+    authenticatedTaskMap: adoptedMap, expectedPredecessor: { alias: tamperedAlias, taskMap: oldMap },
+  }));
+  const tamperedMap = { ...oldMap, [Object.keys(oldMap)[0]]: oldMap[Object.keys(oldMap)[0]].replace(/:[0-9]+$/, ':44') };
+  assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(null, adoptedMap), {
+    authenticatedTaskMap: adoptedMap, expectedPredecessor: { alias, taskMap: tamperedMap },
+  }));
 });
 for (const drift of ['policy', 'url', 'event', 'version']) test(`end-of-scan traffic guard rejects concurrent ${drift}`, () => {
   assert.throws(() => readStagedBrokerPrerequisites(prerequisiteReader(drift)));
