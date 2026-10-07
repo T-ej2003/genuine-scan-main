@@ -63,3 +63,13 @@ The historical policy tooling-tree recomputation updates the fingerprint to
 `c570635d7a4de415ccfcb86af96c0343e01129e31c2277de3a993175ef2deb63`.
 It adds only source-to-tree authentication at receipt-bound handoff creation
 and consumption. The accepted finding and expiry remain unchanged.
+
+The WorkspaceState policy-capacity transaction update rebinds the fingerprint
+to `8d18bc437e1b2af948109498dc1196003ba18d3de0d2fe443e075a8b324873e1`. A fresh
+unfiltered OSV Scanner 2.6.0 report matched the prior PR #640 hosted report
+exactly: one HIGH dev-only `braces@3.0.3` finding, GHSA-vfj7-8cjw-p6xm /
+CVE-2026-93687. The fresh canonical browser build transformed 3,993 modules
+into 96 chunks and resolved 204 packages; `braces@3.0.3` was absent. Only
+`reachability.inputsSha256` changed; the accepted advisory, package/version,
+scope, rationale, owner, creation date, and exclusive expiry 2026-11-02 are
+unchanged.

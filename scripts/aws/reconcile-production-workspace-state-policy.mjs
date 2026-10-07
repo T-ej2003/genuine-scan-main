@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { authenticateWorkspaceStateLiveState, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, resolveWorkspaceStateAuthorizationArtifact, WORKSPACE_STATE_RECONCILIATION, workspaceStateProductionSleep } from "./production-workspace-state-policy-reconciliation.mjs";
+import { authenticateWorkspaceStateLiveState, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, resolveWorkspaceStateAuthorizationArtifact, WORKSPACE_STATE_RECONCILIATION, WorkspaceStateRetryableObservationError, workspaceStateProductionSleep } from "./production-workspace-state-policy-reconciliation.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 
@@ -13,7 +13,17 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")
 const option = (argv, name) => { const index = argv.indexOf(name); return index < 0 ? undefined : argv[index + 1]; };
 const required = (argv, name) => { const value = option(argv, name); if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
 const exactOptions = (argv, allowed) => { const seen = new Set(); for (let index = 0; index < argv.length; index += 2) { const name = argv[index], value = argv[index + 1]; if (!allowed.has(name) || seen.has(name) || !value || value.startsWith("--")) throw new Error("WorkspaceState reconciliation arguments are not exact."); seen.add(name); } };
-const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const RETRYABLE_IAM_READ_CODES = /\((?:Throttling|ThrottlingException|RequestLimitExceeded|ServiceUnavailable|ServiceFailure|InternalFailure|InternalError|RequestTimeout|RequestTimeoutException|PriorRequestNotComplete)\)/;
+const IAM_READ_COMMANDS = new Set(["get-policy", "list-policy-versions", "get-policy-version", "list-entities-for-policy"]);
+const errorText = error => [error?.message, error?.stderr, error?.stdout].map(value => Buffer.isBuffer(value) ? value.toString("utf8") : String(value || "")).join("\n");
+const json = (run, args) => {
+  try { return JSON.parse(run([...args, "--output", "json", "--no-cli-pager"])); }
+  catch (error) {
+    const message = errorText(error); const retryableCode = RETRYABLE_IAM_READ_CODES.test(message) || (args[1] === "get-policy-version" && /\((?:NoSuchEntity|NoSuchEntityException)\)/.test(message));
+    if (args[0] === "iam" && IAM_READ_COMMANDS.has(args[1]) && retryableCode) throw new WorkspaceStateRetryableObservationError(`Retryable ${args[1]} observation failed.`, { cause: error });
+    throw error;
+  }
+};
 const paged = (run, args, fields) => {
   const result = Object.fromEntries(fields.map(field => [field, []])); const markers = new Set(); let marker;
   for (;;) {
@@ -30,9 +40,11 @@ export function readWorkspaceStateLiveState(run) {
   const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", WORKSPACE_STATE_RECONCILIATION.policyArn]).Versions;
   const entities = paged(run, ["iam", "list-entities-for-policy", "--policy-arn", WORKSPACE_STATE_RECONCILIATION.policyArn], ["PolicyRoles", "PolicyUsers", "PolicyGroups"]);
   if (policy?.Arn !== WORKSPACE_STATE_RECONCILIATION.policyArn || !Array.isArray(versions)) throw new Error("WorkspaceState IAM response is malformed.");
+  const listedDefaults = versions.filter(version => version?.IsDefaultVersion === true);
+  if (listedDefaults.length !== 1 || listedDefaults[0].VersionId !== policy.DefaultVersionId) throw new WorkspaceStateRetryableObservationError("WorkspaceState policy and version-list snapshot is internally inconsistent.");
   return { policyArn: policy.Arn, defaultVersionId: policy.DefaultVersionId, versions: versions.map(version => {
     const observed = json(run, ["iam", "get-policy-version", "--policy-arn", WORKSPACE_STATE_RECONCILIATION.policyArn, "--version-id", version.VersionId]).PolicyVersion;
-    if (observed?.VersionId !== version.VersionId || observed.IsDefaultVersion !== version.IsDefaultVersion) throw new Error("WorkspaceState policy-version readback is inconsistent.");
+    if (observed?.VersionId !== version.VersionId || observed.IsDefaultVersion !== version.IsDefaultVersion) throw new WorkspaceStateRetryableObservationError("WorkspaceState policy-version readback is internally inconsistent.");
     return { versionId: observed.VersionId, isDefault: observed.IsDefaultVersion, createDate: new Date(version.CreateDate).toISOString(), document: observed.Document };
   }), attachedRoles: entities.PolicyRoles.map(({ RoleName }) => RoleName), attachedUsers: entities.PolicyUsers.map(({ UserName }) => UserName), attachedGroups: entities.PolicyGroups.map(({ GroupName }) => GroupName), permissionsBoundaryUsageCount: policy.PermissionsBoundaryUsageCount };
 }

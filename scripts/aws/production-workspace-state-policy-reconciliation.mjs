@@ -22,6 +22,10 @@ const exactKeys = (value, keys, label) => {
 };
 const iso = (value, label) => { const parsed = new Date(value); if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) throw new Error(`${label} is invalid.`); return parsed; };
 
+export class WorkspaceStateRetryableObservationError extends Error {
+  constructor(message, options) { super(message, options); this.name = "WorkspaceStateRetryableObservationError"; }
+}
+
 export const WORKSPACE_STATE_RECONCILIATION = Object.freeze({
   schemaVersion: 1,
   operation: "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION",
@@ -182,8 +186,16 @@ export function createWorkspaceStateJournal({ read, create } = {}) {
   return Object.freeze({ read: get, create: put });
 }
 
-const recordBody = ({ kind, preparation, authorization, provenance, createdAt, postState }) => ({ schemaVersion: 1, kind, operationId: preparation.operationId, sourceSha: preparation.sourceSha, targetPolicyArn: preparation.targetPolicyArn, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationProvenanceSha256: provenance.provenanceSha256, currentDefaultVersionId: preparation.currentDefaultVersionId, currentDefaultDocumentSha256: preparation.currentDefaultDocumentSha256, desiredDocumentSha256: preparation.desiredDocumentSha256, versionInventorySha256: preparation.versionInventorySha256, deletionCandidate: preparation.deletionCandidate, expectedWritePlanSha256: preparation.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
+const recordBody = ({ kind, preparation, authorization, provenance, createdAt, postState }) => ({ schemaVersion: 1, kind, operationId: preparation.operationId, sourceSha: preparation.sourceSha, targetPolicyArn: preparation.targetPolicyArn, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationProvenanceSha256: provenance.provenanceSha256, currentDefaultVersionId: preparation.currentDefaultVersionId, currentDefaultDocumentSha256: preparation.currentDefaultDocumentSha256, desiredDocumentSha256: preparation.desiredDocumentSha256, permissionDeltaSha256: preparation.permissionDeltaSha256, versionInventorySha256: preparation.versionInventorySha256, deletionCandidate: preparation.deletionCandidate, expectedWritePlanSha256: preparation.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
 const assertRecord = (value, expected) => { const { recordSha256, ...body } = value || {}; exactKeys(value, [...Object.keys(expected), "recordSha256"], "WorkspaceState journal record"); if (canonicalJson(body) !== canonicalJson(expected) || recordSha256 !== sha256(body)) throw new Error("WorkspaceState journal record differs from the authorized transaction."); return value; };
+const assertZeroWriteReservation = (value, preparation, authorization, provenance) => {
+  const { recordSha256, ...body } = value || {};
+  exactKeys(value, [...Object.keys(recordBody({ kind: "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation, authorization, provenance, createdAt: value?.createdAt })), "recordSha256"], "WorkspaceState reservation");
+  const expected = recordBody({ kind: "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation, authorization, provenance, createdAt: value.createdAt });
+  const historicalHashes = ["preparationSha256", "authorizationSha256", "authorizationProvenanceSha256"];
+  if (value.recordSha256 !== sha256(body) || iso(value.createdAt, "WorkspaceState reservation createdAt").toISOString() !== value.createdAt || historicalHashes.some(field => !SHA256.test(value[field] || "")) || Object.keys(expected).some(field => !historicalHashes.includes(field) && canonicalJson(value[field]) !== canonicalJson(expected[field]))) throw new Error("WorkspaceState reservation is not an adoptable zero-write record.");
+  return value;
+};
 
 const stateMatchesPreparation = (state, preparation) => state.status === "AUTHENTICATED_PRE_STATE" && state.defaultVersionId === preparation.currentDefaultVersionId && state.defaultDocumentSha256 === preparation.currentDefaultDocumentSha256 && state.inventorySha256 === preparation.versionInventorySha256 && state.attachmentTopologySha256 === preparation.attachmentTopologySha256;
 const stateMatchesAfterDeletion = (state, preparation) => state.status === "AUTHENTICATED_CAPACITY_STATE" && state.defaultVersionId === preparation.currentDefaultVersionId && state.defaultDocumentSha256 === preparation.currentDefaultDocumentSha256 && state.attachmentTopologySha256 === preparation.attachmentTopologySha256 && state.versions.length === 4 && preparation.versionInventory.filter(version => version.versionId !== preparation.deletionCandidate.versionId).every(version => state.versions.some(current => canonicalJson(current) === canonicalJson(version)));
@@ -194,12 +206,25 @@ const stateMatchesPost = (state, preparation) => {
 };
 
 async function observe(readLiveState, desired) { return authenticateWorkspaceStateLiveState(await readLiveState(), { desired }); }
-async function bounded(readLiveState, desired, predicate, sleep) {
+async function bounded(readLiveState, desired, predicate, sleep, { intermediate = () => false } = {}) {
+  let lastTransient;
   for (let index = 0; index <= WORKSPACE_STATE_RECONCILIATION.readDelaysMs.length; index += 1) {
-    const state = await observe(readLiveState, desired); if (predicate(state)) return state;
+    let state;
+    try { state = await observe(readLiveState, desired); lastTransient = undefined; }
+    catch (error) {
+      if (!(error instanceof WorkspaceStateRetryableObservationError)) throw error;
+      lastTransient = error;
+    }
+    if (state && predicate(state)) return state;
+    if (state && !intermediate(state)) throw new Error("WorkspaceState observation is authenticated but contradicts the authorized transition.");
     if (index < WORKSPACE_STATE_RECONCILIATION.readDelaysMs.length) await sleep(WORKSPACE_STATE_RECONCILIATION.readDelaysMs[index]);
   }
+  if (lastTransient) throw new Error("WorkspaceState IAM observation remained transient after the bounded retry budget.", { cause: lastTransient });
   return null;
+}
+async function boundedOutcome(readLiveState, desired, predicate, sleep, options, mutationOutcome) {
+  try { return await bounded(readLiveState, desired, predicate, sleep, options); }
+  catch (error) { error.mutationOutcome = mutationOutcome; throw error; }
 }
 
 export async function executeWorkspaceStateReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, deletePolicyVersion, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = workspaceStateProductionSleep } = {}) {
@@ -210,7 +235,17 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   const terminal = await journal.read(authorization, "terminal.json");
   if (terminal) { reauthenticateSource(); const current = await observe(readLiveState, desired); if (!stateMatchesPost(current, preparation)) throw new Error("Consumed WorkspaceState transaction no longer matches live IAM."); assertRecord(terminal, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_TERMINAL", terminal.createdAt, current)); return Object.freeze({ status: "CONSUMED", iamDeleteCount: 0, iamCreateCount: 0, postState: current }); }
   let reservation = await journal.read(authorization, "reservation.json");
-  if (reservation) assertRecord(reservation, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", reservation.createdAt));
+  if (reservation) {
+    try { assertRecord(reservation, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", reservation.createdAt)); }
+    catch (error) {
+      assertZeroWriteReservation(reservation, preparation, authorization, provenance);
+      assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+      const laterRecords = await Promise.all(["deletion-attempt.json", "deletion-complete.json", "creation-attempt.json"].map(record => journal.read(authorization, record)));
+      if (laterRecords.some(Boolean)) throw new Error("WorkspaceState reservation cannot be adopted after a mutation-attempt boundary.", { cause: error });
+      const current = await observe(readLiveState, desired);
+      if (!stateMatchesPreparation(current, preparation)) throw new Error("WorkspaceState zero-write reservation cannot be adopted after live pre-state changed.");
+    }
+  }
   else { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reservation = await journal.create(authorization, "reservation.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation.createdAt)); if (!reservation) throw new Error("WorkspaceState reservation raced another executor."); }
   const deletionAttempt = await journal.read(authorization, "deletion-attempt.json");
   let deletionComplete = await journal.read(authorization, "deletion-complete.json");
@@ -222,17 +257,17 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
     const attempt = await journal.create(authorization, "deletion-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", new Date(clock()).toISOString())); if (!attempt) throw new Error("WorkspaceState deletion-attempt raced another executor.");
     reauthenticateSource(); const latest = await observe(readLiveState, desired); if (!stateMatchesPreparation(latest, preparation)) throw new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
     try { iamDeleteCount += 1; await deletePolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, VersionId: preparation.deletionCandidate.versionId }); }
-    catch (error) { const recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep); if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
+    catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
   }
   if (!deletionComplete) {
-    reauthenticateSource(); const capacity = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep);
+    reauthenticateSource(); const capacity = await boundedOutcome(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }, "DELETE_OUTCOME_AMBIGUOUS");
     if (!capacity) throw Object.assign(new Error("WorkspaceState deletion did not converge to the exact authorized capacity state."), { mutationOutcome: "DELETE_OUTCOME_AMBIGUOUS" });
     deletionComplete = await journal.create(authorization, "deletion-complete.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", new Date(clock()).toISOString())); if (!deletionComplete) throw new Error("WorkspaceState deletion completion raced another executor.");
   }
   const creationAttempt = await journal.read(authorization, "creation-attempt.json");
   if (creationAttempt) {
     assertRecord(creationAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", creationAttempt.createdAt)); reauthenticateSource();
-    const recovered = await bounded(readLiveState, desired, state => stateMatchesPost(state, preparation), sleep);
+    const recovered = await boundedOutcome(readLiveState, desired, state => stateMatchesPost(state, preparation), sleep, { intermediate: state => stateMatchesAfterDeletion(state, preparation) }, "CREATE_OUTCOME_AMBIGUOUS");
     if (!recovered) throw Object.assign(new Error("WorkspaceState CreatePolicyVersion outcome remains ambiguous; no retry is permitted."), { mutationOutcome: "CREATE_OUTCOME_AMBIGUOUS" });
     const completed = await journal.create(authorization, "terminal.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_TERMINAL", new Date(clock()).toISOString(), recovered)); if (!completed) throw new Error("WorkspaceState terminal consumption raced another executor.");
     return Object.freeze({ status: "EXPECTED_POST_STATE_RECOVERED", iamDeleteCount: 0, iamCreateCount: 0, postState: recovered });
@@ -241,9 +276,9 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   const createAttempt = await journal.create(authorization, "creation-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", new Date(clock()).toISOString())); if (!createAttempt) throw new Error("WorkspaceState creation-attempt raced another executor.");
   let response;
   try { iamCreateCount += 1; response = await createPolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }
-  catch (error) { const recovered = await bounded(readLiveState, desired, state => stateMatchesPost(state, preparation), sleep); if (!recovered) { error.mutationOutcome = "CREATE_OUTCOME_AMBIGUOUS"; throw error; } response = { PolicyVersion: { VersionId: recovered.defaultVersionId } }; }
+  catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesPost(state, preparation), sleep, { intermediate: state => stateMatchesAfterDeletion(state, preparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "CREATE_OUTCOME_AMBIGUOUS"; throw error; } response = { PolicyVersion: { VersionId: recovered.defaultVersionId } }; }
   if (!VERSION.test(response?.PolicyVersion?.VersionId || "")) throw Object.assign(new Error("WorkspaceState CreatePolicyVersion response is ambiguous."), { mutationOutcome: "CREATE_OUTCOME_AMBIGUOUS" });
-  const post = await bounded(readLiveState, desired, state => stateMatchesPost(state, preparation) && state.defaultVersionId === response.PolicyVersion.VersionId, sleep);
+  const post = await boundedOutcome(readLiveState, desired, state => stateMatchesPost(state, preparation) && state.defaultVersionId === response.PolicyVersion.VersionId, sleep, { intermediate: state => stateMatchesAfterDeletion(state, preparation) }, "CREATE_OUTCOME_AMBIGUOUS");
   if (!post) throw Object.assign(new Error("WorkspaceState successor did not converge to the exact declared contract."), { mutationOutcome: "CREATE_OUTCOME_AMBIGUOUS" });
   const completed = await journal.create(authorization, "terminal.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_TERMINAL", new Date(clock()).toISOString(), post)); if (!completed) throw new Error("WorkspaceState terminal consumption raced another executor.");
   return Object.freeze({ status: "COMPLETED", iamDeleteCount, iamCreateCount, postState: post, terminal: completed });
