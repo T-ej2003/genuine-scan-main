@@ -93,6 +93,7 @@ const chooseDeletionCandidate = versions => {
 
 const operationId = body => sha256({ schemaVersion: 1, operation: WORKSPACE_STATE_RECONCILIATION.operation, account: WORKSPACE_STATE_RECONCILIATION.account, targetPolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, ...body });
 const PREPARATION_FIELDS = ["schemaVersion", "kind", "operation", "operationId", "sourceSha", "account", "targetPolicyArn", "sourcePolicyPath", "currentDefaultVersionId", "currentDefaultDocumentSha256", "desiredDocumentSha256", "permissionDelta", "permissionDeltaSha256", "versionInventory", "versionInventorySha256", "deletionCandidate", "rollbackRetention", "attachmentTopology", "attachmentTopologySha256", "expectedWritePlan", "expectedWritePlanSha256", "continuation", "createdAt", "expiresAt", "preparationSha256"];
+const CONTINUATION_PREPARATION_FIELDS = PREPARATION_FIELDS.filter(field => !["versionInventory", "attachmentTopology"].includes(field));
 
 export function createWorkspaceStatePreparation({ sourceSha, liveState, desired = readWorkspaceStateDesiredPolicy(), preparedAt = new Date().toISOString() } = {}) {
   if (!SHA40.test(sourceSha || "")) throw new Error("WorkspaceState preparation source SHA is invalid.");
@@ -109,35 +110,41 @@ export function createWorkspaceStatePreparation({ sourceSha, liveState, desired 
   return Object.freeze({ ...body, preparationSha256: sha256(body) });
 }
 
-export function assertWorkspaceStatePreparation(value, { sourceSha, desired = readWorkspaceStateDesiredPolicy(), now = new Date(), allowExpired = false } = {}) {
-  exactKeys(value, PREPARATION_FIELDS, "WorkspaceState preparation");
+export function assertWorkspaceStatePreparation(value, { sourceSha, basePreparation = null, desired = readWorkspaceStateDesiredPolicy(), now = new Date(), allowExpired = false } = {}) {
+  const continuation = value?.continuation;
+  const isContinuation = continuation !== null && continuation !== undefined;
+  if (isContinuation !== Boolean(basePreparation)) throw new Error("WorkspaceState continuation requires exactly one separately supplied base preparation.");
+  exactKeys(value, isContinuation ? CONTINUATION_PREPARATION_FIELDS : PREPARATION_FIELDS, "WorkspaceState preparation");
   const body = { ...value }; delete body.preparationSha256;
-  const versions = normalizeVersions(value.versionInventory); const candidate = chooseDeletionCandidate(versions);
-  const deletionCandidate = { versionId: candidate.versionId, createDate: candidate.createDate, documentSha256: candidate.documentSha256 };
-  const identity = { sourceSha, currentDefaultVersionId: value.currentDefaultVersionId, currentDefaultDocumentSha256: value.currentDefaultDocumentSha256, desiredDocumentSha256: value.desiredDocumentSha256, versionInventorySha256: value.versionInventorySha256, deletionCandidate, attachmentTopologySha256: value.attachmentTopologySha256 };
-  const continuation = value.continuation;
-  let expectedWritePlan = [{ action: "iam:DeletePolicyVersion", policyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, versionId: candidate.versionId }, { action: "iam:CreatePolicyVersion", policyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, policyDocumentSha256: desired.desiredDocumentSha256, setAsDefault: true }];
-  if (continuation !== null) {
-    exactKeys(continuation, ["kind", "basePreparation", "reservationRecordSha256", "deletionAttemptRecordSha256", "deletionPrewriteFailedRecordSha256", "proofRecordSha256", "deletionRetryAttemptRecordSha256"], "WorkspaceState continuation");
-    const base = continuation.basePreparation;
+  const base = isContinuation ? basePreparation : value;
+  if (isContinuation) {
+    exactKeys(continuation, ["kind", "basePreparationSha256", "reservationRecordSha256", "deletionAttemptRecordSha256", "deletionPrewriteFailedRecordSha256", "proofRecordSha256", "deletionRetryAttemptRecordSha256"], "WorkspaceState continuation");
+    if (!base || continuation.basePreparationSha256 !== base.preparationSha256) throw new Error("WorkspaceState continuation base preparation digest is missing or invalid.");
     assertWorkspaceStatePreparation(base, { sourceSha, desired, now, allowExpired: true });
-    const sameBase = ["operationId", "sourceSha", "targetPolicyArn", "currentDefaultVersionId", "currentDefaultDocumentSha256", "desiredDocumentSha256", "permissionDeltaSha256", "versionInventorySha256", "deletionCandidate", "attachmentTopologySha256"].every(field => canonicalJson(value[field]) === canonicalJson(base[field]));
+    const sameBase = ["operationId", "sourceSha", "account", "targetPolicyArn", "sourcePolicyPath", "currentDefaultVersionId", "currentDefaultDocumentSha256", "desiredDocumentSha256", "permissionDelta", "permissionDeltaSha256", "versionInventorySha256", "deletionCandidate", "rollbackRetention", "attachmentTopologySha256"].every(field => canonicalJson(value[field]) === canonicalJson(base[field]));
     const deleting = continuation.kind === "PROVED_NO_DELETE_WRITE" && continuation.deletionRetryAttemptRecordSha256 === null;
     const creating = continuation.kind === "PROVED_NO_CREATE_WRITE";
     if (base.continuation !== null || !sameBase || !SHA256.test(continuation.reservationRecordSha256 || "") || !SHA256.test(continuation.deletionAttemptRecordSha256 || "") || (continuation.deletionPrewriteFailedRecordSha256 !== null && !SHA256.test(continuation.deletionPrewriteFailedRecordSha256 || "")) || !SHA256.test(continuation.proofRecordSha256 || "") || (!deleting && !creating) || (continuation.deletionRetryAttemptRecordSha256 !== null && !SHA256.test(continuation.deletionRetryAttemptRecordSha256 || ""))) throw new Error("WorkspaceState continuation binding is invalid.");
     if (deleting && continuation.deletionPrewriteFailedRecordSha256 !== continuation.proofRecordSha256 || creating && continuation.deletionPrewriteFailedRecordSha256 === null && continuation.deletionRetryAttemptRecordSha256 !== null) throw new Error("WorkspaceState continuation record chain is incomplete.");
-    expectedWritePlan = deleting ? [expectedWritePlan[0]] : [expectedWritePlan[1]];
   }
-  const current = versions.find(version => version.versionId === value.currentDefaultVersionId);
-  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_PREPARATION" || value.operation !== WORKSPACE_STATE_RECONCILIATION.operation || value.operationId !== operationId(identity) || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== WORKSPACE_STATE_RECONCILIATION.account || value.targetPolicyArn !== WORKSPACE_STATE_RECONCILIATION.policyArn || value.sourcePolicyPath !== desired.sourcePath || versions.length !== 5 || !current?.isDefault || current.documentSha256 !== desired.predecessorDocumentSha256 || value.currentDefaultDocumentSha256 !== desired.predecessorDocumentSha256 || value.desiredDocumentSha256 !== desired.desiredDocumentSha256 || canonicalJson(value.permissionDelta) !== canonicalJson(desired.delta) || value.permissionDeltaSha256 !== sha256(desired.delta) || value.versionInventorySha256 !== sha256(versions) || canonicalJson(value.deletionCandidate) !== canonicalJson(deletionCandidate) || value.rollbackRetention !== WORKSPACE_STATE_RECONCILIATION.rollbackRetention || value.attachmentTopologySha256 !== sha256(value.attachmentTopology) || canonicalJson(value.attachmentTopology) !== canonicalJson({ roles: [WORKSPACE_STATE_RECONCILIATION.releaseRoleName], users: [], groups: [], permissionsBoundaryUsageCount: 0 }) || canonicalJson(value.expectedWritePlan) !== canonicalJson(expectedWritePlan) || value.expectedWritePlanSha256 !== sha256(expectedWritePlan) || (continuation === undefined) || value.preparationSha256 !== sha256(body)) throw new Error("WorkspaceState preparation binding is invalid.");
+  const versions = isContinuation ? null : normalizeVersions(value.versionInventory);
+  const candidate = isContinuation ? base.deletionCandidate : (() => { const selected = chooseDeletionCandidate(versions); return { versionId: selected.versionId, createDate: selected.createDate, documentSha256: selected.documentSha256 }; })();
+  const deletionCandidate = candidate;
+  const identity = { sourceSha, currentDefaultVersionId: value.currentDefaultVersionId, currentDefaultDocumentSha256: value.currentDefaultDocumentSha256, desiredDocumentSha256: value.desiredDocumentSha256, versionInventorySha256: value.versionInventorySha256, deletionCandidate, attachmentTopologySha256: value.attachmentTopologySha256 };
+  let expectedWritePlan = [{ action: "iam:DeletePolicyVersion", policyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, versionId: candidate.versionId }, { action: "iam:CreatePolicyVersion", policyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, policyDocumentSha256: desired.desiredDocumentSha256, setAsDefault: true }];
+  if (isContinuation) expectedWritePlan = continuation.kind === "PROVED_NO_DELETE_WRITE" ? [expectedWritePlan[0]] : [expectedWritePlan[1]];
+  const current = isContinuation ? base.versionInventory.find(version => version.versionId === value.currentDefaultVersionId) : versions.find(version => version.versionId === value.currentDefaultVersionId);
+  const versionInventoryValid = isContinuation ? value.versionInventorySha256 === base.versionInventorySha256 : versions.length === 5 && value.versionInventorySha256 === sha256(versions);
+  const attachmentValid = isContinuation ? value.attachmentTopologySha256 === base.attachmentTopologySha256 : value.attachmentTopologySha256 === sha256(value.attachmentTopology) && canonicalJson(value.attachmentTopology) === canonicalJson({ roles: [WORKSPACE_STATE_RECONCILIATION.releaseRoleName], users: [], groups: [], permissionsBoundaryUsageCount: 0 });
+  if (value.schemaVersion !== 1 || value.kind !== "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_PREPARATION" || value.operation !== WORKSPACE_STATE_RECONCILIATION.operation || value.operationId !== operationId(identity) || value.sourceSha !== sourceSha || !SHA40.test(sourceSha || "") || value.account !== WORKSPACE_STATE_RECONCILIATION.account || value.targetPolicyArn !== WORKSPACE_STATE_RECONCILIATION.policyArn || value.sourcePolicyPath !== desired.sourcePath || (!isContinuation && versions.length !== 5) || !current?.isDefault || current.documentSha256 !== desired.predecessorDocumentSha256 || value.currentDefaultDocumentSha256 !== desired.predecessorDocumentSha256 || value.desiredDocumentSha256 !== desired.desiredDocumentSha256 || canonicalJson(value.permissionDelta) !== canonicalJson(desired.delta) || value.permissionDeltaSha256 !== sha256(desired.delta) || !versionInventoryValid || canonicalJson(value.deletionCandidate) !== canonicalJson(deletionCandidate) || value.rollbackRetention !== WORKSPACE_STATE_RECONCILIATION.rollbackRetention || !attachmentValid || canonicalJson(value.expectedWritePlan) !== canonicalJson(expectedWritePlan) || value.expectedWritePlanSha256 !== sha256(expectedWritePlan) || (isContinuation ? value.continuation === null : value.continuation !== null) || value.preparationSha256 !== sha256(body)) throw new Error("WorkspaceState preparation binding is invalid.");
   const created = iso(value.createdAt, "WorkspaceState preparation createdAt"); const expires = iso(value.expiresAt, "WorkspaceState preparation expiresAt"); const clock = now instanceof Date ? now : new Date(now);
   if (!Number.isFinite(clock.getTime()) || expires.getTime() - created.getTime() !== WORKSPACE_STATE_RECONCILIATION.maxAgeMs || clock < created || (!allowExpired && clock > expires)) throw new Error("WorkspaceState preparation is stale.");
   return value;
 }
 
 const AUTHORIZATION_FIELDS = ["schemaVersion", "kind", "operation", "operationId", "sourceSha", "targetPolicyArn", "currentDefaultVersionId", "currentDefaultDocumentSha256", "desiredDocumentSha256", "permissionDeltaSha256", "versionInventorySha256", "deletionCandidate", "attachmentTopologySha256", "expectedWritePlanSha256", "preparationSha256", "expiresAt", "approvedBy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizationConsumed", "authorizationSha256"];
-export function createWorkspaceStateAuthorization({ preparation, protectedEnvironmentApprovalEvidence, now = new Date() } = {}) {
-  const checked = assertWorkspaceStatePreparation(preparation, { sourceSha: preparation?.sourceSha, now });
+export function createWorkspaceStateAuthorization({ preparation, basePreparation = null, protectedEnvironmentApprovalEvidence, now = new Date() } = {}) {
+  const checked = assertWorkspaceStatePreparation(preparation, { sourceSha: preparation?.sourceSha, basePreparation, now });
   assertProductionEnvironmentApprovalIdentity(protectedEnvironmentApprovalEvidence, { sourceSha: checked.sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository });
   assertProductionEnvironmentApprovalFreshness(protectedEnvironmentApprovalEvidence, { now });
   if (protectedEnvironmentApprovalEvidence.schemaVersion !== 3 || protectedEnvironmentApprovalEvidence.workflowRef !== WORKSPACE_STATE_RECONCILIATION.workflowRef) throw new Error("WorkspaceState authorization requires its dedicated protected workflow.");
@@ -146,9 +153,9 @@ export function createWorkspaceStateAuthorization({ preparation, protectedEnviro
   return Object.freeze({ ...body, authorizationSha256: sha256(body) });
 }
 
-export function assertWorkspaceStateAuthorization(value, preparation, { sourceSha, now = new Date(), allowExpired = false } = {}) {
+export function assertWorkspaceStateAuthorization(value, preparation, { sourceSha, basePreparation = null, now = new Date(), allowExpired = false } = {}) {
   exactKeys(value, AUTHORIZATION_FIELDS, "WorkspaceState authorization");
-  const checked = assertWorkspaceStatePreparation(preparation, { sourceSha, now, allowExpired }); const body = { ...value }; delete body.authorizationSha256;
+  const checked = assertWorkspaceStatePreparation(preparation, { sourceSha, basePreparation, now, allowExpired }); const body = { ...value }; delete body.authorizationSha256;
   assertProductionEnvironmentApprovalIdentity(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository });
   if (!allowExpired) assertProductionEnvironmentApprovalFreshness(value.protectedEnvironmentApprovalEvidence, { now });
   const approvedBy = assertProductionEnvironmentActualReviewer(value.protectedEnvironmentApprovalEvidence, { sourceSha, repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, executionActor: value.protectedEnvironmentApprovalEvidence.executionActor });
@@ -157,7 +164,7 @@ export function assertWorkspaceStateAuthorization(value, preparation, { sourceSh
   return value;
 }
 
-export async function resolveWorkspaceStateAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, preparation, run, now = new Date(), allowExpired = true } = {}) {
+export async function resolveWorkspaceStateAuthorizationArtifact({ workflowRunId, workflowRunAttempt, sourceSha, preparation, basePreparation = null, run, now = new Date(), allowExpired = true } = {}) {
   if (!RUN_ID.test(String(workflowRunId || "")) || String(workflowRunAttempt) !== "1" || typeof run !== "function") throw new Error("WorkspaceState authorization workflow identity is invalid.");
   const parse = (args, label) => { let value; try { value = JSON.parse(run("gh", args, { encoding: "utf8", maxBuffer: 8 * 1024 * 1024 })); } catch { throw new Error(`${label} is unavailable.`); } return value; };
   const workflow = parse(["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/runs/${workflowRunId}`], "WorkspaceState authorization workflow");
@@ -171,7 +178,7 @@ export async function resolveWorkspaceStateAuthorizationArtifact({ workflowRunId
   if (entries.length !== 1 || entries[0].name !== WORKSPACE_STATE_RECONCILIATION.authorizationFilename || (Number(entries[0].unixPermissions || 0) & 0o170000) === 0o120000) throw new Error("WorkspaceState authorization archive contents are not exact.");
   const bytes = Buffer.from(await entries[0].async("uint8array")); let authorization;
   try { authorization = JSON.parse(new TextDecoder("utf8", { fatal: true }).decode(bytes)); } catch { throw new Error("WorkspaceState authorization artifact payload is malformed."); }
-  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now, allowExpired });
+  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation, now, allowExpired });
   const environment = parse(["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/environments/production`], "WorkspaceState environment");
   const approvals = parse(["api", `repos/${PRODUCTION_ENVIRONMENT_APPROVAL.repository}/actions/runs/${workflowRunId}/approvals`], "WorkspaceState approvals");
   const actual = approvals.flatMap(approval => approval?.state === "approved" ? (approval.environments || []).filter(item => item?.id === environment.id && item?.name === "production").map(() => ({ state: "approved", environmentId: environment.id, environmentName: "production", userId: approval.user?.id, userLogin: approval.user?.login })) : []);
@@ -242,11 +249,11 @@ export function createWorkspaceStateContinuationPreparation({ sourceSha, basePre
     expectedPlan = [base.expectedWritePlan[1]];
   } else throw new Error("WorkspaceState continuation kind is unsupported.");
   const created = iso(preparedAt, "WorkspaceState continuation createdAt");
-  const continuation = { kind, basePreparation: base, reservationRecordSha256: reservation.recordSha256, deletionAttemptRecordSha256: deletionAttempt.recordSha256, deletionPrewriteFailedRecordSha256: deletionPrewriteFailed?.recordSha256 || (kind === "PROVED_NO_DELETE_WRITE" ? proofRecord.recordSha256 : null), proofRecordSha256: proofRecord.recordSha256, deletionRetryAttemptRecordSha256: deletionRetryAttempt?.recordSha256 || null };
-  const { preparationSha256: _oldHash, ...baseBody } = base;
+  const continuation = { kind, basePreparationSha256: base.preparationSha256, reservationRecordSha256: reservation.recordSha256, deletionAttemptRecordSha256: deletionAttempt.recordSha256, deletionPrewriteFailedRecordSha256: deletionPrewriteFailed?.recordSha256 || (kind === "PROVED_NO_DELETE_WRITE" ? proofRecord.recordSha256 : null), proofRecordSha256: proofRecord.recordSha256, deletionRetryAttemptRecordSha256: deletionRetryAttempt?.recordSha256 || null };
+  const { preparationSha256: _oldHash, versionInventory: _versionInventory, attachmentTopology: _attachmentTopology, ...baseBody } = base;
   const body = { ...baseBody, expectedWritePlan: expectedPlan, expectedWritePlanSha256: sha256(expectedPlan), continuation, createdAt: created.toISOString(), expiresAt: new Date(created.getTime() + WORKSPACE_STATE_RECONCILIATION.maxAgeMs).toISOString() };
   const result = Object.freeze({ ...body, preparationSha256: sha256(body) });
-  assertWorkspaceStatePreparation(result, { sourceSha, desired, now: created });
+  assertWorkspaceStatePreparation(result, { sourceSha, basePreparation: base, desired, now: created });
   return result;
 }
 const assertZeroWriteReservation = (value, preparation, authorization, provenance) => {
@@ -294,10 +301,10 @@ async function boundedOutcome(readLiveState, desired, predicate, sleep, options,
   catch (error) { error.mutationOutcome = mutationOutcome; throw error; }
 }
 
-export async function executeWorkspaceStateReconciliation({ sourceSha, preparation, authorization, provenance, readLiveState, deletePolicyVersion, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = workspaceStateProductionSleep } = {}) {
+export async function executeWorkspaceStateReconciliation({ sourceSha, preparation, basePreparation = null, authorization, provenance, readLiveState, deletePolicyVersion, createPolicyVersion, journal, reauthenticateSource, now = () => new Date(), sleep = workspaceStateProductionSleep } = {}) {
   if (![readLiveState, deletePolicyVersion, createPolicyVersion, reauthenticateSource, sleep].every(value => typeof value === "function") || !journal) throw new Error("WorkspaceState executor adapters are required.");
-  const clock = typeof now === "function" ? now : () => now; const desired = readWorkspaceStateDesiredPolicy(); const basePreparation = preparation?.continuation?.basePreparation || preparation; const continuation = preparation?.continuation || null; let iamDeleteCount = 0; let iamCreateCount = 0;
-  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock(), allowExpired: true }); assertWorkspaceStateAuthorizationProvenance(provenance, { authorization, sourceSha });
+  const clock = typeof now === "function" ? now : () => now; const desired = readWorkspaceStateDesiredPolicy(); const continuation = preparation?.continuation || null; basePreparation = continuation ? basePreparation : preparation; let iamDeleteCount = 0; let iamCreateCount = 0;
+  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock(), allowExpired: true }); assertWorkspaceStateAuthorizationProvenance(provenance, { authorization, sourceSha });
   const expected = (kind, createdAt, postState) => recordBody({ kind, preparation, authorization, provenance, createdAt, postState });
   const terminal = await journal.read(authorization, "terminal.json");
   if (terminal) { reauthenticateSource(); const current = await observe(readLiveState, desired); if (!stateMatchesPost(current, basePreparation)) throw new Error("Consumed WorkspaceState transaction no longer matches live IAM."); assertRecord(terminal, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_TERMINAL", terminal.createdAt, current)); return Object.freeze({ status: "CONSUMED", iamDeleteCount: 0, iamCreateCount: 0, postState: current }); }
@@ -343,13 +350,13 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
         laterRecords.forEach((record, index) => { if (record) assertRecord(record, expected(`PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kinds[index]}`, record.createdAt)); });
         if ((laterRecords[3] || laterRecords[4]) && !laterRecords[0] || laterRecords[4] && !laterRecords[3]) throw new Error("WorkspaceState adopted reservation continuation has an invalid mutation order.");
       } else {
-        assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+        assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
         const current = await observe(readLiveState, desired);
         if (!stateMatchesPreparation(current, basePreparation)) throw new Error("WorkspaceState zero-write reservation cannot be adopted after live pre-state changed.");
       }
     }
   }
-  else { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reservation = await journal.create(authorization, "reservation.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation.createdAt)); if (!reservation) throw new Error("WorkspaceState reservation raced another executor."); }
+  else { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); reservation = await journal.create(authorization, "reservation.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", preparation.createdAt)); if (!reservation) throw new Error("WorkspaceState reservation raced another executor."); }
   const deletionAttempt = await journal.read(authorization, "deletion-attempt.json");
   const deletionPrewriteFailed = await journal.read(authorization, "deletion-prewrite-failed.json");
   const deletionRetryAttempt = await journal.read(authorization, "deletion-retry-attempt.json");
@@ -361,11 +368,11 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   if ((deletionPrewriteFailed && !deletionAttempt) || (deletionRetryAttempt && !deletionPrewriteFailed) || (deletionRetryAttempt && !deletionAttempt)) throw new Error("WorkspaceState deletion retry journal is inconsistent.");
   const deleteOnce = async () => {
     try { iamDeleteCount += 1; await deletePolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, VersionId: preparation.deletionCandidate.versionId }); }
-    catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, preparation), sleep, { intermediate: state => stateMatchesPreparation(state, preparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
+    catch (error) { let recovered; try { recovered = await bounded(readLiveState, desired, state => stateMatchesAfterDeletion(state, basePreparation), sleep, { intermediate: state => stateMatchesPreparation(state, basePreparation) }); } catch (observationError) { error.cause = observationError; } if (!recovered) { error.mutationOutcome = "DELETE_OUTCOME_AMBIGUOUS"; throw error; } }
   };
   if (!deletionAttempt) {
-    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reauthenticateSource();
-    const before = await observe(readLiveState, desired); if (!stateMatchesPreparation(before, preparation)) throw new Error("WorkspaceState final pre-deletion CAS changed after authorization.");
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); reauthenticateSource();
+    const before = await observe(readLiveState, desired); if (!stateMatchesPreparation(before, basePreparation)) throw new Error("WorkspaceState final pre-deletion CAS changed after authorization.");
     const attempt = await journal.create(authorization, "deletion-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", new Date(clock()).toISOString())); if (!attempt) throw new Error("WorkspaceState deletion-attempt raced another executor.");
     reauthenticateSource();
     try {
@@ -379,13 +386,13 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
       }
       throw error;
     }
-    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
     await deleteOnce();
   } else if (deletionPrewriteFailed && !deletionRetryAttempt && !deletionComplete) {
-    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() }); reauthenticateSource();
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); reauthenticateSource();
     const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, basePreparation), sleep);
     if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed during recovery.");
-    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
     const retryAttempt = await journal.create(authorization, "deletion-retry-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", new Date(clock()).toISOString()));
     if (!retryAttempt) throw new Error("WorkspaceState deletion retry-attempt raced another executor.");
     await deleteOnce();
@@ -405,7 +412,7 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   }
   reauthenticateSource(); const capacity = await observe(readLiveState, desired); if (!stateMatchesAfterDeletion(capacity, basePreparation)) throw new Error("WorkspaceState capacity state changed before successor publication.");
   if (continuation?.kind === "PROVED_NO_DELETE_WRITE") return Object.freeze({ status: "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION", iamDeleteCount, iamCreateCount, postState: capacity });
-  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, now: clock() });
+  assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
   const createAttempt = await journal.create(authorization, "creation-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", new Date(clock()).toISOString())); if (!createAttempt) throw new Error("WorkspaceState creation-attempt raced another executor.");
   let response;
   try { iamCreateCount += 1; response = await createPolicyVersion({ PolicyArn: WORKSPACE_STATE_RECONCILIATION.policyArn, PolicyDocument: desired.document, SetAsDefault: true }); }

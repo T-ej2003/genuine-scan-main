@@ -12,6 +12,8 @@ When an adopted reservation already has progress records, each record must bind 
 
 The checker authorization is revalidated after the final live-state CAS and before each policy mutation. If it expires after the approved deletion, reconciliation stops before creating the successor; an expired authorization never authorizes a write.
 
+The authorization workflow transports exact preparation bytes as deterministic gzip plus base64 and verifies the SHA-256 of the decoded, uncompressed file. A continuation preparation contains only a SHA-256 reference to the original preparation and the authenticated journal digests; it does not embed the five policy documents again. For continuation authorization and execution, pass the original base preparation as a separate compressed input/file with its own SHA-256. The checker and executor verify each exact file hash and require the continuation's canonical base-preparation digest to match the validated base. The maximum five-version fixture measures 16,096 bytes for normal authorization and 17,869 bytes for continuation authorization, below the 49,152-byte test ceiling and GitHub's 65,535-byte total-input limit.
+
 Use a clean protected-main checkout and private output directory (`umask 077`):
 
 ```sh
@@ -19,12 +21,43 @@ npm run production:workspace-state-reconciliation -- --mode prepare --source-sha
 
 gh workflow run authorize-production-workspace-state-policy-reconciliation.yml --ref main \
   -f source_sha="$PROTECTED_MAIN_SHA" \
-  -f preparation_json_base64="$(base64 < "$PRIVATE_DIR/preparation.json" | tr -d '\n')" \
+  -f preparation_json_gzip_base64="$(gzip -n -c "$PRIVATE_DIR/preparation.json" | base64 | tr -d '\n')" \
   -f preparation_file_sha256="$(shasum -a 256 "$PRIVATE_DIR/preparation.json" | awk '{print $1}')"
 
 npm run production:workspace-state-reconciliation -- --mode execute --source-sha "$PROTECTED_MAIN_SHA" \
   --preparation "$PRIVATE_DIR/preparation.json" \
   --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
+  --authorization-workflow-run-id "$AUTHORIZATION_WORKFLOW_RUN_ID" \
+  --authorization-workflow-run-attempt 1 --admin-profile "$ADMIN_PROFILE" \
+  --result-out "$PRIVATE_DIR/result.json"
+```
+
+For `prepare-continuation`, keep the original `base-preparation.json` and produce the compact continuation from it:
+
+```sh
+npm run production:workspace-state-reconciliation -- --mode prepare-continuation --source-sha "$PROTECTED_MAIN_SHA" \
+  --base-preparation "$PRIVATE_DIR/base-preparation.json" \
+  --base-preparation-file-sha256 "$BASE_PREPARATION_FILE_SHA256" \
+  --continuation-kind "$CONTINUATION_KIND" \
+  --admin-profile "$ADMIN_PROFILE" \
+  --preparation-out "$PRIVATE_DIR/continuation.json"
+```
+
+Submit the original and compact files separately:
+
+```sh
+gh workflow run authorize-production-workspace-state-policy-reconciliation.yml --ref main \
+  -f source_sha="$PROTECTED_MAIN_SHA" \
+  -f preparation_json_gzip_base64="$(gzip -n -c "$PRIVATE_DIR/continuation.json" | base64 | tr -d '\n')" \
+  -f preparation_file_sha256="$(shasum -a 256 "$PRIVATE_DIR/continuation.json" | awk '{print $1}')" \
+  -f base_preparation_json_gzip_base64="$(gzip -n -c "$PRIVATE_DIR/base-preparation.json" | base64 | tr -d '\n')" \
+  -f base_preparation_file_sha256="$(shasum -a 256 "$PRIVATE_DIR/base-preparation.json" | awk '{print $1}')"
+
+npm run production:workspace-state-reconciliation -- --mode execute --source-sha "$PROTECTED_MAIN_SHA" \
+  --preparation "$PRIVATE_DIR/continuation.json" \
+  --preparation-file-sha256 "$CONTINUATION_FILE_SHA256" \
+  --base-preparation "$PRIVATE_DIR/base-preparation.json" \
+  --base-preparation-file-sha256 "$BASE_PREPARATION_FILE_SHA256" \
   --authorization-workflow-run-id "$AUTHORIZATION_WORKFLOW_RUN_ID" \
   --authorization-workflow-run-attempt 1 --admin-profile "$ADMIN_PROFILE" \
   --result-out "$PRIVATE_DIR/result.json"

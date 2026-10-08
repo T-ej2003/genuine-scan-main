@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import { gzipSync } from "node:zlib";
 import test from "node:test";
+import yaml from "js-yaml";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
-import { WORKSPACE_STATE_RECONCILIATION as CONTRACT, assertWorkspaceStateAuthorization, createWorkspaceStateAuthorization, createWorkspaceStateContinuationPreparation, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, WorkspaceStateRetryableObservationError, workspaceStateJournalKey } from "../aws/production-workspace-state-policy-reconciliation.mjs";
+import { WORKSPACE_STATE_RECONCILIATION as CONTRACT, assertWorkspaceStateAuthorization, assertWorkspaceStatePreparation, createWorkspaceStateAuthorization, createWorkspaceStateContinuationPreparation, createWorkspaceStateJournal, createWorkspaceStatePreparation, executeWorkspaceStateReconciliation, readWorkspaceStateDesiredPolicy, WorkspaceStateRetryableObservationError, workspaceStateJournalKey } from "../aws/production-workspace-state-policy-reconciliation.mjs";
 import { readWorkspaceStateLiveState } from "../aws/reconcile-production-workspace-state-policy.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -17,12 +20,12 @@ const afterDelete = (change = {}) => state({ versions: versions().filter(({ vers
 const post = (change = {}) => state({ defaultVersionId: "v6", versions: [...versions().filter(({ versionId }) => versionId !== "v1").map(version => ({ ...version, isDefault: false })), { versionId: "v6", isDefault: true, createDate: "2026-10-07T12:05:00.000Z", document: desired.document }], ...change });
 const approval = (at = now, workflowRunId = "123", approvedSourceSha = sourceSha) => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "T-ej2003" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha: approvedSourceSha, workflowRef: CONTRACT.workflowRef, eventName: "workflow_dispatch", workflowRunId, workflowRunAttempt: "1", executionActor: "release-operator", observedAt: at.toISOString(), actualApproval: { state: "approved", environmentId: 1, environmentName: "production", userId: 2, userLogin: "T-ej2003" } });
 const preparation = () => createWorkspaceStatePreparation({ sourceSha, liveState: state(), desired, preparedAt: now.toISOString() });
-const authorization = (prep, at = now, workflowRunId = "123") => createWorkspaceStateAuthorization({ preparation: prep, protectedEnvironmentApprovalEvidence: approval(at, workflowRunId, prep.sourceSha), now: at });
+const authorization = (prep, at = now, workflowRunId = "123", basePreparation = null) => createWorkspaceStateAuthorization({ preparation: prep, basePreparation, protectedEnvironmentApprovalEvidence: approval(at, workflowRunId, prep.sourceSha), now: at });
 const provenance = auth => { const body = { schemaVersion: 1, kind: "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_AUTHORIZATION_PROVENANCE", repository: "T-ej2003/genuine-scan-main", workflowPath: CONTRACT.workflowPath, workflowRunId: auth.protectedEnvironmentApprovalEvidence.workflowRunId, workflowRunAttempt: "1", event: "workflow_dispatch", status: "completed", conclusion: "success", headSha: auth.sourceSha, artifactId: 456, artifactName: CONTRACT.artifactName, artifactDigest: `sha256:${"b".repeat(64)}`, authorizationFileSha256: "c".repeat(64), authorizationSha256: auth.authorizationSha256, approvedBy: auth.approvedBy }; return { ...body, provenanceSha256: hash(body) }; };
 const memoryJournal = () => { const values = new Map(); return { values, journal: createWorkspaceStateJournal({ read: async key => values.get(key) || null, create: async (key, bytes) => { if (values.has(key)) return false; values.set(key, Buffer.from(bytes)); return true; } }) }; };
-const executor = ({ prep = preparation(), live = state(), journal = memoryJournal(), authorization: auth = authorization(prep), ...overrides } = {}) => {
+const executor = ({ prep = preparation(), basePreparation = null, live = state(), journal = memoryJournal(), authorization: auth = authorization(prep, now, "123", basePreparation), ...overrides } = {}) => {
   const box = { live, deletes: 0, creates: 0 };
-  const args = { sourceSha, preparation: prep, authorization: auth, provenance: provenance(auth), journal: journal.journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => box.live, deletePolicyVersion: async ({ PolicyArn, VersionId }) => { box.deletes += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.equal(VersionId, prep.deletionCandidate.versionId); box.live = afterDelete(); }, createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => { box.creates += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.deepEqual(PolicyDocument, desired.document); assert.equal(SetAsDefault, true); box.live = post(); return { PolicyVersion: { VersionId: "v6" } }; }, ...overrides };
+  const args = { sourceSha, preparation: prep, basePreparation, authorization: auth, provenance: provenance(auth), journal: journal.journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => box.live, deletePolicyVersion: async ({ PolicyArn, VersionId }) => { box.deletes += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.equal(VersionId, prep.deletionCandidate.versionId); box.live = afterDelete(); }, createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => { box.creates += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.deepEqual(PolicyDocument, desired.document); assert.equal(SetAsDefault, true); box.live = post(); return { PolicyVersion: { VersionId: "v6" } }; }, ...overrides };
   return { args, box, journal };
 };
 const recordBody = (kind, prep, auth, createdAt, postState) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, targetPolicyArn: prep.targetPolicyArn, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: provenance(auth).provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, permissionDeltaSha256: prep.permissionDeltaSha256, versionInventorySha256: prep.versionInventorySha256, deletionCandidate: prep.deletionCandidate, expectedWritePlanSha256: prep.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
@@ -44,6 +47,49 @@ test("five-version preparation binds one uniquely oldest non-default deletion an
   assert.notEqual(prep.deletionCandidate.versionId, prep.currentDefaultVersionId);
   assert.deepEqual(prep.expectedWritePlan.map(({ action }) => action), ["iam:DeletePolicyVersion", "iam:CreatePolicyVersion"]);
   assert.equal(prep.desiredDocumentSha256, desired.desiredDocumentSha256);
+});
+
+test("maximum legitimate normal and continuation dispatch inputs stay below the GitHub payload limit", () => {
+  const maxDocument = seed => {
+    const document = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "s3:GetObject", Resource: [] }] };
+    const prefix = `arn:aws:s3:::wstate-${seed}/object/`;
+    const resource = index => `${prefix}${crypto.createHash("sha256").update(`${seed}:${index}`).digest("hex")}`;
+    while (Buffer.byteLength(JSON.stringify({ ...document, Statement: [{ ...document.Statement[0], Resource: [...document.Statement[0].Resource, resource(document.Statement[0].Resource.length)] }] })) <= 6144) document.Statement[0].Resource.push(resource(document.Statement[0].Resource.length));
+    let current = Buffer.byteLength(JSON.stringify(document)); let separator = document.Statement[0].Resource.length ? 1 : 0; let remainingText = 6144 - current - separator - 2;
+    while (remainingText < prefix.length + 64) { document.Statement[0].Resource.pop(); current = Buffer.byteLength(JSON.stringify(document)); separator = document.Statement[0].Resource.length ? 1 : 0; remainingText = 6144 - current - separator - 2; }
+    document.Statement[0].Resource.push(`${prefix}${crypto.createHash("sha256").update(`${seed}:final`).digest("hex")}${"x".repeat(Math.max(0, remainingText - prefix.length - 64))}`);
+    assert.equal(Buffer.byteLength(JSON.stringify(document)), 6144);
+    return document;
+  };
+  const maximumVersions = versions().map(version => version.versionId === "v5" ? version : { ...version, document: maxDocument(version.versionId) });
+  const base = createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: maximumVersions }) });
+  const continuationBody = { ...base, versionInventory: undefined, attachmentTopology: undefined };
+  delete continuationBody.versionInventory; delete continuationBody.attachmentTopology; delete continuationBody.preparationSha256;
+  const continuation = { ...continuationBody, expectedWritePlan: [base.expectedWritePlan[0]], expectedWritePlanSha256: hash([base.expectedWritePlan[0]]), continuation: { kind: "PROVED_NO_DELETE_WRITE", basePreparationSha256: base.preparationSha256, reservationRecordSha256: "a".repeat(64), deletionAttemptRecordSha256: "b".repeat(64), deletionPrewriteFailedRecordSha256: "c".repeat(64), proofRecordSha256: "c".repeat(64), deletionRetryAttemptRecordSha256: null }, createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + CONTRACT.maxAgeMs).toISOString() };
+  continuation.preparationSha256 = hash(Object.fromEntries(Object.entries(continuation).filter(([key]) => key !== "preparationSha256")));
+  assert.doesNotThrow(() => assertWorkspaceStatePreparation(continuation, { sourceSha, basePreparation: base, desired, now }));
+  assert.equal("versionInventory" in continuation, false);
+  assert.equal("basePreparation" in continuation.continuation, false);
+  assert.throws(() => assertWorkspaceStatePreparation(continuation, { sourceSha, desired, now }), /separately supplied base preparation/);
+  assert.throws(() => createWorkspaceStateAuthorization({ preparation: continuation, protectedEnvironmentApprovalEvidence: approval(now), now }), /separately supplied base preparation/);
+  const continuationAuth = createWorkspaceStateAuthorization({ preparation: continuation, basePreparation: base, protectedEnvironmentApprovalEvidence: approval(now), now });
+  assert.doesNotThrow(() => assertWorkspaceStateAuthorization(continuationAuth, continuation, { sourceSha, basePreparation: base, now }));
+  const wrongBase = createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: now.toISOString(), liveState: state({ versions: maximumVersions.map(version => version.versionId === "v2" ? { ...version, document: oldDocument(2) } : version) }) });
+  assert.throws(() => assertWorkspaceStatePreparation(continuation, { sourceSha, basePreparation: wrongBase, desired, now }), /base preparation digest/);
+  assert.throws(() => assertWorkspaceStateAuthorization(continuationAuth, continuation, { sourceSha, basePreparation: wrongBase, now }), /base preparation digest/);
+  const workflow = yaml.load(fs.readFileSync(CONTRACT.workflowPath, "utf8"));
+  const dispatchBytes = (preparationValue, baseValue) => {
+    const fields = { source_sha: sourceSha, preparation_json_gzip_base64: gzipSync(Buffer.from(`${JSON.stringify(preparationValue, null, 2)}\n`), { level: 9, mtime: 0 }).toString("base64"), preparation_file_sha256: hash(Buffer.from(`${JSON.stringify(preparationValue, null, 2)}\n`)) };
+    if (baseValue) { const bytes = Buffer.from(`${JSON.stringify(baseValue, null, 2)}\n`); fields.base_preparation_json_gzip_base64 = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64"); fields.base_preparation_file_sha256 = hash(bytes); }
+    return Buffer.byteLength(JSON.stringify({ ref: "main", inputs: fields }));
+  };
+  const normalBytes = dispatchBytes(base, null); const continuationBytes = dispatchBytes(continuation, base);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), ["base_preparation_file_sha256", "base_preparation_json_gzip_base64", "preparation_file_sha256", "preparation_json_gzip_base64", "source_sha"]);
+  const workflowText = fs.readFileSync(CONTRACT.workflowPath, "utf8");
+  assert.equal((workflowText.match(/gzip -dc/g) || []).length, 2);
+  assert.match(workflowText, /BASE_PREPARATION_FILE_SHA256/);
+  assert.ok(normalBytes < 49152, `normal workflow_dispatch payload was ${normalBytes} bytes`);
+  assert.ok(continuationBytes < 49152, `continuation workflow_dispatch payload was ${continuationBytes} bytes`);
 });
 
 test("oldest default is protected and the oldest non-default becomes the reviewed candidate", () => {
@@ -246,11 +292,24 @@ test("fresh authorization adopts only an authentic proved-no-delete continuation
   const { prep: base, auth: ignored, at } = freshAuthorization();
   // The retry preparation is freshly timed but retains the exact original transition identity.
   const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
-  const auth = authorization(continuation, at, "124"); const retry = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at });
+  const auth = authorization(continuation, at, "124", old.preparation); const retry = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => at });
   const result = await executeWorkspaceStateReconciliation(retry.args);
   assert.equal(result.status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
   assert.deepEqual([retry.box.deletes, retry.box.creates], [1, 0]);
   assert.equal(ignored.operationId, continuation.operationId);
+});
+
+test("continuation delete reconciles an ambiguous API response against the separate authenticated base", async () => {
+  const original = executor(); const old = original.args;
+  for (const [file, kind, createdAt] of [["reservation.json", "RESERVATION", now.toISOString()], ["deletion-attempt.json", "DELETION_ATTEMPT", new Date(now.getTime() + 1).toISOString()], ["deletion-prewrite-failed.json", "DELETION_PREWRITE_FAILED", new Date(now.getTime() + 2).toISOString()]]) await seedRecord(original, old.authorization, old.preparation, file, `PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kind}`, createdAt);
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
+  const { at } = freshAuthorization();
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
+  const auth = authorization(continuation, at, "124", old.preparation);
+  const resumed = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => at, deletePolicyVersion: async () => { resumed.box.deletes += 1; resumed.box.live = afterDelete(); throw new Error("response lost after IAM accepted the delete"); } });
+  const result = await executeWorkspaceStateReconciliation(resumed.args);
+  assert.equal(result.status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([resumed.box.deletes, resumed.box.creates], [1, 0]);
 });
 
 test("delete retry restart accepts the exact post-delete state without repeating deletion", async () => {
@@ -263,8 +322,8 @@ test("delete retry restart accepts the exact post-delete state without repeating
   const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
   const { at } = freshAuthorization();
   const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
-  const auth = authorization(continuation, at, "124");
-  const first = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at });
+  const auth = authorization(continuation, at, "124", old.preparation);
+  const first = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => at });
   const normalRead = first.args.readLiveState;
   first.args.readLiveState = async () => {
     if (first.box.deletes) throw new WorkspaceStateRetryableObservationError("transient post-delete observation");
@@ -276,7 +335,7 @@ test("delete retry restart accepts the exact post-delete state without repeating
   assert.equal(first.journal.values.has(workspaceStateJournalKey(continuation.operationId, "deletion-complete.json")), false);
 
   const expiredAt = new Date(at.getTime() + CONTRACT.maxAgeMs + 1);
-  const restarted = executor({ prep: continuation, authorization: auth, journal: original.journal, live: afterDelete(), now: () => expiredAt });
+  const restarted = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, live: afterDelete(), now: () => expiredAt });
   const result = await executeWorkspaceStateReconciliation(restarted.args);
   assert.equal(result.status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
   assert.deepEqual([restarted.box.deletes, restarted.box.creates], [0, 0]);
@@ -292,8 +351,8 @@ test("retry record plus pre-state is uncertain, and contradictory retry states f
     const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
     const { at } = freshAuthorization();
     const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
-    const auth = authorization(continuation, at, "124");
-    const first = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at, deletePolicyVersion: async () => { first.box.deletes += 1; } });
+    const auth = authorization(continuation, at, "124", old.preparation);
+    const first = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => at, deletePolicyVersion: async () => { first.box.deletes += 1; } });
     // The API was invoked but live state remains pre-delete, so the outcome is uncertain.
     await assert.rejects(() => executeWorkspaceStateReconciliation(first.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS");
     assert.equal(first.box.deletes, 1);
@@ -301,7 +360,7 @@ test("retry record plus pre-state is uncertain, and contradictory retry states f
   };
 
   const uncertain = await interruptedRetry();
-  const preStateRestart = executor({ prep: uncertain.continuation, authorization: uncertain.auth, journal: uncertain.original.journal, live: state(), now: () => uncertain.at });
+  const preStateRestart = executor({ prep: uncertain.continuation, basePreparation: uncertain.original.args.preparation, authorization: uncertain.auth, journal: uncertain.original.journal, live: state(), now: () => uncertain.at });
   await assert.rejects(() => executeWorkspaceStateReconciliation(preStateRestart.args), error => error.mutationOutcome === "DELETE_OUTCOME_AMBIGUOUS" && /another delete is forbidden/.test(error.message));
   assert.deepEqual([preStateRestart.box.deletes, preStateRestart.box.creates], [0, 0]);
 
@@ -313,7 +372,7 @@ test("retry record plus pre-state is uncertain, and contradictory retry states f
   ];
   for (const live of badStates) {
     const fixture = await interruptedRetry();
-    const resumed = executor({ prep: fixture.continuation, authorization: fixture.auth, journal: fixture.original.journal, live, now: () => fixture.at });
+    const resumed = executor({ prep: fixture.continuation, basePreparation: fixture.original.args.preparation, authorization: fixture.auth, journal: fixture.original.journal, live, now: () => fixture.at });
     await assert.rejects(() => executeWorkspaceStateReconciliation(resumed.args));
     assert.deepEqual([resumed.box.deletes, resumed.box.creates], [0, 0]);
   }
@@ -325,16 +384,16 @@ test("proved-no-write continuation rejects tampered journal, changed live state,
   const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
   const at = new Date(now.getTime() + 31 * 60 * 1000);
   const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
-  const auth = authorization(continuation, at, "124");
+  const auth = authorization(continuation, at, "124", old.preparation);
   const expiredAt = new Date(at.getTime() + CONTRACT.maxAgeMs + 1);
-  const expired = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => expiredAt });
+  const expired = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => expiredAt });
   await assert.rejects(() => executeWorkspaceStateReconciliation(expired.args), /stale/);
   assert.deepEqual([expired.box.deletes, expired.box.creates], [0, 0]);
   for (const edit of [
     run => { run.box.live = afterDelete(); },
     run => { const key = workspaceStateJournalKey(continuation.operationId, "deletion-prewrite-failed.json"); const row = JSON.parse(run.journal.values.get(key)); row.sourceSha = "f".repeat(40); run.journal.values.set(key, Buffer.from(`${canonicalJson(row)}\n`)); },
   ]) {
-    const run = executor({ prep: continuation, authorization: auth, journal: original.journal, now: () => at }); edit(run);
+    const run = executor({ prep: continuation, basePreparation: old.preparation, authorization: auth, journal: original.journal, now: () => at }); edit(run);
     await assert.rejects(() => executeWorkspaceStateReconciliation(run.args));
     assert.deepEqual([run.box.deletes, run.box.creates], [0, 0]);
   }
@@ -356,19 +415,19 @@ test("fresh create continuation follows proved deletion without repeating it and
   const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(old.preparation.operationId, file)));
   const at = new Date(now.getTime() + 31 * 60 * 1000);
   const deletePrep = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-prewrite-failed.json"), liveState: state(), preparedAt: at.toISOString() });
-  const deleteAuth = authorization(deletePrep, at, "124"); const deleted = executor({ prep: deletePrep, authorization: deleteAuth, journal: original.journal, now: () => at });
+  const deleteAuth = authorization(deletePrep, at, "124", old.preparation); const deleted = executor({ prep: deletePrep, basePreparation: old.preparation, authorization: deleteAuth, journal: original.journal, now: () => at });
   assert.equal((await executeWorkspaceStateReconciliation(deleted.args)).status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
   assert.deepEqual([deleted.box.deletes, deleted.box.creates], [1, 0]);
   const at2 = new Date(at.getTime() + 60_000);
   const createPrep = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: old.preparation, kind: "PROVED_NO_CREATE_WRITE", reservation: read("reservation.json"), deletionAttempt: read("deletion-attempt.json"), proofRecord: read("deletion-complete.json"), deletionPrewriteFailed: read("deletion-prewrite-failed.json"), deletionRetryAttempt: read("deletion-retry-attempt.json"), liveState: afterDelete(), preparedAt: at2.toISOString() });
-  const createAuth = authorization(createPrep, at2, "125"); let clock = at2;
-  const expiredBeforeCreate = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => new Date(at2.getTime() + CONTRACT.maxAgeMs + 1) });
+  const createAuth = authorization(createPrep, at2, "125", old.preparation); let clock = at2;
+  const expiredBeforeCreate = executor({ prep: createPrep, basePreparation: old.preparation, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => new Date(at2.getTime() + CONTRACT.maxAgeMs + 1) });
   await assert.rejects(() => executeWorkspaceStateReconciliation(expiredBeforeCreate.args), /stale/);
   assert.deepEqual([expiredBeforeCreate.box.deletes, expiredBeforeCreate.box.creates], [0, 0]);
-  const creating = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => clock, createPolicyVersion: async () => { creating.box.creates += 1; creating.box.live = post(); clock = new Date(at2.getTime() + CONTRACT.maxAgeMs + 1); return { PolicyVersion: { VersionId: "v6" } }; } });
+  const creating = executor({ prep: createPrep, basePreparation: old.preparation, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => clock, createPolicyVersion: async () => { creating.box.creates += 1; creating.box.live = post(); clock = new Date(at2.getTime() + CONTRACT.maxAgeMs + 1); return { PolicyVersion: { VersionId: "v6" } }; } });
   assert.equal((await executeWorkspaceStateReconciliation(creating.args)).status, "COMPLETED");
   assert.deepEqual([creating.box.deletes, creating.box.creates], [0, 1]);
-  const expired = executor({ prep: createPrep, authorization: createAuth, journal: original.journal, live: post(), now: () => clock });
+  const expired = executor({ prep: createPrep, basePreparation: old.preparation, authorization: createAuth, journal: original.journal, live: post(), now: () => clock });
   assert.equal((await executeWorkspaceStateReconciliation(expired.args)).status, "CONSUMED");
   assert.deepEqual([expired.box.deletes, expired.box.creates], [0, 0]);
 });

@@ -68,7 +68,7 @@ The earlier PR #640 WorkspaceState policy-capacity review was historically
 bound to `8d18bc437e1b2af948109498dc1196003ba18d3de0d2fe443e075a8b324873e1`.
 That digest is superseded and is not the final executable/build-input review.
 
-## Final frozen PR #640 input revalidation
+## Historical PR #640 input revalidation (superseded)
 
 Date: 2026-10-08 UTC. After hostile review and final relevant tests, the
 implementation was frozen. The canonical `reachabilityInputsSha256(process.cwd())`
@@ -85,7 +85,7 @@ package/version, scope, rationale, owner, creation date, execution claims, and
 exclusive expiry `2026-11-02` are unchanged. The current acceptance and this
 final revalidation record both bind the digest above.
 
-## Final frozen PR #640 continuation recovery revalidation
+## Historical PR #640 continuation recovery revalidation (superseded)
 
 Date: 2026-10-08 UTC. After the WorkspaceState continuation and restart
 recovery implementation was frozen and its required local test gates passed,
@@ -100,7 +100,7 @@ these frozen inputs. The existing acceptance remains limited to this advisory
 and its existing scope, rationale, owner, and expiry `2026-11-02`; no
 reachability or expiry claim was broadened.
 
-## Final PR #640 delete-retry recovery revalidation
+## Historical PR #640 delete-retry recovery revalidation (superseded)
 
 Date: 2026-10-08 UTC. After the exact-head review correction for deletion
 retry recovery was implemented, the implementation was frozen and the
@@ -112,3 +112,20 @@ A fresh unfiltered OSV Scanner 2.6.0 scan again found exactly the existing HIGH
 96 chunks and resolved 204 packages; `braces@3.0.3` was absent, and the gate
 passed. The acceptance remains bound only to that existing advisory and keeps
 its prior scope, rationale, owner, and expiry `2026-11-02`.
+
+## Current final PR #640 compact-continuation revalidation
+
+Date: 2026-10-08 UTC. After the compact continuation transport and separately
+bound base-preparation handling were frozen, all required Stage-B, IAM,
+capability/dependency, security, workflow, and RLS gates passed. The canonical
+`reachabilityInputsSha256(process.cwd())` result is
+`03c57c88519d75bf6633928329a119cacb0824361801b4f92e4cc264a03b8645`.
+Unfiltered OSV Scanner 2.6.0 report
+`/private/tmp/mscqr-pr640-osv.9KXqm9/osv-source.json` contains the existing
+single HIGH `braces@3.0.3` dev-only finding, `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. The canonical browser closure built 3,993 modules into 96
+chunks and resolved 204 packages; `braces@3.0.3` is absent. The exact
+`check-osv-runtime.mjs` gate passed on this report and the final fingerprint.
+The acceptance continues to use the existing advisory, package/version,
+scope, rationale, owner, creation date, execution claims, and expiry
+`2026-11-02`.

@@ -4,8 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       source_sha: { description: Protected main source SHA, required: true, type: string }
-      preparation_json_base64: { description: Exact preparation artifact, required: true, type: string }
+      preparation_json_gzip_base64: { description: Deterministically compressed exact preparation artifact, required: true, type: string }
       preparation_file_sha256: { description: Exact preparation file SHA256, required: true, type: string }
+      base_preparation_json_gzip_base64: { description: Compressed original preparation for a continuation, required: false, type: string }
+      base_preparation_file_sha256: { description: Exact original preparation file SHA256 for a continuation, required: false, type: string }
 
 permissions:
   actions: read
@@ -50,16 +52,24 @@ jobs:
           test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-      - name: Decode exact preparation
+      - name: Decode exact preparation inputs
         env:
-          PREPARATION_JSON_BASE64: ${{ inputs.preparation_json_base64 }}
+          PREPARATION_JSON_GZIP_BASE64: ${{ inputs.preparation_json_gzip_base64 }}
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          BASE_PREPARATION_JSON_GZIP_BASE64: ${{ inputs.base_preparation_json_gzip_base64 }}
+          BASE_PREPARATION_FILE_SHA256: ${{ inputs.base_preparation_file_sha256 }}
         run: |
           set -euo pipefail
           install -d -m 700 "$RUNNER_TEMP/workspace-state-reconciliation"
-          printf '%s' "$PREPARATION_JSON_BASE64" | base64 --decode > "$RUNNER_TEMP/workspace-state-reconciliation/preparation.json"
+          printf '%s' "$PREPARATION_JSON_GZIP_BASE64" | base64 --decode | gzip -dc > "$RUNNER_TEMP/workspace-state-reconciliation/preparation.json"
           chmod 600 "$RUNNER_TEMP/workspace-state-reconciliation/preparation.json"
           test "$(sha256sum "$RUNNER_TEMP/workspace-state-reconciliation/preparation.json" | awk '{print $1}')" = "$PREPARATION_FILE_SHA256"
+          if [ -n "$BASE_PREPARATION_JSON_GZIP_BASE64" ] || [ -n "$BASE_PREPARATION_FILE_SHA256" ]; then
+            test -n "$BASE_PREPARATION_JSON_GZIP_BASE64" && test -n "$BASE_PREPARATION_FILE_SHA256"
+            printf '%s' "$BASE_PREPARATION_JSON_GZIP_BASE64" | base64 --decode | gzip -dc > "$RUNNER_TEMP/workspace-state-reconciliation/base-preparation.json"
+            chmod 600 "$RUNNER_TEMP/workspace-state-reconciliation/base-preparation.json"
+            test "$(sha256sum "$RUNNER_TEMP/workspace-state-reconciliation/base-preparation.json" | awk '{print $1}')" = "$BASE_PREPARATION_FILE_SHA256"
+          fi
       - name: Authenticate independent protected-environment approval
         id: approval
         env:
@@ -77,13 +87,18 @@ jobs:
       - name: Produce exact authorization
         env:
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+          BASE_PREPARATION_FILE_SHA256: ${{ inputs.base_preparation_file_sha256 }}
           APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
         run: |
           set -euo pipefail
-          node scripts/aws/authorize-production-workspace-state-policy-reconciliation.mjs --authorize \
+          args=(--authorize \
             --preparation "$RUNNER_TEMP/workspace-state-reconciliation/preparation.json" --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
             --environment-approval "$RUNNER_TEMP/workspace-state-reconciliation/environment-approval.json" --environment-approval-file-sha256 "$APPROVAL_SHA256" \
-            --output "$RUNNER_TEMP/workspace-state-reconciliation/authorization.json"
+            --output "$RUNNER_TEMP/workspace-state-reconciliation/authorization.json")
+          if [ -n "$BASE_PREPARATION_FILE_SHA256" ]; then
+            args+=(--base-preparation "$RUNNER_TEMP/workspace-state-reconciliation/base-preparation.json" --base-preparation-file-sha256 "$BASE_PREPARATION_FILE_SHA256")
+          fi
+          node scripts/aws/authorize-production-workspace-state-policy-reconciliation.mjs "${args[@]}"
       - uses: actions/upload-artifact@v4
         with:
           name: production-workspace-state-policy-reconciliation-authorization
