@@ -209,10 +209,16 @@ export function createWorkspaceStateJournal({ read, create } = {}) {
 }
 
 const recordBody = ({ kind, preparation, authorization, provenance, createdAt, postState }) => ({ schemaVersion: 1, kind, operationId: preparation.operationId, sourceSha: preparation.sourceSha, targetPolicyArn: preparation.targetPolicyArn, preparationSha256: preparation.preparationSha256, authorizationSha256: authorization.authorizationSha256, authorizationProvenanceSha256: provenance.provenanceSha256, currentDefaultVersionId: preparation.currentDefaultVersionId, currentDefaultDocumentSha256: preparation.currentDefaultDocumentSha256, desiredDocumentSha256: preparation.desiredDocumentSha256, permissionDeltaSha256: preparation.permissionDeltaSha256, versionInventorySha256: preparation.versionInventorySha256, deletionCandidate: preparation.deletionCandidate, expectedWritePlanSha256: preparation.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
+const PREWRITE_DISPOSITIONS = Object.freeze(["FRESH_AUTH_CONTINUATION_ALLOWED", "CONTRADICTION"]);
+const prewriteRecord = (body, disposition) => ({ ...body, prewriteDisposition: disposition });
 const assertRecord = (value, expected) => { const { recordSha256, ...body } = value || {}; exactKeys(value, [...Object.keys(expected), "recordSha256"], "WorkspaceState journal record"); if (canonicalJson(body) !== canonicalJson(expected) || recordSha256 !== sha256(body)) throw new Error("WorkspaceState journal record differs from the authorized transaction."); return value; };
 const assertRecordOrder = (...records) => { const times = records.map(record => iso(record.createdAt, "WorkspaceState journal createdAt").getTime()); if (times.some((time, index) => index > 0 && time < times[index - 1])) throw new Error("WorkspaceState journal records are out of order."); };
 const assertHistoricalRecord = (value, kind, preparation, hashes) => {
   const expected = recordBody({ kind, preparation, authorization: { authorizationSha256: hashes.authorizationSha256 }, provenance: { provenanceSha256: hashes.authorizationProvenanceSha256 }, createdAt: value?.createdAt });
+  if (kind.endsWith("_DELETION_PREWRITE_FAILED")) {
+    if (!PREWRITE_DISPOSITIONS.includes(value?.prewriteDisposition)) throw new Error("WorkspaceState pre-delete proof disposition is invalid.");
+    expected.prewriteDisposition = value.prewriteDisposition;
+  }
   const { recordSha256, ...body } = value || {};
   const basePlanHash = sha256(preparation.expectedWritePlan); const deletePlanHash = sha256([preparation.expectedWritePlan[0]]); const createPlanHash = sha256([preparation.expectedWritePlan[1]]);
   const allowedPlanHashes = kind.endsWith("_DELETION_RETRY_ATTEMPT") ? [deletePlanHash] : kind.endsWith("_CREATION_ATTEMPT") ? [createPlanHash] : kind.endsWith("_DELETION_COMPLETE") ? [basePlanHash, deletePlanHash] : [basePlanHash];
@@ -231,6 +237,7 @@ export function createWorkspaceStateContinuationPreparation({ sourceSha, basePre
   let expectedPlan;
   if (kind === "PROVED_NO_DELETE_WRITE") {
     assertHistoricalRecord(proofRecord, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, reservationHashes);
+    if (proofRecord.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation.");
     assertRecordOrder(deletionAttempt, proofRecord);
     if (deletionRetryAttempt || deletionComplete || creationAttempt || terminalRecord) throw new Error("WorkspaceState delete continuation is unavailable after a retry or later mutation boundary.");
     expectedPlan = [base.expectedWritePlan[0]];
@@ -239,7 +246,7 @@ export function createWorkspaceStateContinuationPreparation({ sourceSha, basePre
     if (!proofRecord || proofRecord.kind !== "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE" || !SHA256.test(proofRecord.recordSha256 || "")) throw new Error("WorkspaceState delete completion proof is missing.");
     if (creationAttempt || terminalRecord || (deletionComplete && deletionComplete.recordSha256 !== proofRecord.recordSha256)) throw new Error("WorkspaceState create continuation has prior create or terminal evidence.");
     if (deletionPrewriteFailed && !deletionRetryAttempt || deletionRetryAttempt && !deletionPrewriteFailed) throw new Error("WorkspaceState create continuation deletion retry chain is incomplete.");
-    if (deletionPrewriteFailed) { assertHistoricalRecord(deletionPrewriteFailed, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, reservationHashes); assertRecordOrder(deletionAttempt, deletionPrewriteFailed, deletionRetryAttempt); }
+    if (deletionPrewriteFailed) { assertHistoricalRecord(deletionPrewriteFailed, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, reservationHashes); if (deletionPrewriteFailed.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation."); assertRecordOrder(deletionAttempt, deletionPrewriteFailed, deletionRetryAttempt); }
     if (deletionRetryAttempt) assertHistoricalRecord(deletionRetryAttempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", base, { preparationSha256: deletionRetryAttempt.preparationSha256, authorizationSha256: deletionRetryAttempt.authorizationSha256, authorizationProvenanceSha256: deletionRetryAttempt.authorizationProvenanceSha256 });
     const completionHashes = { preparationSha256: proofRecord.preparationSha256, authorizationSha256: proofRecord.authorizationSha256, authorizationProvenanceSha256: proofRecord.authorizationProvenanceSha256 };
     assertHistoricalRecord(proofRecord, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", base, completionHashes);
@@ -309,7 +316,12 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   if (![readLiveState, deletePolicyVersion, createPolicyVersion, reauthenticateSource, sleep].every(value => typeof value === "function") || !journal) throw new Error("WorkspaceState executor adapters are required.");
   const clock = typeof now === "function" ? now : () => now; const desired = readWorkspaceStateDesiredPolicy(); const continuation = preparation?.continuation || null; basePreparation = continuation ? basePreparation : preparation; let iamDeleteCount = 0; let iamCreateCount = 0;
   assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock(), allowExpired: true }); assertWorkspaceStateAuthorizationProvenance(provenance, { authorization, sourceSha });
-  const expected = (kind, createdAt, postState) => recordBody({ kind, preparation, authorization, provenance, createdAt, postState });
+  const expected = (kind, createdAt, postState, prewriteDisposition) => {
+    const body = recordBody({ kind, preparation, authorization, provenance, createdAt, postState });
+    if (kind !== "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED") return body;
+    if (!PREWRITE_DISPOSITIONS.includes(prewriteDisposition)) throw new Error("WorkspaceState pre-delete proof disposition is invalid.");
+    return prewriteRecord(body, prewriteDisposition);
+  };
   const terminal = await journal.read(authorization, "terminal.json");
   if (terminal) { reauthenticateSource(); const current = await observe(readLiveState, desired); if (!stateMatchesPost(current, basePreparation)) throw new Error("Consumed WorkspaceState transaction no longer matches live IAM."); assertRecord(terminal, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_TERMINAL", terminal.createdAt, current)); return Object.freeze({ status: "CONSUMED", iamDeleteCount: 0, iamCreateCount: 0, postState: current }); }
   let reservation = await journal.read(authorization, "reservation.json");
@@ -330,6 +342,7 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
         if (refs.kind === "PROVED_NO_DELETE_WRITE") {
           if (!prewriteFailure || prewriteFailure.recordSha256 !== refs.proofRecordSha256 || prewriteFailure.recordSha256 !== refs.deletionPrewriteFailedRecordSha256 || createAttempt || (complete && !retryAttempt)) throw new Error("WorkspaceState delete continuation is not a proved-no-write state.");
           assertHistoricalRecord(prewriteFailure, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", basePreparation, reservationHashes);
+          if (prewriteFailure.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation.");
           assertRecordOrder(attempt, prewriteFailure);
           if (retryAttempt) assertRecord(retryAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", retryAttempt.createdAt));
           if (complete) assertRecord(complete, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", complete.createdAt));
@@ -351,7 +364,7 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
         } else if (!stateMatchesAfterDeletion(current, basePreparation) && !(createAttempt && stateMatchesPost(current, basePreparation))) throw new Error("WorkspaceState continuation live state differs from its proved no-write boundary.");
       } else if (laterRecords.some(Boolean)) {
         const kinds = ["DELETION_ATTEMPT", "DELETION_PREWRITE_FAILED", "DELETION_RETRY_ATTEMPT", "DELETION_COMPLETE", "CREATION_ATTEMPT"];
-        laterRecords.forEach((record, index) => { if (record) assertRecord(record, expected(`PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kinds[index]}`, record.createdAt)); });
+        laterRecords.forEach((record, index) => { if (record) assertRecord(record, expected(`PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_${kinds[index]}`, record.createdAt, undefined, record.prewriteDisposition)); });
         if ((laterRecords[3] || laterRecords[4]) && !laterRecords[0] || laterRecords[4] && !laterRecords[3]) throw new Error("WorkspaceState adopted reservation continuation has an invalid mutation order.");
       } else {
         assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
@@ -366,7 +379,9 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
   const deletionRetryAttempt = await journal.read(authorization, "deletion-retry-attempt.json");
   let deletionComplete = await journal.read(authorization, "deletion-complete.json");
   if (deletionAttempt && !continuation) assertRecord(deletionAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", deletionAttempt.createdAt));
-  if (deletionPrewriteFailed && !continuation) assertRecord(deletionPrewriteFailed, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", deletionPrewriteFailed.createdAt));
+  if (deletionPrewriteFailed && !continuation) assertRecord(deletionPrewriteFailed, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", deletionPrewriteFailed.createdAt, undefined, deletionPrewriteFailed.prewriteDisposition));
+  if (deletionPrewriteFailed && !PREWRITE_DISPOSITIONS.includes(deletionPrewriteFailed.prewriteDisposition)) throw new Error("WorkspaceState pre-delete proof disposition is invalid.");
+  if (deletionPrewriteFailed?.prewriteDisposition === "CONTRADICTION") throw new Error("WorkspaceState pre-delete security contradiction remains fail-closed.");
   if (deletionRetryAttempt && !continuation) assertRecord(deletionRetryAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", deletionRetryAttempt.createdAt));
   if (deletionComplete && !continuation) assertRecord(deletionComplete, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", deletionComplete.createdAt));
   if ((deletionPrewriteFailed && !deletionAttempt) || (deletionRetryAttempt && !deletionPrewriteFailed) || (deletionRetryAttempt && !deletionAttempt)) throw new Error("WorkspaceState deletion retry journal is inconsistent.");
@@ -378,19 +393,26 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
     assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); reauthenticateSource();
     const before = await observe(readLiveState, desired); if (!stateMatchesPreparation(before, basePreparation)) throw new Error("WorkspaceState final pre-deletion CAS changed after authorization.");
     const attempt = await journal.create(authorization, "deletion-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", new Date(clock()).toISOString())); if (!attempt) throw new Error("WorkspaceState deletion-attempt raced another executor.");
-    reauthenticateSource();
     try {
+      try { reauthenticateSource(); }
+      catch (error) { error.observationOutcome = "CONTRADICTORY_STATE"; throw error; }
       const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, basePreparation), sleep);
-      if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
+      if (!latest) throw Object.assign(new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary."), { observationOutcome: "CONTRADICTORY_STATE" });
     } catch (error) {
-      if (error.observationOutcome !== "CONTRADICTORY_STATE") {
-        const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString()));
-        if (!recorded) throw new Error("WorkspaceState pre-delete failure record raced another executor.", { cause: error });
+      const disposition = error.observationOutcome === "CONTRADICTORY_STATE" ? "CONTRADICTION" : "FRESH_AUTH_CONTINUATION_ALLOWED";
+      const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString(), undefined, disposition));
+      if (!recorded) throw new Error("WorkspaceState pre-delete failure record raced another executor.", { cause: error });
+      if (disposition === "FRESH_AUTH_CONTINUATION_ALLOWED") {
         throw Object.assign(new Error("WorkspaceState pre-delete observation failed before the mutation boundary; DeletePolicyVersion was not called.", { cause: error }), { mutationOutcome: "DELETE_NOT_ISSUED" });
       }
-      throw error;
+      throw Object.assign(error, { mutationOutcome: "DELETE_NOT_ISSUED" });
     }
-    assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() });
+    try { assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); }
+    catch (error) {
+      const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString(), undefined, "FRESH_AUTH_CONTINUATION_ALLOWED"));
+      if (!recorded) throw new Error("WorkspaceState pre-delete authorization failure record raced another executor.", { cause: error });
+      throw Object.assign(new Error("WorkspaceState authorization is stale before DeletePolicyVersion; a fresh authorization is required.", { cause: error }), { mutationOutcome: "DELETE_NOT_ISSUED" });
+    }
     await deleteOnce();
   } else if (deletionPrewriteFailed && !deletionRetryAttempt && !deletionComplete) {
     assertWorkspaceStateAuthorization(authorization, preparation, { sourceSha, basePreparation: continuation ? basePreparation : null, now: clock() }); reauthenticateSource();

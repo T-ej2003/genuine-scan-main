@@ -28,7 +28,7 @@ const executor = ({ prep = preparation(), basePreparation = null, live = state()
   const args = { sourceSha, preparation: prep, basePreparation, authorization: auth, provenance: provenance(auth), journal: journal.journal, reauthenticateSource: () => true, now: () => now, sleep: async () => {}, readLiveState: async () => box.live, deletePolicyVersion: async ({ PolicyArn, VersionId }) => { box.deletes += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.equal(VersionId, prep.deletionCandidate.versionId); box.live = afterDelete(); }, createPolicyVersion: async ({ PolicyArn, PolicyDocument, SetAsDefault }) => { box.creates += 1; assert.equal(PolicyArn, CONTRACT.policyArn); assert.deepEqual(PolicyDocument, desired.document); assert.equal(SetAsDefault, true); box.live = post(); return { PolicyVersion: { VersionId: "v6" } }; }, ...overrides };
   return { args, box, journal };
 };
-const recordBody = (kind, prep, auth, createdAt, postState) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, targetPolicyArn: prep.targetPolicyArn, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: provenance(auth).provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, permissionDeltaSha256: prep.permissionDeltaSha256, versionInventorySha256: prep.versionInventorySha256, deletionCandidate: prep.deletionCandidate, expectedWritePlanSha256: prep.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), createdAt });
+const recordBody = (kind, prep, auth, createdAt, postState) => ({ schemaVersion: 1, kind, operationId: prep.operationId, sourceSha: prep.sourceSha, targetPolicyArn: prep.targetPolicyArn, preparationSha256: prep.preparationSha256, authorizationSha256: auth.authorizationSha256, authorizationProvenanceSha256: provenance(auth).provenanceSha256, currentDefaultVersionId: prep.currentDefaultVersionId, currentDefaultDocumentSha256: prep.currentDefaultDocumentSha256, desiredDocumentSha256: prep.desiredDocumentSha256, permissionDeltaSha256: prep.permissionDeltaSha256, versionInventorySha256: prep.versionInventorySha256, deletionCandidate: prep.deletionCandidate, expectedWritePlanSha256: prep.expectedWritePlanSha256, ...(postState ? { createdPolicyVersionId: postState.defaultVersionId, postVersionInventorySha256: postState.inventorySha256, status: "COMPLETED", authorizationConsumed: true } : {}), ...(kind.endsWith("_DELETION_PREWRITE_FAILED") ? { prewriteDisposition: "FRESH_AUTH_CONTINUATION_ALLOWED" } : {}), createdAt });
 const seedRecord = (run, auth, prep, record, kind, createdAt = now.toISOString(), postState) => run.journal.journal.create(auth, record, recordBody(kind, prep, auth, createdAt, postState));
 const freshAuthorization = () => { const at = new Date(now.getTime() + 31 * 60 * 1000); const prep = createWorkspaceStatePreparation({ sourceSha, desired, preparedAt: at.toISOString(), liveState: state() }); return { prep, auth: authorization(prep, at, "124"), at }; };
 
@@ -528,9 +528,13 @@ test("post-journal stable CAS mismatch fails closed and permanent read errors re
     if (changed.journal.values.has(workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-attempt.json"))) return state({ policyArn: "arn:aws:iam::368992683803:policy/unexpected" });
     return baseRead();
   };
-  await assert.rejects(() => executeWorkspaceStateReconciliation(changed.args));
+  await assert.rejects(() => executeWorkspaceStateReconciliation(changed.args), error => error.mutationOutcome === "DELETE_NOT_ISSUED");
   assert.equal(changedReads, 2); assert.equal(changed.box.deletes, 0);
-  assert.equal(changed.journal.values.has(workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-prewrite-failed.json")), false);
+  const contradictionKey = workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-prewrite-failed.json");
+  assert.equal(changed.journal.values.has(contradictionKey), true);
+  const contradiction = JSON.parse(changed.journal.values.get(contradictionKey));
+  assert.equal(contradiction.prewriteDisposition, "CONTRADICTION");
+  assert.throws(() => createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: changed.args.preparation, kind: "PROVED_NO_DELETE_WRITE", reservation: JSON.parse(changed.journal.values.get(workspaceStateJournalKey(changed.args.preparation.operationId, "reservation.json"))), deletionAttempt: JSON.parse(changed.journal.values.get(workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-attempt.json"))), proofRecord: contradiction, liveState: state(), preparedAt: now.toISOString() }), /security contradiction/);
 
   const denied = executor(); let deniedReads = 0; const deniedBaseRead = denied.args.readLiveState;
   denied.args.readLiveState = async () => {
@@ -543,6 +547,7 @@ test("post-journal stable CAS mismatch fails closed and permanent read errors re
   assert.equal(denied.journal.values.has(proofKey), true);
   const proof = JSON.parse(denied.journal.values.get(proofKey));
   assert.equal(proof.kind, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED");
+  assert.equal(proof.prewriteDisposition, "FRESH_AUTH_CONTINUATION_ALLOWED");
 
   const { at } = freshAuthorization();
   const basePreparation = denied.args.preparation;
@@ -554,6 +559,15 @@ test("post-journal stable CAS mismatch fails closed and permanent read errors re
   assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
   assert.deepEqual([denied.box.deletes, resumed.box.deletes], [0, 1]);
   assert.equal(resumed.box.creates, 0);
+
+  const unclassified = executor(); let unclassifiedReads = 0; const unclassifiedBaseRead = unclassified.args.readLiveState;
+  unclassified.args.readLiveState = async () => {
+    if (unclassified.journal.values.has(workspaceStateJournalKey(unclassified.args.preparation.operationId, "deletion-attempt.json"))) { unclassifiedReads += 1; throw new Error("read adapter failed"); }
+    return unclassifiedBaseRead();
+  };
+  await assert.rejects(() => executeWorkspaceStateReconciliation(unclassified.args), error => error.mutationOutcome === "DELETE_NOT_ISSUED" && error.cause?.message === "read adapter failed");
+  assert.equal(unclassifiedReads, 1); assert.equal(unclassified.box.deletes, 0);
+  assert.equal(JSON.parse(unclassified.journal.values.get(workspaceStateJournalKey(unclassified.args.preparation.operationId, "deletion-prewrite-failed.json"))).prewriteDisposition, "FRESH_AUTH_CONTINUATION_ALLOWED");
 });
 
 test("a single transient post-delete observation resolves on the next bounded read", async () => {
