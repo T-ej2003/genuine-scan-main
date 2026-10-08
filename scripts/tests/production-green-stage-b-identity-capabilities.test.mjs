@@ -28,7 +28,7 @@ const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, se
 const shapedPolicyEvidence = () => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
   const inlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
-  return { roleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
+  return { roleArn: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", receiptReleaseShaTag: "5".repeat(40), attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
 };
 const temp = () => fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-release-preflight-test-"));
 const imageFixture = makeCanonicalImageAuthorization({ sourceSha: protectedSourceSha, imageReleaseSha: protectedSourceSha });

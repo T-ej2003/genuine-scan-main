@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 
 export const NORMAL_ACTIVATION = Object.freeze({
@@ -13,6 +15,13 @@ export const NORMAL_ACTIVATION = Object.freeze({
 
 export const NORMAL_CANDIDATE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-backend-candidate:([1-9][0-9]*)$/;
 export const NORMAL_LEGACY_SOURCE_ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-backend:([1-9][0-9]*)$/;
+// The governed v17 SOURCE/TARGET document is the authenticated live predecessor for this release.
+export const HISTORICAL_NORMAL_ACTIVATION_TRANSACTION = Object.freeze({
+  defaultVersionId: "v17",
+  sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:24",
+  targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:27",
+});
+const NORMAL_ACTIVATION_POLICY_SOURCE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..", NORMAL_ACTIVATION.policyPath);
 export const AWS_MANAGED_POLICY_DOCUMENT_LIMIT = 6144;
 export const canonicalNormalActivationValue = (value) => Array.isArray(value)
   ? `[${value.map(canonicalNormalActivationValue).join(",")}]`
@@ -50,7 +59,7 @@ function baseNormalActivationPolicy(sourcePolicy) {
   return { policy, activation: activation[0], recovery: recovery[0] };
 }
 
-export function buildNormalActivationPolicy(targetArn, sourcePolicy = JSON.parse(fs.readFileSync(NORMAL_ACTIVATION.policyPath, "utf8"))) {
+export function buildNormalActivationPolicy(targetArn, sourcePolicy = JSON.parse(fs.readFileSync(NORMAL_ACTIVATION_POLICY_SOURCE, "utf8"))) {
   if (!NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation policy requires one exact candidate revision.");
   const { policy, activation } = baseNormalActivationPolicy(sourcePolicy);
   activation.Condition.ArnEquals["ecs:task-definition"] = targetArn;
@@ -58,7 +67,7 @@ export function buildNormalActivationPolicy(targetArn, sourcePolicy = JSON.parse
   return policy;
 }
 
-export function buildNormalActivationTransactionPolicy({ sourceArn, targetArn }, sourcePolicy = JSON.parse(fs.readFileSync(NORMAL_ACTIVATION.policyPath, "utf8"))) {
+export function buildNormalActivationTransactionPolicy({ sourceArn, targetArn }, sourcePolicy = JSON.parse(fs.readFileSync(NORMAL_ACTIVATION_POLICY_SOURCE, "utf8"))) {
   if (!exactNormalSource(sourceArn) || !NORMAL_CANDIDATE_ARN.test(targetArn || "")) throw new Error("Normal activation transaction requires exact permitted SOURCE and candidate TARGET revisions.");
   const { policy, activation, recovery } = baseNormalActivationPolicy(sourcePolicy);
   const targets = [...new Set([sourceArn, targetArn])].sort();

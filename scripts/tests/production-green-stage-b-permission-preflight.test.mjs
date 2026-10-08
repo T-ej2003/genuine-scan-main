@@ -59,6 +59,7 @@ import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operato
 import { deriveContractDigests, generateStageBTfvars } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
+import { HISTORICAL_NORMAL_ACTIVATION_TRANSACTION, buildNormalActivationTransactionPolicy, compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 
 const manifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 const realForbiddenSimulations = JSON.parse(fs.readFileSync("scripts/tests/fixtures/aws-iam-simulate-principal-policy-stage-b-forbidden.json", "utf8"));
@@ -70,7 +71,16 @@ const generatorArn = "arn:aws:iam::368992683803:root";
 const policyEvidence = (() => {
   const policies = sourcePolicyEvidence().map((policy) => ({ ...policy, defaultVersionId: "v1", liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
   const inlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
-  return { roleArn, attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
+  return { roleArn, receiptReleaseShaTag: "5".repeat(40), attachedPolicyArns: policies.map(({ arn }) => arn).sort(), inlinePolicyNames: inlinePolicies.map(({ policyName }) => policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: "valid" };
+})();
+const governedPolicyEvidence = (() => {
+  const evidence = structuredClone(policyEvidence);
+  const transaction = evidence.policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite");
+  transaction.defaultVersionId = HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.defaultVersionId;
+  transaction.liveSha256 = crypto.createHash("sha256").update(canonicalizeJson(compactNormalActivationPolicy(buildNormalActivationTransactionPolicy(HISTORICAL_NORMAL_ACTIVATION_TRANSACTION)))).digest("hex");
+  transaction.matchesSource = false;
+  transaction.ownership = "GOVERNED_NORMAL_ACTIVATION_TRANSACTION";
+  return evidence;
 })();
 const runPermissionPreflight = (input) => {
   if (!input.savedPlanBytes) return runPermissionPreflightRaw({ policyEvidence, ecsExecVerifierEvidence: buildEcsExecOperatorEvidence(), ...input });
@@ -754,6 +764,17 @@ test("direct backend rejects missing context on its unneeded ListBucket proof", 
   assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, run: () => JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: ["s3:prefix"] }] }) }), /unexpected MissingContextValues/);
 });
 
+test("negative S3 simulation supplies the release-bound principal tag and rejects missing context", () => {
+  const receiptReleaseShaTag = policyEvidence.receiptReleaseShaTag;
+  const item = deriveRequiredEvaluations(plan, manifest, { policyEvidence }).forbidden.find(({ manifestId }) => manifestId === "backend-list-bucket-not-required");
+  const run = (missingContextValues) => (args) => {
+    assert.ok(args.slice(args.indexOf("--context-entries") + 1).includes(`ContextKeyName=aws:PrincipalTag/MSCQRReceiptReleaseSha,ContextKeyValues=${receiptReleaseShaTag},ContextKeyType=string`));
+    return JSON.stringify({ EvaluationResults: [{ EvalActionName: item.action, EvalResourceName: item.resource, EvalDecision: "implicitDeny", MatchedStatements: [], MissingContextValues: missingContextValues }] });
+  };
+  assert.equal(simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins: sourcePolicyConditionKeyOrigins(), run: run([]) }).decision, "implicitDeny");
+  assert.throws(() => simulatePrincipalPolicy({ roleArn, evaluation: item, conditionKeyOrigins: sourcePolicyConditionKeyOrigins(), run: run(["aws:PrincipalTag/MSCQRReceiptReleaseSha"]) }), /unexpected MissingContextValues/);
+});
+
 test("unexpected missing context is rejected for forbidden and required evaluations", () => {
   const forbidden = structuredClone(listBucketEvaluation());
   forbidden.forbidden = true;
@@ -1400,6 +1421,57 @@ test("permission evidence fails closed on stale versions, source drift, and deta
   assert.throws(() => assertReleasePolicyEvidence(bounded), /permissions boundary/);
   const extraAttachment = structuredClone(policyEvidence); extraAttachment.attachedPolicyArns.push("arn:aws:iam::aws:policy/AdministratorAccess");
   assert.throws(() => assertReleasePolicyEvidence(extraAttachment), /attachment set/);
+  const missingTag = structuredClone(policyEvidence); delete missingTag.receiptReleaseShaTag;
+  assert.throws(() => assertReleasePolicyEvidence(missingTag), /receipt principal tag evidence/);
+});
+
+test("governed v17 transaction binds current activation, rollback, recovery, and negative S3 simulations", () => {
+  assert.equal(assertReleasePolicyEvidence(governedPolicyEvidence), true);
+  const report = runPermissionPreflight({
+    reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest,
+    policyEvidence: governedPolicyEvidence, generatedAt: now, now, policyPublishedAt: now,
+    cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail,
+  });
+  assert.equal(report.status, "valid");
+  assert.equal(assertPermissionEvaluationBindings(report, manifest, { permissionProfile: report.permissionProfile }), true);
+  const required = new Map(report.requiredEvaluations.map((item) => [item.manifestId, item]));
+  for (const [id, arn] of [
+    ["activate-exact-ecs-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn],
+    ["rollback-exact-ecs-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn],
+    ["backend-health-recovery-update-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn],
+  ]) {
+    assert.deepEqual(required.get(id).context.find(({ key }) => key === "ecs:task-definition").values, [arn]);
+    assert.equal(required.get(id).decision, "allowed");
+  }
+  for (const id of ["backend-list-bucket-not-required", "backend-other-production-workspace-read", "backend-other-stage-b-key-read", "backend-unrelated-bucket-read", "backend-wildcard-object-read"]) {
+    const item = report.forbiddenEvaluations.find((value) => value.manifestId === id);
+    assert.deepEqual(item.context.find(({ key }) => key === "aws:PrincipalTag/MSCQRReceiptReleaseSha").values, [report.policyEvidence.receiptReleaseShaTag]);
+    assert.equal(item.decision, "implicitDeny");
+    assert.deepEqual(item.missingContextValues, []);
+  }
+  for (const changed of [
+    (value) => { value.policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").defaultVersionId = "v16"; },
+    (value) => { value.policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").liveSha256 = "0".repeat(64); },
+    (value) => { delete value.policies.find(({ name }) => name === "MSCQRProductionGreenStageBFinalApplyWrite").ownership; },
+  ]) {
+    const mismatch = structuredClone(governedPolicyEvidence); changed(mismatch);
+    assert.throws(() => assertReleasePolicyEvidence(mismatch), /source\/live identity/);
+  }
+  for (const simulate of [
+    ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
+      ? { decision: "implicitDeny", matchedStatements: 0, missingContextValues: ["aws:PrincipalTag/MSCQRReceiptReleaseSha"] }
+      : allowRequiredDenyForbidden({ evaluation }),
+    ({ evaluation }) => evaluation.manifestId === "backend-list-bucket-not-required"
+      ? { decision: "allowed", matchedStatements: 1, missingContextValues: [] }
+      : allowRequiredDenyForbidden({ evaluation }),
+  ]) {
+    const denied = runPermissionPreflight({
+      reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest,
+      policyEvidence: governedPolicyEvidence, generatedAt: now, now, policyPublishedAt: now,
+      cloudTrailSessionName: "test-session", simulate, cloudTrail: clearCloudTrail,
+    });
+    assert.equal(denied.status, "invalid");
+  }
 });
 
 test("release inline policies must exactly match source-owned names and documents", () => {
@@ -1453,7 +1525,7 @@ test("live release inline-policy collection validates complete enumeration and c
       if (match.policyName === "MSCQRProductionFrontendActivation" && mutateFrontendDocument) mutateFrontendDocument(doc);
       return JSON.stringify({ PolicyDocument: match.policyName === "MSCQRProductionFrontendActivation" ? encodeURIComponent(JSON.stringify(doc)) : doc });
     }
-    if (operation === "get-role") return JSON.stringify({ Role: { Arn: roleArn } });
+    if (operation === "get-role") return JSON.stringify({ Role: { Arn: roleArn, Tags: [{ Key: "MSCQRReceiptReleaseSha", Value: policyEvidence.receiptReleaseShaTag }] } });
     if (operation === "get-policy") {
       const policy = sourcePolicies.find(({ arn }) => arn === value("--policy-arn"));
       if (!policy) throw new Error("unexpected managed policy requested");
@@ -1468,6 +1540,14 @@ test("live release inline-policy collection validates complete enumeration and c
   const evidence = collectLiveReleasePolicyEvidence({ run });
   assert.deepEqual(evidence.inlinePolicyNames, expectedInline.map(({ policyName }) => policyName));
   assert.equal(assertReleasePolicyEvidence(evidence), true);
+  assert.throws(() => collectLiveReleasePolicyEvidence({ run: (args) => args[1] === "get-role" ? JSON.stringify({ Role: { Arn: "arn:aws:iam::368992683803:role/other", Tags: [{ Key: "MSCQRReceiptReleaseSha", Value: policyEvidence.receiptReleaseShaTag }] } }) : run(args) }), /role identity differs/);
+  for (const tags of [
+    [],
+    [{ Key: "MSCQRReceiptReleaseSha", Value: "wrong" }],
+    [{ Key: "MSCQRReceiptReleaseSha", Value: policyEvidence.receiptReleaseShaTag }, { Key: "MSCQRReceiptReleaseSha", Value: policyEvidence.receiptReleaseShaTag }],
+  ]) {
+    assert.throws(() => collectLiveReleasePolicyEvidence({ run: (args) => args[1] === "get-role" ? JSON.stringify({ Role: { Arn: roleArn, Tags: tags } }) : run(args) }), /receipt principal tag|tag inventory/);
+  }
 
   for (const incomplete of [
     {}, { PolicyNames: null }, { PolicyNames: "not-an-array" }, { PolicyNames: ["duplicate", "duplicate"] },
@@ -1491,6 +1571,25 @@ test("live release inline-policy collection validates complete enumeration and c
     const drift = collectLiveReleasePolicyEvidence({ run });
     assert.throws(() => assertReleasePolicyEvidence(drift), /inline policy document differs.*MSCQRProductionFrontendActivation/);
   }
+  mutateFrontendDocument = undefined;
+  const transactionDocument = compactNormalActivationPolicy(buildNormalActivationTransactionPolicy(HISTORICAL_NORMAL_ACTIVATION_TRANSACTION));
+  const transactionRun = (args) => {
+    const policyArn = args[args.indexOf("--policy-arn") + 1];
+    if (policyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite") {
+      if (args[1] === "get-policy") return JSON.stringify({ Policy: { Arn: policyArn, DefaultVersionId: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.defaultVersionId } });
+      if (args[1] === "get-policy-version") return JSON.stringify({ PolicyVersion: { Document: transactionDocument } });
+    }
+    return run(args);
+  };
+  const transactionEvidence = collectLiveReleasePolicyEvidence({ run: transactionRun });
+  assert.equal(transactionEvidence.status, "valid");
+  assert.equal(assertReleasePolicyEvidence(transactionEvidence), true);
+  assert.deepEqual(transactionEvidence, governedPolicyEvidence);
+  const expanded = structuredClone(transactionDocument);
+  expanded.Statement.find(({ Action }) => Action === "ecs:UpdateService").Condition.ArnEquals["ecs:task-definition"].push("arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:28");
+  const unauthorized = collectLiveReleasePolicyEvidence({ run: (args) => args[1] === "get-policy-version" && args.includes("arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite") ? JSON.stringify({ PolicyVersion: { Document: expanded } }) : transactionRun(args) });
+  assert.equal(unauthorized.status, "invalid");
+  assert.throws(() => assertReleasePolicyEvidence(unauthorized), /missing or invalid/);
 });
 
 test("preflight requires a manifest and rejects an unapproved generator", () => {
@@ -1749,7 +1848,7 @@ function wrapperFixture({ approvedPlan = plan, shownPlan, savedBytes = savedPlan
   const savedHash = crypto.createHash("sha256").update(savedBytes).digest("hex");
   let planHash = crypto.createHash("sha256").update(effectiveApprovedBytes).digest("hex");
   let canonicalHash = crypto.createHash("sha256").update(Buffer.from(canonicalizeJson(JSON.parse(JSON.stringify(effectiveShownPlan))))).digest("hex");
-  const derivedEvaluations = deriveRequiredEvaluations(plan, manifest);
+  const derivedEvaluations = deriveRequiredEvaluations(plan, manifest, { policyEvidence });
   const derivedEvaluationFor = (entry) => [...derivedEvaluations.required, ...derivedEvaluations.forbidden].find(({ manifestId }) => manifestId === entry.id);
   const requiredFixtureEntry = manifest.required.find((entry) => !entry.plan);
   const forbiddenFixtureEntry = manifest.forbidden.find((entry) => entry.id === "backend-list-bucket-not-required");
