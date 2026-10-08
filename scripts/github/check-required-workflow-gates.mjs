@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { pathToFileURL } from "node:url";
+import { requiredWorkflowFiles } from "./release-lifecycle-contract.mjs";
 
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || "").href;
 
@@ -185,6 +186,19 @@ async function readGateState(config) {
       expectedWorkflowRunIds: config.expectedWorkflowRunIds,
     }),
   );
+}
+
+// The coordinator consumes the same exact-run payloads as the Release Train
+// gate checker, rather than reconstructing a weaker success-only summary.
+export async function readReleaseGateEvidence({ sourceSha, lifecycle, expectedWorkflowRunIds, token, repository = 'T-ej2003/genuine-scan-main', githubJson } = {}) {
+  if(repository!=='T-ej2003/genuine-scan-main'||!/^[a-f0-9]{40}$/.test(sourceSha||''))throw new Error('Invalid governed release gate source');
+  const files=requiredWorkflowFiles(lifecycle);
+  const expected=parseExpectedWorkflowRunIds(JSON.stringify(expectedWorkflowRunIds),files);
+  if(!expected)throw new Error('Exact governed gate run identities are required');
+  const reader=githubJson||githubClient({owner:'T-ej2003',repo:'genuine-scan-main',token});
+  const workflowPayloads=Object.fromEntries(await Promise.all(files.map(async file=>[file,
+    await readWorkflowPayload(reader,file,sourceSha,expected[file])])));
+  return {sourceSha,lifecycle,expectedWorkflowRunIds:expected,workflowPayloads};
 }
 
 function printState(state, config, { stream = process.stdout } = {}) {

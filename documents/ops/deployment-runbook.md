@@ -46,6 +46,7 @@ authorization_sha256="$(printf '%s' "$authorization_json" | shasum -a 256 | awk 
 gh workflow run release-train.yml --ref main \
   -f git_ref=main \
   -f target_sha=<main_sha> \
+  -f ticket_id=<issued_production_release_ticket> \
   -f normal_image_authorization_json="$authorization_json" \
   -f normal_image_authorization_sha256="$authorization_sha256"
 ```

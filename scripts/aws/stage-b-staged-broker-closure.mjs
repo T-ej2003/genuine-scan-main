@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STAGE_B } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, brokerDigest, brokerTargetIdentity, assertBrokerAuthorization, assertBrokerClosurePlan } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, brokerDigest, brokerTargetIdentity, assertBrokerAuthorization, assertBrokerClosurePlan, prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { readStagedBrokerReceipt, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, normalizeBrokerAlias } from './stage-b-staged-broker-executor.mjs';
 import { readStagedBrokerPrerequisites } from './stage-b-staged-broker-observations.mjs';
@@ -23,8 +23,9 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   const pub = source.preparation, pubAuth = source.authorization;
   assert.equal(pub.sourceSha, sourceSha); assert.equal(pub.purpose, BROKER_PUBLICATION);
   const handoff = await deps.readReceipt(stagedBrokerSourceReservation(sourceSha), 'STAGED_BROKER_TERMINAL_HANDOFF');
-  assert.deepEqual(Object.keys(handoff).sort(), ['authorization', 'casResult', 'preparation', 'record']);
-  const { preparation: p, authorization: auth, casResult: cas, record } = structuredClone(handoff);
+  const separate=Object.hasOwn(handoff,'closure');
+  assert.deepEqual(Object.keys(handoff).sort(), ['authorization', 'casResult', ...(separate?['closure']:[]), 'preparation', 'record'].sort());
+  const { preparation: p, authorization: auth, casResult: cas, record, closure } = structuredClone(handoff);
   assert.equal(p.sourceSha, sourceSha); assert.equal(p.purpose, BROKER_CUTOVER);
   const pubHash = await assertBrokerAuthorization(pubAuth, pub, { verify: deps.verifyAuthorization, now: new Date(p.publication.authorizedAt) });
   equal(await deps.readReceipt(pubHash, 'PUBLISHED'), p.publication);
@@ -42,7 +43,15 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   assert.equal(cas.status, 'CUTOVER_COMMITTED_STATE_PENDING');
   assert.equal(cas.alias.FunctionVersion, p.target.version); assert.notEqual(cas.alias.RevisionId, p.alias.RevisionId);
   equal({ ...cas.alias, FunctionVersion: p.alias.FunctionVersion, RevisionId: p.alias.RevisionId }, p.alias);
-  equal(await deps.readReceipt(authHash, 'RECONCILED_PENDING_RELEASE_CAS', record), record);
+  let stateHash=authHash;
+  if(separate){
+    assert.deepEqual(Object.keys(closure).sort(),['authorization','preparation']);
+    equal(closure.preparation,prepareBrokerStateRefresh({preparation:p,authorization:auth,casResult:cas}));
+    stateHash=await assertBrokerAuthorization(closure.authorization,closure.preparation,
+      {verify:deps.verifyAuthorization,now:new Date(record.stateAuthorizedAt)});
+    assert.equal(record.stateRefreshAuthorizationSha256,stateHash);
+  }else assert.equal(record.stateRefreshAuthorizationSha256,undefined);
+  equal(await deps.readReceipt(stateHash, 'RECONCILED_PENDING_RELEASE_CAS', record), record);
   assert.equal(record.status, 'RECONCILED_PENDING_RELEASE_CAS'); assert.equal(record.sourceSha, sourceSha);
   equal(record.mutationAddresses, BROKER_CENSUS);
   assert.equal(record.publicationAuthorizationSha256, pubHash); assert.equal(record.publicationResultSha256, brokerDigest(p.publication));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { writerSession, writerIssuance, writerAccessKeyId } from './fixtures/broker-writer-session.mjs';
-import { authenticateBrokerSessionIssuance, proveBrokerWriterUnusable, readBrokerRecoveryAwsClock, createBrokerWriterSessionBoundary, readBrokerSessionIssuance } from '../aws/stage-b-broker-writer-session.mjs';
+import { authenticateBrokerSessionIssuance, proveBrokerWriterUnusable, readBrokerRecoveryAwsClock, createBrokerWriterSessionBoundary,createHostedBrokerWriterSessionBoundary, readBrokerSessionIssuance } from '../aws/stage-b-broker-writer-session.mjs';
 const owner = { policyArn: 'exact-policy', owner: 'owner-1', generation: 1, writerSession };
 const identity = () => ({ accessKeyIdSha256: writerSession.accessKeyIdSha256, callerArn: writerSession.callerArn, callerUserId: writerSession.callerUserId });
 const issuanceWindow = { startTime: '2026-10-03T13:00:00.000Z', endTime: writerSession.expiresAt };
@@ -130,4 +130,38 @@ test('malformed or conflicting CloudTrail responses never expose session-token c
   assert.throws(() => readBrokerSessionIssuance(() => '{"secret":"' + secret, identity(), issuanceWindow), error => !String(error).includes(secret));
   const a = writerIssuance(), b = writerIssuance(); a.responseElements.credentials.sessionToken = secret; b.responseElements.credentials.sessionToken = 'different';
   assert.throws(() => readBrokerSessionIssuance(() => JSON.stringify({ Events: [a,b].map(e => ({ EventId: e.eventID, CloudTrailEvent: JSON.stringify(e) })) }), identity(), issuanceWindow), error => String(error).includes('Conflicting') && !String(error).includes(secret));
+});
+
+test('hosted writer pins OIDC credentials and requires exact completed run plus AWS expiry before recovery',async()=>{
+  const runId='700',sourceSha='a'.repeat(40),expiration='2026-10-08T13:00:00.000Z';
+  const env={PATH:process.env.PATH,HOME:'/test',GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+    GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',
+    GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:runId,GITHUB_SHA:sourceSha,AWS_ACCESS_KEY_ID:writerAccessKeyId,
+    AWS_SECRET_ACCESS_KEY:'fixture-only',AWS_SESSION_TOKEN:'fixture-only',AWS_CREDENTIAL_EXPIRATION:expiration};
+  const response={id:700,repository:{full_name:env.GITHUB_REPOSITORY},head_repository:{full_name:env.GITHUB_REPOSITORY},
+    path:'.github/workflows/release-train.yml',head_sha:sourceSha,event:'workflow_dispatch',run_attempt:1,status:'in_progress'};
+  let observedAt='2026-10-08T12:59:59.000Z';
+  const boundary=createHostedBrokerWriterSessionBoundary({env,now:()=>new Date('2026-10-08T12:00:00.000Z'),
+    exec:(_,args,options)=>{assert.equal(options.env.AWS_ACCESS_KEY_ID,writerAccessKeyId);assert.equal(options.env.AWS_PROFILE,undefined);
+      return JSON.stringify({Account:'368992683803',Arn:`arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/release-${runId}`,
+        UserId:`AROAABCDEFGHIJKLMNOP:release-${runId}`});},
+    githubRun:args=>{assert.equal(args[1],`repos/T-ej2003/genuine-scan-main/actions/runs/${runId}/attempts/1`);return JSON.stringify(response);},clock:async()=>observedAt});
+  const pinned=boundary.pin(),owner={writerSession:pinned.session,operationIdentity:'b'.repeat(64)};
+  assert.equal(pinned.session.mechanism,'GITHUB_OIDC_BOUNDED_WRITER');
+  assert.throws(()=>pinned.run(['sts','assume-role']),/another session/);
+  await assert.rejects(()=>boundary.prove(owner),/may still be running/);
+  response.status='completed';await assert.rejects(()=>boundary.prove(owner),/remain usable/);
+  observedAt='2026-10-08T13:00:01.000Z';
+  const proof=await boundary.prove(owner);assert.equal(proof.mechanism,'GITHUB_RUN_COMPLETED_STS_EXPIRY');
+  assert.equal(proof.processTerminationProven,true);assert.equal(proof.previousWriterCannotContinue,true);
+  const resumed=createHostedBrokerWriterSessionBoundary({env:{...env,GITHUB_RUN_ATTEMPT:'2',AWS_CREDENTIAL_EXPIRATION:'2026-10-08T14:00:00.000Z'},
+    now:()=>new Date('2026-10-08T13:01:00.000Z'),
+    exec:()=>JSON.stringify({Account:'368992683803',Arn:`arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/release-${runId}`,
+      UserId:`AROAABCDEFGHIJKLMNOP:release-${runId}`}),
+    githubRun:args=>{assert.equal(args[1],`repos/T-ej2003/genuine-scan-main/actions/runs/${runId}/attempts/1`);return JSON.stringify(response);},
+    clock:async()=>observedAt});
+  assert.equal(resumed.pin().session.workflowRunAttempt,'2');
+  assert.equal((await resumed.prove(owner)).session.workflowRunAttempt,'1');
+  response.head_sha='f'.repeat(40);await assert.rejects(()=>boundary.prove(owner));
+  assert.throws(()=>boundary.proveAliasCas({}),/lacks authenticated native execution evidence/);
 });

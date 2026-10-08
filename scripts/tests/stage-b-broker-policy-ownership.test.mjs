@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import fs from 'node:fs';
+import {createHash} from 'node:crypto';
+import {canonicalJson} from '../aws/production-green-stage-b-contract.mjs';
 import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { assertBrokerPolicyPredecessorOwnership, createBrokerPolicyOwnershipClient, BROKER_POLICY_OWNERSHIP_KEY, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from '../aws/stage-b-broker-policy-ownership.mjs';
@@ -80,6 +82,20 @@ test('read-only recovery uses original generation and cannot launch a competing 
     readPolicy: () => 'old', persistReceipt: () => receipt });
   assert.equal(recovered.status, 'RECOVERED_NO_WRITE'); assert.equal(client.read().status, 'RELEASED');
   assert.equal(client.acquire(operation).generation, owner.generation + 1);
+});
+test('completed hosted writer recovers only its original held generation without another IAM write',async()=>{
+  const {client}=rig(),session={mechanism:'GITHUB_OIDC_BOUNDED_WRITER',accessKeyIdSha256:'a'.repeat(64),
+    callerArn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/release-700',
+    callerUserId:'AROAABCDEFGHIJKLMNOP:release-700',workflowRunId:'700',workflowRunAttempt:'1',
+    workflowRef:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',sourceSha:'a'.repeat(40),
+    issuedAt:'2026-10-08T12:00:00.000Z',expiresAt:'2026-10-08T13:00:00.000Z'};
+  const held=client.acquire({...operation,writerSession:session});
+  const recovered=await recoverOwnedBrokerPolicyMutation({ownership:client,owner:held,
+    authenticateTermination:async owner=>({mechanism:'GITHUB_RUN_COMPLETED_STS_EXPIRY',ownerSha256:createHash('sha256').update(canonicalJson(owner)).digest('hex'),
+      session,observedAt:'2026-10-08T13:00:01.000Z',previousWriterCannotContinue:true,processTerminationProven:true}),
+    authenticateRecovery:async()=>({previousExecutionCannotContinue:true,authorizationConsumed:true,outcome:'RECOVERED_NO_WRITE',expectedPolicy:'old'}),
+    readPolicy:async()=> 'old',persistReceipt:async()=>receipt});
+  assert.equal(recovered.status,'RECOVERED_NO_WRITE');assert.equal(client.read().status,'RELEASED');
 });
 test('pruning and convergence contend on the same policy record', () => {
   const { client } = rig(); client.acquire(operation);
@@ -186,6 +202,21 @@ test('reserved authority cannot steal held ownership or be silently reused after
   await assert.rejects(() => executeOwnedBrokerPolicyMutation(input), error => error.reservationConsumed === true && error.recoveryRequired === true && error.operationIdentity === operation.operationIdentity);
   assert.equal(reserved, true); assert.deepEqual(client.read().identity, held); assert.equal(writes, 0);
   await assert.rejects(() => executeOwnedBrokerPolicyMutation(input)); assert.deepEqual(client.read().identity, held);
+});
+
+for (const substituted of [false, true]) test(`released policy outcome recovery is read only and rejects substituted receipts: ${substituted}`, async () => {
+  const { client, calls } = rig(), owner = client.acquire(operation);
+  client.commitMutation(owner, receipt); client.complete(owner, { outcome: 'SUCCEEDED', receiptSha256: receipt }); client.release(owner);
+  const before = calls.filter(c => c[1] !== 'get-item').length;
+  const recover = () => recoverOwnedBrokerPolicyMutation({ ownership: client, owner,
+    authenticateTermination: () => assert.fail('Released terminal recovery needs no new writer authority'),
+    authenticateRecovery: (actual, termination) => {
+      assert.deepEqual(actual, owner); assert.equal(termination, null);
+      return { authorizationConsumed: true, outcome: 'SUCCEEDED', expectedPolicy: 'exact', receiptSha256: substituted ? 'd'.repeat(64) : receipt };
+    }, readPolicy: () => 'exact', persistReceipt: () => assert.fail('Existing terminal receipt must not be rewritten') });
+  if (substituted) await assert.rejects(recover);
+  else assert.equal((await recover()).status, 'SUCCEEDED');
+  assert.equal(calls.filter(c => c[1] !== 'get-item').length, before);
 });
 
 const crashWindows = ['reservation-before','reservation-after','acquire-before','acquire-after','authentication-before','authentication-after',

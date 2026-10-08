@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, brokerDigest, brokerAliasIdentity,
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, BROKER_CENSUS, brokerDigest, brokerAliasIdentity, prepareBrokerStateRefresh,
   brokerPrerequisiteIdentity, brokerTargetIdentity, brokerStateReservation, assertBrokerPreparation, assertBrokerAuthorization,
   assertBrokerPublicationPlan, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan } from "./stage-b-staged-broker-contract.mjs";
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
@@ -108,12 +108,16 @@ export async function executeBrokerAliasCas({ preparation, authorization }, deps
   await deps.record(authorizationSha256, result.status, result); return result;
 }
 
-export async function reconcileBrokerAlias({ preparation, authorization, casResult }, deps) {
-  const p = context(preparation, BROKER_CUTOVER);
+export async function reconcileBrokerAlias({ preparation, authorization, casResult, cutoverPreparation, cutoverAuthorization }, deps) {
+  const p = context(preparation, cutoverPreparation ? BROKER_STATE_REFRESH : BROKER_CUTOVER);
   const authHash = await assertBrokerAuthorization(authorization, p, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
-  assert.equal(casResult.status, "CUTOVER_COMMITTED_STATE_PENDING"); assert.equal(casResult.authorizationSha256, authHash);
-  assert.equal(casResult.preparationSha256, brokerDigest(p));
-  await deps.authenticateCasResult(casResult, authHash);
+  const old = cutoverPreparation ? context(cutoverPreparation,BROKER_CUTOVER) : p;
+  const oldAuthorization = cutoverPreparation ? cutoverAuthorization : authorization;
+  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult}));
+  const cutoverHash=await assertBrokerAuthorization(oldAuthorization,old,{verify:deps.verifyAuthorization,now:new Date(casResult.authorizedAt)});
+  assert.equal(casResult.status, "CUTOVER_COMMITTED_STATE_PENDING"); assert.equal(casResult.authorizationSha256, cutoverHash);
+  assert.equal(casResult.preparationSha256, brokerDigest(old));
+  await deps.authenticateCasResult(casResult, cutoverHash);
   const revalidate = async () => {
     equal(await deps.readCheckout(), { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
     equal(brokerAliasIdentity(await deps.getAlias()), casResult.alias);
@@ -126,7 +130,8 @@ export async function reconcileBrokerAlias({ preparation, authorization, casResu
   assert.ok(Buffer.isBuffer(refresh.bytes)); const refreshPlanSha256 = brokerDigest(refresh.bytes);
   await revalidate(); equal(await deps.readStateIdentity(), p.state);
   await deps.reserve(brokerStateReservation(authHash), { purpose: "STAGE_B_BROKER_STATE_ONLY", parent: authHash, refreshPlanSha256 });
-  await deps.record(authHash, "STATE_REFRESH_INTENT", { refreshPlanSha256, authorizedAt: (deps.now?.() || new Date()).toISOString() });
+  const stateAuthorizedAt=(deps.now?.() || new Date()).toISOString();
+  await deps.record(authHash, "STATE_REFRESH_INTENT", { refreshPlanSha256, authorizedAt:stateAuthorizedAt });
   await assertBrokerAuthorization(authorization, p, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
   await revalidate(); equal(await deps.readStateIdentity(), p.state);
   try { await deps.applyRefreshOnlyPlan(refresh.bytes); }
@@ -137,12 +142,14 @@ export async function reconcileBrokerAlias({ preparation, authorization, casResu
   await revalidate(); await deps.authenticateTerraformState(p.target, casResult.alias);
   const record = { status: "RECONCILED_PENDING_RELEASE_CAS", sourceSha: p.sourceSha,
     mutationAddresses: [...BROKER_CENSUS], publicationAuthorizationSha256: p.publication.authorizationSha256,
-    publicationResultSha256: brokerDigest(p.publication), cutoverAuthorizationSha256: authHash,
+    publicationResultSha256: brokerDigest(p.publication), cutoverAuthorizationSha256: cutoverHash,
+    ...(cutoverPreparation?{stateRefreshAuthorizationSha256:authHash,stateAuthorizedAt}:{}),
     casResultSha256: brokerDigest(casResult), refreshPlanSha256, closurePlanSha256: brokerDigest(closure.bytes),
     closurePlan: closure.plan, closurePlanJsonSha256: brokerDigest(closure.plan),
     stateAfter: await deps.readStateIdentity(), target: p.target, alias: casResult.alias };
   await deps.record(authHash, record.status, record);
-  await deps.publishTerminalHandoff({ preparation: p, authorization, casResult, record });
+  await deps.publishTerminalHandoff({ preparation: old, authorization: oldAuthorization,
+    ...(cutoverPreparation?{closure:{preparation:p,authorization}}:{}),casResult, record });
   return record;
 }
 
@@ -192,15 +199,19 @@ export async function recoverBrokerAliasCas({ preparation: p, authorization }, d
   await deps.record(id, result.status, result); return result;
 }
 
-export async function recoverBrokerReconciliation({ preparation: p, authorization, casResult }, deps) {
-  context(p, BROKER_CUTOVER);
+export async function recoverBrokerReconciliation({ preparation: p, authorization, casResult, cutoverPreparation, cutoverAuthorization }, deps) {
+  context(p, cutoverPreparation ? BROKER_STATE_REFRESH : BROKER_CUTOVER);
+  const old=cutoverPreparation?context(cutoverPreparation,BROKER_CUTOVER):p;
+  const oldAuthorization=cutoverPreparation?cutoverAuthorization:authorization;
+  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult}));
   const { refreshPlanSha256 } = await deps.readRecoveryStateIntent();
-  const { id } = await deps.authenticateRecoveryIntent('STATE_REFRESH_INTENT', { refreshPlanSha256 });
+  const { id,authorizedAt:stateAuthorizedAt } = await deps.authenticateRecoveryIntent('STATE_REFRESH_INTENT', { refreshPlanSha256 });
   assert.equal(id, brokerDigest(authorization));
   assert.equal(casResult.status, 'CUTOVER_COMMITTED_STATE_PENDING');
   assert.equal(casResult.alias.FunctionVersion, p.target.version); assert.notEqual(casResult.alias.RevisionId, p.alias.RevisionId);
   equal({ ...brokerAliasIdentity(casResult.alias), FunctionVersion: p.alias.FunctionVersion, RevisionId: p.alias.RevisionId }, p.alias);
-  await deps.authenticateCasResult(casResult, id); assert.equal(casResult.authorizationSha256, id); assert.equal(casResult.preparationSha256, brokerDigest(p));
+  const cutoverHash=await assertBrokerAuthorization(oldAuthorization,old,{verify:deps.verifyAuthorization,now:new Date(casResult.authorizedAt)});
+  await deps.authenticateCasResult(casResult, cutoverHash); assert.equal(casResult.authorizationSha256, cutoverHash); assert.equal(casResult.preparationSha256, brokerDigest(old));
   equal(await deps.readCheckout(), { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
   if (p.prerequisiteChain) await deps.authenticatePrerequisiteChain(p.prerequisiteChain);
   equal(brokerAliasIdentity(await deps.getAlias()), casResult.alias); equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -212,14 +223,18 @@ export async function recoverBrokerReconciliation({ preparation: p, authorizatio
   let record;
   if (existing) {
     assert.equal(existing.status, 'RECONCILED_PENDING_RELEASE_CAS'); assert.equal(existing.sourceSha, p.sourceSha); equal(existing.stateAfter, state); equal(existing.target, p.target); equal(existing.alias, casResult.alias);
-    assert.equal(existing.cutoverAuthorizationSha256, id); assert.equal(existing.casResultSha256, brokerDigest(casResult)); assert.equal(existing.refreshPlanSha256, refreshPlanSha256);
+    assert.equal(existing.cutoverAuthorizationSha256, cutoverHash);assert.equal(existing.stateRefreshAuthorizationSha256,cutoverPreparation?id:undefined);
+    if(cutoverPreparation)assert.equal(existing.stateAuthorizedAt,stateAuthorizedAt);
+    assert.equal(existing.casResultSha256, brokerDigest(casResult)); assert.equal(existing.refreshPlanSha256, refreshPlanSha256);
     assert.equal(existing.publicationResultSha256, brokerDigest(p.publication)); assert.equal(existing.publicationAuthorizationSha256, p.publication.authorizationSha256);
     equal(existing.mutationAddresses, BROKER_CENSUS); assertBrokerClosurePlan(existing.closurePlan, p); assert.equal(existing.closurePlanJsonSha256, brokerDigest(existing.closurePlan)); record = existing;
   } else {
     record = { status: 'RECONCILED_PENDING_RELEASE_CAS', sourceSha: p.sourceSha, mutationAddresses: [...BROKER_CENSUS], publicationAuthorizationSha256: p.publication.authorizationSha256,
-      publicationResultSha256: brokerDigest(p.publication), cutoverAuthorizationSha256: id, casResultSha256: brokerDigest(casResult), refreshPlanSha256,
+      publicationResultSha256: brokerDigest(p.publication), cutoverAuthorizationSha256: cutoverHash,
+      ...(cutoverPreparation?{stateRefreshAuthorizationSha256:id,stateAuthorizedAt}:{}),casResultSha256: brokerDigest(casResult), refreshPlanSha256,
       closurePlanSha256: brokerDigest(closure.bytes), closurePlan: closure.plan, closurePlanJsonSha256: brokerDigest(closure.plan), stateAfter: state, target: p.target, alias: casResult.alias };
     await deps.record(id, record.status, record);
   }
-  await deps.publishTerminalHandoff({ preparation: p, authorization, casResult, record }); return record;
+  await deps.publishTerminalHandoff({ preparation: old, authorization: oldAuthorization,
+    ...(cutoverPreparation?{closure:{preparation:p,authorization}}:{}),casResult, record }); return record;
 }

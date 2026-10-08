@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan, registrationPolicyPrerequisiteChain } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerCutoverPlan, prepareBrokerStateRefresh, registrationPolicyPrerequisiteChain, PREPUBLICATION_POLICY_OPERATIONS } from './stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
-import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
+import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary,readBrokerProtectedEnvironmentApproval,createBrokerProtectedEnvironmentAuthorization } from './stage-b-staged-broker-authorization.mjs';
 import { assertStageBStaticConfigurationCoverage } from './stage-b-plan-semantic-contract.mjs';
 import { assertStageBPlanResourceChange, classifyStageBPlan } from './stage-b-deployment-contract.mjs';
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from './stage-b-artifact-contract.mjs';
@@ -16,7 +16,7 @@ import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TA
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const equal = (a, b) => assert.equal(brokerDigest(a), brokerDigest(b));
-const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
+const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'authorize-closure':'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
 Object.assign(MODES, { 'prepare-registration': 'PREPARATION', 'authorize-registration': 'PREPARATION', register: 'REGISTRATION', 'prepare-policy': 'PREPARATION', 'authorize-policy': 'PREPARATION', 'converge-policy': 'POLICY' });
 Object.assign(MODES, { 'prepare-pruning': 'PREPARATION', 'authorize-pruning': 'PREPARATION', prune: 'POLICY', 'recover-policy': 'POLICY_RECOVERY', 'verify-policy-writer-termination': 'POLICY_RECOVERY' });
 Object.assign(MODES, { 'recover-registration': 'REGISTRATION_RECOVERY', 'recover-publication': 'PUBLICATION_RECOVERY', 'recover-cutover': 'CUTOVER_RECOVERY', 'recover-reconciliation': 'RECONCILIATION_RECOVERY' });
@@ -31,7 +31,7 @@ function staticPlan(plan) {
   for (const c of plan.resource_changes) assertStageBPlanResourceChange(c, { strict: true, validateActions: false, terraformConfiguration: source, plan });
 }
 
-export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs } = {}) {
+export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs,readProtectedApproval=readBrokerProtectedEnvironmentApproval } = {}) {
   const { operation, files, directory, terraformDataDir, preparation, authorization, planPath } = request;
   assert.ok(Object.hasOwn(MODES, operation), 'Unknown staged operation');
   if (['prepare-registration-adoption', 'prepare-policy-adoption'].includes(operation)) {
@@ -51,12 +51,15 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.deepEqual(Object.keys(request.predecessorReceiptRecovery).sort(), ['policyTransactionId', 'registrationTransactionId']);
     for (const id of Object.values(request.predecessorReceiptRecovery)) assert.match(id || '', /^[a-f0-9]{64}$/);
   }
-  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery'];
+  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'cutoverPreparation', 'cutoverAuthorization', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery'];
+  if(!['authorize-closure','reconcile','recover-reconciliation'].includes(operation)){
+    assert.equal(request.cutoverPreparation,undefined);assert.equal(request.cutoverAuthorization,undefined);
+  }
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
   let prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
-  if (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
-  if (['authorize-policy', 'converge-policy'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
+  if (PREPUBLICATION_POLICY_OPERATIONS.includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
+  if (['authorize-policy', 'converge-policy', 'authorize-pruning', 'prune'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
     equal(request.prerequisiteChain, preparation.prerequisiteChain, 'Policy continuation cannot substitute its signed prerequisite chain');
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
     : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
@@ -77,7 +80,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   }
   if (operation === 'recover-publication') return recoverBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'recover-cutover') return recoverBrokerAliasCas({ preparation, authorization }, deps);
-  if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult }, deps);
+  if (operation === 'recover-reconciliation') return recoverBrokerReconciliation({ preparation, authorization, casResult: request.casResult,
+    cutoverPreparation:request.cutoverPreparation,cutoverAuthorization:request.cutoverAuthorization }, deps);
   if (operation === 'prepare-registration-adoption') {
     assert.ok(prerequisiteChain?.registration, 'Registration adoption requires authenticated registration evidence');
     assert.equal(prerequisiteChain.policy, undefined);
@@ -87,6 +91,20 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   const prerequisites = brokerPrerequisiteIdentity(operation === 'prepare-registration-adoption'
     ? await deps.readRegistrationAdoptionPrerequisites(prerequisiteChain.registration, checkout)
     : registrationPredecessorEvidence?.prerequisites || await deps.readPrerequisites());
+  if(operation==='authorize-closure'){
+    assert.equal(preparation?.purpose,BROKER_STATE_REFRESH);
+    equal(preparation,prepareBrokerStateRefresh({preparation:request.cutoverPreparation,authorization:request.cutoverAuthorization,casResult:request.casResult}));
+    await assertBrokerAuthorization(request.cutoverAuthorization,request.cutoverPreparation,
+      {verify:deps.verifyAuthorization,now:new Date(request.casResult.authorizedAt)});
+    await deps.authenticateCasResult(request.casResult,brokerDigest(request.cutoverAuthorization));
+    equal(checkout,{sourceSha:preparation.sourceSha,treeSha256:preparation.treeSha256});
+    equal(prerequisites,preparation.prerequisites);equal(await deps.readStateIdentity(),preparation.state);
+    equal(await deps.getAlias(),request.casResult.alias);
+    equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version),preparation.packageSha256),preparation.target);
+    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:preparation.sourceSha,now});
+    if(approval)return createBrokerProtectedEnvironmentAuthorization(preparation,{...approval,now});
+    return signBrokerAuthorization(preparation,{...checker(),makerCaller:deps.readMakerCaller,makerIdentity:request.makerIdentity,humanReviewId:request.humanReviewId});
+  }
   if (['prepare-registration-adoption', 'prepare-policy-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
     // Reuse exact tfvars/package/image/refresh authority before capturing this
     // narrower plan. A stale/recovery-mode input cannot authorize this profile.
@@ -176,6 +194,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       equal(await deps.getAlias(), preparation.alias);
       equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version), preparation.packageSha256), preparation.target);
     }
+    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:preparation.sourceSha,now});
+    if(approval)return createBrokerProtectedEnvironmentAuthorization(preparation,{...approval,now});
     return signBrokerAuthorization(preparation, { ...checker(), makerCaller: deps.readMakerCaller, makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId });
   }
   if (operation === 'register') return executeTaskRegistration({ preparation, authorization }, deps);
@@ -192,7 +212,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     return { preparation: p, planPath: captured.file };
   }
   if (operation === 'cutover') return executeBrokerAliasCas({ preparation, authorization }, deps);
-  if (operation === 'reconcile') return reconcileBrokerAlias({ preparation, authorization, casResult: request.casResult }, deps);
+  if (operation === 'reconcile') return reconcileBrokerAlias({ preparation, authorization, casResult: request.casResult,
+    cutoverPreparation:request.cutoverPreparation,cutoverAuthorization:request.cutoverAuthorization }, deps);
   throw new Error('Unreachable phase');
 }
 

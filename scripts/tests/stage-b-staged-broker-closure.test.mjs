@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ready, sourceSha, now, configuration } from './fixtures/staged-broker-runtime.mjs';
+import { ready, sourceSha, now, configuration, authorization as signFixture } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
 import { authenticateStagedBrokerClosure, assertStagedBrokerProof, assertStagedBrokerTerminal } from '../aws/stage-b-staged-broker-closure.mjs';
-import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
+import { brokerDigest, prepareBrokerStateRefresh } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState } from '../aws/production-component-deployment-state.mjs';
 import { canonicalSha256 } from '../aws/production-green-stage-b-contract.mjs';
 import { commitSecurityComponentState } from '../aws/commit-production-component-security-state.mjs';
 
-async function terminal() {
+async function terminal(separate = false) {
   const r = await ready();
   const pub = r.entries.find(e => e[1] === 'PUBLISHED')[2];
   // The publication preparation/approval are independently retained by the
@@ -16,8 +16,11 @@ async function terminal() {
   const { preparation, authorization } = await import('./fixtures/staged-broker-runtime.mjs');
   const publicationPreparation = preparation(), publicationAuthorization = authorization(publicationPreparation);
   const casResult = await executeBrokerAliasCas({ preparation: r.p, authorization: r.auth }, r.deps);
-  const record = await reconcileBrokerAlias({ preparation: r.p, authorization: r.auth, casResult }, r.deps);
-  const handoff = { preparation: r.p, authorization: r.auth, casResult, record };
+  const closure = separate ? { preparation: prepareBrokerStateRefresh({ preparation: r.p, authorization: r.auth, casResult }) } : null;
+  if (closure) closure.authorization = signFixture(closure.preparation);
+  const record = await reconcileBrokerAlias({ preparation: closure?.preparation || r.p, authorization: closure?.authorization || r.auth,
+    casResult, ...(closure ? { cutoverPreparation: r.p, cutoverAuthorization: r.auth } : {}) }, r.deps);
+  const handoff = { preparation: r.p, authorization: r.auth, ...(closure ? { closure } : {}), casResult, record };
   const source = { kind: 'STAGED_BROKER_SOURCE', sourceSha, preparation: publicationPreparation, authorization: publicationAuthorization };
   const deps = { ...r.deps, readSource: async () => source, readReceipt: async (id, status) => {
     if (status === 'STAGED_BROKER_TERMINAL_HANDOFF') return handoff;
@@ -26,6 +29,13 @@ async function terminal() {
   assert.equal(brokerDigest(source.authorization), pub.authorizationSha256);
   return { ...r, source, handoff, deps };
 }
+test('terminal proof authenticates a distinct state-refresh authorization bound to completed cutover', async () => {
+  const r = await terminal(true), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
+  assertStagedBrokerProof(proof, sourceSha);
+  assert.notEqual(r.handoff.record.cutoverAuthorizationSha256, r.handoff.record.stateRefreshAuthorizationSha256);
+  r.handoff.closure.authorization.preparationSha256 = '0'.repeat(64);
+  await assert.rejects(() => authenticateStagedBrokerClosure({ sourceSha, deps: r.deps }));
+});
 test('verified four-phase closure requires a real component-state CAS readback', async () => {
   const r = await terminal(), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
   assertStagedBrokerProof(proof, sourceSha);

@@ -277,6 +277,12 @@ test("tooling and deployment Compose inputs are image-reuse compatible while unk
   assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["unknown/security-scan-output.bin"] }), /unclassified/);
 });
 
+test("the hosted prerequisite action is CI-only without trusting arbitrary actions", () => {
+  const file = ".github/actions/converge-stage-b-prerequisites/action.yml";
+  assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "ciOnly", imageAffecting: false });
+  assert.equal(classifyStageBImageReusePath(".github/actions/unreviewed/action.yml").category, "unknown");
+});
+
 test("historical Gitleaks remediation matches only the diagnosed fingerprint", () => {
   const target = "c1fbb3030c0a84c07299657822ac7b4faadef426:scripts/tests/production-cutover-producers.test.mjs:generic-api-key:174";
   const ignored = readFileSync(new URL("../../.gitleaksignore", import.meta.url), "utf8").split(/\r?\n/).filter(Boolean);

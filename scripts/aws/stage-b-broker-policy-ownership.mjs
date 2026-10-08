@@ -42,7 +42,7 @@ export function assertBrokerPolicyPredecessorOwnership(previous, current, transi
   assert.equal(previous.status, 'RELEASED'); assert.equal(previous.terminal.outcome, 'SUCCEEDED');
   if (!transition) { same(current, previous); return true; }
   const { owner, operation } = transition;
-  assert.equal(operation.acquisition.purpose, 'STAGE_B_BROKER_POLICY_CONVERGENCE');
+  assert.ok(['STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(operation.acquisition.purpose));
   same(current.identity, identity(owner));
   assert.equal(current.status, 'HELD'); assert.equal(current.terminal, null);
   assert.equal(owner.generation, previous.identity.generation + 1);
@@ -140,14 +140,26 @@ export async function executeOwnedBrokerPolicyMutation({ ownership, operation, r
 // Recovery is diagnosis, never another IAM mutation. The original execution
 // credentials must be proved unusable before completing its exact held generation.
 export async function recoverOwnedBrokerPolicyMutation({ ownership, owner, authenticateTermination, authenticateRecovery, readPolicy, persistReceipt }) {
-  const current = ownership.read(); assert.ok(current); same(current.identity, identity(owner)); assert.equal(current.status, 'HELD');
+  const current = ownership.read(); assert.ok(current); same(current.identity, identity(owner));
+  if (current.status === 'RELEASED') {
+    assert.ok(current.terminal, 'Released ownership requires a terminal receipt');
+    const recovery = await authenticateRecovery(owner, null);
+    assert.equal(recovery.authorizationConsumed, true);
+    same(current.terminal, { outcome: recovery.outcome, receiptSha256: recovery.receiptSha256 });
+    same(await readPolicy(), recovery.expectedPolicy);
+    same(ownership.read(), current);
+    return { owner, ...current.terminal, status: recovery.outcome };
+  }
+  assert.equal(current.status, 'HELD');
   assert.equal(typeof authenticateTermination, 'function', 'Independent termination verifier required');
   const termination = await authenticateTermination(owner);
-  assert.equal(termination.mechanism, 'AWS_STS_AUTHENTICATED_EXPIRY');
+  assert.equal(termination.mechanism, owner.writerSession?.mechanism==='GITHUB_OIDC_BOUNDED_WRITER'
+    ? 'GITHUB_RUN_COMPLETED_STS_EXPIRY' : 'AWS_STS_AUTHENTICATED_EXPIRY');
   assert.equal(termination.ownerSha256, createHash('sha256').update(canonicalJson(owner)).digest('hex'));
   same(termination.session, owner.writerSession); assertBrokerWriterSession(termination.session);
   assert.ok(Date.parse(termination.observedAt) > Date.parse(termination.session.expiresAt));
   assert.equal(termination.previousWriterCannotContinue, true);
+  if(termination.mechanism==='GITHUB_RUN_COMPLETED_STS_EXPIRY')assert.equal(termination.processTerminationProven,true);
   const recovery = await authenticateRecovery(owner, termination);
   assert.equal(recovery.previousExecutionCannotContinue, true);
   assert.equal(recovery.authorizationConsumed, true);

@@ -39,6 +39,8 @@ test("release classification is deterministic and sensitive lanes fail closed", 
     assert.equal(classifyProductionChanges([file]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE, file);
   assert.equal(classifyProductionChanges(["backend/prisma/schema.prisma"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["infra/aws/terraform/production-web-release/main.tf"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
+  assert.equal(classifyProductionChanges([".github/actions/converge-stage-b-prerequisites/action.yml"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
+  assert.throws(() => classifyProductionChanges([".github/actions/unreviewed/action.yml"]), /Ambiguous/);
   assert.equal(classifyProductionChanges(["scripts/aws/recover-production-backend-health.mjs"]).releaseClass, PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY);
   assert.equal(classifyProductionChanges(["backend/src/services/auditLogOutboxService.ts"]).releaseClass, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE);
   assert.equal(classifyProductionChanges(["scripts/plan-production-green-stage-b.mjs"]).releaseClass, PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY);

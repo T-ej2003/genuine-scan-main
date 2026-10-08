@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -34,7 +35,7 @@ export function selectProtectedMainReleaseGateRun({ beforeRunIds, runs, workflow
   throw new Error(`Release Gate did not execute from protected main; observed ${observed}.`);
 }
 
-async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {}, selectRun, fetchImpl = fetch, sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), attempts = 20, pollMilliseconds = 1500 } = {}) {
+async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {}, selectRun, fetchImpl = fetch, sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), attempts = 20, pollMilliseconds = 1500, dispatchJournal, targetSha } = {}) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository || "")) throw new Error("GitHub repository must be owner/name.");
   if (!token) throw new Error("GitHub token is required for source-bound workflow dispatch.");
   if (!WORKFLOW.test(workflow || "")) throw new Error("Workflow filename is invalid.");
@@ -58,9 +59,38 @@ async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {},
   const workflowMetadata = await request(workflowBase);
   const workflowPath = workflowMetadata.path;
   if (workflowPath !== `.github/workflows/${workflow}` || !Number.isSafeInteger(workflowMetadata.id) || workflowMetadata.id < 1) throw new Error("Workflow dispatch identity is not exact.");
-  const before = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
-  const beforeRunIds = new Set((before.workflow_runs || []).map((run) => String(run.id)));
-  const dispatched = await request(`${workflowBase}/dispatches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref, inputs, return_run_details: true }) });
+  const identity = { repository, workflow, workflowPath, workflowId: workflowMetadata.id, ref, inputs, ...(targetSha ? { targetSha } : {}) };
+  let recorded = dispatchJournal ? await dispatchJournal.read() : null;
+  const resuming = Boolean(recorded);
+  if (recorded) {
+    assert.deepEqual(Object.keys(recorded).sort(), ["beforeRunIds", "identity"]);
+    assert.deepEqual(recorded.identity, identity, "Dispatch recovery identity substitution");
+    assert.ok(Array.isArray(recorded.beforeRunIds) && recorded.beforeRunIds.every(id => /^[1-9][0-9]*$/.test(id)));
+    assert.equal(new Set(recorded.beforeRunIds).size, recorded.beforeRunIds.length);
+  } else {
+    const before = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
+    const beforeRunIds = (before.workflow_runs || []).map(run => String(run.id));
+    if (dispatchJournal && before.total_count > 100) {
+      assert.ok(Number.isSafeInteger(before.total_count) && beforeRunIds.length === 100, "Dispatch baseline is incomplete");
+      for (let page = 2; beforeRunIds.length < before.total_count; page += 1) {
+        const older = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100&page=${page}`);
+        assert.equal(older.total_count, before.total_count, "Dispatch baseline changed during pagination");
+        assert.ok(Array.isArray(older.workflow_runs) && older.workflow_runs.length === Math.min(100, before.total_count - beforeRunIds.length), "Dispatch baseline page is incomplete");
+        beforeRunIds.push(...older.workflow_runs.map(run => String(run.id)));
+      }
+      const latest = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
+      assert.equal(latest.total_count, before.total_count, "Dispatch baseline changed during pagination");
+      assert.deepEqual((latest.workflow_runs || []).map(run => String(run.id)), beforeRunIds.slice(0, 100), "Dispatch baseline changed during pagination");
+      assert.equal(new Set(beforeRunIds).size, beforeRunIds.length, "Dispatch baseline contains duplicate runs");
+    }
+    recorded = { identity, beforeRunIds };
+    if (dispatchJournal) await dispatchJournal.write(recorded);
+  }
+  const beforeRunIds = new Set(recorded.beforeRunIds);
+  // A journaled dispatch attempt is not evidence it was rejected. On restart
+  // authenticate its existing child; never issue another POST after uncertainty.
+  const dispatched = resuming
+    ? null : await request(`${workflowBase}/dispatches`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ref, inputs, return_run_details: true }) });
   if (dispatched?.workflow_run_id) {
     const run = await request(`${repositoryBase}/actions/runs/${dispatched.workflow_run_id}`);
     return selectRun({ beforeRunIds, runs: [run], workflowPath, workflowId: workflowMetadata.id, repository }) || (() => { throw new Error("Returned workflow run is not a fresh workflow_dispatch candidate."); })();
@@ -78,7 +108,7 @@ async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {},
 export async function dispatchSourceBoundWorkflow({ repository, token, workflow, ref, targetSha, inputs = {}, ...options } = {}) {
   assertWorkflowDispatchRef(ref);
   if (!SHA.test(targetSha || "")) throw new Error("Workflow target SHA must be a full commit SHA.");
-  return dispatchWorkflow({ repository, token, workflow, ref, inputs, ...options, selectRun: (context) => selectSourceBoundRun({ ...context, targetSha }) });
+  return dispatchWorkflow({ repository, token, workflow, ref, inputs, ...options, targetSha, selectRun: (context) => selectSourceBoundRun({ ...context, targetSha }) });
 }
 
 export async function dispatchProtectedMainReleaseGate({ repository, token, targetSha, targetRef, inputs = {}, ...options } = {}) {

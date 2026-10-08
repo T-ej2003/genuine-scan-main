@@ -3,11 +3,82 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import JSZip from 'jszip';
+import {readZipCentralDirectory} from './package-production-green-stage-b-broker.mjs';
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { brokerDigest, assertBrokerPreparation, assertBrokerAuthorization, receiptBoundCheckerDisclosure } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest, assertBrokerPreparation, assertBrokerAuthorization, receiptBoundCheckerDisclosure,assertBrokerReleaseAuthorizationContext } from './stage-b-staged-broker-contract.mjs';
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
+import {PRODUCTION_ENVIRONMENT_APPROVAL,assertProductionEnvironmentApprovalIdentity,assertProductionEnvironmentApprovalFreshness,assertProductionEnvironmentActualReviewer,createProductionEnvironmentApprovalEvidence,fetchProductionEnvironmentApprovalEvidence,assertProductionEnvironmentApprovalEvidence} from './production-github-environment-approval.mjs';
 
 export const brokerAuthorizationMessage = ({ signature, ...body }) => Buffer.from(canonicalJson(body));
+
+export async function readBrokerProtectedEnvironmentApproval({sourceSha,env=process.env,fetchImpl=fetch,now=new Date()}) {
+  if(env.GITHUB_ACTIONS!=='true')return null;
+  assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,'Stage-B authorization requires its dedicated governed workflow');
+  assert.equal(env.GITHUB_SHA,sourceSha);assert.equal(env.GITHUB_RUN_ATTEMPT,'1');
+  const context={repository:env.GITHUB_REPOSITORY,environment:'production',sourceSha,workflowRef:env.GITHUB_WORKFLOW_REF,eventName:env.GITHUB_EVENT_NAME,
+    workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,executionActor:env.GITHUB_ACTOR,githubActions:env.GITHUB_ACTIONS,now};
+  const approval=await fetchProductionEnvironmentApprovalEvidence({...context,token:env.GH_TOKEN,requireActualApproval:true,observedAt:now.toISOString()},{fetchImpl});
+  assertProductionEnvironmentApprovalEvidence(approval,context);
+  assertProductionEnvironmentActualReviewer(approval,context);
+  assert.match(env.RELEASE_AUTHORIZATION_ROUND||'',/^(?:0|[1-9][0-9]*)$/);
+  return {approval,release:{releaseId:env.RELEASE_ID,phase:env.RELEASE_PHASE,preparationReference:env.RELEASE_PREPARATION_REFERENCE,authorizationRound:Number(env.RELEASE_AUTHORIZATION_ROUND)}};
+}
+
+export function createBrokerProtectedEnvironmentAuthorization(preparation,{approval,release,now=new Date()}) {
+  assertBrokerPreparation(preparation);
+  assertBrokerReleaseAuthorizationContext(release,preparation);
+  assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:preparation.sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
+  assertProductionEnvironmentApprovalFreshness(approval,{now});
+  assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
+  assert.equal(approval.workflowRunAttempt,'1');
+  const approvedBy=assertProductionEnvironmentActualReviewer(approval,{sourceSha:preparation.sourceSha,repository:approval.repository,executionActor:approval.executionActor});
+  const independent=approvedBy.toLowerCase()!==approval.executionActor.toLowerCase(),disclosure=receiptBoundCheckerDisclosure(preparation);
+  return {schemaVersion:2,purpose:preparation.purpose,preparationSha256:brokerDigest(preparation),sourceSha:preparation.sourceSha,
+    nonce:randomBytes(32).toString('hex'),issuedAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*60000).toISOString(),
+    review:{approvedBy,checkerIndependent:independent,soleOperatorModel:!independent},release,protectedEnvironmentApprovalEvidence:approval,
+    ...(disclosure?{recoveryDisclosure:disclosure}:{})};
+}
+
+export async function readBrokerProtectedEnvironmentAuthorization({workflowRunId,sourceSha,run}) {
+  assert.match(String(workflowRunId),/^[1-9][0-9]*$/);assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.equal(typeof run,'function');
+  const repository=PRODUCTION_ENVIRONMENT_APPROVAL.repository;
+  const api=(suffix,...flags)=>JSON.parse(run(['api',`repos/${repository}/${suffix}`,...flags],{encoding:'utf8',maxBuffer:8*1024*1024}));
+  const workflow=api(`actions/runs/${String(workflowRunId)}`);
+  assert.equal(String(workflow.id),String(workflowRunId));assert.equal(workflow.repository?.full_name,repository);assert.equal(workflow.head_repository?.full_name,repository);
+  assert.equal(workflow.path,'.github/workflows/authorize-production-stage-b-release-transition.yml');assert.equal(workflow.head_sha,sourceSha);
+  assert.equal(workflow.event,'workflow_dispatch');assert.equal(workflow.status,'completed');assert.equal(workflow.conclusion,'success');assert.equal(String(workflow.run_attempt),'1');
+  const pages=api(`actions/runs/${workflow.id}/artifacts`,'--paginate','--slurp');assert.ok(Array.isArray(pages));
+  const matches=pages.flatMap(page=>page.artifacts||[]).filter(a=>a.name==='production-stage-b-release-transition-authorization'&&a.expired===false&&String(a.workflow_run?.id)===String(workflowRunId)&&a.workflow_run?.head_sha===sourceSha&&a.workflow_run?.repository_id===workflow.repository.id);
+  assert.equal(matches.length,1,'Exact transition authorization artifact required');const artifact=matches[0];assert.ok(Number.isSafeInteger(artifact.id)&&artifact.id>0);
+  assert.match(artifact.digest||'',/^sha256:[a-f0-9]{64}$/);
+  const archive=Buffer.from(run(['api',`repos/${repository}/actions/artifacts/${artifact.id}/zip`],{encoding:null,maxBuffer:8*1024*1024}));
+  assert.equal(`sha256:${createHash('sha256').update(archive).digest('hex')}`,artifact.digest);
+  const members=readZipCentralDirectory(archive);assert.equal(members.length,1);assert.ok(members[0].uncompressedSize<=8*1024*1024,'Oversized authorization archive member');
+  const zip=await JSZip.loadAsync(archive),entries=Object.values(zip.files).filter(e=>!e.dir);
+  assert.equal(entries.length,1);assert.equal(entries[0].name,'authorization.json');assert.notEqual(Number(entries[0].unixPermissions||0)&0o170000,0o120000);
+  const bytes=await entries[0].async('uint8array');assert.ok(bytes.length<=8*1024*1024,'Oversized authorization payload');
+  const authorization=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));
+  assert.equal(authorization.schemaVersion,2);assert.equal(authorization.sourceSha,sourceSha);
+  assert.equal(authorization.protectedEnvironmentApprovalEvidence.workflowRunId,String(workflowRunId));
+  return {authorization,workflow};
+}
+
+export async function verifyBrokerProtectedEnvironmentAuthorization(authorization,{run}) {
+  assert.equal(authorization.schemaVersion,2);assert.equal(typeof run,'function');
+  const approval=authorization.protectedEnvironmentApprovalEvidence,repository=PRODUCTION_ENVIRONMENT_APPROVAL.repository;
+  assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:authorization.sourceSha,repository});
+  assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);assert.equal(approval.workflowRunAttempt,'1');
+  const {authorization:downloaded,workflow}=await readBrokerProtectedEnvironmentAuthorization({workflowRunId:approval.workflowRunId,sourceSha:authorization.sourceSha,run});
+  assert.equal(canonicalJson(downloaded),canonicalJson(authorization),'Authorization artifact substitution');
+  const api=(suffix,...flags)=>JSON.parse(run(['api',`repos/${repository}/${suffix}`,...flags],{encoding:'utf8',maxBuffer:8*1024*1024}));
+  const environment=api('environments/production'),approvals=api(`actions/runs/${workflow.id}/approvals`);
+  const actual=approvals.flatMap(a=>a.state==='approved'?(a.environments||[]).filter(e=>e.id===environment.id&&e.name==='production').map(()=>({state:'approved',environmentId:environment.id,environmentName:'production',userId:a.user?.id,userLogin:a.user?.login})):[]);
+  assert.equal(actual.length,1,'Exact protected production approval required');
+  const observed=createProductionEnvironmentApprovalEvidence({environmentConfig:environment,repository,environment:'production',sourceSha:authorization.sourceSha,
+    workflowRef:approval.workflowRef,eventName:workflow.event,workflowRunId:approval.workflowRunId,workflowRunAttempt:'1',executionActor:workflow.actor?.login,observedAt:approval.observedAt,actualApproval:actual[0]});
+  assert.equal(canonicalJson(observed),canonicalJson(approval),'Approval provenance substitution');return true;
+}
 
 // Same checker, key and algorithm as the existing Stage B approvals; distinct
 // purpose prevents a runtime/RLS approval from authorizing infrastructure.
@@ -32,7 +103,7 @@ export async function signBrokerAuthorization(preparation, { makerIdentity, huma
   return authorization;
 }
 
-export function createBrokerKmsAuthorizationBoundary({ run }) {
+export function createBrokerKmsAuthorizationBoundary({ run, githubRun }) {
   assert.equal(typeof run, 'function');
   const messageFile = (bytes, operation) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-authorization-'));
@@ -50,7 +121,9 @@ export function createBrokerKmsAuthorizationBoundary({ run }) {
   return {
     caller: async () => json(['sts', 'get-caller-identity']),
     sign: async bytes => messageFile(bytes, (file, messageType) => json(['kms', 'sign', ...common, '--message-type', messageType, '--message', `fileb://${file}`]).Signature),
-    verify: async authorization => messageFile(brokerAuthorizationMessage(authorization), (file, messageType) => json(['kms', 'verify', ...common, '--message-type', messageType, '--message', `fileb://${file}`, '--signature', authorization.signature.signatureBase64]).SignatureValid === true),
+    verify: async authorization => authorization.schemaVersion===2
+      ? verifyBrokerProtectedEnvironmentAuthorization(authorization,{run:githubRun})
+      : messageFile(brokerAuthorizationMessage(authorization), (file, messageType) => json(['kms', 'verify', ...common, '--message-type', messageType, '--message', `fileb://${file}`, '--signature', authorization.signature.signatureBase64]).SignatureValid === true),
   };
 }
 export function createBrokerCheckerAuthorizationBoundary() {

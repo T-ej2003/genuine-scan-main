@@ -32,102 +32,7 @@ const reconcileBrokerAlias = (r, d) => reconcile(phaseInput(r), d);
 const clone = structuredClone;
 import { rig, ready, configuration, preparation, authorization, cutoverPlan, publicationPlan, envelope, change, tfFn, tfAlias, alias, state, env, prerequisites, sourceSha, oldSha, packageSha256, now, target } from './fixtures/staged-broker-runtime.mjs';
 
-function terminalPolicyFixture() {
- const treeSha256='9'.repeat(64), historicalState={...state,serial:117,stateSha256:'d'.repeat(64)}, release={sourceSha,treeSha256};
- const registrationPreparation={purpose:TASK_REGISTRATION,sourceSha:oldSha,treeSha256:'8'.repeat(64)}, registrationAuthorization={schemaVersion:1};
- const historicalRegistration={preparation:registrationPreparation,authorization:registrationAuthorization,result:{sourceSha:oldSha,treeSha256:registrationPreparation.treeSha256,
-   preparationSha256:brokerDigest(registrationPreparation),authorizationSha256:brokerDigest(registrationAuthorization),taskMap:clone(prerequisites.taskMap),definitions:{}}};
- const p=preparation(); p.schemaVersion=2;p.purpose=BROKER_POLICY_CONVERGENCE;p.sourceSha=oldSha;p.treeSha256='7'.repeat(64);p.state={...state,serial:110};p.publication=null;
- registrationPreparation.treeSha256=p.treeSha256;historicalRegistration.result.treeSha256=p.treeSha256;
- historicalRegistration.result.preparationSha256=brokerDigest(registrationPreparation);
- p.prerequisites={...clone(prerequisites),policyVersion:'v12'};p.target={policy:deriveBrokerPolicy(p.prerequisites.policy,historicalRegistration.result.taskMap)};
- p.prerequisiteChain={registration:historicalRegistration};
- const auth=authorization(p);auth.purpose=p.purpose;auth.sourceSha=oldSha;auth.preparationSha256=brokerDigest(p);
- const result={status:'BROKER_POLICY_CONVERGED_NONTERMINAL',sourceSha:oldSha,treeSha256:p.treeSha256,preparationSha256:brokerDigest(p),authorizationSha256:brokerDigest(auth),savedPlanSha256:p.savedPlanSha256,policy:clone(p.target.policy),authorizedAt:now.toISOString()};
- const owner={policyArn:prerequisites.policyArn,operationIdentity:brokerDigest(auth),sourceSha:oldSha,owner:'owner-1',generation:1};
- const terminal={...clone(result),owner,successorIdentity:{policyVersion:'v13'}};
- const inventory=[{VersionId:'v13',IsDefaultVersion:true}];
- const entry=createTerminalPolicySuccessorAdoption({preparation:p,authorization:auth,result,terminal},release,historicalState,inventory);
- const ownership={identity:owner,status:'RELEASED',terminal:{outcome:'SUCCEEDED',receiptSha256:brokerDigest(terminal)},mutation:{intentSha256:'e'.repeat(64)}};
- const live={policyArn:prerequisites.policyArn,version:'v13',policy:clone(terminal.policy),versions:inventory};
- return {entry,release,state:historicalState,ownership,live};
-}
-function publicationWithTerminalPolicyAdoption(f=terminalPolicyFixture()) {
- const currentRegistrationPreparation={purpose:TASK_REGISTRATION,sourceSha,treeSha256:f.release.treeSha256};
- const currentRegistrationAuthorization={schemaVersion:1};
- const currentRegistration={preparation:currentRegistrationPreparation,authorization:currentRegistrationAuthorization,result:{sourceSha,treeSha256:f.release.treeSha256,
-  preparationSha256:brokerDigest(currentRegistrationPreparation),authorizationSha256:brokerDigest(currentRegistrationAuthorization),taskMap:clone(prerequisites.taskMap),definitions:{}}};
- const p=preparation();p.schemaVersion=2;p.sourceSha=sourceSha;p.treeSha256=f.release.treeSha256;p.state=clone(f.state);
- p.prerequisites={...clone(prerequisites),policyVersion:'v13',policy:clone(f.entry.terminal.policy)};
- p.prerequisiteChain={registration:currentRegistration,policy:f.entry};
- return p;
-}
-
-function receiptBoundFixture(revision = 1) {
- const f=terminalPolicyFixture();
- const historicalTaskMap=Object.fromEntries(Object.entries(prerequisites.taskMap).map(([k,v])=>[k,v.replace(/:\d+$/,`:${revision}`)]));
- f.entry.terminal.policy=deriveBrokerPolicy(f.entry.terminal.policy,historicalTaskMap);
- const registrationId='a'.repeat(64),policyId=f.entry.terminal.owner.operationIdentity;
- const object=(id,seq,body)=>({bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,
-  key:seq===0?`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}.json`:`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}/${String(seq).padStart(4,'0')}.json`,
-  versionId:`version-${seq}-${id.slice(0,4)}`,etag:`"etag-${seq}"`,objectSha256:brokerDigest(body)});
- const receiptObjects=(id,bodies)=>({reservation:object(id,0,bodies.reservation),intent:object(id,1,bodies.intent),result:object(id,2,bodies.result)});
- const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>{const name=address.includes('.executor[')?address.match(/\["([^"]+)"\]$/)[1]:address.endsWith('candidate["canary"]')?'full-rls-application-canary':null;return [address,{arn:name?historicalTaskMap[name]:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`}];}));
- const regResult={status:'REGISTERED_NONTERMINAL',sourceSha:oldSha,treeSha256:'8'.repeat(64),savedPlanSha256:'5'.repeat(64),preparationSha256:'6'.repeat(64),authorizationSha256:registrationId,authorizedAt:'2026-10-06T11:40:35.838Z',definitions,taskMap:clone(historicalTaskMap)};
- const regReservation={kind:'STAGED_BROKER_RESERVATION',id:registrationId,value:{purpose:TASK_REGISTRATION,nonce:'b'.repeat(64),preparationSha256:regResult.preparationSha256}};
- const regIntent={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTRATION_INTENT',value:{savedPlanSha256:regResult.savedPlanSha256,authorizedAt:regResult.authorizedAt}};
- const regReceipt={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTERED',value:regResult};
- const regEntry={result:regResult,receiptBoundAdoption:{kind:'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION',schemaVersion:1,recoveryMode:'RECEIPT_BOUND',
-  historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,
-  historicalSourceSha:oldSha,historicalPurpose:TASK_REGISTRATION,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),toolingTreeSha256:regResult.treeSha256,savedPlanSha256:regResult.savedPlanSha256,
-  transactionId:registrationId,authorizationId:registrationId,consumerSourceSha:f.release.sourceSha,consumerTreeSha256:f.release.treeSha256,receiptObjects:receiptObjects(registrationId,{reservation:regReservation,intent:regIntent,result:regReceipt}),
-  receiptChainSha256:'0'.repeat(64),registeredOutputCount:12,definitionsSha256:brokerDigest(definitions),imageImpactReport:{imageReleaseSha:oldSha,toolingSha:f.release.sourceSha,toolingInputTreeSha256:f.release.treeSha256,imageReuseCompatible:true,newImagesRequired:false,imageAffectingFiles:[]},imageImpactSha256:'0'.repeat(64),liveCorroborationSha256:'c'.repeat(64),originalMutationReplayable:false,originalMutationAuthorizationAvailable:false,freshHandoffOnly:true}};
- regEntry.receiptBoundAdoption.imageImpactSha256=brokerDigest(regEntry.receiptBoundAdoption.imageImpactReport);
- const d=regEntry.receiptBoundAdoption.receiptObjects; regEntry.receiptBoundAdoption.receiptChainSha256=brokerDigest({transactionId:registrationId,historicalPreparationSha256:regResult.preparationSha256,historicalAuthorizationSha256:registrationId,historicalResultSha256:brokerDigest(regResult),receiptObjects:d});
- const intentValue={owner:f.entry.terminal.owner,acquisitionSha256:'0'.repeat(64),savedPlanSha256:f.entry.terminal.savedPlanSha256,authorizedAt:'2026-10-07T11:32:01.389Z',predecessorInventory:[{VersionId:'v9',IsDefaultVersion:false},{VersionId:'v10',IsDefaultVersion:false},{VersionId:'v11',IsDefaultVersion:false},{VersionId:'v12',IsDefaultVersion:true}]};
- const polReservation={kind:'STAGED_BROKER_RESERVATION',id:policyId,value:{purpose:BROKER_POLICY_CONVERGENCE,nonce:'d'.repeat(64),preparationSha256:f.entry.terminal.preparationSha256}};
- const polIntent={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_INTENT',value:intentValue};
- const terminal=clone(f.entry.terminal); terminal.owner.owner='123e4567-e89b-12d3-a456-426614174000'; terminal.treeSha256='7'.repeat(64); terminal.savedPlanSha256=intentValue.savedPlanSha256; terminal.authorizedAt=intentValue.authorizedAt; terminal.reconciliation={state:clone(f.state)};
- intentValue.owner=clone(terminal.owner);
- terminal.successorIdentity={policyArn:prerequisites.policyArn,policyVersion:'v13',policy:clone(terminal.policy),taskMap:clone(historicalTaskMap)};
- const polResult={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_CONVERGED',value:terminal};
- const ownership={identity:clone(terminal.owner),acquisition:{authorizedAt:intentValue.authorizedAt,purpose:BROKER_POLICY_CONVERGENCE,preparationSha256:terminal.preparationSha256,reservationSha256:brokerDigest(polReservation)},mutation:{intentSha256:brokerDigest(intentValue)},status:'RELEASED',terminal:{outcome:'SUCCEEDED',receiptSha256:brokerDigest(terminal)}};
- intentValue.acquisitionSha256=brokerDigest(ownership.acquisition);
- ownership.mutation.intentSha256=brokerDigest(intentValue);
- ownership.terminal.receiptSha256=brokerDigest(terminal);
- const policyIdDescriptors=receiptObjects(policyId,{reservation:polReservation,intent:polIntent,result:polResult});
- const successorInventory=[...intentValue.predecessorInventory.map(v=>({...v,IsDefaultVersion:false})),{VersionId:'v13',IsDefaultVersion:true}].sort((a,b)=>a.VersionId.localeCompare(b.VersionId));
- const state=clone(f.state),corroboration={ownership,policyArn:prerequisites.policyArn,version:'v13',policy:terminal.policy,versions:successorInventory,terraform:state};
- const recovery={kind:'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION',schemaVersion:1,recoveryMode:'RECEIPT_BOUND',historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,
-  historicalSourceSha:oldSha,historicalPurpose:BROKER_POLICY_CONVERGENCE,historicalPreparationSha256:terminal.preparationSha256,historicalAuthorizationSha256:policyId,historicalResultSha256:brokerDigest(terminal),toolingTreeSha256:terminal.treeSha256,savedPlanSha256:intentValue.savedPlanSha256,transactionId:policyId,authorizationId:policyId,
-  consumerSourceSha:f.release.sourceSha,consumerTreeSha256:f.release.treeSha256,receiptObjects:policyIdDescriptors,receiptChainSha256:'0'.repeat(64),ownershipStatus:'RELEASED',transactionReplayable:false,ownership,
-  predecessorInventory:intentValue.predecessorInventory,predecessor:{policyArn:prerequisites.policyArn,defaultVersion:'v12'},successor:terminal.successorIdentity,policyArn:prerequisites.policyArn,successorVersion:'v13',successorDocumentSha256:brokerDigest(terminal.policy),successorInventory,terraformLineage:state.lineage,terraformSerial:state.serial,terraformStateSha256:state.stateSha256,liveCorroborationSha256:brokerDigest(corroboration)};
- recovery.receiptChainSha256=brokerDigest({transactionId:policyId,historicalPreparationSha256:terminal.preparationSha256,historicalAuthorizationSha256:policyId,historicalResultSha256:brokerDigest(terminal),receiptObjects:policyIdDescriptors});
- const policyEntry={terminal,receiptBoundAdoption:recovery};
- const registrationReceipts={reservation:{envelope:regReservation,value:regReservation.value},intent:{envelope:regIntent,value:regIntent.value},result:{envelope:regReceipt,value:regResult}};
- const policyReceipts={reservation:{envelope:polReservation,value:polReservation.value},intent:{envelope:polIntent,value:intentValue},result:{envelope:polResult,value:terminal}};
- return {f,registration:regEntry,policy:policyEntry,registrationReceipts,policyReceipts,ownership,state};
-}
-
-function prepublicationPredecessorFixture(revision = 3) {
- const x=receiptBoundFixture(revision), {registration,policy,registrationReceipts,policyReceipts,f}=x;
- const bump=map=>Object.fromEntries(Object.entries(map).map(([name,arn])=>[name,arn.replace(/:(\d+)$/,(_,revision)=>`:${Number(revision)+2}`)]));
- const registrationTaskMap=clone(registration.result.taskMap), aliasRuntimeTaskMap=clone(prerequisites.taskMap);
- const imageImpactReport={imageReleaseSha:registration.result.sourceSha,toolingSha:f.release.sourceSha,toolingInputTreeSha256:f.release.treeSha256,
-  imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['backend/src/app.mjs']};
- const regRecovery=registration.receiptBoundAdoption,policyRecovery=policy.receiptBoundAdoption;
- const proof={kind:'AUTHENTICATED_PREPUBLICATION_REGISTRATION_PREDECESSOR',lifecycleState:'EXPECTED_PRE_PUBLICATION_STATE',
-  sourceSha:f.release.sourceSha,registrationTransactionId:regRecovery.transactionId,registrationSourceSha:regRecovery.historicalSourceSha,
-  registrationResultSha256:regRecovery.historicalResultSha256,registrationReceiptObjects:regRecovery.receiptObjects,
-  registrationReceiptChainSha256:regRecovery.receiptChainSha256,registrationTaskMap,
-  policyTransactionId:policyRecovery.transactionId,policySourceSha:policyRecovery.historicalSourceSha,
-  policyResultSha256:policyRecovery.historicalResultSha256,policyReceiptObjects:policyRecovery.receiptObjects,
-  policyReceiptChainSha256:policyRecovery.receiptChainSha256,policyArn:policyRecovery.policyArn,
-  policyDefaultVersion:policyRecovery.successorVersion,policyDocument:deriveBrokerPolicy(policy.terminal.policy,registrationTaskMap),
-  policyDocumentSha256:brokerDigest(deriveBrokerPolicy(policy.terminal.policy,registrationTaskMap)),
-  alias:clone(alias),aliasRuntimeTaskMap,imageImpactReport,imageImpactSha256:brokerDigest(imageImpactReport)};
- return { ...x, proof, registrationTaskMap, aliasRuntimeTaskMap, imageImpactReport };
-}
+import { terminalPolicyFixture, publicationWithTerminalPolicyAdoption, receiptBoundFixture, prepublicationPredecessorFixture, schema3RegistrationPredecessor } from './fixtures/production-release-system.mjs';
 
 test('authenticated pre-publication predecessor permits only the expected registered-policy versus latest-alias map transition',()=>{
  const x=prepublicationPredecessorFixture();
@@ -185,14 +90,6 @@ test('normal equal-map registration preparation remains on the strict schema-2 p
  const p=preparation();p.schemaVersion=2;p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;
  assert.equal(p.schemaVersion,2);assert.equal(assertBrokerPreparation(p),p);
 });
-
-function schema3RegistrationPredecessor(x) {
- const p=preparation();p.schemaVersion=3;p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;
- p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;p.alias=clone(x.proof.alias);p.registrationPredecessor=clone(x.proof);p.registrationPolicyPredecessor=clone(x.policy);
- p.prerequisites={...clone(p.prerequisites),taskMap:clone(x.registrationTaskMap),policy:clone(x.proof.policyDocument),policyVersion:x.proof.policyDefaultVersion};
- p.configuration.BROKER_TASK_DEFINITIONS_JSON=JSON.stringify(x.aliasRuntimeTaskMap);
- assertBrokerPreparation(p);return p;
-}
 
 test('policy preparation authenticates the schema-3 fresh registration chain before observing its distinct predecessor maps',async()=>{
  const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x),order=[];
@@ -788,7 +685,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    readRecoveryReceipt:async(id,status)=>receipts.find(r=>r[0]===id&&r[1]===status)?.[2]||null};
   const adapterFactory=options=>{currentPreparation=options.preparation;currentChain=options.prerequisiteChain;return deps;};
   const planningInputs=()=>({recoveryMode:'NORMAL',toolingTreeSha256:tree,bindingReport:{stateLineage:liveState.lineage,stateSerial:liveState.serial}});
-  const run=request=>runStagedBrokerRequest({files,directory,terraformDataDir:directory,...request},{adapterFactory,checker,planningInputs});
+  const run=request=>runStagedBrokerRequest({files,directory,terraformDataDir:directory,...request},{adapterFactory,checker,planningInputs,readProtectedApproval:async()=>null});
   const json=value=>JSON.parse(JSON.stringify(value));
   const prepared=json(await run({operation:'prepare-registration',predecessorReceiptRecovery:{registrationTransactionId:x.proof.registrationTransactionId,policyTransactionId:x.proof.policyTransactionId}}));
   assert.deepEqual(prepared.preparation.registrationPolicyPredecessor,x.policy);
