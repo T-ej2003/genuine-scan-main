@@ -1214,7 +1214,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       consumeMutation(id); terraform(['apply', '-input=false', planPath]);
     },
     authenticateRecoveryIntent: async (status, expected) => {
-      const purpose = { REGISTRATION_RECOVERY: TASK_REGISTRATION, POLICY_RECOVERY: BROKER_POLICY_CONVERGENCE, PUBLICATION_RECOVERY: BROKER_PUBLICATION, CUTOVER_RECOVERY: BROKER_CUTOVER, RECONCILIATION_RECOVERY: BROKER_CUTOVER }[phase];
+      const purpose = { REGISTRATION_RECOVERY: TASK_REGISTRATION, POLICY_RECOVERY: BROKER_POLICY_CONVERGENCE, PUBLICATION_RECOVERY: BROKER_PUBLICATION, CUTOVER_RECOVERY: BROKER_CUTOVER, RECONCILIATION_RECOVERY: preparation.purpose }[phase];
       assert.ok(purpose); assert.equal(preparation.purpose, purpose);
       assert.equal(status, { REGISTRATION_RECOVERY: 'TASK_REGISTRATION_INTENT', POLICY_RECOVERY: 'BROKER_POLICY_INTENT', PUBLICATION_RECOVERY: 'PUBLICATION_INTENT', CUTOVER_RECOVERY: 'CUTOVER_INTENT', RECONCILIATION_RECOVERY: 'STATE_REFRESH_INTENT' }[phase]);
       const id = brokerDigest(authorization), intent = readReceipt(id, status), { authorizedAt, ...fields } = intent;
@@ -1573,7 +1573,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     captureRefreshOnlyPlan: async () => { assert.equal(phase, 'RECONCILIATION'); capturedRefresh = capture('alias-refresh', ['-refresh-only']); return capturedRefresh; },
     applyRefreshOnlyPlan: async bytes => {
       assert.equal(phase, 'RECONCILIATION'); assert.ok(capturedRefresh && bytes.equals(capturedRefresh.bytes));
-      const authHash = await requireAuthorization(BROKER_CUTOVER);
+      const authHash = await requireAuthorization(preparation.purpose);
       readIntent(authHash, 'STATE_REFRESH_INTENT', { refreshPlanSha256: brokerDigest(bytes) });
       assertBrokerRefreshPlan(capturedRefresh.plan, preparation, await getAlias());
       consumeMutation(brokerStateReservation(brokerDigest(authorization)));
@@ -1583,8 +1583,10 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     authenticateReconciliation: async (record, id) => readReceipt(id, 'RECONCILED_PENDING_RELEASE_CAS', record),
     publishTerminalHandoff: async value => {
       assert.ok(['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase));
-      const id = phase === 'RECONCILIATION_RECOVERY' ? await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify, now: new Date(value.casResult.authorizedAt) }) : await requireAuthorization(BROKER_CUTOVER);
-      assert.equal(value.record.cutoverAuthorizationSha256, id);
+      const id = phase === 'RECONCILIATION_RECOVERY' ? await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify, now: new Date(value.record.stateAuthorizedAt||value.casResult.authorizedAt) }) : await requireAuthorization(preparation.purpose);
+      assert.equal(value.record.cutoverAuthorizationSha256, brokerDigest(value.authorization));
+      if(value.closure){assert.equal(value.record.stateRefreshAuthorizationSha256,id);equal(value.closure,{preparation,authorization});}
+      else assert.equal(value.record.cutoverAuthorizationSha256,id);
       readReceipt(id, 'RECONCILED_PENDING_RELEASE_CAS', value.record);
       const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory });
       assert.ok(source); assert.equal(brokerDigest(source.authorization), preparation.publication.authorizationSha256);

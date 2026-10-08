@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { brokerDigest,assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest,assertBrokerPreparation,prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
 import { assertProductionComponentDeploymentState } from './production-component-deployment-state.mjs';
 import { classifyProductionChanges } from './production-deployment-classification.mjs';
 import fs from 'node:fs';
@@ -46,7 +46,7 @@ export function authenticateReleaseGateRuns(release,evidence) {
 export function releaseTransitionDispatchInputs({release,authorizationRound},phase,preparationReference){
  assert.match(release.sourceSha||'',/^[a-f0-9]{40}$/);assert.match(release.releaseId||'',/^[a-f0-9]{64}$/);
  assert.match(release.ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);assert.match(preparationReference||'',/^[a-f0-9]{64}$/);
- assert.ok(['registration','pruning','policy','publication','cutover'].includes(phase));assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
+ assert.ok(['registration','pruning','policy','publication','cutover','closure'].includes(phase));assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
  const inputs={source_sha:release.sourceSha,ticket_id:release.ticketId,release_id:release.releaseId,phase,preparation_reference:preparationReference,authorization_round:String(authorizationRound)};
  assert.ok(Buffer.byteLength(JSON.stringify({ref:'main',inputs}))<60*1024,'Release approval dispatch exceeds safe transport size');return inputs;
 }
@@ -313,7 +313,7 @@ export async function runReleaseCoordinator(request, runtime) {
  let chain;
  const context = {release, artifacts, gates, store, inputs:initialInputs};
  const assertReleaseApproval=(phase,prepared,authorization,round=authorization.release?.authorizationRound)=>{
-  if(authorization.schemaVersion===2)assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase:phase==='closure'?'cutover':phase,
+  if(authorization.schemaVersion===2)assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,
    preparationReference:brokerDigest(prepared),authorizationRound:round},'Authorization substituted release/phase identity');
  };
  const packages = {};
@@ -378,11 +378,12 @@ export async function runReleaseCoordinator(request, runtime) {
    if (name === 'pruning') prepareRequest.versionId = context.versionId;
    if (name === 'cutover') Object.assign(prepareRequest, {publicationPreparation:packages.publication.prepared.preparation,
     publicationAuthorization:packages.publication.authorization, publicationResult:packages.publication.result});
-   prepared = name === 'closure' ? packages.cutover.prepared
-    : await once(`${name}:prepared`, async () => {
-      const value = await runtime.runStageOperation(prepareRequest);
-      return runtime.capturePreparation(context,name,value);
-    });
+   prepared = await once(`${name}:prepared`, async () => {
+    if(name==='closure')return runtime.capturePreparation(context,name,{...packages.cutover.prepared,preparation:prepareBrokerStateRefresh({
+     preparation:packages.cutover.prepared.preparation,authorization:packages.cutover.authorization,casResult:packages.cutover.result})});
+    const value = await runtime.runStageOperation(prepareRequest);
+    return runtime.capturePreparation(context,name,value);
+   });
    assert.ok(prepared?.preparation, `Expected ${name} preparation`);
    assert.equal(prepared.preparation.sourceSha, release.sourceSha, 'Preparation changed release source');
    await runtime.hydratePreparation(context,name,prepared);
@@ -390,13 +391,24 @@ export async function runReleaseCoordinator(request, runtime) {
    for(let round=0;;round++){
     assert.ok(round<20,'Repeated no-write or expired approvals require a new governed release');
     const attempt=await readStep(`${name}:attempt:${round}`);
-    if(name==='closure')authorization=packages.cutover.authorization;
-    else {
+    const authenticatedDispatch=async()=>{
+     const journal=await readStep(`${name}:dispatch:${round}`),identity=journal?.dispatch?.identity;
+     assert.ok(identity,'Timed-out approval lacks an authenticated dispatch');
+     assert.equal(identity.repository,'T-ej2003/genuine-scan-main');
+     assert.equal(identity.workflow,'authorize-production-stage-b-release-transition.yml');
+     assert.equal(identity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
+     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,release.sourceSha);
+     assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},name,preparedDigest));
+    };
+    {
      const timedOut=await readStep(`${name}:approval-timeout:${round}`);
      if(timedOut){
       assert.equal(attempt,null);assert.equal(await readStep(`${name}:authorized:${round}`),null);
       const pending=await readStep(`${name}:pending:${round}`);
-      assert.equal(timedOut.prepared,preparedDigest);assert.equal(timedOut.runId,pending?.runId);
+      assert.equal(timedOut.prepared,preparedDigest);
+      assert.match(timedOut.runId,/^[1-9][0-9]*$/);
+      if(pending)assert.equal(timedOut.runId,pending.runId);
+      else await authenticatedDispatch();
       continue;
      }
      const signed=await readStep(`${name}:authorized:${round}`);
@@ -413,7 +425,9 @@ export async function runReleaseCoordinator(request, runtime) {
       const approval=await runtime.obtainAuthorization({...context,authorizationRound:round,pendingApproval},name,prepared,preparedDigest);
       if(approval.status==='APPROVAL_TIMED_OUT'){
        assert.equal(attempt,null);
-       assert.equal(String(approval.runId),pendingApproval?.runId,'Timed-out child differs from the recorded approval');
+       assert.match(String(approval.runId),/^[1-9][0-9]*$/);
+       if(pendingApproval)assert.equal(String(approval.runId),pendingApproval.runId,'Timed-out child differs from the recorded approval');
+       else await authenticatedDispatch();
        await record(`${name}:approval-timeout:${round}`,{prepared:preparedDigest,runId:String(approval.runId)});
        continue;
       }
@@ -442,7 +456,8 @@ export async function runReleaseCoordinator(request, runtime) {
     assert.ok(['PRE_NATIVE','RECOVER'].includes(nativeState),'Unknown native recovery state');
     if(nativeState==='PRE_NATIVE'&&Date.parse(authorization.expiresAt)<=(runtime.now?.()||new Date()).getTime())continue;
     const operationRequest={...inputs,operation:nativeState==='RECOVER'?recover:execute,preparation:prepared.preparation,authorization,planPath:prepared.planPath};
-    if(name==='closure')operationRequest.casResult=packages.cutover.result;
+    if(name==='closure')Object.assign(operationRequest,{casResult:packages.cutover.result,
+     cutoverPreparation:packages.cutover.prepared.preparation,cutoverAuthorization:packages.cutover.authorization});
     if(attempt){
      assert.equal(attempt.prepared,preparedDigest);assert.equal(attempt.authorization,authorizationDigest);
      result=await runtime.runStageOperation(operationRequest);

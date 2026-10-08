@@ -11,7 +11,7 @@ on:
         description: Exact coordinator transition awaiting approval
         required: true
         type: choice
-        options: [registration, pruning, policy, publication, cutover]
+        options: [registration, pruning, policy, publication, cutover, closure]
       preparation_reference: {description: Immutable preparation artifact SHA-256 in the release journal, required: true, type: string}
       authorization_round: {description: Immutable approval round, required: true, type: string}
 
@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
-          [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover|closure)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_SHA" = "$SOURCE_SHA"
           git fetch --no-tags origin main
@@ -56,8 +56,12 @@ jobs:
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           umask 077
           install -d -m 700 "/tmp/mscqr-production-release"
-          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/terraform"
-          printf 'TF_DATA_DIR=%s\n' "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/terraform" >> "$GITHUB_ENV"
+          phase_dir="$RELEASE_PHASE"
+          if test "$phase_dir" = closure; then phase_dir=cutover; fi
+          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$phase_dir/terraform"
+          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE"
+          printf 'TF_DATA_DIR=%s\n' "/tmp/mscqr-production-release/$RELEASE_ID/$phase_dir/terraform" >> "$GITHUB_ENV"
+          printf 'AUTHORIZATION_OUTPUT=%s\n' "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/authorization.json" >> "$GITHUB_ENV"
       - uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-region: eu-west-2
@@ -76,7 +80,7 @@ jobs:
             --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-id "$RELEASE_ID" \
             --phase "$RELEASE_PHASE" --preparation-reference "$RELEASE_PREPARATION_REFERENCE" \
             --authorization-round "$RELEASE_AUTHORIZATION_ROUND" \
-            --output "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/authorization.json"
+            --output "$AUTHORIZATION_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: production-stage-b-release-transition-authorization

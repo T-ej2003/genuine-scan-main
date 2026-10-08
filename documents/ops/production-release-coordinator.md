@@ -60,6 +60,10 @@ workflow dispatch or HTTP health alone does not establish deployment success.
 An approval child that times out without approval consumes its exact round. The
 coordinator may request a new round for the same preparation; failed or
 cancelled children do not silently become new approvals.
+If the runner stops after the authenticated dispatch journal but before the
+pending marker, the exact journal-recovered child may still consume its timed-out
+round. The child must match the release, phase, preparation and round; a new
+approval child is dispatched only for the next round.
 
 ## Hosted authorization
 
@@ -71,6 +75,14 @@ first attempt, immutable archive digest, single authorization file, configured
 environment protection and actual approval event. Local JSON and its digest
 alone cannot authorize a mutation. Historical KMS authorizations retain their
 existing verification path.
+
+Alias cutover and Terraform state-only closure have separate authorization
+purposes. A completed alias CAS is authenticated predecessor evidence for a
+new closure preparation. If the cutover approval expires before the native
+state-refresh intent, the coordinator obtains fresh closure authority for the
+remaining write. That authority cannot approve another alias update. Once the
+state-refresh intent exists, native recovery reconciles the result without a
+second write.
 
 Self-approval is recorded as `checkerIndependent=false` and
 `soleOperatorModel=true`; it is never described as independent human review.

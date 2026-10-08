@@ -281,6 +281,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    applyTaskRegistration:async()=>{assert.equal(writes++,0);registeredTaskDefinitionCalls+=TASK_REGISTRATION_ADDRESSES.length;registered=true;liveState={...liveState,serial:liveState.serial+1,stateSha256:'d'.repeat(64)};},
    readRegisteredTaskDefinition:async address=>{assert.ok(registered);return clone(states[address]);},describeTaskDefinition:async arn=>describe(arn),
    authenticateRecoveryIntent:async(status,expected)=>{const r=receipts.find(r=>r[1]===status);assert.ok(r);const {authorizedAt,...fields}=r[2];assert.deepEqual(fields,expected);return {id:r[0],authorizedAt};},
+   readRecoveryStateIntent:async()=>{const r=receipts.find(r=>r[1]==='STATE_REFRESH_INTENT');assert.ok(r);return clone(r[2]);},
    authenticateRegistrationRecoveryIdentity:async()=>({mode:'READ_ONLY_EXACT_SUCCESSOR',transaction:{sourceSha:source,treeSha256:tree},tooling:{sourceSha:source,treeSha256:tree}}),
    authenticateRegistrationState:async()=>tasks.forEach(c=>assertRegisteredTaskDefinitionState(c.change.after,states[c.address],c.change.after_unknown)),
    readRecoveryReceipt:async(id,status)=>receipts.find(r=>r[0]===id&&r[1]===status)?.[2]||null};
@@ -315,7 +316,8 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
   deps.applyRefreshOnlyPlan=async()=>{assert.equal(refreshCalls++,0);liveState={...liveState,serial:liveState.serial+1,stateSha256:'1'.repeat(64)};};
   deps.captureNormalPlan=async()=>({bytes:Buffer.from('fixture-terminal-plan'),plan:closurePlan()});
   deps.authenticateTerraformState=async(target,observedAlias)=>{assert.equal(target.version,'13');assert.deepEqual(observedAlias,liveAlias);assert.equal(refreshCalls,1);};
-  deps.publishTerminalHandoff=async value=>{assert.equal(value.record.status,'RECONCILED_PENDING_RELEASE_CAS');receipts.push(['closure','STAGED_BROKER_TERMINAL_HANDOFF',clone(value)]);};
+  deps.publishTerminalHandoff=async value=>{assert.equal(value.record.status,'RECONCILED_PENDING_RELEASE_CAS');const existing=receipts.find(r=>r[1]==='STAGED_BROKER_TERMINAL_HANDOFF');
+   if(existing)assert.deepEqual(existing[2],value);else receipts.push(['closure','STAGED_BROKER_TERMINAL_HANDOFF',clone(value)]);};
   const preparePublicationPlan=()=>{
    const before=clone(fn.change.before),after=clone(before);
    after.environment=[{variables:{...clone(before.environment[0].variables),BROKER_TASK_DEFINITIONS_JSON:JSON.stringify(currentChain.registration.result.taskMap),

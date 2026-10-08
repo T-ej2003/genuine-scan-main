@@ -95,7 +95,7 @@ test('maximum governed transition dispatch uses references and stays far below G
   const size=Buffer.byteLength(JSON.stringify({ref:'main',inputs}));assert.ok(size<1024);assert.ok(size<65535);
   assert.equal(inputs.preparation_reference,'c'.repeat(64));assert.equal(Object.hasOwn(inputs,'preparation'),false);
  }
- assert.throws(()=>releaseTransitionDispatchInputs({release,authorizationRound:0},'closure','c'.repeat(64)));
+ assert.equal(releaseTransitionDispatchInputs({release,authorizationRound:0},'closure','c'.repeat(64)).phase,'closure');
 });
 
 test('release identity binds exact source, deployed baseline and deterministic classification', () => {
@@ -407,14 +407,17 @@ test('current completed operation retains its real signed identity and all twelv
  assert.throws(()=>adoptRegisteredOutputs(entry,descendant,plan,{...impact,imageReuseCompatible:false,newImagesRequired:true}));
 });
 
-for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','expired-pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
- const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:lostResponse==='adopt-current-registration',descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor'});
+for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
+ const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
+  ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
+ const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:lostResponse==='adopt-current-registration',descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
+  ...(hostedClosureRelease?{privateDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'cutover')}:{})});
  if(lostResponse==='no-prune-policy-lost')f.changeLiveInventory(xs=>xs.filter(v=>v.VersionId!=='v9'));
  const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls;
  const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
- const hostedApproval=['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
+ const hostedApproval=lostResponse===null||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
  if(hostedApproval)f.checker.verify=a=>a.schemaVersion===2?hostedVerifiers.get(a.nonce)?.(a)||false:priorVerify(a);
  const runtime={
   store:{...f.coordinatorStore,
@@ -464,7 +467,11 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
     }else assert.equal(f.snapshot().registeredTaskDefinitionCalls,12);
    }else{assert.equal(entry.preparation.sourceSha,release.sourceSha);await f.authenticateRegistration(entry);}
   },
-  runStageOperation:async request=>{calls.push(request.operation);if(lostResponse==='proved-no-policy-write'){if(request.operation==='prune'&&!interrupted){interrupted=true;throw new Error('Lost completed mutation response');}if(request.operation==='recover-policy')return {status:'RECOVERED_NO_WRITE'};}if(drift&&!interrupted&&request.operation===(lostResponse==='alias-drift'?'cutover':'prune')){interrupted=true;if(lostResponse==='inventory-drift')f.changeLiveInventory(xs=>xs.map(v=>v.VersionId==='v10'?{...v,VersionId:'v99'}:v));if(lostResponse==='default-drift')f.changeLiveDefault('v12');if(lostResponse==='ownership-drift')f.changeOwnership(owner=>({...owner,identity:{...owner.identity,operationIdentity:'0'.repeat(64)}}));if(lostResponse==='alias-drift')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));}const result=await f.run(request);if(request.operation===lostOperation&&!interrupted){interrupted=true;if(lostResponse?.startsWith('expired-'))f.advanceClock(31*60*1000);throw new Error('Lost completed mutation response');}return result;},
+  runStageOperation:async request=>{calls.push(request.operation);if(lostResponse==='proved-no-policy-write'){if(request.operation==='prune'&&!interrupted){interrupted=true;throw new Error('Lost completed mutation response');}if(request.operation==='recover-policy')return {status:'RECOVERED_NO_WRITE'};}if(drift&&!interrupted&&request.operation===(lostResponse==='alias-drift'?'cutover':'prune')){interrupted=true;if(lostResponse==='inventory-drift')f.changeLiveInventory(xs=>xs.map(v=>v.VersionId==='v10'?{...v,VersionId:'v99'}:v));if(lostResponse==='default-drift')f.changeLiveDefault('v12');if(lostResponse==='ownership-drift')f.changeOwnership(owner=>({...owner,identity:{...owner.identity,operationIdentity:'0'.repeat(64)}}));if(lostResponse==='alias-drift')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));}const result=await f.run(request);
+   if(request.operation==='cutover'&&lostResponse==='cutover-expired-before-closure')f.advanceClock(31*60*1000);
+   if(request.operation==='cutover'&&lostResponse==='closure-alias-changed')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));
+   if(request.operation==='cutover'&&lostResponse==='closure-cas-substituted')return {...result,alias:{...result.alias,RevisionId:'substituted-revision'}};
+   if(request.operation===lostOperation&&!interrupted){interrupted=true;if(lostResponse?.startsWith('expired-'))f.advanceClock(31*60*1000);throw new Error('Lost completed mutation response');}return result;},
   classifyNativeAttempt:async(_context,name,_prepared,authorization)=>{
    const id=brokerDigest(authorization),status={registration:'TASK_REGISTRATION_INTENT',pruning:'BROKER_POLICY_PRUNING_INTENT',policy:'BROKER_POLICY_INTENT',publication:'PUBLICATION_INTENT',cutover:'CUTOVER_INTENT',closure:'STATE_REFRESH_INTENT'}[name];
    const snapshot=f.snapshot();
@@ -475,12 +482,13 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   authenticateAuthorization:(p,a)=>assertBrokerAuthorization(a,p,{verify:f.checker.verify,now:new Date(a.issuedAt)}),
   authenticateCompletedTransition:async(context,name,prepared,authorization,result)=>{
    const p=prepared.preparation;
-   await assertBrokerAuthorization(authorization,p,{verify:f.checker.verify,now:new Date(result.authorizedAt||f.now)});
+   await assertBrokerAuthorization(authorization,p,{verify:f.checker.verify,now:new Date(result.stateAuthorizedAt||result.authorizedAt||f.now)});
    if(name==='registration'){
     assertRegistrationHandoff({preparation:p,authorization,result},{sourceSha:f.source,treeSha256:f.tree});
     assert.equal(Object.keys(result.definitions).length,12);
     assert.deepEqual(f.snapshot().receipts.find(r=>r[1]==='TASK_REGISTERED')[2],result);
    } else if(name==='pruning')assertPolicyPruningHandoff({preparation:p,authorization,result},p.prerequisiteChain);
+   else if(name==='cutover')assert.deepEqual(f.snapshot().receipts.find(r=>r[0]===brokerDigest(authorization)&&r[1]==='CUTOVER_COMMITTED_STATE_PENDING')?.[2],result);
    else if(name==='closure')assertBrokerClosurePlan(result.closurePlan,p);
    else {assert.equal(result.preparationSha256,brokerDigest(p));assert.equal(result.authorizationSha256,brokerDigest(authorization));}
   },
@@ -494,6 +502,21 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   authenticatePolicyRetention:async()=>({inventory:f.snapshot().policySnapshot.versions.map(v=>({versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(Date.UTC(2026,8,['v9','v10','v11','v12','v13'].indexOf(v.VersionId)+1)).toISOString(),documentSha256:brokerDigest(f.fixture.policy.terminal.policy)})),protectedVersionIds:['v12','v13'],obsoleteVersionIds:['v9','v10','v11']}),
   obtainAuthorization:async(context,phase,prepared,digest)=>{
    assert.equal(brokerDigest(prepared),digest);
+   const cutover=phase==='closure'?steps.get(`${context.release.releaseId}/cutover:result`):null;
+   const predecessor=cutover?{cutoverPreparation:f.coordinatorStore.getArtifact(cutover.prepared).preparation,
+    cutoverAuthorization:f.coordinatorStore.getArtifact(cutover.authorization),casResult:f.coordinatorStore.getArtifact(cutover.result)}:{};
+   if(lostResponse==='approval-journal-timeout'&&phase==='registration'&&context.authorizationRound===0){
+    assert.equal(context.pendingApproval,null);
+    if(!interrupted){
+     interrupted=true;approvalDispatches++;
+     const workflow='authorize-production-stage-b-release-transition.yml';
+     await runtime.store.writeStep({releaseId:context.release.releaseId,sourceSha:f.source,name:'registration:dispatch:0',
+      dispatch:{identity:{repository:'T-ej2003/genuine-scan-main',workflow,workflowPath:`.github/workflows/${workflow}`,
+       workflowId:8,ref:'main',targetSha:f.source,inputs:releaseTransitionDispatchInputs(context,'registration',digest)},beforeRunIds:[]}});
+     throw new Error('Lost approval child response before pending marker');
+    }
+    return {status:'APPROVAL_TIMED_OUT',runId:'700'};
+   }
    if(['approval-boundary','approval-timed-out','approval-record-response-lost'].includes(lostResponse)&&phase==='registration'&&context.authorizationRound===0){
     if(!context.pendingApproval){approvalDispatches++;return {status:'WAITING_FOR_APPROVAL',runId:'700',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};}
     assert.equal(context.pendingApproval.runId,'700');assert.equal(context.pendingApproval.prepared,digest);
@@ -501,8 +524,23 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    }
    if(hostedApproval){
     const transport=hostedApprovalTransport(f.source,f.now,context.pendingApproval?Number(context.pendingApproval.runId):900+hostedVerifiers.size);
-    const operation={registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover'}[phase];
-    const authorization=await f.run({operation,preparation:prepared.preparation,planPath:prepared.planPath},{readProtectedApproval:async()=>({approval:transport.approval,release:{releaseId:context.release.releaseId,phase,preparationReference:digest,authorizationRound:context.authorizationRound}})});
+    const operation={registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'}[phase];
+    const approvalContext={releaseId:context.release.releaseId,phase,preparationReference:digest,authorizationRound:context.authorizationRound};
+    const authorization=lostResponse===null&&phase==='closure'
+     ?await (async()=>{
+      const output=path.join(HOSTED_RELEASE_ROOT,context.release.releaseId,'closure','authorization.json');
+      fs.mkdirSync(path.dirname(output),{recursive:true,mode:0o700});
+      const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+       GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
+       GITHUB_RUN_ID:String(900+hostedVerifiers.size),GITHUB_SHA:f.source,RUNNER_TEMP:'/tmp',RELEASE_ID:context.release.releaseId,
+       RELEASE_PHASE:phase,RELEASE_PREPARATION_REFERENCE:digest,RELEASE_AUTHORIZATION_ROUND:String(context.authorizationRound)};
+      const signed=await authorizeReleaseTransition({sourceSha:f.source,ticketId:context.release.ticketId,...approvalContext,output},
+       {env,run:rejectExternalAccess,createStore:()=>f.coordinatorStore,
+        runRequest:r=>f.run(r,{readProtectedApproval:async()=>({approval:transport.approval,release:approvalContext})})});
+      assert.equal(signed.authorizationPath,output);return JSON.parse(fs.readFileSync(output,'utf8'));
+     })()
+     :await f.run({operation,preparation:prepared.preparation,planPath:prepared.planPath,...predecessor},
+      {readProtectedApproval:async()=>({approval:transport.approval,release:approvalContext})});
     hostedVerifiers.set(authorization.nonce,await transport.publish(authorization));
     if(lostResponse==='approval-expired-before-consumption'&&phase==='registration'&&context.authorizationRound===0){assert.equal(f.snapshot().registrationApplyCalls,0);f.advanceClock(31*60*1000);}
     return {status:'AUTHORIZED',authorization};
@@ -513,17 +551,25 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
     const authorization=await f.run({operation:'authorize-registration',preparation:prepared.preparation,planPath:prepared.planPath,makerIdentity:f.maker,humanReviewId:'fixture-production-approval'});
     return {status:'AUTHORIZED',authorization};
    }
-   const operation={pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover'}[phase];
+   const operation={pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'}[phase];
    assert.ok(operation);
    if(phase==='pruning')assert.equal(prepared.preparation.target.versionId,'v9');
-   const authorization=await f.run({operation,preparation:prepared.preparation,planPath:prepared.planPath,makerIdentity:f.maker,humanReviewId:`fixture-production-${phase}-approval`});
+   const authorization=await f.run({operation,preparation:prepared.preparation,planPath:prepared.planPath,...predecessor,
+    makerIdentity:f.maker,humanReviewId:`fixture-production-${phase}-approval`});
    return {status:'AUTHORIZED',authorization};
   },
  };
  try {
   const request={sourceSha:f.source,ticketId:'current-release'};
   if(drift){await assert.rejects(()=>runReleaseCoordinator(request,runtime));const before=f.snapshot();assert.equal(before.registrationApplyCalls,1);assert.equal(before.policyDeletes,lostResponse==='alias-drift'?1:0);assert.equal(before.policyCreates,lostResponse==='alias-drift'?1:0);assert.equal(before.aliasCalls,0);await assert.rejects(()=>runReleaseCoordinator(request,runtime));const after=f.snapshot();for(const count of ['registrationApplyCalls','policyDeletes','policyCreates','publicationCalls','aliasCalls'])assert.equal(after[count],before[count]);return;}
+  if(['closure-alias-changed','closure-cas-substituted'].includes(lostResponse)){
+   await assert.rejects(()=>runReleaseCoordinator(request,runtime));
+   assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,0);
+   assert.equal([...steps.keys()].filter(k=>k.endsWith('closure:authorized:0')).length,0);
+   return;
+  }
   if(['approval-boundary','approval-timed-out'].includes(lostResponse)){const waiting=await runReleaseCoordinator(request,runtime);assert.equal(waiting.status,'WAITING_FOR_APPROVAL');assert.equal(waiting.runId,'700');assert.equal(f.snapshot().registrationApplyCalls,0);}
+  if(lostResponse==='approval-journal-timeout')await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost approval child response/);
   const nativeOperation=lostResponse?.replace(/^(expired-)?(pre|post)-intent-|^(reservation|owner)-/,'');
   if(lostResponse?.includes('pre-intent-'))f.injectNativeFault({kind:'checkout',operation:nativeOperation});
   if(lostResponse?.startsWith('post-intent-'))f.injectNativeFault({kind:'after-intent',status:{register:'TASK_REGISTRATION_INTENT',prune:'BROKER_POLICY_PRUNING_INTENT','converge-policy':'BROKER_POLICY_INTENT',publish:'PUBLICATION_INTENT',cutover:'CUTOVER_INTENT',reconcile:'STATE_REFRESH_INTENT'}[nativeOperation]});
@@ -541,7 +587,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    if(lostResponse.startsWith('expired-'))f.advanceClock(31*60*1000);
   }
   else if(lostResponse?.startsWith('reservation-'))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Injected reservation-only failure/);
-  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-expired-before-consumption'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
+  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
   if(lostResponse==='hosted-runner-replacement'){
    const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
    for(const binding of ['needs: gates','TARGET_SHA: ${{ needs.gates.outputs.target_sha }}',
@@ -566,6 +612,15 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    : runReleaseCoordinator(request,runtime);
   const result=await invoke();
   assert.equal(result.status,'PREREQUISITES_CONVERGED');
+  const cutoverApproval=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/cutover:result`).authorization);
+  const closureApproval=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/closure:result`).authorization);
+  const closurePrepared=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/closure:result`).prepared);
+  const cutoverResult=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/cutover:result`).result);
+  assert.notEqual(brokerDigest(cutoverApproval),brokerDigest(closureApproval));
+  assert.equal(closureApproval.purpose,'STAGE_B_BROKER_STATE_REFRESH');
+  assert.equal(closureApproval.preparationSha256,brokerDigest(closurePrepared.preparation));
+  assert.equal(closurePrepared.preparation.cutover.authorizationSha256,brokerDigest(cutoverApproval));
+  assert.equal(closurePrepared.preparation.cutover.resultSha256,brokerDigest(cutoverResult));
   const expected=['prepare-registration','register','prepare-pruning','prune','prepare-policy','converge-policy','prepare-publication','publish','prepare-cutover','cutover','reconcile'];
   if(lostResponse==='no-prune-policy-lost')expected.splice(expected.indexOf('prepare-pruning'),2);
   if(['adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse))expected.splice(0,2);
@@ -573,23 +628,39 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   if(lostResponse==='hosted-runner-replacement')expected.splice(expected.indexOf('prune')+1,0,'recover-policy');
   else if(lostResponse==='proved-no-policy-write')expected.splice(expected.indexOf('prune')+1,0,'prune');
   else if(lostResponse?.includes('pre-intent-')||lostResponse?.startsWith('reservation-'))expected.splice(expected.indexOf(nativeOperation)+1,0,nativeOperation);
-  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-record-response-lost','approval-expired-before-consumption'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover'}[lostOperation]);
+  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover',reconcile:'recover-reconciliation'}[lostOperation]);
   assert.deepEqual(calls,expected);
   if(['pre-intent-register','expired-pre-intent-register','reservation-register'].includes(lostResponse))assert.equal(calls.filter(call=>call==='recover-registration').length,0);
   if(lostResponse==='expired-pre-intent-register')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:authorized:1')));
-  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
+  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
+  if(lostResponse==='reconcile')assert.equal(f.snapshot().receipts.filter(r=>r[1]==='STAGED_BROKER_TERMINAL_HANDOFF').length,1);
   assert.equal(f.snapshot().registeredTaskDefinitionCalls,12);
   if(['adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)){assert.equal(result.registrationTransactionId,CURRENT_REGISTRATION_OPERATION);assert.equal(f.snapshot().registeredTaskDefinitionCalls-priorRegistrationCalls,0);}
-  if(['approval-boundary','approval-timed-out','approval-record-response-lost'].includes(lostResponse))assert.equal(approvalDispatches,1);
+  if(['approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost'].includes(lostResponse))assert.equal(approvalDispatches,1);
   if(lostResponse==='approval-timed-out')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:approval-timeout:0')));
-  if(lostResponse==='approval-expired-before-consumption'){assert.equal(hostedVerifiers.size,6);assert.equal([...steps.keys()].filter(k=>k.endsWith('registration:authorized:0')||k.endsWith('registration:authorized:1')).length,2);}
+  if(lostResponse==='approval-journal-timeout'){
+   assert.ok(steps.has(`${result.releaseId}/registration:dispatch:0`));
+   assert.ok(steps.has(`${result.releaseId}/registration:approval-timeout:0`));
+   assert.equal(steps.has(`${result.releaseId}/registration:pending:0`),false);
+   assert.ok(steps.has(`${result.releaseId}/registration:authorized:1`));
+  }
+  if(lostResponse==='expired-pre-intent-reconcile'){
+   assert.ok(steps.has(`${result.releaseId}/closure:authorized:1`));
+   assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
+  }
+  if(lostResponse==='cutover-expired-before-closure'){
+   assert.ok(Date.parse(cutoverApproval.expiresAt)<=f.now.getTime());
+   assert.ok(Date.parse(closureApproval.expiresAt)>f.now.getTime());
+   assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
+  }
+  if(lostResponse==='approval-expired-before-consumption'){assert.equal(hostedVerifiers.size,7);assert.equal([...steps.keys()].filter(k=>k.endsWith('registration:authorized:0')||k.endsWith('registration:authorized:1')).length,2);}
   assert.ok(steps.has(`${result.releaseId}/GATES_PASSED`));
   if(lostResponse==='source-advance')runtime.authenticateSource=async(source,frozen)=>{assert.equal(source,request.sourceSha);assert.equal(frozen.releaseId,result.releaseId);return {baseline:{...baseline,generation:baseline.generation+1},changedFiles:['frontend/src/app.ts']};};
   await invoke();
   assert.deepEqual(calls,expected);
   if(lostResponse==='authorization-response-lost'){assert.ok(steps.has(`${result.releaseId}/registration:authorized:0`));assert.ok(steps.has(`${result.releaseId}/registration:authorized:1`));}
-  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
- }finally{f.dispose();}
+  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
+ }finally{f.dispose();if(hostedClosureRelease)fs.rmSync(path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId),{recursive:true,force:true});}
 });
 
 
@@ -622,8 +693,11 @@ test('governed approval dispatch resumes its exact child at the human boundary w
  const pending={runId:boundary.runId,prepared:reference};
  assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),boundary);assert.equal(posts,1);
  child.status='completed';child.conclusion='timed_out';
+ assert.deepEqual(await obtainReleaseTransitionAuthorization(context,'pruning',prepared,reference,deps),
+  {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
  assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
   {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
  child.conclusion='failure';await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),/Exact approval child failed/);assert.equal(posts,1);
  child.head_sha='f'.repeat(40);await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps));assert.equal(posts,1);
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization(context,'pruning',prepared,reference,deps));assert.equal(posts,1);
 });

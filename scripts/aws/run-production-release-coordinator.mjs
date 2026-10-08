@@ -20,7 +20,7 @@ import {readBrokerPolicyInventory} from './stage-b-staged-broker-observations.mj
 import {createBrokerPolicyOwnershipClient} from './stage-b-broker-policy-ownership.mjs';
 import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertRegistrationHandoff,assertPolicyPruningHandoff} from './stage-b-staged-broker-contract.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
-import {readStagedBrokerReceipt} from './stage-b-staged-broker-executor.mjs';
+import {readStagedBrokerReceipt,stagedBrokerSourceReservation} from './stage-b-staged-broker-executor.mjs';
 import {authenticateRegisteredDefinition} from './stage-b-release-prerequisites.mjs';
 import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
 
@@ -169,7 +169,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    const cutover=name==='closure'?store.readStep(context.release.releaseId,'cutover:result'):null;
    const casResult=cutover?store.getArtifact(cutover.result):undefined;
    await assertBrokerAuthorization(authorization,prepared.preparation,{verify,
-    now:new Date(name==='closure'?casResult?.authorizedAt:result.authorizedAt)});
+    now:new Date(name==='closure'?result.stateAuthorizedAt:result.authorizedAt)});
    if(name==='registration')assertRegistrationHandoff({preparation:prepared.preparation,authorization,result},
     {sourceSha:context.release.sourceSha,treeSha256:prepared.preparation.treeSha256});
    else if(name==='pruning')assertPolicyPruningHandoff({preparation:prepared.preparation,authorization,result},prepared.preparation.prerequisiteChain);
@@ -180,8 +180,9 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    // old predecessor still be current. The next public phase authenticates
    // live state; terminal recovery authenticates the final live state.
    if(name==='closure'){
+    const cutoverPrepared=store.getArtifact(cutover.prepared),cutoverAuthorization=store.getArtifact(cutover.authorization);
     const recovered=await runStageOperation({...context.inputs,operation:'recover-reconciliation',preparation:prepared.preparation,
-     authorization,planPath:prepared.planPath,casResult});
+     authorization,planPath:prepared.planPath,casResult,cutoverPreparation:cutoverPrepared.preparation,cutoverAuthorization});
     exact(recovered,result);
    }else exact(readReceipt({run:awsRun,id:brokerDigest(authorization),status:receipts[name],
     directory:context.inputs.directory,allowPolicyNoWrite:name==='pruning'||name==='policy'}),result);
@@ -208,7 +209,11 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   authenticateClosure:async(context,packages)=>{
    const p=packages.cutover.prepared.preparation,result=packages.closure.result;
    assertBrokerClosurePlan(result.closurePlan,p);
-   return readReceipt({run:awsRun,id:brokerDigest(packages.cutover.authorization),status:'STAGED_BROKER_TERMINAL_HANDOFF',directory:context.inputs.directory});
+   const terminal=readReceipt({run:awsRun,id:stagedBrokerSourceReservation(context.release.sourceSha),status:'STAGED_BROKER_TERMINAL_HANDOFF',directory:context.inputs.directory});
+   exact(terminal,{preparation:p,authorization:packages.cutover.authorization,
+    closure:{preparation:packages.closure.prepared.preparation,authorization:packages.closure.authorization},
+    casResult:packages.cutover.result,record:result});
+   return terminal;
   },
  };
 }
