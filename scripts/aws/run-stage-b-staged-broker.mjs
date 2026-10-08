@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan, registrationPolicyPrerequisiteChain } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan, registrationPolicyPrerequisiteChain, PREPUBLICATION_POLICY_OPERATIONS } from './stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
-import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
+import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary,readBrokerProtectedEnvironmentApproval,createBrokerProtectedEnvironmentAuthorization } from './stage-b-staged-broker-authorization.mjs';
 import { assertStageBStaticConfigurationCoverage } from './stage-b-plan-semantic-contract.mjs';
 import { assertStageBPlanResourceChange, classifyStageBPlan } from './stage-b-deployment-contract.mjs';
 import { assertStageBPrivateFile, ensureStageBPrivateDirectory } from './stage-b-artifact-contract.mjs';
@@ -31,7 +31,7 @@ function staticPlan(plan) {
   for (const c of plan.resource_changes) assertStageBPlanResourceChange(c, { strict: true, validateActions: false, terraformConfiguration: source, plan });
 }
 
-export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs } = {}) {
+export async function runStagedBrokerRequest(request, { adapterFactory = createStagedBrokerExecutor, checker = createBrokerCheckerAuthorizationBoundary, planningInputs = readPlanningInputs,readProtectedApproval=readBrokerProtectedEnvironmentApproval } = {}) {
   const { operation, files, directory, terraformDataDir, preparation, authorization, planPath } = request;
   assert.ok(Object.hasOwn(MODES, operation), 'Unknown staged operation');
   if (['prepare-registration-adoption', 'prepare-policy-adoption'].includes(operation)) {
@@ -55,8 +55,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
   let prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
-  if (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
-  if (['authorize-policy', 'converge-policy'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
+  if (PREPUBLICATION_POLICY_OPERATIONS.includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
+  if (['authorize-policy', 'converge-policy', 'authorize-pruning', 'prune'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
     equal(request.prerequisiteChain, preparation.prerequisiteChain, 'Policy continuation cannot substitute its signed prerequisite chain');
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
     : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
@@ -176,6 +176,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       equal(await deps.getAlias(), preparation.alias);
       equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version), preparation.packageSha256), preparation.target);
     }
+    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:preparation.sourceSha,now});
+    if(approval)return createBrokerProtectedEnvironmentAuthorization(preparation,{...approval,now});
     return signBrokerAuthorization(preparation, { ...checker(), makerCaller: deps.readMakerCaller, makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId });
   }
   if (operation === 'register') return executeTaskRegistration({ preparation, authorization }, deps);

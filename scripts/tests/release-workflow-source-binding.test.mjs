@@ -28,7 +28,7 @@ function apiFor({ workflowFile = workflow, targetSha = current, observedSha = ta
       if (url.endsWith("/actions/runs/99")) return response(200, { id: 99, workflow_id: workflowId, repository: { full_name: repository }, head_repository: { full_name: repository }, event: "workflow_dispatch", run_attempt: runAttempt, head_sha: observedSha, head_branch: headBranch, path: expectedPath, html_url: "https://example.test/runs/99" });
       if (url.includes(`/actions/workflows/${workflowFile}/runs?`)) {
         runsReads += 1;
-        return response(200, { workflow_runs: runsReads === 1 ? [] : Array.from({ length: freshRuns }, (_, index) => ({ id: index + 1, workflow_id: workflowId, repository: { full_name: repository }, head_repository: { full_name: repository }, event: "workflow_dispatch", run_attempt: runAttempt, head_sha: observedSha, head_branch: headBranch, path: expectedPath, html_url: `https://example.test/runs/${index + 1}` })) });
+        return response(200, { total_count: freshRuns, workflow_runs: runsReads === 1 ? [] : Array.from({ length: freshRuns }, (_, index) => ({ id: index + 1, workflow_id: workflowId, repository: { full_name: repository }, head_repository: { full_name: repository }, event: "workflow_dispatch", run_attempt: runAttempt, head_sha: observedSha, head_branch: headBranch, path: expectedPath, html_url: `https://example.test/runs/${index + 1}` })) });
       }
       throw new Error(`Unexpected URL: ${url}`);
     },
@@ -84,6 +84,7 @@ test("a main advance, wrong source, mutable ref movement, and ambiguous correlat
 
 test("Release Train resolves an exact dispatch ref and uses source-bound dispatch for every gate", () => {
   const train = readFileSync(".github/workflows/release-train.yml", "utf8");
+  const coordinatorAction = readFileSync(".github/actions/converge-stage-b-prerequisites/action.yml", "utf8");
   const gate = readFileSync(".github/workflows/release-gate.yml", "utf8");
   assert.match(train, /git_ref must be main or an explicit refs\/tags/);
   assert.match(train, /refs\/tags\/\(release-\|v\)/);
@@ -93,6 +94,20 @@ test("Release Train resolves an exact dispatch ref and uses source-bound dispatc
   assert.match(train, /assert-authenticated-initial-overlap-workflow-schema\.mjs --revision "\$TARGET_SHA"/);
   assert.match(train, /printf '\{\}' > "\$inputs_file"/);
   assert.match(train, /REQUIRED_GATE_RUN_IDS_JSON/);
+  assert.match(train, /ticket_id:[\s\S]*?required: true/);
+  assert.match(train, /environment: production/);
+  assert.match(train, /uses: \.\/\.github\/actions\/converge-stage-b-prerequisites/);
+  assert.match(coordinatorAction, /role-session-name: release-\$\{\{ github\.run_id \}\}/);
+  assert.match(coordinatorAction, /AWS_CREDENTIAL_EXPIRATION: \$\{\{ steps\.credentials\.outputs\.aws-expiration \}\}/);
+  assert.match(coordinatorAction, /unset-current-credentials: true/);
+  assert.match(coordinatorAction, /status=WAITING_FOR_APPROVAL/);
+  assert.equal((train.match(/uses: \.\/\.github\/actions\/converge-stage-b-prerequisites/g)||[]).length,7);
+  assert.match(train, /Require authenticated prerequisite closure[\s\S]*?Trigger final Release Gate/);
+  assert.ok(train.indexOf('Converge exact Stage B prerequisites') > train.indexOf('Wait for required workflow gates'));
+  assert.ok(train.indexOf('Converge exact Stage B prerequisites') < train.indexOf('Trigger final Release Gate'));
+  assert.match(coordinatorAction, /node scripts\/aws\/run-production-release-coordinator\.mjs/);
+  assert.match(train, /PREREQUISITES_CONVERGED/);
+  assert.doesNotMatch(train,/^  push:/m);
   assert.match(gate, /required_gate_run_ids_json/);
   assert.match(gate, /Normal Release Gate requires the exact workflow-run IDs dispatched by its Release Train/);
   assert.doesNotMatch(train, /gh workflow run/);
@@ -100,4 +115,31 @@ test("Release Train resolves an exact dispatch ref and uses source-bound dispatc
   assert.match(gate, /Historical production deploy targets require a release-\* or v\* tag ref/);
   assert.match(gate, /Historical deployment target SHA must equal its exact release tag/);
   assert.match(gate, /Release Train does not authenticate the retained main deployment target/);
+});
+
+
+test("journaled authorization/image dispatch reconciles a lost response without another child", async () => {
+  const api = apiFor();let record, posts = 0, lose = true;
+  const journal = { read: async () => record ?? null, write: async value => { assert.equal(record, undefined);record = structuredClone(value); } };
+  const fetchImpl = async (url, options) => {
+    const result = await api.fetch(url, options);
+    if (options?.method === "POST") { posts++;if (lose) { lose = false;throw new Error("Lost dispatch response"); } }
+    return result;
+  };
+  const input = { repository, token: "token", workflow, ref: "main", targetSha: current, inputs: { source_sha: current }, dispatchJournal: journal, fetchImpl, attempts: 1 };
+  await assert.rejects(() => dispatchSourceBoundWorkflow(input), /Lost dispatch response/);
+  assert.equal(posts, 1);assert.equal(record.identity.targetSha, current);
+  const run = await dispatchSourceBoundWorkflow(input);assert.equal(run.head_sha, current);assert.equal(posts, 1);
+  await assert.rejects(() => dispatchSourceBoundWorkflow({ ...input, targetSha: older }), /identity substitution/);
+  await assert.rejects(() => dispatchSourceBoundWorkflow({ ...input, inputs: { source_sha: older } }), /identity substitution/);
+  assert.equal(posts, 1);
+});
+
+test("journaled attempt with no visible child fails closed instead of redispatching", async () => {
+  const api = apiFor({ freshRuns: 0 });let record;
+  const journal = { read: async () => record ?? null, write: async value => { record = structuredClone(value);throw new Error("Interrupted before dispatch"); } };
+  const input = { repository, token: "token", workflow, ref: "main", targetSha: current, inputs: {}, dispatchJournal: journal, fetchImpl: api.fetch, attempts: 1 };
+  await assert.rejects(() => dispatchSourceBoundWorkflow(input), /Interrupted before dispatch/);
+  await assert.rejects(() => dispatchSourceBoundWorkflow(input), /No authenticated workflow run/);
+  assert.equal(api.requests.filter(({options}) => options.method === "POST").length, 0);
 });

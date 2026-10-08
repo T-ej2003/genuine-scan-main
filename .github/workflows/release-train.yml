@@ -12,6 +12,10 @@ on:
         description: "Optional exact main-branch commit SHA. It must equal the resolved immutable dispatch ref."
         required: false
         type: string
+      ticket_id:
+        description: "Externally issued production release ticket bound to the prerequisite coordinator."
+        required: true
+        type: string
       release_lifecycle:
         description: "Strict post-rotation release or exact authenticated initial-overlap activation."
         required: false
@@ -68,16 +72,21 @@ on:
 permissions:
   contents: read
   actions: write
+  id-token: write
 
 concurrency:
   group: release-train-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  orchestrate:
-    name: Trigger and verify release train
+  gates:
+    name: Resolve source and required gates
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 120
+    outputs:
+      target_ref: ${{ steps.resolve.outputs.target_ref }}
+      target_sha: ${{ steps.resolve.outputs.target_sha }}
+      gate_run_ids_json: ${{ steps.gate_runs.outputs.gate_run_ids_json }}
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@v6
@@ -142,6 +151,7 @@ jobs:
           echo "Release Train target SHA: $target_sha"
 
       - name: Trigger required workflow gates
+        id: gate_runs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
@@ -229,6 +239,7 @@ jobs:
           fs.writeFileSync(process.argv[3], JSON.stringify(value), { mode: 0o600 });
           NODE
           echo "REQUIRED_GATE_RUN_IDS_JSON=$(cat "$gate_runs_file")" >> "$GITHUB_ENV"
+          echo "gate_run_ids_json=$(cat "$gate_runs_file")" >> "$GITHUB_OUTPUT"
           rm -f "$gate_pairs" "$gate_runs_file"
           trap - EXIT
 
@@ -245,11 +256,85 @@ jobs:
           export REQUIRED_WORKFLOW_FILES="$(node scripts/github/release-lifecycle-contract.mjs --lifecycle "$RELEASE_LIFECYCLE")"
           node scripts/github/check-required-workflow-gates.mjs
 
+  orchestrate:
+    name: Converge governed prerequisites and trigger Release Gate
+    needs: gates
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
+      RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
+      RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+      NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
+      NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
+      REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}
+      TF_WORKSPACE: default
+    steps:
+      - name: Checkout exact approved source
+        uses: actions/checkout@v6
+        with: {ref: '${{ needs.gates.outputs.target_sha }}', fetch-depth: 0}
+      - name: Authenticate unchanged protected source
+        env:
+          TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test "$(git rev-parse origin/main)" = "$TARGET_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+
+      - uses: actions/setup-node@v6
+        with: {node-version: 24, cache: npm}
+
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: 1.15.8, terraform_wrapper: false}
+
+      - name: Converge exact Stage B prerequisites
+        uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_1
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_2
+        if: steps.converge_1.outputs.status != 'PREREQUISITES_CONVERGED'
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_3
+        if: steps.converge_2.outputs.status == 'WAITING_FOR_APPROVAL'
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_4
+        if: steps.converge_3.outputs.status == 'WAITING_FOR_APPROVAL'
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_5
+        if: steps.converge_4.outputs.status == 'WAITING_FOR_APPROVAL'
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_6
+        if: steps.converge_5.outputs.status == 'WAITING_FOR_APPROVAL'
+      - uses: ./.github/actions/converge-stage-b-prerequisites
+        id: converge_7
+        if: steps.converge_6.outputs.status == 'WAITING_FOR_APPROVAL'
+      - name: Require authenticated prerequisite closure
+        env:
+          STATUS_1: ${{ steps.converge_1.outputs.status }}
+          STATUS_2: ${{ steps.converge_2.outputs.status }}
+          STATUS_3: ${{ steps.converge_3.outputs.status }}
+          STATUS_4: ${{ steps.converge_4.outputs.status }}
+          STATUS_5: ${{ steps.converge_5.outputs.status }}
+          STATUS_6: ${{ steps.converge_6.outputs.status }}
+          STATUS_7: ${{ steps.converge_7.outputs.status }}
+        run: |
+          if ! printf '%s\n' "$STATUS_1" "$STATUS_2" "$STATUS_3" "$STATUS_4" "$STATUS_5" "$STATUS_6" "$STATUS_7" | grep -qx PREREQUISITES_CONVERGED; then
+            echo '::error::Governed prerequisite approval did not complete within this Release Train run; rerun failed jobs to resume the durable release.'
+            exit 1
+          fi
+
       - name: Trigger final Release Gate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_REF: ${{ steps.resolve.outputs.target_ref }}
-          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          TARGET_REF: ${{ needs.gates.outputs.target_ref }}
+          TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
+          REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}

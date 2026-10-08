@@ -1,0 +1,36 @@
+name: Converge Stage B prerequisites
+description: Resume the durable release coordinator with a fresh release-deployer session.
+outputs:
+  status:
+    description: Authenticated prerequisite state after this bounded runner window.
+    value: ${{ steps.converge.outputs.status }}
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v6
+      id: credentials
+      with:
+        aws-region: eu-west-2
+        role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+        role-session-name: release-${{ github.run_id }}
+        output-credentials: true
+        unset-current-credentials: true
+    - name: Resume exact release coordinator
+      id: converge
+      shell: bash
+      env:
+        AWS_CREDENTIAL_EXPIRATION: ${{ steps.credentials.outputs.aws-expiration }}
+      run: |
+        set -euo pipefail
+        for attempt in $(seq 1 75); do
+          result="$(node scripts/aws/run-production-release-coordinator.mjs)"
+          status="$(node -e 'const v=JSON.parse(process.argv[1]); if(!["WAITING_FOR_APPROVAL","PREREQUISITES_CONVERGED"].includes(v.status)) process.exit(2); process.stdout.write(v.status)' "$result")"
+          if [ "$status" = PREREQUISITES_CONVERGED ]; then
+            printf '%s\n' "$result"
+            echo 'status=PREREQUISITES_CONVERGED' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node -e 'const v=JSON.parse(process.argv[1]); console.log(`Waiting for exact ${v.phase} production approval: ${v.runUrl}`)' "$result"
+          sleep 30
+        done
+        echo 'status=WAITING_FOR_APPROVAL' >> "$GITHUB_OUTPUT"

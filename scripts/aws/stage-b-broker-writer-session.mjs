@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { brokerAliasIdentity, brokerDigest } from './stage-b-staged-broker-contract.mjs';
 import { canonicalJson, STAGE_B } from './production-green-stage-b-contract.mjs';
-import { createAssumedRoleSessionEnvironment, createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
+import { createAssumedRoleSessionEnvironment, createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 
 const ROLE = 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer';
 const PROFILE = 'mscqr-production-release-deployer';
@@ -18,6 +18,21 @@ function timestamp(value, awsExpiration = false) {
   assert.ok(Number.isFinite(milliseconds), 'Invalid AWS session timestamp'); return milliseconds;
 }
 export function assertBrokerWriterSession(session) {
+  if (session?.mechanism === 'GITHUB_OIDC_BOUNDED_WRITER') {
+    assert.deepEqual(Object.keys(session).sort(), ['accessKeyIdSha256','callerArn','callerUserId','expiresAt','issuedAt','mechanism','sourceSha','workflowRef','workflowRunId','workflowRunAttempt'].sort());
+    assert.match(session.accessKeyIdSha256,/^[a-f0-9]{64}$/);
+    assert.match(session.callerArn,/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/release-[1-9][0-9]*$/);
+    assert.match(session.callerUserId,/^AROA[A-Z0-9]+:release-[1-9][0-9]*$/);
+    assert.equal(session.callerUserId.split(':')[1],session.callerArn.split('/').at(-1));
+    assert.match(session.workflowRunId,/^[1-9][0-9]*$/);
+    assert.match(session.workflowRunAttempt,/^[1-9][0-9]*$/);
+    assert.equal(session.callerArn.split('/').at(-1),`release-${session.workflowRunId}`);
+    assert.equal(session.workflowRef,'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main');
+    assert.match(session.sourceSha,/^[a-f0-9]{40}$/);
+    const duration=timestamp(session.expiresAt)-timestamp(session.issuedAt);
+    assert.ok(duration>0&&duration<=60*60*1000,'Unbounded hosted writer session');
+    return session;
+  }
   assert.deepEqual(Object.keys(session).sort(), ['accessKeyIdSha256', 'callerArn', 'callerUserId', 'eventId', 'expiresAt', 'issuedAt'].sort());
   assert.match(session.accessKeyIdSha256, /^[a-f0-9]{64}$/);
   assert.match(session.callerArn, /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[\w+=,.@-]{2,64}$/);
@@ -27,6 +42,50 @@ export function assertBrokerWriterSession(session) {
   const duration = timestamp(session.expiresAt) - timestamp(session.issuedAt);
   assert.ok(duration >= 900000 && duration <= 43200000, 'Unbounded role session');
   return session;
+}
+
+// A hosted runner freezes the AWS-issued OIDC credentials already placed in
+// its protected job. A replacement runner authenticates completion of that
+// exact job and waits for AWS session expiry before recovering held ownership.
+export function createHostedBrokerWriterSessionBoundary({env=process.env,exec=execFileSync,githubRun,clock=readBrokerRecoveryAwsClock,now=()=>new Date()}={}) {
+  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_REPOSITORY,'T-ej2003/genuine-scan-main');
+  assert.equal(env.GITHUB_WORKFLOW_REF,'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main');
+  assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');assert.match(env.GITHUB_RUN_ATTEMPT||'',/^[1-9][0-9]*$/);
+  assert.match(env.GITHUB_RUN_ID||'',/^[1-9][0-9]*$/);assert.match(env.GITHUB_SHA||'',/^[a-f0-9]{40}$/);
+  assert.match(env.AWS_ACCESS_KEY_ID||'',/^ASIA[A-Z0-9]{16}$/);assert.ok(env.AWS_SECRET_ACCESS_KEY&&env.AWS_SESSION_TOKEN);
+  const github=githubRun||((args)=>createProductionGithubCommandRunner({env,exec})('gh',args));
+  const frozenEnvironment=createAssumedRoleSessionEnvironment({credentials:{AccessKeyId:env.AWS_ACCESS_KEY_ID,SecretAccessKey:env.AWS_SECRET_ACCESS_KEY,
+    SessionToken:env.AWS_SESSION_TOKEN},env});
+  const aws=createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,env:frozenEnvironment,
+    exec:(command,args,options)=>exec(command,args,{...options,env:{...options.env,AWS_MAX_ATTEMPTS:'1',AWS_RETRY_MODE:'standard'}})});
+  const run=args=>{assert.ok(args[0]!=='configure'&&(args[0]!=='sts'||args[1]==='get-caller-identity'),'Pinned writer cannot acquire another session');
+    assert.ok(!args.some(arg=>/^(?:--profile|--endpoint-url|--no-verify-ssl)(?:=|$)/.test(arg)),'Pinned credential authority cannot be redirected');return aws(args);};
+  const authenticateRun=session=>{
+    const workflow=JSON.parse(github(['api',`repos/T-ej2003/genuine-scan-main/actions/runs/${session.workflowRunId}/attempts/${session.workflowRunAttempt}`]));
+    assert.equal(String(workflow.id),session.workflowRunId);assert.equal(workflow.repository?.full_name,'T-ej2003/genuine-scan-main');
+    assert.equal(workflow.head_repository?.full_name,'T-ej2003/genuine-scan-main');
+    assert.equal(workflow.path,'.github/workflows/release-train.yml');assert.equal(workflow.head_sha,session.sourceSha);
+    assert.equal(workflow.event,'workflow_dispatch');assert.equal(String(workflow.run_attempt),session.workflowRunAttempt);
+    assert.equal(workflow.status,'completed','Previous hosted writer may still be running');
+  };
+  return {
+    pin(){
+      const caller=JSON.parse(run(['sts','get-caller-identity','--output','json','--no-cli-pager']));
+      assert.equal(caller.Account,STAGE_B.account);
+      const session=assertBrokerWriterSession({mechanism:'GITHUB_OIDC_BOUNDED_WRITER',accessKeyIdSha256:digest(env.AWS_ACCESS_KEY_ID),callerArn:caller.Arn,
+        callerUserId:caller.UserId,workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,workflowRef:env.GITHUB_WORKFLOW_REF,sourceSha:env.GITHUB_SHA,
+        issuedAt:now().toISOString(),expiresAt:new Date(timestamp(env.AWS_CREDENTIAL_EXPIRATION)).toISOString()});
+      return {session,run,environment:frozenEnvironment};
+    },
+    async prove(owner){
+      const session=assertBrokerWriterSession(owner.writerSession);assert.equal(session.mechanism,'GITHUB_OIDC_BOUNDED_WRITER');
+      authenticateRun(session);
+      const observedAt=await clock();assert.ok(timestamp(observedAt)>timestamp(session.expiresAt),'Previous hosted writer credentials remain usable');
+      return {mechanism:'GITHUB_RUN_COMPLETED_STS_EXPIRY',ownerSha256:digest(canonicalJson(owner)),session,observedAt,
+        previousWriterCannotContinue:true,processTerminationProven:true};
+    },
+    proveAliasCas(){throw new Error('Hosted alias CAS lacks authenticated native execution evidence');},
+  };
 }
 function assertIssuanceWindow(window) {
   assert.ok(window && typeof window === 'object', 'Authenticated issuance interval required');

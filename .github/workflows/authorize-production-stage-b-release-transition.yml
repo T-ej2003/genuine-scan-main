@@ -1,0 +1,85 @@
+name: Authorize governed Stage B release transition
+run-name: Stage B approval ${{ inputs.release_id }}/${{ inputs.phase }}/${{ inputs.authorization_round }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: {description: Exact protected-main release source, required: true, type: string}
+      ticket_id: {description: Original governed release ticket, required: true, type: string}
+      release_id: {description: Immutable coordinator release identity, required: true, type: string}
+      phase:
+        description: Exact coordinator transition awaiting approval
+        required: true
+        type: choice
+        options: [registration, pruning, policy, publication, cutover]
+      preparation_reference: {description: Immutable preparation artifact SHA-256 in the release journal, required: true, type: string}
+      authorization_round: {description: Immutable approval round, required: true, type: string}
+
+permissions: {contents: read, actions: read, id-token: write}
+concurrency:
+  group: release-approval-${{ inputs.release_id }}-${{ inputs.phase }}-${{ inputs.authorization_round }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      TICKET_ID: ${{ inputs.ticket_id }}
+      RELEASE_ID: ${{ inputs.release_id }}
+      RELEASE_PHASE: ${{ inputs.phase }}
+      RELEASE_PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+      RELEASE_AUTHORIZATION_ROUND: ${{ inputs.authorization_round }}
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: '${{ inputs.source_sha }}', fetch-depth: 0, persist-credentials: false}
+      - uses: actions/setup-node@v6
+        with: {node-version: 24, cache: npm}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: 1.15.8, terraform_wrapper: false}
+      - name: Authenticate exact protected source and private phase paths
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .protected)" = true
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          umask 077
+          install -d -m 700 "/tmp/mscqr-production-release"
+          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/terraform"
+          printf 'TF_DATA_DIR=%s\n' "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/terraform" >> "$GITHUB_ENV"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          role-session-name: release-approval-${{ github.run_id }}
+      - name: Initialize exact provider schemas without applying or accessing the backend
+        run: |
+          terraform -chdir=infra/aws/terraform/production-green-stage-b init -backend=false -input=false -lockfile=readonly
+          # Hydration writes the exact captured backend metadata from preparation.
+          # The backend-disabled init metadata is runner-local and cannot replace it.
+          rm -f "$TF_DATA_DIR/terraform.tfstate"
+      - name: Reauthenticate complete preparation and produce exact approval
+        run: |
+          set -euo pipefail
+          node scripts/aws/authorize-production-stage-b-release-transition.mjs \
+            --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-id "$RELEASE_ID" \
+            --phase "$RELEASE_PHASE" --preparation-reference "$RELEASE_PREPARATION_REFERENCE" \
+            --authorization-round "$RELEASE_AUTHORIZATION_ROUND" \
+            --output "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-stage-b-release-transition-authorization
+          path: /tmp/mscqr-production-release/${{ inputs.release_id }}/${{ inputs.phase }}/authorization.json
+          if-no-files-found: error
+          retention-days: 90

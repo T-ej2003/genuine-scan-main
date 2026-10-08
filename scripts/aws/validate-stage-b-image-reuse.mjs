@@ -56,7 +56,7 @@ const WEB_IMAGE_INPUTS = [
   /^(?:package\.json|package-lock\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|tsconfig[^/]*\.json)$/,
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
-const CI = /^\.github\/workflows\//;
+const CI = /^\.github\/(?:workflows\/|actions\/converge-stage-b-prerequisites\/action\.yml$)/;
 const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\//;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
