@@ -211,3 +211,21 @@ development dependency group. The acceptance remains limited to the same
 advisory and retains its scope, rationale, owner, creation date, execution
 claims, and expiry `2026-11-02`. The canonical OSV runtime gate passed against
 these frozen inputs.
+
+## Final PR #641 mixed-policy-disclosure revalidation
+
+Date: 2026-10-08 UTC. After freezing the mixed schema-3 registration plus
+receipt-bound policy authorization-disclosure correction at code commit
+`e2969fb74d1da298d4848b3fa5109e6eb764fbd6`, the canonical
+`reachabilityInputsSha256(process.cwd())` result is
+`28dec8eed24fefda423b87237c83da485e0d5bf2353433ed76547df0f60dbd78`. A fresh
+unfiltered OSV Scanner 2.6.0 scan found the same HIGH development-only
+`braces@3.0.3` finding, `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` (report
+SHA256 `13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`).
+The canonical browser closure transformed 3,993 modules into 96 chunks and
+resolved 204 packages; `braces@3.0.3` is absent. The backend lockfile remains
+free of this package, and the scan identifies it only in the root npm
+development dependency group. The acceptance retains the same advisory,
+scope, rationale, owner, creation date, execution claims, and expiry
+`2026-11-02`. The canonical OSV runtime gate passed against these frozen
+inputs.
