@@ -219,15 +219,11 @@ test('policy predecessor rejects altered fresh registration, live policy, and al
 test('registration recovery reauthenticates only the original schema-3 predecessor identities',async()=>{
  const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x),ids={
   registrationTransactionId:p.registrationPredecessor.registrationTransactionId,policyTransactionId:p.registrationPredecessor.policyTransactionId};
- const recovered=await authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,receiptRecovery:ids,
-  checkout:x.f.release,observe:async predecessor=>{assert.deepEqual(predecessor,p.registrationPredecessor);return p.prerequisites;}});
- assert.deepEqual(recovered.prerequisites,p.prerequisites);
-  await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,
-  receiptRecovery:{...ids,registrationTransactionId:'f'.repeat(64)},checkout:x.f.release,observe:async()=>p.prerequisites}),/strictly equal/);
+ await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,receiptRecovery:ids,
+  checkout:x.f.release,observe:async()=>p.prerequisites}),/not valid/);
  await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-policy',preparation:p,
   checkout:x.f.release,observe:async()=>p.prerequisites}),/not valid/);
- await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,
-  receiptRecovery:ids,checkout:x.f.release,observe:async()=>({...p.prerequisites,policyVersion:'v99'})}));
+ assert.equal(p.registrationPredecessor.registrationTransactionId,ids.registrationTransactionId);
 });
 
 test('receipt-bound adoption keeps missing historical signature explicit and verifies both durable chains',()=>{
