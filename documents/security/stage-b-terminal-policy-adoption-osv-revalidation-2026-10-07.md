@@ -113,7 +113,7 @@ A fresh unfiltered OSV Scanner 2.6.0 scan again found exactly the existing HIGH
 passed. The acceptance remains bound only to that existing advisory and keeps
 its prior scope, rationale, owner, and expiry `2026-11-02`.
 
-## Current final PR #640 compact-continuation revalidation
+## Historical PR #640 compact-continuation revalidation (superseded)
 
 Date: 2026-10-08 UTC. After the compact continuation transport and separately
 bound base-preparation handling were frozen, all required Stage-B, IAM,
@@ -129,3 +129,19 @@ chunks and resolved 204 packages; `braces@3.0.3` is absent. The exact
 The acceptance continues to use the existing advisory, package/version,
 scope, rationale, owner, creation date, execution claims, and expiry
 `2026-11-02`.
+
+## Current final PR #640 pre-delete no-write recovery revalidation
+
+Date: 2026-10-08 UTC. After the final pre-delete no-write journal disposition
+change was implemented and all required source/test gates passed, the
+canonical `reachabilityInputsSha256(process.cwd())` result is
+`a5afd1a74fadc00897e26e825557accb9b7e5d7bfb0727bd0236f86d61eeff8b`. A fresh
+unfiltered OSV Scanner 2.6.0 scan at
+`/private/tmp/mscqr-pr640-osv-final-d6d3f2ff/osv-source.json` found the same
+single HIGH development-only `braces@3.0.3` finding,
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The fresh canonical browser closure
+at `/private/tmp/mscqr-pr640-osv-final-d6d3f2ff/browser-runtime-closure.json`
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` is absent. The existing non-runtime acceptance remains limited
+to this advisory and retains its prior scope, rationale, owner, creation date,
+execution claims, and expiry `2026-11-02`.

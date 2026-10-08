@@ -25,6 +25,7 @@ const iso = (value, label) => { const parsed = new Date(value); if (!Number.isFi
 export class WorkspaceStateRetryableObservationError extends Error {
   constructor(message, options) { super(message, options); this.name = "WorkspaceStateRetryableObservationError"; }
 }
+class WorkspaceStateContradictionError extends Error {}
 
 export const WORKSPACE_STATE_RECONCILIATION = Object.freeze({
   schemaVersion: 1,
@@ -289,7 +290,7 @@ const classifyDeleteContinuationState = (state, preparation, retryAttempt) => {
 async function observe(readLiveState, desired) {
   const value = await readLiveState();
   try { return authenticateWorkspaceStateLiveState(value, { desired }); }
-  catch (error) { error.observationOutcome = "CONTRADICTORY_STATE"; throw error; }
+  catch (error) { throw new WorkspaceStateContradictionError("WorkspaceState live IAM observation contradicts the authenticated contract.", { cause: error }); }
 }
 async function bounded(readLiveState, desired, predicate, sleep, { intermediate = () => false } = {}) {
   let lastTransient;
@@ -301,7 +302,7 @@ async function bounded(readLiveState, desired, predicate, sleep, { intermediate 
       lastTransient = error;
     }
     if (state && predicate(state)) return state;
-    if (state && !intermediate(state)) throw Object.assign(new Error("WorkspaceState observation is authenticated but contradicts the authorized transition."), { observationOutcome: "CONTRADICTORY_STATE" });
+    if (state && !intermediate(state)) throw new WorkspaceStateContradictionError("WorkspaceState observation is authenticated but contradicts the authorized transition.");
     if (index < WORKSPACE_STATE_RECONCILIATION.readDelaysMs.length) await sleep(WORKSPACE_STATE_RECONCILIATION.readDelaysMs[index]);
   }
   if (lastTransient) throw new Error("WorkspaceState IAM observation remained transient after the bounded retry budget.", { cause: lastTransient });
@@ -395,11 +396,11 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
     const attempt = await journal.create(authorization, "deletion-attempt.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", new Date(clock()).toISOString())); if (!attempt) throw new Error("WorkspaceState deletion-attempt raced another executor.");
     try {
       try { reauthenticateSource(); }
-      catch (error) { error.observationOutcome = "CONTRADICTORY_STATE"; throw error; }
+      catch (error) { throw new WorkspaceStateContradictionError("WorkspaceState source reauthentication failed before deletion.", { cause: error }); }
       const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, basePreparation), sleep);
-      if (!latest) throw Object.assign(new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary."), { observationOutcome: "CONTRADICTORY_STATE" });
+      if (!latest) throw new WorkspaceStateContradictionError("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
     } catch (error) {
-      const disposition = error.observationOutcome === "CONTRADICTORY_STATE" ? "CONTRADICTION" : "FRESH_AUTH_CONTINUATION_ALLOWED";
+      const disposition = error instanceof WorkspaceStateContradictionError ? "CONTRADICTION" : "FRESH_AUTH_CONTINUATION_ALLOWED";
       const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString(), undefined, disposition));
       if (!recorded) throw new Error("WorkspaceState pre-delete failure record raced another executor.", { cause: error });
       if (disposition === "FRESH_AUTH_CONTINUATION_ALLOWED") {
