@@ -130,7 +130,7 @@ The acceptance continues to use the existing advisory, package/version,
 scope, rationale, owner, creation date, execution claims, and expiry
 `2026-11-02`.
 
-## Current final PR #640 pre-delete no-write recovery revalidation
+## Historical PR #640 pre-delete no-write recovery revalidation (superseded)
 
 Date: 2026-10-08 UTC. After the final pre-delete no-write journal disposition
 and contradiction classification were implemented and all required
@@ -146,3 +146,18 @@ transformed 3,993 modules into 96 chunks and resolved 204 packages;
 `braces@3.0.3` is absent. The existing non-runtime acceptance remains limited
 to this advisory and retains its prior scope, rationale, owner, creation date,
 execution claims, and expiry `2026-11-02`.
+
+## Current final PR #640 adopter-bound continuation revalidation
+
+Date: 2026-10-08 UTC. After validating adopter-bound attempt, prewrite-proof,
+and completion journal bindings, the frozen executable/build fingerprint is
+`28fa19e652f9e9146423bc723229fe9a43ffbfdbee5857a800a91d0040d7de06`. The
+fresh unfiltered OSV Scanner 2.6.0 report at
+`/private/tmp/mscqr-pr640-osv-final-YxjONK/osv-source.json` contains the same
+single HIGH dev-only `braces@3.0.3` finding, `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. A fresh canonical browser closure at
+`/private/tmp/mscqr-pr640-osv-final-YxjONK/browser-runtime-closure.json`
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` is absent. The existing acceptance retains its advisory,
+package/version, scope, rationale, owner, creation date, execution claims, and
+exclusive expiry `2026-11-02`.
