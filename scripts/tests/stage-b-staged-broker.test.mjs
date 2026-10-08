@@ -16,6 +16,7 @@ import { BROKER_POLICY_CONVERGENCE, TASK_REGISTRATION, deriveBrokerPolicy } from
 import { TASK_REGISTRATION_ADDRESSES } from '../aws/stage-b-release-prerequisites.mjs';
 import { STAGE_B_TERRAFORM_BACKEND } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
+import { authenticatePreparedPrepublicationPredecessor, authenticatePrepublicationPolicyChain } from '../aws/stage-b-staged-broker-executor.mjs';
 const phaseInput = r => Object.hasOwn(r, 'p') ? { ...r, preparation: r.p, authorization: r.auth } : r;
 const executeBrokerPublication = (r, d) => publish(phaseInput(r), d);
 const executeBrokerAliasCas = (r, d) => cutover(phaseInput(r), d);
@@ -172,6 +173,61 @@ for(const [name,mutate] of [
 test('normal equal-map registration preparation remains on the strict schema-2 path',()=>{
  const p=preparation();p.schemaVersion=2;p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;
  assert.equal(p.schemaVersion,2);assert.equal(assertBrokerPreparation(p),p);
+});
+
+function schema3RegistrationPredecessor(x) {
+ const p=preparation();p.schemaVersion=3;p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;
+ p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;p.alias=clone(x.proof.alias);p.registrationPredecessor=clone(x.proof);
+ p.prerequisites={...clone(p.prerequisites),taskMap:clone(x.registrationTaskMap),policy:clone(x.proof.policyDocument),policyVersion:x.proof.policyDefaultVersion};
+ p.configuration.BROKER_TASK_DEFINITIONS_JSON=JSON.stringify(x.aliasRuntimeTaskMap);
+ assertBrokerPreparation(p);return p;
+}
+
+test('policy preparation authenticates the schema-3 fresh registration chain before observing its distinct predecessor maps',async()=>{
+ const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x),order=[];
+ const freshMap={...clone(p.registrationPredecessor.registrationTaskMap)};
+ for(const key of Object.keys(freshMap))freshMap[key]=freshMap[key].replace(/:(\d+)$/,(_,n)=>`:${Number(n)+1}`);
+ const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:freshMap}}};
+ const observed=await authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain,checkout:x.f.release,
+  authenticateChain:async authenticated=>{order.push('chain');assert.deepEqual(authenticated,chain);assert.equal(authenticated.registration.result.preparationSha256,brokerDigest(p));},
+  observe:async predecessor=>{order.push('live');assert.deepEqual(predecessor.registrationTaskMap,x.registrationTaskMap);assert.deepEqual(predecessor.aliasRuntimeTaskMap,x.aliasRuntimeTaskMap);return p.prerequisites;}});
+ assert.deepEqual(order,['chain','live']);assert.deepEqual(observed.prerequisites,p.prerequisites);
+ assert.notDeepEqual(chain.registration.result.taskMap,p.registrationPredecessor.registrationTaskMap);
+});
+
+test('policy predecessor is unavailable without the authenticated schema-3 chain or outside policy lifecycle operations',async()=>{
+ const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x);let observed=0;
+ const args={chain:{registration:{preparation:p}},checkout:x.f.release,authenticateChain:async()=>{},observe:async()=>{observed++;return p.prerequisites;}};
+ await assert.rejects(()=>authenticatePrepublicationPolicyChain({...args,operation:'prepare-publication'}),/not valid/);
+ await assert.rejects(()=>authenticatePrepublicationPolicyChain({...args,operation:'prepare-policy',chain:{registration:{preparation:{...p,registrationPredecessor:{...p.registrationPredecessor}}}},authenticateChain:async()=>{throw new Error('untrusted chain');}}),/untrusted chain/);
+ assert.equal(observed,0);
+});
+
+test('policy predecessor rejects altered fresh registration, live policy, and alias identities without mutation',async()=>{
+ const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x);let mutations=0;
+ const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:clone(x.registrationTaskMap)}}};
+ await assert.rejects(()=>authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain,checkout:x.f.release,
+  authenticateChain:async value=>{assert.deepEqual(value.registration.result.taskMap,x.registrationTaskMap);throw new Error('registered map mismatch');},
+  observe:async()=>{throw new Error('must not observe after chain mismatch');}}),/registered map mismatch/);
+ const badPolicy=clone(p.prerequisites.policy);badPolicy.Statement.find(s=>s.Sid==='RunOnlyApprovedExecutorAndCanaryRevisions').Resource[0]='arn:aws:ecs:eu-west-2:368992683803:task-definition/unapproved:999';
+ for(const observed of [{...p.prerequisites,policyVersion:'v99'},{...p.prerequisites,policy:badPolicy},
+  {...p.prerequisites,taskMap:clone(x.aliasRuntimeTaskMap)}])await assert.rejects(()=>authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain,
+  checkout:x.f.release,authenticateChain:async()=>{},observe:async predecessor=>{assert.deepEqual(predecessor.aliasRuntimeTaskMap,x.aliasRuntimeTaskMap);return observed;}}));
+ assert.equal(mutations,0);
+});
+
+test('registration recovery reauthenticates only the original schema-3 predecessor identities',async()=>{
+ const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x),ids={
+  registrationTransactionId:p.registrationPredecessor.registrationTransactionId,policyTransactionId:p.registrationPredecessor.policyTransactionId};
+ const recovered=await authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,receiptRecovery:ids,
+  checkout:x.f.release,observe:async predecessor=>{assert.deepEqual(predecessor,p.registrationPredecessor);return p.prerequisites;}});
+ assert.deepEqual(recovered.prerequisites,p.prerequisites);
+  await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,
+  receiptRecovery:{...ids,registrationTransactionId:'f'.repeat(64)},checkout:x.f.release,observe:async()=>p.prerequisites}),/strictly equal/);
+ await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-policy',preparation:p,
+  checkout:x.f.release,observe:async()=>p.prerequisites}),/not valid/);
+ await assert.rejects(()=>authenticatePreparedPrepublicationPredecessor({operation:'recover-registration',preparation:p,
+  receiptRecovery:ids,checkout:x.f.release,observe:async()=>({...p.prerequisites,policyVersion:'v99'})}));
 });
 
 test('receipt-bound adoption keeps missing historical signature explicit and verifies both durable chains',()=>{

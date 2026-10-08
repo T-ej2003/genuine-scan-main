@@ -486,6 +486,36 @@ test('pre-publication mismatch cannot be enabled with a caller boolean', async (
   assert.equal(constructed, false);
 });
 
+test('predecessor receipt IDs cannot be caller-injected into policy or publication operations', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-predecessor-phase-rejection-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    let constructed = false;
+    for (const operation of ['prepare-policy', 'prepare-publication', 'prepare-cutover']) {
+      await assert.rejects(() => runStagedBrokerRequest({ operation, directory,
+        predecessorReceiptRecovery: { registrationTransactionId: 'a'.repeat(64), policyTransactionId: 'b'.repeat(64) } },
+      { adapterFactory: () => { constructed = true; throw new Error('must reject before executor'); } }),
+      /accepted only while preparing fresh registration/);
+    }
+    assert.equal(constructed, false);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('policy authorization and convergence cannot substitute the preparation-bound registration chain', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-policy-chain-substitution-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    let constructed = false;
+    for (const operation of ['authorize-policy', 'converge-policy']) {
+      const prepared = { prerequisiteChain: { registration: { transaction: 'signed' } } };
+      await assert.rejects(() => runStagedBrokerRequest({ operation, directory, preparation: prepared,
+        prerequisiteChain: { registration: { transaction: 'substituted' } } },
+      { adapterFactory: () => { constructed = true; throw new Error('must reject before executor'); } }));
+    }
+    assert.equal(constructed, false);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test('fresh registration without receipt provenance retains the strict prerequisite reader', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-strict-prerequisites-'));
   fs.chmodSync(directory, 0o700);

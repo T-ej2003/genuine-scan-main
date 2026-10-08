@@ -55,9 +55,11 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
   const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
+  if (['authorize-policy', 'converge-policy'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
+    equal(request.prerequisiteChain, preparation.prerequisiteChain, 'Policy continuation cannot substitute its signed prerequisite chain');
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
     : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
-  const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir,
+  const deps = adapterFactory({ phase: MODES[operation], operation, preparation, authorization, planPath, files, directory, terraformDataDir,
     prerequisiteChain: adapterPrerequisites, registrationPredecessorRecovery: request.predecessorReceiptRecovery });
   if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
   if (['recover-policy', 'verify-policy-writer-termination'].includes(operation)) {
