@@ -227,17 +227,25 @@ const assertHistoricalRecord = (value, kind, preparation, hashes) => {
   iso(value.createdAt, "WorkspaceState journal createdAt");
   return value;
 };
+const journalAuthorizationHashes = value => {
+  const hashes = { preparationSha256: value?.preparationSha256, authorizationSha256: value?.authorizationSha256, authorizationProvenanceSha256: value?.authorizationProvenanceSha256 };
+  if (Object.values(hashes).some(hash => !SHA256.test(hash || ""))) throw new Error("WorkspaceState journal authorization binding is invalid.");
+  return hashes;
+};
+const sameJournalAuthorization = (left, right) => ["preparationSha256", "authorizationSha256", "authorizationProvenanceSha256"].every(field => left[field] === right[field]);
 export function createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation, kind, reservation, deletionAttempt, proofRecord, deletionPrewriteFailed = null, deletionRetryAttempt = null, deletionComplete = null, creationAttempt = null, terminalRecord = null, desired = readWorkspaceStateDesiredPolicy(), liveState, preparedAt = new Date().toISOString() } = {}) {
   const base = assertWorkspaceStatePreparation(basePreparation, { sourceSha, desired, now: preparedAt, allowExpired: true });
   if (base.continuation !== null) throw new Error("WorkspaceState continuation must reference a normal preparation.");
   const reservationHashes = { preparationSha256: reservation?.preparationSha256, authorizationSha256: reservation?.authorizationSha256, authorizationProvenanceSha256: reservation?.authorizationProvenanceSha256 };
   if (Object.values(reservationHashes).some(value => !SHA256.test(value || ""))) throw new Error("WorkspaceState reservation proof is invalid.");
   assertHistoricalRecord(reservation, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", base, reservationHashes);
-  assertHistoricalRecord(deletionAttempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", base, reservationHashes);
+  const deletionAttemptHashes = journalAuthorizationHashes(deletionAttempt);
+  assertHistoricalRecord(deletionAttempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", base, deletionAttemptHashes);
   assertRecordOrder(reservation, deletionAttempt);
   let expectedPlan;
   if (kind === "PROVED_NO_DELETE_WRITE") {
-    assertHistoricalRecord(proofRecord, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, reservationHashes);
+    assertHistoricalRecord(proofRecord, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, journalAuthorizationHashes(proofRecord));
+    if (!sameJournalAuthorization(deletionAttemptHashes, journalAuthorizationHashes(proofRecord))) throw new Error("WorkspaceState deletion attempt and prewrite proof are not bound to one authorizing handoff.");
     if (proofRecord.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation.");
     assertRecordOrder(deletionAttempt, proofRecord);
     if (deletionRetryAttempt || deletionComplete || creationAttempt || terminalRecord) throw new Error("WorkspaceState delete continuation is unavailable after a retry or later mutation boundary.");
@@ -247,12 +255,13 @@ export function createWorkspaceStateContinuationPreparation({ sourceSha, basePre
     if (!proofRecord || proofRecord.kind !== "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE" || !SHA256.test(proofRecord.recordSha256 || "")) throw new Error("WorkspaceState delete completion proof is missing.");
     if (creationAttempt || terminalRecord || (deletionComplete && deletionComplete.recordSha256 !== proofRecord.recordSha256)) throw new Error("WorkspaceState create continuation has prior create or terminal evidence.");
     if (deletionPrewriteFailed && !deletionRetryAttempt || deletionRetryAttempt && !deletionPrewriteFailed) throw new Error("WorkspaceState create continuation deletion retry chain is incomplete.");
-    if (deletionPrewriteFailed) { assertHistoricalRecord(deletionPrewriteFailed, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, reservationHashes); if (deletionPrewriteFailed.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation."); assertRecordOrder(deletionAttempt, deletionPrewriteFailed, deletionRetryAttempt); }
+    if (deletionPrewriteFailed) { assertHistoricalRecord(deletionPrewriteFailed, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", base, journalAuthorizationHashes(deletionPrewriteFailed)); if (!sameJournalAuthorization(deletionAttemptHashes, journalAuthorizationHashes(deletionPrewriteFailed))) throw new Error("WorkspaceState deletion attempt and prewrite proof are not bound to one authorizing handoff."); if (deletionPrewriteFailed.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation."); assertRecordOrder(deletionAttempt, deletionPrewriteFailed, deletionRetryAttempt); }
     if (deletionRetryAttempt) assertHistoricalRecord(deletionRetryAttempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", base, { preparationSha256: deletionRetryAttempt.preparationSha256, authorizationSha256: deletionRetryAttempt.authorizationSha256, authorizationProvenanceSha256: deletionRetryAttempt.authorizationProvenanceSha256 });
     const completionHashes = { preparationSha256: proofRecord.preparationSha256, authorizationSha256: proofRecord.authorizationSha256, authorizationProvenanceSha256: proofRecord.authorizationProvenanceSha256 };
     assertHistoricalRecord(proofRecord, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", base, completionHashes);
     assertRecordOrder(deletionAttempt, ...(deletionRetryAttempt ? [deletionRetryAttempt] : []), proofRecord);
-    if (["preparationSha256", "authorizationSha256", "authorizationProvenanceSha256"].some(field => (deletionRetryAttempt ? deletionRetryAttempt[field] : reservation[field]) !== proofRecord[field])) throw new Error("WorkspaceState delete completion is not bound to its delete attempt.");
+    const completingDeleteHashes = deletionRetryAttempt ? journalAuthorizationHashes(deletionRetryAttempt) : deletionAttemptHashes;
+    if (!sameJournalAuthorization(completingDeleteHashes, completionHashes)) throw new Error("WorkspaceState delete completion is not bound to its delete attempt.");
     if (!stateMatchesAfterDeletion(authenticateWorkspaceStateLiveState(liveState, { desired }), base)) throw new Error("WorkspaceState proved-no-create continuation live state changed.");
     expectedPlan = [base.expectedWritePlan[1]];
   } else throw new Error("WorkspaceState continuation kind is unsupported.");
@@ -338,23 +347,26 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
         if (reservation.recordSha256 !== refs.reservationRecordSha256 || !attempt || attempt.recordSha256 !== refs.deletionAttemptRecordSha256) throw new Error("WorkspaceState continuation journal references do not match the authenticated proof.");
         const reservationHashes = { preparationSha256: reservation.preparationSha256, authorizationSha256: reservation.authorizationSha256, authorizationProvenanceSha256: reservation.authorizationProvenanceSha256 };
         assertHistoricalRecord(reservation, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION", basePreparation, reservationHashes);
-        assertHistoricalRecord(attempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", basePreparation, reservationHashes);
+        const attemptHashes = journalAuthorizationHashes(attempt);
+        assertHistoricalRecord(attempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_ATTEMPT", basePreparation, attemptHashes);
         assertRecordOrder(reservation, attempt);
         if (refs.kind === "PROVED_NO_DELETE_WRITE") {
           if (!prewriteFailure || prewriteFailure.recordSha256 !== refs.proofRecordSha256 || prewriteFailure.recordSha256 !== refs.deletionPrewriteFailedRecordSha256 || createAttempt || (complete && !retryAttempt)) throw new Error("WorkspaceState delete continuation is not a proved-no-write state.");
-          assertHistoricalRecord(prewriteFailure, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", basePreparation, reservationHashes);
+          assertHistoricalRecord(prewriteFailure, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", basePreparation, journalAuthorizationHashes(prewriteFailure));
+          if (!sameJournalAuthorization(attemptHashes, journalAuthorizationHashes(prewriteFailure))) throw new Error("WorkspaceState deletion attempt and prewrite proof are not bound to one authorizing handoff.");
           if (prewriteFailure.prewriteDisposition !== "FRESH_AUTH_CONTINUATION_ALLOWED") throw new Error("WorkspaceState security contradiction cannot authorize a continuation.");
           assertRecordOrder(attempt, prewriteFailure);
           if (retryAttempt) assertRecord(retryAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", retryAttempt.createdAt));
           if (complete) assertRecord(complete, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", complete.createdAt));
         } else {
           if (!complete || complete.recordSha256 !== refs.proofRecordSha256 || (prewriteFailure?.recordSha256 || null) !== refs.deletionPrewriteFailedRecordSha256 || prewriteFailure && !retryAttempt || (retryAttempt?.recordSha256 || null) !== refs.deletionRetryAttemptRecordSha256) throw new Error("WorkspaceState create continuation is not a proved-no-write state.");
-          if (prewriteFailure) { assertHistoricalRecord(prewriteFailure, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", basePreparation, reservationHashes); assertRecordOrder(attempt, prewriteFailure, retryAttempt); }
+          if (prewriteFailure) { assertHistoricalRecord(prewriteFailure, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", basePreparation, journalAuthorizationHashes(prewriteFailure)); if (!sameJournalAuthorization(attemptHashes, journalAuthorizationHashes(prewriteFailure))) throw new Error("WorkspaceState deletion attempt and prewrite proof are not bound to one authorizing handoff."); assertRecordOrder(attempt, prewriteFailure, retryAttempt); }
           if (retryAttempt) assertHistoricalRecord(retryAttempt, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_RETRY_ATTEMPT", basePreparation, { preparationSha256: retryAttempt.preparationSha256, authorizationSha256: retryAttempt.authorizationSha256, authorizationProvenanceSha256: retryAttempt.authorizationProvenanceSha256 });
           const completionHashes = { preparationSha256: complete.preparationSha256, authorizationSha256: complete.authorizationSha256, authorizationProvenanceSha256: complete.authorizationProvenanceSha256 };
           assertHistoricalRecord(complete, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_COMPLETE", basePreparation, completionHashes);
           assertRecordOrder(attempt, ...(retryAttempt ? [retryAttempt] : []), complete);
-          if (["preparationSha256", "authorizationSha256", "authorizationProvenanceSha256"].some(field => (retryAttempt ? retryAttempt[field] : reservation[field]) !== complete[field])) throw new Error("WorkspaceState deletion completion is not bound to its delete attempt.");
+          const completingDeleteHashes = retryAttempt ? journalAuthorizationHashes(retryAttempt) : attemptHashes;
+          if (!sameJournalAuthorization(completingDeleteHashes, completionHashes)) throw new Error("WorkspaceState deletion completion is not bound to its delete attempt.");
           if (createAttempt) assertRecord(createAttempt, expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_CREATION_ATTEMPT", createAttempt.createdAt));
         }
         const current = await observe(readLiveState, desired);

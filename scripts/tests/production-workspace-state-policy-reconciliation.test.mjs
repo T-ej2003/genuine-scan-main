@@ -245,6 +245,39 @@ test("fresh matching authorization adopts a zero-write reservation without rewri
   assert.deepEqual(original.journal.values.get(workspaceStateJournalKey(auth.operationId, "reservation.json")), originalBytes);
 });
 
+test("fresh continuation authenticates adopter-bound delete attempt and prewrite proof", async () => {
+  const original = executor(); await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
+  const adopted = freshAuthorization(); let reads = 0;
+  const adoptingRun = executor({ prep: adopted.prep, authorization: adopted.auth, journal: original.journal, now: () => adopted.at, readLiveState: async () => { reads += 1; if (reads > 2) throw new WorkspaceStateRetryableObservationError("temporary IAM read failure"); return state(); } });
+  await assert.rejects(() => executeWorkspaceStateReconciliation(adoptingRun.args), error => error.mutationOutcome === "DELETE_NOT_ISSUED");
+  assert.deepEqual([adoptingRun.box.deletes, adoptingRun.box.creates], [0, 0]);
+
+  const read = file => JSON.parse(original.journal.values.get(workspaceStateJournalKey(adopted.prep.operationId, file)));
+  const reservation = read("reservation.json"); const attempt = read("deletion-attempt.json"); const proof = read("deletion-prewrite-failed.json");
+  assert.notEqual(attempt.authorizationSha256, reservation.authorizationSha256);
+  assert.equal(attempt.authorizationSha256, proof.authorizationSha256);
+  assert.equal(attempt.authorizationProvenanceSha256, proof.authorizationProvenanceSha256);
+  const splitProof = { ...proof, authorizationSha256: "d".repeat(64) }; delete splitProof.recordSha256; splitProof.recordSha256 = hash(splitProof);
+  assert.throws(() => createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: adopted.prep, kind: "PROVED_NO_DELETE_WRITE", reservation, deletionAttempt: attempt, proofRecord: splitProof, liveState: state(), preparedAt: new Date(adopted.at.getTime() + 1).toISOString() }), /one authorizing handoff/);
+
+  const continuationAt = new Date(adopted.at.getTime() + CONTRACT.maxAgeMs + 1);
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: adopted.prep, kind: "PROVED_NO_DELETE_WRITE", reservation, deletionAttempt: attempt, proofRecord: proof, liveState: state(), preparedAt: continuationAt.toISOString() });
+  const continuationAuth = authorization(continuation, continuationAt, "125", adopted.prep);
+  const resumed = executor({ prep: continuation, basePreparation: adopted.prep, authorization: continuationAuth, journal: original.journal, now: () => continuationAt });
+  assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([resumed.box.deletes, resumed.box.creates], [1, 0]);
+
+  const continuationAt2 = new Date(continuationAt.getTime() + 60_000);
+  const completion = read("deletion-complete.json");
+  const splitCompletion = { ...completion, authorizationProvenanceSha256: "e".repeat(64) }; delete splitCompletion.recordSha256; splitCompletion.recordSha256 = hash(splitCompletion);
+  assert.throws(() => createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: adopted.prep, kind: "PROVED_NO_CREATE_WRITE", reservation, deletionAttempt: attempt, proofRecord: splitCompletion, deletionPrewriteFailed: proof, deletionRetryAttempt: read("deletion-retry-attempt.json"), liveState: afterDelete(), preparedAt: continuationAt2.toISOString() }), /not bound to its delete attempt/);
+  const createContinuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation: adopted.prep, kind: "PROVED_NO_CREATE_WRITE", reservation, deletionAttempt: attempt, proofRecord: completion, deletionPrewriteFailed: proof, deletionRetryAttempt: read("deletion-retry-attempt.json"), liveState: afterDelete(), preparedAt: continuationAt2.toISOString() });
+  const createAuth = authorization(createContinuation, continuationAt2, "126", adopted.prep);
+  const creating = executor({ prep: createContinuation, basePreparation: adopted.prep, authorization: createAuth, journal: original.journal, live: afterDelete(), now: () => continuationAt2 });
+  assert.equal((await executeWorkspaceStateReconciliation(creating.args)).status, "COMPLETED");
+  assert.deepEqual([creating.box.deletes, creating.box.creates], [0, 1]);
+});
+
 test("fresh reservation adoption resumes its own authenticated mutation records", async () => {
   const original = executor();
   await seedRecord(original, original.args.authorization, original.args.preparation, "reservation.json", "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_RESERVATION");
