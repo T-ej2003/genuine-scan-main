@@ -35,6 +35,7 @@ const normalApplication = [
 
 const securityInfrastructure = [
   /^\.github\/workflows\//,
+  /^\.github\/actions\/converge-stage-b-prerequisites\/action\.yml$/,
   /^infra\//,
   /^backend\/prisma\//,
   /^backend\/src\/(?:app\.ts$|index\.ts$|auth\/|rls-waves\/|workers\/|security\/|middleware\/|routes\/(?:index\.ts$|modules\/authRoutes\.ts$)|controllers\/(?:auth(?:AdminSecurity|Session)?Controller(?:Shared)?\.ts$|verify\/)|config\/database\.ts)/i,

@@ -685,7 +685,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    readRecoveryReceipt:async(id,status)=>receipts.find(r=>r[0]===id&&r[1]===status)?.[2]||null};
   const adapterFactory=options=>{currentPreparation=options.preparation;currentChain=options.prerequisiteChain;return deps;};
   const planningInputs=()=>({recoveryMode:'NORMAL',toolingTreeSha256:tree,bindingReport:{stateLineage:liveState.lineage,stateSerial:liveState.serial}});
-  const run=request=>runStagedBrokerRequest({files,directory,terraformDataDir:directory,...request},{adapterFactory,checker,planningInputs});
+  const run=request=>runStagedBrokerRequest({files,directory,terraformDataDir:directory,...request},{adapterFactory,checker,planningInputs,readProtectedApproval:async()=>null});
   const json=value=>JSON.parse(JSON.stringify(value));
   const prepared=json(await run({operation:'prepare-registration',predecessorReceiptRecovery:{registrationTransactionId:x.proof.registrationTransactionId,policyTransactionId:x.proof.policyTransactionId}}));
   assert.deepEqual(prepared.preparation.registrationPolicyPredecessor,x.policy);

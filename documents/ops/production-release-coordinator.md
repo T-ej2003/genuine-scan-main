@@ -67,8 +67,6 @@ Self-approval is recorded as `checkerIndependent=false` and
 `soleOperatorModel=true`; it is never described as independent human review.
 This change does not grant additional AWS permissions.
 
-Implementation remains in progress: the hosted default runtime and Release
-Train connection must be completed and tested before this branch is reviewable.
 The executable fixture is not production execution evidence. The hosted writer
 now freezes the OIDC credentials from the approved Release Train job. Read-only
 held-owner recovery requires authentication of that exact completed job and an
@@ -154,14 +152,11 @@ writer connection pins bounded session provenance before an IAM write;
 uncertain alias outcomes still require authenticated native CAS execution
 provenance. No release-role CloudTrail/administrator permission is being added.
 
-Local validation at this checkpoint: the combined coordinator, public Stage-B,
-executor and ownership suite reported 435 passed / 1 skipped. The source-bound
-dispatch suite reported 7 passed. Workflow YAML, security guardrails, canonical
-capability graph, dependency closure, RLS package and RLS boundary checks passed.
-The capability/dependency checks also caught and resolved an eager approval
-import cycle; protected-approval tests are rerun after that correction. These
-checks are local development proof, not hosted CI or production proof. Final
-OSV work remains deferred until implementation freeze.
+Local coordinator, public Stage-B, deployment-closure, workflow, security,
+capability, dependency, RLS, Terraform and OSV gates passed before the first
+PR head. Hosted CI then exposed one missing credential-root inventory entry;
+that exact checker workflow is now classified and retested. These are source
+and deterministic-fixture results, not production execution evidence.
 
 The coordinator now captures each prepared phase's exact package, manifest,
 tfvars, backend metadata and saved plan into immutable content-addressed
@@ -182,6 +177,15 @@ bounded workflow run, rerunning the failed orchestrate job resumes that exact
 release without selecting a Stage-B phase. A recovered held writer is bound to
 the exact previous GitHub run attempt and its expired AWS session; a later
 attempt cannot impersonate that writer.
+
+The hosted coordinator is used for a Release Train target equal to current
+protected `main`. Existing explicit historical `release-*` and `v*` tag
+dispatches retain the prior Release Gate route after exact source/ancestry
+checks; those older source trees do not claim to run current-main Stage-B
+mutation tooling. The release classification treats only the coordinator's
+reviewed composite action path as security infrastructure. A four-version
+predecessor records a durable no-pruning decision, so a later policy creation
+cannot cause restart to insert a pruning mutation out of order.
 
 The release ID binds the ticket as well as the source, deployed baseline and
 classification. Completed phase results are reauthenticated against their

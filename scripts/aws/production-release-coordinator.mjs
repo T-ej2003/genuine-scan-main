@@ -341,13 +341,28 @@ export async function runReleaseCoordinator(request, runtime) {
    prepared:done?await get(done.prepared):savedPreparation?await get(savedPreparation.result):name==='closure'?packages.cutover.prepared:null});
   assert.equal(inputs.predecessorReceiptRecovery,undefined,'Historical predecessor selection belongs only to registration preparation');
   context.inputs=inputs;
-  if (name === 'pruning' && !done) {
-   const pending = savedPreparation;
-   if (pending) context.versionId = (await get(pending.result)).preparation.target.versionId;
-   else {
-    const retention = await runtime.authenticatePolicyRetention(context, chain);
-    if (retention.inventory.length < 5) continue;
-    context.versionId = selectReleasePolicyDeletion(retention);
+  if (name === 'pruning') {
+   const skipped = await readStep('pruning:skipped');
+   if (skipped) {
+    assert.equal(done,null,'Pruning cannot be both skipped and completed');
+    assert.equal(savedPreparation,null,'Pruning cannot be both skipped and prepared');
+    const retention=await get(skipped.result);
+    assert.equal(retention.inventory.length,4,'Only four-version capacity may skip pruning');
+    const policyAttempted=(await Promise.all(Array.from({length:20},(_,round)=>readStep(`policy:attempt:${round}`)))).some(Boolean);
+    if (!policyAttempted) assert.deepEqual(await runtime.authenticatePolicyRetention(context,chain),retention,'Unpruned inventory changed before policy convergence');
+    continue;
+   }
+   if (!done) {
+    if (savedPreparation) context.versionId = (await get(savedPreparation.result)).preparation.target.versionId;
+    else {
+     const retention = await runtime.authenticatePolicyRetention(context, chain);
+     if (retention.inventory.length < 5) {
+      assert.equal(retention.inventory.length,4,'Policy capacity changed outside the supported predecessor');
+      await record('pruning:skipped',{result:await put(retention)});
+      continue;
+     }
+     context.versionId = selectReleasePolicyDeletion(retention);
+    }
    }
   }
   let prepared, authorization, result;

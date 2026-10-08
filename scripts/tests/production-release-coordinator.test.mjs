@@ -388,10 +388,11 @@ test('current completed operation retains its real signed identity and all twelv
  assert.throws(()=>adoptRegisteredOutputs(entry,descendant,plan,{...impact,imageReuseCompatible:false,newImagesRequired:true}));
 });
 
-for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','github-approval','approval-boundary','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','expired-register','expired-prune','expired-converge-policy','expired-publish','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
+for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','expired-register','expired-prune','expired-converge-policy','expired-publish','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
  const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:lostResponse==='adopt-current-registration',descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor'});
+ if(lostResponse==='no-prune-policy-lost')f.changeLiveInventory(xs=>xs.filter(v=>v.VersionId!=='v9'));
  const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls;
- const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
+ const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
  const hostedApproval=['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
@@ -466,7 +467,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    assert.ok(f.snapshot().receipts.some(r=>r[1]==='STAGED_BROKER_TERMINAL_HANDOFF'));
    return packages.closure.result;
   },
-  authenticatePolicyRetention:async()=>({inventory:f.fixture.policy.receiptBoundAdoption.successorInventory.map((v,i)=>({versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(Date.UTC(2026,8,['v9','v10','v11','v12','v13'].indexOf(v.VersionId)+1)).toISOString(),documentSha256:brokerDigest(f.fixture.policy.terminal.policy)})),protectedVersionIds:['v12','v13'],obsoleteVersionIds:['v9','v10','v11']}),
+  authenticatePolicyRetention:async()=>({inventory:f.snapshot().policySnapshot.versions.map(v=>({versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(Date.UTC(2026,8,['v9','v10','v11','v12','v13'].indexOf(v.VersionId)+1)).toISOString(),documentSha256:brokerDigest(f.fixture.policy.terminal.policy)})),protectedVersionIds:['v12','v13'],obsoleteVersionIds:['v9','v10','v11']}),
   obtainAuthorization:async(context,phase,prepared,digest)=>{
    assert.equal(brokerDigest(prepared),digest);
    if(['approval-boundary','approval-record-response-lost'].includes(lostResponse)&&phase==='registration'){
@@ -513,6 +514,8 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    assert.ok(workflow.slice(workflow.indexOf('  orchestrate:')).includes('environment: production'));
    assert.ok(workflow.indexOf('Wait for required workflow gates')<workflow.indexOf('Converge exact Stage B prerequisites'));
    assert.ok(workflow.indexOf('Converge exact Stage B prerequisites')<workflow.indexOf('Trigger final Release Gate'));
+   assert.ok(workflow.includes("if: needs.gates.outputs.target_ref == 'main'"));
+   assert.ok(workflow.includes('git merge-base --is-ancestor "$TARGET_SHA" origin/main'));
   }
   const invoke=()=>['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)
    ? runHostedReleaseCoordinator(hostedReleaseTrainRequest({TARGET_SHA:request.sourceSha,RELEASE_TICKET_ID:request.ticketId,
@@ -522,13 +525,14 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   const result=await invoke();
   assert.equal(result.status,'PREREQUISITES_CONVERGED');
   const expected=['prepare-registration','register','prepare-pruning','prune','prepare-policy','converge-policy','prepare-publication','publish','prepare-cutover','cutover','reconcile'];
+  if(lostResponse==='no-prune-policy-lost')expected.splice(expected.indexOf('prepare-pruning'),2);
   if(['adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse))expected.splice(0,2);
   if(['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse))expected.unshift('prepare-registration-adoption');
   if(lostResponse==='hosted-runner-replacement')expected.splice(expected.indexOf('prune')+1,0,'recover-policy');
   else if(lostResponse==='proved-no-policy-write')expected.splice(expected.indexOf('prune')+1,0,'recover-policy','prune');
   else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-record-response-lost','approval-expired-before-consumption'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover'}[lostOperation]);
   assert.deepEqual(calls,expected);
-  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
+  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
   assert.equal(f.snapshot().registeredTaskDefinitionCalls,12);
   if(['adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)){assert.equal(result.registrationTransactionId,CURRENT_REGISTRATION_OPERATION);assert.equal(f.snapshot().registeredTaskDefinitionCalls-priorRegistrationCalls,0);}
   if(['approval-boundary','approval-record-response-lost'].includes(lostResponse))assert.equal(approvalDispatches,1);
@@ -538,7 +542,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   await invoke();
   assert.deepEqual(calls,expected);
   if(lostResponse==='authorization-response-lost'){assert.ok(steps.has(`${result.releaseId}/registration:authorized:0`));assert.ok(steps.has(`${result.releaseId}/registration:authorized:1`));}
-  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
+  assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);
  }finally{f.dispose();}
 });
 
