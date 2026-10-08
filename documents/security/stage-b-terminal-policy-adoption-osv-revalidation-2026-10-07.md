@@ -193,3 +193,21 @@ of this package, and the scan identifies the finding only in the root npm
 development dependency group. The accepted advisory identity, scope,
 rationale, owner, creation date, execution claims, and expiry `2026-11-02`
 remain unchanged.
+
+## Current PR #641 predecessor-recovery and policy-chain revalidation
+
+Date: 2026-10-08 UTC. After freezing the recovery source-identity and mixed
+policy-chain corrections at code commit
+`3757b62cba7cb9d424fdddbcc5973241a256fa9c`, the canonical
+`reachabilityInputsSha256(process.cwd())` result is
+`699b53c1d0ce2f8730aff07bd0d31eb93c77bd171cd4fd24f0f9aa7f9295bfa3`. A fresh
+unfiltered OSV Scanner 2.6.0 scan found the same HIGH development-only
+`braces@3.0.3` finding, `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` (report
+SHA256 `13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`).
+The canonical browser closure transformed 3,993 modules into 96 chunks and
+resolved 204 packages; `braces@3.0.3` is absent. The backend lockfile remains
+free of the package and the scan identifies it only in the root npm
+development dependency group. The acceptance remains limited to the same
+advisory and retains its scope, rationale, owner, creation date, execution
+claims, and expiry `2026-11-02`. The canonical OSV runtime gate passed against
+these frozen inputs.
