@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createWorkspaceStateAuthorization } from "./production-workspace-state-policy-reconciliation.mjs";
+import { assertStageBArtifactPath, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const required = (argv, name) => { const index = argv.indexOf(name), value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--")) throw new Error(`${name} is required.`); return value; };
+export function authorizeWorkspaceStateReconciliation(argv = process.argv.slice(2), deps = {}) {
+  const allowed = new Set(["--preparation", "--preparation-file-sha256", "--base-preparation", "--base-preparation-file-sha256", "--environment-approval", "--environment-approval-file-sha256", "--output"]), seen = new Set();
+  if (argv[0] !== "--authorize" || argv.filter(value => value === "--authorize").length !== 1) throw new Error("--authorize is required exactly once; authorization is never implicit.");
+  for (let index = 1; index < argv.length; index += 2) { const name = argv[index], value = argv[index + 1]; if (!allowed.has(name) || seen.has(name) || !value || value.startsWith("--")) throw new Error("WorkspaceState authorization arguments are not exact."); seen.add(name); }
+  const preparation = readBoundStageBPrivateJson({ filePath: path.resolve(required(argv, "--preparation")), expectedSha256: required(argv, "--preparation-file-sha256"), repositoryRoot: root, label: "WorkspaceState preparation" });
+  const basePath = argv.includes("--base-preparation");
+  if (basePath !== argv.includes("--base-preparation-file-sha256")) throw new Error("WorkspaceState base preparation path and digest must be supplied together.");
+  const basePreparation = basePath ? readBoundStageBPrivateJson({ filePath: path.resolve(required(argv, "--base-preparation")), expectedSha256: required(argv, "--base-preparation-file-sha256"), repositoryRoot: root, label: "WorkspaceState base preparation" }) : null;
+  const approval = readBoundStageBPrivateJson({ filePath: path.resolve(required(argv, "--environment-approval")), expectedSha256: required(argv, "--environment-approval-file-sha256"), repositoryRoot: root, label: "WorkspaceState environment approval" });
+  const authorization = createWorkspaceStateAuthorization({ preparation, basePreparation, protectedEnvironmentApprovalEvidence: approval, now: deps.now || new Date() });
+  const output = assertStageBArtifactPath({ artifactPath: path.resolve(required(argv, "--output")), repositoryRoot: root, label: "WorkspaceState authorization", allowExisting: false }); ensureStageBPrivateDirectory({ directory: path.dirname(output), repositoryRoot: root, label: "WorkspaceState authorization directory" });
+  writeStageBPrivateFileExclusive({ filePath: output, bytes: Buffer.from(`${JSON.stringify(authorization, null, 2)}\n`), repositoryRoot: root, label: "WorkspaceState authorization" });
+  return Object.freeze({ authorizationSha256: authorization.authorizationSha256, approvedBy: authorization.approvedBy });
+}
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) process.stdout.write(`${JSON.stringify(authorizeWorkspaceStateReconciliation(), null, 2)}\n`);

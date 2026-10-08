@@ -1730,6 +1730,177 @@
       "capabilityGraphPresent": true
     },
     {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "sts:GetCallerIdentity",
+      "capabilityId": "workspace-state-reconciliation-identify",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:GetPolicy",
+      "capabilityId": "workspace-state-reconciliation-read-policy",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:GetPolicyVersion",
+      "capabilityId": "workspace-state-reconciliation-read-policy-version",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:ListPolicyVersions",
+      "capabilityId": "workspace-state-reconciliation-list-policy-versions",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:ListEntitiesForPolicy",
+      "capabilityId": "workspace-state-reconciliation-list-policy-entities",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "s3:GetObject",
+      "capabilityId": "workspace-state-reconciliation-read-journal",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "s3:PutObject",
+      "capabilityId": "workspace-state-reconciliation-write-journal",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:DeletePolicyVersion",
+      "capabilityId": "workspace-state-reconciliation-delete-policy-version",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "action": "iam:CreatePolicyVersion",
+      "capabilityId": "workspace-state-reconciliation-create-policy-version",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/production-green-stage-b-ecs-observations.mjs",
       "action": "ec2:DescribeNetworkInterfaces",
       "capabilityId": "manifest-refresh-stage-a-vpc-endpoint-interfaces",

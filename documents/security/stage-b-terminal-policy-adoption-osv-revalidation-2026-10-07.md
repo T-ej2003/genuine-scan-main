@@ -63,3 +63,101 @@ The historical policy tooling-tree recomputation updates the fingerprint to
 `c570635d7a4de415ccfcb86af96c0343e01129e31c2277de3a993175ef2deb63`.
 It adds only source-to-tree authentication at receipt-bound handoff creation
 and consumption. The accepted finding and expiry remain unchanged.
+
+The earlier PR #640 WorkspaceState policy-capacity review was historically
+bound to `8d18bc437e1b2af948109498dc1196003ba18d3de0d2fe443e075a8b324873e1`.
+That digest is superseded and is not the final executable/build-input review.
+
+## Historical PR #640 input revalidation (superseded)
+
+Date: 2026-10-08 UTC. After hostile review and final relevant tests, the
+implementation was frozen. The canonical `reachabilityInputsSha256(process.cwd())`
+result was `56358825a3f222b8161f16aa87a72d59a651797881ef183574e7fb229d9826af`.
+An unfiltered OSV Scanner 2.6.0 source scan produced the same finding set as the
+previous report: one HIGH dev-only `braces@3.0.3` finding,
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The fresh canonical browser-closure
+build transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` was absent. The exact hosted OSV/runtime gate passed against
+that fresh report and fingerprint.
+
+Only `reachability.inputsSha256` changed in the acceptance. Advisory identity,
+package/version, scope, rationale, owner, creation date, execution claims, and
+exclusive expiry `2026-11-02` are unchanged. The current acceptance and this
+final revalidation record both bind the digest above.
+
+## Historical PR #640 continuation recovery revalidation (superseded)
+
+Date: 2026-10-08 UTC. After the WorkspaceState continuation and restart
+recovery implementation was frozen and its required local test gates passed,
+the canonical `reachabilityInputsSha256(process.cwd())` result was
+`8c8980f2318590552657955caabffb50d5268ca513a673eddf1bd4d71f0fee56`. A fresh
+unfiltered OSV Scanner 2.6.0 source scan found exactly one HIGH finding:
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`, `braces@3.0.3`, in the root
+development dependency lockfile. The fresh canonical browser-closure build
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` was absent. The exact hosted OSV/runtime gate passed against
+these frozen inputs. The existing acceptance remains limited to this advisory
+and its existing scope, rationale, owner, and expiry `2026-11-02`; no
+reachability or expiry claim was broadened.
+
+## Historical PR #640 delete-retry recovery revalidation (superseded)
+
+Date: 2026-10-08 UTC. After the exact-head review correction for deletion
+retry recovery was implemented, the implementation was frozen and the
+required local suites passed. The canonical `reachabilityInputsSha256(process.cwd())`
+result was `7ea49721e3dfd4cad4bd00ce492a54de0036886e46fcf99e37b94998c443023c`.
+A fresh unfiltered OSV Scanner 2.6.0 scan again found exactly the existing HIGH
+`braces@3.0.3` development-only advisory `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. The fresh browser/runtime gate transformed 3,993 modules into
+96 chunks and resolved 204 packages; `braces@3.0.3` was absent, and the gate
+passed. The acceptance remains bound only to that existing advisory and keeps
+its prior scope, rationale, owner, and expiry `2026-11-02`.
+
+## Historical PR #640 compact-continuation revalidation (superseded)
+
+Date: 2026-10-08 UTC. After the compact continuation transport and separately
+bound base-preparation handling were frozen, all required Stage-B, IAM,
+capability/dependency, security, workflow, and RLS gates passed. The canonical
+`reachabilityInputsSha256(process.cwd())` result is
+`03c57c88519d75bf6633928329a119cacb0824361801b4f92e4cc264a03b8645`.
+Unfiltered OSV Scanner 2.6.0 report
+`/private/tmp/mscqr-pr640-osv.9KXqm9/osv-source.json` contains the existing
+single HIGH `braces@3.0.3` dev-only finding, `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. The canonical browser closure built 3,993 modules into 96
+chunks and resolved 204 packages; `braces@3.0.3` is absent. The exact
+`check-osv-runtime.mjs` gate passed on this report and the final fingerprint.
+The acceptance continues to use the existing advisory, package/version,
+scope, rationale, owner, creation date, execution claims, and expiry
+`2026-11-02`.
+
+## Historical PR #640 pre-delete no-write recovery revalidation (superseded)
+
+Date: 2026-10-08 UTC. After the final pre-delete no-write journal disposition
+and contradiction classification were implemented and all required
+source/test gates passed, the
+canonical `reachabilityInputsSha256(process.cwd())` result is
+`8b300f5dd7868d2349737ef63b5b21319ea4426c4beb8fa53ab3120b59f4afa6`. A fresh
+unfiltered OSV Scanner 2.6.0 scan at
+`/private/tmp/mscqr-pr640-osv-final-fbf0c050/osv-source.json` found the same
+single HIGH development-only `braces@3.0.3` finding,
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The fresh canonical browser closure
+at `/private/tmp/mscqr-pr640-osv-final-fbf0c050/browser-runtime-closure.json`
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` is absent. The existing non-runtime acceptance remains limited
+to this advisory and retains its prior scope, rationale, owner, creation date,
+execution claims, and expiry `2026-11-02`.
+
+## Current final PR #640 adopter-bound continuation revalidation
+
+Date: 2026-10-08 UTC. After validating adopter-bound attempt, prewrite-proof,
+and completion journal bindings, the frozen executable/build fingerprint is
+`28fa19e652f9e9146423bc723229fe9a43ffbfdbee5857a800a91d0040d7de06`. The
+fresh unfiltered OSV Scanner 2.6.0 report at
+`/private/tmp/mscqr-pr640-osv-final-YxjONK/osv-source.json` contains the same
+single HIGH dev-only `braces@3.0.3` finding, `GHSA-vfj7-8cjw-p6xm` /
+`CVE-2026-93687`. A fresh canonical browser closure at
+`/private/tmp/mscqr-pr640-osv-final-YxjONK/browser-runtime-closure.json`
+transformed 3,993 modules into 96 chunks and resolved 204 packages;
+`braces@3.0.3` is absent. The existing acceptance retains its advisory,
+package/version, scope, rationale, owner, creation date, execution claims, and
+exclusive expiry `2026-11-02`.

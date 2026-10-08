@@ -286,21 +286,26 @@
     },
     {
       "order": 57,
+      "id": "workspace-state-policy-reconciliation",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs"
+    },
+    {
+      "order": 58,
       "id": "bootstrap-operator-policy-reconciliation",
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs"
     },
     {
-      "order": 58,
+      "order": 59,
       "id": "mixed-dual-slot-recovery-iam-preflight",
       "sourceFile": "scripts/aws/preflight-production-mixed-dual-slot-recovery-iam.mjs"
     },
     {
-      "order": 59,
+      "order": 60,
       "id": "mixed-dual-slot-recovery-execution",
       "sourceFile": "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"
     },
     {
-      "order": 60,
+      "order": 61,
       "id": "stage-b-exact-refresh-only-state-reconciliation",
       "sourceFile": "scripts/aws/reconcile-production-green-stage-b-state.mjs"
     }
@@ -24533,6 +24538,269 @@
       },
       "required": true,
       "mutation": true
+    },
+    {
+      "id": "workspace-state-reconciliation-create-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-create-policy-version",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "mutationCountMaximum": 1
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-create-policy-version",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "workspace-state-reconciliation-delete-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-delete-policy-version",
+      "action": "iam:DeletePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
+        "mutationCountMaximum": 1
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-delete-policy-version",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "workspace-state-reconciliation-identify",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-identify",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-identify",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-list-policy-entities",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-list-policy-entities",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-list-policy-entities",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-list-policy-versions",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-list-policy-versions",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-list-policy-versions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-read-journal",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-journal",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-read-journal",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-read-policy",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-policy",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-read-policy",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-read-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-policy-version",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ADMIN_DIRECT_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-read-policy-version",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "workspace-state-reconciliation-write-journal",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-write-journal",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2",
+        "targetPolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      },
+      "classification": "ROOT_GOVERNED_IAM_POLICY_RECONCILIATION",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+        "sid": "workspace-state-reconciliation-write-journal",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": null
+      },
+      "required": true,
+      "mutation": true
     }
   ],
   "directProbes": [
@@ -26049,6 +26317,105 @@
         "*"
       ],
       "capabilityId": "provider-readonly-reconciliation-identify-prepare"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-create-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:CreatePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-create-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-delete-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:DeletePolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-delete-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-policy",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-read-policy"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-policy-version",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:GetPolicyVersion",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-read-policy-version"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-list-policy-entities",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListEntitiesForPolicy",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-list-policy-entities"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-list-policy-versions",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "iam:ListPolicyVersions",
+      "resources": [
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"
+      ],
+      "capabilityId": "workspace-state-reconciliation-list-policy-versions"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-read-journal",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:GetObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "capabilityId": "workspace-state-reconciliation-read-journal"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-write-journal",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "s3:PutObject",
+      "resources": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/workspace-state-policy-reconciliation/*"
+      ],
+      "capabilityId": "workspace-state-reconciliation-write-journal"
+    },
+    {
+      "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
+      "sourceFunction": "workspace-state-reconciliation-identify",
+      "phase": "workspace-state-policy-reconciliation",
+      "identity": "ROOT_OPERATOR",
+      "action": "sts:GetCallerIdentity",
+      "resources": [
+        "*"
+      ],
+      "capabilityId": "workspace-state-reconciliation-identify"
     },
     {
       "sourceFile": "scripts/aws/recover-production-backend-health.mjs",

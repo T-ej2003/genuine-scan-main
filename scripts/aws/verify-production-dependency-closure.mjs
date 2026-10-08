@@ -28,9 +28,20 @@ const STAGE_A_RECONCILIATION_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/productio
 const STAGE_A_TERRAFORM_STATE_ARN = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_A_TERRAFORM_BACKEND.key}`;
 const PROVIDER_READONLY_POLICY = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly";
 const PROVIDER_READONLY_JOURNAL = `${PRODUCTION_ARTIFACTS_BUCKET}/production-provider-readonly-policy-reconciliation/*`;
+const WORKSPACE_STATE_POLICY = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState";
+const WORKSPACE_STATE_JOURNAL = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/workspace-state-policy-reconciliation/*`;
 const BOOTSTRAP_OPERATOR_USER = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
 
 const CALLS = Object.freeze([
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "sts:GetCallerIdentity", "workspace-state-reconciliation-identify", ["*"], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:GetPolicy", "workspace-state-reconciliation-read-policy", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:GetPolicyVersion", "workspace-state-reconciliation-read-policy-version", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:ListPolicyVersions", "workspace-state-reconciliation-list-policy-versions", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:ListEntitiesForPolicy", "workspace-state-reconciliation-list-policy-entities", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "s3:GetObject", "workspace-state-reconciliation-read-journal", [WORKSPACE_STATE_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "s3:PutObject", "workspace-state-reconciliation-write-journal", [WORKSPACE_STATE_JOURNAL], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:DeletePolicyVersion", "workspace-state-reconciliation-delete-policy-version", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
+  ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:CreatePolicyVersion", "workspace-state-reconciliation-create-policy-version", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
   ["scripts/aws/production-green-stage-b-ecs-observations.mjs", "ec2:DescribeNetworkInterfaces", "manifest-refresh-stage-a-vpc-endpoint-interfaces", ["*"]],
   ["scripts/aws/production-green-stage-b-ecs-observations.mjs", "cloudtrail:LookupEvents", "admin-cloudtrail-denials", ["reviewed-exact-resource"], "ADMINISTRATOR"],
   ["scripts/aws/production-green-stage-b-identity-capabilities.mjs", "ec2:DescribeNetworkInterfaces", "manifest-refresh-stage-a-vpc-endpoint-interfaces", ["*"]],
@@ -373,7 +384,7 @@ export function assertChangedAwsCallClosure(scanned, graph) {
   scanned = scanned.filter(c => !Object.hasOwn(STAGED_BROKER_CALLS, c.sourceFile));
   const appOnly = assertAppOnlyAwsCallClosure(scanned, graph);
   scanned = scanned.filter(({ sourceFile }) => !Object.hasOwn(APP_ONLY_CALLS, sourceFile));
-  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs", "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"].includes(sourceFile);
+  const identityBound = (sourceFile) => ["scripts/aws/production-stage-a-production-artifacts-journal.mjs", "scripts/aws/production-root-attestation-signer.mjs", "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs", "scripts/aws/run-production-stage-a-production-artifacts-reconciliation.mjs", "scripts/aws/production-initial-activation-policy-reconciliation.mjs", "scripts/aws/run-production-initial-activation-lifecycle-policy-reconciliation.mjs", "scripts/aws/reconcile-production-provider-readonly-policy.mjs", "scripts/aws/reconcile-production-workspace-state-policy.mjs", "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs", "scripts/aws/recover-production-mixed-dual-slot-topology.mjs"].includes(sourceFile);
   const key = ({ sourceFile, action, identity = "RELEASE_DEPLOYER", sourceFunction = "", capabilityId = "" }) => `${sourceFile}\t${action}\t${identityBound(sourceFile) ? identity : ""}\t${capabilityId.endsWith("-read-raw-state") ? sourceFunction : capabilityId.includes("reservation") ? capabilityId : ""}`;
   const callKeys = new Set(CALLS.map(key));
   const normalized = scanned.map(({ sourceFile, action, identity, sourceFunction, capabilityId }) => {
