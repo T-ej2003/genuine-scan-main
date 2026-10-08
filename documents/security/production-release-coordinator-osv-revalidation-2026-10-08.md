@@ -4,10 +4,12 @@ Date: 2026-10-08 UTC. The PR A executable/build inputs were frozen after the
 coordinator, hosted Release Train, Stage-B, security, workflow, dependency,
 Terraform, and RLS validation passed. The canonical
 `reachabilityInputsSha256(process.cwd())` is
-`6e1be51e8303d9fac3a83edad5858e85c978f867bb3eef70c8c9f81126d8c572`.
-This final fingerprint includes the hosted checker credential-root inventory,
-release-path classification, durable no-pruning decision, and tag routing
-corrections validated after exact-head review.
+`8bf116a29610b3333a3a9b0d2444d8fbc04648fa1b4a6a32d66322a2f3168d28`.
+This final fingerprint includes the native recovery-boundary correction for
+coordinator restart, exact pre-intent reservation readback, and deterministic
+interruption tests across registration, policy, publication, alias CAS and
+terminal reconciliation. The source scan was rerun after executable inputs
+were frozen.
 
 The unfiltered OSV Scanner 2.6.0 source scan used binary SHA-256
 `98c460dcd37de25819babd757d04542045b6243113e209edcd4d89fedb0256b4`.

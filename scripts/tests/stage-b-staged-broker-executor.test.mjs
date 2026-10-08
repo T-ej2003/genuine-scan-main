@@ -84,7 +84,7 @@ async function native(phase = "CUTOVER") {
     if (args[0] === 'kms') { assert.equal(args[1], 'verify'); return JSON.stringify({ SignatureValid: true }); }
     if (args[0] === 's3api') {
       const key = value('--key');
-      if (args[1] === 'put-object') { assert.equal(value('--if-none-match'), '*'); if (objects.has(key)) throw new Error('Occupied'); objects.set(key, fs.readFileSync(value('--body'))); }
+      if (args[1] === 'put-object') { assert.equal(value('--if-none-match'), '*'); if (objects.has(key)) throw Object.assign(new Error('Occupied'),{stderr:'PreconditionFailed (412)'}); objects.set(key, fs.readFileSync(value('--body'))); }
       else { assert.ok(objects.has(key)); const outfile = args.find(a => a.startsWith(directory+'/')); assert.ok(outfile); fs.writeFileSync(outfile, objects.get(key)); }
       return '{}';
     }
@@ -105,6 +105,14 @@ async function reserve(r) {
   await r.adapter.reserve(id, { purpose: r.p.purpose, nonce: r.auth.nonce, preparationSha256: brokerDigest(r.p) });
   await r.adapter.record(id, 'CUTOVER_INTENT', { predecessor: r.p.alias, target: r.p.target, authorizedAt: new Date().toISOString() });
 }
+test('native reservation resumes only exact pre-intent bytes',async()=>{
+ const r=await native('CUTOVER'),id=brokerDigest(r.auth),value={purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)};
+ await r.adapter.reserve(id,value);
+ await r.adapter.reserve(id,value);
+ r.objects.set(stageBApplyAttemptS3Key(id),Buffer.from(JSON.stringify({kind:'STAGED_BROKER_RESERVATION',id,value:{...value,nonce:'substituted'}})));
+ await assert.rejects(()=>r.adapter.reserve(id,value));
+ assert.equal(r.calls.filter(call=>call.command==='aws'&&call.args[0]==='lambda'&&call.args[1]==='update-alias').length,0);
+});
 test('hosted prerequisite reader uses the existing bounded OIDC credential source without a local-profile fallback',async()=>{
  const r=await native('PUBLICATION'),env={GITHUB_ACTIONS:'true',AWS_ACCESS_KEY_ID:'fixture-key',AWS_SECRET_ACCESS_KEY:'fixture-secret',AWS_SESSION_TOKEN:'fixture-session',AWS_PROFILE:'ignored-local-profile'};
  const adapter=r.makeAdapter('PUBLICATION',r.auth,undefined,env);
@@ -776,6 +784,15 @@ test('exact no-op policy produces a coherent receipt without ownership/IAM mutat
  const r=await convergenceRecoveryFixture('no-op'),result=await r.execute.executeBrokerPolicyConvergence();
  assert.deepEqual(result.policy,result.successorIdentity.policy);assert.deepEqual(result.successorIdentity,r.p.prerequisites);assert.equal(result.owner,null);assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
  await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence());assert.equal(r.state().owner,undefined);assert.equal(r.state().writes,0);
+});
+test('no-op policy intent recovers read only after its result response is lost',async()=>{
+ const r=await convergenceRecoveryFixture('no-op'),record=r.execute.record;let interrupted=false;
+ r.execute.record=async(...args)=>{const value=await record(...args);if(args[1]==='BROKER_POLICY_INTENT'&&!interrupted){interrupted=true;throw new Error('Lost no-op intent response');}return value;};
+ await assert.rejects(()=>r.execute.executeBrokerPolicyConvergence(),/Lost no-op intent response/);
+ r.recovery.readPrerequisites=r.execute.readPrerequisites;
+ const result=await r.recovery.recoverBrokerPolicyOwnership();
+ assert.equal(result.status,'SUCCEEDED');assert.equal(r.state().writes,0);assert.equal(r.state().owner,undefined);
+ assert.equal((await r.recovery.recoverBrokerPolicyOwnership()).receiptSha256,result.receiptSha256);
 });
 for(const [name,mutate] of [['version',p=>p.policyVersion='v99'],['role',p=>p.role.RoleId='another'],['map',p=>p.taskMap['full-rls-preflight']+='wrong'],['traffic',p=>p.traffic.functionUrls=['unexpected']]])test(`no-op policy refuses concurrent ${name} prerequisite drift before terminal receipt`,async()=>{
  const r=await convergenceRecoveryFixture('no-op');let reads=0;

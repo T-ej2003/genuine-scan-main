@@ -141,6 +141,17 @@ export function readStagedBrokerReceipt({ run, id, status, directory, expected, 
     if (expected !== undefined) equal(entry.value, expected); return entry.value;
   } finally { fs.rmSync(file, { force: true }); }
 }
+export function readStagedBrokerReservation({ run, id, directory }) {
+  assert.match(id || '', /^[a-f0-9]{64}$/);
+  const file = path.join(directory, `reservation-${id}-${randomUUID()}.json`);
+  try {
+    if (!readProductionReceiptObject({ run, bucket: STAGE_B_TERRAFORM_BACKEND.bucketName, key: stageBApplyAttemptS3Key(id), file })) return null;
+    const entry = JSON.parse(fs.readFileSync(file));
+    assert.deepEqual(Object.keys(entry).sort(), ['id', 'kind', 'value']);
+    assert.equal(entry.kind, 'STAGED_BROKER_RESERVATION'); assert.equal(entry.id, id);
+    return entry.value;
+  } finally { fs.rmSync(file, { force: true }); }
+}
 export const stagedBrokerSourceReservation = sourceSha => {
   assert.match(sourceSha || '', /^[a-f0-9]{40}$/);
   return brokerDigest({ kind: 'STAGED_BROKER_SOURCE', sourceSha });
@@ -968,9 +979,22 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         assert.ok(capturedRefresh); assert.equal(value.purpose, 'STAGE_B_BROKER_STATE_ONLY');
         assert.equal(id, brokerStateReservation(authHash)); assert.equal(value.parent, authHash); assert.equal(value.refreshPlanSha256, brokerDigest(capturedRefresh.bytes));
       } else { assert.equal(id, authHash); assert.equal(value.purpose, preparation.purpose); }
-      const result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: id, bytes: Buffer.from(canonicalJson({ kind: 'STAGED_BROKER_RESERVATION', id, value })), privateDirectory: directory, run: runAws });
-      if (phase === 'PUBLICATION') reserveStageBSharedApplyAttempt({ artifactSetIdentity: stagedBrokerSourceReservation(preparation.sourceSha),
-        bytes: Buffer.from(canonicalJson({ kind: 'STAGED_BROKER_SOURCE', sourceSha: preparation.sourceSha, preparation, authorization })), privateDirectory: directory, run: runAws });
+      let result;
+      try { result = reserveStageBSharedApplyAttempt({ artifactSetIdentity: id, bytes: Buffer.from(canonicalJson({ kind: 'STAGED_BROKER_RESERVATION', id, value })), privateDirectory: directory, run: runAws }); }
+      catch (error) {
+        if (error.reservationResult?.classification !== 'OCCUPIED') throw error;
+        equal(readStagedBrokerReservation({ run: runAws, id, directory }), value, 'Native reservation belongs to another operation');
+        result = { status: 'reserved', key: stageBApplyAttemptS3Key(id) };
+      }
+      if (phase === 'PUBLICATION') {
+        try { reserveStageBSharedApplyAttempt({ artifactSetIdentity: stagedBrokerSourceReservation(preparation.sourceSha),
+          bytes: Buffer.from(canonicalJson({ kind: 'STAGED_BROKER_SOURCE', sourceSha: preparation.sourceSha, preparation, authorization })), privateDirectory: directory, run: runAws }); }
+        catch (error) {
+          if (error.reservationResult?.classification !== 'OCCUPIED') throw error;
+          equal(readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory }),
+            { preparation, authorization, kind: 'STAGED_BROKER_SOURCE', sourceSha: preparation.sourceSha }, 'Publication source reservation changed');
+        }
+      }
       ownedReservations.add(id); return result;
     },
     record: async (id, status, value) => {
@@ -1190,9 +1214,9 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       consumeMutation(id); terraform(['apply', '-input=false', planPath]);
     },
     authenticateRecoveryIntent: async (status, expected) => {
-      const purpose = { REGISTRATION_RECOVERY: TASK_REGISTRATION, PUBLICATION_RECOVERY: BROKER_PUBLICATION, CUTOVER_RECOVERY: BROKER_CUTOVER, RECONCILIATION_RECOVERY: BROKER_CUTOVER }[phase];
+      const purpose = { REGISTRATION_RECOVERY: TASK_REGISTRATION, POLICY_RECOVERY: BROKER_POLICY_CONVERGENCE, PUBLICATION_RECOVERY: BROKER_PUBLICATION, CUTOVER_RECOVERY: BROKER_CUTOVER, RECONCILIATION_RECOVERY: BROKER_CUTOVER }[phase];
       assert.ok(purpose); assert.equal(preparation.purpose, purpose);
-      assert.equal(status, { REGISTRATION_RECOVERY: 'TASK_REGISTRATION_INTENT', PUBLICATION_RECOVERY: 'PUBLICATION_INTENT', CUTOVER_RECOVERY: 'CUTOVER_INTENT', RECONCILIATION_RECOVERY: 'STATE_REFRESH_INTENT' }[phase]);
+      assert.equal(status, { REGISTRATION_RECOVERY: 'TASK_REGISTRATION_INTENT', POLICY_RECOVERY: 'BROKER_POLICY_INTENT', PUBLICATION_RECOVERY: 'PUBLICATION_INTENT', CUTOVER_RECOVERY: 'CUTOVER_INTENT', RECONCILIATION_RECOVERY: 'STATE_REFRESH_INTENT' }[phase]);
       const id = brokerDigest(authorization), intent = readReceipt(id, status), { authorizedAt, ...fields } = intent;
       equal(fields, expected);
       await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify, now: new Date(authorizedAt) });
@@ -1384,6 +1408,41 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     recoverBrokerPolicyOwnership: async () => {
       assert.equal(phase, 'POLICY_RECOVERY');
       assert.ok([BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING].includes(preparation.purpose));
+      if (preparation.purpose === BROKER_POLICY_CONVERGENCE) {
+        let noOpIntent;
+        try { noOpIntent = readReceipt(brokerDigest(authorization), 'BROKER_POLICY_INTENT'); }
+        catch (error) { if (error.code !== 'RECEIPT_ABSENT') throw error; }
+        if (noOpIntent?.noOp === true) {
+          const { id, authorizedAt } = await adapter.authenticateRecoveryIntent('BROKER_POLICY_INTENT',
+            { savedPlanSha256: preparation.savedPlanSha256, noOp: true });
+          assert.notEqual(createBrokerPolicyOwnershipClient({ run: runAws }).read()?.identity?.operationIdentity, id,
+            'No-op policy intent cannot share a held policy writer');
+          await adapter.readRecoveryCheckout();
+          const artifacts = await adapter.readPlan();
+          assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256);
+          assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256);
+          assert.equal(artifacts.artifactSetSha256, preparation.artifactSetSha256);
+          assert.equal(assertPrerequisitePlan(artifacts.plan, preparation).length, 0);
+          if (preparation.prerequisiteChain) await adapter.authenticatePrerequisiteChain(preparation.prerequisiteChain);
+          equal(await getAlias(), preparation.alias);
+          const snapshot = readBrokerPolicyInventory(runAws);
+          equal(snapshot.policy, preparation.prerequisites.policy);
+          assert.equal(snapshot.version, preparation.prerequisites.policyVersion);
+          const successorIdentity = await adapter.readPrerequisites();
+          equal(successorIdentity, preparation.prerequisites);
+          equal(await adapter.readStateIdentity(), preparation.state);
+          const receipt = { schemaVersion: 1, status: 'BROKER_POLICY_CONVERGED_NONTERMINAL', sourceSha: preparation.sourceSha,
+            treeSha256: preparation.treeSha256, preparationSha256: brokerDigest(preparation), authorizationSha256: id,
+            savedPlanSha256: preparation.savedPlanSha256, authorizedAt, policy: preparation.target.policy, owner: null,
+            successorIdentity, reconciliation: { noOp: true, normalPlanSha256: brokerDigest(artifacts.plan) } };
+          let existing;
+          try { existing = readReceipt(id, 'BROKER_POLICY_CONVERGED'); }
+          catch (error) { if (error.code !== 'RECEIPT_ABSENT') throw error; }
+          if (existing) equal(existing, receipt);
+          else await adapter.record(id, 'BROKER_POLICY_CONVERGED', receipt);
+          return { status: 'SUCCEEDED', receiptSha256: brokerDigest(receipt) };
+        }
+      }
       const ownership = createBrokerPolicyOwnershipClient({ run: runAws });
       const current = ownership.read(); assert.ok(current); assert.ok(['HELD', 'RELEASED'].includes(current.status));
       if (current.status === 'RELEASED') assert.ok(current.terminal);

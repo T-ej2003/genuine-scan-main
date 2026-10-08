@@ -422,14 +422,17 @@ export async function runReleaseCoordinator(request, runtime) {
     }
     const authorizationDigest=await put(authorization);
     assertReleaseApproval(name,prepared,authorization);
-    const operationRequest={...inputs,operation:attempt?recover:execute,preparation:prepared.preparation,authorization,planPath:prepared.planPath};
+    // The coordinator invocation is not a native mutation intent. Only the
+    // native journal (or held policy ownership) can select native recovery.
+    const nativeState=attempt?await runtime.classifyNativeAttempt(context,name,prepared,authorization):'PRE_NATIVE';
+    assert.ok(['PRE_NATIVE','RECOVER'].includes(nativeState),'Unknown native recovery state');
+    if(nativeState==='PRE_NATIVE'&&Date.parse(authorization.expiresAt)<=(runtime.now?.()||new Date()).getTime())continue;
+    const operationRequest={...inputs,operation:nativeState==='RECOVER'?recover:execute,preparation:prepared.preparation,authorization,planPath:prepared.planPath};
     if(name==='closure')operationRequest.casResult=packages.cutover.result;
     if(attempt){
      assert.equal(attempt.prepared,preparedDigest);assert.equal(attempt.authorization,authorizationDigest);
-     // An uncertain response is diagnosed by the native journal/live-state
-     // recovery operation. Only its durable no-write outcome permits a new round.
      result=await runtime.runStageOperation(operationRequest);
-     result=await runtime.readRecoveredTransition(context,name,prepared,authorization,result);
+     if(nativeState==='RECOVER')result=await runtime.readRecoveredTransition(context,name,prepared,authorization,result);
     }else{
      await record(`${name}:attempt:${round}`,{prepared:preparedDigest,authorization:authorizationDigest});
      result=await runtime.runStageOperation(operationRequest);

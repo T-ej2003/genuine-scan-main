@@ -89,6 +89,18 @@ Completed outcomes recover without another mutation. Proved no-write outcomes
 require fresh authority before any new mutation. Uncertain or contradictory
 outcomes fail closed; a lost response never means the write was not issued.
 
+The coordinator's `:attempt:` record means only that it invoked a public Stage-B
+operation. On restart it reads that operation's native intent before selecting
+native recovery; held policy ownership is also a native recovery boundary.
+An absent intent before ownership acquisition permits the same authorized
+operation to resume after fresh authentication and final checks. An expired
+approval cannot authorize that new write. A reservation created before intent
+may be reused only when its immutable bytes match exactly; native conditional
+intent creation still prevents two writers from reaching the mutation. Intent
+present, uncertain mutation, or completed result follows the native recovery
+path. This rule covers registration, policy capacity and convergence, broker
+publication, alias CAS and state-only terminal closure.
+
 ## Required executable proof
 
 The public coordinator success test must itself call only one coordinator entry.

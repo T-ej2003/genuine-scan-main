@@ -143,6 +143,21 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    }
   },
   runStageOperation:request=>runStageOperation(request),
+  classifyNativeAttempt:async(context,name,_prepared,authorization)=>{
+   const id=brokerDigest(authorization),status={registration:'TASK_REGISTRATION_INTENT',pruning:'BROKER_POLICY_PRUNING_INTENT',
+    policy:'BROKER_POLICY_INTENT',publication:'PUBLICATION_INTENT',cutover:'CUTOVER_INTENT',closure:'STATE_REFRESH_INTENT'}[name];
+   assert.ok(status,'Unknown Stage B transition');
+   try {readReceipt({run:awsRun,id,status,directory:context.inputs.directory});return 'RECOVER';}
+   catch(error){if(error.code!=='RECEIPT_ABSENT')throw error;}
+   if(name==='pruning'||name==='policy'){
+    const owner=createBrokerPolicyOwnershipClient({run:awsRun}).read();
+    if(owner?.identity?.operationIdentity===id){
+     assert.equal(owner.identity.sourceSha,context.release.sourceSha);
+     return 'RECOVER';
+    }
+   }
+   return 'PRE_NATIVE';
+  },
   readRecoveredTransition:async(context,name,_prepared,authorization,result)=>{
    if(name==='pruning'||name==='policy')return readReceipt({run:awsRun,id:brokerDigest(authorization),
     status:name==='pruning'?'BROKER_POLICY_PRUNED':'BROKER_POLICY_CONVERGED',directory:context.inputs.directory,allowPolicyNoWrite:true});

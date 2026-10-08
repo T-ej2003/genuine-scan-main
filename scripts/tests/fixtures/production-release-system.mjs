@@ -256,7 +256,11 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    sign:async bytes=>cryptoSign('sha256',bytes,{key:privateKey,...keyOptions}).toString('base64'),
    verify:async auth=>cryptoVerify('sha256',brokerAuthorizationMessage(auth),{key:current&&brokerDigest(auth)===CURRENT_REGISTRATION_OPERATION?originalPublicKey:publicKey,...keyOptions},Buffer.from(auth.signature.signatureBase64,'base64'))};
   const checker=()=>({...kms,now:fixtureNow});
-  const deps={verifyAuthorization:authorization=>kms.verify(authorization),now:()=>fixtureNow,readCheckout:async()=>({sourceSha:source,treeSha256:tree}),readMakerCaller:async()=>({Account:STAGE_B.account,Arn:maker}),
+  let nativeFault=null;
+  const deps={verifyAuthorization:authorization=>kms.verify(authorization),now:()=>fixtureNow,readCheckout:async()=>{
+    if(nativeFault?.kind==='checkout'&&nativeFault.operation===currentOperation){nativeFault=null;throw new Error('Injected pre-native checkout failure');}
+    return {sourceSha:source,treeSha256:tree};
+   },readMakerCaller:async()=>({Account:STAGE_B.account,Arn:maker}),
    readRegistrationPreparationPredecessor:async()=>{await authenticateHistoricalPolicy(x.policy);return {registrationPredecessor:x.proof,prerequisites:historicalPrerequisites,policy:x.policy};},
    readPrerequisites:async()=>{if(currentChain?.policy?.receiptBoundAdoption)await authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain:currentChain,checkout:x.f.release,authenticateChain,observe:async()=>clone(historicalPrerequisites)});if(currentChain&&!currentChain.policy?.receiptBoundAdoption)await authenticateChain(currentChain);return {...clone(historicalPrerequisites),policyVersion,policy:clone(livePolicy),taskMap:currentChain?.policy&&!currentChain.policy.receiptBoundAdoption?clone(currentChain.registration.result.taskMap):clone(historicalPrerequisites.taskMap)};},
    readStateIdentity:async()=>clone(liveState),getAlias:async()=>clone(liveAlias),captureCutoverPlan:async()=>({plan:selectedPlan}),
@@ -269,7 +273,11 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    },
    authenticatePrerequisiteChain:authenticateChain,readPlan:async()=>({...savedPlans.get(selectedPath),artifactSetSha256:stagedBrokerArtifactSet(files,process.cwd(),currentPreparation)}),
    authenticatePrerequisiteAuthorization:async(p,auth)=>{assertBrokerPreparation(p);return assertBrokerAuthorization(auth,p,{verify:kms.verify,now:fixtureNow});},
-   reserve:async id=>{assert.ok(!reserved.has(id));reserved.add(id);},record:async(...record)=>receipts.push(record),
+   reserve:async id=>{reserved.add(id);},record:async(...record)=>{
+    if(nativeFault?.kind==='before-intent'&&nativeFault.status===record[1]){nativeFault=null;throw new Error('Injected reservation-only failure');}
+    assert.ok(!receipts.some(r=>r[0]===record[0]&&r[1]===record[1]),'Native transition already exists');receipts.push(record);
+    if(nativeFault?.kind==='after-intent'&&nativeFault.status===record[1]){nativeFault=null;throw new Error('Injected post-native intent failure');}
+   },
    applyTaskRegistration:async()=>{assert.equal(writes++,0);registeredTaskDefinitionCalls+=TASK_REGISTRATION_ADDRESSES.length;registered=true;liveState={...liveState,serial:liveState.serial+1,stateSha256:'d'.repeat(64)};},
    readRegisteredTaskDefinition:async address=>{assert.ok(registered);return clone(states[address]);},describeTaskDefinition:async arn=>describe(arn),
    authenticateRecoveryIntent:async(status,expected)=>{const r=receipts.find(r=>r[1]===status);assert.ok(r);const {authorizedAt,...fields}=r[2];assert.deepEqual(fields,expected);return {id:r[0],authorizedAt};},
@@ -412,6 +420,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    completed={preparation:prepared.preparation,authorization,result};
   }
   return {run,coordinatorStore,files,directory,source,tree,fixture:x,checker:kms,maker,get now(){return fixtureNow;},
+   injectNativeFault:fault=>{nativeFault=fault;},
    changeLiveInventory:change=>{policyInventory=change(clone(policyInventory));},
    changeLiveDefault:version=>{policyVersion=version;policyInventory=policyInventory.map(v=>({...v,IsDefaultVersion:v.VersionId===version}));},
    changeLiveAlias:change=>{liveAlias=change(clone(liveAlias));},
