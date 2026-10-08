@@ -176,3 +176,20 @@ packages; `braces@3.0.3` was absent. The exact OSV runtime gate passed against
 the frozen inputs. The acceptance remains limited to the same advisory and
 retains its scope, rationale, owner, creation date, execution claims, and
 exclusive expiry `2026-11-02`.
+
+## Current PR #641 predecessor-authentication revalidation
+
+Date: 2026-10-08 UTC. The frozen executable/build inputs at candidate commit
+`d7d3355c2f32bab082855bd34b9b5edd1893948e` have canonical
+`reachabilityInputsSha256` `2219ce92d55b2bb0537b143214639684ffc7255a94d21db67437c2b0ee1e46c3`.
+A fresh unfiltered OSV Scanner 2.6.0 scan (binary SHA256
+`98c460dcd37de25819babd757d04542045b6243113e209edcd4d89fedb0256b4`, report
+SHA256 `13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`)
+found the existing HIGH development-only `braces@3.0.3` advisory
+`GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The canonical browser closure for
+the same fingerprint transformed 3,993 modules into 96 chunks and resolved
+204 packages; `braces@3.0.3` is absent. The backend lockfile also remains free
+of this package, and the scan identifies the finding only in the root npm
+development dependency group. The accepted advisory identity, scope,
+rationale, owner, creation date, execution claims, and expiry `2026-11-02`
+remain unchanged.
