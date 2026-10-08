@@ -10,7 +10,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createProductionAwsCredentialEnvironment } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
-import { NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
+import { HISTORICAL_NORMAL_ACTIVATION_TRANSACTION, NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { stageBBoundImagesFromBindingReport } from "./generate-production-green-stage-b-tfvars.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -37,8 +37,8 @@ export const HISTORICAL_FINAL_APPLY_WRITE_V16 = Object.freeze({
   defaultVersionId: "v16",
   versionIds: Object.freeze(["v12", "v13", "v14", "v15", "v16"]),
   activationTargetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:7",
-  sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:24",
-  targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:27",
+  sourceArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn,
+  targetArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn,
   stateLineage: NORMAL_ACTIVATION.lineage,
   stateSerial: 115,
   stateSha256: "20dd673d1f0db6e6e4185ac3fa3843ff24f753426d9835d3380ad706034a2b26",

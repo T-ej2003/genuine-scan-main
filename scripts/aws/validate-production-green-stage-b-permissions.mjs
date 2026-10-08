@@ -22,6 +22,7 @@ import { assertSimulationContextCardinality, iamSimulationContextArgs } from "./
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createRootAttestationKmsVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
+import { HISTORICAL_NORMAL_ACTIVATION_TRANSACTION, assertNormalActivationTransactionPolicy, buildNormalActivationTransactionPolicy, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
 
 export { assertSimulationContextCardinality } from "./iam-simulation-context.mjs";
 
@@ -228,6 +229,15 @@ export function assertPermissionReportPlanBinding(report, { planJsonBytes, saved
 }
 
 const decodePolicyDocument = (document) => normalizeIamPolicyDocument(document, "Release IAM policy document");
+const NORMAL_ACTIVATION_TRANSACTION_SHA256 = sha256(Buffer.from(canonicalizeJson(compactNormalActivationPolicy(buildNormalActivationTransactionPolicy({
+  sourceArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn,
+  targetArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn,
+})))));
+const NORMAL_ACTIVATION_TRANSACTION_NAME = "MSCQRProductionGreenStageBFinalApplyWrite";
+const normalActivationTransactionIdentity = (policy) => policy.name === NORMAL_ACTIVATION_TRANSACTION_NAME
+  && policy.defaultVersionId === HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.defaultVersionId
+  && policy.liveSha256 === NORMAL_ACTIVATION_TRANSACTION_SHA256
+  && policy.ownership === "GOVERNED_NORMAL_ACTIVATION_TRANSACTION";
 export function sourcePolicyEvidence() {
   return RELEASE_POLICY_SOURCES.map(({ name, arn, sourcePath }) => {
     const document = JSON.parse(fs.readFileSync(path.join(stageBRoot, sourcePath), "utf8"));
@@ -310,31 +320,45 @@ export function collectLiveReleasePolicyEvidence({ run } = {}) {
   if (typeof run !== "function") throw new Error("Release policy evidence requires an explicit credential-bound AWS command runner.");
   const roleName = RELEASE_ROLE_ARN.split("/").at(-1);
   const attached = JSON.parse(run(["iam", "list-attached-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).AttachedPolicies || [];
+  const role = JSON.parse(run(["iam", "get-role", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).Role;
+  if (role?.Arn !== RELEASE_ROLE_ARN) throw new Error("Live release role identity differs.");
+  const roleTags = role?.Tags;
+  if (!Array.isArray(roleTags) || roleTags.some(({ Key, Value }) => typeof Key !== "string" || typeof Value !== "string")
+    || new Set(roleTags.map(({ Key }) => Key)).size !== roleTags.length) throw new Error("Release role tag inventory is incomplete or malformed.");
+  const receiptReleaseShaTag = roleTags.find(({ Key }) => Key === "MSCQRReceiptReleaseSha")?.Value;
+  if (!/^[a-f0-9]{40}$/.test(receiptReleaseShaTag || "")) throw new Error("Release role receipt principal tag is missing or malformed.");
   const inlinePolicyNames = completeInlinePolicyNames(JSON.parse(run(["iam", "list-role-policies", "--role-name", roleName, "--output", "json", "--no-cli-pager"])));
   const inlinePolicies = inlinePolicyNames.map((policyName) => {
     const response = JSON.parse(run(["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName, "--output", "json", "--no-cli-pager"]));
     return { policyName, sha256: sha256(Buffer.from(canonicalizeJson(decodePolicyDocument(response.PolicyDocument)))) };
   }).sort((left, right) => left.policyName.localeCompare(right.policyName));
-  const role = JSON.parse(run(["iam", "get-role", "--role-name", roleName, "--output", "json", "--no-cli-pager"])).Role;
   const policies = sourcePolicyEvidence().map((expected) => {
     const metadata = JSON.parse(run(["iam", "get-policy", "--policy-arn", expected.arn, "--output", "json", "--no-cli-pager"])).Policy;
     if (!metadata?.DefaultVersionId) throw new Error(`Live release policy has no default version: ${expected.name}.`);
     const version = JSON.parse(run(["iam", "get-policy-version", "--policy-arn", expected.arn, "--version-id", metadata.DefaultVersionId, "--output", "json", "--no-cli-pager"])).PolicyVersion;
-    const liveSha256 = sha256(Buffer.from(canonicalizeJson(decodePolicyDocument(version?.Document))));
-    return { ...expected, defaultVersionId: metadata.DefaultVersionId, liveSha256, attached: attached.some(({ PolicyArn }) => PolicyArn === expected.arn), matchesSource: liveSha256 === expected.sourceSha256 };
+    const document = decodePolicyDocument(version?.Document);
+    const liveSha256 = sha256(Buffer.from(canonicalizeJson(document)));
+    let ownership = "SOURCE";
+    if (expected.name === NORMAL_ACTIVATION_TRANSACTION_NAME && metadata.DefaultVersionId === HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.defaultVersionId && liveSha256 === NORMAL_ACTIVATION_TRANSACTION_SHA256) {
+      assertNormalActivationTransactionPolicy(document, { sourceArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn, targetArn: HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn });
+      ownership = "GOVERNED_NORMAL_ACTIVATION_TRANSACTION";
+    }
+    return { ...expected, defaultVersionId: metadata.DefaultVersionId, liveSha256, attached: attached.some(({ PolicyArn }) => PolicyArn === expected.arn), matchesSource: liveSha256 === expected.sourceSha256, ...(ownership !== "SOURCE" ? { ownership } : {}) };
   });
   return {
     roleArn: RELEASE_ROLE_ARN,
+    receiptReleaseShaTag,
     attachedPolicyArns: attached.map(({ PolicyArn }) => PolicyArn).sort(),
     inlinePolicyNames: [...inlinePolicyNames].sort(), inlinePolicies,
     permissionsBoundaryArn: role?.PermissionsBoundary?.PermissionsBoundaryArn || null,
     policies,
-    status: policies.every(({ attached: isAttached, matchesSource }) => isAttached && matchesSource) ? "valid" : "invalid",
+    status: policies.every((policy) => policy.attached && (policy.matchesSource || normalActivationTransactionIdentity(policy))) ? "valid" : "invalid",
   };
 }
 
 export function assertReleasePolicyEvidence(evidence) {
   if (evidence?.roleArn !== RELEASE_ROLE_ARN || evidence.status !== "valid" || !Array.isArray(evidence.policies)) throw new Error("Release policy evidence is missing or invalid.");
+  if (!/^[a-f0-9]{40}$/.test(evidence.receiptReleaseShaTag || "")) throw new Error("Release role receipt principal tag evidence is missing or malformed.");
   if (evidence.permissionsBoundaryArn !== null) throw new Error("Release policy evidence contains an unreviewed permissions boundary.");
   if (!Array.isArray(evidence.inlinePolicyNames) || !Array.isArray(evidence.inlinePolicies) || evidence.inlinePolicyNames.length !== evidence.inlinePolicies.length
     || evidence.inlinePolicyNames.some((name) => typeof name !== "string" || !name)
@@ -354,7 +378,7 @@ export function assertReleasePolicyEvidence(evidence) {
   if (evidence.policies.length !== expected.length) throw new Error("Release policy evidence is incomplete.");
   for (const policy of expected) {
     const actual = evidence.policies.find(({ arn }) => arn === policy.arn);
-    if (!actual || actual.sourcePath !== policy.sourcePath || actual.sourceSha256 !== policy.sourceSha256 || actual.liveSha256 !== policy.sourceSha256 || actual.attached !== true || !/^v[1-9][0-9]*$/.test(actual.defaultVersionId || "")) throw new Error(`Release policy source/live identity differs: ${policy.name}.`);
+    if (!actual || actual.sourcePath !== policy.sourcePath || actual.sourceSha256 !== policy.sourceSha256 || (actual.liveSha256 !== policy.sourceSha256 && !normalActivationTransactionIdentity(actual)) || actual.attached !== true || !/^v[1-9][0-9]*$/.test(actual.defaultVersionId || "")) throw new Error(`Release policy source/live identity differs: ${policy.name}.`);
   }
   return true;
 }
@@ -530,7 +554,14 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   const capabilities = stageBPermissionProfileCapabilities(permissionProfile);
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
-  const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => [entry.id, { entry, forbidden: manifest.forbidden.includes(entry) }]));
+  const unavailableCapabilities = report.policyEvidence?.policies?.some(normalActivationTransactionIdentity)
+    ? ["backend-health-recovery-update-service"] : [];
+  if (JSON.stringify(report.unavailableCapabilities || []) !== JSON.stringify(unavailableCapabilities)) throw new Error("Permission-preflight unavailable recovery capability disclosure is incomplete or stale.");
+  if (report.requiredEvaluations?.some(({ manifestId }) => unavailableCapabilities.includes(manifestId))) throw new Error("Unavailable legacy recovery cannot appear as an allowed required capability.");
+  const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => {
+    const forbidden = manifest.forbidden.includes(entry);
+    return [entry.id, { entry: effectiveEvaluationEntry(entry, { forbidden, policyEvidence: report.policyEvidence }), forbidden }];
+  }));
   for (const mapping of manifest.taskDefinitionMappings) {
     entries.set(`${mapping.id}-register`, { entry: { context: mapping.registerContext }, forbidden: false });
     entries.set(`${mapping.id}-tag`, { entry: { context: taskDefinitionTagContext(mapping.registerContext) }, forbidden: false });
@@ -949,6 +980,27 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { permi
   return true;
 }
 
+const TRANSACTION_TASK_DEFINITION_EVALUATIONS = Object.freeze({
+  "activate-exact-ecs-service": HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn,
+  "rollback-exact-ecs-service": HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn,
+});
+const PRINCIPAL_TAG_NEGATIVE_S3_EVALUATIONS = new Set([
+  "backend-list-bucket-not-required", "backend-other-production-workspace-read",
+  "backend-other-stage-b-key-read", "backend-unrelated-bucket-read", "backend-wildcard-object-read",
+]);
+function effectiveEvaluationEntry(entry, { forbidden = false, policyEvidence } = {}) {
+  const transaction = policyEvidence?.policies?.some(normalActivationTransactionIdentity);
+  if (!forbidden && transaction && Object.hasOwn(TRANSACTION_TASK_DEFINITION_EVALUATIONS, entry.id)) {
+    return { ...entry, context: entry.context.map((context) => context.key === "ecs:task-definition"
+      ? { ...context, values: [TRANSACTION_TASK_DEFINITION_EVALUATIONS[entry.id]] } : context) };
+  }
+  if (forbidden && policyEvidence && PRINCIPAL_TAG_NEGATIVE_S3_EVALUATIONS.has(entry.id)) {
+    if (!/^[a-f0-9]{40}$/.test(policyEvidence.receiptReleaseShaTag || "")) throw new Error("Forbidden S3 simulation requires the authenticated live receipt principal tag.");
+    return { ...entry, context: [...entry.context, { key: "aws:PrincipalTag/MSCQRReceiptReleaseSha", type: "string", values: [policyEvidence.receiptReleaseShaTag] }] };
+  }
+  return entry;
+}
+
 function evaluation(entry, resource, { forbidden = false, contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY } = {}) {
   const result = {
     id: `${entry.id}:${resource}`,
@@ -983,11 +1035,14 @@ function principalEvaluation(entry, { forbidden = false } = {}) {
   return result;
 }
 
-export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins(), terraformConfiguration } = {}) {
+export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = "NORMAL_STAGE_B_RELEASE", contextRegistry = REVIEWED_SIMULATION_CONTEXT_REGISTRY, conditionKeyOrigins = sourcePolicyConditionKeyOrigins(), terraformConfiguration, policyEvidence } = {}) {
   assertStageBPermissionProfile(permissionProfile);
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { contextRegistry })));
+  // Legacy backend recovery is a separate operation; v17's candidate-only transaction cannot authorize its new legacy revision.
+  const governedTransaction = policyEvidence?.policies?.some(normalActivationTransactionIdentity);
+  const required = manifest.required.filter((entry) => !entry.plan && !(governedTransaction && entry.id === "backend-health-recovery-update-service"))
+    .flatMap((entry) => entry.resources.map((resource) => evaluation(effectiveEvaluationEntry(entry, { policyEvidence }), resource, { contextRegistry })));
   const coveredChanges = [];
   const zeroAwsMutationChanges = [];
   const matchedPlanEntries = new Set();
@@ -1026,13 +1081,13 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
     coveredChanges.push(stageBMutationInstanceIdentity(change));
     for (const entry of matches) {
       matchedPlanEntries.add(entry.id);
-      for (const resource of entry.resources) required.push(evaluation(entry, resource, { contextRegistry }));
+      for (const resource of entry.resources) required.push(evaluation(effectiveEvaluationEntry(entry, { policyEvidence }), resource, { contextRegistry }));
     }
   }
   for (const entry of manifest.required.filter((candidate) => candidate.plan?.coverageRequired && appliesToPermissionProfile(candidate, permissionProfile))) {
     if (!matchedPlanEntries.has(entry.id)) throw new Error(`Permission manifest mapping has no matching plan change: ${entry.id}.`);
   }
-  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(entry, resource, { forbidden: true, contextRegistry })));
+  const forbidden = manifest.forbidden.flatMap((entry) => entry.resources.map((resource) => evaluation(effectiveEvaluationEntry(entry, { forbidden: true, policyEvidence }), resource, { forbidden: true, contextRegistry })));
   return {
     required: required.sort((left, right) => left.id.localeCompare(right.id)),
     forbidden: forbidden.sort((left, right) => left.id.localeCompare(right.id)),
@@ -1260,7 +1315,7 @@ export function runPermissionPreflight({
   let policyEvidenceError = null;
   try { assertReleasePolicyEvidence(policyEvidence); } catch (error) { policyEvidenceError = error.message; }
   if (discoverContextKeys) assertDiscoveredSimulationContextKeys(discoverContextKeys({ roleArn: simulatedRoleArn }), { conditionKeyOrigins, registry: reviewedContextRegistry });
-  const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins, terraformConfiguration });
+  const derived = deriveRequiredEvaluations(plan, manifest, { permissionProfile: permissionProfileBinding.permissionProfile, contextRegistry: reviewedContextRegistry, conditionKeyOrigins, terraformConfiguration, policyEvidence });
   const requiredResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.required, simulate });
   const forbiddenResults = runSimulationCensus({ roleArn: simulatedRoleArn, evaluations: derived.forbidden, simulate });
   const operatorRequired = ECS_EXEC_OPERATOR_REQUIRED.map((entry) => principalEvaluation(entry));
@@ -1361,6 +1416,7 @@ export function runPermissionPreflight({
     },
     cloudTrail: cloudTrailResult,
     policyEvidence,
+    unavailableCapabilities: policyEvidence?.policies?.some(normalActivationTransactionIdentity) ? ["backend-health-recovery-update-service"] : [],
     policySourceLiveMismatchCount: policyEvidenceError ? 1 : 0,
     policySourceLiveMismatch: policyEvidenceError,
     requiredAllowedCount: requiredResults.filter((item) => item.decision === "allowed").length,
