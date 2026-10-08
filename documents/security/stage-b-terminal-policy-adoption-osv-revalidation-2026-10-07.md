@@ -161,3 +161,18 @@ transformed 3,993 modules into 96 chunks and resolved 204 packages;
 `braces@3.0.3` is absent. The existing acceptance retains its advisory,
 package/version, scope, rationale, owner, creation date, execution claims, and
 exclusive expiry `2026-11-02`.
+
+## Current pre-publication registration predecessor PR revalidation
+
+Date: 2026-10-08 UTC. After the Stage-B pre-publication predecessor change was
+frozen at candidate commit `cb98c7264a9950e47750e8ac383168d5fd805f1a`, the
+canonical `reachabilityInputsSha256(process.cwd())` result was
+`96c7d730a92855c313cd02e17cf633cde57f2c5b53bb110e3170ccc08b0ff506`. A fresh
+unfiltered OSV Scanner 2.6.0 scan found the same single HIGH development-only
+finding, `braces@3.0.3`, `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` (report SHA256
+`13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`). The
+canonical browser closure built 3,993 modules into 96 chunks and resolved 204
+packages; `braces@3.0.3` was absent. The exact OSV runtime gate passed against
+the frozen inputs. The acceptance remains limited to the same advisory and
+retains its scope, rationale, owner, creation date, execution claims, and
+exclusive expiry `2026-11-02`.
