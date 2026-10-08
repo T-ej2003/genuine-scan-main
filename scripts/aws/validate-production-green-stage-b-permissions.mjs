@@ -554,6 +554,10 @@ export function assertPermissionEvaluationBindings(report, manifest, { plan, per
   const capabilities = stageBPermissionProfileCapabilities(permissionProfile);
   const conditionKeyOrigins = sourcePolicyConditionKeyOrigins();
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
+  const unavailableCapabilities = report.policyEvidence?.policies?.some(normalActivationTransactionIdentity)
+    ? ["backend-health-recovery-update-service"] : [];
+  if (JSON.stringify(report.unavailableCapabilities || []) !== JSON.stringify(unavailableCapabilities)) throw new Error("Permission-preflight unavailable recovery capability disclosure is incomplete or stale.");
+  if (report.requiredEvaluations?.some(({ manifestId }) => unavailableCapabilities.includes(manifestId))) throw new Error("Unavailable legacy recovery cannot appear as an allowed required capability.");
   const entries = new Map([...manifest.required, ...manifest.forbidden].map((entry) => {
     const forbidden = manifest.forbidden.includes(entry);
     return [entry.id, { entry: effectiveEvaluationEntry(entry, { forbidden, policyEvidence: report.policyEvidence }), forbidden }];
@@ -979,7 +983,6 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { permi
 const TRANSACTION_TASK_DEFINITION_EVALUATIONS = Object.freeze({
   "activate-exact-ecs-service": HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn,
   "rollback-exact-ecs-service": HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn,
-  "backend-health-recovery-update-service": HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn,
 });
 const PRINCIPAL_TAG_NEGATIVE_S3_EVALUATIONS = new Set([
   "backend-list-bucket-not-required", "backend-other-production-workspace-read",
@@ -1036,7 +1039,10 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
   assertStageBPermissionProfile(permissionProfile);
   validateManifest(manifest, { contextRegistry, conditionKeyOrigins });
   const changes = Array.isArray(plan?.resource_changes) ? plan.resource_changes : [];
-  const required = manifest.required.filter((entry) => !entry.plan).flatMap((entry) => entry.resources.map((resource) => evaluation(effectiveEvaluationEntry(entry, { policyEvidence }), resource, { contextRegistry })));
+  // Legacy backend recovery is a separate operation; v17's candidate-only transaction cannot authorize its new legacy revision.
+  const governedTransaction = policyEvidence?.policies?.some(normalActivationTransactionIdentity);
+  const required = manifest.required.filter((entry) => !entry.plan && !(governedTransaction && entry.id === "backend-health-recovery-update-service"))
+    .flatMap((entry) => entry.resources.map((resource) => evaluation(effectiveEvaluationEntry(entry, { policyEvidence }), resource, { contextRegistry })));
   const coveredChanges = [];
   const zeroAwsMutationChanges = [];
   const matchedPlanEntries = new Set();
@@ -1410,6 +1416,7 @@ export function runPermissionPreflight({
     },
     cloudTrail: cloudTrailResult,
     policyEvidence,
+    unavailableCapabilities: policyEvidence?.policies?.some(normalActivationTransactionIdentity) ? ["backend-health-recovery-update-service"] : [],
     policySourceLiveMismatchCount: policyEvidenceError ? 1 : 0,
     policySourceLiveMismatch: policyEvidenceError,
     requiredAllowedCount: requiredResults.filter((item) => item.decision === "allowed").length,

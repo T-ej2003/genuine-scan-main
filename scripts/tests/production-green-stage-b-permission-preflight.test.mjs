@@ -1425,7 +1425,7 @@ test("permission evidence fails closed on stale versions, source drift, and deta
   assert.throws(() => assertReleasePolicyEvidence(missingTag), /receipt principal tag evidence/);
 });
 
-test("governed v17 transaction binds current activation, rollback, recovery, and negative S3 simulations", () => {
+test("governed v17 transaction binds activation and rollback while disclosing unavailable legacy recovery", () => {
   assert.equal(assertReleasePolicyEvidence(governedPolicyEvidence), true);
   const report = runPermissionPreflight({
     reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan, planBytes, savedPlanBytes, manifest,
@@ -1434,11 +1434,16 @@ test("governed v17 transaction binds current activation, rollback, recovery, and
   });
   assert.equal(report.status, "valid");
   assert.equal(assertPermissionEvaluationBindings(report, manifest, { permissionProfile: report.permissionProfile }), true);
+  assert.deepEqual(report.unavailableCapabilities, ["backend-health-recovery-update-service"]);
+  assert.equal(report.requiredEvaluations.some(({ manifestId }) => manifestId === "backend-health-recovery-update-service"), false);
+  assert.throws(() => assertPermissionEvaluationBindings({ ...report, unavailableCapabilities: [] }, manifest, { permissionProfile: report.permissionProfile }), /unavailable recovery capability disclosure/);
+  const falseClaim = structuredClone(report);
+  falseClaim.requiredEvaluations.push({ ...falseClaim.requiredEvaluations.find(({ manifestId }) => manifestId === "rollback-exact-ecs-service"), manifestId: "backend-health-recovery-update-service" });
+  assert.throws(() => assertPermissionEvaluationBindings(falseClaim, manifest, { permissionProfile: report.permissionProfile }), /Unavailable legacy recovery/);
   const required = new Map(report.requiredEvaluations.map((item) => [item.manifestId, item]));
   for (const [id, arn] of [
     ["activate-exact-ecs-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.targetArn],
     ["rollback-exact-ecs-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn],
-    ["backend-health-recovery-update-service", HISTORICAL_NORMAL_ACTIVATION_TRANSACTION.sourceArn],
   ]) {
     assert.deepEqual(required.get(id).context.find(({ key }) => key === "ecs:task-definition").values, [arn]);
     assert.equal(required.get(id).decision, "allowed");
