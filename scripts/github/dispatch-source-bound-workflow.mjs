@@ -69,8 +69,21 @@ async function dispatchWorkflow({ repository, token, workflow, ref, inputs = {},
     assert.equal(new Set(recorded.beforeRunIds).size, recorded.beforeRunIds.length);
   } else {
     const before = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
-    if (dispatchJournal) assert.ok(before.total_count <= 100, "Dispatch baseline pagination required");
-    recorded = { identity, beforeRunIds: (before.workflow_runs || []).map(run => String(run.id)) };
+    const beforeRunIds = (before.workflow_runs || []).map(run => String(run.id));
+    if (dispatchJournal && before.total_count > 100) {
+      assert.ok(Number.isSafeInteger(before.total_count) && beforeRunIds.length === 100, "Dispatch baseline is incomplete");
+      for (let page = 2; beforeRunIds.length < before.total_count; page += 1) {
+        const older = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100&page=${page}`);
+        assert.equal(older.total_count, before.total_count, "Dispatch baseline changed during pagination");
+        assert.ok(Array.isArray(older.workflow_runs) && older.workflow_runs.length === Math.min(100, before.total_count - beforeRunIds.length), "Dispatch baseline page is incomplete");
+        beforeRunIds.push(...older.workflow_runs.map(run => String(run.id)));
+      }
+      const latest = await request(`${workflowBase}/runs?event=workflow_dispatch&per_page=100`);
+      assert.equal(latest.total_count, before.total_count, "Dispatch baseline changed during pagination");
+      assert.deepEqual((latest.workflow_runs || []).map(run => String(run.id)), beforeRunIds.slice(0, 100), "Dispatch baseline changed during pagination");
+      assert.equal(new Set(beforeRunIds).size, beforeRunIds.length, "Dispatch baseline contains duplicate runs");
+    }
+    recorded = { identity, beforeRunIds };
     if (dispatchJournal) await dispatchJournal.write(recorded);
   }
   const beforeRunIds = new Set(recorded.beforeRunIds);

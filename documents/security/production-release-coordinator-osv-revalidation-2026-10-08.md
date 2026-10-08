@@ -4,12 +4,13 @@ Date: 2026-10-08 UTC. The PR A executable/build inputs were frozen after the
 coordinator, hosted Release Train, Stage-B, required security guardrail, workflow, dependency,
 Terraform, and RLS validation passed. The canonical
 `reachabilityInputsSha256(process.cwd())` is
-`46e3c5597d9b527dedd5c47b609f92e621a3629c6bfcb5b26a258def4ea249a5`.
+`3ef224b7d7611909654ccc8814af92ab72c93e78642f97097fadd6aefba106e8`.
 This final fingerprint includes the native recovery-boundary correction,
 authenticated journal-recovered approval timeout, and a distinct exact
-authorization for state-only closure after completed alias CAS. The source
-scan was rerun after executable inputs and deterministic interruption tests
-were frozen.
+authorization for state-only closure after completed alias CAS. It also includes
+the authenticated paginated approval-dispatch baseline and its regression tests.
+The source scan was rerun after executable inputs and deterministic interruption
+tests were frozen.
 
 The unfiltered OSV Scanner 2.6.0 source scan used binary SHA-256
 `98c460dcd37de25819babd757d04542045b6243113e209edcd4d89fedb0256b4`.
@@ -22,7 +23,7 @@ The canonical `scripts/check-osv-runtime.mjs` gate rebuilt the production
 browser closure from these exact inputs: 3,993 modules, 96 chunks, 204 browser
 packages. `braces@3.0.3` was absent. The backend lockfile contains no `braces`.
 The gate passed and its browser-closure report SHA-256 is
-`df8d3fa8109dfbb5d28eedf7bd4df25b9c16b9750009fed5f42469b105d9b7d1`.
+`103fc6a2d02c4991640f0b2bf097937248908c65e443299e7c0b8c4ed7c2dc6c`.
 The new coordinator and workflow code orchestrate production operations; they
 do not add a browser or backend runtime import of the affected build package or
 an attacker-controlled input to its Tailwind content-glob use.

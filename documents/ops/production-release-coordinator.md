@@ -168,6 +168,9 @@ ref, inputs and pre-dispatch child IDs. A lost dispatch response reconciles a
 unique exact-source child on restart without a second POST. An attempt with no
 visible authenticated child fails closed. A successful dispatch remains only a
 child identity, never a production or prerequisite completion claim.
+Journaled dispatch paginates and checks the complete pre-dispatch run inventory,
+including workflows with more than 100 historical runs. A changed run count,
+changed latest page, or duplicate run ID fails before dispatch.
 
 Protected-approval artifact retrieval shares the canonical authorization archive
 checks: exact source/run, successful first attempt, exact artifact identity and

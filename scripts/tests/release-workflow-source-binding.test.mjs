@@ -135,6 +135,48 @@ test("journaled authorization/image dispatch reconciles a lost response without 
   assert.equal(posts, 1);
 });
 
+test("journaled approval dispatch recovers the exact child beyond 100 historical runs", async () => {
+  const historical = Array.from({ length: 150 }, (_, index) => 250 - index);
+  let record, posts = 0;
+  const journal = { read: async () => record ?? null, write: async value => { record = structuredClone(value); } };
+  const child = { id: 251, workflow_id: workflowId, repository: { full_name: repository }, head_repository: { full_name: repository }, event: "workflow_dispatch", run_attempt: 1, head_sha: current, path: workflowPath };
+  const fetchImpl = async (url, options = {}) => {
+    if (url.endsWith(`/actions/workflows/${workflow}`)) return response(200, { id: workflowId, path: workflowPath });
+    if (url.endsWith("/dispatches")) { posts++;throw new Error("Lost dispatch response"); }
+    if (url.includes("/runs?")) {
+      const page = Number(new URL(url).searchParams.get("page") || 1);
+      const ids = (posts ? [251, ...historical] : historical).slice((page - 1) * 100, page * 100);
+      return response(200, { total_count: historical.length + posts, workflow_runs: ids.map(id => id === 251 ? child : { id }) });
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  const input = { repository, token: "token", workflow, ref: "main", targetSha: current, inputs: {}, dispatchJournal: journal, fetchImpl, attempts: 1 };
+  await assert.rejects(() => dispatchSourceBoundWorkflow(input), /Lost dispatch response/);
+  assert.equal(record.beforeRunIds.length, 150);
+  const recovered = await dispatchSourceBoundWorkflow(input);
+  assert.equal(recovered.id, 251);
+  assert.equal(posts, 1);
+});
+
+test("changing or duplicate paginated dispatch history fails before creating an approval child", async () => {
+  for (const changed of ["count", "duplicate"]) {
+    let posts = 0, reads = 0;
+    const fetchImpl = async (url) => {
+      if (url.endsWith(`/actions/workflows/${workflow}`)) return response(200, { id: workflowId, path: workflowPath });
+      if (url.endsWith("/dispatches")) { posts++;return response(204); }
+      if (url.includes("/runs?")) {
+        reads++;
+        const page = Number(new URL(url).searchParams.get("page") || 1);
+        const ids = page === 1 ? Array.from({ length: 100 }, (_, index) => 250 - index) : Array.from({ length: 50 }, (_, index) => (changed === "duplicate" ? 250 : 150 - index));
+        return response(200, { total_count: changed === "count" && reads === 2 ? 149 : 150, workflow_runs: ids.map(id => ({ id })) });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    };
+    await assert.rejects(() => dispatchSourceBoundWorkflow({ repository, token: "token", workflow, ref: "main", targetSha: current, dispatchJournal: { read: async () => null, write: async () => assert.fail("invalid baseline persisted") }, fetchImpl }), /baseline changed|duplicate runs/);
+    assert.equal(posts, 0);
+  }
+});
+
 test("journaled attempt with no visible child fails closed instead of redispatching", async () => {
   const api = apiFor({ freshRuns: 0 });let record;
   const journal = { read: async () => record ?? null, write: async value => { record = structuredClone(value);throw new Error("Interrupted before dispatch"); } };
