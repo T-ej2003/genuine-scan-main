@@ -133,14 +133,15 @@ scope, rationale, owner, creation date, execution claims, and expiry
 ## Current final PR #640 pre-delete no-write recovery revalidation
 
 Date: 2026-10-08 UTC. After the final pre-delete no-write journal disposition
-change was implemented and all required source/test gates passed, the
+and contradiction classification were implemented and all required
+source/test gates passed, the
 canonical `reachabilityInputsSha256(process.cwd())` result is
-`a5afd1a74fadc00897e26e825557accb9b7e5d7bfb0727bd0236f86d61eeff8b`. A fresh
+`8b300f5dd7868d2349737ef63b5b21319ea4426c4beb8fa53ab3120b59f4afa6`. A fresh
 unfiltered OSV Scanner 2.6.0 scan at
-`/private/tmp/mscqr-pr640-osv-final-d6d3f2ff/osv-source.json` found the same
+`/private/tmp/mscqr-pr640-osv-final-fbf0c050/osv-source.json` found the same
 single HIGH development-only `braces@3.0.3` finding,
 `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The fresh canonical browser closure
-at `/private/tmp/mscqr-pr640-osv-final-d6d3f2ff/browser-runtime-closure.json`
+at `/private/tmp/mscqr-pr640-osv-final-fbf0c050/browser-runtime-closure.json`
 transformed 3,993 modules into 96 chunks and resolved 204 packages;
 `braces@3.0.3` is absent. The existing non-runtime acceptance remains limited
 to this advisory and retains its prior scope, rationale, owner, creation date,
