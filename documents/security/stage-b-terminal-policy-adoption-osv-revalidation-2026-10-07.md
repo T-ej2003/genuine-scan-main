@@ -255,7 +255,7 @@ scope, rationale, owner, creation date, execution claims and expiry
 the same final fingerprint. Earlier fingerprints in this document describe
 historical validation inputs only. No production operation was performed.
 
-## Current PR #641 complete policy-evidence handoff revalidation
+## Historical PR #641 complete policy-evidence handoff revalidation
 
 Date: 2026-10-08 UTC. Implementation is frozen after preserving the mandatory
 receipt-bound policy through registration preparation, execution, recovery and
@@ -278,3 +278,27 @@ under the canonical checks. Advisory identity, scope, rationale, owner,
 creation date, execution claims and expiry `2026-11-02` are unchanged.
 Acceptance and this current evidence bind the same final fingerprint.
 Earlier fingerprints are historical only. No production operation occurred.
+
+## Current PR #641 owned policy-evidence handoff revalidation
+
+Date: 2026-10-08 UTC. The ownership-transition correction is frozen. Historical
+RELEASED ownership authenticates before acquisition; subsequent convergence
+checks authenticate only this exact next HELD generation and acquisition.
+The canonical `reachabilityInputsSha256(process.cwd())` is
+`d55236b66df901a959d4cccef97a7e9cb394b3b8df1e1b3621b259f446ba62b5`. All 49 focused ownership tests passed. The full
+Stage-B suite passed (1,586 passed, zero failed, two skipped), including the
+serialized public registration/recovery-to-policy authorization lifecycle.
+Capability/dependency closure, security guardrails, RLS verification and its
+24 tests, workflow validation and production dependency audit passed.
+
+A fresh unfiltered OSV Scanner 2.6.0 scan produced report SHA256
+`13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`.
+The canonical runtime gate rebuilt the production browser closure and passed
+with 204 browser packages; `braces@3.0.3` was absent. The backend lockfile
+remains free of this package, and the affected root npm instance remains
+development-only. The HIGH `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` acceptance
+remains non-runtime under the canonical checks. Advisory identity, scope,
+rationale, owner, creation date, execution claims and expiry `2026-11-02` are
+unchanged. Acceptance and this current evidence bind the same final
+fingerprint. Earlier fingerprints are historical only. No production
+operation occurred.

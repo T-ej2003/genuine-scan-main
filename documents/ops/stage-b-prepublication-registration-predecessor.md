@@ -92,3 +92,10 @@ SHA-256 DIGEST for complete messages above KMS's 4096-byte RAW limit, using
 the same key and RSASSA_PSS_SHA_256 algorithm. The complete disclosure remains
 signed; changing it invalidates verification. See the
 [AWS KMS Sign contract](https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html).
+
+During mutable policy convergence the historical RELEASED ownership is checked
+before reservation and acquisition. After acquisition, rechecks require the
+exact new HELD owner, its next generation, writer session, source, operation,
+preparation and reservation bindings. The historical receipt remains unchanged.
+An unrelated owner, generation, source, acquisition, or pruning purpose fails
+closed; recovery retains its existing exact-transaction ownership rules.

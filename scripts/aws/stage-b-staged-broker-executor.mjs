@@ -24,7 +24,7 @@ import { deriveStageBToolingInputTreeSha256, deriveStageBImageImpactReport } fro
 import { assertStageBBrokerPackageManifest } from './package-production-green-stage-b-broker.mjs';
 import { readStagedBrokerPrerequisites, readBrokerPolicyInventory } from './stage-b-staged-broker-observations.mjs';
 import { reserveStageBSharedApplyAttempt, reserveStageBApplyAttemptTransition, assertStageBApplyTerraformEnvironment } from '../apply-production-green-stage-b.mjs';
-import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from './stage-b-broker-policy-ownership.mjs';
+import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation, assertBrokerPolicyPredecessorOwnership } from './stage-b-broker-policy-ownership.mjs';
 import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from './stage-b-release-prerequisites.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
@@ -336,6 +336,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     return writerSession;
   };
   const ownedReservations = new Set(); let mutationAttempted = false;
+  let authenticatedPolicyPredecessorOwnership, policyOwnershipTransition;
   const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b'), dataDirectory = terraformDataDir) => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
     if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
@@ -465,7 +466,15 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     const reservation = readReceiptAt(id, 'RESERVATION', r.receiptObjects.reservation);
     const intent = readReceiptAt(id, 'BROKER_POLICY_INTENT', r.receiptObjects.intent);
     const result = readReceiptAt(id, 'BROKER_POLICY_CONVERGED', r.receiptObjects.result);
-    if (!historicalRecovery) equal(r.ownership, createBrokerPolicyOwnershipClient({ run: runAws }).read());
+    if (!historicalRecovery) {
+      if (policyOwnershipTransition) {
+        assert.equal(phase, 'POLICY'); assert.equal(operation, 'converge-policy');
+        assert.equal(preparation.prerequisiteChain.registration.preparation.schemaVersion, 3);
+        equal(entry, preparation.prerequisiteChain.policy);
+        equal(r.ownership, authenticatedPolicyPredecessorOwnership);
+      }
+      assertBrokerPolicyPredecessorOwnership(r.ownership, createBrokerPolicyOwnershipClient({ run: runAws }).read(), policyOwnershipTransition);
+    }
     assertReceiptBoundPolicyReceipts(entry, release, { reservation, intent, result, ownership: r.ownership });
     const state = await adapter.readStateIdentity();
     const adoptedState = { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 };
@@ -478,6 +487,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     const corroboration = { ownership: r.ownership, policyArn: STAGE_B_BROKER_POLICY.arn, version: live.version,
       policy: live.policy, versions: live.versions, terraform: adoptedState };
     assert.equal(brokerDigest(corroboration), r.liveCorroborationSha256);
+    if (!historicalRecovery && !policyOwnershipTransition) authenticatedPolicyPredecessorOwnership = structuredClone(r.ownership);
     return live;
   };
   const makeReceiptBoundAdoptions = async ({ registrationId, policyId }, release, predecessorOnly = false) => {
@@ -1203,10 +1213,17 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         }
         return snapshot.policy;
       };
+      // Authenticate the released predecessor before reservation/acquisition.
+      await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
+      const ownedOperation = policyOperation(id, session);
       await executeOwnedBrokerPolicyMutation({ ownership,
-        operation: policyOperation(id, session),
+        operation: ownedOperation,
         reserve: () => adapter.reserve(id, policyReservation()),
-        authenticate: async () => {
+        authenticate: async owner => {
+          if (preparation.prerequisiteChain?.registration.preparation?.schemaVersion === 3) {
+            assert.ok(authenticatedPolicyPredecessorOwnership, 'Historical ownership must authenticate before acquisition');
+            policyOwnershipTransition = { owner, operation: ownedOperation };
+          }
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
           equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap));
           const artifacts = await adapter.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256);

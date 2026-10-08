@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
-import { createBrokerPolicyOwnershipClient, BROKER_POLICY_OWNERSHIP_KEY, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from '../aws/stage-b-broker-policy-ownership.mjs';
+import { assertBrokerPolicyPredecessorOwnership, createBrokerPolicyOwnershipClient, BROKER_POLICY_OWNERSHIP_KEY, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from '../aws/stage-b-broker-policy-ownership.mjs';
 import { STAGE_B_BROKER_POLICY } from '../aws/stage-b-deployment-contract.mjs';
 
 function rig() {
@@ -252,4 +252,40 @@ test('mutation commit is single-use and success cannot be fabricated for an unco
   client.commitMutation(owner, receipt); assert.throws(() => client.commitMutation(owner, receipt));
   assert.throws(() => client.assertCommitted({ ...owner, generation: owner.generation + 1 }, receipt));
   assert.throws(() => client.assertCommitted(owner, '0'.repeat(64))); assert.equal(client.read().status, 'HELD');
+});
+
+
+test('authenticated released policy provenance survives exactly its next owned convergence without bypassing held-generation checks', async () => {
+  const { client } = rig(), historicalOwner = client.acquire(operation);
+  client.commitMutation(historicalOwner, receipt);
+  client.complete(historicalOwner, { outcome: 'SUCCEEDED', receiptSha256: receipt });
+  client.release(historicalOwner);
+  const historical = structuredClone(client.read());
+  assert.equal(assertBrokerPolicyPredecessorOwnership(historical, client.read()), true);
+  const next = { ...operation, operationIdentity: '1'.repeat(64), sourceSha: '2'.repeat(40),
+    acquisition: { ...operation.acquisition, preparationSha256: '3'.repeat(64), reservationSha256: '4'.repeat(64) } };
+  let writes = 0, transition;
+  await executeOwnedBrokerPolicyMutation({ ownership: client, operation: next, reserve: () => {},
+    authenticate: owner => {
+      transition = { owner, operation: next };
+      assert.equal(assertBrokerPolicyPredecessorOwnership(historical, client.read(), transition), true);
+      assert.throws(() => assertBrokerPolicyPredecessorOwnership(historical, client.read()));
+      for (const alter of [v => v.owner.generation++, v => v.operation.sourceSha = '9'.repeat(40),
+        v => v.operation.operationIdentity = '9'.repeat(64), v => v.operation.writerSession.sessionName += '-other',
+        v => v.operation.acquisition.preparationSha256 = '9'.repeat(64),
+        v => v.operation.acquisition.reservationSha256 = '9'.repeat(64),
+        v => v.operation.acquisition.purpose = 'STAGE_B_BROKER_POLICY_PRUNING']) {
+        const bad = structuredClone(transition); alter(bad);
+        assert.throws(() => assertBrokerPolicyPredecessorOwnership(historical, client.read(), bad));
+        assert.equal(writes, 0);
+      }
+      return { predecessor: 'old', successor: 'new' };
+    },
+    readPolicy: () => writes ? 'new' : 'old', persistIntent: () => ({ sha256: receipt }),
+    mutate: () => { assert.equal(assertBrokerPolicyPredecessorOwnership(historical, client.read(), transition), true); writes++; },
+    persistReceipt: () => receipt,
+  });
+  assert.equal(writes, 1); assert.equal(client.read().status, 'RELEASED');
+  assert.deepEqual(historical.identity, historicalOwner);
+  assert.throws(() => assertBrokerPolicyPredecessorOwnership(historical, client.read(), transition));
 });
