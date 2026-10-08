@@ -194,7 +194,7 @@ development dependency group. The accepted advisory identity, scope,
 rationale, owner, creation date, execution claims, and expiry `2026-11-02`
 remain unchanged.
 
-## Current PR #641 predecessor-recovery and policy-chain revalidation
+## Historical PR #641 predecessor-recovery and policy-chain revalidation
 
 Date: 2026-10-08 UTC. After freezing the recovery source-identity and mixed
 policy-chain corrections at code commit
@@ -212,7 +212,7 @@ advisory and retains its scope, rationale, owner, creation date, execution
 claims, and expiry `2026-11-02`. The canonical OSV runtime gate passed against
 these frozen inputs.
 
-## Final PR #641 mixed-policy-disclosure revalidation
+## Historical PR #641 mixed-policy-disclosure revalidation
 
 Date: 2026-10-08 UTC. After freezing the mixed schema-3 registration plus
 receipt-bound policy authorization-disclosure correction at code commit
@@ -229,3 +229,28 @@ development dependency group. The acceptance retains the same advisory,
 scope, rationale, owner, creation date, execution claims, and expiry
 `2026-11-02`. The canonical OSV runtime gate passed against these frozen
 inputs.
+
+
+## Current PR #641 final correctness revalidation
+
+Date: 2026-10-08 UTC. Implementation is frozen after the retained-predecessor
+versus current-successor recovery correction and mandatory schema-3 policy
+evidence correction. The canonical `reachabilityInputsSha256(process.cwd())`
+is `1994ac89449f703a84dada3c6106fe16fd51c5bbcf5df0ab5ef78fc62ce5e5a4`.
+The full Stage-B suite passed (1,584 passed, zero failed, two skipped), and
+focused public-CLI omission, signing/verification, retained predecessor and
+advanced-successor recovery tests passed. Capability/dependency closure,
+security guardrails, RLS package verification and its 24 tests, workflow
+validation and production dependency audit passed before revalidation.
+
+A new unfiltered OSV Scanner 2.6.0 scan of these frozen inputs produced report
+SHA256 `13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`.
+The canonical runtime gate rebuilt the production browser closure and passed:
+204 browser packages, with `braces@3.0.3` absent. The backend lockfile contains
+no `braces`; the affected instance remains a root npm development dependency.
+The existing HIGH `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` acceptance remains
+non-runtime under the canonical reachability checks. Its advisory identity,
+scope, rationale, owner, creation date, execution claims and expiry
+`2026-11-02` are unchanged. The acceptance and this current revalidation bind
+the same final fingerprint. Earlier fingerprints in this document describe
+historical validation inputs only. No production operation was performed.

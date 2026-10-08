@@ -78,11 +78,18 @@ export async function authenticatePreparedPrepublicationPredecessor({ operation,
     'Live policy/alias predecessor differs from the original signed registration preparation');
   return { registrationPredecessor: predecessor, prerequisites };
 }
+export function authenticateRetainedRegistrationPredecessor(address, definition, observed) {
+  const state = { ...definition.desired, arn: definition.arn, revision: definition.revision };
+  const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed });
+  equal(authenticated, definition);
+  return authenticated;
+}
 export async function authenticatePrepublicationPolicyChain({ operation, chain, checkout, authenticateChain, observe }) {
   assert.ok(['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation),
     `Pre-publication predecessor is not valid during ${operation}`);
   assert.ok(chain?.registration?.preparation?.schemaVersion === 3,
     'Policy predecessor requires the authenticated schema-3 registration handoff');
+  assert.ok(chain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
   await authenticateChain(chain);
   return authenticatePreparedPrepublicationPredecessor({ operation,
     preparation: chain.registration.preparation, checkout, observe });
@@ -520,8 +527,11 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     } };
     const observedOutputs = [];
     for (const [address, definition] of Object.entries(result.definitions)) {
-      const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired,
-        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) });
+      const observed = await adapter.describeTaskDefinition(definition.arn);
+      const authenticated = predecessorOnly && phase === 'REGISTRATION_RECOVERY'
+        ? authenticateRetainedRegistrationPredecessor(address, definition, observed)
+        : authenticateRegisteredDefinition({ address, desired: definition.desired,
+          state: await adapter.readRegisteredTaskDefinition(address), observed });
       equal(authenticated, definition); observedOutputs.push({ address, arn: definition.arn, revision: definition.revision, definitionSha256: brokerDigest(authenticated) });
     }
     const registrationEvidence = registration[predecessorOnly ? 'registrationPredecessor' : 'receiptBoundAdoption'];
@@ -549,10 +559,13 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(live.policy.Statement && brokerDigest(live.policy), brokerDigest(terminal.policy));
     assert.equal(live.version, terminal.successorIdentity.policyVersion);
     const state = await adapter.readStateIdentity(), policyState = stateResource('aws_iam_policy.broker');
-    equal(terminal.reconciliation?.state, state, 'Durable convergence result does not bind current Terraform state');
+    const corroboratedState = predecessorOnly && phase === 'REGISTRATION_RECOVERY' ? terminal.reconciliation?.state : state;
+    assert.ok(corroboratedState);
+    assertReceiptBoundPolicyTerraformState(phase, state, corroboratedState);
+    equal(terminal.reconciliation?.state, corroboratedState, 'Durable convergence result does not bind authenticated Terraform state');
     assert.equal(policyState.arn, STAGE_B_BROKER_POLICY.arn); equal(JSON.parse(policyState.policy), terminal.policy);
     const corroboration = { ownership, policyArn: STAGE_B_BROKER_POLICY.arn, version: live.version, policy: live.policy,
-      versions: live.versions, terraform: state };
+      versions: live.versions, terraform: corroboratedState };
     const policy = { terminal, receiptBoundAdoption: {
       kind: 'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION', schemaVersion: 1, recoveryMode: 'RECEIPT_BOUND',
       historicalSignatureVerified: false, historicalEvidenceAvailability: 'ORIGINAL_AUTHORIZATION_UNAVAILABLE',
@@ -572,8 +585,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         defaultVersion: pol.intent.value.predecessorInventory.find(v => v.IsDefaultVersion)?.VersionId },
       successor: terminal.successorIdentity, policyArn: STAGE_B_BROKER_POLICY.arn,
       successorVersion: live.version, successorDocumentSha256: brokerDigest(terminal.policy),
-      successorInventory: live.versions, terraformLineage: state.lineage, terraformSerial: state.serial,
-      terraformStateSha256: state.stateSha256, liveCorroborationSha256: brokerDigest(corroboration),
+      successorInventory: live.versions, terraformLineage: corroboratedState.lineage, terraformSerial: corroboratedState.serial,
+      terraformStateSha256: corroboratedState.stateSha256, liveCorroborationSha256: brokerDigest(corroboration),
     } };
     assertReceiptBoundPolicyAdoption(policy, release);
     if (!predecessorOnly) {
@@ -1001,6 +1014,11 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     authenticatePrerequisiteChain: async (chain, recoveryBinding) => {
       assert.ok(chain?.registration);
       const historicalRecovery = recoveryBinding !== undefined;
+      if (chain.registration.preparation?.schemaVersion === 3 &&
+          ['prepare-policy', 'authorize-policy', 'converge-policy', 'recover-policy'].includes(operation)) {
+        assert.ok(chain.policy?.receiptBoundAdoption,
+          'Schema-3 policy convergence requires authenticated historical policy evidence');
+      }
       const prepublicationPolicyOperation = (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation) ||
         historicalRecovery && phase === 'POLICY_RECOVERY' && operation === 'recover-policy') &&
         chain.registration.preparation?.schemaVersion === 3 && !chain.registration.receiptBoundAdoption &&
@@ -1043,7 +1061,10 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       } else if (normalPolicyEntry) {
         assert.ok(chain.policy.preparation && chain.policy.result,
           'Normal policy predecessor requires its canonical preparation/result representation');
-        equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
+        if (chain.registration.preparation?.schemaVersion === 3) {
+          assertBrokerPreparation(chain.policy.preparation);
+          equal(chain.policy.preparation.prerequisiteChain.registration, chain.registration);
+        } else equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
       for (const [name, entry] of Object.entries(chain)) {

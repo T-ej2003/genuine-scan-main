@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { authenticateRetainedRegistrationPredecessor } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import test from 'node:test';
 import { taskChange, rotationVariables } from './fixtures/stage-b-task-rotation.mjs';
@@ -600,4 +601,28 @@ test('normal policy preparation keeps using the strict ordinary prerequisite rea
       prerequisiteChain: { registration } }, { adapterFactory: () => deps }), /Unknown\/missing staged broker fields/);
     assert.equal(ordinaryRead, 1); assert.equal(adoptionRead, 0);
   } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
+test('successful fresh apply leaves retained historical predecessors authentic and recovery uses exact advanced successors without replay',async()=>{
+ const historical=rig('a',17);
+ const old=await executeTaskRegistration({preparation:historical.p,authorization:{}},historical.deps);
+ const fresh=await registrationRecoveryFixture();
+ const verifyPredecessors=async()=>{
+  for(const [address,definition] of Object.entries(old.definitions)) {
+   assert.notEqual(fresh.states[address].arn,definition.arn);
+   authenticateRetainedRegistrationPredecessor(address,definition,historical.describe(definition.arn));
+  }
+  return structuredClone(fresh.p.prerequisites);
+ };
+ fresh.deps.readPrerequisites=verifyPredecessors;
+ const result=await fresh.recover();
+ assert.ok(Object.values(result.definitions).every(d=>d.revision===42));
+ assert.equal(fresh.writes(),1);
+ await fresh.recover();assert.equal(fresh.writes(),1);
+ const address=TASK_REGISTRATION_ADDRESSES[0],definition=old.definitions[address];
+ assert.throws(()=>authenticateRetainedRegistrationPredecessor(address,definition,{...historical.describe(definition.arn),cpu:'999'}));
+ const changed=structuredClone(definition);changed.arn=changed.arn.replace(/:17$/,':18');changed.revision=18;
+ assert.throws(()=>authenticateRetainedRegistrationPredecessor(address,changed,historical.describe(definition.arn)));
+ fresh.states[address].cpu='999';
+ await assert.rejects(fresh.recover);assert.equal(fresh.writes(),1);
 });

@@ -35,3 +35,35 @@ release handoff. Fresh current-main task definitions and the existing
 registration authorization are still required. Preparation performs reads
 and plan capture only; it does not register definitions or mutate IAM, Lambda,
 ECS, Terraform state, or the database.
+
+
+## Recovery and mandatory policy evidence
+
+Registration recovery authenticates retained historical ECS revisions against
+immutable, version-pinned registration receipts. It does not require those
+revisions to remain Terraform's current resource bindings after fresh apply.
+The historical policy receipt still authenticates the original state identity;
+the current state must retain its lineage and advance its serial, while its
+broker policy resource and live IAM default/document remain exact. The existing
+read-only recovery classifier separately verifies every current task-definition
+binding and ECS successor against the original authorized saved plan. Partial,
+substituted, or ambiguous successors cannot terminalize and cannot be replayed.
+
+The public `prepare-policy`, `authorize-policy`, and `converge-policy` paths
+require the receipt-bound historical policy entry when registration is schema
+3. The entry's transaction, receipt objects, receipt chain, result digest and
+registered map must match the signed registration predecessor; the live policy
+and alias are independently reauthenticated. Missing evidence fails before
+plan capture or signing. Authorization binds the full mixed chain and its
+checker disclosure. After convergence, publication authenticates that exact
+signed policy package, including its historical evidence, and the fresh live
+successor; it does not reinterpret the historical policy as the current policy.
+Publication and cutover retain their own authorization boundaries.
+
+| Boundary | Historical expectation | Current expectation | Authority |
+| --- | --- | --- | --- |
+| Registration preparation/execution | Retained receipt revisions equal current pre-apply bindings | Exact old alias and historical IAM predecessor | Fresh registration authorization for apply |
+| Registration recovery | Retained receipt revisions remain authentic in ECS | Exact fresh plan successors in advanced Terraform state and ECS | Read-only diagnosis; no registration replay |
+| Policy preparation/signing/convergence | Mandatory receipt-bound policy matches signed predecessor | Fresh registration outputs; exact old alias and IAM predecessor | Separate policy authorization binds complete evidence |
+| Completed policy handoff/publication | Historical evidence remains in signed policy package | Fresh policy and registration successors agree | Separate publication authorization |
+| Cutover | Publication provenance retained | Exact fresh predecessor/RevisionId CAS | Separate cutover authorization |

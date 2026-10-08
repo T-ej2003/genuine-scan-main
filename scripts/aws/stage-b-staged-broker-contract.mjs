@@ -313,6 +313,9 @@ export function assertReceiptBoundPolicyReceipts(entry, release, { reservation, 
 
 export function receiptBoundCheckerDisclosure(preparation) {
   const chain = preparation?.prerequisiteChain;
+  if (preparation.purpose === 'STAGE_B_BROKER_POLICY_CONVERGENCE' && chain?.registration?.preparation?.schemaVersion === 3) {
+    assert.ok(chain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
+  }
   if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
   const policyConvergence = preparation.purpose === 'STAGE_B_BROKER_POLICY_CONVERGENCE' &&
     chain.registration?.preparation?.schemaVersion === 3 &&
@@ -632,7 +635,20 @@ export function assertBrokerPreparation(p) {
       else assert.equal(p.registrationPredecessor, undefined);
     }
     else if (p.purpose === 'STAGE_B_BROKER_POLICY_PRUNING') { keys(p.target, ['versionId', 'inventory']); assert.match(p.target.versionId, /^v[1-9][0-9]*$/); assert.notEqual(p.target.versionId, p.prerequisites.policyVersion); }
-    else { assert.ok(p.prerequisiteChain?.registration); if (p.prerequisiteChain.registration.adoption) assertRegistrationHandoff(p.prerequisiteChain.registration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
+    else { assert.ok(p.prerequisiteChain?.registration); if (p.prerequisiteChain.registration.preparation?.schemaVersion === 3) {
+      assert.ok(p.prerequisiteChain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
+      assertReceiptBoundPolicyAdoption(p.prerequisiteChain.policy, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+      const predecessor = p.prerequisiteChain.registration.preparation.registrationPredecessor;
+      assert.ok(predecessor);
+      assert.equal(p.prerequisiteChain.policy.receiptBoundAdoption.transactionId, predecessor.policyTransactionId);
+      assert.equal(p.prerequisiteChain.policy.receiptBoundAdoption.historicalResultSha256, predecessor.policyResultSha256);
+      assert.equal(p.prerequisiteChain.policy.receiptBoundAdoption.receiptChainSha256, predecessor.policyReceiptChainSha256);
+      equal(p.prerequisiteChain.policy.terminal.successorIdentity.taskMap, predecessor.registrationTaskMap);
+      assertBrokerPreparation(p.prerequisiteChain.registration.preparation);
+      equal(p.prerequisiteChain.policy.receiptBoundAdoption.receiptObjects, predecessor.policyReceiptObjects);
+      equal(p.prerequisites.policy, predecessor.policyDocument);
+      assert.equal(p.prerequisites.policyVersion, predecessor.policyDefaultVersion);
+    } if (p.prerequisiteChain.registration.adoption) assertRegistrationHandoff(p.prerequisiteChain.registration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
     return p;
   }
   if (p.schemaVersion === 2) {

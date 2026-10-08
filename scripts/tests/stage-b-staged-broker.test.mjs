@@ -55,14 +55,17 @@ function publicationWithTerminalPolicyAdoption(f=terminalPolicyFixture()) {
  return p;
 }
 
-function receiptBoundFixture() {
- const f=terminalPolicyFixture(),registrationId='a'.repeat(64),policyId=f.entry.terminal.owner.operationIdentity;
+function receiptBoundFixture(revision = 1) {
+ const f=terminalPolicyFixture();
+ const historicalTaskMap=Object.fromEntries(Object.entries(prerequisites.taskMap).map(([k,v])=>[k,v.replace(/:\d+$/,`:${revision}`)]));
+ f.entry.terminal.policy=deriveBrokerPolicy(f.entry.terminal.policy,historicalTaskMap);
+ const registrationId='a'.repeat(64),policyId=f.entry.terminal.owner.operationIdentity;
  const object=(id,seq,body)=>({bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,
   key:seq===0?`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}.json`:`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}/${String(seq).padStart(4,'0')}.json`,
   versionId:`version-${seq}-${id.slice(0,4)}`,etag:`"etag-${seq}"`,objectSha256:brokerDigest(body)});
  const receiptObjects=(id,bodies)=>({reservation:object(id,0,bodies.reservation),intent:object(id,1,bodies.intent),result:object(id,2,bodies.result)});
- const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>{const name=address.includes('.executor[')?address.match(/\["([^"]+)"\]$/)[1]:address.endsWith('candidate["canary"]')?'full-rls-application-canary':null;return [address,{arn:name?prerequisites.taskMap[name]:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`}];}));
- const regResult={status:'REGISTERED_NONTERMINAL',sourceSha:oldSha,treeSha256:'8'.repeat(64),savedPlanSha256:'5'.repeat(64),preparationSha256:'6'.repeat(64),authorizationSha256:registrationId,authorizedAt:'2026-10-06T11:40:35.838Z',definitions,taskMap:clone(prerequisites.taskMap)};
+ const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>{const name=address.includes('.executor[')?address.match(/\["([^"]+)"\]$/)[1]:address.endsWith('candidate["canary"]')?'full-rls-application-canary':null;return [address,{arn:name?historicalTaskMap[name]:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`}];}));
+ const regResult={status:'REGISTERED_NONTERMINAL',sourceSha:oldSha,treeSha256:'8'.repeat(64),savedPlanSha256:'5'.repeat(64),preparationSha256:'6'.repeat(64),authorizationSha256:registrationId,authorizedAt:'2026-10-06T11:40:35.838Z',definitions,taskMap:clone(historicalTaskMap)};
  const regReservation={kind:'STAGED_BROKER_RESERVATION',id:registrationId,value:{purpose:TASK_REGISTRATION,nonce:'b'.repeat(64),preparationSha256:regResult.preparationSha256}};
  const regIntent={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTRATION_INTENT',value:{savedPlanSha256:regResult.savedPlanSha256,authorizedAt:regResult.authorizedAt}};
  const regReceipt={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTERED',value:regResult};
@@ -78,7 +81,7 @@ function receiptBoundFixture() {
  const polIntent={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_INTENT',value:intentValue};
  const terminal=clone(f.entry.terminal); terminal.owner.owner='123e4567-e89b-12d3-a456-426614174000'; terminal.treeSha256='7'.repeat(64); terminal.savedPlanSha256=intentValue.savedPlanSha256; terminal.authorizedAt=intentValue.authorizedAt; terminal.reconciliation={state:clone(f.state)};
  intentValue.owner=clone(terminal.owner);
- terminal.successorIdentity={policyArn:prerequisites.policyArn,policyVersion:'v13',policy:clone(terminal.policy),taskMap:clone(prerequisites.taskMap)};
+ terminal.successorIdentity={policyArn:prerequisites.policyArn,policyVersion:'v13',policy:clone(terminal.policy),taskMap:clone(historicalTaskMap)};
  const polResult={kind:'STAGED_BROKER_STEP',id:policyId,status:'BROKER_POLICY_CONVERGED',value:terminal};
  const ownership={identity:clone(terminal.owner),acquisition:{authorizedAt:intentValue.authorizedAt,purpose:BROKER_POLICY_CONVERGENCE,preparationSha256:terminal.preparationSha256,reservationSha256:brokerDigest(polReservation)},mutation:{intentSha256:brokerDigest(intentValue)},status:'RELEASED',terminal:{outcome:'SUCCEEDED',receiptSha256:brokerDigest(terminal)}};
  intentValue.acquisitionSha256=brokerDigest(ownership.acquisition);
@@ -98,8 +101,8 @@ function receiptBoundFixture() {
  return {f,registration:regEntry,policy:policyEntry,registrationReceipts,policyReceipts,ownership,state};
 }
 
-function prepublicationPredecessorFixture() {
- const x=receiptBoundFixture(), {registration,policy,registrationReceipts,policyReceipts,f}=x;
+function prepublicationPredecessorFixture(revision = 1) {
+ const x=receiptBoundFixture(revision), {registration,policy,registrationReceipts,policyReceipts,f}=x;
  const bump=map=>Object.fromEntries(Object.entries(map).map(([name,arn])=>[name,arn.replace(/:(\d+)$/,(_,revision)=>`:${Number(revision)+2}`)]));
  const registrationTaskMap=bump(registration.result.taskMap), aliasRuntimeTaskMap=clone(prerequisites.taskMap);
  const imageImpactReport={imageReleaseSha:registration.result.sourceSha,toolingSha:f.release.sourceSha,toolingInputTreeSha256:f.release.treeSha256,
@@ -187,7 +190,7 @@ test('policy preparation authenticates the schema-3 fresh registration chain bef
  const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x),order=[];
  const freshMap={...clone(p.registrationPredecessor.registrationTaskMap)};
  for(const key of Object.keys(freshMap))freshMap[key]=freshMap[key].replace(/:(\d+)$/,(_,n)=>`:${Number(n)+1}`);
- const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:freshMap}}};
+ const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:freshMap}},policy:x.policy};
  const observed=await authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain,checkout:x.f.release,
   authenticateChain:async authenticated=>{order.push('chain');assert.deepEqual(authenticated,chain);assert.equal(authenticated.registration.result.preparationSha256,brokerDigest(p));},
   observe:async predecessor=>{order.push('live');assert.deepEqual(predecessor.registrationTaskMap,x.registrationTaskMap);assert.deepEqual(predecessor.aliasRuntimeTaskMap,x.aliasRuntimeTaskMap);return p.prerequisites;}});
@@ -197,15 +200,15 @@ test('policy preparation authenticates the schema-3 fresh registration chain bef
 
 test('policy predecessor is unavailable without the authenticated schema-3 chain or outside policy lifecycle operations',async()=>{
  const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x);let observed=0;
- const args={chain:{registration:{preparation:p}},checkout:x.f.release,authenticateChain:async()=>{},observe:async()=>{observed++;return p.prerequisites;}};
+ const args={chain:{registration:{preparation:p},policy:x.policy},checkout:x.f.release,authenticateChain:async()=>{},observe:async()=>{observed++;return p.prerequisites;}};
  await assert.rejects(()=>authenticatePrepublicationPolicyChain({...args,operation:'prepare-publication'}),/not valid/);
- await assert.rejects(()=>authenticatePrepublicationPolicyChain({...args,operation:'prepare-policy',chain:{registration:{preparation:{...p,registrationPredecessor:{...p.registrationPredecessor}}}},authenticateChain:async()=>{throw new Error('untrusted chain');}}),/untrusted chain/);
+ await assert.rejects(()=>authenticatePrepublicationPolicyChain({...args,operation:'prepare-policy',chain:{registration:{preparation:{...p,registrationPredecessor:{...p.registrationPredecessor}}},policy:x.policy},authenticateChain:async()=>{throw new Error('untrusted chain');}}),/untrusted chain/);
  assert.equal(observed,0);
 });
 
 test('policy predecessor rejects altered fresh registration, live policy, and alias identities without mutation',async()=>{
  const x=prepublicationPredecessorFixture(),p=schema3RegistrationPredecessor(x);let mutations=0;
- const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:clone(x.registrationTaskMap)}}};
+ const chain={registration:{preparation:p,result:{preparationSha256:brokerDigest(p),taskMap:clone(x.registrationTaskMap)}},policy:x.policy};
  await assert.rejects(()=>authenticatePrepublicationPolicyChain({operation:'prepare-policy',chain,checkout:x.f.release,
   authenticateChain:async value=>{assert.deepEqual(value.registration.result.taskMap,x.registrationTaskMap);throw new Error('registered map mismatch');},
   observe:async()=>{throw new Error('must not observe after chain mismatch');}}),/registered map mismatch/);
@@ -329,11 +332,21 @@ test('fresh checker disclosure binds the new publication package and discloses u
 });
 
 test('fresh policy-convergence authorization discloses the mixed schema-3 registration and historical policy chain',async()=>{
- const x=prepublicationPredecessorFixture(),registrationPreparation=schema3RegistrationPredecessor(x),registrationAuthorization=authorization(registrationPreparation);
+ const x=prepublicationPredecessorFixture(3);
+ // The historical policy receipt binds the historical registration map; the fresh result is a third identity.
+ x.registrationTaskMap=clone(x.policy.terminal.successorIdentity.taskMap);
+ x.aliasRuntimeTaskMap=clone(prerequisites.taskMap);
+ Object.assign(x.proof,{registrationTaskMap:x.registrationTaskMap,aliasRuntimeTaskMap:x.aliasRuntimeTaskMap,
+  policyDocument:clone(x.policy.terminal.policy),policyDocumentSha256:brokerDigest(x.policy.terminal.policy)});
+ const registrationPreparation=schema3RegistrationPredecessor(x),registrationAuthorization=authorization(registrationPreparation);
  const registration={preparation:registrationPreparation,authorization:registrationAuthorization,result:{status:'REGISTERED_NONTERMINAL',
   sourceSha:registrationPreparation.sourceSha,treeSha256:registrationPreparation.treeSha256,preparationSha256:brokerDigest(registrationPreparation),
   authorizationSha256:brokerDigest(registrationAuthorization),savedPlanSha256:registrationPreparation.savedPlanSha256,authorizedAt:now.toISOString(),
   taskMap:clone(x.registrationTaskMap),definitions:clone(x.registration.result.definitions)}};
+ for(const definition of Object.values(registration.result.definitions)) definition.arn=definition.arn.replace(/:\d+$/,':5');
+ registration.result.taskMap=Object.fromEntries(Object.entries(x.registrationTaskMap).map(([k,v])=>[k,v.replace(/:\d+$/,':5')]));
+ assert.notDeepEqual(registration.result.taskMap,registrationPreparation.registrationPredecessor.registrationTaskMap);
+ assert.notDeepEqual(registrationPreparation.registrationPredecessor.registrationTaskMap,registrationPreparation.registrationPredecessor.aliasRuntimeTaskMap);
  const p=preparation();p.schemaVersion=2;p.purpose=BROKER_POLICY_CONVERGENCE;p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;
  p.prerequisites={...clone(prerequisites),policyVersion:x.policy.receiptBoundAdoption.successorVersion,
   policy:clone(x.policy.terminal.policy),taskMap:clone(x.registration.result.taskMap)};
@@ -354,6 +367,22 @@ test('fresh policy-convergence authorization discloses the mixed schema-3 regist
  const auth=await signBrokerAuthorization(p,{makerIdentity:maker,humanReviewId:'policy-review',makerCaller:async()=>({Account:'368992683803',Arn:maker}),
   caller:async()=>({Arn:checker}),sign:async()=>'c2ln',verify:async()=>true,now});
  assert.deepEqual(auth.recoveryDisclosure,disclosure);
+ await assertBrokerAuthorization(auth,p,{verify:async()=>true,now});
+ const successorPolicy={preparation:p,authorization:auth,result:{status:'BROKER_POLICY_CONVERGED_NONTERMINAL',sourceSha:p.sourceSha,
+  treeSha256:p.treeSha256,preparationSha256:brokerDigest(p),authorizationSha256:brokerDigest(auth),policy:p.target.policy}};
+ const publication=preparation();publication.schemaVersion=2;publication.sourceSha=p.sourceSha;publication.treeSha256=p.treeSha256;
+ publication.prerequisiteChain={registration,policy:successorPolicy};
+ publication.prerequisites={...clone(p.prerequisites),policyVersion:'v14',policy:clone(p.target.policy),taskMap:clone(registration.result.taskMap)};
+ publication.configuration.BROKER_TASK_DEFINITIONS_JSON=JSON.stringify(registration.result.taskMap);
+ assertBrokerPreparation(publication);
+ await assert.rejects(()=>assertBrokerAuthorization(auth,publication,{verify:async()=>true,now}));
+
+ const missing=clone(p);delete missing.prerequisiteChain.policy;
+ assert.throws(()=>assertBrokerPreparation(missing),/requires authenticated historical policy evidence/);
+ assert.throws(()=>receiptBoundCheckerDisclosure(missing),/requires authenticated historical policy evidence/);
+ await assert.rejects(()=>signBrokerAuthorization(missing,{makerIdentity:maker,humanReviewId:'policy-review',makerCaller:async()=>({Account:'368992683803',Arn:maker}),
+  caller:async()=>({Arn:checker}),sign:async()=>assert.fail('Missing evidence must never be signed'),verify:async()=>true,now}),/requires authenticated historical policy evidence/);
+
  const alteredPolicy=clone(p);alteredPolicy.prerequisiteChain.policy.receiptBoundAdoption.historicalResultSha256='f'.repeat(64);
  assert.throws(()=>receiptBoundCheckerDisclosure(alteredPolicy));
  const wrongShape=clone(p);wrongShape.prerequisiteChain.registration=x.registration;

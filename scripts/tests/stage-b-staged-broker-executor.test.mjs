@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -912,4 +912,20 @@ test('read-only registration adoption cannot reserve or reach any external mutat
   ]) await assert.rejects(attempt);
   assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
   assert.equal(r.calls.filter(c => ['put-object', 'update-alias', 'create-policy-version', 'delete-policy-version', 'register-task-definition', 'run-task', 'stop-task', 'update-service'].includes(c.args[1])).length, 0);
+});
+
+for (const operation of ['prepare-policy', 'authorize-policy', 'converge-policy']) test(`${operation} rejects registration-only schema-3 chain before any AWS read or write`, async () => {
+  const r=await native('PUBLICATION'), adapter=r.makeAdapter('PREPARATION',r.auth,operation);
+  const chain={registration:{preparation:{schemaVersion:3}}};
+  adapter.readCheckout=async()=>assert.fail('Missing evidence must fail before checkout or AWS');
+  const before=r.calls.length;
+  await assert.rejects(()=>adapter.authenticatePrerequisiteChain(chain),/requires authenticated historical policy evidence/);
+  assert.equal(r.calls.length,before);
+  await assert.rejects(()=>runStagedBrokerRequest({operation,files,directory,terraformDataDir:directory,
+    prerequisiteChain:chain},{adapterFactory:options=>{
+      const nativeAdapter=createStagedBrokerExecutor({...options,env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec:r.exec});
+      nativeAdapter.readCheckout=async()=>({sourceSha:r.p.sourceSha,treeSha256:r.p.treeSha256});
+      return nativeAdapter;
+    }}),/requires authenticated historical policy evidence/);
+  assert.equal(r.calls.length,before);
 });
