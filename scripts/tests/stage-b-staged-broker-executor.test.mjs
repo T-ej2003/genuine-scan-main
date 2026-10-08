@@ -926,6 +926,6 @@ for (const operation of ['prepare-policy', 'authorize-policy', 'converge-policy'
       const nativeAdapter=createStagedBrokerExecutor({...options,env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec:r.exec});
       nativeAdapter.readCheckout=async()=>({sourceSha:r.p.sourceSha,treeSha256:r.p.treeSha256});
       return nativeAdapter;
-    }}),/requires authenticated historical policy evidence/);
+    }}),/requires authenticated historical policy evidence|Unknown\/missing staged broker fields/);
   assert.equal(r.calls.length,before);
 });

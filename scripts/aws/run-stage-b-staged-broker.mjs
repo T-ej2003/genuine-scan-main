@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan, registrationPolicyPrerequisiteChain } from './stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
 import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
@@ -54,7 +54,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery'];
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
-  const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
+  let prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
+  if (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
   if (['authorize-policy', 'converge-policy'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
     equal(request.prerequisiteChain, preparation.prerequisiteChain, 'Policy continuation cannot substitute its signed prerequisite chain');
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
@@ -133,7 +134,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
         configuration: diagnostic.plan.resource_changes.find(c => c.address === BROKER_FUNCTION).change.before.environment[0].variables,
         publication: null, target: registration ? null : pruning ? { versionId: request.versionId, inventory: captured.plan.inventory } : { policy: deriveBrokerPolicy(prerequisites.policy, prerequisiteChain.registration.result.taskMap) },
         prerequisiteChain: registration ? null : prerequisiteChain || null,
-        ...(registration && registrationPredecessorEvidence ? { registrationPredecessor: registrationPredecessorEvidence.registrationPredecessor } : {}) };
+        ...(registration && registrationPredecessorEvidence ? { registrationPredecessor: registrationPredecessorEvidence.registrationPredecessor, registrationPolicyPredecessor: registrationPredecessorEvidence.policy } : {}) };
       assertBrokerPreparation(p); const mutationAddresses = pruning ? assertBrokerPolicyPruningPlan(captured.plan, p) : assertPrerequisitePlan(captured.plan, p);
       equal(await deps.readCheckout(), checkout); equal(await deps.readStateIdentity(), state); equal(await deps.readPrerequisites(), prerequisites);
       return { preparation: p, mutationAddresses, planPath: captured.file };

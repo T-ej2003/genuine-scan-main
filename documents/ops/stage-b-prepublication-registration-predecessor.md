@@ -53,7 +53,7 @@ The public `prepare-policy`, `authorize-policy`, and `converge-policy` paths
 require the receipt-bound historical policy entry when registration is schema
 3. The entry's transaction, receipt objects, receipt chain, result digest and
 registered map must match the signed registration predecessor; the live policy
-and alias are independently reauthenticated. Missing evidence fails before
+and alias are independently reauthenticated. Missing signed preparation or result evidence fails before
 plan capture or signing. Authorization binds the full mixed chain and its
 checker disclosure. After convergence, publication authenticates that exact
 signed policy package, including its historical evidence, and the fresh live
@@ -67,3 +67,28 @@ Publication and cutover retain their own authorization boundaries.
 | Policy preparation/signing/convergence | Mandatory receipt-bound policy matches signed predecessor | Fresh registration outputs; exact old alias and IAM predecessor | Separate policy authorization binds complete evidence |
 | Completed policy handoff/publication | Historical evidence remains in signed policy package | Fresh policy and registration successors agree | Separate publication authorization |
 | Cutover | Publication provenance retained | Exact fresh predecessor/RevisionId CAS | Separate cutover authorization |
+
+## Complete registration-to-policy handoff
+
+Schema-3 preparation requires `registrationPolicyPredecessor`, the full
+receipt-bound policy entry already authenticated by the predecessor reader.
+Its receipt objects, transaction, result digest, policy document, default and
+registered map must match `registrationPredecessor`. Registration execution
+and read-only recovery preserve this exact entry as `result.policyPredecessor`.
+The handoff validator rejects a missing or changed entry in either artifact.
+
+Policy preparation derives its mandatory policy entry from this signed
+registration handoff. An explicitly supplied entry must equal it exactly.
+The canonical prerequisite verifier then reauthenticates durable receipts and
+live identities; deriving the entry does not substitute for authentication.
+Policy preparation, signing and convergence bind the full mixed chain.
+
+The public-operation regression runs preparation, registration authorization,
+registration execution, JSON serialization, completed-apply recovery with and
+without a completion receipt, policy preparation, and policy signing and
+verification. It rejects missing, altered and substituted policy evidence.
+The signer transport test retains short-message KMS RAW signing and uses
+SHA-256 DIGEST for complete messages above KMS's 4096-byte RAW limit, using
+the same key and RSASSA_PSS_SHA_256 algorithm. The complete disclosure remains
+signed; changing it invalidates verification. See the
+[AWS KMS Sign contract](https://docs.aws.amazon.com/kms/latest/APIReference/API_Sign.html).

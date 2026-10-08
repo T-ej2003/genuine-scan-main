@@ -638,7 +638,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       imageImpactReport, imageImpactSha256: brokerDigest(imageImpactReport),
     };
     assertPrepublicationRegistrationPredecessor(registrationPredecessor, release);
-    return { registrationPredecessor, prerequisites };
+    return { registrationPredecessor, prerequisites, policy };
   };
   const authenticateReceiptBoundPrerequisiteChain = async (chain, release) => {
     assertReceiptBoundAuthenticationPhase(phase);
@@ -785,14 +785,17 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         }, originalSource, true);
         assertSamePrepublicationRegistrationPredecessor(preparation.registrationPredecessor,
           authenticated.registrationPredecessor, originalSource);
+        equal(authenticated.policy, preparation.registrationPolicyPredecessor);
         equal(await adapter.readRecoveryCheckout(), checkout,
           'Recovery tooling checkout changed during predecessor reauthentication');
         return authenticated;
       }
       const authenticated = await makeReceiptBoundAdoptions({ registrationId: receiptRecovery.registrationTransactionId,
         policyId: receiptRecovery.policyTransactionId }, checkout, true);
-      if (preparation?.registrationPredecessor) assertSamePrepublicationRegistrationPredecessor(preparation.registrationPredecessor,
-        authenticated.registrationPredecessor, checkout);
+      if (preparation?.registrationPredecessor) {
+        assertSamePrepublicationRegistrationPredecessor(preparation.registrationPredecessor, authenticated.registrationPredecessor, checkout);
+        equal(authenticated.policy, preparation.registrationPolicyPredecessor);
+      }
       else if (preparedRegistrationPredecessor) assertSamePrepublicationRegistrationPredecessor(preparedRegistrationPredecessor,
         authenticated.registrationPredecessor, checkout);
       else preparedRegistrationPredecessor = structuredClone(authenticated.registrationPredecessor);

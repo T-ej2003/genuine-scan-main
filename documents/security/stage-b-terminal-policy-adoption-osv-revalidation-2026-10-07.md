@@ -177,7 +177,7 @@ the frozen inputs. The acceptance remains limited to the same advisory and
 retains its scope, rationale, owner, creation date, execution claims, and
 exclusive expiry `2026-11-02`.
 
-## Current PR #641 predecessor-authentication revalidation
+## Historical PR #641 predecessor-authentication revalidation
 
 Date: 2026-10-08 UTC. The frozen executable/build inputs at candidate commit
 `d7d3355c2f32bab082855bd34b9b5edd1893948e` have canonical
@@ -231,7 +231,7 @@ scope, rationale, owner, creation date, execution claims, and expiry
 inputs.
 
 
-## Current PR #641 final correctness revalidation
+## Historical PR #641 final correctness revalidation
 
 Date: 2026-10-08 UTC. Implementation is frozen after the retained-predecessor
 versus current-successor recovery correction and mandatory schema-3 policy
@@ -254,3 +254,27 @@ scope, rationale, owner, creation date, execution claims and expiry
 `2026-11-02` are unchanged. The acceptance and this current revalidation bind
 the same final fingerprint. Earlier fingerprints in this document describe
 historical validation inputs only. No production operation was performed.
+
+## Current PR #641 complete policy-evidence handoff revalidation
+
+Date: 2026-10-08 UTC. Implementation is frozen after preserving the mandatory
+receipt-bound policy through registration preparation, execution, recovery and
+serialized handoff, and authenticating it during subsequent policy preparation
+and signing. The public-operation regression also exercises the real KMS
+transport boundary for the full authorization disclosure. The canonical
+`reachabilityInputsSha256(process.cwd())` is `97b5977f01b696c3b0c28f51f41f0cd99c1be2048dbf1493af72fe10a3898910`.
+The focused suite passed (562 passed, zero failed, two skipped), and the full
+Stage-B suite passed (1,585 passed, zero failed, two skipped). Capability and
+dependency closure, security guardrails, RLS verification and its 24 tests,
+workflow validation and production dependency audit passed.
+
+A fresh unfiltered OSV Scanner 2.6.0 scan of the frozen inputs produced report
+SHA256 `13c369975a7f9749fe59755af2c4e0c252d7c2d433f31fcf2ff58483aee2a24f`.
+The canonical runtime gate rebuilt the production browser closure and passed:
+204 browser packages, with `braces@3.0.3` absent. The backend lockfile remains
+free of this package; the affected root npm instance is development-only.
+The HIGH `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` acceptance remains non-runtime
+under the canonical checks. Advisory identity, scope, rationale, owner,
+creation date, execution claims and expiry `2026-11-02` are unchanged.
+Acceptance and this current evidence bind the same final fingerprint.
+Earlier fingerprints are historical only. No production operation occurred.
