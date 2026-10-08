@@ -13,6 +13,12 @@ component deployment baseline and canonical change classification. Release IDs,
 Stage-B transaction IDs and GitHub child run IDs are distinct. Advancing main
 cannot replace any of these bindings.
 
+If protected main advances during a release, the existing Stage-B checkout and
+protected approval contracts block further writes from the frozen older source.
+This is PR A's fail-closed source-advance outcome: the coordinator does not
+rebind that release or its approval to newer tooling. Durable records remain
+available for authenticated native recovery.
+
 The coordinator saves the initial component baseline as an immutable referenced
 artifact. Restart reads that accepted identity before reauthenticating the source;
 it does not derive a different release from a later component-state generation.
@@ -51,6 +57,9 @@ internal phases:
 
 Human interaction is limited to deliberate production authorization. Successful
 workflow dispatch or HTTP health alone does not establish deployment success.
+An approval child that times out without approval consumes its exact round. The
+coordinator may request a new round for the same preparation; failed or
+cancelled children do not silently become new approvals.
 
 ## Hosted authorization
 

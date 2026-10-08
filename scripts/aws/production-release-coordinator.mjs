@@ -80,6 +80,7 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
   assert.equal(child.path,`.github/workflows/${workflow}`);assert.equal(child.head_branch,'main');assert.equal(child.event,'workflow_dispatch');assert.equal(String(child.run_attempt),'1');
   assert.equal(child.repository?.full_name,repository);assert.equal(child.head_repository?.full_name,repository);
   if(child.status==='completed'){
+   if(child.conclusion==='timed_out')return {status:'APPROVAL_TIMED_OUT',runId:String(workflowRunId)};
    assert.equal(child.conclusion,'success','Exact approval child failed');
    const {authorization}=await readBrokerProtectedEnvironmentAuthorization({workflowRunId,sourceSha:release.sourceSha,run});
    await assertReleaseTransitionApproval(authorization);
@@ -391,6 +392,13 @@ export async function runReleaseCoordinator(request, runtime) {
     const attempt=await readStep(`${name}:attempt:${round}`);
     if(name==='closure')authorization=packages.cutover.authorization;
     else {
+     const timedOut=await readStep(`${name}:approval-timeout:${round}`);
+     if(timedOut){
+      assert.equal(attempt,null);assert.equal(await readStep(`${name}:authorized:${round}`),null);
+      const pending=await readStep(`${name}:pending:${round}`);
+      assert.equal(timedOut.prepared,preparedDigest);assert.equal(timedOut.runId,pending?.runId);
+      continue;
+     }
      const signed=await readStep(`${name}:authorized:${round}`);
      if(signed){
       assert.equal(signed.prepared,preparedDigest);
@@ -403,6 +411,12 @@ export async function runReleaseCoordinator(request, runtime) {
       const pendingApproval=await readStep(`${name}:pending:${round}`);
       if(pendingApproval)assert.equal(pendingApproval.prepared,preparedDigest);
       const approval=await runtime.obtainAuthorization({...context,authorizationRound:round,pendingApproval},name,prepared,preparedDigest);
+      if(approval.status==='APPROVAL_TIMED_OUT'){
+       assert.equal(attempt,null);
+       assert.equal(String(approval.runId),pendingApproval?.runId,'Timed-out child differs from the recorded approval');
+       await record(`${name}:approval-timeout:${round}`,{prepared:preparedDigest,runId:String(approval.runId)});
+       continue;
+      }
       if(approval.status==='WAITING_FOR_APPROVAL'){
        assert.match(String(approval.runId),/^[1-9][0-9]*$/);
        assert.equal(approval.runUrl,`https://github.com/T-ej2003/genuine-scan-main/actions/runs/${approval.runId}`);
