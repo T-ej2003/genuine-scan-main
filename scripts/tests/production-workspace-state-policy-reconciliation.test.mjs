@@ -521,7 +521,7 @@ test("exhausted post-journal pre-delete retries record no-write evidence and res
   assert.deepEqual([run.box.deletes, run.box.creates], [1, 1]);
 });
 
-test("post-journal stable CAS mismatch and permanent read errors fail immediately without deletion", async () => {
+test("post-journal stable CAS mismatch fails closed and permanent read errors record proved no-write", async () => {
   const changed = executor(); let changedReads = 0; const baseRead = changed.args.readLiveState;
   changed.args.readLiveState = async () => {
     changedReads += 1;
@@ -530,15 +530,30 @@ test("post-journal stable CAS mismatch and permanent read errors fail immediatel
   };
   await assert.rejects(() => executeWorkspaceStateReconciliation(changed.args));
   assert.equal(changedReads, 2); assert.equal(changed.box.deletes, 0);
+  assert.equal(changed.journal.values.has(workspaceStateJournalKey(changed.args.preparation.operationId, "deletion-prewrite-failed.json")), false);
 
   const denied = executor(); let deniedReads = 0; const deniedBaseRead = denied.args.readLiveState;
   denied.args.readLiveState = async () => {
     if (denied.journal.values.has(workspaceStateJournalKey(denied.args.preparation.operationId, "deletion-attempt.json"))) { deniedReads += 1; throw new Error("AccessDenied: not authorized"); }
     return deniedBaseRead();
   };
-  await assert.rejects(() => executeWorkspaceStateReconciliation(denied.args), /AccessDenied/);
+  await assert.rejects(() => executeWorkspaceStateReconciliation(denied.args), error => error.mutationOutcome === "DELETE_NOT_ISSUED" && error.cause?.message.includes("AccessDenied"));
   assert.equal(deniedReads, 1); assert.equal(denied.box.deletes, 0);
-  assert.equal(denied.journal.values.has(workspaceStateJournalKey(denied.args.preparation.operationId, "deletion-prewrite-failed.json")), false);
+  const proofKey = workspaceStateJournalKey(denied.args.preparation.operationId, "deletion-prewrite-failed.json");
+  assert.equal(denied.journal.values.has(proofKey), true);
+  const proof = JSON.parse(denied.journal.values.get(proofKey));
+  assert.equal(proof.kind, "PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED");
+
+  const { at } = freshAuthorization();
+  const basePreparation = denied.args.preparation;
+  const reservation = JSON.parse(denied.journal.values.get(workspaceStateJournalKey(basePreparation.operationId, "reservation.json")));
+  const deletionAttempt = JSON.parse(denied.journal.values.get(workspaceStateJournalKey(basePreparation.operationId, "deletion-attempt.json")));
+  const continuation = createWorkspaceStateContinuationPreparation({ sourceSha, basePreparation, kind: "PROVED_NO_DELETE_WRITE", reservation, deletionAttempt, proofRecord: proof, liveState: state(), preparedAt: at.toISOString() });
+  const freshAuth = authorization(continuation, at, "124", basePreparation);
+  const resumed = executor({ prep: continuation, basePreparation, authorization: freshAuth, journal: denied.journal, now: () => at });
+  assert.equal((await executeWorkspaceStateReconciliation(resumed.args)).status, "DELETION_COMPLETED_AWAITING_FRESH_CREATE_AUTHORIZATION");
+  assert.deepEqual([denied.box.deletes, resumed.box.deletes], [0, 1]);
+  assert.equal(resumed.box.creates, 0);
 });
 
 test("a single transient post-delete observation resolves on the next bounded read", async () => {

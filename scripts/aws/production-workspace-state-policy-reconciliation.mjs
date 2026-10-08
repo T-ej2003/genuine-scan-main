@@ -279,7 +279,11 @@ const classifyDeleteContinuationState = (state, preparation, retryAttempt) => {
   return "CONTRADICTION";
 };
 
-async function observe(readLiveState, desired) { return authenticateWorkspaceStateLiveState(await readLiveState(), { desired }); }
+async function observe(readLiveState, desired) {
+  const value = await readLiveState();
+  try { return authenticateWorkspaceStateLiveState(value, { desired }); }
+  catch (error) { error.observationOutcome = "CONTRADICTORY_STATE"; throw error; }
+}
 async function bounded(readLiveState, desired, predicate, sleep, { intermediate = () => false } = {}) {
   let lastTransient;
   for (let index = 0; index <= WORKSPACE_STATE_RECONCILIATION.readDelaysMs.length; index += 1) {
@@ -290,7 +294,7 @@ async function bounded(readLiveState, desired, predicate, sleep, { intermediate 
       lastTransient = error;
     }
     if (state && predicate(state)) return state;
-    if (state && !intermediate(state)) throw new Error("WorkspaceState observation is authenticated but contradicts the authorized transition.");
+    if (state && !intermediate(state)) throw Object.assign(new Error("WorkspaceState observation is authenticated but contradicts the authorized transition."), { observationOutcome: "CONTRADICTORY_STATE" });
     if (index < WORKSPACE_STATE_RECONCILIATION.readDelaysMs.length) await sleep(WORKSPACE_STATE_RECONCILIATION.readDelaysMs[index]);
   }
   if (lastTransient) throw new Error("WorkspaceState IAM observation remained transient after the bounded retry budget.", { cause: lastTransient });
@@ -379,10 +383,10 @@ export async function executeWorkspaceStateReconciliation({ sourceSha, preparati
       const latest = await bounded(readLiveState, desired, state => stateMatchesPreparation(state, basePreparation), sleep);
       if (!latest) throw new Error("WorkspaceState final pre-deletion CAS changed at the mutation boundary.");
     } catch (error) {
-      if (error.cause instanceof WorkspaceStateRetryableObservationError) {
+      if (error.observationOutcome !== "CONTRADICTORY_STATE") {
         const recorded = await journal.create(authorization, "deletion-prewrite-failed.json", expected("PRODUCTION_WORKSPACE_STATE_POLICY_RECONCILIATION_DELETION_PREWRITE_FAILED", new Date(clock()).toISOString()));
         if (!recorded) throw new Error("WorkspaceState pre-delete failure record raced another executor.", { cause: error });
-        throw Object.assign(new Error("WorkspaceState pre-delete observation exhausted its retry budget; DeletePolicyVersion was not called.", { cause: error }), { mutationOutcome: "DELETE_NOT_ISSUED" });
+        throw Object.assign(new Error("WorkspaceState pre-delete observation failed before the mutation boundary; DeletePolicyVersion was not called.", { cause: error }), { mutationOutcome: "DELETE_NOT_ISSUED" });
       }
       throw error;
     }
