@@ -238,7 +238,8 @@ export async function executeTaskRegistration({ preparation: p, authorization },
   }
   const result = { schemaVersion: 1, status: 'REGISTERED_NONTERMINAL', sourceSha: p.sourceSha, treeSha256: p.treeSha256,
     authorizationSha256: id, preparationSha256: brokerDigest(p), savedPlanSha256: p.savedPlanSha256, authorizedAt, mutations, definitions,
-    taskMap: taskMapFromRegisteredDefinitions(definitions) };
+    taskMap: taskMapFromRegisteredDefinitions(definitions),
+    ...(p.schemaVersion === 3 ? { policyPredecessor: structuredClone(p.registrationPolicyPredecessor) } : {}) };
   await deps.record(id, 'TASK_REGISTERED', result); return result;
 }
 
@@ -280,7 +281,8 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
   equal(await deps.getAlias(), p.alias); equal(await deps.readPrerequisites(), p.prerequisites);
   const result = { schemaVersion: 1, status: 'REGISTERED_NONTERMINAL', sourceSha: p.sourceSha, treeSha256: p.treeSha256,
     authorizationSha256: id, preparationSha256: brokerDigest(p), savedPlanSha256: p.savedPlanSha256, authorizedAt, mutations, definitions,
-    taskMap: taskMapFromRegisteredDefinitions(definitions) };
+    taskMap: taskMapFromRegisteredDefinitions(definitions),
+    ...(p.schemaVersion === 3 ? { policyPredecessor: structuredClone(p.registrationPolicyPredecessor) } : {}) };
   equal(await deps.authenticateRegistrationRecoveryIdentity(), recovery);
   const persisted = await deps.readRecoveryReceipt(id, 'TASK_REGISTERED');
   if (persisted) {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,16 +38,19 @@ export function createBrokerKmsAuthorizationBoundary({ run }) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-authorization-'));
     fs.chmodSync(directory, 0o700);
     try {
-      const file = path.join(directory, 'message'); fs.writeFileSync(file, bytes, { mode: 0o600, flag: 'wx' });
-      return operation(file);
+      // KMS RAW hashes SHA-256 internally; DIGEST binds the same complete message above its 4096-byte transport limit.
+      const messageType = bytes.length > 4096 ? 'DIGEST' : 'RAW';
+      const message = messageType === 'DIGEST' ? createHash('sha256').update(bytes).digest() : bytes;
+      const file = path.join(directory, 'message'); fs.writeFileSync(file, message, { mode: 0o600, flag: 'wx' });
+      return operation(file, messageType);
     } finally { fs.rmSync(directory, { recursive: true }); }
   };
   const json = args => JSON.parse(run([...args, '--output', 'json', '--no-cli-pager']));
-  const common = ['--key-id', STAGE_B.approvalKmsKeyArn, '--message-type', 'RAW', '--signing-algorithm', STAGE_B_APPROVAL_ALGORITHM];
+  const common = ['--key-id', STAGE_B.approvalKmsKeyArn, '--signing-algorithm', STAGE_B_APPROVAL_ALGORITHM];
   return {
     caller: async () => json(['sts', 'get-caller-identity']),
-    sign: async bytes => messageFile(bytes, file => json(['kms', 'sign', ...common, '--message', `fileb://${file}`]).Signature),
-    verify: async authorization => messageFile(brokerAuthorizationMessage(authorization), file => json(['kms', 'verify', ...common, '--message', `fileb://${file}`, '--signature', authorization.signature.signatureBase64]).SignatureValid === true),
+    sign: async bytes => messageFile(bytes, (file, messageType) => json(['kms', 'sign', ...common, '--message-type', messageType, '--message', `fileb://${file}`]).Signature),
+    verify: async authorization => messageFile(brokerAuthorizationMessage(authorization), (file, messageType) => json(['kms', 'verify', ...common, '--message-type', messageType, '--message', `fileb://${file}`, '--signature', authorization.signature.signatureBase64]).SignatureValid === true),
   };
 }
 export function createBrokerCheckerAuthorizationBoundary() {

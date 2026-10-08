@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -95,7 +95,7 @@ async function native(phase = "CUTOVER") {
     if (mode === 'uncertain') throw new Error('Timeout');
     currentAlias = { ...currentAlias, FunctionVersion: p.target.version, RevisionId: 'new-revision' }; return JSON.stringify(currentAlias);
   };
-  const makeAdapter = (selectedPhase=phase, selectedAuth=auth) => createStagedBrokerExecutor({ phase:selectedPhase, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default' }, exec });
+  const makeAdapter = (selectedPhase=phase, selectedAuth=auth, operation) => createStagedBrokerExecutor({ phase:selectedPhase, operation, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default' }, exec });
   const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
   return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
@@ -842,7 +842,7 @@ async function recoveryIdentityFixture(options={}) {
   if(options.missingIntent)r.objects.delete(stageBAttemptStepS3ObjectKey(id,1));
   if(options.wrongAuthorization)r.auth.sourceSha=mergedRecoverySource;
   const exec=(cmd,args,opts)=>cmd==='aws'&&args[0]==='kms'&&options.invalidSignature?JSON.stringify({SignatureValid:false}):cmd==='git'?recoveryGit(args,options):cmd==='aws'&&args[0]==='sts'?JSON.stringify({Account:'368992683803',Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/recovery'}):r.exec(cmd,args,opts);
-  const adapter=createStagedBrokerExecutor({phase:options.phase||'REGISTRATION_RECOVERY',preparation:r.p,authorization:r.auth,files,directory,terraformDataDir:directory,planPath:path.join(directory,'unused-recovery.tfplan'),env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec});
+  const adapter=createStagedBrokerExecutor({phase:options.phase||'REGISTRATION_RECOVERY',operation:options.operation,preparation:r.p,authorization:r.auth,files,directory,terraformDataDir:directory,planPath:path.join(directory,'unused-recovery.tfplan'),env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec});
   return {...r,adapter,id};
 }
 test('native recovery authenticates consumed original transaction and independently pinned protected tooling',async()=>{
@@ -850,6 +850,44 @@ test('native recovery authenticates consumed original transaction and independen
   await r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});
   const identity=await r.adapter.authenticateRegistrationRecoveryIdentity();assert.equal(identity.transaction.sourceSha,originalRecoverySource);assert.equal(identity.tooling.sourceSha,mergedRecoverySource);assert.deepEqual(await r.adapter.authenticateRegistrationRecoveryIdentity(identity),identity);const forged=structuredClone(identity);forged.tooling.treeSha256='e'.repeat(64);await assert.rejects(()=>r.adapter.authenticateRegistrationRecoveryIdentity(forged));
   await assert.rejects(()=>r.adapter.applyTaskRegistration(Buffer.from('never')));await assert.rejects(()=>r.adapter.applyPublication(Buffer.from('never')));await assert.rejects(()=>r.adapter.updateAlias({}));await assert.rejects(()=>r.adapter.captureTaskRegistrationPlan());await assert.rejects(()=>r.adapter.captureNormalPlan());
+});
+test('registration predecessor recovery keeps historical preparation source separate from authenticated descendant tooling',async()=>{
+  const r=await recoveryIdentityFixture();
+  await r.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});
+  const identity=await r.adapter.authenticateRegistrationRecoveryIdentity();
+  const bindings=registrationRecoverySourceBindings(r.p,identity);
+  assert.equal(bindings.originalPreparation.sourceSha,originalRecoverySource);
+  assert.equal(bindings.recoveryTooling.sourceSha,mergedRecoverySource);
+  assert.notEqual(bindings.originalPreparation.sourceSha,bindings.recoveryTooling.sourceSha);
+  assert.equal(r.p.sourceSha,originalRecoverySource);
+  const unrelated=await recoveryIdentityFixture({head:'e'.repeat(40),ancestor:false});
+  await unrelated.adapter.authenticateRecoveryIntent('TASK_REGISTRATION_INTENT',{savedPlanSha256:unrelated.p.savedPlanSha256});
+  await assert.rejects(()=>unrelated.adapter.authenticateRegistrationRecoveryIdentity());
+});
+test('mixed schema-3 registration and receipt-bound policy classifies receipt shape before normal preparation dereference',async()=>{
+  const r=await native('PUBLICATION'),p=preparation();
+  p.schemaVersion=3;p.purpose='STAGE_B_TASK_REGISTRATION';
+  const chain={policy:{terminal:{},receiptBoundAdoption:{kind:'INVALID'}},registration:{preparation:p,result:{}}};
+  const adapter=r.makeAdapter('PREPARATION',r.auth,'prepare-policy');
+  adapter.readCheckout=async()=>({sourceSha:p.sourceSha,treeSha256:p.treeSha256});
+  await assert.rejects(()=>adapter.authenticatePrerequisiteChain(chain),/Unknown\/missing staged broker fields/);
+});
+test('receipt-bound policy representation remains rejected outside fresh policy operations',async()=>{
+  const r=await native('PUBLICATION'),p=preparation();
+  p.schemaVersion=3;p.purpose='STAGE_B_TASK_REGISTRATION';
+  const chain={registration:{preparation:p,result:{}},policy:{terminal:{},receiptBoundAdoption:{kind:'INVALID'}}};
+  const adapter=r.makeAdapter('PREPARATION',r.auth,'prepare-publication');
+  adapter.readCheckout=async()=>({sourceSha:p.sourceSha,treeSha256:p.treeSha256});
+  await assert.rejects(()=>adapter.authenticatePrerequisiteChain(chain),/both completed prerequisites/);
+});
+test('policy recovery recognizes the authenticated mixed schema-3 plus receipt-bound predecessor shape',async()=>{
+  const r=await recoveryIdentityFixture({phase:'POLICY_RECOVERY',operation:'recover-policy'});
+  r.adapter.readRecoveryCheckout=async()=>({sourceSha:mergedRecoverySource,treeSha256:deriveStageBToolingInputTreeSha256(mergedRecoverySource)});
+  r.p.purpose=BROKER_POLICY_CONVERGENCE;
+  const registrationPreparation={...structuredClone(r.p),purpose:'STAGE_B_TASK_REGISTRATION',schemaVersion:3,registrationPredecessor:{}};
+  const chain={policy:{terminal:{},receiptBoundAdoption:{kind:'INVALID'}},registration:{preparation:registrationPreparation,result:{}}};
+  r.p.prerequisiteChain=chain;
+  await assert.rejects(()=>r.adapter.authenticatePrerequisiteChain(chain,{preparationSha256:brokerDigest(r.p)}),/Unknown\/missing staged broker fields/);
 });
 for(const [name,options] of [['non-main',{head:'e'.repeat(40)}],['dirty',{dirty:' M scripts/aws/example.mjs'}],['not ancestor',{ancestor:false}],['normal phase',{phase:'REGISTRATION'}],['wrong transaction tree',{wrongTree:true}]])test(`native recovery identity rejects ${name}`,async()=>{
   const r=await recoveryIdentityFixture(options);
@@ -874,4 +912,20 @@ test('read-only registration adoption cannot reserve or reach any external mutat
   ]) await assert.rejects(attempt);
   assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
   assert.equal(r.calls.filter(c => ['put-object', 'update-alias', 'create-policy-version', 'delete-policy-version', 'register-task-definition', 'run-task', 'stop-task', 'update-service'].includes(c.args[1])).length, 0);
+});
+
+for (const operation of ['prepare-policy', 'authorize-policy', 'converge-policy']) test(`${operation} rejects registration-only schema-3 chain before any AWS read or write`, async () => {
+  const r=await native('PUBLICATION'), adapter=r.makeAdapter('PREPARATION',r.auth,operation);
+  const chain={registration:{preparation:{schemaVersion:3}}};
+  adapter.readCheckout=async()=>assert.fail('Missing evidence must fail before checkout or AWS');
+  const before=r.calls.length;
+  await assert.rejects(()=>adapter.authenticatePrerequisiteChain(chain),/requires authenticated historical policy evidence/);
+  assert.equal(r.calls.length,before);
+  await assert.rejects(()=>runStagedBrokerRequest({operation,files,directory,terraformDataDir:directory,
+    prerequisiteChain:chain},{adapterFactory:options=>{
+      const nativeAdapter=createStagedBrokerExecutor({...options,env:{PATH:process.env.PATH,HOME:process.env.HOME,TF_WORKSPACE:'default'},exec:r.exec});
+      nativeAdapter.readCheckout=async()=>({sourceSha:r.p.sourceSha,treeSha256:r.p.treeSha256});
+      return nativeAdapter;
+    }}),/requires authenticated historical policy evidence|Unknown\/missing staged broker fields/);
+  assert.equal(r.calls.length,before);
 });

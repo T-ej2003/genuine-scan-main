@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -24,7 +24,7 @@ import { deriveStageBToolingInputTreeSha256, deriveStageBImageImpactReport } fro
 import { assertStageBBrokerPackageManifest } from './package-production-green-stage-b-broker.mjs';
 import { readStagedBrokerPrerequisites, readBrokerPolicyInventory } from './stage-b-staged-broker-observations.mjs';
 import { reserveStageBSharedApplyAttempt, reserveStageBApplyAttemptTransition, assertStageBApplyTerraformEnvironment } from '../apply-production-green-stage-b.mjs';
-import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation } from './stage-b-broker-policy-ownership.mjs';
+import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation, assertBrokerPolicyPredecessorOwnership } from './stage-b-broker-policy-ownership.mjs';
 import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from './stage-b-release-prerequisites.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
@@ -39,7 +39,7 @@ export function assertReceiptBoundAuthenticationPhase(phase) {
   return true;
 }
 const RECEIPT_BOUND_POST_PUBLICATION_STATE_PHASES = Object.freeze([
-  'PREPARATION', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION',
+  'PREPARATION', 'REGISTRATION', 'REGISTRATION_RECOVERY', 'POLICY', 'POLICY_RECOVERY', 'PUBLICATION', 'CUTOVER', 'RECONCILIATION',
   'PUBLICATION_RECOVERY', 'CUTOVER_RECOVERY', 'RECONCILIATION_RECOVERY',
 ]);
 export function assertReceiptBoundPolicyTerraformState(phase, current, adopted) {
@@ -55,6 +55,44 @@ export function assertReceiptBoundHistoricalToolingTree(sourceSha, treeSha256, d
   assert.match(sourceSha || '', /^[a-f0-9]{40}$/); assert.match(treeSha256 || '', /^[a-f0-9]{64}$/);
   assert.equal(derive(sourceSha), treeSha256, 'Receipt-bound historical tooling tree changed');
   return true;
+}
+export function registrationRecoverySourceBindings(preparation, recoveryIdentity) {
+  assertRegistrationRecoveryIdentity(recoveryIdentity, preparation);
+  return Object.freeze({ originalPreparation: Object.freeze({ sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 }),
+    recoveryTooling: Object.freeze({ ...recoveryIdentity.tooling }) });
+}
+export async function authenticatePreparedPrepublicationPredecessor({ operation, preparation, receiptRecovery, checkout, observe }) {
+  assert.ok(['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation),
+    `Pre-publication predecessor is not valid during ${operation}`);
+  assert.equal(preparation?.purpose, TASK_REGISTRATION);
+  assert.equal(preparation.schemaVersion, 3);
+  assertBrokerPreparation(preparation);
+  const predecessor = preparation.registrationPredecessor;
+  assertPrepublicationRegistrationPredecessor(predecessor, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+  if (receiptRecovery) equal(receiptRecovery, {
+    registrationTransactionId: predecessor.registrationTransactionId,
+    policyTransactionId: predecessor.policyTransactionId,
+  }, 'Predecessor recovery identifiers differ from the signed registration preparation');
+  const prerequisites = await observe(predecessor);
+  equal(prerequisites, preparation.prerequisites,
+    'Live policy/alias predecessor differs from the original signed registration preparation');
+  return { registrationPredecessor: predecessor, prerequisites };
+}
+export function authenticateRetainedRegistrationPredecessor(address, definition, observed) {
+  const state = { ...definition.desired, arn: definition.arn, revision: definition.revision };
+  const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed });
+  equal(authenticated, definition);
+  return authenticated;
+}
+export async function authenticatePrepublicationPolicyChain({ operation, chain, checkout, authenticateChain, observe }) {
+  assert.ok(['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation),
+    `Pre-publication predecessor is not valid during ${operation}`);
+  assert.ok(chain?.registration?.preparation?.schemaVersion === 3,
+    'Policy predecessor requires the authenticated schema-3 registration handoff');
+  assert.ok(chain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
+  await authenticateChain(chain);
+  return authenticatePreparedPrepublicationPredecessor({ operation,
+    preparation: chain.registration.preparation, checkout, observe });
 }
 const STEPS = ['PUBLICATION_INTENT', 'PUBLICATION_UNKNOWN', 'PUBLISHED', 'CUTOVER_INTENT', 'CUTOVER_CONFLICT', 'CUTOVER_UNKNOWN', 'CUTOVER_COMMITTED_STATE_PENDING', 'STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS', 'STAGED_BROKER_TERMINAL_HANDOFF'];
 STEPS.push('TASK_REGISTRATION_INTENT', 'TASK_REGISTERED', 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
@@ -270,7 +308,7 @@ function readVersionedStageBReceipt({ run, id, key, directory, expected, sequenc
   } finally { fs.rmSync(file, { force: true }); }
 }
 
-export function createStagedBrokerExecutor({ phase, preparation, authorization, planPath, files, directory, terraformDataDir,
+export function createStagedBrokerExecutor({ phase, operation, preparation, authorization, planPath, files, directory, terraformDataDir, registrationPredecessorRecovery,
   prerequisiteChain = preparation?.prerequisiteChain, env = process.env, exec = execFileSync, runAws: injectedAws, writerSessionBoundary } = {}) {
   assert.ok(PHASES.includes(phase));
   const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -298,6 +336,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     return writerSession;
   };
   const ownedReservations = new Set(); let mutationAttempted = false;
+  let authenticatedPolicyPredecessorOwnership, policyOwnershipTransition;
   const terraform = (args, moduleDirectory = path.join(root, 'infra/aws/terraform/production-green-stage-b'), dataDirectory = terraformDataDir) => {
     if (phase === 'REGISTRATION_RECOVERY') { assert.equal(args[0], 'show'); assert.equal(args[1], '-json'); }
     if (phase === 'ADOPTION') { assert.ok(['show', 'plan'].includes(args[0])); if (args[0] === 'plan') assert.ok(args.includes('-lock=false')); }
@@ -420,29 +459,40 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assert.equal(brokerDigest(observedOutputs), r.liveCorroborationSha256);
     return result.value;
   };
-  const verifyReceiptBoundPolicy = async (entry, release) => {
+  const verifyReceiptBoundPolicy = async (entry, release, { historicalRecovery = false } = {}) => {
     assertReceiptBoundPolicyAdoption(entry, release);
     const r = entry.receiptBoundAdoption, id = r.transactionId;
     assertReceiptBoundHistoricalToolingTree(r.historicalSourceSha, r.toolingTreeSha256);
     const reservation = readReceiptAt(id, 'RESERVATION', r.receiptObjects.reservation);
     const intent = readReceiptAt(id, 'BROKER_POLICY_INTENT', r.receiptObjects.intent);
     const result = readReceiptAt(id, 'BROKER_POLICY_CONVERGED', r.receiptObjects.result);
-    equal(r.ownership, createBrokerPolicyOwnershipClient({ run: runAws }).read());
+    if (!historicalRecovery) {
+      if (policyOwnershipTransition) {
+        assert.equal(phase, 'POLICY'); assert.equal(operation, 'converge-policy');
+        assert.equal(preparation.prerequisiteChain.registration.preparation.schemaVersion, 3);
+        equal(entry, preparation.prerequisiteChain.policy);
+        equal(r.ownership, authenticatedPolicyPredecessorOwnership);
+      }
+      assertBrokerPolicyPredecessorOwnership(r.ownership, createBrokerPolicyOwnershipClient({ run: runAws }).read(), policyOwnershipTransition);
+    }
     assertReceiptBoundPolicyReceipts(entry, release, { reservation, intent, result, ownership: r.ownership });
-    const live = normalizePolicyInventory(readBrokerPolicyInventory(runAws));
-    assert.equal(live.version, r.successorVersion); equal(live.policy, entry.terminal.policy);
     const state = await adapter.readStateIdentity();
     const adoptedState = { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 };
     assertReceiptBoundPolicyTerraformState(phase, state, adoptedState);
-    const policyState = stateResource('aws_iam_policy.broker');
+    // Policy recovery separately authenticates its own exact pre/post live state below.
+    const live = historicalRecovery ? { version: r.successorVersion, policy: entry.terminal.policy, versions: r.successorInventory } : normalizePolicyInventory(readBrokerPolicyInventory(runAws));
+    if (!historicalRecovery) { assert.equal(live.version, r.successorVersion); equal(live.policy, entry.terminal.policy); }
+    const policyState = historicalRecovery ? { arn: r.policyArn, policy: JSON.stringify(entry.terminal.policy) } : stateResource('aws_iam_policy.broker');
     assert.equal(policyState.arn, r.policyArn); equal(JSON.parse(policyState.policy), entry.terminal.policy);
     const corroboration = { ownership: r.ownership, policyArn: STAGE_B_BROKER_POLICY.arn, version: live.version,
       policy: live.policy, versions: live.versions, terraform: adoptedState };
     assert.equal(brokerDigest(corroboration), r.liveCorroborationSha256);
+    if (!historicalRecovery && !policyOwnershipTransition) authenticatedPolicyPredecessorOwnership = structuredClone(r.ownership);
     return live;
   };
-  const makeReceiptBoundAdoptions = async ({ registrationId, policyId }, release) => {
-    assert.equal(phase, 'RECEIPT_ADOPTION');
+  const makeReceiptBoundAdoptions = async ({ registrationId, policyId }, release, predecessorOnly = false) => {
+    if (predecessorOnly) { assert.ok(['PREPARATION', 'REGISTRATION', 'REGISTRATION_RECOVERY'].includes(phase)); assert.ok(!preparation || preparation.purpose === TASK_REGISTRATION); }
+    else assert.equal(phase, 'RECEIPT_ADOPTION');
     const readTriplet = (id, intentStatus, resultStatus) => {
       assert.match(id || '', /^[a-f0-9]{64}$/);
       const reservation = readReceiptAt(id, 'RESERVATION');
@@ -463,9 +513,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assertReceiptBoundGitAncestry({ historicalSourceSha: result.sourceSha, consumerSourceSha: release.sourceSha, exec, cwd: root });
     assert.equal(deriveStageBToolingInputTreeSha256(result.sourceSha), result.treeSha256);
     const imageImpactReport = deriveStageBImageImpactReport({ imageReleaseSha: result.sourceSha, toolingSha: release.sourceSha });
-    assertBrokerImageReuseCompatibility(imageImpactReport, result.sourceSha, release);
-    const registration = { result, receiptBoundAdoption: {
-      kind: 'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION', schemaVersion: 1, recoveryMode: 'RECEIPT_BOUND',
+    if (predecessorOnly) {
+      assert.equal(imageImpactReport.imageReuseCompatible, false);
+      assert.equal(imageImpactReport.newImagesRequired, true);
+      assert.ok(imageImpactReport.imageAffectingFiles.length > 0);
+    } else assertBrokerImageReuseCompatibility(imageImpactReport, result.sourceSha, release);
+    const registration = { result, [predecessorOnly ? 'registrationPredecessor' : 'receiptBoundAdoption']: {
+      kind: predecessorOnly ? 'RECEIPT_BOUND_REGISTERED_OUTPUT_PREDECESSOR' : 'RECEIPT_BOUND_REGISTERED_OUTPUT_ADOPTION', schemaVersion: 1, recoveryMode: 'RECEIPT_BOUND',
       historicalSignatureVerified: false, historicalEvidenceAvailability: 'ORIGINAL_AUTHORIZATION_UNAVAILABLE',
       durableReceiptChainVerified: true, liveSuccessorCorroborated: true, freshIndependentCheckerRequired: true,
       historicalSourceSha: result.sourceSha, historicalPurpose: TASK_REGISTRATION,
@@ -483,12 +537,17 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     } };
     const observedOutputs = [];
     for (const [address, definition] of Object.entries(result.definitions)) {
-      const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired,
-        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) });
+      const observed = await adapter.describeTaskDefinition(definition.arn);
+      const authenticated = predecessorOnly && phase === 'REGISTRATION_RECOVERY'
+        ? authenticateRetainedRegistrationPredecessor(address, definition, observed)
+        : authenticateRegisteredDefinition({ address, desired: definition.desired,
+          state: await adapter.readRegisteredTaskDefinition(address), observed });
       equal(authenticated, definition); observedOutputs.push({ address, arn: definition.arn, revision: definition.revision, definitionSha256: brokerDigest(authenticated) });
     }
-    registration.receiptBoundAdoption.liveCorroborationSha256 = brokerDigest(observedOutputs);
-    assertReceiptBoundRegistrationAdoption(registration, release);
+    const registrationEvidence = registration[predecessorOnly ? 'registrationPredecessor' : 'receiptBoundAdoption'];
+    registrationEvidence.liveCorroborationSha256 = brokerDigest(observedOutputs);
+    if (predecessorOnly) assertReceiptBoundRegistrationPredecessorReceipts(registration, release, reg);
+    else assertReceiptBoundRegistrationAdoption(registration, release);
 
     const pol = readTriplet(policyId, 'BROKER_POLICY_INTENT', 'BROKER_POLICY_CONVERGED');
     const ownership = createBrokerPolicyOwnershipClient({ run: runAws }).read();
@@ -510,10 +569,13 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     assert.equal(live.policy.Statement && brokerDigest(live.policy), brokerDigest(terminal.policy));
     assert.equal(live.version, terminal.successorIdentity.policyVersion);
     const state = await adapter.readStateIdentity(), policyState = stateResource('aws_iam_policy.broker');
-    equal(terminal.reconciliation?.state, state, 'Durable convergence result does not bind current Terraform state');
+    const corroboratedState = predecessorOnly && phase === 'REGISTRATION_RECOVERY' ? terminal.reconciliation?.state : state;
+    assert.ok(corroboratedState);
+    assertReceiptBoundPolicyTerraformState(phase, state, corroboratedState);
+    equal(terminal.reconciliation?.state, corroboratedState, 'Durable convergence result does not bind authenticated Terraform state');
     assert.equal(policyState.arn, STAGE_B_BROKER_POLICY.arn); equal(JSON.parse(policyState.policy), terminal.policy);
     const corroboration = { ownership, policyArn: STAGE_B_BROKER_POLICY.arn, version: live.version, policy: live.policy,
-      versions: live.versions, terraform: state };
+      versions: live.versions, terraform: corroboratedState };
     const policy = { terminal, receiptBoundAdoption: {
       kind: 'RECEIPT_BOUND_TERMINAL_POLICY_SUCCESSOR_ADOPTION', schemaVersion: 1, recoveryMode: 'RECEIPT_BOUND',
       historicalSignatureVerified: false, historicalEvidenceAvailability: 'ORIGINAL_AUTHORIZATION_UNAVAILABLE',
@@ -533,12 +595,60 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         defaultVersion: pol.intent.value.predecessorInventory.find(v => v.IsDefaultVersion)?.VersionId },
       successor: terminal.successorIdentity, policyArn: STAGE_B_BROKER_POLICY.arn,
       successorVersion: live.version, successorDocumentSha256: brokerDigest(terminal.policy),
-      successorInventory: live.versions, terraformLineage: state.lineage, terraformSerial: state.serial,
-      terraformStateSha256: state.stateSha256, liveCorroborationSha256: brokerDigest(corroboration),
+      successorInventory: live.versions, terraformLineage: corroboratedState.lineage, terraformSerial: corroboratedState.serial,
+      terraformStateSha256: corroboratedState.stateSha256, liveCorroborationSha256: brokerDigest(corroboration),
     } };
     assertReceiptBoundPolicyAdoption(policy, release);
-    await authenticateReceiptBoundPrerequisiteChain({ registration, policy }, release);
-    return { registration, policy };
+    if (!predecessorOnly) {
+      await authenticateReceiptBoundPrerequisiteChain({ registration, policy }, release);
+      return { registration, policy };
+    }
+    assertReceiptBoundRegistrationPredecessorReceipts(registration, release, reg);
+    assertReceiptBoundPolicyReceipts(policy, release, { reservation: pol.reservation, intent: pol.intent, result: pol.result, ownership });
+    await verifyReceiptBoundPolicy(policy, release);
+    const liveAlias = await adapter.getAlias();
+    const aliasConfiguration = await adapter.getVersion(liveAlias.FunctionVersion);
+    const latestConfiguration = json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn]);
+    const aliasRuntimeTaskMap = JSON.parse(aliasConfiguration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON);
+    assert.equal(aliasConfiguration.State, 'Active'); assert.equal(aliasConfiguration.LastUpdateStatus, 'Successful');
+    equal(JSON.parse(latestConfiguration.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON), aliasRuntimeTaskMap,
+      'Expected pre-publication state requires the live alias and $LATEST runtime maps to match');
+    const versionInventory = JSON.parse(runAws(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn,
+      '--output', 'json', '--no-cli-pager']));
+    assert.ok(!versionInventory.NextMarker && !versionInventory.NextToken && !versionInventory.Marker && !versionInventory.IsTruncated,
+      'Incomplete broker Lambda version inventory');
+    const versions = versionInventory.Versions.map(v => v.Version).filter(v => /^[1-9][0-9]*$/.test(v)).map(Number);
+    assert.ok(versions.length); assert.equal(Number(liveAlias.FunctionVersion), Math.max(...versions),
+      'Expected pre-publication state requires the reviewed alias to target the latest published version');
+    const prerequisites = readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap: result.taskMap,
+      expectedPredecessor: { alias: liveAlias, taskMap: aliasRuntimeTaskMap } });
+    equal(prerequisites.policy, terminal.policy, 'Live policy differs from its authenticated terminal receipt');
+    assert.equal(prerequisites.policyArn, STAGE_B_BROKER_POLICY.arn);
+    assert.equal(prerequisites.policyVersion, terminal.successorIdentity.policyVersion);
+    assert.equal(terminal.successorIdentity.policyArn, STAGE_B_BROKER_POLICY.arn);
+    equal(terminal.successorIdentity.policy, terminal.policy);
+    equal(terminal.successorIdentity.taskMap, result.taskMap,
+      'Authenticated policy successor does not identify the historical registered outputs');
+    const permittedTasks = terminal.policy.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions')?.Resource;
+    equal([...permittedTasks].sort(), Object.values(result.taskMap).sort(),
+      'Authenticated policy document does not authorize exactly the historical registered outputs');
+    equal(prerequisites.taskMap, result.taskMap, 'Policy task map differs from authenticated registration outputs');
+    const registrationPredecessor = {
+      kind: 'AUTHENTICATED_PREPUBLICATION_REGISTRATION_PREDECESSOR', lifecycleState: 'EXPECTED_PRE_PUBLICATION_STATE',
+      sourceSha: release.sourceSha, registrationTransactionId: registrationId, registrationSourceSha: result.sourceSha,
+      registrationResultSha256: brokerDigest(result), registrationReceiptObjects: registration.registrationPredecessor.receiptObjects,
+      registrationReceiptChainSha256: registration.registrationPredecessor.receiptChainSha256,
+      registrationTaskMap: result.taskMap,
+      policyTransactionId: policyId, policySourceSha: terminal.sourceSha, policyResultSha256: brokerDigest(terminal),
+      policyReceiptObjects: policy.receiptBoundAdoption.receiptObjects,
+      policyReceiptChainSha256: policy.receiptBoundAdoption.receiptChainSha256,
+      policyArn: prerequisites.policyArn, policyDefaultVersion: prerequisites.policyVersion,
+      policyDocument: prerequisites.policy, policyDocumentSha256: brokerDigest(prerequisites.policy),
+      alias: brokerAliasIdentity(liveAlias), aliasRuntimeTaskMap,
+      imageImpactReport, imageImpactSha256: brokerDigest(imageImpactReport),
+    };
+    assertPrepublicationRegistrationPredecessor(registrationPredecessor, release);
+    return { registrationPredecessor, prerequisites, policy };
   };
   const authenticateReceiptBoundPrerequisiteChain = async (chain, release) => {
     assertReceiptBoundAuthenticationPhase(phase);
@@ -667,10 +777,41 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       return JSON.parse(terraform(['show', '-json', file], moduleDirectory, historicalDataDir || terraformDataDir));
     } finally { fs.rmSync(file, { force: true }); historicalSource?.dispose(); if (historicalDataDir) fs.rmSync(historicalDataDir, { recursive: true, force: true }); }
   };
-  let capturedRefresh;
+  let capturedRefresh, preparedRegistrationPredecessor;
   const adapter = {
     verifyAuthorization: kms.verify,
     makeReceiptBoundAdoptions,
+    readRegistrationPreparationPredecessor: async (receiptRecovery, checkout) => {
+      assert.ok(['PREPARATION', 'REGISTRATION', 'REGISTRATION_RECOVERY'].includes(phase));
+      assert.deepEqual(Object.keys(receiptRecovery || {}).sort(), ['policyTransactionId', 'registrationTransactionId']);
+      if (phase === 'REGISTRATION_RECOVERY') {
+        assert.equal(preparation?.purpose, TASK_REGISTRATION);
+        const { originalPreparation: originalSource, recoveryTooling } = registrationRecoverySourceBindings(preparation, registrationRecoveryIdentity);
+        equal(checkout, recoveryTooling,
+          'Registration predecessor recovery must use the authenticated recovery tooling checkout');
+        const authenticated = await makeReceiptBoundAdoptions({
+          registrationId: receiptRecovery.registrationTransactionId,
+          policyId: receiptRecovery.policyTransactionId,
+        }, originalSource, true);
+        assertSamePrepublicationRegistrationPredecessor(preparation.registrationPredecessor,
+          authenticated.registrationPredecessor, originalSource);
+        equal(authenticated.policy, preparation.registrationPolicyPredecessor);
+        equal(await adapter.readRecoveryCheckout(), checkout,
+          'Recovery tooling checkout changed during predecessor reauthentication');
+        return authenticated;
+      }
+      const authenticated = await makeReceiptBoundAdoptions({ registrationId: receiptRecovery.registrationTransactionId,
+        policyId: receiptRecovery.policyTransactionId }, checkout, true);
+      if (preparation?.registrationPredecessor) {
+        assertSamePrepublicationRegistrationPredecessor(preparation.registrationPredecessor, authenticated.registrationPredecessor, checkout);
+        equal(authenticated.policy, preparation.registrationPolicyPredecessor);
+      }
+      else if (preparedRegistrationPredecessor) assertSamePrepublicationRegistrationPredecessor(preparedRegistrationPredecessor,
+        authenticated.registrationPredecessor, checkout);
+      else preparedRegistrationPredecessor = structuredClone(authenticated.registrationPredecessor);
+      equal(await adapter.readCheckout(), checkout);
+      return authenticated;
+    },
     authenticateReceiptBoundPrerequisiteChain,
     readBrokerPolicyOwnership: async () => createBrokerPolicyOwnershipClient({ run: runAws }).read(),
     authenticatePriorBrokerWriterTermination: async owner => {
@@ -687,7 +828,7 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       return { sourceSha: checkout.currentHead, treeSha256 };
     },
     readRecoveryCheckout: async () => {
-      assert.equal(phase, 'POLICY_RECOVERY');
+      assert.ok(['POLICY_RECOVERY', 'REGISTRATION_RECOVERY'].includes(phase));
       const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, requireCanonicalRepository: true });
       assert.equal(checkout.currentHead, checkout.originMainHead, 'Recovery code must be the current protected main');
       await readMakerCaller();
@@ -716,6 +857,38 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
       return registrationRecoveryIdentity;
     },
     readPrerequisites: async () => {
+      if (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation) &&
+          prerequisiteChain?.registration?.preparation?.schemaVersion === 3) {
+        const authenticated = await authenticatePrepublicationPolicyChain({
+          operation, chain: prerequisiteChain, checkout: await adapter.readCheckout(),
+          authenticateChain: chain => adapter.authenticatePrerequisiteChain(chain),
+          observe: predecessor => readStagedBrokerPrerequisites(runAws, {
+            authenticatedTaskMap: predecessor.registrationTaskMap,
+            expectedPredecessor: { alias: predecessor.alias, taskMap: predecessor.aliasRuntimeTaskMap },
+          }),
+        });
+        return authenticated.prerequisites;
+      }
+      if (preparation?.purpose === TASK_REGISTRATION && preparation.registrationPredecessor ||
+          !preparation && phase === 'PREPARATION' && registrationPredecessorRecovery) {
+        const expected = preparation?.registrationPredecessor;
+        const receiptRecovery = expected ? {
+          registrationTransactionId: expected.registrationTransactionId,
+          policyTransactionId: expected.policyTransactionId,
+        } : registrationPredecessorRecovery;
+        const recovery = phase === 'REGISTRATION_RECOVERY';
+        const bindings = recovery ? registrationRecoverySourceBindings(preparation, registrationRecoveryIdentity) : null;
+        const checkout = recovery ? bindings.recoveryTooling : await adapter.readCheckout();
+        const authenticated = await adapter.readRegistrationPreparationPredecessor({
+          registrationTransactionId: receiptRecovery.registrationTransactionId,
+          policyTransactionId: receiptRecovery.policyTransactionId,
+        }, checkout);
+        if (expected) assertSamePrepublicationRegistrationPredecessor(expected, authenticated.registrationPredecessor,
+          recovery ? bindings.originalPreparation : checkout);
+        if (recovery) equal(await adapter.authenticateRegistrationRecoveryIdentity(registrationRecoveryIdentity), registrationRecoveryIdentity);
+        else equal(await adapter.readCheckout(), checkout);
+        return authenticated.prerequisites;
+      }
       let authenticatedTaskMap;
       if (prerequisiteChain?.registration) {
         await adapter.authenticatePrerequisiteChain(prerequisiteChain);
@@ -854,7 +1027,16 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
     authenticatePrerequisiteChain: async (chain, recoveryBinding) => {
       assert.ok(chain?.registration);
       const historicalRecovery = recoveryBinding !== undefined;
-      if (chain.registration.receiptBoundAdoption || chain.policy?.receiptBoundAdoption) {
+      if (chain.registration.preparation?.schemaVersion === 3 &&
+          ['prepare-policy', 'authorize-policy', 'converge-policy', 'recover-policy'].includes(operation)) {
+        assert.ok(chain.policy?.receiptBoundAdoption,
+          'Schema-3 policy convergence requires authenticated historical policy evidence');
+      }
+      const prepublicationPolicyOperation = (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation) ||
+        historicalRecovery && phase === 'POLICY_RECOVERY' && operation === 'recover-policy') &&
+        chain.registration.preparation?.schemaVersion === 3 && !chain.registration.receiptBoundAdoption &&
+        Boolean(chain.policy?.receiptBoundAdoption);
+      if ((chain.registration.receiptBoundAdoption || chain.policy?.receiptBoundAdoption) && !prepublicationPolicyOperation) {
         assert.equal(historicalRecovery, false, 'Receipt-bound adoption is not historical transaction recovery');
         const checkout = await adapter.readCheckout();
         await adapter.authenticateReceiptBoundPrerequisiteChain(chain, checkout);
@@ -880,18 +1062,38 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         if (historicalRecovery) equal(await adapter.readRecoveryCheckout(), recoveryCheckoutForChain);
         else equal(await adapter.readCheckout(), checkout);
       };
-      if (chain.policy && !chain.policy.adoption) {
-        equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
+      const receiptBoundPolicyEntry = Boolean(chain.policy?.receiptBoundAdoption);
+      const adoptedPolicyEntry = Boolean(chain.policy?.adoption);
+      const normalPolicyEntry = Boolean(chain.policy && !receiptBoundPolicyEntry && !adoptedPolicyEntry);
+      if (receiptBoundPolicyEntry) {
+        assert.equal(prepublicationPolicyOperation, true,
+          'Receipt-bound policy predecessor is valid only during the authenticated pre-publication policy lifecycle');
+      } else if (adoptedPolicyEntry) {
+        assert.ok(chain.policy.terminal && chain.policy.adoption,
+          'Adopted policy predecessor requires its canonical terminal representation');
+      } else if (normalPolicyEntry) {
+        assert.ok(chain.policy.preparation && chain.policy.result,
+          'Normal policy predecessor requires its canonical preparation/result representation');
+        if (chain.registration.preparation?.schemaVersion === 3) {
+          assertBrokerPreparation(chain.policy.preparation);
+          equal(chain.policy.preparation.prerequisiteChain.registration, chain.registration);
+        } else equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
       for (const [name, entry] of Object.entries(chain)) {
         assert.ok(['registration', 'policy'].includes(name));
-        const { preparation: p, authorization: auth, result } = entry;
-        assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
-        if (name === 'policy' && entry.adoption) {
+        if (name === 'policy' && entry.receiptBoundAdoption) {
+          assert.equal(prepublicationPolicyOperation, true, 'Receipt-bound policy predecessor is valid only during the authenticated pre-publication policy lifecycle');
+          await verifyReceiptBoundPolicy(entry, checkout, { historicalRecovery });
+          continue;
+        } else if (name === 'policy' && entry.adoption) {
           await authenticateTerminalPolicySuccessor(entry, checkout, await adapter.readStateIdentity());
           continue;
-        } else if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
+        }
+        const { preparation: p, authorization: auth, result } = entry;
+        assert.ok(p && result, `${name} prerequisite requires its normal preparation/result representation`);
+        assert.equal(p.purpose, name === 'registration' ? TASK_REGISTRATION : BROKER_POLICY_CONVERGENCE);
+        if (name === 'registration' && p.sourceSha !== checkout.sourceSha) {
           assertRegistrationHandoff(entry, checkout); await readHistoricalRegistration(entry, checkout);
           equal(entry, adoptRegisteredOutputs(entry, checkout, readAdoptionPlan(historicalRecovery ? checkout : undefined),
             deriveStageBImageImpactReport({ imageReleaseSha: p.sourceSha, toolingSha: checkout.sourceSha })));
@@ -908,7 +1110,12 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         const state = await adapter.readRegisteredTaskDefinition(address), observed = await adapter.describeTaskDefinition(definition.arn);
         equal(authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed }), definition);
       }
-      if (chain.policy) {
+      if (chain.policy?.receiptBoundAdoption) {
+        assert.equal(prepublicationPolicyOperation, true, 'Mixed receipt-bound policy chain is not valid in this lifecycle phase');
+        equal(chain.policy.terminal.successorIdentity.taskMap,
+          chain.registration.preparation.registrationPredecessor.registrationTaskMap,
+          'Historical IAM map differs from the schema-3 registration predecessor');
+      } else if (chain.policy) {
         const historicalRegistration = chain.policy.preparation.prerequisiteChain.registration;
         equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
         equal(historicalRegistration.result.taskMap, chain.registration.result.taskMap);
@@ -1006,10 +1213,17 @@ export function createStagedBrokerExecutor({ phase, preparation, authorization, 
         }
         return snapshot.policy;
       };
+      // Authenticate the released predecessor before reservation/acquisition.
+      await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
+      const ownedOperation = policyOperation(id, session);
       await executeOwnedBrokerPolicyMutation({ ownership,
-        operation: policyOperation(id, session),
+        operation: ownedOperation,
         reserve: () => adapter.reserve(id, policyReservation()),
-        authenticate: async () => {
+        authenticate: async owner => {
+          if (preparation.prerequisiteChain?.registration.preparation?.schemaVersion === 3) {
+            assert.ok(authenticatedPolicyPredecessorOwnership, 'Historical ownership must authenticate before acquisition');
+            policyOwnershipTransition = { owner, operation: ownedOperation };
+          }
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
           equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap));
           const artifacts = await adapter.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256);

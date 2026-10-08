@@ -35,6 +35,23 @@ function record(value) {
   return value;
 }
 
+// Historical RELEASED provenance remains immutable when this exact convergence
+// acquires its next generation. This is not permission to accept another owner.
+export function assertBrokerPolicyPredecessorOwnership(previous, current, transition) {
+  record(previous); record(current);
+  assert.equal(previous.status, 'RELEASED'); assert.equal(previous.terminal.outcome, 'SUCCEEDED');
+  if (!transition) { same(current, previous); return true; }
+  const { owner, operation } = transition;
+  assert.equal(operation.acquisition.purpose, 'STAGE_B_BROKER_POLICY_CONVERGENCE');
+  same(current.identity, identity(owner));
+  assert.equal(current.status, 'HELD'); assert.equal(current.terminal, null);
+  assert.equal(owner.generation, previous.identity.generation + 1);
+  assert.equal(owner.policyArn, previous.identity.policyArn);
+  for (const field of ['policyArn', 'sourceSha', 'operationIdentity', 'writerSession']) same(owner[field], operation[field]);
+  same(current.acquisition, operation.acquisition);
+  return true;
+}
+
 // A fixed policy domain, not a release lease. No TTL, stealing, or exception unlock.
 export function createBrokerPolicyOwnershipClient({ run }) {
   const key = { stateKey: { S: BROKER_POLICY_OWNERSHIP_KEY } };

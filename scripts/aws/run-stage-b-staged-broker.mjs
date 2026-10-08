@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan, registrationPolicyPrerequisiteChain } from './stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
 import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
@@ -45,13 +45,23 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.deepEqual(Object.keys(request.receiptRecovery || {}).sort(), ['policyTransactionId', 'registrationTransactionId']);
     for (const id of Object.values(request.receiptRecovery)) assert.match(id || '', /^[a-f0-9]{64}$/);
   } else assert.equal(request.receiptRecovery, undefined, 'Receipt recovery requires its explicit operation');
-  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery'];
+  if (operation !== 'prepare-registration') assert.equal(request.predecessorReceiptRecovery, undefined,
+    'Pre-publication predecessor receipts are accepted only while preparing fresh registration');
+  if (request.predecessorReceiptRecovery !== undefined) {
+    assert.deepEqual(Object.keys(request.predecessorReceiptRecovery).sort(), ['policyTransactionId', 'registrationTransactionId']);
+    for (const id of Object.values(request.predecessorReceiptRecovery)) assert.match(id || '', /^[a-f0-9]{64}$/);
+  }
+  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery'];
   assert.ok(Object.keys(request).every(k => allowed.includes(k)), 'Unknown staged request field');
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false, label: 'Staged broker artifacts' });
-  const prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
+  let prerequisiteChain = request.prerequisiteChain || preparation?.prerequisiteChain;
+  if (['prepare-policy', 'authorize-policy', 'converge-policy'].includes(operation)) prerequisiteChain = registrationPolicyPrerequisiteChain(prerequisiteChain);
+  if (['authorize-policy', 'converge-policy'].includes(operation) && preparation?.prerequisiteChain && request.prerequisiteChain)
+    equal(request.prerequisiteChain, preparation.prerequisiteChain, 'Policy continuation cannot substitute its signed prerequisite chain');
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
     : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
-  const deps = adapterFactory({ phase: MODES[operation], preparation, authorization, planPath, files, directory, terraformDataDir, prerequisiteChain: adapterPrerequisites });
+  const deps = adapterFactory({ phase: MODES[operation], operation, preparation, authorization, planPath, files, directory, terraformDataDir,
+    prerequisiteChain: adapterPrerequisites, registrationPredecessorRecovery: request.predecessorReceiptRecovery });
   if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
   if (['recover-policy', 'verify-policy-writer-termination'].includes(operation)) {
     // Historical source is authenticated by the durable transaction chain inside recovery, not by today's checkout SHA.
@@ -72,9 +82,11 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.ok(prerequisiteChain?.registration, 'Registration adoption requires authenticated registration evidence');
     assert.equal(prerequisiteChain.policy, undefined);
   }
+  const registrationPredecessorEvidence = operation === 'prepare-registration' && request.predecessorReceiptRecovery
+    ? await deps.readRegistrationPreparationPredecessor(request.predecessorReceiptRecovery, checkout) : undefined;
   const prerequisites = brokerPrerequisiteIdentity(operation === 'prepare-registration-adoption'
     ? await deps.readRegistrationAdoptionPrerequisites(prerequisiteChain.registration, checkout)
-    : await deps.readPrerequisites());
+    : registrationPredecessorEvidence?.prerequisites || await deps.readPrerequisites());
   if (['prepare-registration-adoption', 'prepare-policy-adoption', 'prepare-publication', 'prepare-registration', 'prepare-policy', 'prepare-pruning'].includes(operation)) {
     // Reuse exact tfvars/package/image/refresh authority before capturing this
     // narrower plan. A stale/recovery-mode input cannot authorize this profile.
@@ -115,13 +127,14 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       if (!registration && !pruning) { assert.ok(prerequisiteChain?.registration); await deps.authenticatePrerequisiteChain(prerequisiteChain); }
       const captured = registration ? await deps.captureTaskRegistrationPlan() : pruning ? await deps.captureBrokerPolicyPruningPlan(request.versionId) : await deps.captureBrokerPolicyPlan();
       if (!pruning) staticPlan(captured.plan);
-      const p = { schemaVersion: 2, purpose: registration ? TASK_REGISTRATION : pruning ? BROKER_POLICY_PRUNING : BROKER_POLICY_CONVERGENCE,
+      const p = { schemaVersion: registration && registrationPredecessorEvidence ? 3 : 2, purpose: registration ? TASK_REGISTRATION : pruning ? BROKER_POLICY_PRUNING : BROKER_POLICY_CONVERGENCE,
         sourceSha: checkout.sourceSha, treeSha256: checkout.treeSha256, savedPlanSha256: brokerDigest(captured.bytes), logicalPlanSha256: brokerDigest(captured.plan),
         artifactSetSha256: stagedBrokerArtifactSet(files, root), state, packageSha256: brokerDigest(fs.readFileSync(files.package)),
         alias: await deps.getAlias(), prerequisites, canonicalAddresses: diagnostic.plan.resource_changes.map(c => c.address).sort(),
         configuration: diagnostic.plan.resource_changes.find(c => c.address === BROKER_FUNCTION).change.before.environment[0].variables,
         publication: null, target: registration ? null : pruning ? { versionId: request.versionId, inventory: captured.plan.inventory } : { policy: deriveBrokerPolicy(prerequisites.policy, prerequisiteChain.registration.result.taskMap) },
-        prerequisiteChain: registration ? null : prerequisiteChain || null };
+        prerequisiteChain: registration ? null : prerequisiteChain || null,
+        ...(registration && registrationPredecessorEvidence ? { registrationPredecessor: registrationPredecessorEvidence.registrationPredecessor, registrationPolicyPredecessor: registrationPredecessorEvidence.policy } : {}) };
       assertBrokerPreparation(p); const mutationAddresses = pruning ? assertBrokerPolicyPruningPlan(captured.plan, p) : assertPrerequisitePlan(captured.plan, p);
       equal(await deps.readCheckout(), checkout); equal(await deps.readStateIdentity(), state); equal(await deps.readPrerequisites(), prerequisites);
       return { preparation: p, mutationAddresses, planPath: captured.file };
