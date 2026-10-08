@@ -341,6 +341,7 @@ test("production image publisher workflows select explicit OIDC or the documente
 test("every GitHub workflow credential root is classified by its authenticated mode", () => {
   const oidcWorkflows = [
     ".github/workflows/authorize-component-broker-recovery-successor.yml",
+    ".github/workflows/authorize-production-stage-b-release-transition.yml",
     ".github/workflows/component-iam-authorization-publisher.yml",
     ".github/workflows/prepare-production-app-only-verifier-operation.yml",
     ".github/workflows/prepare-production-app-only-deployment-operation.yml",
