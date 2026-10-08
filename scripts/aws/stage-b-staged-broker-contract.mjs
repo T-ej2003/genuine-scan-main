@@ -314,7 +314,24 @@ export function assertReceiptBoundPolicyReceipts(entry, release, { reservation, 
 export function receiptBoundCheckerDisclosure(preparation) {
   const chain = preparation?.prerequisiteChain;
   if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
+  const policyConvergence = preparation.purpose === 'STAGE_B_BROKER_POLICY_CONVERGENCE' &&
+    chain.registration?.preparation?.schemaVersion === 3 &&
+    chain.registration.preparation.purpose === 'STAGE_B_TASK_REGISTRATION' &&
+    chain.registration.preparation.registrationPredecessor && chain.policy?.receiptBoundAdoption;
+  const publicationOrCutover = [BROKER_PUBLICATION, BROKER_CUTOVER].includes(preparation.purpose) &&
+    chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption;
+  assert.ok(policyConvergence || publicationOrCutover,
+    'Receipt-bound recovery disclosure is limited to authenticated policy convergence, publication, or cutover chains');
+  if (policyConvergence) {
+    assertBrokerPreparation(chain.registration.preparation);
+    assertRegistrationHandoff(chain.registration, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+    assertReceiptBoundPolicyAdoption(chain.policy, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+  }
   const operation = {
+    STAGE_B_BROKER_POLICY_CONVERGENCE: {
+      intendedOperation: 'TERRAFORM_APPLY_STAGED_BROKER_POLICY_CONVERGENCE_PLAN',
+      authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_POLICY_CONVERGENCE_PACKAGE',
+    },
     [BROKER_PUBLICATION]: {
       intendedOperation: 'TERRAFORM_APPLY_STAGED_BROKER_PUBLICATION_PLAN',
       authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_PUBLICATION_PACKAGE',
@@ -324,11 +341,10 @@ export function receiptBoundCheckerDisclosure(preparation) {
       authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_CURRENT_RELEASE_CUTOVER_PACKAGE',
     },
   }[preparation.purpose];
-  assert.ok(operation, 'Receipt-bound recovery can authorize only publication or cutover packages');
-  assert.ok(chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption);
-  const identity = entry => {
-    const r = entry.receiptBoundAdoption;
-    return { artifactSha256: brokerDigest(entry), transactionId: r.transactionId,
+  const identity = (entry, name) => {
+    if (entry.receiptBoundAdoption) {
+      const r = entry.receiptBoundAdoption;
+      return { representation: 'RECEIPT_BOUND_ADOPTION', artifactSha256: brokerDigest(entry), transactionId: r.transactionId,
       historicalSourceSha: r.historicalSourceSha, historicalPurpose: r.historicalPurpose,
       preparationSha256: r.historicalPreparationSha256, authorizationDigest: r.historicalAuthorizationSha256,
       resultSha256: r.historicalResultSha256, receiptObjects: r.receiptObjects,
@@ -341,6 +357,23 @@ export function receiptBoundCheckerDisclosure(preparation) {
           terraform: { lineage: r.terraformLineage, serial: r.terraformSerial, stateSha256: r.terraformStateSha256 } }
         : { registeredOutputCount: r.registeredOutputCount, definitionsSha256: r.definitionsSha256,
           imageImpactSha256: r.imageImpactSha256 }) };
+    }
+    assert.ok(policyConvergence && name === 'registration', 'Unexpected receipt-bound chain representation');
+    const p = entry.preparation, predecessor = p.registrationPredecessor;
+    assertBrokerPreparation(p);
+    assertRegistrationHandoff(entry, { sourceSha: preparation.sourceSha, treeSha256: p.treeSha256 });
+    return { representation: 'SCHEMA3_CURRENT_REGISTRATION_WITH_RECEIPT_BOUND_PREDECESSOR',
+      artifactSha256: brokerDigest(entry), transactionId: entry.result.authorizationSha256,
+      sourceSha: p.sourceSha, preparationSha256: brokerDigest(p), authorizationDigest: entry.result.authorizationSha256,
+      resultSha256: brokerDigest(entry.result), predecessor: { artifactSha256: brokerDigest(predecessor),
+        transactionId: predecessor.registrationTransactionId, historicalSourceSha: predecessor.registrationSourceSha,
+        historicalAuthorizationDigest: predecessor.registrationTransactionId,
+        historicalResultSha256: predecessor.registrationResultSha256,
+        receiptObjects: predecessor.registrationReceiptObjects,
+        receiptChainSha256: predecessor.registrationReceiptChainSha256,
+        registeredTaskMapSha256: brokerDigest(predecessor.registrationTaskMap),
+        aliasRuntimeTaskMapSha256: brokerDigest(predecessor.aliasRuntimeTaskMap),
+        imageImpactSha256: predecessor.imageImpactSha256 } };
   };
   return { kind: 'RECEIPT_BOUND_RECOVERY_DISCLOSURE',
     statements: ['ORIGINAL_HISTORICAL_PREPARATION_AND_AUTHORIZATION_BYTES_UNAVAILABLE',
@@ -348,9 +381,13 @@ export function receiptBoundCheckerDisclosure(preparation) {
       'COMPLETED_OUTPUTS_AND_TERMINAL_TRANSACTION_VERIFIED', 'LIVE_SUCCESSOR_INDEPENDENTLY_CORROBORATED',
       'REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED',
       'TERRAFORM_OWNERSHIP_AND_STATE_CORROBORATED', 'RECEIPT_BOUND_HANDOFF_PREPARATION_IS_NON_MUTATING',
+      ...(policyConvergence ? ['HISTORICAL_REGISTRATION_USED_ONLY_AS_PREDECESSOR_PROVENANCE',
+        'HISTORICAL_REGISTRATION_IMAGE_REUSE_COMPATIBILITY_REMAINS_FALSE',
+        'CURRENT_RELEASE_REGISTRATION_REQUIRES_ITS_OWN_AUTHORIZATION',
+        'POLICY_CONVERGENCE_AUTHORIZATION_DOES_NOT_AUTHORIZE_PUBLICATION_OR_CUTOVER'] : []),
       operation.authorizationStatement],
     recoveryArtifactSha256: brokerDigest({ registration: chain.registration, policy: chain.policy }),
-    registration: identity(chain.registration), policy: identity(chain.policy),
+    registration: identity(chain.registration, 'registration'), policy: identity(chain.policy, 'policy'),
     consumerSourceSha: preparation.sourceSha, intendedOperation: operation.intendedOperation,
     packageSha256: preparation.packageSha256, savedPlanSha256: preparation.savedPlanSha256,
     logicalPlanSha256: preparation.logicalPlanSha256, preparationSha256: brokerDigest(preparation),

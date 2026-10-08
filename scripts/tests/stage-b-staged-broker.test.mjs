@@ -328,6 +328,43 @@ test('fresh checker disclosure binds the new publication package and discloses u
  const ordinary=publicationWithTerminalPolicyAdoption();assert.equal(receiptBoundCheckerDisclosure(ordinary),null);
 });
 
+test('fresh policy-convergence authorization discloses the mixed schema-3 registration and historical policy chain',async()=>{
+ const x=prepublicationPredecessorFixture(),registrationPreparation=schema3RegistrationPredecessor(x),registrationAuthorization=authorization(registrationPreparation);
+ const registration={preparation:registrationPreparation,authorization:registrationAuthorization,result:{status:'REGISTERED_NONTERMINAL',
+  sourceSha:registrationPreparation.sourceSha,treeSha256:registrationPreparation.treeSha256,preparationSha256:brokerDigest(registrationPreparation),
+  authorizationSha256:brokerDigest(registrationAuthorization),savedPlanSha256:registrationPreparation.savedPlanSha256,authorizedAt:now.toISOString(),
+  taskMap:clone(x.registrationTaskMap),definitions:clone(x.registration.result.definitions)}};
+ const p=preparation();p.schemaVersion=2;p.purpose=BROKER_POLICY_CONVERGENCE;p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;
+ p.prerequisites={...clone(prerequisites),policyVersion:x.policy.receiptBoundAdoption.successorVersion,
+  policy:clone(x.policy.terminal.policy),taskMap:clone(x.registration.result.taskMap)};
+ p.target={policy:deriveBrokerPolicy(p.prerequisites.policy,registration.result.taskMap)};
+ p.prerequisiteChain={registration,policy:x.policy};
+ assertBrokerPreparation(p);
+ const disclosure=receiptBoundCheckerDisclosure(p);
+ assert.equal(disclosure.intendedOperation,'TERRAFORM_APPLY_STAGED_BROKER_POLICY_CONVERGENCE_PLAN');
+ assert.equal(disclosure.registration.representation,'SCHEMA3_CURRENT_REGISTRATION_WITH_RECEIPT_BOUND_PREDECESSOR');
+ assert.equal(disclosure.registration.artifactSha256,brokerDigest(registration));
+ assert.equal(disclosure.registration.predecessor.receiptChainSha256,registrationPreparation.registrationPredecessor.registrationReceiptChainSha256);
+ assert.equal(disclosure.policy.artifactSha256,brokerDigest(x.policy));
+ assert.ok(disclosure.statements.includes('HISTORICAL_REGISTRATION_USED_ONLY_AS_PREDECESSOR_PROVENANCE'));
+ assert.ok(disclosure.statements.includes('HISTORICAL_REGISTRATION_IMAGE_REUSE_COMPATIBILITY_REMAINS_FALSE'));
+ assert.ok(disclosure.statements.includes('POLICY_CONVERGENCE_AUTHORIZATION_DOES_NOT_AUTHORIZE_PUBLICATION_OR_CUTOVER'));
+ const maker='arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/authenticated-maker';
+ const checker='arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/authenticated-checker';
+ const auth=await signBrokerAuthorization(p,{makerIdentity:maker,humanReviewId:'policy-review',makerCaller:async()=>({Account:'368992683803',Arn:maker}),
+  caller:async()=>({Arn:checker}),sign:async()=>'c2ln',verify:async()=>true,now});
+ assert.deepEqual(auth.recoveryDisclosure,disclosure);
+ const alteredPolicy=clone(p);alteredPolicy.prerequisiteChain.policy.receiptBoundAdoption.historicalResultSha256='f'.repeat(64);
+ assert.throws(()=>receiptBoundCheckerDisclosure(alteredPolicy));
+ const wrongShape=clone(p);wrongShape.prerequisiteChain.registration=x.registration;
+ assert.throws(()=>receiptBoundCheckerDisclosure(wrongShape));
+ const alteredDisclosure=clone(auth);alteredDisclosure.recoveryDisclosure.intendedOperation='LAMBDA_ALIAS_COMPARE_AND_SWAP';
+ await assert.rejects(()=>assertBrokerAuthorization(alteredDisclosure,p,{verify:async()=>true,now}));
+ const tampered=clone(p);tampered.prerequisiteChain.registration.preparation.registrationPredecessor.registrationTaskMap[Object.keys(registrationPreparation.registrationPredecessor.registrationTaskMap)[0]]='arn:aws:ecs:eu-west-2:368992683803:task-definition/unapproved:999';
+ assert.throws(()=>receiptBoundCheckerDisclosure(tampered));
+ assert.throws(()=>receiptBoundCheckerDisclosure({...p,purpose:'UNRELATED'}),/limited to authenticated policy convergence/);
+});
+
 test('receipt-bound publication carries verified provenance into a distinct cutover authorization',async()=>{
  const x=receiptBoundFixture(),publicationPreparation=publicationWithTerminalPolicyAdoption(x.f);
  publicationPreparation.prerequisiteChain={registration:x.registration,policy:x.policy};assertBrokerPreparation(publicationPreparation);
@@ -358,7 +395,7 @@ test('receipt-bound publication carries verified provenance into a distinct cuto
  const cutoverAuthorization=await signBrokerAuthorization(cutoverPreparation,{...signer,humanReviewId:'cutover-review'});
  assert.equal(cutoverAuthorization.purpose,BROKER_CUTOVER);assert.deepEqual(cutoverAuthorization.recoveryDisclosure,cutoverDisclosure);
  await assert.rejects(()=>assertBrokerAuthorization(publicationAuthorization,cutoverPreparation,{verify:async()=>true,now}));
- assert.throws(()=>receiptBoundCheckerDisclosure({...cutoverPreparation,purpose:'UNRELATED'}),/only publication or cutover/);
+ assert.throws(()=>receiptBoundCheckerDisclosure({...cutoverPreparation,purpose:'UNRELATED'}),/limited to authenticated policy convergence, publication, or cutover/);
  for(const mutate of [
   chain=>{chain.registration.receiptBoundAdoption.historicalResultSha256='f'.repeat(64);},
   chain=>{const r=chain.registration.receiptBoundAdoption;r.imageImpactReport.imageReuseCompatible=false;r.imageImpactReport.newImagesRequired=true;r.imageImpactReport.imageAffectingFiles=['src/backend/app.mjs'];r.imageImpactSha256=brokerDigest(r.imageImpactReport);},
