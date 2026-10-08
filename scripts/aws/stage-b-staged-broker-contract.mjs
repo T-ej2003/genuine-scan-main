@@ -54,6 +54,53 @@ export function brokerPrerequisiteIdentity(snapshot) {
   return structuredClone(snapshot);
 }
 
+export function assertPrepublicationRegistrationPredecessor(value, release) {
+  keys(value, ['kind', 'lifecycleState', 'sourceSha', 'registrationTransactionId', 'registrationSourceSha',
+    'registrationResultSha256', 'registrationReceiptObjects', 'registrationReceiptChainSha256', 'registrationTaskMap',
+    'policyTransactionId', 'policySourceSha', 'policyResultSha256', 'policyReceiptObjects', 'policyReceiptChainSha256',
+    'policyArn', 'policyDefaultVersion', 'policyDocument', 'policyDocumentSha256', 'alias', 'aliasRuntimeTaskMap', 'imageImpactReport', 'imageImpactSha256']);
+  assert.equal(value.kind, 'AUTHENTICATED_PREPUBLICATION_REGISTRATION_PREDECESSOR');
+  assert.equal(value.lifecycleState, 'EXPECTED_PRE_PUBLICATION_STATE');
+  assert.equal(value.sourceSha, release.sourceSha);
+  for (const name of ['registrationTransactionId', 'policyTransactionId']) hash(value[name]);
+  for (const name of ['registrationResultSha256', 'registrationReceiptChainSha256', 'policyResultSha256', 'policyReceiptChainSha256', 'policyDocumentSha256', 'imageImpactSha256']) hash(value[name]);
+  keys(value.registrationReceiptObjects, ['reservation', 'intent', 'result']); keys(value.policyReceiptObjects, ['reservation', 'intent', 'result']);
+  for (const receipts of [value.registrationReceiptObjects, value.policyReceiptObjects]) for (const receipt of Object.values(receipts)) receiptObject(receipt);
+  for (const name of ['registrationSourceSha', 'policySourceSha']) assert.match(value[name] || '', /^[a-f0-9]{40}$/);
+  assert.equal(value.policyArn, STAGE_B_BROKER_POLICY.arn);
+  assert.match(value.policyDefaultVersion || '', /^v[1-9][0-9]*$/);
+  assertStageBBrokerPolicyDocument(value.policyDocument);
+  assert.equal(brokerDigest(value.policyDocument), value.policyDocumentSha256);
+  equal(value.policyDocument.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions')?.Resource,
+    Object.keys(value.registrationTaskMap).sort().map(name => value.registrationTaskMap[name]));
+  assert.equal(brokerDigest(value.imageImpactReport), value.imageImpactSha256);
+  assert.equal(value.imageImpactReport.imageReleaseSha, value.registrationSourceSha);
+  assert.equal(value.imageImpactReport.toolingSha, release.sourceSha);
+  assert.equal(value.imageImpactReport.toolingInputTreeSha256, release.treeSha256);
+  assert.equal(value.imageImpactReport.imageReuseCompatible, false);
+  assert.equal(value.imageImpactReport.newImagesRequired, true);
+  assert.ok(value.imageImpactReport.imageAffectingFiles.length > 0);
+  assertStageBBrokerTaskDefinitionMap(value.registrationTaskMap);
+  assertStageBBrokerTaskDefinitionMap(value.aliasRuntimeTaskMap);
+  const revisions = map => Object.fromEntries(Object.entries(map).map(([name, arn]) => [name, Number(arn.slice(arn.lastIndexOf(':') + 1))]));
+  const registered = revisions(value.registrationTaskMap), runtime = revisions(value.aliasRuntimeTaskMap);
+  assert.deepEqual(Object.keys(registered).sort(), Object.keys(runtime).sort());
+  assert.ok(Object.keys(registered).every(name => value.registrationTaskMap[name].slice(0, value.registrationTaskMap[name].lastIndexOf(':'))
+    === value.aliasRuntimeTaskMap[name].slice(0, value.aliasRuntimeTaskMap[name].lastIndexOf(':'))),
+  'Policy and runtime maps must refer to the same approved task-definition families');
+  assert.ok(Object.keys(registered).every(name => runtime[name] < registered[name]),
+    'Only a strictly older published runtime map may precede authenticated registered successors');
+  brokerAliasIdentity(value.alias);
+  return true;
+}
+
+export function assertSamePrepublicationRegistrationPredecessor(prepared, observed, release) {
+  assertPrepublicationRegistrationPredecessor(prepared, release);
+  assertPrepublicationRegistrationPredecessor(observed, release);
+  equal(observed, prepared, 'Authenticated registration predecessor changed after preparation');
+  return true;
+}
+
 const receiptObject = value => {
   keys(value, ['bucket', 'key', 'versionId', 'etag', 'objectSha256']);
   assert.equal(value.bucket, STAGE_B_TERRAFORM_BACKEND.bucketName);
@@ -129,6 +176,58 @@ export function assertReceiptBoundRegistrationReceipts(entry, release, { reserva
   assert.equal(result.envelope.status, 'TASK_REGISTERED'); equal(result.value, entry.result);
   assert.equal(intent.value.savedPlanSha256, r.savedPlanSha256);
   assert.equal(intent.value.authorizedAt, result.value.authorizedAt);
+  return true;
+}
+
+export function assertReceiptBoundRegistrationPredecessorReceipts(entry, release, { reservation, intent, result }) {
+  const r = entry?.registrationPredecessor;
+  assert.ok(r, 'Pre-publication registration provenance is required');
+  keys(r, ['kind', 'schemaVersion', 'recoveryMode', 'historicalSignatureVerified', 'historicalSourceSha', 'historicalPurpose',
+    'historicalEvidenceAvailability', 'durableReceiptChainVerified', 'liveSuccessorCorroborated', 'freshIndependentCheckerRequired',
+    'historicalPreparationSha256', 'historicalAuthorizationSha256', 'historicalResultSha256', 'toolingTreeSha256', 'savedPlanSha256',
+    'transactionId', 'authorizationId', 'consumerSourceSha', 'consumerTreeSha256', 'receiptObjects', 'receiptChainSha256',
+    'registeredOutputCount', 'definitionsSha256', 'imageImpactReport', 'imageImpactSha256', 'liveCorroborationSha256',
+    'originalMutationReplayable', 'originalMutationAuthorizationAvailable', 'freshHandoffOnly']);
+  assert.equal(r.kind, 'RECEIPT_BOUND_REGISTERED_OUTPUT_PREDECESSOR');
+  assert.equal(r.schemaVersion, 1); assert.equal(r.recoveryMode, 'RECEIPT_BOUND'); assert.equal(r.historicalSignatureVerified, false);
+  assert.equal(r.historicalEvidenceAvailability, 'ORIGINAL_AUTHORIZATION_UNAVAILABLE');
+  assert.equal(r.durableReceiptChainVerified, true); assert.equal(r.liveSuccessorCorroborated, true);
+  assert.equal(r.freshIndependentCheckerRequired, true); assert.equal(r.originalMutationReplayable, false);
+  assert.equal(r.originalMutationAuthorizationAvailable, false); assert.equal(r.freshHandoffOnly, true);
+  assert.equal(r.historicalPurpose, 'STAGE_B_TASK_REGISTRATION'); assert.equal(r.registeredOutputCount, 12);
+  assert.equal(r.historicalSourceSha, result.value.sourceSha);
+  assert.equal(r.transactionId, result.envelope.id); assert.equal(r.authorizationId, r.transactionId);
+  assert.equal(r.historicalAuthorizationSha256, r.authorizationId);
+  assert.equal(r.historicalPreparationSha256, result.value.preparationSha256);
+  assert.equal(r.historicalResultSha256, brokerDigest(result.value));
+  assert.equal(r.consumerSourceSha, release.sourceSha); assert.equal(r.consumerTreeSha256, release.treeSha256);
+  assert.equal(result.value.status, 'REGISTERED_NONTERMINAL');
+  assert.equal(result.value.authorizationSha256, r.transactionId);
+  assert.equal(result.value.treeSha256, r.toolingTreeSha256);
+  assert.equal(result.value.savedPlanSha256, r.savedPlanSha256);
+  assert.equal(r.definitionsSha256, brokerDigest(result.value.definitions));
+  assert.equal(r.imageImpactReport.imageReuseCompatible, false); assert.equal(r.imageImpactReport.newImagesRequired, true);
+  assert.equal(r.imageImpactReport.imageReleaseSha, r.historicalSourceSha);
+  assert.equal(r.imageImpactReport.toolingSha, release.sourceSha);
+  assert.equal(r.imageImpactReport.toolingInputTreeSha256, release.treeSha256);
+  assert.equal(r.imageImpactSha256, brokerDigest(r.imageImpactReport));
+  equal(r.receiptObjects, { reservation: reservation.object, intent: intent.object, result: result.object });
+  assert.equal(r.receiptChainSha256, brokerDigest({ transactionId: r.transactionId,
+    historicalPreparationSha256: r.historicalPreparationSha256, historicalAuthorizationSha256: r.historicalAuthorizationSha256,
+    historicalResultSha256: r.historicalResultSha256, receiptObjects: r.receiptObjects }));
+  equal(Object.keys(result.value.definitions).sort(), Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort());
+  const taskMap = Object.fromEntries(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
+    .filter(([address]) => address.includes('.executor[') || address.endsWith('candidate["canary"]'))
+    .map(([address]) => [address.includes('.executor[') ? address.match(/\["([^"]+)"\]$/)[1] : 'full-rls-application-canary', result.value.definitions[address].arn]));
+  assertStageBBrokerTaskDefinitionMap(taskMap); equal(result.value.taskMap, taskMap);
+  assert.equal(reservation.envelope.kind, 'STAGED_BROKER_RESERVATION'); assert.equal(reservation.envelope.id, r.transactionId);
+  equal(reservation.value, { purpose: 'STAGE_B_TASK_REGISTRATION', nonce: reservation.value.nonce, preparationSha256: r.historicalPreparationSha256 });
+  assert.match(reservation.value.nonce || '', /^[a-f0-9]{64}$/);
+  assert.equal(intent.envelope.kind, 'STAGED_BROKER_STEP'); assert.equal(intent.envelope.id, r.transactionId);
+  assert.equal(intent.envelope.status, 'TASK_REGISTRATION_INTENT');
+  equal(Object.keys(intent.value).sort(), ['authorizedAt', 'savedPlanSha256']);
+  assert.equal(intent.value.savedPlanSha256, r.savedPlanSha256); assert.equal(intent.value.authorizedAt, result.value.authorizedAt);
+  assert.ok(Date.parse(result.value.authorizedAt) > 0);
   return true;
 }
 
@@ -467,8 +566,10 @@ export function assertTerminalPolicySuccessorState(entry, release, { ownership, 
 export function assertBrokerPreparation(p) {
   const fields = ["schemaVersion", "purpose", "sourceSha", "treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "state", "packageSha256", "alias", "prerequisites", "configuration", "canonicalAddresses", "publication", "target"];
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
+  if (p.schemaVersion === 3) fields.push('prerequisiteChain', 'registrationPredecessor');
   keys(p, fields);
-  assert.ok([1, 2].includes(p.schemaVersion)); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER, 'STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose));
+  assert.ok([1, 2, 3].includes(p.schemaVersion)); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER, 'STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose));
+  if (p.schemaVersion === 3) assert.equal(p.purpose, 'STAGE_B_TASK_REGISTRATION', 'Pre-publication predecessor evidence is registration-only');
   assert.match(p.sourceSha || "", /^[a-f0-9]{40}$/);
   for (const k of ["treeSha256", "savedPlanSha256", "logicalPlanSha256", "artifactSetSha256", "packageSha256"]) hash(p[k]);
   keys(p.state, ["lineage", "serial", "stateSha256"]); assert.match(p.state.lineage || "", /^[a-f0-9-]{36}$/);
@@ -478,8 +579,21 @@ export function assertBrokerPreparation(p) {
   assert.equal(new Set(p.canonicalAddresses).size, p.canonicalAddresses.length);
   assert.ok(BROKER_CENSUS.every(a => p.canonicalAddresses.includes(a)));
   if (['STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose)) {
-    assert.equal(p.schemaVersion, 2); assert.equal(p.publication, null);
-    if (p.purpose === 'STAGE_B_TASK_REGISTRATION') { assert.equal(p.target, null); assert.equal(p.prerequisiteChain, null); }
+    assert.ok([2, 3].includes(p.schemaVersion)); assert.equal(p.publication, null);
+    if (p.purpose === 'STAGE_B_TASK_REGISTRATION') {
+      assert.equal(p.target, null); assert.equal(p.prerequisiteChain, null);
+      if (p.schemaVersion === 3) {
+        const predecessor = p.registrationPredecessor;
+        assertPrepublicationRegistrationPredecessor(predecessor, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
+        equal(predecessor.alias, p.alias, 'Pre-publication alias identity differs from the prepared predecessor');
+        assert.equal(predecessor.policyDefaultVersion, p.prerequisites.policyVersion);
+        equal(predecessor.policyDocument, p.prerequisites.policy);
+        equal(predecessor.registrationTaskMap, p.prerequisites.taskMap);
+        equal(JSON.parse(p.configuration.BROKER_TASK_DEFINITIONS_JSON), predecessor.aliasRuntimeTaskMap,
+          'Terraform function configuration differs from the authenticated published runtime map');
+      }
+      else assert.equal(p.registrationPredecessor, undefined);
+    }
     else if (p.purpose === 'STAGE_B_BROKER_POLICY_PRUNING') { keys(p.target, ['versionId', 'inventory']); assert.match(p.target.versionId, /^v[1-9][0-9]*$/); assert.notEqual(p.target.versionId, p.prerequisites.policyVersion); }
     else { assert.ok(p.prerequisiteChain?.registration); if (p.prerequisiteChain.registration.adoption) assertRegistrationHandoff(p.prerequisiteChain.registration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 }); keys(p.target, ['policy']); assertStageBBrokerPolicyDocument(p.target.policy); }
     return p;

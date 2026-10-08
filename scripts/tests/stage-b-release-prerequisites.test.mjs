@@ -479,6 +479,46 @@ for (const field of ['preparation', 'authorization', 'planPath']) test(`adoption
   assert.equal(called, false);
 });
 
+test('pre-publication mismatch cannot be enabled with a caller boolean', async () => {
+  let constructed = false;
+  await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration', allowPrepublicationMismatch: true },
+    { adapterFactory: () => { constructed = true; throw new Error('must reject before executor creation'); } }), /Unknown staged request field/);
+  assert.equal(constructed, false);
+});
+
+test('fresh registration without receipt provenance retains the strict prerequisite reader', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-strict-prerequisites-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const order = [], deps = { readCheckout: async () => ({ sourceSha: 'c'.repeat(40), treeSha256: 'c'.repeat(64) }),
+      readPrerequisites: async () => { order.push('strict-live-reader'); throw new Error('policy/runtime task map mismatch'); },
+      readRegistrationPreparationPredecessor: async () => { order.push('receipt-reader'); throw new Error('must not opt in implicitly'); } };
+    await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration', directory },
+      { adapterFactory: () => deps }), /policy\/runtime task map mismatch/);
+    assert.deepEqual(order, ['strict-live-reader']);
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
+test('explicit receipt identities select only read-only pre-publication authentication before source guards', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-predecessor-order-'));
+  fs.chmodSync(directory, 0o700);
+  try {
+    const order = [], checkout = { sourceSha: '9fcb625c4174c4fd61c586601a84b243791a8bd5', treeSha256: 'c'.repeat(64) };
+    const deps = { readCheckout: async () => checkout,
+      readRegistrationPreparationPredecessor: async (ids, release) => {
+        order.push('authenticate-receipt-predecessors');
+        assert.deepEqual(ids, { registrationTransactionId: 'a'.repeat(64), policyTransactionId: 'b'.repeat(64) });
+        assert.deepEqual(release, checkout); return { registrationPredecessor: {}, prerequisites: brokerPreparation().prerequisites };
+      },
+      readPrerequisites: async () => { order.push('ordinary-reader'); throw new Error('must use authenticated predecessor'); } };
+    await assert.rejects(() => runStagedBrokerRequest({ operation: 'prepare-registration', directory,
+      files: { backendMetadata: path.join(directory, 'backend.json') }, terraformDataDir: directory,
+      predecessorReceiptRecovery: { registrationTransactionId: 'a'.repeat(64), policyTransactionId: 'b'.repeat(64) } },
+      { adapterFactory: () => deps }), /protected main|clean|checkout|commit/i);
+    assert.deepEqual(order, ['authenticate-receipt-predecessors']);
+  } finally { fs.rmSync(directory, { recursive: true }); }
+});
+
 test('registration adoption authenticates its historical handoff before reading live prerequisites', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-registration-adoption-order-'));
   fs.chmodSync(directory, 0o700);

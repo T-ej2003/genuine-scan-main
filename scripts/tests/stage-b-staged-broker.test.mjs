@@ -8,7 +8,8 @@ import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from '../aws/produ
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerTargetIdentity,
  assertBrokerPublicationPlan, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan, assertBrokerAuthorization,
  assertBrokerPreparation, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, createTerminalPolicySuccessorAdoption, assertTerminalPolicySuccessorState,
- assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, receiptBoundCheckerDisclosure,
+ assertReceiptBoundRegistrationAdoption, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyReceipts, receiptBoundCheckerDisclosure,
+ assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor,
  } from '../aws/stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication as publish, prepareBrokerCutover, executeBrokerAliasCas as cutover, reconcileBrokerAlias as reconcile, brokerTransitionRequired } from '../aws/stage-b-staged-broker.mjs';
 import { BROKER_POLICY_CONVERGENCE, TASK_REGISTRATION, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
@@ -59,7 +60,7 @@ function receiptBoundFixture() {
   key:seq===0?`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}.json`:`${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${id}/${String(seq).padStart(4,'0')}.json`,
   versionId:`version-${seq}-${id.slice(0,4)}`,etag:`"etag-${seq}"`,objectSha256:brokerDigest(body)});
  const receiptObjects=(id,bodies)=>({reservation:object(id,0,bodies.reservation),intent:object(id,1,bodies.intent),result:object(id,2,bodies.result)});
- const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>[address,{arn:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`} ]));
+ const definitions=Object.fromEntries(TASK_REGISTRATION_ADDRESSES.map((address,i)=>{const name=address.includes('.executor[')?address.match(/\["([^"]+)"\]$/)[1]:address.endsWith('candidate["canary"]')?'full-rls-application-canary':null;return [address,{arn:name?prerequisites.taskMap[name]:`arn:aws:ecs:eu-west-2:368992683803:task-definition/family-${i+1}:${i+1}`}];}));
  const regResult={status:'REGISTERED_NONTERMINAL',sourceSha:oldSha,treeSha256:'8'.repeat(64),savedPlanSha256:'5'.repeat(64),preparationSha256:'6'.repeat(64),authorizationSha256:registrationId,authorizedAt:'2026-10-06T11:40:35.838Z',definitions,taskMap:clone(prerequisites.taskMap)};
  const regReservation={kind:'STAGED_BROKER_RESERVATION',id:registrationId,value:{purpose:TASK_REGISTRATION,nonce:'b'.repeat(64),preparationSha256:regResult.preparationSha256}};
  const regIntent={kind:'STAGED_BROKER_STEP',id:registrationId,status:'TASK_REGISTRATION_INTENT',value:{savedPlanSha256:regResult.savedPlanSha256,authorizedAt:regResult.authorizedAt}};
@@ -95,6 +96,83 @@ function receiptBoundFixture() {
  const policyReceipts={reservation:{envelope:polReservation,value:polReservation.value},intent:{envelope:polIntent,value:intentValue},result:{envelope:polResult,value:terminal}};
  return {f,registration:regEntry,policy:policyEntry,registrationReceipts,policyReceipts,ownership,state};
 }
+
+function prepublicationPredecessorFixture() {
+ const x=receiptBoundFixture(), {registration,policy,registrationReceipts,policyReceipts,f}=x;
+ const bump=map=>Object.fromEntries(Object.entries(map).map(([name,arn])=>[name,arn.replace(/:(\d+)$/,(_,revision)=>`:${Number(revision)+2}`)]));
+ const registrationTaskMap=bump(registration.result.taskMap), aliasRuntimeTaskMap=clone(prerequisites.taskMap);
+ const imageImpactReport={imageReleaseSha:registration.result.sourceSha,toolingSha:f.release.sourceSha,toolingInputTreeSha256:f.release.treeSha256,
+  imageReuseCompatible:false,newImagesRequired:true,imageAffectingFiles:['backend/src/app.mjs']};
+ const regRecovery=registration.receiptBoundAdoption,policyRecovery=policy.receiptBoundAdoption;
+ const proof={kind:'AUTHENTICATED_PREPUBLICATION_REGISTRATION_PREDECESSOR',lifecycleState:'EXPECTED_PRE_PUBLICATION_STATE',
+  sourceSha:f.release.sourceSha,registrationTransactionId:regRecovery.transactionId,registrationSourceSha:regRecovery.historicalSourceSha,
+  registrationResultSha256:regRecovery.historicalResultSha256,registrationReceiptObjects:regRecovery.receiptObjects,
+  registrationReceiptChainSha256:regRecovery.receiptChainSha256,registrationTaskMap,
+  policyTransactionId:policyRecovery.transactionId,policySourceSha:policyRecovery.historicalSourceSha,
+  policyResultSha256:policyRecovery.historicalResultSha256,policyReceiptObjects:policyRecovery.receiptObjects,
+  policyReceiptChainSha256:policyRecovery.receiptChainSha256,policyArn:policyRecovery.policyArn,
+  policyDefaultVersion:policyRecovery.successorVersion,policyDocument:deriveBrokerPolicy(policy.terminal.policy,registrationTaskMap),
+  policyDocumentSha256:brokerDigest(deriveBrokerPolicy(policy.terminal.policy,registrationTaskMap)),
+  alias:clone(alias),aliasRuntimeTaskMap,imageImpactReport,imageImpactSha256:brokerDigest(imageImpactReport)};
+ return { ...x, proof, registrationTaskMap, aliasRuntimeTaskMap, imageImpactReport };
+}
+
+test('authenticated pre-publication predecessor permits only the expected registered-policy versus latest-alias map transition',()=>{
+ const x=prepublicationPredecessorFixture();
+ assert.equal(assertPrepublicationRegistrationPredecessor(x.proof,x.f.release),true);
+ const p=preparation();p.schemaVersion=3;p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;
+ p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;p.alias=clone(x.proof.alias);p.registrationPredecessor=x.proof;
+ p.prerequisites={...clone(p.prerequisites),taskMap:x.registrationTaskMap,policy:deriveBrokerPolicy(p.prerequisites.policy,x.registrationTaskMap),policyVersion:x.proof.policyDefaultVersion};
+ assert.equal(assertBrokerPreparation(p),p);
+});
+
+test('pre-publication receipt producer shape authenticates and preparation binds the alias configuration',()=>{
+ const x=prepublicationPredecessorFixture(),base=x.registration.receiptBoundAdoption;
+ const imageImpactReport={...clone(x.imageImpactReport)};
+ const predecessor={kind:'RECEIPT_BOUND_REGISTERED_OUTPUT_PREDECESSOR',schemaVersion:1,recoveryMode:'RECEIPT_BOUND',
+  historicalSignatureVerified:false,historicalEvidenceAvailability:'ORIGINAL_AUTHORIZATION_UNAVAILABLE',durableReceiptChainVerified:true,
+  liveSuccessorCorroborated:true,freshIndependentCheckerRequired:true,historicalSourceSha:base.historicalSourceSha,
+  historicalPurpose:base.historicalPurpose,historicalPreparationSha256:base.historicalPreparationSha256,
+  historicalAuthorizationSha256:base.historicalAuthorizationSha256,historicalResultSha256:base.historicalResultSha256,
+  toolingTreeSha256:base.toolingTreeSha256,savedPlanSha256:base.savedPlanSha256,transactionId:base.transactionId,
+  authorizationId:base.authorizationId,consumerSourceSha:base.consumerSourceSha,consumerTreeSha256:base.consumerTreeSha256,
+  receiptObjects:base.receiptObjects,receiptChainSha256:base.receiptChainSha256,
+  registeredOutputCount:12,definitionsSha256:brokerDigest(x.registration.result.definitions),imageImpactReport,
+  imageImpactSha256:brokerDigest(imageImpactReport),liveCorroborationSha256:'c'.repeat(64),originalMutationReplayable:false,
+  originalMutationAuthorizationAvailable:false,freshHandoffOnly:true};
+ const registration={result:x.registration.result,registrationPredecessor:predecessor};
+ const triplet=Object.fromEntries(['reservation','intent','result'].map(name=>[name,{...x.registrationReceipts[name],object:base.receiptObjects[name]}]));
+ assert.equal(assertReceiptBoundRegistrationPredecessorReceipts(registration,x.f.release,triplet),true);
+ const p=preparation();p.schemaVersion=3;p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;
+ p.sourceSha=x.f.release.sourceSha;p.treeSha256=x.f.release.treeSha256;p.alias=clone(x.proof.alias);p.registrationPredecessor=x.proof;
+ p.prerequisites={...clone(p.prerequisites),taskMap:x.registrationTaskMap,policy:clone(x.proof.policyDocument),policyVersion:x.proof.policyDefaultVersion};
+ p.configuration.BROKER_TASK_DEFINITIONS_JSON=JSON.stringify(x.aliasRuntimeTaskMap);
+ assert.equal(assertBrokerPreparation(p),p);
+ p.configuration.BROKER_TASK_DEFINITIONS_JSON=JSON.stringify(x.registrationTaskMap);
+ assert.throws(()=>assertBrokerPreparation(p),/Terraform function configuration/);
+ p.schemaVersion=3;p.purpose=BROKER_POLICY_CONVERGENCE;
+ assert.throws(()=>assertBrokerPreparation(p),/registration-only/);
+});
+
+for(const [name,mutate] of [
+ ['policy-side registered map',x=>{x.registrationTaskMap[Object.keys(x.registrationTaskMap)[0]]=x.registrationTaskMap[Object.keys(x.registrationTaskMap)[0]].replace(/:(\d+)$/,(_,n)=>`:${Number(n)+1}`);}],
+ ['alias runtime map',x=>{x.aliasRuntimeTaskMap[Object.keys(x.aliasRuntimeTaskMap)[0]]=x.aliasRuntimeTaskMap[Object.keys(x.aliasRuntimeTaskMap)[0]].replace(/:(\d+)$/,(_,n)=>`:${Number(n)+1}`);}],
+ ['alias version',x=>{x.alias.FunctionVersion='13';}],
+ ['policy document',x=>{x.policyDocument.Statement.find(s=>s.Sid==='RunOnlyApprovedExecutorAndCanaryRevisions').Resource[0]='arn:aws:ecs:eu-west-2:368992683803:task-definition/unapproved:999';x.policyDocumentSha256=brokerDigest(x.policyDocument);}],
+ ['policy default',x=>{x.policyDefaultVersion='v12';}],
+ ['registration receipt',x=>{x.registrationReceiptObjects.result.versionId='substituted';}],
+ ['policy receipt',x=>{x.policyReceiptChainSha256='e'.repeat(64);}],
+ ['image incompatibility hidden',x=>{x.imageImpactReport.imageReuseCompatible=true;x.imageImpactSha256=brokerDigest(x.imageImpactReport);}],
+ ['unknown mismatch topology',x=>{x.registrationTaskMap[Object.keys(x.registrationTaskMap)[0]]=x.aliasRuntimeTaskMap[Object.keys(x.aliasRuntimeTaskMap)[0]];}],
+]) test(`pre-publication predecessor rejects ${name}`,()=>{
+ const x=prepublicationPredecessorFixture(),prepared=clone(x.proof);mutate(x.proof);
+ assert.throws(()=>assertSamePrepublicationRegistrationPredecessor(prepared,x.proof,x.f.release));
+});
+
+test('normal equal-map registration preparation remains on the strict schema-2 path',()=>{
+ const p=preparation();p.schemaVersion=2;p.purpose=TASK_REGISTRATION;p.target=null;p.prerequisiteChain=null;
+ assert.equal(p.schemaVersion,2);assert.equal(assertBrokerPreparation(p),p);
+});
 
 test('receipt-bound adoption keeps missing historical signature explicit and verifies both durable chains',()=>{
  const x=receiptBoundFixture(),release=x.f.release;
