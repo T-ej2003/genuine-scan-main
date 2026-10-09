@@ -159,3 +159,43 @@ No dependency or required test was removed or bypassed.
 Required GitHub CI and a new exact-head review remain necessary before merge;
 local results do not substitute for them. Keep security updates in the documented
 reviewed update process so immutable pinning does not silently defer CVE fixes.
+
+### Dockerfile parser P1 and complete stage authentication
+
+The P1 reported on `c1764b5956` also existed on `f8bcdabde2`: uppercase-only
+line regexes ignored lowercase or indented extra stages. Negative public-validator
+tests reproduced the bypass before correction. The shared gate now enumerates
+logical Dockerfile instructions case-insensitively, with ASCII indentation,
+continuations, comment removal, parser directives, platform options and stage
+aliases. Every external base must match its approved family/digest; internal
+bases must refer to an earlier authenticated alias. It enforces the complete
+two-stage frontend/five-stage backend sets as well as external image counts.
+
+Unbound variable image references are recognized and rejected: an `ARG` default
+does not prove the value passed by a real build. Literal approved platforms and
+Docker's automatic native platform selectors are recognized; source overrides of
+automatic selectors fail closed. Unknown syntax, malformed FROMs, duplicate or
+forward aliases, unapproved parser frontends, heredocs and ambiguous continuations
+fail closed rather than being skipped. Supporting a new syntax requires a reviewed
+contract change. Non-ASCII trailing whitespace cannot turn a separate FROM into
+a falsely continued prior instruction.
+
+Both callers (the public provenance CLI used by audit/production, and OSV runtime
+packaging verification) use this same gate. No private count-only parser remains.
+Tests cover case, indentation, platforms, continuations, aliases, variables,
+additional stages, parser ambiguity and image-family substitution; real local
+Docker builds verify normal and indented mixed-case/platform source. Docker's
+instruction rules: https://docs.docker.com/reference/dockerfile/
+
+Hostile review also closes implicit image sources: COPY and RUN mount references
+must name authenticated prior stages (or valid prior stage indexes), not an
+external image/named context. Frontend builder and final-runtime roles remain
+Node and nginx respectively; swapping two individually approved images cannot
+make audit and production use different runtime families. Unsupported quoted or
+variable source flags fail closed. Remaining known P0/P1/security-relevant P2: zero.
+Final parser validation: 70 provenance/parser tests and 159 combined security
+tests passed; the broader 1,620-test Stage-B suite passed with its two existing
+skips. Normal frontend/backend builds and the indented mixed-case/platform build
+passed. Source guardrails, all 97 workflow files, capability closure, canonical
+RLS verification, fresh OSV reachability review and diff checks passed. No
+production operation or PR #647 change was performed.

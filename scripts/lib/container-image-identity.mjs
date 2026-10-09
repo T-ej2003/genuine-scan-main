@@ -28,6 +28,82 @@ export function readApprovedImages(repository = root) {
   return lock.images;
 }
 
+function dockerfileStages(source) {
+  assert.doesNotMatch(source, /\u0000|\r(?!\n)/, "Ambiguous Dockerfile control character");
+  const stages = [], aliases = new Set();
+  let escape = "\\", directives = true, pending = "", continued = false;
+  const seenDirectives = new Set();
+  for (const raw of source.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const line = raw.replace(/^[ \t]+|[ \t]+$/g, "");
+    const directive = line.match(/^#\s*(syntax|escape|check)\s*=\s*(.+)$/i);
+    if (directive) assert.ok(directives && !pending, "Ambiguous/late Dockerfile parser directive");
+    if (directives) {
+      if (directive) {
+        const name = directive[1].toLowerCase(), value = directive[2];
+        assert.ok(!seenDirectives.has(name), "Duplicate Dockerfile parser directive");
+        seenDirectives.add(name);
+        if (name === "escape") { assert.ok(["\\", "`"].includes(value), "Unsupported Dockerfile escape"); escape = value; }
+        if (name === "syntax") assert.equal(value, "docker/dockerfile:1.7", "Unapproved Dockerfile parser frontend");
+        continue;
+      }
+      directives = false;
+    }
+    if (!line || line.startsWith("#")) continue;
+    const continuation = line.endsWith(escape);
+    continued = continuation;
+    assert.ok(!line.endsWith(escape + escape), "Ambiguous Dockerfile continuation");
+    pending += continuation ? line.slice(0, -1) : line;
+    if (continuation) continue;
+    const instruction = pending.match(/^([a-z]+)(?:\s+(.*))?$/i);
+    assert.ok(instruction, "Malformed Dockerfile instruction");
+    const name = instruction[1].toUpperCase(), argumentsText = instruction[2] || "";
+    assert.ok(argumentsText, "Missing Dockerfile instruction arguments");
+    assert.ok(["FROM", "ARG", "RUN", "COPY", "ADD", "WORKDIR", "ENV", "LABEL", "EXPOSE", "USER", "CMD", "ENTRYPOINT", "VOLUME", "STOPSIGNAL", "HEALTHCHECK", "SHELL", "MAINTAINER"].includes(name), "Unsupported Dockerfile instruction");
+    assert.doesNotMatch(argumentsText, /<</, "Unsupported Dockerfile heredoc");
+    pending = "";
+    if (name !== "FROM") {
+      assert.ok(stages.length || name === "ARG", "Instruction before first FROM");
+      if (!stages.length) assert.doesNotMatch(argumentsText, /^(?:BUILDPLATFORM|TARGETPLATFORM)(?:=|$)/, "Unbound automatic platform override");
+      const knownStage = reference => {
+        const prior = stages.slice(0, -1);
+        assert.ok(prior.some(stage => stage.alias?.toLowerCase() === reference.toLowerCase()) || (/^(0|[1-9][0-9]*)$/.test(reference) && Number(reference) < prior.length), "Unapproved external/undeclared stage reference");
+      };
+      const flags = (argumentsText.match(/^(?:--\S+(?:\s+|$))*/)?.[0] || "").trim().split(/\s+/);
+      for (const flag of flags) {
+        if (name === "COPY" && /^--from/i.test(flag)) {
+          assert.match(flag, /^--from=[a-z0-9_.-]+$/i, "Unsupported COPY stage reference");
+          knownStage(flag.slice(7));
+        }
+        if (name === "RUN" && /^--mount=/i.test(flag)) {
+          assert.doesNotMatch(flag, /["'$\\`]/, "Unsupported RUN mount reference syntax");
+          for (const option of flag.slice(8).split(",")) if (/^from=/i.test(option)) knownStage(option.slice(5));
+        }
+      }
+      continue;
+    }
+    const tokens = argumentsText.split(/\s+/).filter(Boolean);
+    let platform;
+    if (tokens[0]?.startsWith("--")) {
+      platform = tokens.shift().match(/^--platform=(linux\/(?:amd64|arm64(?:\/v8)?)|\$(?:BUILDPLATFORM|TARGETPLATFORM)|\$\{(?:BUILDPLATFORM|TARGETPLATFORM)\})$/)?.[1];
+      assert.ok(platform, "Unsupported FROM platform argument");
+    }
+    assert.ok(tokens.length === 1 || (tokens.length === 3 && tokens[1].toUpperCase() === "AS"), "Malformed FROM instruction");
+    const [reference, , alias] = tokens;
+    // Build-arg defaults do not authenticate overrides supplied by actual builds.
+    assert.doesNotMatch(reference, /[$\\`'"#]/, "Unbound/unsupported FROM image reference");
+    const internal = aliases.has(reference.toLowerCase());
+    if (alias) {
+      assert.match(alias, /^[a-z][a-z0-9_.-]*$/i, "Malformed FROM stage alias");
+      assert.ok(!aliases.has(alias.toLowerCase()), "Duplicate FROM stage alias");
+      aliases.add(alias.toLowerCase());
+    }
+    stages.push({ reference, internal, alias, platform });
+  }
+  assert.ok(!continued && pending === "", "Unterminated Dockerfile continuation");
+  assert.ok(stages.length, "Dockerfile has no FROM stages");
+  return stages;
+}
+
 export function assertPinnedImageInputs(repository = root) {
   const images = readApprovedImages(repository);
   const counts = (file, pattern, key, count) => {
@@ -36,9 +112,17 @@ export function assertPinnedImageInputs(repository = root) {
     return values;
   };
   for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {
-    const refs = counts(file, /^FROM\s+(\S+)/gm, "node", file === "backend/Dockerfile" ? 3 : 1);
-    if (file !== "backend/Dockerfile") counts(file, /^FROM\s+(\S+)/gm, "nginx", 1);
-    assert.ok(refs.every(ref => [images.node.reference, images.nginx.reference, "deps", "runtime"].includes(ref)), `${file}: unexpected base image`);
+    const stages = dockerfileStages(readFileSync(path.join(repository, file), "utf8"));
+    const backend = file === "backend/Dockerfile";
+    assert.ok(stages.every(stage => stage.internal || [images.node.reference, ...(backend ? [] : [images.nginx.reference])].includes(stage.reference)), `${file}: unapproved base image`);
+    assert.equal(stages.length, backend ? 5 : 2, `${file}: unexpected stage count`);
+    const external = stages.filter(stage => !stage.internal);
+    assert.equal(external.filter(stage => stage.reference === images.node.reference).length, backend ? 3 : 1, `${file}: unapproved node stage set`);
+    if (!backend) {
+      assert.equal(external.filter(stage => stage.reference === images.nginx.reference).length, 1, `${file}: unapproved nginx stage set`);
+      assert.equal(stages[0].reference, images.node.reference, `${file}: unapproved frontend builder family`);
+      assert.equal(stages.at(-1).reference, images.nginx.reference, `${file}: unapproved frontend runtime family`);
+    }
   }
   for (const [file, count] of [[".github/workflows/auth-security-tests.yml", 1], [".github/workflows/quality-gate.yml", 2], [".github/workflows/release-gate.yml", 1], ["docker-compose.p2-test.yml", 1]]) {
     counts(file, /^\s+image:\s+(\S+)\s*$/gm, "postgres", count);

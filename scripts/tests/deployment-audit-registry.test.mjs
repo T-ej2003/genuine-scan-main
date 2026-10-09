@@ -151,3 +151,127 @@ test("a different official image family cannot replace the Node contract", () =>
   const lock = JSON.parse(readFileSync(target)); lock.images.node = lock.images.nginx;
   writeFileSync(target, JSON.stringify(lock)); assert.throws(() => readApprovedImages(root), /family substitution/);
 }));
+
+for (const instruction of ['from', '   FROM', '\tFrOm']) {
+  for (const file of ['Dockerfile', 'Dockerfile.ecs-frontend', 'backend/Dockerfile']) {
+    test(`${file}: complete enumeration rejects additional ${instruction} stage`, () => checkout(root => {
+      const target = path.join(root, file);
+      writeFileSync(target, readFileSync(target, 'utf8') + `\n${instruction} unapproved/image AS injected\n`);
+      assert.throws(() => assertPinnedImageInputs(root), /unapproved|unexpected|stage/i);
+    }));
+  }
+}
+for (const instruction of ['FROM', 'from', '   FrOm']) {
+  test(`approved full multi-stage Dockerfiles accept ${instruction} syntax`, () => checkout(root => {
+    for (const file of ['Dockerfile', 'Dockerfile.ecs-frontend', 'backend/Dockerfile']) {
+      const target = path.join(root, file);
+      writeFileSync(target, readFileSync(target, 'utf8').replace(/^FROM /gm, `${instruction} `));
+    }
+    assertPinnedImageInputs(root);
+  }));
+}
+test('platform arguments, continuations, comments and declared internal stages authenticate', () => checkout(root => {
+  const target = path.join(root, 'backend/Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8').replace(/^FROM /gm, '  FrOm --platform=$BUILDPLATFORM ').replace(' AS deps', ' \\\n# skipped Docker comment\n aS deps'));
+  assertPinnedImageInputs(root);
+}));
+for (const instruction of [
+  'FROM', 'FROM --platform=linux/amd64', 'FROM --unknown=x deps',
+  'FROM --platform=linux/amd64 --platform=linux/arm64 deps',
+  'FROM deps AS', 'FROM deps AS repeated extra', 'FROM missing-stage AS another',
+  'FROM $UNBOUND AS another', 'FROM ${UNBOUND:-unapproved/image} AS another',
+  'FROM deps # not an inline comment', 'FROM deps AS runtime',
+  'FROM deps AS 123', 'FROM deps AS unapproved/stage',
+]) {
+  test(`malformed/ambiguous/unbound stage fails: ${instruction}`, () => checkout(root => {
+    const target = path.join(root, 'backend/Dockerfile');
+    writeFileSync(target, readFileSync(target, 'utf8') + `\n${instruction}\n`);
+    assert.throws(() => assertPinnedImageInputs(root));
+  }));
+}
+test('approved extra stages cannot bypass the required complete stage count', () => checkout(root => {
+  const target=path.join(root, 'backend/Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8') + '\nfrom deps AS extra\n');
+  assert.throws(() => assertPinnedImageInputs(root), /stage/i);
+}));
+test('undeclared internal names cannot be mistaken for approved prior stages', () => checkout(root => {
+  const target=path.join(root, 'backend/Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8').replace(' AS deps', ' AS dependencies'));
+  assert.throws(() => assertPinnedImageInputs(root), /unapproved|unexpected/i);
+}));
+
+test('non-ASCII trailing whitespace cannot launder a separate unapproved FROM into RUN', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8') + '\nRUN echo inert \\\u00a0\nfrom unapproved/image\n');
+  assert.throws(() => assertPinnedImageInputs(root), /unapproved|unexpected/i);
+}));
+test('alternate Docker escape directive still enumerates every stage', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8').replace('# syntax=docker/dockerfile:1.7', '# syntax=docker/dockerfile:1.7\n# escape=`').replace(/\\\n/g, '`\n') + '\nfrOm `\n unapproved/image\n');
+  assert.throws(() => assertPinnedImageInputs(root), /unapproved|unexpected/i);
+}));
+for (const suffix of [
+  '\nfrom \\\n  # ignored comment\n unapproved/image\n',
+  '\nFROM deps \\\n AS injected\n',
+  '\nRUN <<EOF\nfrom unapproved/image\nEOF\n',
+  '\nFROM deps \\',
+]) {
+  test('continued/unsupported syntax cannot hide an additional stage: '+JSON.stringify(suffix), () => checkout(root => {
+    const target=path.join(root, 'backend/Dockerfile');
+    writeFileSync(target, readFileSync(target, 'utf8') + suffix);
+    assert.throws(() => assertPinnedImageInputs(root));
+  }));
+}
+for (const header of ['# syntax=unapproved/frontend', '# escape=x', '# escape=\\\n# escape=`', 'ARG BUILDPLATFORM=linux/s390x']) {
+  test('unapproved/ambiguous parser or platform binding fails: '+header, () => checkout(root => {
+    const target=path.join(root, 'Dockerfile');
+    writeFileSync(target, readFileSync(target, 'utf8').replace('# syntax=docker/dockerfile:1.7', header));
+    assert.throws(() => assertPinnedImageInputs(root));
+  }));
+}
+test('variable image defaults cannot authenticate later build-argument overrides', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8').replace('\n\nFROM', `\n\nARG BASE=${images.node.reference}\nFROM`).replace(`FROM ${images.node.reference}`, 'FROM ${BASE}'));
+  assert.throws(() => assertPinnedImageInputs(root), /Unbound/);
+}));
+
+test('a late parser directive cannot change the validated instruction interpretation', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8')+'\n# syntax=unapproved/frontend\n');
+  assert.throws(() => assertPinnedImageInputs(root), /directive/);
+}));
+
+for (const instruction of ['copy --from=unapproved/image /payload /payload', 'RUN --mount=type=bind,from=unapproved/image,target=/source true']) {
+  test('implicit external image sources cannot evade the complete stage contract: '+instruction, () => checkout(root => {
+    const target=path.join(root, 'Dockerfile');
+    writeFileSync(target, readFileSync(target, 'utf8')+'\n'+instruction+'\n');
+    assert.throws(() => assertPinnedImageInputs(root), /Unsupported|Unapproved/);
+  }));
+}
+test('COPY stage indexes and RUN mounts may use authenticated prior stages', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8').replace('COPY --from=builder', 'copy --from=0')+'\nRUN --mount=type=bind,from=builder,target=/source true\n');
+  assertPinnedImageInputs(root);
+}));
+
+for (const instruction of ['COPY --FrOm=unapproved/image /payload /payload', 'RUN --mount=type=bind,FrOm=unapproved/image,target=/source true', 'RUN --mount="type=bind,from=unapproved/image,target=/source" true']) {
+  test('implicit image reference syntax cannot launder a foreign source: '+instruction, () => checkout(root => {
+    const target=path.join(root, 'Dockerfile');
+    writeFileSync(target, readFileSync(target, 'utf8')+'\n'+instruction+'\n');
+    assert.throws(() => assertPinnedImageInputs(root), /Unsupported|Unapproved/);
+  }));
+}
+
+test('empty dangling continuation cannot be silently discarded at EOF', () => checkout(root => {
+  const target=path.join(root, 'Dockerfile');
+  writeFileSync(target, readFileSync(target, 'utf8')+'\n\\\n# no continuation target\n');
+  assert.throws(() => assertPinnedImageInputs(root), /Unterminated/);
+}));
+
+for (const file of ['Dockerfile', 'Dockerfile.ecs-frontend']) {
+  test(file+': exchanging approved builder/runtime families cannot evade identity alignment', () => checkout(root => {
+    const target=path.join(root, file);
+    writeFileSync(target, readFileSync(target, 'utf8').replace(images.node.reference, 'temporary-builder-placeholder').replace(images.nginx.reference, images.node.reference).replace('temporary-builder-placeholder', images.nginx.reference));
+    assert.throws(() => assertPinnedImageInputs(root), /family/);
+  }));
+}
