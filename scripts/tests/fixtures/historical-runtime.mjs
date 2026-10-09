@@ -6,8 +6,8 @@ import { prepareHistoricalRuntimeReference } from "../../aws/production-historic
 import { signPermissionReport } from "../../aws/validate-production-green-stage-b-permissions.mjs";
 import { historicalRuntimeEvidence } from "../../aws/production-historical-runtime-evidence.mjs";
 
-export function historicalRuntimeFixture() {
-  const source = "a".repeat(40), release = "b".repeat(40), imageDigest = `sha256:${"c".repeat(64)}`;
+export function historicalRuntimeFixture({ release = "b".repeat(40), now = "2026-09-29T11:00:00.000Z" } = {}) {
+  const source = "a".repeat(40), imageDigest = `sha256:${"c".repeat(64)}`;
   const definitionArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/mscqr-production-rls-green-worker-candidate:7`;
   const taskArn = `arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task/mscqr-prod-euw2-main/${"1".repeat(32)}`;
   const taskRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-task", executionRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-worker-execution";
@@ -26,7 +26,6 @@ export function historicalRuntimeFixture() {
   const tasks = [task];
   const reader = { describeTasks: (arns) => ({ tasks: structuredClone(tasks.filter((entry) => arns.includes(entry.taskArn))), failures: [] }), describeTaskDefinition: () => ({ taskDefinition: structuredClone(definition), tags: [] }), describeImages: () => ({ imageDetails: [{ repositoryName: "mscqr-worker", registryId: STAGE_B.account, imageDigest, imageTags: [source] }] }), describeRepositories: () => ({ repositories: [{ repositoryName: "mscqr-worker", registryId: STAGE_B.account, imageTagMutability: "IMMUTABLE" }] }), describeNetworkInterfaces: () => ({ NetworkInterfaces: [structuredClone(eni)] }), lookupEvents: (operation) => [{ CloudTrailEvent: JSON.stringify(operation === "RunTask" ? launch : registration) }], listTasks: () => tasks.map(({ taskArn }) => taskArn) };
   const reference = prepareHistoricalRuntimeReference({ reader, taskArn, componentState: state, componentStateSha256: stateHash(state), recoverySourceSha: release, recoveryTreeSha256: "f".repeat(64), isProtectedSource: () => true });
-  const now = "2026-09-29T11:00:00.000Z";
   const report = { schemaVersion: 1, status: "valid", sourceSha: release, evidenceKind: "PLAN_BOUND_PERMISSION", phase: "plan-bound", purpose: "saved-plan-authorization", historicalRuntimeAuthority: { sourceSha: release, referenceSha256: reference.referenceSha256, planApprovalReportSha256: "1".repeat(64), referenceAuditSha256: "2".repeat(64), approvedAt: now } };
   // An actual keyed signature verifier at the injected crypto boundary: unlike
   // `verify: () => true`, a changed signed binding cannot pass these tests.

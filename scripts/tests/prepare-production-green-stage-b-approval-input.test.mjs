@@ -17,7 +17,7 @@ import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerLambdaConfiguration, normalizeStageBBrokerRuntimeVersionConfig, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { assertStableBrokerAliasObservation, authenticateApprovalInputCheckerIdentity, createApprovalInputEvidenceRunners, prepareProductionGreenStageBApprovalInput, runApprovalInputCli, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
-import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes, stageBTaskDefinitionBindings } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
 const imageReleaseSha = "2004d1b936764ee0c4d5c92e509454cf85a5294b";
@@ -532,16 +532,28 @@ test("completed original publication, descendant closure and public approval col
   try {
   const templateDirectory = 'infra/aws/terraform/production-green-stage-b/task-definitions';
   fs.cpSync(path.join(repositoryRoot, templateDirectory), path.join(directory, templateDirectory), { recursive: true });
+  fs.mkdirSync(path.join(directory, 'scripts/aws'), { recursive: true });
+  for (const file of ['production-green-stage-b-task-definitions.mjs', 'production-green-stage-b-contract.mjs', 'production-ecs-runtime-dependencies.mjs']) fs.copyFileSync(path.join(repositoryRoot, 'scripts/aws', file), path.join(directory, 'scripts/aws', file));
   git(['init', '--initial-branch=main']); git(['add', '.']); git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Original release']);
   const originalSource = git(['rev-parse', 'HEAD']);
   const executorFile = path.join(directory, templateDirectory, 'green-activation-executor.json');
   const changedTemplate = JSON.parse(fs.readFileSync(executorFile)); changedTemplate.cpu = '512'; changedTemplate.memory = '1024';
   fs.writeFileSync(executorFile, JSON.stringify(changedTemplate));
+  const rendererFile = path.join(directory, 'scripts/aws/production-green-stage-b-task-definitions.mjs');
+  fs.writeFileSync(rendererFile, fs.readFileSync(rendererFile, 'utf8').replace('MSCQR_PRODUCTION_GREEN_CREATE_AND_BOOTSTRAP_DATABASE', 'DESCENDANT_CONFIRMATION_MUST_NOT_ENTER_ORIGINAL_RELEASE').replace('export function assertFixedTaskDefinition(definition) {', 'export function assertFixedTaskDefinition(definition) { throw new Error("DESCENDANT_VALIDATOR");'));
+  const contractFile = path.join(directory, 'scripts/aws/production-green-stage-b-contract.mjs');
+  fs.writeFileSync(contractFile, fs.readFileSync(contractFile, 'utf8').replaceAll('X86_64', 'ARM64').replace(STAGE_B.executorLogGroupName, '/ecs/descendant-only-executor').replace(STAGE_B.canaryLogGroupName, '/ecs/descendant-only-canary'));
+  const dependencyFile = path.join(directory, 'scripts/aws/production-ecs-runtime-dependencies.mjs');
+  fs.writeFileSync(dependencyFile, fs.readFileSync(dependencyFile, 'utf8').replace('export function deriveEcsRuntimeDependencies(candidate) {', 'export function deriveEcsRuntimeDependencies(candidate) { throw new Error("DESCENDANT_RUNTIME_DEPENDENCIES");'));
   fs.writeFileSync(path.join(directory, 'descendant-contracts.json'), JSON.stringify({ sourceContractSha256: digest('f'), migrationSetDigest: digest('f') }));
   git(['add', '.']); git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling']);
   const tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: digest('e') };
   process.chdir(directory);
   assert.notDeepEqual(stageBTemplateHashes(originalSource), stageBTemplateHashes());
+  assert.notDeepEqual(stageBTemplateHashes(originalSource), stageBTemplateHashes(tooling.sourceSha));
+  assert.deepEqual(stageBTaskDefinitionBindings(originalSource), stageBTaskDefinitionBindings());
+  assert.notDeepEqual(stageBTaskDefinitionBindings(originalSource), stageBTaskDefinitionBindings(tooling.sourceSha));
+  assert.throws(() => renderStageBTaskDefinition('backend', { imageReleaseSha, sourceContractSha256: digest('a'), migrationSetDigest: digest('b'), packageChecksumSha256: digest('c'), receiptBucket: STAGE_B.receiptBucket, backendLogGroup: '/ecs/mscqr-production/rls-green-backend', backendImage: brokerImages.backendImageDigest }, tooling.sourceSha));
 
   const r = rig(), originalLive = live();
   const variables = structuredClone(originalLive.configuration.Environment.Variables);

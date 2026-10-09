@@ -111,7 +111,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   let checksumsFile;
   if (recoveryApproval) {
     if (!isAuthenticatedBrokerRecoveryApproval(recoveryApproval) || recoveryApproval.sourceSha !== toolingSha) throw new Error("Readiness recovery requires authenticated original release.");
-    const bytes = execFileSync("git", ["show", `${toolingSha}:documents/security/rls-program/generated/checksums.json`], { cwd: root });
+    const bytes = run("git", ["show", `${toolingSha}:documents/security/rls-program/generated/checksums.json`], { cwd: root });
     checksumsFile = path.join(preflightDirectory, "original-release-checksums.json");
     writeStageBPrivateFileAtomic({ filePath: checksumsFile, bytes, repositoryRoot: root, label: "Original release checksums" });
     const contracts = deriveContractDigests({ file: checksumsFile });
@@ -163,7 +163,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
   const verify = dependencies.verify;
   const verifyImageEvidence = dependencies.verifyImageEvidence;
   const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
-  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, { ...publication, recoveryApproval }));
+  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, { ...publication, recoveryApproval, ...(dependencies.run ? { run: dependencies.run } : {}) }));
   const validateCapabilityGraph = dependencies.validateCapabilityGraph || assertStageBDeploymentCapabilityGraph;
   const readStageATerraformSource = dependencies.readStageATerraformSource || (() => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"));
   const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));
@@ -249,7 +249,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
-    const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    const releaseRun = dependencies.commandRun || createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
     (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     if (adminReport.recoveryTooling && !recoveryBinding) throw new Error("Administrator recovery report requires authenticated recovery context.");
     if (recoveryBinding && canonicalizeJson(adminReport.recoveryTooling) !== canonicalizeJson(recoveryBinding)) throw new Error("Administrator report differs from authenticated broker recovery.");

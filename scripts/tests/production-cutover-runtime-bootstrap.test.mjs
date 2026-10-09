@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync, chmodSync, statSync, cpSync, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -42,6 +42,22 @@ import { assertInitialDualSlotBindings } from "../aws/production-initial-dual-sl
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildPartialRebaselineRecoveryCompletion, buildPartialRebaselineRecoveryRotationBindings, createPartialRebaselineRecoveryAuthorization, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, assertPartialRebaselineRecoveryAuthorization } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
+import { historicalRuntimeFixture } from "./fixtures/historical-runtime.mjs";
+import { recoveryApprovalFixture } from "./fixtures/staged-broker-runtime.mjs";
+import { resolvedBrokerEnvironment } from "./fixtures/staged-broker.mjs";
+import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
+import { deriveContractDigests } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "../aws/validate-stage-b-image-reuse.mjs";
+import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
+import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-production-green-stage-b-approval-evidence.mjs";
+import { prepareStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
+import { prepareProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
+import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes, stageBTaskDefinitionBindings } from "../aws/production-green-stage-b-task-definitions.mjs";
+import { sourcePolicyEvidence, sourceReleaseRoleInlinePolicyEvidence, runPermissionPreflight } from "../aws/validate-production-green-stage-b-permissions.mjs";
+import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { ROOT_ATTESTATION_KEY_DESCRIPTION, ROOT_ATTESTATION_TAGS, buildRootAttestationKeyPolicy } from "../aws/production-root-attestation-key.mjs";
+import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
 const digest = "sha256:5c03df843e46dd0853762108c7ae780a4d06b7e11cac585d9d2b2cd3d196f6ad";
@@ -225,6 +241,185 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("native completed broker recovery preserves release identity through rotation bootstrap", async () => {
+  const brokerSourceSha = sourceSha, tooling = { sourceSha: 'd'.repeat(40), treeSha256: 'e'.repeat(64) };
+  const r = await recoveryApprovalFixture({ sourceSha: brokerSourceSha, imageReleaseSha: '594bab55f23ff8b2438c12b85b149ba0aebeed1e', tooling });
+  const recovery = r.context;
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd(), brokerSourceSha);
+    input.rotationBindings = { ...bindings, sourceSha: brokerSourceSha };
+    input.git = gitFixture(tooling.sourceSha); input.sourceSha = brokerSourceSha; input.brokerRecoveryApproval = recovery;
+    const report = JSON.parse(readFileSync(input.releasePreflightEvidenceFile));
+    report.recoveryTooling = { ...tooling, releaseSourceSha: brokerSourceSha, publicationResultSha256: recovery.publicationResultSha256, closureResultSha256: recovery.closureResultSha256 };
+    writeFileSync(input.releasePreflightEvidenceFile, JSON.stringify(report) + '\n', { mode: 0o600 });
+    const reportBytes = readFileSync(input.releasePreflightEvidenceFile);
+    const attestation = buildReleasePreflightCheckerTrustAttestation({ report, reportBytes, sourceSha: brokerSourceSha, administratorReportSha256: report.administratorReportSha256 });
+    writeFileSync(input.releasePreflightAttestationFile, JSON.stringify(attestation) + '\n', { mode: 0o600 });
+    writeFileSync(input.releasePreflightAttestationSignatureFile, JSON.stringify(signPermissionReport(attestation, { reportBytes: readFileSync(input.releasePreflightAttestationFile), sign: () => 'AQ==' })) + '\n', { mode: 0o600 });
+    const result = prepareProductionCutoverRuntime(input);
+    assert.equal(result.readyToConsumeMfa, true, result.blockers?.join('; '));
+    assert.equal(result.protectedMainSha, tooling.sourceSha); assert.equal(result.config.sourceSha, brokerSourceSha);
+    assert.equal(result.releaseSourceSha, brokerSourceSha); assert.deepEqual(result.config.recoveryTooling, report.recoveryTooling);
+    assert.equal(r.calls.filter(c => c === 'publish').length, 1);
+    for (const [name, value] of [['missing', undefined], ['unbranded', structuredClone(recovery)]]) {
+      const rejected = prepareProductionCutoverRuntime({ ...input, outputDirectory: path.join(directory, name), brokerRecoveryApproval: value });
+      assert.equal(rejected.readyToConsumeMfa, false);
+    }
+    for (const [name, git] of [['wrong-tooling', gitFixture('f'.repeat(40))], ['dirty-tooling', (file, args) => args[0] === 'status' ? ' M changed' : gitFixture(tooling.sourceSha)(file, args)]]) {
+      const rejected = prepareProductionCutoverRuntime({ ...input, outputDirectory: path.join(directory, name), git });
+      assert.equal(rejected.readyToConsumeMfa, false);
+    }
+    const wrongRelease = prepareProductionCutoverRuntime({ ...input, outputDirectory: path.join(directory, 'wrong-release'), sourceSha: 'f'.repeat(40) });
+    assert.equal(wrongRelease.readyToConsumeMfa, false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("public descendant preflight preserves original contracts through approval and rotation handoff", async () => {
+  const childFixture = process.env.MSCQR_DESCENDANT_HANDOFF_FIXTURE;
+  const originalCwd = process.cwd(), originalHome = process.env.HOME, directory = childFixture || realpathSync(fsTemp()), checkout = path.join(directory, 'checkout');
+  const release = '29406b0ec537ac60618642bba20133dd0cf45529', imagesSource = '3666118ab57fb4ba32ff1597e7b74e47f1050f3b';
+  const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+  try {
+    if (!childFixture) {
+      execFileSync('git', ['clone', '--shared', originalCwd, checkout], { stdio: 'pipe' });
+      symlinkSync(path.join(originalCwd, 'node_modules'), path.join(checkout, 'node_modules'), 'dir');
+      symlinkSync(path.join(originalCwd, 'backend/node_modules'), path.join(checkout, 'backend/node_modules'), 'dir');
+      const changed = execFileSync('git', ['diff', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
+      writeFileSync(path.join(checkout, 'documents/security/rls-program/generated/checksums.json'), JSON.stringify({ sourceContractSha256: 'f'.repeat(64), migrationSetDigest: 'f'.repeat(64) }));
+      execFileSync('git', ['add', '.'], { cwd: checkout }); execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling with different release contracts'], { cwd: checkout, stdio: 'pipe' });
+      const output = execFileSync(process.execPath, ['--test', '--test-name-pattern=public descendant preflight', 'scripts/tests/production-cutover-runtime-bootstrap.test.mjs'], { cwd: checkout, env: { PATH: process.env.PATH, HOME: path.join(directory, 'home'), MSCQR_DESCENDANT_HANDOFF_FIXTURE: directory }, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
+      assert.match(output, /pass 1/); return;
+    }
+    const git = args => execFileSync('git', args, { cwd: checkout, encoding: 'utf8', stdio: 'pipe' }).trim();
+    const checksumPath = 'documents/security/rls-program/generated/checksums.json';
+    const originalChecksums = execFileSync('git', ['show', `${release}:${checksumPath}`], { cwd: checkout });
+    git(['merge-base', '--is-ancestor', release, 'HEAD']);
+    process.chdir(checkout); process.env.HOME = path.join(directory, 'home'); mkdirSync(process.env.HOME, { mode: 0o700 });
+    const tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: deriveStageBToolingInputTreeSha256(git(['rev-parse', 'HEAD'])) };
+    const originalFile = path.join(directory, 'authenticated-original-checksums.json'); writeFileSync(originalFile, originalChecksums, { mode: 0o600 });
+    const contracts = deriveContractDigests({ file: originalFile });
+    assert.notDeepEqual(contracts, deriveContractDigests({ file: path.join(checkout, checksumPath) }));
+    const input = fullInput(directory, checkout, release, imagesSource);
+    input.rotationBindings = { ...bindings, sourceSha: release };
+    input.sourceSha = release; input.git = gitFixture(tooling.sourceSha);
+    const publishedPackage = await packageStageBBroker({ outputPath: path.join(directory, 'broker.zip'), toolingSha: release, toolingTreeSha256: deriveStageBToolingInputTreeSha256(release), repositoryRoot: checkout });
+    assert.equal(git(['diff', release, 'HEAD', '--', 'infra/aws/terraform/lambda/production-rls-approval-broker', 'infra/aws/terraform/production-green-stage-b/broker']), '');
+    const variables = resolvedBrokerEnvironment();
+    variables.BROKER_IMAGE_RELEASE_SHA = imagesSource;
+    variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ ...JSON.parse(variables.BROKER_APPROVAL_EXPECTED_JSON), releaseSha: release, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256 });
+    variables.BROKER_TASK_TEMPLATE_HASHES_JSON = JSON.stringify(stageBTemplateHashes(release));
+    const imageRecords = input.imageAuthorization.imageEvidence.images;
+    const image = service => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${service === 'worker' ? 'mscqr-worker' : 'mscqr-backend'}@${imageRecords.find(record => record.service === service).digest}`;
+    variables.BROKER_IMAGES_JSON = JSON.stringify({ backendImageDigest: image('backend'), workerImageDigest: image('worker'), executorImageDigest: image('rls-executor'), canaryImageDigest: image('rls-canary') });
+    const r = await recoveryApprovalFixture({ sourceSha: release, imageReleaseSha: imagesSource, tooling, contracts, environment: variables, packageIdentity: hash(readFileSync(publishedPackage.package.path)), toolingTreeSha256: deriveStageBToolingInputTreeSha256(release) });
+    input.brokerRecoveryApproval = r.context;
+    const taskMap = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+    const definitions = Object.fromEntries(STAGE_B_MODES.map(mode => {
+      const kind = mode === 'full-rls-application-canary' ? 'canary' : 'executor';
+      return [taskMap[mode], { taskDefinition: { ...renderStageBTaskDefinition(kind, { imageReleaseSha: imagesSource, ...contracts, ...stageBTaskDefinitionBindings(release), [`${kind}Image`]: image(kind === 'canary' ? 'rls-canary' : 'rls-executor'), ...(kind === 'executor' ? { mode } : {}) }, release), taskDefinitionArn: taskMap[mode], revision: 1, status: 'ACTIVE' } }];
+    }));
+    const keyId = '00000000-0000-0000-0000-000000000001', keyArn = `arn:aws:kms:eu-west-2:368992683803:key/${keyId}`;
+    let registerCalls = 0;
+    const aws = args => {
+      const operation = `${args[0]}:${args[1]}`;
+      if (operation === 'ecs:register-task-definition') { registerCalls++; throw new Error('Registration forbidden in handoff fixture'); }
+      if (operation === 'lambda:get-alias') return JSON.stringify(r.context.alias);
+      if (operation === 'lambda:get-function-configuration') return JSON.stringify({ ...JSON.parse(readFileSync(new URL('./fixtures/production-stage-b-broker-get-function-configuration.json', import.meta.url))), Version: '13', CodeSha256: Buffer.from(hash(readFileSync(publishedPackage.package.path)), 'hex').toString('base64'), FunctionArn: `${STAGE_B.brokerFunctionArn}:13`, Environment: { Variables: variables } });
+      if (operation === 'ecs:describe-task-definition') { const arn = args[args.indexOf('--task-definition') + 1]; assert.ok(definitions[arn]); return JSON.stringify(definitions[arn]); }
+      if (operation === 'ec2:describe-subnets') return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: 'vpc-0123456789abcdef0', State: 'available', MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? 'b' : 'a'}`, CidrBlock: `10.0.${index}.0/24` })) });
+      if (operation === 'ec2:describe-route-tables') return JSON.stringify({ RouteTables: [{ RouteTableId: 'rtb-12345678', VpcId: 'vpc-0123456789abcdef0', Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: '0.0.0.0/0', NatGatewayId: 'nat-12345678' }] }] });
+      if (operation === 'ec2:describe-security-groups') return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map(GroupId => ({ GroupId, VpcId: 'vpc-0123456789abcdef0' })) });
+      if (operation === 'ecs:describe-clusters') return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: 'ACTIVE' }] });
+      if (operation === 'rds:describe-db-instances') return JSON.stringify({ DBInstances: [{ DBInstanceStatus: 'available', DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map(SubnetIdentifier => ({ SubnetIdentifier })) } }] });
+      if (operation === 'kms:describe-key') return JSON.stringify({ KeyMetadata: { Arn: keyArn, KeyId: keyId, Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: 'SIGN_VERIFY', KeySpec: 'RSA_3072', KeyState: 'Enabled', Enabled: true, KeyManager: 'CUSTOMER', Origin: 'AWS_KMS', MultiRegion: false } });
+      if (operation === 'kms:get-key-policy') return JSON.stringify({ Policy: JSON.stringify(buildRootAttestationKeyPolicy()) });
+      if (operation === 'kms:list-resource-tags') return JSON.stringify({ Tags: Object.entries(ROOT_ATTESTATION_TAGS).map(([TagKey, TagValue]) => ({ TagKey, TagValue })) });
+      if (operation === 'kms:verify') return JSON.stringify({ SignatureValid: true });
+      throw new Error(`Unexpected external operation: ${operation}`);
+    };
+    const policies = sourcePolicyEvidence().map(policy => ({ ...policy, defaultVersionId: 'v1', liveSha256: policy.sourceSha256, attached: true, matchesSource: true }));
+    const inlinePolicies = sourceReleaseRoleInlinePolicyEvidence();
+    const policyEvidence = { roleArn: 'arn:aws:iam::368992683803:role/mscqr-production-release-deployer', receiptReleaseShaTag: '5'.repeat(40), attachedPolicyArns: policies.map(p => p.arn).sort(), inlinePolicyNames: inlinePolicies.map(p => p.policyName), inlinePolicies, permissionsBoundaryArn: null, policies, status: 'valid' };
+    const imageHash = hash(readFileSync(input.imageAuthorization.filePath));
+    const dependencies = { recoveryApproval: r.context, commandRun: aws, readProtectedMainCheckout: () => ({ toolingSha: tooling.sourceSha, currentHead: tooling.sourceSha, originMainHead: tooling.sourceSha, porcelainStatus: git(['status', '--porcelain']) }),
+      readImageAuthorization: () => ({ authorization: input.imageAuthorization, fileSha256: imageHash }), verifyImageEvidence: input.imageAuthorizationValidation.verifyImageEvidence, validateCapabilityGraph: () => ({}),
+      caller: () => 'arn:aws:iam::368992683803:root', collectPolicies: () => policyEvidence, collectEcsExecOperatorEvidence: buildEcsExecOperatorEvidence,
+      permissionPreflight: options => runPermissionPreflight({ ...options, simulate: ({ evaluation }) => ({ decision: evaluation.expectedDecision || 'allowed', matchedStatements: evaluation.expectedDecision ? 0 : 1, missingContextValues: evaluation.expectedMissingContextValues || [] }), cloudTrail: () => ({ status: 'clear', eventsChecked: 0, unresolvedDenials: [] }) }),
+      sign: (report, options) => signPermissionReport(report, { ...options, sign: () => 'AQ==' }), verify: () => true };
+    for (const file of [input.iamEvidence.filePath, input.iamEvidenceSignatureFile, input.releasePreflightEvidenceFile, input.stageBTfvarsPath, input.stageBTfvarsBindingReportPath]) rmSync(file);
+    runProductionPreflightCli(['--identity', 'administrator', '--phase', 'initial', '--source-sha', release, '--image-authorization', input.imageAuthorization.filePath, '--image-authorization-sha256', imageHash, '--output', input.iamEvidence.filePath, '--signature-output', input.iamEvidenceSignatureFile], dependencies);
+    const imagePath = path.join(directory, 'image-evidence.json'), signaturePath = path.join(directory, 'image-evidence.signature.json');
+    writeFileSync(imagePath, JSON.stringify(input.imageAuthorization.imageEvidence), { mode: 0o600 }); writeFileSync(signaturePath, JSON.stringify(input.imageAuthorization.imageEvidenceSignature), { mode: 0o600 });
+    const attr = (family, revision = 1) => ({ arn: `arn:aws:ecs:eu-west-2:368992683803:task-definition/${family}:${revision}`, family, revision, network_mode: 'awsvpc', requires_compatibilities: ['FARGATE'], cpu: 1024, memory: 2048, container_definitions: JSON.stringify([{ name: 'main', image: 'fixture', essential: true }]), volume: [] });
+    const releaseDependencies = { ...dependencies, caller: () => 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/fixture', releasePreflight: () => {
+      writeFileSync(path.join(directory, 'stage-a-state.json'), JSON.stringify(productionStageAState({ serial: 42 })), { mode: 0o600 });
+      writeFileSync(path.join(directory, 'stage-b-state.json'), JSON.stringify({ lineage: '4e438e59-8b8b-194d-030c-5ede0c26344a', serial: 120, resources: [
+        { mode: 'managed', type: 'aws_ecs_task_definition', name: 'candidate_retained', instances: ['backend', 'worker', 'canary'].map(kind => ({ index_key: `60b782b-${kind}`, attributes: attr(kind === 'canary' ? 'mscqr-production-full-rls-green-application-canary' : `mscqr-production-rls-green-${kind}-candidate`) })) },
+        { mode: 'managed', type: 'aws_ecs_task_definition', name: 'executor_retained', instances: ['admin-bootstrap', 'admin-ownership', 'capability-preflight', 'role-provision', 'role-verify', 'rollback', 'runtime-policy', 'verification'].map(mode => ({ index_key: `60b782b-full-rls-${mode}`, attributes: attr(`mscqr-production-full-rls-green-full-rls-${mode}`) })) },
+        { type: 'aws_iam_policy', name: 'broker', instances: [{ attributes: { arn: r.p.prerequisites.policyArn } }] }, { type: 'aws_iam_role_policy_attachment', name: 'broker', instances: [{ attributes: { policy_arn: r.p.prerequisites.policyArn, role: 'mscqr-production-rls-approval-broker' } }] }
+      ] }), { mode: 0o600 });
+      return { status: 'valid', caller: releaseDependencies.caller(), account: STAGE_B.account, region: STAGE_B.region, failed: [], skipped: [], total: 1, allowed: 1, executed: 1, requiredReads: { 'kms:Verify': 'allowed' }, checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN } };
+    }, run: (command, args, options) => {
+      if (command === 'git') return execFileSync(command, args, { ...options, cwd: checkout });
+      if (command === 'aws') return aws(args);
+      if (command === 'terraform' && args.includes('init')) { writeFileSync(path.join(input.stageBTerraformDataDir, 'terraform.tfstate'), JSON.stringify({ backend: { type: 's3', config: STAGE_B_TERRAFORM_BACKEND_CONFIG, hash: 1 } }), { mode: 0o600 }); return ''; }
+      if (command === 'terraform' && args.includes('workspace')) return 'default';
+      throw new Error(`Unexpected external command: ${command}`);
+    } };
+    const releaseArgs = ['--identity', 'release-deployer', '--tooling-sha', release, '--tooling-tree-sha256', deriveStageBToolingInputTreeSha256(release), '--image-release-sha', imagesSource, '--workflow-run-id', input.imageAuthorization.workflowRunId, '--canonical-artifact-sha256', input.imageAuthorization.imageEvidence.canonicalArtifactSha256,
+      '--image-authorization', input.imageAuthorization.filePath, '--image-authorization-sha256', imageHash, '--image-evidence', imagePath, '--image-evidence-signature', signaturePath, '--administrator-report', input.iamEvidence.filePath, '--administrator-report-signature', input.iamEvidenceSignatureFile,
+      '--output', input.releasePreflightEvidenceFile, '--stage-a-handoff', path.join(directory, 'stage-a-handoff.json'), '--tfvars', input.stageBTfvarsPath, '--binding-report', input.stageBTfvarsBindingReportPath, '--broker-package', publishedPackage.package.path, '--backend-config', path.join(directory, 'backend.hcl'), '--terraform-data-dir', input.stageBTerraformDataDir, '--capture-stage-b-approval-live-observation'];
+    for (const [index, substitute] of [null, readFileSync(path.join(checkout, checksumPath)), Buffer.from('{}')].entries()) {
+      rmSync(path.join(directory, 'original-release-checksums.json'), { force: true });
+      const negativeArgs = [...releaseArgs]; negativeArgs[negativeArgs.indexOf('--stage-a-handoff') + 1] = path.join(directory, `negative-handoff-${index}.json`);
+      assert.throws(() => runProductionPreflightCli(negativeArgs, { ...releaseDependencies, run: (command, args, options) => {
+        if (command === 'git' && args[0] === 'show') { if (substitute === null) throw new Error('Original Git material missing'); return substitute; }
+        return releaseDependencies.run(command, args, options);
+      } }), /Original Git material missing|Original release checksums differ|digest/);
+    }
+    rmSync(path.join(directory, 'original-release-checksums.json'), { force: true });
+    runProductionPreflightCli(releaseArgs, releaseDependencies);
+    const generated = JSON.parse(readFileSync(input.stageBTfvarsBindingReportPath));
+    for (const name of ['sourceContractSha256', 'migrationSetDigest', 'packageChecksumSha256']) assert.equal(generated[name], contracts[name]);
+    const reportBytes = readFileSync(input.releasePreflightEvidenceFile), report = JSON.parse(reportBytes);
+    const attestation = buildReleasePreflightCheckerTrustAttestation({ report, reportBytes, sourceSha: release, administratorReportSha256: report.administratorReportSha256 });
+    writeFileSync(input.releasePreflightAttestationFile, JSON.stringify(attestation) + '\n', { mode: 0o600 }); writeFileSync(input.releasePreflightAttestationSignatureFile, JSON.stringify(signPermissionReport(attestation, { reportBytes: readFileSync(input.releasePreflightAttestationFile), sign: () => 'AQ==' })) + '\n', { mode: 0o600 });
+    const historical = historicalRuntimeFixture({ release, now: new Date().toISOString() });
+    const collectionInput = { sourceSha: release, imageAuthorization: input.imageAuthorization, tfvarsPath: input.stageBTfvarsPath, bindingReportPath: input.stageBTfvarsBindingReportPath, releasePreflightPath: input.releasePreflightEvidenceFile, releasePreflightAttestationPath: input.releasePreflightAttestationFile, releasePreflightAttestationSignaturePath: input.releasePreflightAttestationSignatureFile,
+      checkerIdentity: 'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/fixture', recoveryApproval: r.context, verifyImageEvidence: input.imageAuthorizationValidation.verifyImageEvidence, verifyReleasePreflightAttestationSignature: () => true, historicalRuntimeReader: historical.reader, historicalRuntimeState: historical.state, historicalRuntimeEvidence: historical.evidence, verifyHistoricalRuntimeSignature: historical.verify };
+    assert.throws(() => collectProductionGreenStageBApprovalEvidence({ ...collectionInput, historicalRuntimeEvidence: undefined }), /Historical worker requires/);
+    const collected = collectProductionGreenStageBApprovalEvidence(collectionInput).evidence;
+    const prepared = await prepareProductionGreenStageBApprovalInput({ evidence: collected, protectedSourceSha: tooling.sourceSha, recoveryApproval: r.context, operator: { ticketId: 'MSCQR-REL-FIXTURE' }, now: new Date() });
+    await prepareStageBApproval(prepared.input);
+    assert.equal(prepared.input.releaseSha, release); assert.equal(prepared.input.brokerVersion, '13');
+    input.iamEvidence = { ...JSON.parse(readFileSync(input.iamEvidence.filePath)), filePath: input.iamEvidence.filePath };
+    input.temporaryKmsCapabilityFile = undefined;
+    input.stageBTfvarsBindingReportSha256 = hash(readFileSync(input.stageBTfvarsBindingReportPath));
+    writeFileSync(input.rootDropEvidenceFile, JSON.stringify(buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: release, callerArn: 'arn:aws:iam::368992683803:root', now: new Date().toISOString(), nonce: 'runtime-bootstrap-root-with-entropy', rotationId: bindings.rotationId, imageAuthorizationSha256: input.imageAuthorization.authorizationSha256, successorRecoveryAuthorizationSha256: null, administratorEvidenceSha256: hash(readFileSync(input.iamEvidence.filePath)), administratorSignatureSha256: hash(readFileSync(input.iamEvidenceSignatureFile)) }), signatureBase64: 'AQ==' })), { mode: 0o600 });
+    input.inventoryTaskDefinitionArn = 'arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:7';
+    for (const [name, attack] of Object.entries({
+      'plaintext-secret': reference => { reference.value = 'fixture-password'; },
+      'not-an-arn': reference => { reference.valueFrom = 'fixture-password'; },
+      'wrong-account': reference => { reference.valueFrom = reference.valueFrom.replace('368992683803', '000000000000'); },
+    })) {
+      const changed = structuredClone(report);
+      attack(Object.values(changed.stageBApprovalLiveObservation.taskDefinitions)[0].taskDefinition.containerDefinitions[0].secrets[0]);
+      writeFileSync(input.releasePreflightEvidenceFile, JSON.stringify(changed), { mode: 0o600 });
+      const rejected = prepareProductionCutoverRuntime({ ...input, outputDirectory: path.join(directory, name) });
+      assert.equal(rejected.readyToConsumeMfa, false);
+      assert.match(rejected.blockers.join('; '), /secret reference|Secrets Manager reference/);
+    }
+    writeFileSync(input.releasePreflightEvidenceFile, reportBytes, { mode: 0o600 });
+    const runtime = prepareProductionCutoverRuntime(input);
+    assert.equal(runtime.config?.inventoryTaskDefinitionArn, input.inventoryTaskDefinitionArn);
+    assert.equal(runtime.readyToConsumeMfa, true, runtime.blockers?.join('; '));
+    assert.equal(runtime.config.sourceSha, release); assert.equal(runtime.protectedMainSha, tooling.sourceSha);
+    assert.equal(registerCalls, 0); assert.equal(r.calls.filter(call => call === 'publish').length, 1);
+  } finally { process.chdir(originalCwd); if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; if (!childFixture) rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("rebaseline revalidation never performs a late GitHub lookup inside the sanitized AWS environment", async () => {

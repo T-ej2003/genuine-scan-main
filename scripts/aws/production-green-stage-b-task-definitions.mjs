@@ -1,10 +1,33 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { assertStageBRuntimePlatform, canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b/task-definitions";
+// Original-release expectations must execute the original renderer and its dependencies together.
+function originalRenderer(sourceSha, operation, args = []) {
+  if (!/^[a-f0-9]{40}$/.test(sourceSha || "")) throw new Error("Task renderer source must be exact.");
+  const resolved = execFileSync("git", ["rev-parse", "--verify", `${sourceSha}^{commit}`], { encoding: "utf8" }).trim();
+  if (resolved !== sourceSha) throw new Error("Task renderer source does not resolve to its exact commit.");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "stage-b-original-renderer-"));
+  try {
+    const inputs = [root, "scripts/aws/production-green-stage-b-task-definitions.mjs", "scripts/aws/production-green-stage-b-contract.mjs", "scripts/aws/production-ecs-runtime-dependencies.mjs"];
+    const tree = execFileSync("git", ["ls-tree", "-rz", sourceSha, "--", ...inputs], { encoding: "utf8" }).split("\0").filter(Boolean);
+    if (tree.some(entry => !/^100(?:644|755) blob [a-f0-9]{40}\t/.test(entry))) throw new Error("Original renderer inputs must be ordinary Git files.");
+    const expected = tree.map(entry => entry.split("\t")[1]).sort();
+    if (inputs.slice(1).some(file => !expected.includes(file))) throw new Error("Original renderer dependency is missing.");
+    const archive = execFileSync("git", ["archive", "--format=tar", sourceSha, ...inputs], { maxBuffer: 64 * 1024 * 1024 });
+    execFileSync("tar", ["-xf", "-", "-C", directory], { input: archive });
+    const observed = [];
+    const visit = current => { for (const name of fs.readdirSync(current)) { const file = path.join(current, name), stat = fs.lstatSync(file); if (stat.isSymbolicLink()) throw new Error("Original renderer cannot contain symlinks."); if (stat.isDirectory()) visit(file); else { if (!stat.isFile()) throw new Error("Unsupported original renderer input."); observed.push(path.relative(directory, file).split(path.sep).join("/")); } } };
+    visit(directory);
+    if (JSON.stringify(observed.sort()) !== JSON.stringify(expected)) throw new Error("Original renderer archive differs from its authenticated Git tree.");
+    const script = 'import fs from "node:fs"; const {operation,args}=JSON.parse(fs.readFileSync(0,"utf8")); const renderer=await import("./scripts/aws/production-green-stage-b-task-definitions.mjs"); const {STAGE_B}=await import("./scripts/aws/production-green-stage-b-contract.mjs"); const bindings={receiptBucket:STAGE_B.receiptBucket,executorLogGroup:STAGE_B.executorLogGroupName,canaryLogGroup:STAGE_B.canaryLogGroupName}; process.stdout.write(JSON.stringify(operation==="taskBindings" ? bindings : renderer[operation](...args)));';
+    return JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], { cwd: directory, input: JSON.stringify({ operation, args }), encoding: "utf8", env: {}, maxBuffer: 4 * 1024 * 1024 }));
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
 const files = Object.freeze(Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, {
   executor: "green-activation-executor.json", canary: "green-application-canary.json", backend: "green-backend-candidate.json", worker: "green-worker-candidate.json",
 }[key]])));
@@ -41,7 +64,8 @@ const assertNoTokens = (value) => {
 };
 
 const reviewedTemplate = (kind, sourceSha) => ({ ...readTemplate(kind, sourceSha), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
-export const stageBTemplateHashes = (sourceSha) => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind, sourceSha))]));
+export const stageBTaskDefinitionBindings = sourceSha => sourceSha !== undefined ? originalRenderer(sourceSha, "taskBindings") : { receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName };
+export const stageBTemplateHashes = (sourceSha) => sourceSha !== undefined ? originalRenderer(sourceSha, "stageBTemplateHashes") : Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind))]));
 export const approvedNetworkConfiguration = (privateSubnetIds) => {
   if (!Array.isArray(privateSubnetIds) || privateSubnetIds.length !== STAGE_B.privateSubnetIds.length
       || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")) {
@@ -83,6 +107,7 @@ export function assertFixedTaskDefinition(definition) {
 }
 
 export function renderStageBTaskDefinition(kind, bindings, sourceSha) {
+  if (sourceSha !== undefined) return originalRenderer(sourceSha, "renderStageBTaskDefinition", [kind, bindings]);
   const base = { RELEASE_SHA: bindings.imageReleaseSha, SOURCE_CONTRACT_SHA256: bindings.sourceContractSha256, MIGRATION_SET_DIGEST: bindings.migrationSetDigest, PACKAGE_CHECKSUM_SHA256: bindings.packageChecksumSha256, RECEIPT_BUCKET: bindings.receiptBucket, EXECUTOR_LOG_GROUP: bindings.executorLogGroup, CANARY_LOG_GROUP: bindings.canaryLogGroup, BACKEND_LOG_GROUP: bindings.backendLogGroup, WORKER_LOG_GROUP: bindings.workerLogGroup };
   if (!/^[a-f0-9]{40}$/.test(base.RELEASE_SHA || "") || !/^[a-f0-9]{64}$/.test(base.SOURCE_CONTRACT_SHA256 || "") || !/^[a-f0-9]{64}$/.test(base.MIGRATION_SET_DIGEST || "") || !/^[a-f0-9]{64}$/.test(base.PACKAGE_CHECKSUM_SHA256 || "")) throw new Error("Stage B task release binding is invalid.");
   const imageField = `${kind.toUpperCase()}_IMAGE`;

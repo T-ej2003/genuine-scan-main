@@ -9,9 +9,12 @@ import { discoverGit, parseBootstrapArgs, prepareProductionCutoverRuntime } from
 import { REBASELINE_ABANDONED_HISTORICAL_TOPOLOGY_SHA256, resolvePartialRebaselineRecoveryAuthorizationArtifact, resolveProductionDualSlotRebaselineAuthorizationArtifact, verifyLiveProductionDualSlotRebaselineWithRunner } from "./production-dual-slot-rebaseline-contract.mjs";
 import { verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
 import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./production-qr-version-selector-resolution.mjs";
+import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
+if (args.has("broker-recovery") !== args.has("broker-recovery-sha256")) throw new Error("Broker recovery requires its exact transport digest.");
+const brokerRecoveryApproval = args.has("broker-recovery") ? await readBrokerRecoveryApproval({ filePath: required("broker-recovery"), expectedSha256: required("broker-recovery-sha256") }) : undefined;
 const outputDirectory = args.get("output-directory") || path.join(os.homedir(), ".mscqr", "production-cutover", Date.now().toString(36));
 const capture = (name, label = name) => readStageBPrivateFileBytes({ filePath: required(name), repositoryRoot: process.cwd(), label });
 const read = (name, label) => JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture(name, label).bytes));
@@ -83,7 +86,7 @@ if (args.has("qr-version-resolution-run-id") || args.has("qr-version-secret-arn"
   const currentTaskDefinition = loadCurrentTaskDefinition();
   const expectedSecretArn = args.get("qr-version-secret-arn");
   const secretMetadata = JSON.parse(releaseRun(["secretsmanager", "describe-secret", "--secret-id", expectedSecretArn]));
-  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: args.get("qr-version-resolution-run-id"), sourceSha: discoverGit(), changeTicket: required("ticket"), expectedSecretArn, taskDefinition: currentTaskDefinition, secretMetadata, token: readGitHubApiToken() });
+  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: args.get("qr-version-resolution-run-id"), sourceSha: brokerRecoveryApproval?.sourceSha || discoverGit(), changeTicket: required("ticket"), expectedSecretArn, taskDefinition: currentTaskDefinition, secretMetadata, token: readGitHubApiToken() });
 }
 const approval = {
   ticket: required("ticket"),
@@ -94,6 +97,8 @@ const approval = {
   minimumGraceSeconds: Number(required("minimum-grace-seconds")),
 };
 const result = prepareProductionCutoverRuntime({
+  brokerRecoveryApproval,
+  sourceSha: brokerRecoveryApproval?.sourceSha,
   outputDirectory,
   approval,
   rotationBindings,
@@ -139,6 +144,7 @@ process.stdout.write(`${JSON.stringify({
   ROTATION_CONFIG_SHA256: result.runtimeConfigSha256 || null,
   STATIC_BINDING_SHA256: result.staticBindingSha256 || null,
   PROTECTED_MAIN_SHA: result.protectedMainSha,
+  RELEASE_SOURCE_SHA: result.releaseSourceSha,
   READY_TO_CONSUME_MFA: result.readyToConsumeMfa,
   FIRST_BLOCKER: result.blockers?.[0] || null,
   NEXT_COMMAND: result.nextCommand || null,

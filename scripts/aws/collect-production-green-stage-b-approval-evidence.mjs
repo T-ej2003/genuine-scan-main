@@ -9,7 +9,7 @@ import { assertStageBBrokerConfigurationBindings, assertStageBBrokerLambdaConfig
 import { assertStageBTfvarsBindingBytes, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { renderStageBTaskDefinition, stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes, stageBTaskDefinitionBindings } from "./production-green-stage-b-task-definitions.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 import { assertEcsTaskDefinitionReadback, canonicalizeEcsTaskDefinition } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
@@ -24,7 +24,7 @@ const authenticatedEvidence = new WeakSet();
 
 function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, imageReleaseSha, contracts, images, sourceSha }) {
   if (!liveTaskDefinitions || typeof liveTaskDefinitions !== "object" || Array.isArray(liveTaskDefinitions)) throw new Error("Exact live broker task-definition readbacks are required.");
-  const bindings = { imageReleaseSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker" };
+  const bindings = { imageReleaseSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, ...stageBTaskDefinitionBindings(sourceSha) };
   const contentHashes = {};
   for (const [mode, taskDefinitionArn] of Object.entries(taskDefinitionArns)) {
     const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
