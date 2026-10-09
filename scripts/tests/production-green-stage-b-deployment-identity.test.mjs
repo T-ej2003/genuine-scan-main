@@ -197,6 +197,21 @@ test("reader returns the complete validated checkout contract accepted by its st
   });
 });
 
+test("preparation checkout must be the config-bound operation source after protected main advances", () => {
+  withProtectedMainCheckout(({ cwd, head: configuredSource }) => {
+    fs.writeFileSync(path.join(cwd, "tracked.txt"), "successor\n");
+    git(cwd, ["add", "tracked.txt"]);
+    git(cwd, ["commit", "-qm", "protected main advances"]);
+    const executingSource = git(cwd, ["rev-parse", "HEAD"]);
+    git(cwd, ["update-ref", "refs/remotes/origin/main", executingSource]);
+    const run = args => args[0] === "fetch" ? "" : args[0] === "rev-parse" && args[1] === "FETCH_HEAD" ? executingSource : git(cwd, args);
+    assert.throws(() => readStageBProtectedMainCheckout({ cwd, run, expectedSourceSha: configuredSource, requireCanonicalRepository: true }), /Requested source SHA/);
+    assert.equal(readStageBProtectedMainCheckout({ cwd, run, expectedSourceSha: executingSource, requireCanonicalRepository: true }).currentHead, executingSource);
+    fs.writeFileSync(path.join(cwd, "tracked.txt"), "dirty\n");
+    assert.throws(() => readStageBProtectedMainCheckout({ cwd, run, expectedSourceSha: executingSource, requireCanonicalRepository: true }), /tracked modifications/);
+  });
+});
+
 test("validated, returned, and consumed checkout field sets remain identical", () => {
   const checkout = cleanCheckout();
   const validated = assertStageBProtectedMainCheckout(checkout);

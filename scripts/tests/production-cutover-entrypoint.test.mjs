@@ -38,6 +38,8 @@ test("prepare-overlap uses the shared control plane and cannot fall through to o
   assert.ok(controlPlane.indexOf("mode === PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP") < controlPlane.indexOf("runGovernedOverlapDeployment({ readiness: readinessEvidence"));
   assert.match(cli, /preparedForOverlapAuthorization: true/);
   assert.match(cli, /ecsUpdateServiceCount: 0/);
+  assert.match(cli, /readStageBProtectedMainCheckout\(\{ expectedSourceSha: config\.recoveryTooling\?\.sourceSha \|\| sourceSha, requireCanonicalRepository: true \}\)/);
+  assert.ok(cli.indexOf("readStageBProtectedMainCheckout({ expectedSourceSha:") < cli.indexOf("const adapters = createProductionCutoverRuntimeComposition()"));
   assert.doesNotMatch(cli.slice(cli.indexOf('mode === "prepare-overlap"'), cli.indexOf(': { readyForOnboarding')), /runProductionCutoverOverlapControlPlane/);
 });
 

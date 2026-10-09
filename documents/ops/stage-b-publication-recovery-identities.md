@@ -57,7 +57,9 @@ run/job/artifact sources or a receipt relabelled as the tooling release fail clo
 The verifier also requires the resolved workflow SHA to equal the digest-bound runtime
 configuration's `recoveryTooling.sourceSha`. Two different authorized descendants
 cannot contribute to one overlap operation. The canonical prepare-overlap producer
-records that execution SHA in its hashed readiness evidence; Release Gate compares
+first requires its actual clean checkout and freshly fetched protected main to equal
+the digest-bound runtime configuration's execution SHA, then records that SHA in its
+hashed readiness evidence; Release Gate compares
 it with its authenticated checkout and re-fetches protected main immediately before
 the overlap ECS deployment step. Cleanup keeps its separate existing readiness
 contract. If protected main
