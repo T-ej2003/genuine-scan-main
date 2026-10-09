@@ -251,7 +251,13 @@ jobs:
 
       - name: Build container for scan
         if: steps.docker-detect.outputs.found == 'true'
-        run: docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
+        # Docker's official ECR mirror has the same reviewed nginx manifest bytes.
+        # Override only audit image resolution; production Dockerfiles stay unchanged.
+        run: |
+          docker build \
+            --build-context "nginx:1.29-alpine=docker-image://public.ecr.aws/docker/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de" \
+            -t deployment-audit:latest \
+            -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
 
       - name: Trivy container scan
         if: steps.docker-detect.outputs.found == 'true'
