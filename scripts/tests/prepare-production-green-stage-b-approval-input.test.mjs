@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { rig, publicationPlan, cutoverPlan, configuration as fixtureConfiguration, authorization as fixtureAuthorization } from "./fixtures/staged-broker-runtime.mjs";
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, authenticateBrokerRecoveryApproval } from "../aws/stage-b-staged-broker.mjs";
-import { brokerDigest } from "../aws/stage-b-staged-broker-contract.mjs";
+import { brokerDigest, brokerExecutionCheckout } from "../aws/stage-b-staged-broker-contract.mjs";
 
 import { prepareStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
 import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-production-green-stage-b-approval-evidence.mjs";
@@ -602,6 +602,9 @@ test("completed original publication, descendant closure and public approval col
   const handoff = { preparation: p, authorization, casResult, record };
   const native = { ...r.deps, readSource: async () => ({ preparation: r.p, authorization: r.auth }),
     readReceipt: async (id, status) => status === 'STAGED_BROKER_TERMINAL_HANDOFF' ? handoff : r.entries.find(e => e[0] === id && e[1] === status)?.[2],
+    authenticateHistoricalTooling: async (preparation, observed) => { assert.equal(preparation.sourceSha, originalSource); assert.deepEqual(observed, brokerExecutionCheckout(preparation)); },
+    authenticateContinuationTooling: async (preparation, observed) => { assert.equal(preparation.sourceSha, originalSource); assert.deepEqual(observed, tooling); },
+    authenticateHistoricalExecutionSource: async (_preparation, observed, executionSourceSha) => { assert.deepEqual(observed, tooling); assert.equal(executionSourceSha, tooling.sourceSha); return tooling; },
     authenticateRecoveryTooling: async (_p, observed) => assert.deepEqual(observed, tooling), authenticateState: async () => {},
     authenticateReconciliation: async (value, id) => assert.ok(r.entries.some(e => e[0] === id && e[1] === value.status && brokerDigest(e[2]) === brokerDigest(value))) };
   const recoveryApproval = await authenticateBrokerRecoveryApproval({ preparation: p, authorization, result: record }, native);
