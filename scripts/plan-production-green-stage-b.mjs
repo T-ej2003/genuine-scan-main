@@ -20,6 +20,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
+  publishedBrokerPredecessorContext,
 } from "./aws/stage-b-reference-audit-contract.mjs";
 import { assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "./aws/production-green-stage-b-contract.mjs";
 import { assertStageBPlanImageEvidenceBinding } from "./aws/production-green-stage-b-image-evidence.mjs";
@@ -593,9 +594,38 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
       throw new Error("Stage B append-only reference audit broker mode mapping is incomplete or duplicated.");
     }
     const mappingByMode = new Map();
+    const outsidePlan = broker.liveTaskDefinitionMappings.filter((mapping) => {
+      const family = expectedBrokerFamily(mapping.mode);
+      return !ownershipArnsByFamily.get(family)?.has(mapping.taskDefinitionArn);
+    });
+    const published = outsidePlan.length === expectedModes.length && broker.publishedPredecessors !== undefined
+      ? publishedBrokerPredecessorContext(plan) : undefined;
+    if (!published && broker.publishedPredecessors !== undefined) throw new Error("Unneeded published broker predecessor evidence is forbidden.");
+    if (published) {
+      const proofs = broker.publishedPredecessors;
+      if (!Array.isArray(proofs) || proofs.length !== expectedModes.length
+        || broker.aliasFunctionVersion !== published.aliasVersion
+        || broker.configurationVersion !== published.aliasVersion
+        || !Array.isArray(broker.liveTaskDefinitionPredecessors)
+        || broker.liveTaskDefinitionPredecessors.length !== expectedModes.length) throw new Error("Published broker predecessor evidence is incomplete.");
+      for (const mode of expectedModes) {
+        const arn = published.taskMap[mode];
+        const expectedImage = mode === "full-rls-application-canary" ? published.images.canaryImageDigest : published.images.executorImageDigest;
+        const proof = proofs.find((entry) => entry.mode === mode);
+        const predecessor = broker.liveTaskDefinitionPredecessors.find((entry) => entry.mode === mode);
+        if (proofs.filter((entry) => entry.mode === mode).length !== 1
+          || broker.liveTaskDefinitionMappings.find((entry) => entry.mode === mode)?.taskDefinitionArn !== arn
+          || proof?.taskDefinitionArn !== arn || proof.sourceSha !== published.sourceSha
+          || proof.imageDigest !== expectedImage.split("@")[1] || proof.aliasVersion !== published.aliasVersion
+          || !/^[a-f0-9-]{36}$/.test(broker.aliasRevisionId || "") || proof.aliasRevisionId !== broker.aliasRevisionId
+          || predecessor?.classification !== "PUBLISHED" || predecessor.taskDefinitionArn !== arn
+          || predecessor.address !== expectedBrokerAddress(mode)) throw new Error(`Published broker predecessor is not bound to prior state: ${mode}.`);
+      }
+    }
     for (const mapping of broker.liveTaskDefinitionMappings) {
       const identity = taskDefinitionArnPattern.exec(mapping?.taskDefinitionArn || "");
-      if (!identity || identity[1] !== expectedBrokerFamily(mapping.mode) || !ownershipArnsByFamily.get(identity[1])?.has(identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact per-mode current/retained ARN sets.");
+      if (!identity || identity[1] !== expectedBrokerFamily(mapping.mode)
+        || !(ownershipArnsByFamily.get(identity[1])?.has(identity[0]) || published?.taskMap[mapping.mode] === identity[0])) throw new Error("Stage B append-only reference audit broker mapping is outside the exact per-mode current/retained ARN sets.");
       mappingByMode.set(mapping.mode, { ...mapping, arn: identity[0], family: identity[1] });
     }
     if (!Array.isArray(referenceAudit.plannedAtomicBrokerRollovers)) throw new Error("Stage B append-only reference audit broker rollover evidence is missing.");

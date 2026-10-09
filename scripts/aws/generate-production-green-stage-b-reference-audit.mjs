@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, STAGE_B, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
+import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "./production-green-stage-b-contract.mjs";
 import {
   assertStageBReferenceAuditFreshness,
   STAGE_B_REFERENCE_AUDIT_SCHEMA_VERSION,
@@ -21,6 +21,7 @@ import {
   STAGE_B_TASK_DEFINITION_FAMILIES,
   STAGE_B_TASK_DEFINITION_FAMILY_NAMES,
   STAGE_B_BROKER_TASK_DEFINITION_REFERENCE,
+  publishedBrokerPredecessorContext,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
 import { assertStageBImportedBackendMetadataNormalization, classifyStageBFreshImagePartialApplyRecoveryTopology, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
@@ -345,7 +346,7 @@ function proveBrokerPackagePlan(plan, terraformConfiguration, expectedPackageChe
   return proof;
 }
 
-function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha256, terraformConfiguration) {
+function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPackageChecksum, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha256, terraformConfiguration, reader, toolingSha) {
   const brokerIdentity = assertStageBBrokerConfigurationIdentity({ configuration: config, alias });
   const variables = normalizeEnvironment(config);
   const taskDefinitions = requireObject(parseJson(variables.BROKER_TASK_DEFINITIONS_JSON, "BROKER_TASK_DEFINITIONS_JSON"), "BROKER_TASK_DEFINITIONS_JSON");
@@ -354,6 +355,51 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
   const brokerReferences = new Map();
   const brokerReferencesByFamily = new Map();
   const brokerPredecessorsByMode = new Map();
+  const outsidePlan = expectedModes.filter((mode) => {
+    const arn = taskDefinitions[mode];
+    const family = expectedBrokerFamily(mode);
+    return !(retainedArnSetByFamily.get(family)?.has(arn) || currentNoOpByFamily.get(family)?.has(arn)
+      || currentArnSetByFamily.get(family)?.has(arn) || [...rolloverByAddress.values()].some((entry) => entry.family === family && entry.oldArn === arn)
+      || (deposedByAddress.get(brokerTaskDefinitionAddress(mode)) || []).some((entry) => entry.arn === arn));
+  });
+  const priorResources = plan?.prior_state?.values?.root_module?.resources || [];
+  const published = outsidePlan.length === expectedModes.length
+    && ["aws_lambda_function.broker", "aws_lambda_alias.reviewed"].every((address) => priorResources.some((entry) => entry.address === address))
+    ? publishedBrokerPredecessorContext(plan) : undefined;
+  const publishedPredecessors = [];
+  if (published) {
+    const liveImages = parseJson(variables.BROKER_IMAGES_JSON, "live broker images");
+    const liveApproval = parseJson(variables.BROKER_APPROVAL_EXPECTED_JSON, "live broker approval expectation");
+    const repository = reader.describeRepositories(["mscqr-backend"])?.repositories;
+    const isAncestor = reader.isProtectedSource || ((source, target) => { try { execFileSync("git", ["merge-base", "--is-ancestor", source, target], { cwd: repositoryRoot, stdio: "ignore" }); return true; } catch { return false; } });
+    if (brokerIdentity.aliasFunctionVersion !== published.aliasVersion
+      || !/^[a-f0-9-]{36}$/.test(alias.RevisionId || "")
+      || config.CodeSha256 !== published.codeSha256 || liveApproval.releaseSha !== published.sourceSha
+      || canonicalJson(taskDefinitions) !== canonicalJson(published.taskMap)
+      || canonicalJson(liveImages) !== canonicalJson(published.images)
+      || repository?.length !== 1 || repository[0].repositoryArn !== `arn:aws:ecr:eu-west-2:${STAGE_B.account}:repository/mscqr-backend`
+      || repository[0].imageTagMutability !== "IMMUTABLE"
+      || !isAncestor(published.sourceSha, toolingSha)) throw new Error("Published broker predecessor differs from authenticated Terraform and immutable Lambda identity.");
+    for (const mode of expectedModes) {
+      const arn = taskDefinitions[mode];
+      const definition = reader.describeTaskDefinition(arn)?.taskDefinition;
+      const source = definition?.containerDefinitions?.[0]?.environment?.find((entry) => entry.name === "RELEASE_GIT_SHA")?.value;
+      const image = definition?.containerDefinitions?.[0]?.image;
+      const expectedImage = mode === "full-rls-application-canary" ? published.images.canaryImageDigest : published.images.executorImageDigest;
+      const tag = `${published.sourceSha}-${mode === "full-rls-application-canary" ? "rls-canary" : "rls-executor"}`;
+      const digest = expectedImage.split("@")[1];
+      const imageDetails = reader.describeImages("mscqr-backend", digest)?.imageDetails;
+      if (definition?.taskDefinitionArn !== arn || definition.family !== expectedBrokerFamily(mode)
+        || Number(definition.revision) !== familyFromArn(arn, mode).revision || definition.status !== "ACTIVE"
+        || definition.containerDefinitions.length !== 1 || source !== published.sourceSha || image !== expectedImage
+        || imageDetails?.length !== 1 || imageDetails[0].imageDigest !== digest || !imageDetails[0].imageTags?.includes(tag)) {
+        throw new Error(`Published broker predecessor task definition, source, or image is unauthenticated: ${mode}.`);
+      }
+      publishedPredecessors.push({ mode, taskDefinitionArn: arn, sourceSha: source, imageDigest: digest, aliasVersion: published.aliasVersion, aliasRevisionId: alias.RevisionId });
+    }
+    const finalAlias = reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier);
+    if (finalAlias?.FunctionVersion !== published.aliasVersion || finalAlias.RevisionId !== alias.RevisionId) throw new Error("Published broker alias changed during predecessor authentication.");
+  }
   for (const mode of expectedModes) {
     const identity = familyFromArn(taskDefinitions[mode], `broker task definition for ${mode}`);
     if (identity.family !== expectedBrokerFamily(mode)) throw new Error(`Broker task definition family is unexpected for ${mode}.`);
@@ -367,9 +413,10 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const deposed = rollover ? (deposedByAddress.get(rollover.address) || []).find((entry) => entry.arn === identity.arn) : undefined;
     const allowedReviewedDeposed = Boolean(freshImagePartialApplyRecovery && rollover && deposed);
     if ((freshImagePartialApplyRecovery || retainedArns.size > 0 || currentNoOpArns.size > 0)
-      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn) && !allowedReviewedDeposed) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision or reviewed deposed predecessor: ${mode}.`);
+      && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn) && !allowedReviewedDeposed && !published) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision or reviewed deposed predecessor: ${mode}.`);
     if (allowedReviewedDeposed) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "DEPOSED", deposedKey: deposed.deposed, address: rollover.address });
     else if (currentManagedArns.has(identity.arn)) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "CURRENT", address: rollover?.address });
+    else if (published) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "PUBLISHED", address: rollover?.address });
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
@@ -466,6 +513,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
       aliasVersion: brokerIdentity.aliasFunctionVersion,
       aliasName: brokerIdentity.aliasName,
       aliasFunctionVersion: brokerIdentity.aliasFunctionVersion,
+      ...(published ? { aliasRevisionId: alias.RevisionId } : {}),
       configurationFunctionArn: brokerIdentity.configurationFunctionArn,
       configurationVersion: brokerIdentity.configurationVersion,
       resolvedVersionArn: brokerIdentity.resolvedVersionArn,
@@ -483,6 +531,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
       liveTaskDefinitionPredecessors: [...brokerPredecessorsByMode.entries()]
         .map(([mode, predecessor]) => ({ mode, ...predecessor }))
         .sort((left, right) => left.mode.localeCompare(right.mode)),
+      ...(published ? { publishedPredecessors } : {}),
     },
     referencesByFamily: brokerReferencesByFamily,
     referencesByArn: brokerReferences,
@@ -862,7 +911,7 @@ export function generateReferenceAudit({
     brokerPredecessorsByMode,
     plannedAtomicBrokerRollovers,
     plannedAtomicPackageChecksumTransition,
-  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha, terraformConfiguration);
+  } = validateBrokerConfiguration(reader.getFunctionConfiguration(brokerAliasArn), reader.getAlias(STAGE_B.brokerFunctionArn, STAGE_B.brokerAliasQualifier), brokerAliasArn, expectedPackageChecksumSha256, oldArns, createOnlyFamilies, currentNoOpByFamily, currentArnSetByFamily, retainedArnSetByFamily, newestRetainedByFamily, plan, rolloverByAddress, deposedByAddress, freshImagePartialApplyRecovery, planSha, terraformConfiguration, reader, deploymentIdentity.toolingSha);
   const serviceReferences = referenceNames(stageBServices, oldArns, "taskDefinition", "serviceName");
   const runningReferences = referenceNames(stageBRunningTasks, oldArns, "taskDefinitionArn", "taskArn");
   const pendingReferences = referenceNames(stageBPendingTasks, oldArns, "taskDefinitionArn", "taskArn");
@@ -907,7 +956,7 @@ export function generateReferenceAudit({
     const runningRefs = [...(runningReferences.get(entry.oldArn) || [])].sort();
     const pendingRefs = [...(pendingReferences.get(entry.oldArn) || [])].sort();
     const brokerRefs = [...brokerPredecessorsByMode.entries()]
-      .filter(([, predecessor]) => predecessor.address === entry.address)
+      .filter(([, predecessor]) => predecessor.address === entry.address && predecessor.classification !== "PUBLISHED")
       .map(([mode]) => mode)
       .sort();
     const atomicBrokerRollovers = plannedAtomicBrokerRollovers.filter((rollover) => rollover.oldTaskDefinitionArn === entry.oldArn);

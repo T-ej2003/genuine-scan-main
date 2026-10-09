@@ -871,6 +871,90 @@ test("serial-96 live broker mappings bind reviewed deposed predecessors without 
   assert.doesNotThrow(() => assertStageBFreshImageReferenceAuditBinding(fixture.plan, audit, { terraformConfiguration: fixture.options.terraformConfiguration, planJsonSha256: fixture.planJsonSha256 }));
 });
 
+function makePublishedBrokerPredecessorFixture() {
+  const fixture = makeAtomicBrokerFixture({ appendOnly: false, mode: "full-rls-admin-bootstrap" });
+  const sourceSha = "d".repeat(40);
+  const executorImageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`;
+  const canaryImageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"2".repeat(64)}`;
+  const taskMap = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, oldArnFor(familyForMode(mode)).replace(":1", ":5")]));
+  const images = { backendImageDigest: executorImageDigest, workerImageDigest: executorImageDigest, executorImageDigest, canaryImageDigest };
+  const approval = { packageChecksumSha256: packageChecksum, releaseSha: sourceSha };
+  const brokerChange = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
+  brokerChange.change.before = { ...brokerChange.change.before, version: "2", source_code_hash: packageSourceCodeHash,
+    environment: [{ variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskMap), BROKER_IMAGES_JSON: JSON.stringify(images), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(approval) } }] };
+  fixture.plan.resource_changes.push({ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2" }, after: {} } });
+  fixture.plan.prior_state.values.root_module.resources.push(
+    { address: "aws_lambda_function.broker", values: structuredClone(brokerChange.change.before) },
+    { address: "aws_lambda_alias.reviewed", values: { function_version: "2" } },
+  );
+  for (const change of fixture.plan.resource_changes.filter((entry) => entry.type === "aws_ecs_task_definition")) {
+    change.change.before.arn = oldArnFor(change.change.before.family).replace(":1", ":6");
+    change.change.after.arn = newArnFor(change.change.after.family).replace(":2", ":7");
+    fixture.plan.prior_state.values.root_module.resources.find((entry) => entry.address === change.address).values.arn = change.change.before.arn;
+  }
+  const originalDescribe = fixture.reader.describeTaskDefinition;
+  fixture.reader.getFunctionConfiguration = () => ({ FunctionArn: STAGE_B.brokerFunctionArn, Version: "2", CodeSha256: packageSourceCodeHash,
+    Environment: { Variables: structuredClone(brokerChange.change.before.environment[0].variables) } });
+  const getAlias = fixture.reader.getAlias;
+  fixture.reader.getAlias = () => ({ ...getAlias(), RevisionId: "11111111-1111-1111-1111-111111111111" });
+  fixture.reader.describeTaskDefinition = (arn) => arn.endsWith(":5")
+    ? { taskDefinition: { taskDefinitionArn: arn, family: arn.split("task-definition/")[1].replace(/:[0-9]+$/, ""), revision: 5, status: "ACTIVE",
+      containerDefinitions: [{ image: arn.includes("application-canary") ? canaryImageDigest : executorImageDigest, environment: [{ name: "RELEASE_GIT_SHA", value: sourceSha }] }] } }
+    : (() => { const response = originalDescribe(arn); response.taskDefinition.taskDefinitionArn = arn; response.taskDefinition.revision = Number(arn.split(":").at(-1)); return response; })();
+  fixture.reader.describeImages = (_repository, digest) => ({ imageDetails: [{ imageDigest: digest,
+    imageTags: [`${sourceSha}-${digest === canaryImageDigest.split("@")[1] ? "rls-canary" : "rls-executor"}`] }] });
+  fixture.reader.describeRepositories = () => ({ repositories: [{ repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", imageTagMutability: "IMMUTABLE" }] });
+  fixture.reader.isProtectedSource = (source, target) => source === sourceSha && target === fixture.plan.variables.tooling_sha.value;
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
+  fixture.planJsonSha256 = sha256(fixture.planBytes);
+  return fixture;
+}
+
+test("complete published broker predecessor is bound to the prior state, live alias, and ECS/ECR identity", () => {
+  const fixture = makePublishedBrokerPredecessorFixture();
+  const audit = generate(fixture);
+  assert.equal(audit.broker.publishedPredecessors.length, STAGE_B_MODES.length);
+  assert.equal(audit.plannedAtomicBrokerRollovers.length, 0);
+  validateBrokerPlan(fixture, audit);
+  const wrong = structuredClone(audit);
+  wrong.broker.publishedPredecessors[0].imageDigest = `sha256:${"9".repeat(64)}`;
+  assert.throws(() => validateBrokerPlan(fixture, wrong), /Published broker predecessor/);
+});
+
+test("published broker predecessor and a separately authenticated RUNNING historical worker remain distinct", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const fixture = makePublishedBrokerPredecessorFixture(), runtime = historicalRuntimeFixture();
+  runtime.task.createdAt = runtime.launch.eventTime = "2026-07-30T10:00:00.000Z";
+  runtime.definition.registeredAt = runtime.registration.eventTime = "2026-07-30T09:00:00.000Z";
+  const original = { ...fixture.reader };
+  Object.assign(fixture.reader, {
+    listTasks: (status) => [...original.listTasks(status), ...(status === "RUNNING" ? [runtime.taskArn] : [])],
+    describeTasks: (arns) => ({ tasks: [...original.describeTasks(arns.filter((arn) => arn !== runtime.taskArn)).tasks, ...runtime.reader.describeTasks(arns).tasks], failures: [] }),
+    describeTaskDefinition: (arn) => arn === runtime.definitionArn ? runtime.reader.describeTaskDefinition(arn) : original.describeTaskDefinition(arn),
+    describeImages: (name, digest) => name === "mscqr-worker" ? runtime.reader.describeImages(name, digest) : original.describeImages(name, digest),
+    describeRepositories: (names) => names.includes("mscqr-worker") ? runtime.reader.describeRepositories(names) : original.describeRepositories(names),
+    describeNetworkInterfaces: runtime.reader.describeNetworkInterfaces, lookupEvents: runtime.reader.lookupEvents,
+    readProductionComponentDeploymentState: () => runtime.state,
+    isProtectedSource: (source, target) => [runtime.source, "d".repeat(40)].includes(source) && target === fixture.plan.variables.tooling_sha.value,
+  });
+  const audit = generate(fixture, { historicalRuntimeTaskArn: runtime.taskArn, readToolingTreeSha256: () => "f".repeat(64) });
+  assert.equal(audit.broker.publishedPredecessors.length, STAGE_B_MODES.length);
+  assert.equal(audit.historicalRuntimeReference.runtime.taskArn, runtime.taskArn);
+  validateBrokerPlan(fixture, audit);
+});
+
+for (const [label, mutate] of [
+  ["arbitrary old revision", (fixture) => { const config = fixture.reader.getFunctionConfiguration(); const map = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON); map[STAGE_B_MODES[0]] = map[STAGE_B_MODES[0]].replace(":5", ":4"); fixture.reader.getFunctionConfiguration = () => ({ ...config, Environment: { Variables: { ...config.Environment.Variables, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(map) } } }); }],
+  ["wrong source", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].environment[0].value = "0".repeat(40); return value; }; }],
+  ["wrong image", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].image = `mscqr-backend@sha256:${"9".repeat(64)}`; return value; }; }],
+  ["unbound prior state", (fixture) => { fixture.plan.prior_state.values.root_module.resources.find((entry) => entry.address === "aws_lambda_alias.reviewed").values.function_version = "3"; }],
+]) test(`published broker predecessor rejects ${label}`, () => {
+  const fixture = makePublishedBrokerPredecessorFixture();
+  mutate(fixture);
+  fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan)); fixture.planJsonSha256 = sha256(fixture.planBytes);
+  assert.throws(() => generate(fixture));
+});
+
 for (const [label, mutate] of [
   ["live broker mapping to an unreviewed same-family revision", (fixture) => {
     const mode = "full-rls-admin-bootstrap";
