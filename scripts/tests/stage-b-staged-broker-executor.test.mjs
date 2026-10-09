@@ -960,3 +960,74 @@ for (const operation of ['prepare-policy', 'authorize-policy', 'converge-policy'
     }}),/requires authenticated historical policy evidence|Unknown\/missing staged broker fields/);
   assert.equal(r.calls.length,before);
 });
+
+import {generateKeyPairSync,sign,verify,constants} from 'node:crypto';
+import {authenticateRegistrationPredecessorBindings} from '../aws/stage-b-staged-broker-executor.mjs';
+import {authenticateRegisteredDefinition,authenticateRegistrationHandoffEvidence,TASK_REGISTRATION_ADDRESSES,taskMapFromRegisteredDefinitions} from '../aws/stage-b-release-prerequisites.mjs';
+import {signBrokerAuthorization,brokerAuthorizationMessage} from '../aws/stage-b-staged-broker-authorization.mjs';
+import {prepublicationPredecessorFixture,schema3RegistrationPredecessor} from './fixtures/production-release-system.mjs';
+import {taskChange} from './fixtures/stage-b-task-rotation.mjs';
+
+async function preparationTransitionFixture() {
+ const x=prepublicationPredecessorFixture(), states={}, observed={}, definitions={};
+ const ecs=s=>({taskDefinitionArn:s.arn,revision:s.revision,status:'ACTIVE',family:s.family,taskRoleArn:s.task_role_arn,
+  executionRoleArn:s.execution_role_arn,networkMode:s.network_mode,cpu:s.cpu,memory:s.memory,
+  runtimePlatform:{operatingSystemFamily:s.runtime_platform.operating_system_family,cpuArchitecture:s.runtime_platform.cpu_architecture},
+  volumes:s.volume.map(({name})=>({name})),requiresCompatibilities:s.requires_compatibilities,
+  containerDefinitions:JSON.parse(s.container_definitions),tags:Object.entries(s.tags).map(([key,value])=>({key,value}))});
+ const make=(address,raw,revision)=>{
+  const desired={...structuredClone(raw),arn:null,revision:null},state={...structuredClone(desired),arn:`arn:aws:ecs:eu-west-2:368992683803:task-definition/${desired.family}:${revision}`,revision};
+  observed[state.arn]=ecs(state);
+  return {state,definition:authenticateRegisteredDefinition({address,desired,state,observed:observed[state.arn]})};
+ };
+ for(const address of TASK_REGISTRATION_ADDRESSES){
+  const c=taskChange(address,27),mapArn=x.registration.result.definitions[address].arn;
+  const revision=address==='aws_ecs_task_definition.candidate["backend"]'?27:Number(mapArn.split(':').at(-1));
+  const old=make(address,c.change.before,revision),current=make(address,c.change.after,revision+1);
+  x.registration.result.definitions[address]=old.definition;definitions[address]=current.definition;states[address]=current.state;
+ }
+ x.registration.result.taskMap=taskMapFromRegisteredDefinitions(x.registration.result.definitions);
+ assert.deepEqual(x.registration.result.taskMap,x.registrationTaskMap);
+ x.proof.registrationResultSha256=brokerDigest(x.registration.result);
+ const predecessor={transactionId:x.proof.registrationTransactionId,receiptObjects:x.proof.registrationReceiptObjects,receiptChainSha256:x.proof.registrationReceiptChainSha256};
+ const historical={result:structuredClone(x.registration.result),registrationPredecessor:predecessor};
+ const p=schema3RegistrationPredecessor(x),now=new Date('2026-10-08T12:00:00.000Z');
+ const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048}),options={padding:constants.RSA_PKCS1_PSS_PADDING,saltLength:32};
+ const verifyAuthorization=async a=>verify('sha256',brokerAuthorizationMessage(a),{key:publicKey,...options},Buffer.from(a.signature.signatureBase64,'base64'));
+ const makerIdentity='arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/maker';
+ const authorization=await signBrokerAuthorization(p,{makerIdentity,humanReviewId:'transition-test',makerCaller:async()=>({Account:'368992683803',Arn:makerIdentity}),
+  caller:async()=>({Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker'}),now,
+  sign:async bytes=>sign('sha256',bytes,{key:privateKey,...options}).toString('base64'),verify:verifyAuthorization});
+ const id=brokerDigest(authorization),result={status:'REGISTERED_NONTERMINAL',sourceSha:p.sourceSha,treeSha256:p.treeSha256,
+  authorizationSha256:id,preparationSha256:brokerDigest(p),savedPlanSha256:p.savedPlanSha256,authorizedAt:now.toISOString(),definitions,taskMap:taskMapFromRegisteredDefinitions(definitions)};
+ const completed={preparation:p,authorization,result},release={sourceSha:'c'.repeat(40),treeSha256:'d'.repeat(64)};
+ const receipts={TASK_REGISTERED:structuredClone(result),TASK_REGISTRATION_INTENT:{savedPlanSha256:p.savedPlanSha256,authorizedAt:result.authorizedAt}};
+ const reservation={kind:'STAGED_BROKER_RESERVATION',id,value:{purpose:p.purpose,nonce:authorization.nonce,preparationSha256:brokerDigest(p)}};
+ const deps={readRegisteredTaskDefinition:async address=>states[address],describeTaskDefinition:async arn=>observed[arn],readCompletedRegistration:async()=>completed,
+  authenticateRegistration:(entry,checkout)=>authenticateRegistrationHandoffEvidence(entry,checkout,{verifyAuthorization,
+   authenticateTransactionSource:async prep=>assert.equal(prep.sourceSha,p.sourceSha,'Unrelated transaction source'),
+   readReceipt:async(transaction,status)=>{assert.equal(transaction,id);return receipts[status];},
+   readReservation:async transaction=>{assert.equal(transaction,id);return reservation;}})};
+ return {historical,completed,release,deps,states,observed,receipts};
+}
+
+test('preparation independently authenticates retained predecessor and completed current successors',async()=>{
+ const r=await preparationTransitionFixture();assert.equal(await authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps),true);
+ assert.ok(r.states['aws_ecs_task_definition.candidate["backend"]'].arn.endsWith(':28'));
+});
+test('same-revision preparation retains strict Terraform/ECS authentication without a transition',async()=>{
+ const r=await preparationTransitionFixture();for(const [address,d] of Object.entries(r.historical.result.definitions))r.states[address]={...structuredClone(d.desired),arn:d.arn,revision:d.revision};
+ r.deps.readCompletedRegistration=()=>assert.fail('Same revision must not require transition');
+ assert.equal(await authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps),false);
+});
+for(const [name,mutate] of [
+ ['no authenticated transition',r=>r.deps.readCompletedRegistration=async()=>null],
+ ['Terraform and ECS disagree',r=>r.states['aws_ecs_task_definition.candidate["backend"]'].arn=r.states['aws_ecs_task_definition.candidate["backend"]'].arn.replace(':28',':29')],
+ ['wrong transaction source',r=>r.completed.result.sourceSha='f'.repeat(40)],
+ ['invalid transaction digest',r=>r.completed.result.authorizationSha256='f'.repeat(64)],
+ ['substituted durable result',r=>r.receipts.TASK_REGISTERED.preparationSha256='f'.repeat(64)],
+ ['substituted signed predecessor',r=>r.completed.preparation.registrationPredecessor.registrationResultSha256='f'.repeat(64)],
+ ['arbitrary retained older revision',r=>r.historical.result.sourceSha='f'.repeat(40)],
+ ['altered current image',r=>{const arn=r.states['aws_ecs_task_definition.candidate["backend"]'].arn;r.observed[arn].containerDefinitions[0].image+='-wrong';}],
+ ['altered historical image',r=>{const arn=r.historical.result.definitions['aws_ecs_task_definition.candidate["backend"]'].arn;r.observed[arn].containerDefinitions[0].image+='-wrong';}],
+]) test(`preparation rejects ${name}`,async()=>{const r=await preparationTransitionFixture();mutate(r);await assert.rejects(()=>authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps));});

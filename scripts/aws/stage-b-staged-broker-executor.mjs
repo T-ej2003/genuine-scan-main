@@ -84,6 +84,38 @@ export function authenticateRetainedRegistrationPredecessor(address, definition,
   equal(authenticated, definition);
   return authenticated;
 }
+// Retained predecessors and current bindings have separate authorities. A
+// completed signed registration must explain every changed current binding.
+export async function authenticateRegistrationPredecessorBindings(registration, release, deps) {
+  const definitions = registration.result.definitions, current = {};
+  for (const [address, definition] of Object.entries(definitions)) {
+    authenticateRetainedRegistrationPredecessor(address, definition, await deps.describeTaskDefinition(definition.arn));
+    current[address] = await deps.readRegisteredTaskDefinition(address);
+  }
+  if (Object.entries(definitions).every(([address, definition]) => current[address].arn === definition.arn)) {
+    for (const [address, definition] of Object.entries(definitions))
+      equal(authenticateRegisteredDefinition({address, desired:definition.desired, state:current[address],
+        observed:await deps.describeTaskDefinition(definition.arn)}), definition);
+    return false;
+  }
+  const completed = await deps.readCompletedRegistration();
+  assert.ok(completed, 'Changed registration bindings require an authenticated completed transition');
+  await deps.authenticateRegistration(completed, release);
+  const predecessor = completed.preparation.registrationPredecessor;
+  assert.ok(predecessor, 'Completed transition lacks authenticated registration predecessor');
+  assert.equal(predecessor.registrationTransactionId, registration.registrationPredecessor.transactionId);
+  assert.equal(predecessor.registrationSourceSha, registration.result.sourceSha);
+  assert.equal(predecessor.registrationResultSha256, brokerDigest(registration.result));
+  equal(predecessor.registrationReceiptObjects, registration.registrationPredecessor.receiptObjects);
+  assert.equal(predecessor.registrationReceiptChainSha256, registration.registrationPredecessor.receiptChainSha256);
+  equal(predecessor.registrationTaskMap, registration.result.taskMap);
+  equal(Object.keys(completed.result.definitions).sort(), Object.keys(definitions).sort());
+  equal(completed.result.taskMap, taskMapFromRegisteredDefinitions(completed.result.definitions));
+  for (const [address, definition] of Object.entries(completed.result.definitions))
+    equal(authenticateRegisteredDefinition({address, desired:definition.desired, state:current[address],
+      observed:await deps.describeTaskDefinition(definition.arn)}), definition);
+  return true;
+}
 export async function authenticatePrepublicationPolicyChain({ operation, chain, checkout, authenticateChain, observe }) {
   assert.ok(PREPUBLICATION_POLICY_OPERATIONS.includes(operation),
     `Pre-publication predecessor is not valid during ${operation}`);
@@ -584,10 +616,18 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       registeredOutputCount: 12, definitionsSha256: brokerDigest(result.definitions), liveCorroborationSha256: '0'.repeat(64),
       originalMutationReplayable: false, originalMutationAuthorizationAvailable: false, freshHandoffOnly: true,
     } };
+    const authenticatedBindingTransition = predecessorOnly && ['PREPARATION','REGISTRATION'].includes(phase)
+      ? await authenticateRegistrationPredecessorBindings(registration, release, {
+        describeTaskDefinition: address => adapter.describeTaskDefinition(address),
+        readRegisteredTaskDefinition: address => adapter.readRegisteredTaskDefinition(address),
+        readCompletedRegistration: async () => JSON.parse(fs.readFileSync(path.join(root,
+          'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json'))),
+        authenticateRegistration: readHistoricalRegistration,
+      }) : false;
     const observedOutputs = [];
     for (const [address, definition] of Object.entries(result.definitions)) {
       const observed = await adapter.describeTaskDefinition(definition.arn);
-      const authenticated = predecessorOnly && ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase)
+      const authenticated = predecessorOnly && (authenticatedBindingTransition || ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase))
         ? authenticateRetainedRegistrationPredecessor(address, definition, observed)
         : authenticateRegisteredDefinition({ address, desired: definition.desired,
           state: await adapter.readRegisteredTaskDefinition(address), observed });
@@ -618,7 +658,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(live.policy.Statement && brokerDigest(live.policy), brokerDigest(terminal.policy));
     assert.equal(live.version, terminal.successorIdentity.policyVersion);
     const state = await adapter.readStateIdentity(), policyState = stateResource('aws_iam_policy.broker');
-    const corroboratedState = predecessorOnly && ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase) ? terminal.reconciliation?.state : state;
+    const corroboratedState = predecessorOnly && (authenticatedBindingTransition || ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase)) ? terminal.reconciliation?.state : state;
     assert.ok(corroboratedState);
     assertReceiptBoundPolicyTerraformState(phase, state, corroboratedState);
     equal(terminal.reconciliation?.state, corroboratedState, 'Durable convergence result does not bind authenticated Terraform state');
