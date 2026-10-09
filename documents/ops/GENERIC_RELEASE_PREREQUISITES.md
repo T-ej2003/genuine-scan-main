@@ -16,6 +16,12 @@ Use `node scripts/aws/run-stage-b-staged-broker.mjs --input <private-request.jso
 
 The policy receipt must include the exact registration chain used to derive it. Source/tree, signed preparation, durable execution receipt, live definition identity, and resulting policy are reauthenticated between phases. Receipts from another release or another registration cannot be substituted.
 
+## Preparation after completed registration
+
+Fresh preparation authenticates retained historical definitions independently of current Terraform bindings. If those bindings advanced, the existing completed-registration record must authenticate through its original signed preparation, consumed reservation, intent, result, and source ancestry. Its signed predecessor must bind the same historical registration transaction, result, receipts, and task map; all current successors must match both Terraform and live ECS. A retained revision alone cannot establish a transition.
+
+This predecessor-only check does not adopt historical images or provide mutation authority. Preparation retains its current state identity and requires new exact authorization. The historical default-policy receipt remains authoritative while its semantic document is unchanged; its older Terraform serial is corroborated through the authenticated registration advance. Recovery keeps the existing retained-predecessor and exact-successor classification.
+
 ## Fixed broker-policy ownership
 
 All routine convergence and separately approved pruning contend on:
