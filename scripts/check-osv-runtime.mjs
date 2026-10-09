@@ -1,3 +1,4 @@
+import { assertPinnedImageInputs } from "./lib/container-image-identity.mjs";
 import { reachabilityInputsSha256, validateNonRuntimeAcceptance } from "./lib/osv-non-runtime-acceptance.mjs";
 import assert from "node:assert/strict";
 import { realpathSync, readFileSync, mkdtempSync, rmSync, readdirSync, writeFileSync } from "node:fs";
@@ -80,13 +81,14 @@ export async function buildBrowserClosure(root, options = {}) {
 }
 
 export function assertRuntimePackaging(root) {
+  const images = assertPinnedImageInputs(root);
   const backend = readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
-  const builder = backend.split("FROM deps AS builder")[1]?.split("FROM node:24-bookworm-slim AS runtime")[0];
+  const builder = backend.split("FROM deps AS builder")[1]?.split(`FROM ${images.node.reference} AS runtime`)[0];
   assert.match(builder || "", /npm prune --omit=dev --no-audit --no-fund\s*$/);
   assert.equal((backend.match(/npm ci/g) || []).length, 1);
   assert.doesNotMatch(backend.split("AS runtime")[1], /COPY --from=deps|npm (?:ci|install)(?! --global)/);
   for (const file of ["Dockerfile", "Dockerfile.ecs-frontend"]) {
-    const runtime = readFileSync(path.join(root, file), "utf8").split(/^FROM nginx:[^\n]+$/m)[1];
+    const runtime = readFileSync(path.join(root, file), "utf8").split(`FROM ${images.nginx.reference}`)[1];
     assert.ok(runtime, "Unknown frontend runtime packaging");
     assert.doesNotMatch(runtime, /node_modules|\bnpm\b|\bnode\b/);
     assert.deepEqual(runtime.match(/^COPY --from=.*$/gm), ["COPY --from=builder /app/dist /usr/share/nginx/html"]);

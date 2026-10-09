@@ -331,7 +331,7 @@ jobs:
       options: --init --ipc=host
     services:
       postgres:
-        image: postgres:18.4
+        image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_DB: mscqr_e2e_admin_test
           POSTGRES_USER: postgres
@@ -344,7 +344,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       redis:
-        image: redis:8-alpine
+        image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-
@@ -571,7 +571,7 @@ jobs:
       options: --init --ipc=host
     services:
       postgres:
-        image: postgres:18.4
+        image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_DB: mscqr_integration_admin_test
           POSTGRES_USER: postgres
@@ -584,7 +584,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:8-alpine
+        image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-
@@ -666,4 +666,6 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Docker verification contract
-        run: npm run verify:ci:docker
+        run: |
+          node scripts/verify-container-image-provenance.mjs
+          npm run verify:ci:docker

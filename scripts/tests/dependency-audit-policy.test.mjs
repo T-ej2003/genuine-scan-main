@@ -1,3 +1,4 @@
+import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import os from "node:os";
@@ -97,7 +98,7 @@ test("Tailwind compiler/plugin and braces are build-only, not runtime dependency
   assert.equal(manifest.devDependencies["tailwindcss-animate"], "^1.0.7");
   for (const name of ["tailwindcss-animate", "tailwindcss", "braces", "chokidar", "fast-glob", "micromatch"]) assert.equal(lock.packages[`node_modules/${name}`].dev, true, name);
   assert.match(readFileSync(path.join(root, "tailwind.config.ts"), "utf8"), /import tailwindcssAnimate from "tailwindcss-animate"/);
-  const runtime = readFileSync(path.join(root, "Dockerfile.ecs-frontend"), "utf8").split("FROM nginx:")[1];
+  const runtime = readFileSync(path.join(root, "Dockerfile.ecs-frontend"), "utf8").split(`FROM ${readApprovedImages().nginx.reference}`)[1];
   assert.match(runtime, /COPY --from=builder \/app\/dist \/usr\/share\/nginx\/html/);
   assert.doesNotMatch(runtime, /node_modules|npm |node:/);
   assert.equal(run().status, 0, "Audit reports with build dependencies omitted must pass without a waiver");

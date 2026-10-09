@@ -85,3 +85,26 @@ A workflow correction therefore requires `npm run rls:full-generate` and
 checksums and SQL contract markers belong to B; recovery must still load the
 original A material from its exact Git tree for the already-published broker.
 Regenerating B evidence neither republishes broker13 nor renews mutation authority.
+
+## Hostile review after PR #648 integration — 2026-10-09
+
+Protected main is `931bf86391d57cd0489162f8ef7b73f1896a42aa`; its tree exactly matches PR #648's reviewed `33e4a55757` tree. All 33 merged-head checks, including Deployment Audit, Docker and database integration, succeeded. PR #647 preserves `a76c1a1e65` through a merge, without rebasing its reviewed commits. Generated RLS and OSV evidence conflicts are resolved by canonical regeneration and a fresh reachability review of the combined inputs. SQL changes remain generated contract markers rather than database policy changes.
+
+| Evidence boundary | Immutable identity | Executing identity | Review result |
+| --- | --- | --- | --- |
+| Published broker, package, receipt and alias target | Original A / authenticated v13 | Authenticated descendant B | No publication or identity rewrite permitted |
+| Cutover and post-CAS reconciliation | A, exact output before/after and broker identity | B with native publication-bound lineage | Other output drift rejected; closure consumes the same evidence |
+| Historical checksum, migration/package/source contracts | Exact Git material A | B supplies tooling | Public tfvars producer authenticates A bytes; collector independently expects A |
+| Task expectations and hashes | Complete original renderer A | Isolated original Git archive invoked by B | No current constants or renderer fallback |
+| Approval collection/preparation/publication | Release A | Recovery context explicitly binds B | Signed historical handoff and exact live broker remain mandatory |
+| Fresh QR selector and GitHub artifact | Operational B | B | Expired evidence can be regenerated without relabelling A |
+| Rotation bootstrap/config/root-drop | Payload A, explicit recovery references | B | Both identities must authenticate; inventory reuse remains exact |
+| Release Gate rotation execution | Deployment/rotation A | Clean protected-main B | Existing image authorization and deployment guards preserved |
+| Overlap receipt / verification | Receipt payload A | Workflow, job, artifact and environment approval B | Native authenticated A→B context mandatory |
+| Initial overlap and later normal release | Their independently authenticated release identities | Exact governed source | No automatic release dispatch or production proof inferred from tests |
+
+New main changes Docker base identities and generated release contracts. They belong to B and cannot be substituted into v13's original release material. Future application image reuse must be decided by the canonical impact classifier; registry remediation does not authorize reuse of incompatible images.
+
+Self-review: P0=0; P1=0 in the inspected changed recovery path. One P2 fixture hygiene issue was found by the local branch guard: new synthetic VPC IDs and literal secret references. The regression now uses clearly synthetic VPC identity and the existing secret-ARN fixture helper; the guard is unchanged. No production implementation was changed for this finding. All callers, optional source/checksum defaults, original-renderer dependencies and workflow/payload provenance splits were inspected. The clone-based public handoff must be rerun from the committed merged head, followed by new exact-head GitHub review and CI. Previous head results do not approve the merged head.
+
+Recommendation: keep the complete descendant public-handoff regression required whenever workflow provenance, original release rendering or artifact resolvers change. Production execution and live adoption remain outside this validation task.

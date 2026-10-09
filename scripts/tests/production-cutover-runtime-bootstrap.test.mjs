@@ -227,7 +227,7 @@ test("same-source bootstrap accepts fresh operational QR evidence and rejects ex
   const directory = fsTemp();
   try {
     const input = fullInput(directory, process.cwd());
-    const secret = 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE';
+    const secret = secretArn('mscqr/prod/rotation/qr-current-version-Fixtur');
     const backend = input.currentTaskDefinition.taskDefinition.containerDefinitions[0];
     const version = backend.environment.find(item => item.name === 'QR_SIGN_ACTIVE_KEY_VERSION').value;
     backend.environment = backend.environment.filter(item => item.name !== 'QR_SIGN_ACTIVE_KEY_VERSION');
@@ -369,9 +369,9 @@ test("public descendant preflight preserves original contracts through approval 
       if (operation === 'lambda:get-alias') return JSON.stringify(r.context.alias);
       if (operation === 'lambda:get-function-configuration') return JSON.stringify({ ...JSON.parse(readFileSync(new URL('./fixtures/production-stage-b-broker-get-function-configuration.json', import.meta.url))), Version: '13', CodeSha256: Buffer.from(hash(readFileSync(publishedPackage.package.path)), 'hex').toString('base64'), FunctionArn: `${STAGE_B.brokerFunctionArn}:13`, Environment: { Variables: variables } });
       if (operation === 'ecs:describe-task-definition') { const arn = args[args.indexOf('--task-definition') + 1]; assert.ok(definitions[arn]); return JSON.stringify(definitions[arn]); }
-      if (operation === 'ec2:describe-subnets') return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: 'vpc-0123456789abcdef0', State: 'available', MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? 'b' : 'a'}`, CidrBlock: `10.0.${index}.0/24` })) });
-      if (operation === 'ec2:describe-route-tables') return JSON.stringify({ RouteTables: [{ RouteTableId: 'rtb-12345678', VpcId: 'vpc-0123456789abcdef0', Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: '0.0.0.0/0', NatGatewayId: 'nat-12345678' }] }] });
-      if (operation === 'ec2:describe-security-groups') return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map(GroupId => ({ GroupId, VpcId: 'vpc-0123456789abcdef0' })) });
+      if (operation === 'ec2:describe-subnets') return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: 'vpc-fixture', State: 'available', MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? 'b' : 'a'}`, CidrBlock: `10.0.${index}.0/24` })) });
+      if (operation === 'ec2:describe-route-tables') return JSON.stringify({ RouteTables: [{ RouteTableId: 'rtb-12345678', VpcId: 'vpc-fixture', Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: '0.0.0.0/0', NatGatewayId: 'nat-12345678' }] }] });
+      if (operation === 'ec2:describe-security-groups') return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map(GroupId => ({ GroupId, VpcId: 'vpc-fixture' })) });
       if (operation === 'ecs:describe-clusters') return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: 'ACTIVE' }] });
       if (operation === 'rds:describe-db-instances') return JSON.stringify({ DBInstances: [{ DBInstanceStatus: 'available', DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map(SubnetIdentifier => ({ SubnetIdentifier })) } }] });
       if (operation === 'kms:describe-key') return JSON.stringify({ KeyMetadata: { Arn: keyArn, KeyId: keyId, Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: 'SIGN_VERIFY', KeySpec: 'RSA_3072', KeyState: 'Enabled', Enabled: true, KeyManager: 'CUSTOMER', Origin: 'AWS_KMS', MultiRegion: false } });
@@ -452,7 +452,7 @@ test("public descendant preflight preserves original contracts through approval 
       },
     });
     assert.equal(rootDrop.sourceSha, release);
-    const qrSecret = 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE';
+    const qrSecret = secretArn('mscqr/prod/rotation/qr-current-version-Fixtur');
     const backend = input.currentTaskDefinition.taskDefinition.containerDefinitions[0];
     const qrVersion = backend.environment.find(item => item.name === 'QR_SIGN_ACTIVE_KEY_VERSION').value;
     backend.environment = backend.environment.filter(item => item.name !== 'QR_SIGN_ACTIVE_KEY_VERSION');

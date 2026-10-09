@@ -2,7 +2,7 @@ name: mscqr-full-rls-certification
 
 services:
   rls-cert-postgres:
-    image: postgres:18
+    image: public.ecr.aws/docker/library/postgres@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
     container_name: mscqr-full-rls-certification-postgres
     restart: "no"
     # The disposable clean-room harness requires every green-database session
