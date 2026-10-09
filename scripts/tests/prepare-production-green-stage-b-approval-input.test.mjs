@@ -11,7 +11,7 @@ import { RELEASE_ROLE_ARN } from "../aws/production-identity-adapters.mjs";
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { assertStageBBrokerLambdaConfiguration, normalizeStageBBrokerRuntimeVersionConfig, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_BROKER_TASK_DEFINITION_FAMILIES, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
-import { assertStableBrokerAliasObservation, authenticateApprovalInputCheckerIdentity, createApprovalInputEvidenceRunners, prepareProductionGreenStageBApprovalInput, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
+import { assertStableBrokerAliasObservation, authenticateApprovalInputCheckerIdentity, createApprovalInputEvidenceRunners, prepareProductionGreenStageBApprovalInput, runApprovalInputCli, writeProductionGreenStageBApprovalInput } from "../aws/prepare-production-green-stage-b-approval-input.mjs";
 import { renderStageBTaskDefinition, stageBTemplateHashes } from "../aws/production-green-stage-b-task-definitions.mjs";
 
 const releaseSha = "8d7ecc53a0c8d0ec07dfce1aeb03dc22d0f43f82";
@@ -20,6 +20,31 @@ const checkerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production
 const deployerIdentity = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/deployer-session";
 const digest = (character) => character.repeat(64);
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+test("actual approval-input CLI path reads the transport and authenticates its canonical runtime dependencies", async () => {
+  const handoffBytes = Buffer.from('{"schemaVersion":1}\n');
+  const calls = [];
+  const reader = {};
+  const state = {};
+  await assert.rejects(runApprovalInputCli([
+    "--image-authorization", "/private/tmp/image-authorization.json",
+    "--historical-runtime-evidence", "/private/tmp/historical-runtime.json",
+    "--historical-runtime-evidence-sha256", sha256(handoffBytes),
+  ], {
+    checkSource: () => calls.push("source"),
+    createRunners: async () => ({ checkerRun: () => JSON.stringify({ Arn: checkerIdentity }), releaseRun: () => "{}" }),
+    readPrivate: ({ filePath }) => ({ bytes: filePath.endsWith("historical-runtime.json") ? handoffBytes : Buffer.from("{}") }),
+    makeReader: ({ region, clusterArn }) => { assert.equal(region, STAGE_B.region); assert.equal(clusterArn, STAGE_B.clusterArn); calls.push("reader"); return reader; },
+    makeStateClient: () => { calls.push("state-client"); return { read: () => state }; },
+    verifyHandoff: (input) => { assert.deepEqual(input.evidence, { schemaVersion: 1 }); assert.equal(input.state, state); assert.equal(input.reader, reader); calls.push("handoff"); throw new Error("handoff boundary reached"); },
+    source: () => releaseSha,
+  }), /handoff boundary reached/);
+  assert.deepEqual(calls, ["source", "reader", "state-client", "handoff"]);
+  const cli = fs.readFileSync(new URL("../aws/prepare-production-green-stage-b-approval-input.mjs", import.meta.url), "utf8");
+  for (const name of ["readHistoricalRuntimeTransport", "createAwsReader", "createProductionComponentDeploymentStateClient", "verifyHistoricalRuntimeHandoff"]) {
+    assert.match(cli, new RegExp(`import \\{[^}]*\\b${name}\\b[^}]*\\} from`));
+  }
+});
 const taskDefinitionArns = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, `arn:aws:ecs:eu-west-2:368992683803:task-definition/${STAGE_B_BROKER_TASK_DEFINITION_FAMILIES[mode]}:4`]));
 const now = new Date("2026-08-31T10:01:00.000Z");
 const image = (repository, character) => ({ digest: `sha256:${character.repeat(64)}`, imageReference: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repository}@sha256:${character.repeat(64)}` });
@@ -476,4 +501,11 @@ test("future checker approval binds persisted runtime authority without renewing
   assert.equal(retention.reference.historicalGovernedDeploymentProvenance, false);
   f.task.lastStatus = "STOPPED";
   assert.throws(() => evidence({ historical: { historicalRuntimeState: state, historicalRuntimeReader: f.reader, verifyHistoricalRuntimeSignature: f.verify } }));
+});
+
+test("approval preparation rejects a live historical worker without its signed handoff", async () => {
+  const { historicalRuntimeFixture } = await import("./fixtures/historical-runtime.mjs");
+  const { verifyHistoricalRuntimeHandoff } = await import("../aws/verify-production-historical-runtime-handoff.mjs");
+  const fixture = historicalRuntimeFixture();
+  assert.throws(() => verifyHistoricalRuntimeHandoff({ state: fixture.state, reader: fixture.reader, sourceSha: fixture.release }), /signed Stage B evidence handoff/);
 });

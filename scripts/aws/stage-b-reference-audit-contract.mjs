@@ -9,6 +9,41 @@ import { assertNormalDeploymentLivePredecessor } from "./production-normal-live-
 import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { assertBootstrapStageBLivePredecessor, BOOTSTRAP_STAGE_B_REFERENCE_KIND } from "./production-bootstrap-stage-b-predecessor-contract.mjs";
 
+export function publishedBrokerPredecessorContext(plan) {
+  const resources = plan?.prior_state?.values?.root_module?.resources || [];
+  const prior = (address) => resources.filter((entry) => entry.address === address && !Object.hasOwn(entry, "deposed_key"));
+  const broker = prior("aws_lambda_function.broker");
+  const alias = prior("aws_lambda_alias.reviewed");
+  const brokerChange = (plan?.resource_changes || []).filter((entry) => entry.address === "aws_lambda_function.broker");
+  const aliasChange = (plan?.resource_changes || []).filter((entry) => entry.address === "aws_lambda_alias.reviewed");
+  if (broker.length !== 1 || alias.length !== 1 || brokerChange.length !== 1 || aliasChange.length !== 1
+    || JSON.stringify(brokerChange[0].change?.actions) !== '["update"]'
+    || JSON.stringify(aliasChange[0].change?.actions) !== '["update"]'
+    || JSON.stringify(broker[0].values?.environment) !== JSON.stringify(brokerChange[0].change.before?.environment)
+    || alias[0].values?.function_version !== aliasChange[0].change.before?.function_version
+    || broker[0].values?.version !== alias[0].values?.function_version) {
+    throw new Error("Published broker predecessor is not bound to the exact Terraform prior state and transition.");
+  }
+  const variables = broker[0].values.environment?.[0]?.variables;
+  let taskMap, images, approval;
+  try {
+    taskMap = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
+    images = JSON.parse(variables.BROKER_IMAGES_JSON);
+    approval = JSON.parse(variables.BROKER_APPROVAL_EXPECTED_JSON);
+  } catch {
+    throw new Error("Published broker predecessor has malformed prior-state bindings.");
+  }
+  if (!/^[a-f0-9]{40}$/.test(approval?.releaseSha || "")
+    || !/^[a-f0-9]{40}$/.test(variables.BROKER_IMAGE_RELEASE_SHA || "")
+    || [approval?.sourceContractSha256, approval?.migrationSetDigest, approval?.packageChecksumSha256].some((value) => !/^[a-f0-9]{64}$/.test(value || ""))
+    || !/^[A-Za-z0-9+/]{43}=$/.test(broker[0].values.source_code_hash || "")
+    || JSON.stringify(Object.keys(taskMap || {}).sort()) !== JSON.stringify([...STAGE_B_MODES].sort())
+    || ![images?.executorImageDigest, images?.canaryImageDigest].every((image) => /^\d{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/.test(image || ""))) {
+    throw new Error("Published broker predecessor source, image, or mode bindings are incomplete.");
+  }
+  return { sourceSha: approval.releaseSha, imageReleaseSha: variables.BROKER_IMAGE_RELEASE_SHA, approval, images, taskMap, aliasVersion: alias[0].values.function_version, codeSha256: broker[0].values.source_code_hash };
+}
+
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
   'aws_ecs_task_definition.candidate["backend"]': "mscqr-production-rls-green-backend-candidate",
   'aws_ecs_task_definition.candidate["worker"]': "mscqr-production-rls-green-worker-candidate",

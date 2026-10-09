@@ -23,6 +23,9 @@ import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-fres
 import { createReleasePreflightCheckerTrustSignatureVerifier } from "./production-release-preflight-checker-attestation.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { establishReleaseDeployerIdentity } from "./production-identity-adapters.mjs";
+import { readHistoricalRuntimeTransport, verifyHistoricalRuntimeHandoff } from "./verify-production-historical-runtime-handoff.mjs";
+import { createAwsReader } from "./production-green-stage-b-ecs-observations.mjs";
+import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
 
 export const STAGE_B_APPROVAL_INPUT_PRODUCER = "scripts/aws/prepare-production-green-stage-b-approval-input.mjs";
 export const STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION = 1;
@@ -214,18 +217,23 @@ export function authenticateApprovalInputCheckerIdentity(checkerRun) {
   return JSON.parse(checkerRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn;
 }
 
-async function run(argv = process.argv.slice(2)) {
-  assertCleanSource();
+export async function runApprovalInputCli(argv = process.argv.slice(2), {
+  checkSource = assertCleanSource, createRunners = createApprovalInputEvidenceRunners,
+  readPrivate = readStageBPrivateFileBytes, makeReader = createAwsReader,
+  makeStateClient = createProductionComponentDeploymentStateClient,
+  verifyHandoff = verifyHistoricalRuntimeHandoff, source = currentHead,
+} = {}) {
+  checkSource();
   const allowed = new Set(["--historical-runtime-evidence", "--historical-runtime-evidence-sha256", "--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
-  const runners = await createApprovalInputEvidenceRunners();
+  const runners = await createRunners();
   const checkerIdentity = authenticateApprovalInputCheckerIdentity(runners.checkerRun);
-  const imageAuthorizationBytes = readStageBPrivateFileBytes({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
+  const imageAuthorizationBytes = readPrivate({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
   const imageAuthorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(imageAuthorizationBytes));
-  const historicalRuntimeEvidence = option(argv, "--historical-runtime-evidence") ? readHistoricalRuntimeTransport({ bytes: readStageBPrivateFileBytes({ filePath: option(argv, "--historical-runtime-evidence"), repositoryRoot: root, label: "Historical runtime handoff" }).bytes, expectedSha256: requiredOption(argv, "--historical-runtime-evidence-sha256") }) : undefined;
-  const runtimeReader = createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: runners.releaseRun });
-  const historicalRuntimeState = createProductionComponentDeploymentStateClient({ run: runners.releaseRun }).read();
-  verifyHistoricalRuntimeHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: runtimeReader, sourceSha: currentHead() });
+  const historicalRuntimeEvidence = option(argv, "--historical-runtime-evidence") ? readHistoricalRuntimeTransport({ bytes: readPrivate({ filePath: option(argv, "--historical-runtime-evidence"), repositoryRoot: root, label: "Historical runtime handoff" }).bytes, expectedSha256: requiredOption(argv, "--historical-runtime-evidence-sha256") }) : undefined;
+  const runtimeReader = makeReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: runners.releaseRun });
+  const historicalRuntimeState = makeStateClient({ run: runners.releaseRun }).read();
+  verifyHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: runtimeReader, sourceSha: source() });
   const { evidence } = collectProductionGreenStageBApprovalEvidence({ historicalRuntimeEvidence, historicalRuntimeState, historicalRuntimeReader: runtimeReader, sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: runners.verifyImageEvidence, verifyReleasePreflightAttestationSignature: runners.verifyReleasePreflightAttestationSignature });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
@@ -236,4 +244,4 @@ async function run(argv = process.argv.slice(2)) {
   process.stdout.write(`${JSON.stringify({ status: "prepared", schemaVersion: STAGE_B_APPROVAL_INPUT_SCHEMA_VERSION, approvalId: result.input.approvalId, sourceSha: result.input.releaseSha, approvalInputPath: output.written.path, approvalInputSha256: output.written.sha256, checkerDecisionPresent: false, approvalSigned: false, approvalPublished: false })}\n`);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) run().catch(() => { process.stderr.write('{"status":"blocked","reason":"stage-b-approval-input-failed"}\n'); process.exitCode = 1; });
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runApprovalInputCli().catch(() => { process.stderr.write('{"status":"blocked","reason":"stage-b-approval-input-failed"}\n'); process.exitCode = 1; });
