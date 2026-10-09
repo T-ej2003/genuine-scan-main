@@ -70,6 +70,7 @@ export async function verifyProductionCutoverOverlap({ configFile, configSha256,
   const readiness = readStageBPrivateFileBytes({ filePath: config.readinessEvidenceFile, repositoryRoot: root, label: "Persisted overlap readiness" });
   const authenticatedReadiness = readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256: readiness.sha256, sourceSha, rotationId, rotationStateSha256: preparedStateSha256 });
   const resolved = resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, brokerRecoveryApproval, run: githubRun });
+  if (resolved.workflowSourceSha !== (config.recoveryTooling?.sourceSha || sourceSha)) throw new Error("Overlap workflow differs from the runtime config execution source.");
   const receipt = resolved.receipt;
   assertVerifierContinuationReceiptBindings({ receipt, authenticatedReadiness, sourceSha, rotationId, preparedStateSha256, readinessSha256: readiness.sha256, rotationFixtureSha256: fixture.sha256, config });
   const adapters = constructAdapters({ config, sourceSha, rotationId, runtimeConfigSha256: configSha256 });

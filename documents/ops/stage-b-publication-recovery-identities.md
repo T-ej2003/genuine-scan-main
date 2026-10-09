@@ -54,6 +54,14 @@ recovery context, never a caller-supplied alternative SHA. Run, job, GitHub depl
 and artifact metadata must match that tooling identity. Receipt payload source must
 independently match the original release. Missing/cloned recovery authority, mismatched
 run/job/artifact sources or a receipt relabelled as the tooling release fail closed.
+The verifier also requires the resolved workflow SHA to equal the digest-bound runtime
+configuration's `recoveryTooling.sourceSha`. Two different authorized descendants
+cannot contribute to one overlap operation. If protected main advances before Release
+Gate executes, the C-bound configuration cannot be paired with a D workflow: prepare
+a fresh D-bound configuration and exact authorization before any overlap write, then
+dispatch under D. If main advances after a C workflow executes, authenticate and
+finish that C operation from its original configuration and receipt; do not rewrite
+the C configuration or historical closure. The public fixture exercises both cases.
 The sealed public descendant test continues through the governed overlap operation,
 receipt resolution, independent overlap verifier and native rotation verification
 adapter into persisted `verified` state. The original release identity survives and

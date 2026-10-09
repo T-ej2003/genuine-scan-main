@@ -625,6 +625,13 @@ test("public descendant preflight preserves original contracts through approval 
         onboarding: { bindPersistedEcsExecProof: persisted => assert.equal(persisted.targetTaskDefinitionArn, overlapTask), run: expected => runStrictOnboardingProbes({ expected, probes: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map(name => [name, async ({ expected }) => { assert.equal(expected.sourceSha, release); assert.equal(expected.imageReleaseSha, imagesSource); return true; }])) }) },
       }; },
     };
+    const originalConfigBytes = readFileSync(runtime.configPath);
+    for (const recoveryTooling of [undefined, { ...config.recoveryTooling, sourceSha: historicalTooling.sourceSha }]) {
+      writeFileSync(runtime.configPath, JSON.stringify({ ...config, recoveryTooling }), { mode: 0o600 });
+      await assert.rejects(verifyProductionCutoverOverlap(verifierInput), /runtime config|recovery tooling|authenticated broker recovery/);
+      await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, configSha256: hash(readFileSync(runtime.configPath)) }), /recovery tooling|authenticated broker recovery|authenticated recovery|input did not match/);
+    }
+    writeFileSync(runtime.configPath, originalConfigBytes, { mode: 0o600 });
     await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: undefined }), /requires authenticated broker recovery/);
     await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: structuredClone(r.context) }), /requires authenticated broker recovery/);
     const verified = await verifyProductionCutoverOverlap(verifierInput);
@@ -634,6 +641,7 @@ test("public descendant preflight preserves original contracts through approval 
     assert.equal(registerCalls, 0); assert.deepEqual(r.calls, completedCalls);
     assert.equal(JSON.stringify(r.handoff), historicalReceipt);
     if (previousVerification) {
+      await assert.rejects(verifyProductionCutoverOverlap({ ...previousVerification, brokerRecoveryApproval: r.context, githubRun: workflowRun() }), /runtime config execution source/);
       const oldConfig = readFileSync(previousVerification.configFile);
       const resumed = await verifyProductionCutoverOverlap({ ...previousVerification, brokerRecoveryApproval: r.context });
       assert.equal(resumed.terminalState, 'VERIFIED_OVERLAP');
