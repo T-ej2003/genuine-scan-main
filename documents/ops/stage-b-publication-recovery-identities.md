@@ -78,3 +78,10 @@ release checkout behavior is unchanged. The full fixture executes the actual
 YAML target-resolution and checkout-verification shell blocks against a private
 local Git origin before the overlap operation; workflow metadata alone is not
 proof of which checkout executed the scripts.
+
+Release Gate YAML participates in the canonical clean-room RLS source contract.
+A workflow correction therefore requires `npm run rls:full-generate` and
+`npm run rls:full-verify` for the descendant tooling tree. Those newly generated
+checksums and SQL contract markers belong to B; recovery must still load the
+original A material from its exact Git tree for the already-published broker.
+Regenerating B evidence neither republishes broker13 nor renews mutation authority.
