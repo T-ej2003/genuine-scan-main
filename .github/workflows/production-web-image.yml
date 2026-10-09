@@ -83,6 +83,7 @@ jobs:
             image_state=absent
           fi
           if [[ "$image_state" == absent ]]; then
+            node scripts/verify-container-image-provenance.mjs --production
             docker buildx build --platform "$PLATFORM" --file Dockerfile.ecs-frontend --build-arg "GIT_SHA=$IMAGE_TAG" --build-arg "RELEASE_GIT_SHA=$IMAGE_TAG" --label "org.opencontainers.image.revision=$IMAGE_TAG" --label "org.opencontainers.image.title=mscqr-frontend" --push --tag "$image_uri" .
             aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --output json >"$image_json"
           fi

@@ -1,3 +1,4 @@
+import { assertDisposablePostgresImage } from "./lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 
@@ -8,7 +9,7 @@ const docker = (args) => execFileSync("docker", args, { encoding: "utf8", timeou
 const [instance] = JSON.parse(docker(["inspect", container]));
 assert.equal(instance.Config.Labels["com.docker.compose.project"], "mscqr-p2-auth-security");
 assert.equal(instance.Config.Labels["com.docker.compose.service"], "p2-postgres");
-assert.equal(instance.Config.Image, "postgres:18.4");
+assertDisposablePostgresImage(instance);
 assert.ok(Object.hasOwn(instance.HostConfig.Tmpfs, "/var/lib/postgresql"));
 assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
 assert.equal(process.argv.length, 2, "The disposable TLS setup accepts no arguments");

@@ -1,3 +1,4 @@
+import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -33,11 +34,11 @@ test("root Compose reserves the trusted frontend IP and its adapter is restart-i
     mutate?.(templates);
     fs.writeFileSync(path.join(directory, "canonical.sh"), "#!/bin/sh\nexec sleep 300\n", { mode: 0o755 });
     fs.writeFileSync(path.join(directory, "compose.yml"), `services:
-  redis: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
-  backend: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
-  worker: { image: alpine:3.22, command: ["sleep", "300"], networks: [app] }
+  redis: { image: ${readApprovedImages().alpine.reference}, command: ["sleep", "300"], networks: [app] }
+  backend: { image: ${readApprovedImages().alpine.reference}, command: ["sleep", "300"], networks: [app] }
+  worker: { image: ${readApprovedImages().alpine.reference}, command: ["sleep", "300"], networks: [app] }
   frontend:
-    image: alpine:3.22
+    image: ${readApprovedImages().alpine.reference}
     entrypoint: ["/root-adapter.sh"]
     volumes:
       - { type: bind, source: ${JSON.stringify(path.join(root, "docker/nginx-root-entrypoint.sh"))}, target: /root-adapter.sh, read_only: true }
@@ -85,7 +86,7 @@ networks:
     run([...compose, "up", "-d", "frontend"]);
     assert.equal(run([...compose, "exec", "-T", "frontend", "hostname", "-i"]), testFrontend);
     for (const forbiddenIp of [`${testPrefix}.0`, testGateway, `${testPrefix}.15`]) {
-      const denied = spawnSync("docker", ["run", "--rm", "--network", `${project}_app`, "--ip", forbiddenIp, "alpine:3.22", "true"], { cwd: root, encoding: "utf8" });
+      const denied = spawnSync("docker", ["run", "--rm", "--network", `${project}_app`, "--ip", forbiddenIp, readApprovedImages().alpine.reference, "true"], { cwd: root, encoding: "utf8" });
       assert.notEqual(denied.status, 0, `${forbiddenIp} must not be assignable`);
     }
     const first = [digest(path.join(templates, "default.http.conf")), digest(path.join(templates, "default.https.conf"))];

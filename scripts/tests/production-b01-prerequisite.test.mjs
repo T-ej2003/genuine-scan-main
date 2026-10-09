@@ -1,3 +1,4 @@
+import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
@@ -150,9 +151,9 @@ test("live B01 executor predecessor is exact revision 19, immutable image, and s
 });
 
 test("revision 19 backend runtime contains the fixed inline executor dependencies", () => {
-  const dockerfile = fs.readFileSync("backend/Dockerfile", "utf8"), runtimeStage = dockerfile.split("FROM node:24-bookworm-slim AS production-rls-executor")[0];
+  const dockerfile = fs.readFileSync("backend/Dockerfile", "utf8"), runtimeStage = dockerfile.split(`FROM ${readApprovedImages().node.reference} AS production-rls-executor`)[0];
   const backendPackage = JSON.parse(fs.readFileSync("backend/package.json", "utf8"));
-  assert.match(runtimeStage, /FROM node:24-bookworm-slim AS runtime/); assert.match(runtimeStage, /COPY --from=builder[^\n]+node_modules \.\/node_modules/);
+  assert.ok(runtimeStage.includes(`FROM ${readApprovedImages().node.reference} AS runtime`)); assert.match(runtimeStage, /COPY --from=builder[^\n]+node_modules \.\/node_modules/);
   assert.ok(backendPackage.dependencies["@prisma/client"]); assert.deepEqual(buildB01ExecutorDefinition(["-e", "source"]).containerDefinitions[0].entryPoint, ["node"]);
 });
 

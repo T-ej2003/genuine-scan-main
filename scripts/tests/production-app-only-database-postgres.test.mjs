@@ -1,3 +1,4 @@
+import { assertDisposablePostgresImage } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
@@ -32,7 +33,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
   const [instance] = JSON.parse(execFileSync("docker", ["inspect", container], { encoding: "utf8", timeout: 10000 }));
   assert.equal(instance.Config.Labels["com.docker.compose.project"], "mscqr-p2-auth-security");
   assert.equal(instance.Config.Labels["com.docker.compose.service"], "p2-postgres");
-  assert.equal(instance.Config.Image, "postgres:18.4");
+  assertDisposablePostgresImage(instance);
   assert.ok(Object.hasOwn(instance.HostConfig.Tmpfs, "/var/lib/postgresql"));
   assert.deepEqual(instance.HostConfig.PortBindings["5432/tcp"], [{ HostIp: "127.0.0.1", HostPort: "55432" }]);
   assert.equal(sql("SELECT current_database()", "mscqr_p2_admin_test"), "mscqr_p2_admin_test");

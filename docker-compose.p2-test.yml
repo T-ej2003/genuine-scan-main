@@ -2,7 +2,7 @@ name: mscqr-p2-auth-security
 
 services:
   p2-postgres:
-    image: postgres:18.4
+    image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
     container_name: mscqr-p2-auth-security-postgres
     restart: unless-stopped
     environment:
@@ -23,7 +23,7 @@ services:
       - ./scripts/p2-postgres18-init.sql:/docker-entrypoint-initdb.d/10-certification-administrator.sql:ro
 
   p2-redis:
-    image: redis:8-alpine
+    image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
     container_name: mscqr-p2-auth-security-redis
     restart: unless-stopped
     ports:

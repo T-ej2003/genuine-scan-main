@@ -1,3 +1,4 @@
+import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -362,7 +363,7 @@ test("generated package assigns every artifact to one exact executor phase", () 
   ]) assert.doesNotMatch(migrationSql, forbidden, `migration package contains administrative SQL: ${forbidden}`);
 
   const dockerfile = fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
-  const [runtimeImage, executorImage] = dockerfile.split("FROM node:24-bookworm-slim AS production-rls-executor");
+  const [runtimeImage, executorImage] = dockerfile.split(`FROM ${readApprovedImages().node.reference} AS production-rls-executor`);
   assert.doesNotMatch(runtimeImage, /scripts\/rls\/sql\/generated|documents\/security\/rls-program\/generated/,
     "the blue application image must not contain the green administrative package");
   assert.match(executorImage, /scripts\/rls\/sql\/generated[\s\S]*documents\/security\/rls-program\/generated/);

@@ -378,7 +378,7 @@ jobs:
       id-token: write
     services:
       postgres:
-        image: postgres:18.4
+        image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_DB: mscqr_p2_integration_test
           POSTGRES_USER: mscqr_rls_cert_admin
@@ -391,7 +391,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:8-alpine
+        image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-

@@ -28,7 +28,8 @@ assert(enterpriseFixture.includes("UserRole.MANUFACTURER_ADMIN"));
 assert(!enterpriseFixture.includes("process.env.DATABASE_URL"));
 
 const qualityGate=read("../.github/workflows/quality-gate.yml");
-assert(qualityGate.includes("image: postgres:18.4"));
+const approvedPostgres = JSON.parse(read("../docker/base-image-identities.json")).images.postgres.reference;
+assert(qualityGate.includes(`image: ${approvedPostgres}`));
 assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs prepare"));
 assert(qualityGate.includes("node scripts/enterprise-e2e-db.mjs cleanup"));
 console.log("operator and CLI shared-boundary tests passed");

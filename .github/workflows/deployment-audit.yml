@@ -183,6 +183,9 @@ jobs:
       - name: Install locked frontend build dependencies
         run: npm ci
 
+      - name: Verify approved base image provenance
+        run: node scripts/verify-container-image-provenance.mjs
+
       - name: Verify OSV runtime boundary
         run: node --test scripts/tests/deployment-osv-policy.test.mjs scripts/tests/osv-non-runtime-acceptance.test.mjs scripts/tests/dependency-audit-policy.test.mjs scripts/tests/osv-deployment-expiry.test.mjs
 
@@ -251,13 +254,7 @@ jobs:
 
       - name: Build container for scan
         if: steps.docker-detect.outputs.found == 'true'
-        # Docker's official ECR mirror has the same reviewed nginx manifest bytes.
-        # Override only audit image resolution; production Dockerfiles stay unchanged.
-        run: |
-          docker build \
-            --build-context "nginx:1.29-alpine=docker-image://public.ecr.aws/docker/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de" \
-            -t deployment-audit:latest \
-            -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
+        run: docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
 
       - name: Trivy container scan
         if: steps.docker-detect.outputs.found == 'true'
