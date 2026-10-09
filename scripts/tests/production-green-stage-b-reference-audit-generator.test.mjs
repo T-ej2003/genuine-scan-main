@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageBPlan, assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
+import { renderStageBTaskDefinition } from "../aws/production-green-stage-b-task-definitions.mjs";
 import { assertStageBBrokerAliasArn, assertStageBBrokerConfigurationIdentity, canonicalJson, STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import {
   createAwsReader,
@@ -878,7 +879,7 @@ function makePublishedBrokerPredecessorFixture() {
   const canaryImageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"2".repeat(64)}`;
   const taskMap = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, oldArnFor(familyForMode(mode)).replace(":1", ":5")]));
   const images = { backendImageDigest: executorImageDigest, workerImageDigest: executorImageDigest, executorImageDigest, canaryImageDigest };
-  const approval = { packageChecksumSha256: packageChecksum, releaseSha: sourceSha };
+  const approval = { packageChecksumSha256: packageChecksum, sourceContractSha256: "3".repeat(64), migrationSetDigest: "4".repeat(64), releaseSha: sourceSha };
   const brokerChange = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
   brokerChange.change.before = { ...brokerChange.change.before, version: "2", source_code_hash: packageSourceCodeHash,
     environment: [{ variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskMap), BROKER_IMAGES_JSON: JSON.stringify(images), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(approval) } }] };
@@ -898,8 +899,12 @@ function makePublishedBrokerPredecessorFixture() {
   const getAlias = fixture.reader.getAlias;
   fixture.reader.getAlias = () => ({ ...getAlias(), RevisionId: "11111111-1111-1111-1111-111111111111" });
   fixture.reader.describeTaskDefinition = (arn) => arn.endsWith(":5")
-    ? { taskDefinition: { taskDefinitionArn: arn, family: arn.split("task-definition/")[1].replace(/:[0-9]+$/, ""), revision: 5, status: "ACTIVE",
-      containerDefinitions: [{ image: arn.includes("application-canary") ? canaryImageDigest : executorImageDigest, environment: [{ name: "RELEASE_GIT_SHA", value: sourceSha }] }] } }
+    ? { taskDefinition: { ...renderStageBTaskDefinition(arn.includes("application-canary") ? "canary" : "executor", {
+      imageReleaseSha: sourceSha, sourceContractSha256: approval.sourceContractSha256, migrationSetDigest: approval.migrationSetDigest,
+      packageChecksumSha256: approval.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket,
+      executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName,
+      ...(arn.includes("application-canary") ? { canaryImage: canaryImageDigest } : { executorImage: executorImageDigest, mode: STAGE_B_MODES.find((mode) => arn.includes(mode)) }),
+    }), taskDefinitionArn: arn, revision: 5, status: "ACTIVE" } }
     : (() => { const response = originalDescribe(arn); response.taskDefinition.taskDefinitionArn = arn; response.taskDefinition.revision = Number(arn.split(":").at(-1)); return response; })();
   fixture.reader.describeImages = (_repository, digest) => ({ imageDetails: [{ imageDigest: digest,
     imageTags: [`${sourceSha}-${digest === canaryImageDigest.split("@")[1] ? "rls-canary" : "rls-executor"}`] }] });
@@ -947,6 +952,10 @@ for (const [label, mutate] of [
   ["arbitrary old revision", (fixture) => { const config = fixture.reader.getFunctionConfiguration(); const map = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON); map[STAGE_B_MODES[0]] = map[STAGE_B_MODES[0]].replace(":5", ":4"); fixture.reader.getFunctionConfiguration = () => ({ ...config, Environment: { Variables: { ...config.Environment.Variables, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(map) } } }); }],
   ["wrong source", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].environment[0].value = "0".repeat(40); return value; }; }],
   ["wrong image", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].image = `mscqr-backend@sha256:${"9".repeat(64)}`; return value; }; }],
+  ["wrong entry point", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].entryPoint = ["node", "other.mjs"]; return value; }; }],
+  ["wrong task role", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.taskRoleArn = "arn:aws:iam::368992683803:role/unreviewed"; return value; }; }],
+  ["wrong secret", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].secrets[0].valueFrom = "arn:aws:secretsmanager:eu-west-2:368992683803:secret:unreviewed"; return value; }; }],
+  ["wrong prior approval binding", (fixture) => { const broker = fixture.plan.prior_state.values.root_module.resources.find((entry) => entry.address === "aws_lambda_function.broker"); const approval = JSON.parse(broker.values.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON); approval.sourceContractSha256 = "9".repeat(64); broker.values.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify(approval); fixture.plan.resource_changes.find((entry) => entry.address === "aws_lambda_function.broker").change.before.environment = structuredClone(broker.values.environment); }],
   ["unbound prior state", (fixture) => { fixture.plan.prior_state.values.root_module.resources.find((entry) => entry.address === "aws_lambda_alias.reviewed").values.function_version = "3"; }],
 ]) test(`published broker predecessor rejects ${label}`, () => {
   const fixture = makePublishedBrokerPredecessorFixture();

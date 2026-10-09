@@ -24,6 +24,8 @@ import {
   publishedBrokerPredecessorContext,
 } from "./stage-b-reference-audit-contract.mjs";
 import { batch, createAwsReader, observeStageBEcs } from "./production-green-stage-b-ecs-observations.mjs";
+import { renderStageBTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
+import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { assertStageBImportedBackendMetadataNormalization, classifyStageBFreshImagePartialApplyRecoveryTopology, classifyStageBPlan, isStageBPartialApplyDeposedTaskDefinitionCleanup, stageBMutationInstanceIdentity, STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "./stage-b-deployment-contract.mjs";
 import { isTerraformDeposedKey } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentIdentity } from "./stage-b-deployment-identity.mjs";
@@ -374,7 +376,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const isAncestor = reader.isProtectedSource || ((source, target) => { try { execFileSync("git", ["merge-base", "--is-ancestor", source, target], { cwd: repositoryRoot, stdio: "ignore" }); return true; } catch { return false; } });
     if (brokerIdentity.aliasFunctionVersion !== published.aliasVersion
       || !/^[a-f0-9-]{36}$/.test(alias.RevisionId || "")
-      || config.CodeSha256 !== published.codeSha256 || liveApproval.releaseSha !== published.sourceSha
+      || config.CodeSha256 !== published.codeSha256 || canonicalJson(liveApproval) !== canonicalJson(published.approval)
       || canonicalJson(taskDefinitions) !== canonicalJson(published.taskMap)
       || canonicalJson(liveImages) !== canonicalJson(published.images)
       || repository?.length !== 1 || repository[0].repositoryArn !== `arn:aws:ecr:eu-west-2:${STAGE_B.account}:repository/mscqr-backend`
@@ -383,6 +385,18 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     for (const mode of expectedModes) {
       const arn = taskDefinitions[mode];
       const definition = reader.describeTaskDefinition(arn)?.taskDefinition;
+      const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
+      const expected = renderStageBTaskDefinition(kind, {
+        imageReleaseSha: published.sourceSha,
+        sourceContractSha256: published.approval.sourceContractSha256,
+        migrationSetDigest: published.approval.migrationSetDigest,
+        packageChecksumSha256: published.approval.packageChecksumSha256,
+        receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName,
+        canaryLogGroup: STAGE_B.canaryLogGroupName,
+        [`${kind}Image`]: kind === "canary" ? published.images.canaryImageDigest : published.images.executorImageDigest,
+        ...(kind === "executor" ? { mode } : {}),
+      });
+      assertEcsTaskDefinitionReadback({ definition, taskDefinitionArn: arn, expected, label: `Published broker predecessor ${mode}` });
       const source = definition?.containerDefinitions?.[0]?.environment?.find((entry) => entry.name === "RELEASE_GIT_SHA")?.value;
       const image = definition?.containerDefinitions?.[0]?.image;
       const expectedImage = mode === "full-rls-application-canary" ? published.images.canaryImageDigest : published.images.executorImageDigest;

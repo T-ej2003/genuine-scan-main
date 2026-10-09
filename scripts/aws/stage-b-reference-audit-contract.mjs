@@ -34,12 +34,13 @@ export function publishedBrokerPredecessorContext(plan) {
     throw new Error("Published broker predecessor has malformed prior-state bindings.");
   }
   if (!/^[a-f0-9]{40}$/.test(approval?.releaseSha || "")
+    || [approval?.sourceContractSha256, approval?.migrationSetDigest, approval?.packageChecksumSha256].some((value) => !/^[a-f0-9]{64}$/.test(value || ""))
     || !/^[A-Za-z0-9+/]{43}=$/.test(broker[0].values.source_code_hash || "")
     || JSON.stringify(Object.keys(taskMap || {}).sort()) !== JSON.stringify([...STAGE_B_MODES].sort())
     || ![images?.executorImageDigest, images?.canaryImageDigest].every((image) => /^\d{12}\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/mscqr-backend@sha256:[a-f0-9]{64}$/.test(image || ""))) {
     throw new Error("Published broker predecessor source, image, or mode bindings are incomplete.");
   }
-  return { sourceSha: approval.releaseSha, images, taskMap, aliasVersion: alias[0].values.function_version, codeSha256: broker[0].values.source_code_hash };
+  return { sourceSha: approval.releaseSha, approval, images, taskMap, aliasVersion: alias[0].values.function_version, codeSha256: broker[0].values.source_code_hash };
 }
 
 export const STAGE_B_TASK_DEFINITION_FAMILIES = Object.freeze({
