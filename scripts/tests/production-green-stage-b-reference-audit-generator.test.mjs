@@ -950,6 +950,26 @@ test("published broker predecessor and a separately authenticated RUNNING histor
   validateBrokerPlan(fixture, audit);
 });
 
+test("published broker predecessors survive an authenticated no-op retry after successor registration", () => {
+  const fixture = makePublishedBrokerPredecessorFixture();
+  for (const change of fixture.plan.resource_changes.filter((entry) => Object.hasOwn(STAGE_B_TASK_DEFINITION_FAMILIES, entry.address))) {
+    change.change.actions = ["no-op"];
+    change.change.before = structuredClone(change.change.after);
+    delete change.change.replace_paths;
+    fixture.plan.planned_values.root_module.resources.find((entry) => entry.address === change.address).values = structuredClone(change.change.after);
+    fixture.plan.prior_state.values.root_module.resources.find((entry) => entry.address === change.address).values = structuredClone(change.change.before);
+  }
+  rebindNoOpFixture(fixture);
+  const audit = generate(fixture);
+  assert.equal(audit.currentTaskDefinitions.currentNoOps, 12);
+  assert.equal(audit.plannedAtomicBrokerRollovers.length, 0);
+  assert.ok(audit.broker.liveTaskDefinitionPredecessors.every((entry) => entry.classification === "PUBLISHED" && entry.address === taskDefinitionAddressForMode(entry.mode)));
+  validateBrokerPlan(fixture, audit);
+  const wrong = structuredClone(audit);
+  delete wrong.broker.liveTaskDefinitionPredecessors[0].address;
+  assert.throws(() => validateBrokerPlan(fixture, wrong), /Published broker predecessor/);
+});
+
 for (const [label, mutate] of [
   ["arbitrary old revision", (fixture) => { const config = fixture.reader.getFunctionConfiguration(); const map = JSON.parse(config.Environment.Variables.BROKER_TASK_DEFINITIONS_JSON); map[STAGE_B_MODES[0]] = map[STAGE_B_MODES[0]].replace(":5", ":4"); fixture.reader.getFunctionConfiguration = () => ({ ...config, Environment: { Variables: { ...config.Environment.Variables, BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(map) } } }); }],
   ["wrong source", (fixture) => { const describe = fixture.reader.describeTaskDefinition; fixture.reader.describeTaskDefinition = (arn) => { const value = describe(arn); if (arn.endsWith(":5")) value.taskDefinition.containerDefinitions[0].environment[0].value = "0".repeat(40); return value; }; }],

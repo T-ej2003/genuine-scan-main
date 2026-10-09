@@ -431,7 +431,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
       && !retainedArns.has(identity.arn) && !currentNoOpArns.has(identity.arn) && !currentArns.has(identity.arn) && !currentManagedArns.has(identity.arn) && !allowedReviewedDeposed && !published) throw new Error(`Broker task-definition ARN is not an explicitly retained or current no-op revision or reviewed deposed predecessor: ${mode}.`);
     if (allowedReviewedDeposed) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "DEPOSED", deposedKey: deposed.deposed, address: rollover.address });
     else if (currentManagedArns.has(identity.arn)) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "CURRENT", address: rollover?.address });
-    else if (published) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "PUBLISHED", address: rollover?.address });
+    else if (published) brokerPredecessorsByMode.set(mode, { taskDefinitionArn: identity.arn, classification: "PUBLISHED", address: brokerTaskDefinitionAddress(mode) });
     brokerReferences.set(identity.arn, mode);
     brokerReferencesByFamily.set(identity.family, [...(brokerReferencesByFamily.get(identity.family) || []), mode]);
   }
@@ -454,6 +454,7 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     const retainedArns = retainedArnSetByFamily.get(identity.family) || new Set();
     const currentNoOpArns = currentNoOpByFamily.get(identity.family) || new Set();
     const observed = brokerPredecessorsByMode.get(mode);
+    if (observed?.classification === "PUBLISHED") continue;
     if (!rollover) continue;
     if (rollover.classification === "currentNoOp" && currentNoOpArns.has(identity.arn)) {
       assert.equal(currentNoOpArns.size, 1, "Current broker reference must be unambiguous");

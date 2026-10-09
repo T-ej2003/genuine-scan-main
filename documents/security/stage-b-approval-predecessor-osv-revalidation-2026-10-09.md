@@ -1,6 +1,6 @@
 # Stage-B approval predecessor reachability revalidation
 
-PR #644, source head `211c30162d105f4ab20c96d9c2da2a471215fc6a`, changes six executable/test inputs: the reference-audit generator and contract, Stage-B plan validator, approval-input CLI, and their two regression suites. The broad unchanged input fingerprint therefore advances from protected main's `1eb67d34a6ebea4af555f05d369bcc80503917c31927da290af1e827f7c2dda1` to `84e8443595ef35707ef8602c39280783bfdce79d32c2dc092375b719f2145867`.
+PR #644, implementation based on reviewed head `e4b81629f3514edce0c8f403706f80aa1c6a7156`, including the authenticated no-op retry correction, changes six executable/test inputs: the reference-audit generator and contract, Stage-B plan validator, approval-input CLI, and their two regression suites. The broad unchanged input fingerprint therefore advances from protected main's `1eb67d34a6ebea4af555f05d369bcc80503917c31927da290af1e827f7c2dda1` to `5c64c20af7a5aeeacf49db50be976811a950346c6b6721db0940c9ea774ff1bd`.
 
 Review of these changes found no vulnerable braces/glob invocation, frontend build plugin/content-glob change, dependency/lockfile change, application/runtime change, or production-controlled build pattern. The added imports and validators execute only in governed Stage-B tooling; the tests are not application runtime inputs. Existing runtime Docker packaging remains unchanged.
 
