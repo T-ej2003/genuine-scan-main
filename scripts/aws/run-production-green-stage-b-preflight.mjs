@@ -13,7 +13,7 @@ import { assertStageBTerraformInitializedBackendMetadata, ensureStageBTerraformB
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
+import { generateStageBTfvars, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { resolveStageBRecoveryMode } from "./stage-b-deployment-contract.mjs";
 import {
   ACCOUNT,
@@ -97,7 +97,7 @@ function assertReadinessImageAuthorizationBinding(argv, authorization) {
   return { imageEvidenceBytes: evidence.bytes, imageEvidenceSignatureBytes: signature.bytes, imageAuthorization: authorization };
 }
 
-function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes } = {}) {
+function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes, recoveryApproval } = {}) {
   const backendConfig = value(argv, "--backend-config"); const terraformDataDir = value(argv, "--terraform-data-dir");
   const preflightDirectory = path.dirname(path.resolve(value(argv, "--output")));
   const stageAState = path.join(preflightDirectory, "stage-a-state.json"); const stageBState = path.join(preflightDirectory, "stage-b-state.json");
@@ -108,7 +108,18 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
   const releaseAwsRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", exec: (command, args, options) => run(command, args, options) });
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY", run: (args) => releaseAwsRun(args) });
+  let checksumsFile;
+  if (recoveryApproval) {
+    if (!isAuthenticatedBrokerRecoveryApproval(recoveryApproval) || recoveryApproval.sourceSha !== toolingSha) throw new Error("Readiness recovery requires authenticated original release.");
+    const bytes = execFileSync("git", ["show", `${toolingSha}:documents/security/rls-program/generated/checksums.json`], { cwd: root });
+    checksumsFile = path.join(preflightDirectory, "original-release-checksums.json");
+    writeStageBPrivateFileAtomic({ filePath: checksumsFile, bytes, repositoryRoot: root, label: "Original release checksums" });
+    const contracts = deriveContractDigests({ file: checksumsFile });
+    const expected = JSON.parse(recoveryApproval.target.configuration.Environment.Variables.BROKER_APPROVAL_EXPECTED_JSON);
+    for (const field of ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"]) if (contracts[field] !== expected[field]) throw new Error("Original release checksums differ from authenticated broker.");
+  }
   const generated = generateStageBTfvars({
+    ...(checksumsFile ? { checksumsFile } : {}),
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     imageEvidenceBytes, imageEvidenceSignatureBytes,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
@@ -152,7 +163,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
   const verify = dependencies.verify;
   const verifyImageEvidence = dependencies.verifyImageEvidence;
   const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
-  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, publication));
+  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, { ...publication, recoveryApproval }));
   const validateCapabilityGraph = dependencies.validateCapabilityGraph || assertStageBDeploymentCapabilityGraph;
   const readStageATerraformSource = dependencies.readStageATerraformSource || (() => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"));
   const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));

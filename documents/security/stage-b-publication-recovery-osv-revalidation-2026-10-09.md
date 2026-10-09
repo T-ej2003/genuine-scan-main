@@ -4,8 +4,10 @@ The Stage-B executable, test, and package-script changes invalidate the prior ex
 
 Fresh production browser compilation and closure inspection covered 204 packages and excluded braces. Backend lockfile and existing worker/server runtime packaging checks also exclude it. The sole locked braces instance remains development-only. This correction changes no dependency lockfiles, Tailwind content patterns, application inputs, or runtime packaging; it introduces no attacker-controlled build pattern. The existing non-runtime conclusion therefore remains valid.
 
-Canonical reviewed executable-input fingerprint: `2ba1e45c07c140e583e6f4aa0463443287801faa6ec88a6c1355a0517a810053`. Only that fingerprint changes in the acceptance record; owner, advisory, rationale, and exclusive expiry remain unchanged. Validate with `node scripts/check-osv-runtime.mjs <unfiltered-osv-report.json>`.
+Canonical reviewed executable-input fingerprint: `744ed1697a663f4dfb0b93a11d478982caafa65445b7ce339cb72a261a765d4b`. Only that fingerprint changes in the acceptance record; owner, advisory, rationale, and exclusive expiry remain unchanged. Validate with `node scripts/check-osv-runtime.mjs <unfiltered-osv-report.json>`.
 
 The administrator-report recovery binding correction was re-reviewed against this final fingerprint; the freshly rebuilt browser closure still excludes braces.
 
 Original-release approval recovery now reads authenticated historical task templates and carries their hashes through approval evidence and preparation. The public-operation regression uses different original and descendant templates and verifies that the original contracts remain bound throughout publication, cutover, closure and approval. No runtime dependencies or build patterns changed.
+
+Recovery readiness also materializes the original committed checksum bytes, checks their digests against the authenticated broker configuration, and supplies them through the existing tfvars generator checksum-file input. The descendant checkout cannot substitute its contracts.
