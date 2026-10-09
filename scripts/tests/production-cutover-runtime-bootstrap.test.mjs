@@ -362,6 +362,7 @@ test("public descendant preflight preserves original contracts through approval 
       return [taskMap[mode], { taskDefinition: { ...renderStageBTaskDefinition(kind, { imageReleaseSha: imagesSource, ...contracts, ...stageBTaskDefinitionBindings(release), [`${kind}Image`]: image(kind === 'canary' ? 'rls-canary' : 'rls-executor'), ...(kind === 'executor' ? { mode } : {}) }, release), taskDefinitionArn: taskMap[mode], revision: 1, status: 'ACTIVE' } }];
     }));
     const keyId = '00000000-0000-0000-0000-000000000001', keyArn = `arn:aws:kms:eu-west-2:368992683803:key/${keyId}`;
+    const fixtureVpcId = productionStageAState().resources.find(resource => resource.type === 'aws_vpc_endpoint').instances[0].attributes.vpc_id;
     let registerCalls = 0;
     const aws = args => {
       const operation = `${args[0]}:${args[1]}`;
@@ -369,9 +370,9 @@ test("public descendant preflight preserves original contracts through approval 
       if (operation === 'lambda:get-alias') return JSON.stringify(r.context.alias);
       if (operation === 'lambda:get-function-configuration') return JSON.stringify({ ...JSON.parse(readFileSync(new URL('./fixtures/production-stage-b-broker-get-function-configuration.json', import.meta.url))), Version: '13', CodeSha256: Buffer.from(hash(readFileSync(publishedPackage.package.path)), 'hex').toString('base64'), FunctionArn: `${STAGE_B.brokerFunctionArn}:13`, Environment: { Variables: variables } });
       if (operation === 'ecs:describe-task-definition') { const arn = args[args.indexOf('--task-definition') + 1]; assert.ok(definitions[arn]); return JSON.stringify(definitions[arn]); }
-      if (operation === 'ec2:describe-subnets') return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: 'vpc-fixture', State: 'available', MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? 'b' : 'a'}`, CidrBlock: `10.0.${index}.0/24` })) });
-      if (operation === 'ec2:describe-route-tables') return JSON.stringify({ RouteTables: [{ RouteTableId: 'rtb-12345678', VpcId: 'vpc-fixture', Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: '0.0.0.0/0', NatGatewayId: 'nat-12345678' }] }] });
-      if (operation === 'ec2:describe-security-groups') return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map(GroupId => ({ GroupId, VpcId: 'vpc-fixture' })) });
+      if (operation === 'ec2:describe-subnets') return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId, index) => ({ SubnetId, VpcId: fixtureVpcId, State: 'available', MapPublicIpOnLaunch: false, AvailabilityZone: `eu-west-2${index ? 'b' : 'a'}`, CidrBlock: `10.0.${index}.0/24` })) });
+      if (operation === 'ec2:describe-route-tables') return JSON.stringify({ RouteTables: [{ RouteTableId: 'rtb-12345678', VpcId: fixtureVpcId, Associations: [{ Main: true }], Routes: [{ DestinationCidrBlock: '0.0.0.0/0', NatGatewayId: 'nat-12345678' }] }] });
+      if (operation === 'ec2:describe-security-groups') return JSON.stringify({ SecurityGroups: [STAGE_B.databaseSecurityGroupId, STAGE_B.executorSecurityGroupId].map(GroupId => ({ GroupId, VpcId: fixtureVpcId })) });
       if (operation === 'ecs:describe-clusters') return JSON.stringify({ clusters: [{ clusterArn: STAGE_B.clusterArn, status: 'ACTIVE' }] });
       if (operation === 'rds:describe-db-instances') return JSON.stringify({ DBInstances: [{ DBInstanceStatus: 'available', DBSubnetGroup: { Subnets: STAGE_B.privateSubnetIds.map(SubnetIdentifier => ({ SubnetIdentifier })) } }] });
       if (operation === 'kms:describe-key') return JSON.stringify({ KeyMetadata: { Arn: keyArn, KeyId: keyId, Description: ROOT_ATTESTATION_KEY_DESCRIPTION, KeyUsage: 'SIGN_VERIFY', KeySpec: 'RSA_3072', KeyState: 'Enabled', Enabled: true, KeyManager: 'CUSTOMER', Origin: 'AWS_KMS', MultiRegion: false } });
