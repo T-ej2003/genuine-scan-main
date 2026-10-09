@@ -97,6 +97,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
       || preflight.bindingReportSha256 !== undefined && preflight.bindingReportSha256 !== bindingReportSha256) {
     throw new Error("Release-deployer preflight is not bound to the selected canonical tfvars and binding report.");
   }
+  if (preflight.recoveryTooling && !recoveryApproval) throw new Error("Approval recovery report requires authenticated recovery context.");
   if (recoveryApproval && (!exact(preflight.recoveryTooling, { sourceSha: toolingSha, treeSha256: recoveryApproval.tooling.treeSha256, releaseSourceSha: sourceSha,
     publicationResultSha256: recoveryApproval.publicationResultSha256, closureResultSha256: recoveryApproval.closureResultSha256 }))) throw new Error("Release preflight is not bound to the authenticated broker recovery.");
   const live = preflight.stageBApprovalLiveObservation;

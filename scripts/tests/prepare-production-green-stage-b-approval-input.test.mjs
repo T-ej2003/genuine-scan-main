@@ -513,3 +513,8 @@ test("approval preparation rejects a live historical worker without its signed h
 test('approval collection rejects caller-supplied recovery identity even for a valid release label', () => {
   assert.throws(() => evidence({ recoveryApproval: { sourceSha: releaseSha, tooling: { sourceSha: 'd'.repeat(40), treeSha256: digest('e') } } }), /unauthenticated/);
 });
+
+
+test("approval collection rejects recovery-labelled preflight when native recovery context is omitted", () => {
+  assert.throws(() => evidence({ preflight: { recoveryTooling: { sourceSha: 'd'.repeat(40) } } }), /Approval recovery report requires authenticated/);
+});

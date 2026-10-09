@@ -240,6 +240,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const signature = JSON.parse(administratorSignatureBytes);
     const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
     (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
+    if (adminReport.recoveryTooling && !recoveryBinding) throw new Error("Administrator recovery report requires authenticated recovery context.");
     if (recoveryBinding && canonicalizeJson(adminReport.recoveryTooling) !== canonicalizeJson(recoveryBinding)) throw new Error("Administrator report differs from authenticated broker recovery.");
     const imageAuthorizationFile = dependencies.readImageAuthorization
       ? dependencies.readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha)

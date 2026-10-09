@@ -174,6 +174,9 @@ test('approval recovery authenticates the native terminal handoff without rewrit
         ? /Authenticated original-release image boundary/ : /Administrator report differs/);
     }
     assert.equal(signatureChecks, 4);
+    const ordinaryCheckout = () => ({ toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, porcelainStatus: '' });
+    assert.throws(() => runProductionPreflightCli(releaseArgv, { ...releaseDependencies, recoveryApproval: undefined, readProtectedMainCheckout: ordinaryCheckout }), /Administrator recovery report requires authenticated/);
+
     const attestArgv = ['--source-sha', sourceSha, '--administrator-report-sha256', 'a'.repeat(64), '--release-preflight-report', reportPath,
       '--output', path.join(directory, 'attestation.json'), '--signature-output', path.join(directory, 'attestation.signature.json')];
     const attestDependencies = { ...dependencies, sign: (value, { reportBytes }) => signPermissionReport(value, { now: now.toISOString(), reportBytes, sign: () => 'AQ==' }) };
@@ -186,6 +189,9 @@ test('approval recovery authenticates the native terminal handoff without rewrit
     const attested = await runReleasePreflightCheckerTrustAttestationCli(attestArgv, attestDependencies);
     assert.equal(attested.status, 'attested');
     assert.equal(JSON.parse(fs.readFileSync(attested.attestationPath)).sourceSha, sourceSha);
+    assert.throws(() => runReleasePreflightCheckerTrustAttestationCli([...attestArgv.slice(0, 7), path.join(directory, 'ordinary.json'), '--signature-output', path.join(directory, 'ordinary.signature.json')],
+      { ...attestDependencies, recoveryApproval: undefined, readProtectedMainCheckout: ordinaryCheckout }), /Checker-trust recovery report requires authenticated/);
+
     await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, { ...attestDependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
 
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }

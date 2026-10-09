@@ -115,6 +115,7 @@ function attest(argv, dependencies) {
   if (path.dirname(outputPath) !== path.dirname(signaturePath) || outputPath === signaturePath) throw new Error("Release-preflight checker-trust attestation outputs must be distinct files in one private directory.");
   const reportBytes = readStageBPrivateFileBytes({ filePath: reportPath, repositoryRoot: root, label: "Release-preflight checker-trust evidence" }).bytes;
   const report = parse(reportBytes, "Release-preflight report");
+  if (report.recoveryTooling && !recovery) throw new Error("Checker-trust recovery report requires authenticated recovery context.");
   if (recovery && canonicalizeJson(report.recoveryTooling) !== canonicalizeJson({ ...recovery.tooling, releaseSourceSha: sourceSha,
     publicationResultSha256: recovery.publicationResultSha256, closureResultSha256: recovery.closureResultSha256 })) throw new Error('Checker-trust report differs from authenticated broker recovery.');
   const attestation = buildReleasePreflightCheckerTrustAttestation({ report, reportBytes, sourceSha, administratorReportSha256 });
