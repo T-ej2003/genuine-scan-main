@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { runReleasePreflightCheckerTrustAttestationCli } from '../aws/production-release-preflight-checker-attestation.mjs';
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from '../aws/production-checker-chain-contract.mjs';
+import { signPermissionReport } from '../aws/validate-production-green-stage-b-permissions.mjs';
 import { runProductionPreflightCli } from '../aws/run-production-green-stage-b-preflight.mjs';
 import { ready, sourceSha, now, configuration, authorization as signFixture } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerAliasCas, reconcileBrokerAlias, authenticateBrokerRecoveryApproval, isAuthenticatedBrokerRecoveryApproval } from '../aws/stage-b-staged-broker.mjs';
@@ -151,6 +157,38 @@ test('approval recovery authenticates the native terminal handoff without rewrit
     assert.throws(() => runProductionPreflightCli(argv, { ...dependencies, readProtectedMainCheckout: () => ({ ...read(), ...contradiction }) }), /clean protected-main/);
   }
   assert.throws(() => runProductionPreflightCli(argv, { ...dependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-recovery-admin-'));
+  try {
+    const reportPath = path.join(directory, 'administrator.json'), signaturePath = path.join(directory, 'signature.json');
+    fs.writeFileSync(signaturePath, '{}');
+    const binding = { ...tooling, releaseSourceSha: sourceSha, publicationResultSha256: context.publicationResultSha256, closureResultSha256: context.closureResultSha256 };
+    const releaseArgv = ['--identity', 'release-deployer', '--tooling-sha', sourceSha, '--output', path.join(directory, 'preflight.json'),
+      '--administrator-report', reportPath, '--administrator-report-signature', signaturePath,
+      '--image-authorization', '/private/tmp/not-read.json', '--image-authorization-sha256', 'a'.repeat(64)];
+    let signatureChecks = 0;
+    const releaseDependencies = { ...dependencies, caller: () => 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test',
+      verify: () => { signatureChecks++; } };
+    for (const recoveryTooling of [undefined, { ...binding, sourceSha: 'f'.repeat(40) }, { ...binding, closureResultSha256: 'f'.repeat(64) }, binding]) {
+      fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling }));
+      assert.throws(() => runProductionPreflightCli(releaseArgv, releaseDependencies), recoveryTooling === binding
+        ? /Authenticated original-release image boundary/ : /Administrator report differs/);
+    }
+    assert.equal(signatureChecks, 4);
+    const attestArgv = ['--source-sha', sourceSha, '--administrator-report-sha256', 'a'.repeat(64), '--release-preflight-report', reportPath,
+      '--output', path.join(directory, 'attestation.json'), '--signature-output', path.join(directory, 'attestation.signature.json')];
+    const attestDependencies = { ...dependencies, sign: (value, { reportBytes }) => signPermissionReport(value, { now: now.toISOString(), reportBytes, sign: () => 'AQ==' }) };
+    for (const recoveryTooling of [undefined, { ...binding, closureResultSha256: 'f'.repeat(64) }]) {
+      fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling }), { mode: 0o600 }); fs.chmodSync(reportPath, 0o600);
+      await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, attestDependencies), /Checker-trust report differs/);
+    }
+    fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling: binding, status: 'ready-for-plan', sourceSha, administratorReportSha256: 'a'.repeat(64),
+      checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN } }));
+    const attested = await runReleasePreflightCheckerTrustAttestationCli(attestArgv, attestDependencies);
+    assert.equal(attested.status, 'attested');
+    assert.equal(JSON.parse(fs.readFileSync(attested.attestationPath)).sourceSha, sourceSha);
+    await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, { ...attestDependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
+
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   context.tooling.sourceSha = 'f'.repeat(40);
   assert.equal(isAuthenticatedBrokerRecoveryApproval(context), false);
   const altered = structuredClone(input); altered.result.sourceSha = tooling.sourceSha;

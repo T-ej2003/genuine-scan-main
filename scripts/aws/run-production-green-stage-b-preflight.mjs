@@ -239,12 +239,13 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
     const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
+    if (recoveryBinding && canonicalizeJson(adminReport.recoveryTooling) !== canonicalizeJson(recoveryBinding)) throw new Error("Administrator report differs from authenticated broker recovery.");
     const imageAuthorizationFile = dependencies.readImageAuthorization
       ? dependencies.readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha)
       : readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha, (args) => releaseRun(args), verifyImageEvidence || undefined);
     if (imageAuthorizationFile.fileSha256 !== value(argv, "--image-authorization-sha256")) throw new Error("Current image authorization file SHA-256 does not match the supplied binding.");
     if (dependencies.readImageAuthorization) assertImageAuthorization(imageAuthorizationFile.authorization, sourceSha, { verifyImageEvidence: verifyImageEvidence || (() => true) });
-    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     assertStageBAdministratorEvidenceIdentity(adminReport, { sourceSha, imageAuthorization: imageAuthorizationFile.authorization, imageAuthorizationFileSha256: imageAuthorizationFile.fileSha256 });
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");

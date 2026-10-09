@@ -86,6 +86,17 @@ export function authenticateReleasePreflightCheckerTrustEvidence({ report, repor
 }
 
 export function runReleasePreflightCheckerTrustAttestationCli(argv = process.argv.slice(2), dependencies = {}) {
+  if (!argv.includes('--broker-recovery') && !dependencies.recoveryApproval) return attest(argv, dependencies);
+  // Load the native recovery graph after initialization; its trust modules also consume this attestation module.
+  return Promise.all([import('./stage-b-staged-broker-executor.mjs'), import('./stage-b-staged-broker.mjs')]).then(async ([native, runtime]) => {
+    const recoveryApproval = dependencies.recoveryApproval || await native.readBrokerRecoveryApproval({ filePath: required(argv, '--broker-recovery'), expectedSha256: required(argv, '--broker-recovery-sha256') });
+    if (!runtime.isAuthenticatedBrokerRecoveryApproval(recoveryApproval)) throw new Error('Checker-trust attestation recovery is unauthenticated.');
+    return attest(argv, { ...dependencies, recoveryApproval });
+  });
+}
+
+function attest(argv, dependencies) {
+  const recovery = dependencies.recoveryApproval;
   const commandRun = dependencies.commandRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default" });
   const caller = dependencies.caller || (() => JSON.parse(commandRun(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"])).Arn);
   const sign = dependencies.sign || createPermissionReportKmsSigner({ run: commandRun });
@@ -94,7 +105,9 @@ export function runReleasePreflightCheckerTrustAttestationCli(argv = process.arg
   const administratorReportSha256 = required(argv, "--administrator-report-sha256");
   if (!SHA40.test(sourceSha) || !SHA256.test(administratorReportSha256)) throw new Error("Release-preflight checker-trust attestation source bindings are invalid.");
   const protectedMain = readProtectedMainCheckout();
-  if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Release-preflight checker-trust attestation requires the exact clean protected-main source.");
+  const toolingSha = recovery?.tooling.sourceSha || sourceSha;
+  if (recovery && recovery.sourceSha !== sourceSha) throw new Error('Checker-trust attestation release differs from completed recovery.');
+  if (!protectedMain || protectedMain.toolingSha !== toolingSha || protectedMain.currentHead !== toolingSha || protectedMain.originMainHead !== toolingSha || protectedMain.porcelainStatus) throw new Error("Release-preflight checker-trust attestation requires the exact clean protected-main source.");
   if (String(caller() || "") !== RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN) throw new Error("Only the exact root administrator preflight signer may attest release-preflight checker trust.");
   const reportPath = required(argv, "--release-preflight-report");
   const outputPath = assertStageBArtifactPath({ artifactPath: required(argv, "--output"), repositoryRoot: root, label: "Release-preflight checker-trust attestation", allowExisting: false });
@@ -102,6 +115,8 @@ export function runReleasePreflightCheckerTrustAttestationCli(argv = process.arg
   if (path.dirname(outputPath) !== path.dirname(signaturePath) || outputPath === signaturePath) throw new Error("Release-preflight checker-trust attestation outputs must be distinct files in one private directory.");
   const reportBytes = readStageBPrivateFileBytes({ filePath: reportPath, repositoryRoot: root, label: "Release-preflight checker-trust evidence" }).bytes;
   const report = parse(reportBytes, "Release-preflight report");
+  if (recovery && canonicalizeJson(report.recoveryTooling) !== canonicalizeJson({ ...recovery.tooling, releaseSourceSha: sourceSha,
+    publicationResultSha256: recovery.publicationResultSha256, closureResultSha256: recovery.closureResultSha256 })) throw new Error('Checker-trust report differs from authenticated broker recovery.');
   const attestation = buildReleasePreflightCheckerTrustAttestation({ report, reportBytes, sourceSha, administratorReportSha256 });
   const attestationBytes = Buffer.from(`${JSON.stringify(attestation, null, 2)}\n`);
   const signature = sign(attestation, { reportBytes: attestationBytes });
@@ -115,4 +130,4 @@ export function runReleasePreflightCheckerTrustAttestationCli(argv = process.arg
   return { status: "attested", attestationPath: outputPath, attestationSha256: sha256(attestationBytes), signaturePath, signatureSha256: sha256(signatureBytes), signerArn: RELEASE_PREFLIGHT_CHECKER_TRUST_ATTESTATION_SIGNER_ARN, keyArn: PERMISSION_REPORT_SIGNING_KEY_ARN, signingAlgorithm: PERMISSION_REPORT_SIGNING_ALGORITHM };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) process.stdout.write(`${JSON.stringify(runReleasePreflightCheckerTrustAttestationCli())}\n`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) process.stdout.write(`${JSON.stringify(await runReleasePreflightCheckerTrustAttestationCli())}\n`);
