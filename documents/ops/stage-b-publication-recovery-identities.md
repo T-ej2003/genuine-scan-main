@@ -100,7 +100,7 @@ Protected main is `931bf86391d57cd0489162f8ef7b73f1896a42aa`; its tree exactly m
 | Fresh QR selector and GitHub artifact | Operational B | B | Expired evidence can be regenerated without relabelling A |
 | Rotation bootstrap/config/root-drop | Payload A, explicit recovery references | B | Both identities must authenticate; inventory reuse remains exact |
 | Release Gate rotation execution | Deployment/rotation A | Clean protected-main B | Existing image authorization and deployment guards preserved |
-| Overlap receipt / verification | Receipt payload A | Workflow, job, artifact and environment approval B | Native authenticated A→B context mandatory |
+| Overlap receipt / verification | Receipt payload A | Workflow, job and artifact B; environment authority describes release A | Native authenticated A→B context mandatory |
 | Initial overlap and later normal release | Their independently authenticated release identities | Exact governed source | No automatic release dispatch or production proof inferred from tests |
 
 New main changes Docker base identities and generated release contracts. They belong to B and cannot be substituted into v13's original release material. Future application image reuse must be decided by the canonical impact classifier; registry remediation does not authorize reuse of incompatible images.
