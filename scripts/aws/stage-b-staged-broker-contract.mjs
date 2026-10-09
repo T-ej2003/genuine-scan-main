@@ -18,6 +18,57 @@ const hash = value => assert.match(value || "", /^[a-f0-9]{64}$/);
 const version = value => assert.match(value || "", /^[1-9][0-9]*$/);
 const keys = (value, expected) => equal(Object.keys(value || {}).sort(), [...expected].sort(), "Unknown/missing staged broker fields");
 
+// The artifact source is immutable; this identity describes only its executing checkout.
+export function brokerExecutionCheckout(preparation) {
+  return preparation.recoveryTooling
+    ? { sourceSha: preparation.recoveryTooling.sourceSha, treeSha256: preparation.recoveryTooling.treeSha256 }
+    : { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 };
+}
+
+export function assertBrokerRecoveryTooling(value, preparation) {
+  keys(value, ['sourceSha', 'treeSha256', 'publicationResultSha256']);
+  assert.match(value.sourceSha || '', /^[a-f0-9]{40}$/); hash(value.treeSha256); hash(value.publicationResultSha256);
+  assert.notEqual(value.sourceSha, preparation.sourceSha);
+  assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose));
+  assert.equal(value.publicationResultSha256, brokerDigest(preparation.publication));
+  assert.equal(preparation.publication.sourceSha, preparation.sourceSha);
+}
+
+export function assertBrokerOutputReconciliation(value, preparation) {
+  keys(value, ['sourceSha', 'publicationResultSha256', 'targetSha256', 'state', 'refreshReportPath', 'refreshReportSha256', 'bindingReportPath', 'bindingReportSha256', 'outputChanges']);
+  assert.equal(value.sourceSha, preparation.sourceSha);
+  assert.equal(value.publicationResultSha256, brokerDigest(preparation.publication));
+  assert.equal(value.targetSha256, brokerDigest(preparation.target)); equal(value.state, preparation.state);
+  for (const name of ['refreshReportSha256', 'bindingReportSha256']) hash(value[name]);
+  for (const name of ['refreshReportPath', 'bindingReportPath']) assert.equal(typeof value[name], 'string');
+  assert.ok(Array.isArray(value.outputChanges) && value.outputChanges.length > 0);
+  assert.equal(new Set(value.outputChanges.map(o => o.name)).size, value.outputChanges.length);
+  for (const output of value.outputChanges) {
+    keys(output, ['name', 'before', 'after']); assert.equal(typeof output.name, 'string');
+    assert.notEqual(brokerDigest(output.before), brokerDigest(output.after));
+  }
+}
+
+export function assertBrokerOutputChanges(plan, preparation, { completed = false } = {}) {
+  const outputs = plan.output_changes || {}, evidence = preparation.outputReconciliation;
+  if (evidence) assertBrokerOutputReconciliation(evidence, preparation);
+  const expected = new Map((evidence?.outputChanges || []).map(o => [o.name, o]));
+  const changed = Object.entries(outputs).filter(([, o]) => canonicalJson(o.actions) !== '["no-op"]');
+  equal(changed.map(([name]) => name).sort(), completed ? [] : [...expected.keys()].sort(), 'Unapproved or missing reconciled output change');
+  for (const [name, output] of Object.entries(outputs)) {
+    const reviewed = expected.get(name);
+    if (reviewed) {
+      equal(output.before, completed ? reviewed.after : reviewed.before, 'Reconciliation predecessor mismatch');
+      equal(output.after, reviewed.after, 'Reconciliation successor mismatch');
+      equal(output.actions, completed ? ['no-op'] : ['update']);
+      assert.ok([undefined, false].includes(output.after_unknown));
+      assert.ok([undefined, false].includes(output.before_sensitive));
+      assert.ok([undefined, false].includes(output.after_sensitive));
+    } else { equal(output.actions, ['no-op']); equal(output.before, output.after, 'False output no-op'); }
+  }
+  for (const name of expected.keys()) assert.ok(Object.hasOwn(outputs, name), 'Missing reconciled output');
+}
+
 export function assertBrokerReleaseAuthorizationContext(value,preparation) {
  keys(value,['releaseId','phase','preparationReference','authorizationRound']);hash(value.releaseId);hash(value.preparationReference);
  const purposes={registration:'STAGE_B_TASK_REGISTRATION',pruning:'STAGE_B_BROKER_POLICY_PRUNING',policy:'STAGE_B_BROKER_POLICY_CONVERGENCE',publication:BROKER_PUBLICATION,cutover:BROKER_CUTOVER,closure:BROKER_STATE_REFRESH};
@@ -547,7 +598,7 @@ export function assertBrokerCutoverPlan(plan, preparation) {
   assert.equal(fn.change.after.version, preparation.target.version);
   assert.equal(fn.change.after.code_sha256, preparation.target.codeSha256);
   equal(fn.change.after.environment?.[0]?.variables, preparation.configuration);
-  assert.ok(Object.values(plan.output_changes || {}).every(o => canonicalJson(o.actions) === '["no-op"]'), "Unapproved cutover output change");
+  assertBrokerOutputChanges(plan, preparation);
 }
 
 export function brokerTargetIdentity(configuration, packageSha256) {
@@ -684,7 +735,10 @@ export function assertBrokerPreparation(p) {
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
   if (p.schemaVersion === 3) fields.push('prerequisiteChain', 'registrationPredecessor', 'registrationPolicyPredecessor');
   if (p.purpose === BROKER_STATE_REFRESH) fields.push('cutover');
+  for (const name of ['recoveryTooling', 'outputReconciliation']) if (p[name] !== undefined) fields.push(name);
   keys(p, fields);
+  if (p.recoveryTooling) assertBrokerRecoveryTooling(p.recoveryTooling, p);
+  if (p.outputReconciliation) { assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(p.purpose)); assertBrokerOutputReconciliation(p.outputReconciliation, p); }
   assert.ok([1, 2, 3].includes(p.schemaVersion)); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, 'STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose));
   if (p.purpose === BROKER_STATE_REFRESH) {
     keys(p.cutover, ['preparationSha256', 'authorizationSha256', 'resultSha256']);
@@ -892,7 +946,7 @@ export function assertBrokerRefreshPlan(plan, preparation, aliasAfter) {
   assert.equal(c.change.after.function_version, preparation.target.version);
   equal({ ...c.change.before, function_version: preparation.target.version }, c.change.after, "Unapproved state drift");
   equal(c.change.after_unknown || {}, {});
-  assert.ok(!Object.values(plan.output_changes || {}).some(o => canonicalJson(o.actions) !== '["no-op"]'), "Unmodeled output drift");
+  assertBrokerOutputChanges(plan, preparation);
 }
 
 export function assertBrokerClosurePlan(plan, preparation) {
@@ -912,5 +966,5 @@ export function assertBrokerClosurePlan(plan, preparation) {
   assert.equal(alias.change.after.function_version, preparation.target.version);
   assert.equal(alias.change.after.arn, preparation.alias.AliasArn);
   equal(fn.change.after.environment?.[0]?.variables, preparation.configuration);
-  assert.ok(!Object.values(plan.output_changes || {}).some(o => canonicalJson(o.actions) !== '["no-op"]'));
+  assertBrokerOutputChanges(plan, preparation, { completed: true });
 }

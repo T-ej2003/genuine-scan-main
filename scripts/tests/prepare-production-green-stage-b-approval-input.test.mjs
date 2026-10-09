@@ -92,7 +92,7 @@ function signedPreflightTrust(reportValue = preflight(), source = releaseSha) {
 function evidence(overrides = {}) {
   const selectedPreflight = { ...preflight(overrides.preflight), stageBApprovalLiveObservation: live(overrides.live) };
   const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || releaseSha);
-  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, ...(overrides.historical || {}) }).evidence;
+  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, ...(overrides.historical || {}), ...(overrides.recoveryApproval ? { recoveryApproval: overrides.recoveryApproval } : {}) }).evidence;
 }
 
 test("approval-input authenticates the release runner before root-attestation verification", async () => {
@@ -508,4 +508,8 @@ test("approval preparation rejects a live historical worker without its signed h
   const { verifyHistoricalRuntimeHandoff } = await import("../aws/verify-production-historical-runtime-handoff.mjs");
   const fixture = historicalRuntimeFixture();
   assert.throws(() => verifyHistoricalRuntimeHandoff({ state: fixture.state, reader: fixture.reader, sourceSha: fixture.release }), /signed Stage B evidence handoff/);
+});
+
+test('approval collection rejects caller-supplied recovery identity even for a valid release label', () => {
+  assert.throws(() => evidence({ recoveryApproval: { sourceSha: releaseSha, tooling: { sourceSha: 'd'.repeat(40), treeSha256: digest('e') } } }), /unauthenticated/);
 });

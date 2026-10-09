@@ -4,11 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { STAGE_B } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, brokerDigest, brokerTargetIdentity, assertBrokerAuthorization, assertBrokerClosurePlan, prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, brokerExecutionCheckout, assertBrokerPreparation, BROKER_CENSUS, brokerDigest, brokerTargetIdentity, assertBrokerAuthorization, assertBrokerClosurePlan, prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
-import { readStagedBrokerReceipt, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, normalizeBrokerAlias } from './stage-b-staged-broker-executor.mjs';
+import { readStagedBrokerReceipt, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, normalizeBrokerAlias, assertReceiptBoundGitAncestry } from './stage-b-staged-broker-executor.mjs';
 import { readStagedBrokerPrerequisites } from './stage-b-staged-broker-observations.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, readStageBTerraformStateIdentity } from './stage-b-terraform-backend-contract.mjs';
+import { readStageBProtectedMainCheckout } from './stage-b-deployment-identity.mjs';
+import { deriveStageBToolingInputTreeSha256 } from './validate-stage-b-image-reuse.mjs';
+import { fileURLToPath } from 'node:url';
 import { stateHash, assertProductionComponentDeploymentState, componentDeploymentProvenance } from './production-component-deployment-state.mjs';
 
 const verified = new WeakSet();
@@ -26,6 +29,7 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   const separate=Object.hasOwn(handoff,'closure');
   assert.deepEqual(Object.keys(handoff).sort(), ['authorization', 'casResult', ...(separate?['closure']:[]), 'preparation', 'record'].sort());
   const { preparation: p, authorization: auth, casResult: cas, record, closure } = structuredClone(handoff);
+  assertBrokerPreparation(p);
   assert.equal(p.sourceSha, sourceSha); assert.equal(p.purpose, BROKER_CUTOVER);
   const pubHash = await assertBrokerAuthorization(pubAuth, pub, { verify: deps.verifyAuthorization, now: new Date(p.publication.authorizedAt) });
   equal(await deps.readReceipt(pubHash, 'PUBLISHED'), p.publication);
@@ -61,7 +65,9 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   assertBrokerClosurePlan(record.closurePlan, p);
   equal(record.target, p.target); equal(record.alias, cas.alias);
   const revalidate = async () => {
-    equal(await deps.readCheckout(), { sourceSha, treeSha256: p.treeSha256 });
+    const checkout = await deps.readCheckout();
+    equal(checkout, brokerExecutionCheckout(p));
+    if (p.recoveryTooling) await deps.authenticateRecoveryTooling(p, checkout);
     equal(await deps.readStateIdentity(), record.stateAfter, 'Reconciled Terraform state changed');
     equal(await deps.getAlias(), cas.alias, 'Terminal alias changed');
     equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -101,6 +107,14 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
   };
   return {
     verifyAuthorization: kms.verify, readCheckout,
+    authenticateRecoveryTooling: (p, checkout) => {
+      const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+      const observed = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
+      assert.equal(observed.currentHead, observed.originMainHead);
+      assert.equal(deriveStageBToolingInputTreeSha256(checkout.sourceSha), checkout.treeSha256);
+      assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
+      assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: checkout.sourceSha, cwd: root });
+    },
     readSource: sourceSha => readStagedBrokerSourceAuthority({ run, sourceSha, directory }),
     readReceipt: (id, status, expected) => readStagedBrokerReceipt({ run, id, status, directory, expected }),
     readStateIdentity: () => readStageBTerraformStateIdentity(run),
@@ -128,7 +142,7 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
 }
 export async function readStagedBrokerClosure({ sourceSha, run, readCheckout }) {
   const deps = {};
-  for (const name of ['verifyAuthorization', 'readCheckout', 'readSource', 'readReceipt', 'readStateIdentity', 'getAlias', 'getVersion', 'readPrerequisites', 'authenticateState']) deps[name] = async (...args) => {
+  for (const name of ['verifyAuthorization', 'readCheckout', 'readSource', 'readReceipt', 'readStateIdentity', 'getAlias', 'getVersion', 'readPrerequisites', 'authenticateState', 'authenticateRecoveryTooling']) deps[name] = async (...args) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-closure-')); fs.chmodSync(directory, 0o700);
     try { return await createStagedBrokerClosureReader({ run, readCheckout, directory })[name](...args); }
     finally { fs.rmSync(directory, { recursive: true }); }

@@ -1,4 +1,6 @@
 import { resolveHistoricalRuntimeAuthority } from "./verify-production-historical-runtime-handoff.mjs";
+import { normalizeBrokerAlias } from "./stage-b-staged-broker-executor.mjs";
+import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-staged-broker.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,8 +39,10 @@ function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinit
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
 
-export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding, historicalRuntimeEvidence, verifyHistoricalRuntimeSignature, historicalRuntimeState, historicalRuntimeReader } = {}) {
+export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding, historicalRuntimeEvidence, verifyHistoricalRuntimeSignature, historicalRuntimeState, historicalRuntimeReader, recoveryApproval } = {}) {
   if (!SHA.test(sourceSha || "") || !CHECKER.test(checkerIdentity || "")) throw new Error("Approval evidence source or checker identity is invalid.");
+  if (recoveryApproval && (!isAuthenticatedBrokerRecoveryApproval(recoveryApproval) || recoveryApproval.sourceSha !== sourceSha)) throw new Error("Broker recovery approval context is unauthenticated.");
+  const toolingSha = recoveryApproval?.tooling.sourceSha || sourceSha;
   validateImageAuthorization(imageAuthorization, sourceSha, { now, verifyImageEvidence });
   const imageEvidenceSha256 = imageAuthorization.imageEvidenceSha256;
   const capturedTfvars = readTfvarsBinding
@@ -93,10 +97,13 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
       || preflight.bindingReportSha256 !== undefined && preflight.bindingReportSha256 !== bindingReportSha256) {
     throw new Error("Release-deployer preflight is not bound to the selected canonical tfvars and binding report.");
   }
+  if (recoveryApproval && (!exact(preflight.recoveryTooling, { sourceSha: toolingSha, treeSha256: recoveryApproval.tooling.treeSha256, releaseSourceSha: sourceSha,
+    publicationResultSha256: recoveryApproval.publicationResultSha256, closureResultSha256: recoveryApproval.closureResultSha256 }))) throw new Error("Release preflight is not bound to the authenticated broker recovery.");
   const live = preflight.stageBApprovalLiveObservation;
   if (!live || typeof live !== "object" || Array.isArray(live)) throw new Error("Runtime broker approval requires post-creation authenticated live Stage B observations; PLAN_APPROVED is the separate authority for resource creation or replacement.");
   const brokerConfiguration = assertStageBBrokerLambdaConfiguration({ configuration: live.configuration, alias: live.alias, brokerPackageRawSha256: report.brokerPackageRawSha256 });
   const { broker, codeSha256: brokerCodeSha256 } = brokerConfiguration;
+  if (recoveryApproval && (!exact(normalizeBrokerAlias(live.alias), recoveryApproval.alias) || !exact({ ...brokerConfiguration.configuration, FunctionArn: brokerConfiguration.broker.resolvedVersionArn }, recoveryApproval.target.configuration))) throw new Error("Approval live broker differs from authenticated recovery closure.");
   const variables = live.configuration?.Environment?.Variables;
   if (variables?.BROKER_IMAGE_RELEASE_SHA !== imageAuthorization.imageReleaseSha) throw new Error("Live broker image release SHA does not match authenticated image authorization.");
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
@@ -121,6 +128,9 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
   const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: historicalRuntimeReader, sourceSha, now, verify: verifyHistoricalRuntimeSignature });
   const evidence = Object.freeze({
+    ...(recoveryApproval ? { recoveryTooling: Object.freeze({ sourceSha: toolingSha, treeSha256: recoveryApproval.tooling.treeSha256,
+      publicationResultSha256: recoveryApproval.publicationResultSha256, preparationSha256: recoveryApproval.preparationSha256,
+      closureResultSha256: recoveryApproval.closureResultSha256 }) } : {}),
     ...(historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256 } : {}),
     schemaVersion: STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION,
     producer: STAGE_B_APPROVAL_EVIDENCE_PRODUCER,
