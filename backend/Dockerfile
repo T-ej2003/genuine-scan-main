@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-bookworm-slim AS deps
+FROM public.ecr.aws/docker/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS deps
 
 WORKDIR /workspace/backend
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false
@@ -39,7 +39,7 @@ COPY shared ../shared
 RUN if [ "$RUN_VERIFY" = "true" ]; then npm test; else npm run build; fi \
   && npm prune --omit=dev --no-audit --no-fund
 
-FROM node:24-bookworm-slim AS runtime
+FROM public.ecr.aws/docker/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
 
 WORKDIR /app
 ARG GIT_SHA=unknown
@@ -96,7 +96,7 @@ USER node
 
 CMD ["/usr/local/bin/start-runtime.sh"]
 
-FROM node:24-bookworm-slim AS production-rls-executor
+FROM public.ecr.aws/docker/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS production-rls-executor
 
 WORKDIR /app
 ARG GIT_SHA=unknown

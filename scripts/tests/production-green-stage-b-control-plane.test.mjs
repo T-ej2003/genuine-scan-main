@@ -1,3 +1,4 @@
+import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -169,7 +170,7 @@ test("Stage B workflow and Docker targets keep the executor fixed and front-end 
   const dockerfile = fs.readFileSync("backend/Dockerfile", "utf8"); const dispatcher = fs.readFileSync(".github/workflows/production-green-stage-b-images.yml", "utf8");
   const workflow = fs.readFileSync(".github/workflows/production-green-stage-b-image-build.yml", "utf8");
   const publisher = fs.readFileSync("scripts/aws/publish-ecs-images.sh", "utf8");
-  assert.match(dockerfile, /FROM node:24-bookworm-slim AS production-rls-executor/); assert.match(dockerfile, /ENTRYPOINT \["node", "scripts\/production-full-rls-green-executor\.mjs"\]/);
+  assert.ok(dockerfile.includes(`FROM ${readApprovedImages().node.reference} AS production-rls-executor`)); assert.match(dockerfile, /ENTRYPOINT \["node", "scripts\/production-full-rls-green-executor\.mjs"\]/);
   assert.match(dockerfile, /scripts\/aws\/production-green-stage-b-contract\.mjs \.\/scripts\/production-green-stage-b-contract\.mjs/);
   assert.match(workflow, /rls:full-verify/); assert.match(workflow, /trivy-action/); assert.match(workflow, /cosign-idempotent-sign-and-attest\.sh"? attest/);
   assert.match(publisher, /IMAGE_TAG.*git rev-parse HEAD/); assert.match(publisher, /SOURCE_RELEASE_SHA/); assert.match(publisher, /npm run rls:full-verify/);

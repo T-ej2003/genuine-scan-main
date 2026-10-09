@@ -269,12 +269,21 @@ test("rotation evidence schema is canonical tooling-only input", () => {
 });
 
 test("tooling and deployment Compose inputs are image-reuse compatible while unknown paths remain fail-closed", () => {
-  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker/nginx-root-entrypoint.sh"];
+  const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker/nginx-root-entrypoint.sh"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });
   const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: files });
   assert.deepEqual(report.imageAffectingFiles, []);
   assert.equal(report.imageReuseCompatible, true);
   assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["unknown/security-scan-output.bin"] }), /unclassified/);
+});
+
+test("approved base image identities are explicit backend and frontend build inputs", () => {
+  const file = "docker/base-image-identities.json";
+  assert.equal(classifyStageBImageReusePath(file).imageAffecting, true);
+  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] });
+  assert.equal(report.imageReuseCompatible, false);
+  assert.equal(report.webPublicationRequired, true);
+  assert.throws(() => imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ["docker/unreviewed-image-identities.json"] }), /unclassified/);
 });
 
 test("the hosted prerequisite action is CI-only without trusting arbitrary actions", () => {

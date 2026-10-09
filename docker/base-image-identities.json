@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-09",
+  "publisher": "Docker Official Images",
+  "images": {
+    "alpine": {
+      "upstream": "alpine:3.22",
+      "reference": "public.ecr.aws/docker/library/alpine@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8",
+      "digest": "sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:3e9b4b680bfc9fb5269227cffbd6d42be39fbf7c0b908123913864aa4447e764",
+          "configDigest": "sha256:c83674e1999044d33d751661371b873539f47e5b5c5ca3320c7e0377acca6238",
+          "layerDigests": [
+            "sha256:53f8f5e03afd86ade91b7aa57a749f5a3d1419c113be5d8c10e7ee61bb5ab887"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:2e1a7aa4cbc4e9e5222bb4c24a839aa1a6170ea5492d644777ce7b178824e44f",
+          "configDigest": "sha256:e09dd31eab4f4aeaade69891673134f31880ef51c6ee514b0cea072df06d7547",
+          "layerDigests": [
+            "sha256:16fc4f52163f03cd2189c3d6a4b3f28a605cfb7919af64b3da4562cca69d2306"
+          ]
+        }
+      }
+    },
+    "nginx": {
+      "upstream": "nginx:1.29-alpine",
+      "reference": "public.ecr.aws/docker/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
+      "digest": "sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:3bcf852aed06467cf075c6105892e4d5a6ebbbafa0ce22d35062db9e90ddef4c",
+          "configDigest": "sha256:812d47f806db497c53f9b47e76bdab38bcf5d724c69d3986df5ee4336c210559",
+          "layerDigests": [
+            "sha256:6a0ac1617861a677b045b7ff88545213ec31c0ff08763195a70a4a5adda577bb",
+            "sha256:82736a35d0e7f1309edc13d09115410b81542cf8b91afff80deeace02b6f2f26",
+            "sha256:583599bb7d382e9e986a9ff65204981307bfa71670a29f4190eedae93c4858be",
+            "sha256:aee4e54b3865ee4d98545b6b49f9e8ab3b9b6ed114a2eafedc7a22e984ea5a68",
+            "sha256:781ff50d2644f74714c0d5a4ffa3447bbfd4b293cfb1dc6a637722ae24c89241",
+            "sha256:453da7dbc73e7338c4e201ec3f3c4a5f7751adbf5a6f127792c1cd001a780721",
+            "sha256:4a8b0b2a5b1937755263ac7ac4ee26db2906c13a5d70f1fb1875ba8e370cdd8f",
+            "sha256:612c0c1df4c55a0bf145f84df03cb28de505e6a52fb8e49c9da7b143fc00ad2d"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:7dd09a6c4f8cab9a2d2cb98fb39790f220e8bc2ea106b2cebde64b90405e0be8",
+          "configDigest": "sha256:7f7dcd27f920b22e980508bd5009b452e3d30b68c1041aa82e98e471d367db03",
+          "layerDigests": [
+            "sha256:d17f077ada118cc762df373ff803592abf2dfa3ddafaa7381e364dd27a88fca7",
+            "sha256:910c2a6cad6dc66c2058f7ef9d3dbb2dfded05a92d6ba4d7ebfc39fc3f74a1e3",
+            "sha256:a89d14ef5abe21dda8850d86d557cfa12c57a34bdcbe1c782fb851ec0c52b750",
+            "sha256:a96b658a00feada62d1fac10d4f49ff5da15023f0e29708ff59127bf7b0e03d2",
+            "sha256:10cbc192f783597fdf87a6e883b139c1b18228e8ee4313665026137d6a31077d",
+            "sha256:634f1d1ce0f777ef20ee9c698a3022175abda8611de03efb010559c7c411f23c",
+            "sha256:83fbf849ee89c6ab0fe1aadcf6a85dcc275070854ee1ca76ee88eb24d9f524af",
+            "sha256:662c8d6f66200adef0cf551c6decc52e200f0a30d11eb042708157398efaeb48"
+          ]
+        }
+      }
+    },
+    "node": {
+      "upstream": "node:24-bookworm-slim",
+      "reference": "public.ecr.aws/docker/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20",
+      "digest": "sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:51b1100cc2a83d370c6a60952e3f2989c8a43159d0e38586e090f3b3326efefd",
+          "configDigest": "sha256:470015c1ab1577c19efce2e80cdad4afd9c682cf8f4dcf3dccae5abfd9113397",
+          "layerDigests": [
+            "sha256:7fd1ebe418b5079d4aa36f416af9b143d127bc75b0155d71cb5fd559b5e04d39",
+            "sha256:517d640e32835287653c4b15eb5d9f6bcf48e103baea4f7e29bac937002f649b",
+            "sha256:11ffcabe0f772f0f1a9c80b4b290b5ec0de54f11c671f0fa10e5844f9b52d17a",
+            "sha256:1a0cf4b1ffc8dd659bb8c6e90471bc8fec24620e4fdb68bb2b6faa56154ae146",
+            "sha256:08489011619dfda982191cb9cc0418dc48ea3b1341588aeef534e4db0ab4d3d0"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:ba6b7d0ee561d9d49deb99e2b93c98632cc287b6cca1a6b18d66127054efa4dc",
+          "configDigest": "sha256:683727a317323c89635f1c9584c722c91dbfa0741cbfb9e2468162867aaf31f7",
+          "layerDigests": [
+            "sha256:c75f989a229d12b2d2613a5997de9ff3546f664c22da9248720033a2410220f6",
+            "sha256:49ac4e8e4295c8ee475ab0dff5e76277d9328670ecc925439122c1ba3f90b228",
+            "sha256:9e7afa9c9ea06b755c905f765b2d70c431dd5c00e88bc0810ab04b5ab49b69c5",
+            "sha256:c1a924fd4d24bc36aeda3ab83dc77c1e84a9c624e42b08ed33e9985744558059",
+            "sha256:4fafc9a89135b87d66ccaf8587cd7e44d65e717d06fb239c6fd4839e64678987"
+          ]
+        }
+      }
+    },
+    "postgres": {
+      "upstream": "postgres:18.4",
+      "reference": "public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+      "digest": "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:4cc13dede823cab4e05290c7fb3350fb4e599ecabd9b07e6706b5d5e8f5bc929",
+          "configDigest": "sha256:4b87d5343a0e499eea33b6c19ec152a3ed4a0d1a453eadd26ff415a406821a6e",
+          "layerDigests": [
+            "sha256:26c307b5e35a59ce911f5fde5b9458120ec8734e831ea2da5649a9ad14abfd3d",
+            "sha256:5db2b7edf527f081a260ecef821b440ed1c4e11b003317b2d298ca8a2b1feb38",
+            "sha256:130549402290405a478adedd2e14bf54504d90b21f8c1275ae05d89e93d139ba",
+            "sha256:8241f4a143196e6b132776cb3cced649a6a9aceb7c0025628e9b266c77c65ec6",
+            "sha256:a4dcdc0137d7e97a1ea0fb395989176aaa1802b3ac453bca048e97853649934d",
+            "sha256:d1052e262c2e9c5ae99c759fb374148dd8b27025560641fa26bd45a1d0fc14f8",
+            "sha256:39762d0b4bb22fb28e7a42cd8b9cca6a18447391cf4d0524b944ea9365dcd689",
+            "sha256:38639b9be6a64cea811b63317eba2e007bdbc35f4e3bc8dc98fb7d4d613d0b04",
+            "sha256:4e6c52c74256575fda337aee8275a7a5ceb3fc1d10379302280f77d972bb7a98",
+            "sha256:f51baa0c6c0d8a7c2d3c958365c33e840a7f9d04e5552956273bbcdbe83c3a04",
+            "sha256:88bb22edda9bcb522bc1fd99537f044db3ec9032c34b19c45185eb1d372ba7d3",
+            "sha256:f7d54729e84b7d110a2fe30a2207bd237acd7530fbfdabd1f828e6b69e7cdbed",
+            "sha256:f90dd111f2e536ce9f6ea373cc0019cd8c79de260096f01d300152d777a0c6b0"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:0826e5f2996099babb925e09fb72bf2c6eb5d187cfcae20aa9291af1612307e4",
+          "configDigest": "sha256:c14be09d80346e5d7716a191b61a60347be1783e177e52da118bcd40bf426f14",
+          "layerDigests": [
+            "sha256:1b7200988f192e72703c70486d494e2457935ac9b0f031ac09eb115b01a12d45",
+            "sha256:304ecb9cba6b8905c4345f2017a6ad0d586998f7dd5c6454466f816cdd1fcc17",
+            "sha256:f105ba8498e2a5f65b10cfa18d6705ffa5fe396fbbdc48d1ec881022670736f7",
+            "sha256:b344fba029d4f08f3bcb7239b4e8687daf58685d13ebe7af9fb58549e53ab788",
+            "sha256:7282707cef8d52b1ed7b248c033306b72707de9585e90a0625bea1c8348876e2",
+            "sha256:e0dd5fc435a2e66da4f43f2757ebafa813f7c9ce7a5671e3860811facd840b72",
+            "sha256:22e29ee9c6935bf6ec4343e513c410fdf1bad9d97825e958545c2020c8b0a6a6",
+            "sha256:e464afbbf96ea41b337023f194df01bdda29897a75720e6c37acb3f002cc2142",
+            "sha256:3eda280140f2aa8e700524bf1db86ea0a86e448e17eb2c22e6437fd8e2dcc65e",
+            "sha256:6da0d4578fc4391ab5d930e943ae67ff508ded7902ae8585eb88326eb218ad3c",
+            "sha256:d1a2ded159fa899a1aa01e788ef59daf86df176de9b2391ad6bd1356af94cb96",
+            "sha256:a5e6124e48e150d6c1e1f03e5b96457d1b20d51f615d665141f089703c7939f0",
+            "sha256:759b7aec44327e7b5f920ad99156c456b3b523ea80eb6bdc68a5fab0700d18b1"
+          ]
+        }
+      }
+    },
+    "postgres-canary": {
+      "upstream": "postgres:18.4@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a",
+      "reference": "public.ecr.aws/docker/library/postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a",
+      "digest": "sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:d93de42662696f278fb34354b06fdaa90ad7ca3106d6f72fbd01d16da006d2cf",
+          "configDigest": "sha256:1bf3d6960db467e87a506daef30feb41fecc23b7c5f96b157e873059f2ffb50a",
+          "layerDigests": [
+            "sha256:062e450697faa5f02a3a74eba9864ee4d79bc9cfbd65769fc6cdff2c05c6a053",
+            "sha256:e3c65694cb28434cd84b855e42589d5f664d1e5593383a1f0a83d37ba380e65e",
+            "sha256:06a631795f5e36ce52fec74217cce6193fd0a6d230d4724b5bcf56d9b20ae545",
+            "sha256:a632e748398858c101b37007569e6955720afcecc3a4da2405a90256b1660cd4",
+            "sha256:52af3c214b7b093a3af3a524db448e22bbf57e68d514a277e632070bc1c3c48f",
+            "sha256:7cf8b58a241cb7423a678eb88c1a14a52c9c33a29a208919a9126e4940015ae4",
+            "sha256:0d2c3ff0a21114008d7d323bf175319b05be05e4bb439fcdc908c415e1118cf9",
+            "sha256:e054976ad965abcba21e30f8823dc402335be0b7b4753895f3f9a6115b50bf5d",
+            "sha256:c18f93e1ec1f29b7af3239a1ba702701408ef75f10981a8ce5f97ddf67277cc1",
+            "sha256:6a60906f2b21f6dbe2dc68155f923c7c6ea85404438cbfdef9933158e94c4363",
+            "sha256:dd2767cd407a4b4d1637f222e841dcb17cbecae0886b024682b0cf5baf864d92",
+            "sha256:5024aded464908e3c9a9f6b52c7f8bb00ceffebf57cc56a295f4004d2d2a5cfe",
+            "sha256:c8530932e7567f95d439620fca14db168be77823b5402b2758b18d41d8663b57"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:f1dd3522a7fde8bf8e505f42583ecdc00b4967a4b94d32ba1f890d118fe17335",
+          "configDigest": "sha256:4dd8bd62e6013b7e5c6edce365cf793745f2a6049d04f3ba75b94e046c4afa73",
+          "layerDigests": [
+            "sha256:59f54fbcd984beca03fd8b78569fa57268ecf78d291c0b6fe1623c2467f5a075",
+            "sha256:ef5a48b5a2404e19eb2544dfd4fb95745eb7b33d2aec4b5044c6131b770113a6",
+            "sha256:e0cf512440d5c0d39eb4f9ee2c7131963ba8c677fd028d61f7d20234f4632d49",
+            "sha256:34a8c34597b0ddde2aba5299bf4897d656e84b9ee4b7a5093287feb22bbe274e",
+            "sha256:8b23613e6495dd8bac863e6b8bb33b7b1c33e948ad86c9917522e92714500701",
+            "sha256:7e5a1272e518ad6b9abddc94f046f6cb6bec2b3e07652e7861e33290183e6928",
+            "sha256:63037f3547008cd231f42159b2162d40c37c252e3ae283b8461cb449b7e44027",
+            "sha256:97582183ee393be32c94a7b74b4632f6ea34a6208605280d283a5f2a1aa405e7",
+            "sha256:2725ad8793bf80f26093d8e9ae80a2305a72f2ecbe72de45c3b5392386557384",
+            "sha256:f97c98582424348a8e0ed165a950d06489bb5dd4288f3602c87f0c16e3ec25d6",
+            "sha256:7ff9543abbc1fc12d2363010d6941bb52c39a27d2f3aa8369c2cbbb7d849fd44",
+            "sha256:3a37de3db76fd03aae1fabd145cbc1391ab1479693db77163254c61a7f3a6571",
+            "sha256:f63594b368fbd41ec67e83b0b62bc236e00bf09b60c39a5ff0999c9b057e6c80"
+          ]
+        }
+      }
+    },
+    "postgres-certification": {
+      "upstream": "postgres:18",
+      "reference": "public.ecr.aws/docker/library/postgres@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336",
+      "digest": "sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:885953109528ad3dfc90362b1a6f50a78620b5315be19f187753d267e484dc5b",
+          "configDigest": "sha256:29754c7520f4b9654cf8ff98e19ac73b88e255c3a53f6236ebe9d52249bb6df3",
+          "layerDigests": [
+            "sha256:ecc510c1e359bdc007b39802570bb7e4dec7d6ebccf357c3201a74299113e05e",
+            "sha256:4a3cafbebf6d72be6d033fcb2d9e8bbc6a11b1ff4f5bc20d976d5e2e37a947cb",
+            "sha256:28ced28a309b096ff42953cb0a86595627a4bd07a944dd2f05528926cd41f12b",
+            "sha256:ab69e2551985a1719a3fe5f74400d8c9679f5ea751674fde5c41263fd488e278",
+            "sha256:1f04dfa92b9fc0d0350a96394660839240ef586ef175c5ef17c6bbe1ada94f0a",
+            "sha256:5a487c9461a5f7f1edbe60a1be3743aa0e981d4d2e2a33128804b85269526438",
+            "sha256:e0d4a6e58470239e79b596b9bf4a6d955ee89f429cb56b35ccfed96610df0024",
+            "sha256:496ce2ef5b2f05e2b5202ed5d3ef40bbfb10ebc68b1b84db6a43add5ca242a70",
+            "sha256:c8145e79cc2b7fe25d7126d75537c22ce81846a82aa37a865ff93ed48c7c36b5",
+            "sha256:06ea90d3bcc9736cff0ca6c77451bdd1e86b5d9cbde2b57b67ca92ec1a260699",
+            "sha256:dc25540d793fe1b9809eb7b63f8d4f4f5a9edf3b114eb7be98b90c1723eb97c7",
+            "sha256:7967f593457f7c184ea02818bd060182f3802c95d34bbe132c5eee070cb1abd1",
+            "sha256:d23c975c469304d5e8513f74ab43e3ee9f4721208b9c502bac8b6bb37dbfe168"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:a63b24165ea0eacced7585766d790ac08bbaefe10a1841f87783a4505d29a69c",
+          "configDigest": "sha256:0336095afa072c685c93021dcfa4a5fee9cbce25ecd65121b58226c787afc0d0",
+          "layerDigests": [
+            "sha256:bbeda6b4abb749f743f4547ef5a28070a14de8caef211daa5afb78d5b5fa21ba",
+            "sha256:19fcd068927b801804ac060488c3e2fc847235ddad9bc85b4ef428b42360e2a4",
+            "sha256:dae9c1725998f87ffa10ea48b0e721bd0811a210f1d4b455cbe40cdec5a5504a",
+            "sha256:a97c43a6325af3fb25e5cb685a4e69818a27d0ab2e3fb82e67f45619152e224c",
+            "sha256:adef3e37879a0f92b9059c5fe890781e2152ae4695205d0567e794c7d7e8d0b6",
+            "sha256:729e9c64421046235cce6d7692a32d1a56e0f34f3335835833ae27023598d456",
+            "sha256:21a9e5df9938c451bb22c30cc640943b04e7ec7e4e1e5d9bbe3d0551fd47b394",
+            "sha256:c344258f5c4bc9bb0894ad6ec4e2b9771f15abf7d3f3abcb90daadb2ab508457",
+            "sha256:9aa353a8667f923050c13d703fb58e1cc96acc3af57e5d6fe5f2bb25a188baec",
+            "sha256:145ddee77a61759aba901cc36e455a32e290a9c974c725ffc365ea5ffaa853c6",
+            "sha256:364028cfe3c1ee2de27acfa56ca0bb3a5311bc5ff2ea412969ca71000096738b",
+            "sha256:7f4f6f4ec9d3cce467496527d4bbc46517e06eda9df67b628c7eec49939096a0",
+            "sha256:7ceb07498658e554031bde97144f5e6ad3183192c942bcf6dd6ddf64c6615053"
+          ]
+        }
+      }
+    },
+    "redis": {
+      "upstream": "redis:8-alpine",
+      "reference": "public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0",
+      "digest": "sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0",
+      "platforms": {
+        "amd64": {
+          "manifestDigest": "sha256:2d3814be5e9b06a30a0be54770b7e12052e7e79ec85271aefd34875c1f393b23",
+          "configDigest": "sha256:15f5a4aad4c3ba34b9874ddbc7f755b469dbd7b8a9e88c12690c52ef6c72465c",
+          "layerDigests": [
+            "sha256:d0c1d894c237d8192cbcd37e435031ad4eddec173299568a5a05869c2e40dfa3",
+            "sha256:d60026184d2e638c58afc4c945753a676d1691a1d7ef8adc7c0a8221b771d624",
+            "sha256:618072543738a1af8f8f650cc185ca8f8cae09950f22d7374610e5eb1383990b",
+            "sha256:8c9c3a906635a6a90731156f83ab00bfbc5d625cb11a8609cb166e602de77a32",
+            "sha256:2f10393390593ca40faa2085463ce1cd58ccda88f8f94a642c6bf9c0fe7694bc",
+            "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+            "sha256:095940d4ebca9229cd4bbc254424b0f3e05f8ce63d7fedebeb9f8c193d16acdf"
+          ]
+        },
+        "arm64": {
+          "manifestDigest": "sha256:41a10b18bd238fa7837b1615b2b5b113edff1654233238ac82d87e6fb5531f44",
+          "configDigest": "sha256:675f7644831d85995868250485bf7a71970257f74da31c62969a868d3f3eff2e",
+          "layerDigests": [
+            "sha256:ace1621be7ff15b54252f68393ac33181df7f3e095e36a5d9a9892031b357d31",
+            "sha256:b13de757b72a2621febf7490aa4900525707681e766ea8c2c5034cfd955c8b8f",
+            "sha256:c1323de87a77cb9250befa6960cced9a2e5dcdce5b9567c2118025d7e52e2c52",
+            "sha256:dde0282d4a7b06269156a5dfeb0eb60e89c3af9dbc4016997618a538e0fb32a0",
+            "sha256:93e2193c9bbad32dad8d30a9ff86cddf32451fb2bf482c92e891b100f909ece0",
+            "sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1",
+            "sha256:b695b0aeb9aadab0619c4ab2df7036b401bd1875ce250950cc2772287cb7ba3f"
+          ]
+        }
+      }
+    }
+  }
+}
