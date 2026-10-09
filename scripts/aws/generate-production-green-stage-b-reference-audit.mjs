@@ -377,17 +377,18 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
     if (brokerIdentity.aliasFunctionVersion !== published.aliasVersion
       || !/^[a-f0-9-]{36}$/.test(alias.RevisionId || "")
       || config.CodeSha256 !== published.codeSha256 || canonicalJson(liveApproval) !== canonicalJson(published.approval)
+      || variables.BROKER_IMAGE_RELEASE_SHA !== published.imageReleaseSha
       || canonicalJson(taskDefinitions) !== canonicalJson(published.taskMap)
       || canonicalJson(liveImages) !== canonicalJson(published.images)
       || repository?.length !== 1 || repository[0].repositoryArn !== `arn:aws:ecr:eu-west-2:${STAGE_B.account}:repository/mscqr-backend`
       || repository[0].imageTagMutability !== "IMMUTABLE"
-      || !isAncestor(published.sourceSha, toolingSha)) throw new Error("Published broker predecessor differs from authenticated Terraform and immutable Lambda identity.");
+      || !isAncestor(published.sourceSha, toolingSha) || !isAncestor(published.imageReleaseSha, published.sourceSha)) throw new Error("Published broker predecessor differs from authenticated Terraform and immutable Lambda identity.");
     for (const mode of expectedModes) {
       const arn = taskDefinitions[mode];
       const definition = reader.describeTaskDefinition(arn)?.taskDefinition;
       const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
       const expected = renderStageBTaskDefinition(kind, {
-        imageReleaseSha: published.sourceSha,
+        imageReleaseSha: published.imageReleaseSha,
         sourceContractSha256: published.approval.sourceContractSha256,
         migrationSetDigest: published.approval.migrationSetDigest,
         packageChecksumSha256: published.approval.packageChecksumSha256,
@@ -400,12 +401,12 @@ function validateBrokerConfiguration(config, alias, brokerAliasArn, expectedPack
       const source = definition?.containerDefinitions?.[0]?.environment?.find((entry) => entry.name === "RELEASE_GIT_SHA")?.value;
       const image = definition?.containerDefinitions?.[0]?.image;
       const expectedImage = mode === "full-rls-application-canary" ? published.images.canaryImageDigest : published.images.executorImageDigest;
-      const tag = `${published.sourceSha}-${mode === "full-rls-application-canary" ? "rls-canary" : "rls-executor"}`;
+      const tag = `${published.imageReleaseSha}-${mode === "full-rls-application-canary" ? "rls-canary" : "rls-executor"}`;
       const digest = expectedImage.split("@")[1];
       const imageDetails = reader.describeImages("mscqr-backend", digest)?.imageDetails;
       if (definition?.taskDefinitionArn !== arn || definition.family !== expectedBrokerFamily(mode)
         || Number(definition.revision) !== familyFromArn(arn, mode).revision || definition.status !== "ACTIVE"
-        || definition.containerDefinitions.length !== 1 || source !== published.sourceSha || image !== expectedImage
+        || definition.containerDefinitions.length !== 1 || source !== published.imageReleaseSha || image !== expectedImage
         || imageDetails?.length !== 1 || imageDetails[0].imageDigest !== digest || !imageDetails[0].imageTags?.includes(tag)) {
         throw new Error(`Published broker predecessor task definition, source, or image is unauthenticated: ${mode}.`);
       }

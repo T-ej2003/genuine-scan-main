@@ -875,6 +875,7 @@ test("serial-96 live broker mappings bind reviewed deposed predecessors without 
 function makePublishedBrokerPredecessorFixture() {
   const fixture = makeAtomicBrokerFixture({ appendOnly: false, mode: "full-rls-admin-bootstrap" });
   const sourceSha = "d".repeat(40);
+  const imageReleaseSha = "e".repeat(40);
   const executorImageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"1".repeat(64)}`;
   const canaryImageDigest = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"2".repeat(64)}`;
   const taskMap = Object.fromEntries(STAGE_B_MODES.map((mode) => [mode, oldArnFor(familyForMode(mode)).replace(":1", ":5")]));
@@ -882,7 +883,7 @@ function makePublishedBrokerPredecessorFixture() {
   const approval = { packageChecksumSha256: packageChecksum, sourceContractSha256: "3".repeat(64), migrationSetDigest: "4".repeat(64), releaseSha: sourceSha };
   const brokerChange = fixture.plan.resource_changes.find((change) => change.address === "aws_lambda_function.broker");
   brokerChange.change.before = { ...brokerChange.change.before, version: "2", source_code_hash: packageSourceCodeHash,
-    environment: [{ variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskMap), BROKER_IMAGES_JSON: JSON.stringify(images), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(approval) } }] };
+    environment: [{ variables: { BROKER_TASK_DEFINITIONS_JSON: JSON.stringify(taskMap), BROKER_IMAGES_JSON: JSON.stringify(images), BROKER_APPROVAL_EXPECTED_JSON: JSON.stringify(approval), BROKER_IMAGE_RELEASE_SHA: imageReleaseSha } }] };
   fixture.plan.resource_changes.push({ address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", change: { actions: ["update"], before: { function_version: "2" }, after: {} } });
   fixture.plan.prior_state.values.root_module.resources.push(
     { address: "aws_lambda_function.broker", values: structuredClone(brokerChange.change.before) },
@@ -900,16 +901,16 @@ function makePublishedBrokerPredecessorFixture() {
   fixture.reader.getAlias = () => ({ ...getAlias(), RevisionId: "11111111-1111-1111-1111-111111111111" });
   fixture.reader.describeTaskDefinition = (arn) => arn.endsWith(":5")
     ? { taskDefinition: { ...renderStageBTaskDefinition(arn.includes("application-canary") ? "canary" : "executor", {
-      imageReleaseSha: sourceSha, sourceContractSha256: approval.sourceContractSha256, migrationSetDigest: approval.migrationSetDigest,
+      imageReleaseSha, sourceContractSha256: approval.sourceContractSha256, migrationSetDigest: approval.migrationSetDigest,
       packageChecksumSha256: approval.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket,
       executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName,
       ...(arn.includes("application-canary") ? { canaryImage: canaryImageDigest } : { executorImage: executorImageDigest, mode: STAGE_B_MODES.find((mode) => arn.includes(mode)) }),
     }), taskDefinitionArn: arn, revision: 5, status: "ACTIVE" } }
     : (() => { const response = originalDescribe(arn); response.taskDefinition.taskDefinitionArn = arn; response.taskDefinition.revision = Number(arn.split(":").at(-1)); return response; })();
   fixture.reader.describeImages = (_repository, digest) => ({ imageDetails: [{ imageDigest: digest,
-    imageTags: [`${sourceSha}-${digest === canaryImageDigest.split("@")[1] ? "rls-canary" : "rls-executor"}`] }] });
+    imageTags: [`${imageReleaseSha}-${digest === canaryImageDigest.split("@")[1] ? "rls-canary" : "rls-executor"}`] }] });
   fixture.reader.describeRepositories = () => ({ repositories: [{ repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", imageTagMutability: "IMMUTABLE" }] });
-  fixture.reader.isProtectedSource = (source, target) => source === sourceSha && target === fixture.plan.variables.tooling_sha.value;
+  fixture.reader.isProtectedSource = (source, target) => (source === imageReleaseSha && target === sourceSha) || (source === sourceSha && target === fixture.plan.variables.tooling_sha.value);
   fixture.planBytes = Buffer.from(JSON.stringify(fixture.plan));
   fixture.planJsonSha256 = sha256(fixture.planBytes);
   return fixture;
@@ -919,6 +920,7 @@ test("complete published broker predecessor is bound to the prior state, live al
   const fixture = makePublishedBrokerPredecessorFixture();
   const audit = generate(fixture);
   assert.equal(audit.broker.publishedPredecessors.length, STAGE_B_MODES.length);
+  assert.ok(audit.broker.publishedPredecessors.every((entry) => entry.sourceSha === "e".repeat(40)));
   assert.equal(audit.plannedAtomicBrokerRollovers.length, 0);
   validateBrokerPlan(fixture, audit);
   const wrong = structuredClone(audit);
@@ -940,7 +942,7 @@ test("published broker predecessor and a separately authenticated RUNNING histor
     describeRepositories: (names) => names.includes("mscqr-worker") ? runtime.reader.describeRepositories(names) : original.describeRepositories(names),
     describeNetworkInterfaces: runtime.reader.describeNetworkInterfaces, lookupEvents: runtime.reader.lookupEvents,
     readProductionComponentDeploymentState: () => runtime.state,
-    isProtectedSource: (source, target) => [runtime.source, "d".repeat(40)].includes(source) && target === fixture.plan.variables.tooling_sha.value,
+    isProtectedSource: (source, target) => (source === "e".repeat(40) && target === "d".repeat(40)) || [runtime.source, "d".repeat(40)].includes(source) && target === fixture.plan.variables.tooling_sha.value,
   });
   const audit = generate(fixture, { historicalRuntimeTaskArn: runtime.taskArn, readToolingTreeSha256: () => "f".repeat(64) });
   assert.equal(audit.broker.publishedPredecessors.length, STAGE_B_MODES.length);

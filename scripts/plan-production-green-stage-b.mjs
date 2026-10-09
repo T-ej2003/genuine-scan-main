@@ -615,7 +615,7 @@ function assertAppendOnlyReferenceAuditBinding(plan, classification, referenceAu
         const predecessor = broker.liveTaskDefinitionPredecessors.find((entry) => entry.mode === mode);
         if (proofs.filter((entry) => entry.mode === mode).length !== 1
           || broker.liveTaskDefinitionMappings.find((entry) => entry.mode === mode)?.taskDefinitionArn !== arn
-          || proof?.taskDefinitionArn !== arn || proof.sourceSha !== published.sourceSha
+          || proof?.taskDefinitionArn !== arn || proof.sourceSha !== published.imageReleaseSha
           || proof.imageDigest !== expectedImage.split("@")[1] || proof.aliasVersion !== published.aliasVersion
           || !/^[a-f0-9-]{36}$/.test(broker.aliasRevisionId || "") || proof.aliasRevisionId !== broker.aliasRevisionId
           || predecessor?.classification !== "PUBLISHED" || predecessor.taskDefinitionArn !== arn
