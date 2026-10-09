@@ -150,6 +150,11 @@ fail closed. Registry reads retry the same URL at most four times with bounded
 backoff for 429/temporary 5xx responses. Each successful response still undergoes
 full authentication; exhaustion, auth failure or substituted bytes still fails.
 The expanded suites contain 21 image-contract and 31 image-impact regressions.
+GitHub also verified all seven mirror identities, then exposed a test placement
+error: the Docker-only job has no host `node_modules`. The image regression suite
+now runs in required Deployment Audit after its existing locked `npm ci`; the
+Docker job retains the dependency-free provenance verifier and actual builds.
+No dependency or required test was removed or bypassed.
 
 Required GitHub CI and a new exact-head review remain necessary before merge;
 local results do not substitute for them. Keep security updates in the documented
