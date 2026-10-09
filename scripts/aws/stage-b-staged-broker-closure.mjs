@@ -64,10 +64,13 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   assert.equal(record.closurePlanJsonSha256, brokerDigest(record.closurePlan));
   assertBrokerClosurePlan(record.closurePlan, p);
   equal(record.target, p.target); equal(record.alias, cas.alias);
+  const historicalTooling = Object.freeze(brokerExecutionCheckout(p));
+  await deps.authenticateHistoricalTooling(p, historicalTooling);
+  const tooling = Object.freeze({ ...await deps.readCheckout() });
   const revalidate = async () => {
-    const checkout = await deps.readCheckout();
-    equal(checkout, brokerExecutionCheckout(p));
-    if (p.recoveryTooling) await deps.authenticateRecoveryTooling(p, checkout);
+    equal(await deps.readCheckout(), tooling, 'Continuation checkout changed during authentication');
+    await deps.authenticateHistoricalTooling(p, historicalTooling);
+    await deps.authenticateContinuationTooling(p, tooling);
     equal(await deps.readStateIdentity(), record.stateAfter, 'Reconciled Terraform state changed');
     equal(await deps.getAlias(), cas.alias, 'Terminal alias changed');
     equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -76,7 +79,8 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
     equal(await deps.readStateIdentity(), record.stateAfter);
   };
   await revalidate();
-  const proof = Object.freeze({ sourceSha, evidenceSha256: brokerDigest(record), revalidate });
+  const proof = Object.freeze({ sourceSha, historicalTooling, tooling, evidenceSha256: brokerDigest(record), revalidate,
+    authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(p, tooling, executionSourceSha) });
   verified.add(proof); return proof;
 }
 export function assertStagedBrokerProof(proof, sourceSha) {
@@ -105,15 +109,27 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
       fs.chmodSync(file, 0o600); return JSON.parse(fs.readFileSync(file));
     } finally { fs.rmSync(file, { force: true }); }
   };
+  const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
+  const authenticateHistoricalTooling = (p, historical) => {
+    equal(historical, brokerExecutionCheckout(p), 'Historical execution differs from signed preparation');
+    assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
+    assert.equal(deriveStageBToolingInputTreeSha256(historical.sourceSha), historical.treeSha256);
+    assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: historical.sourceSha, cwd: root });
+  };
+  const authenticateContinuationTooling = (p, checkout) => {
+    authenticateHistoricalTooling(p, brokerExecutionCheckout(p));
+    const observed = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
+    assert.equal(observed.currentHead, observed.originMainHead);
+    assert.equal(deriveStageBToolingInputTreeSha256(checkout.sourceSha), checkout.treeSha256);
+    assertReceiptBoundGitAncestry({ historicalSourceSha: brokerExecutionCheckout(p).sourceSha, consumerSourceSha: checkout.sourceSha, cwd: root });
+  };
   return {
-    verifyAuthorization: kms.verify, readCheckout,
-    authenticateRecoveryTooling: (p, checkout) => {
-      const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
-      const observed = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
-      assert.equal(observed.currentHead, observed.originMainHead);
-      assert.equal(deriveStageBToolingInputTreeSha256(checkout.sourceSha), checkout.treeSha256);
-      assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
-      assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: checkout.sourceSha, cwd: root });
+    verifyAuthorization: kms.verify, readCheckout, authenticateHistoricalTooling, authenticateContinuationTooling,
+    authenticateHistoricalExecutionSource: (p, checkout, executionSourceSha) => {
+      authenticateContinuationTooling(p, checkout);
+      assertReceiptBoundGitAncestry({ historicalSourceSha: brokerExecutionCheckout(p).sourceSha, consumerSourceSha: executionSourceSha, cwd: root });
+      assertReceiptBoundGitAncestry({ historicalSourceSha: executionSourceSha, consumerSourceSha: checkout.sourceSha, cwd: root });
+      return { sourceSha: executionSourceSha, treeSha256: deriveStageBToolingInputTreeSha256(executionSourceSha) };
     },
     readSource: sourceSha => readStagedBrokerSourceAuthority({ run, sourceSha, directory }),
     readReceipt: (id, status, expected) => readStagedBrokerReceipt({ run, id, status, directory, expected }),
@@ -142,9 +158,14 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
 }
 export async function readStagedBrokerClosure({ sourceSha, run, readCheckout }) {
   const deps = {};
-  for (const name of ['verifyAuthorization', 'readCheckout', 'readSource', 'readReceipt', 'readStateIdentity', 'getAlias', 'getVersion', 'readPrerequisites', 'authenticateState', 'authenticateRecoveryTooling']) deps[name] = async (...args) => {
+  for (const name of ['verifyAuthorization', 'readCheckout', 'readSource', 'readReceipt', 'readStateIdentity', 'getAlias', 'getVersion', 'readPrerequisites', 'authenticateState', 'authenticateHistoricalTooling', 'authenticateContinuationTooling']) deps[name] = async (...args) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-closure-')); fs.chmodSync(directory, 0o700);
     try { return await createStagedBrokerClosureReader({ run, readCheckout, directory })[name](...args); }
+    finally { fs.rmSync(directory, { recursive: true }); }
+  };
+  deps.authenticateHistoricalExecutionSource = (...args) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-closure-')); fs.chmodSync(directory, 0o700);
+    try { return createStagedBrokerClosureReader({ run, readCheckout, directory }).authenticateHistoricalExecutionSource(...args); }
     finally { fs.rmSync(directory, { recursive: true }); }
   };
   return authenticateStagedBrokerClosure({ sourceSha, deps });

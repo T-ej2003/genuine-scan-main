@@ -99,7 +99,10 @@ export async function recoveryApprovalFixture({ tooling, ...release } = {}) {
    const entry = r.entries.find(e => e[0] === id && e[1] === status); assert.ok(entry); return entry[2];
  }, authenticateState: async (target, alias) => assert.equal(target.version, alias.FunctionVersion),
  authenticateReconciliation: async (result, id) => assert.ok(r.entries.some(e => e[0] === id && e[1] === result.status && brokerDigest(e[2]) === brokerDigest(result))) };
- return { ...r, context: await authenticateBrokerRecoveryApproval({ preparation: r.p, authorization: r.auth, result: record }, deps) };
+ deps.authenticateHistoricalTooling = (p, recorded) => { assert.equal(p.sourceSha, source.sourceSha); assert.deepEqual(recorded, tooling); };
+ deps.authenticateContinuationTooling = (p, current) => { deps.authenticateHistoricalTooling(p, tooling); assert.deepEqual(current, tooling); };
+ deps.authenticateHistoricalExecutionSource = (p, current, executionSourceSha) => { deps.authenticateContinuationTooling(p, current); assert.equal(executionSourceSha, tooling.sourceSha); return tooling; };
+ return { ...r, handoff, recoveryDeps: deps, context: await authenticateBrokerRecoveryApproval({ preparation: r.p, authorization: r.auth, result: record }, deps) };
 }
 
 export { rig, ready, configuration, preparation, authorization, cutoverPlan, publicationPlan, envelope, change, tfFn, tfAlias, alias, state, env, prerequisites, sourceSha, oldSha, packageSha256, now, target };

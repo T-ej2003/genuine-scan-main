@@ -108,3 +108,97 @@ New main changes Docker base identities and generated release contracts. They be
 Self-review: P0=0; P1=0 in the inspected changed recovery path. One P2 fixture hygiene issue was found by the local branch guard: new synthetic VPC IDs and literal secret references. The regression now uses the existing Stage-A fixture VPC identity and secret-ARN fixture helper; the guard is unchanged. No production implementation was changed for this finding. All callers, optional source/checksum defaults, original-renderer dependencies and workflow/payload provenance splits were inspected. The clone-based public handoff must be rerun from the committed merged head, followed by new exact-head GitHub review and CI. Previous head results do not approve the merged head.
 
 Recommendation: keep the complete descendant public-handoff regression required whenever workflow provenance, original release rendering or artifact resolvers change. Production execution and live adoption remain outside this validation task.
+
+
+## Advancing operational tooling after immutable closure — 2026-10-10
+
+The previous review missed a permanent closure-checkout restriction. The native
+reader, closure revalidation and returned recovery context all reused the
+historical execution checkout as today's checkout. A legitimate protected-main
+advance therefore stranded fresh preflight and rotation evidence. That earlier
+P1=0 conclusion is superseded by this audit.
+
+Three identities are independently authenticated:
+
+- A is the original release, including the publication receipt and v13.
+- B is the signed historical cutover/closure execution. Its preparation, signature,
+  source/tree and A→B ancestry remain mandatory and immutable.
+- C is the clean canonical current protected-main checkout. B→C ancestry and its
+  exact tree are authenticated independently; a later D is authenticated afresh.
+
+The read-only recovery reader uses current checkout C. Mutating executors still
+require the exact prepared execution checkout and exact authorization. No
+historical receipt is rewritten and no mutation is authorized by ancestry alone.
+A recovery context is branded only after complete native signature/receipt,
+publication, live alias/version, Terraform state and prerequisite authentication.
+It exposes `historicalTooling` B separately from `tooling` C.
+
+| Boundary / producer → consumer | Release / payload | Historical execution | Current execution / workflow | Required proof |
+| --- | --- | --- | --- | --- |
+| Publication → adoption | A / immutable v13 | Publication preparation | C only reads | Native signed receipt, exact code/version and original authority |
+| Cutover → CAS → output reconciliation → closure | A and exact reviewed outputs | Signed B | Future reads from C | Native signed B preparation, exact publication and output set; no replay |
+| Closure → recovery approval | A | Immutable B closure | Clean protected-main C | A→B→C lineage, exact trees, native receipts and unchanged live state |
+| Administrator/checker/release preflight | A / original contracts | Closure digest B | Fresh C | Exact signed report context C plus A publication/B closure digests |
+| tfvars/binding → approval collection/preparation | A checksums, full original renderer and images | Publication / retained-runtime receipts | C | Original Git A bytes independently authenticated; no current-tree fallback |
+| Fresh QR workflow → resolution → bootstrap | Operational identifier | None | Workflow/job/artifact C | Exact fresh C, expiry, selector/task/secret binding; unrelated sources fail |
+| Fresh root-drop → bootstrap | A release payload | Prior signed evidence, if adopted | Current producer C | Native release/root trust and current protected-main recovery context |
+| Bootstrap → runtime config | A and exact inventory predecessor | Config execution E recorded | Fresh producer C creates E=C | Exact C report/QR and original A material; no registration replay |
+| Release Gate → completed deployment receipt | Receipt A / rotation A | Workflow E | E=C when executed | Native environment approval plus run/job/artifact E and exact A payload |
+| Completed receipt/config → overlap verifier | A | Recorded E, unchanged | Current C or later D | B→E→current lineage, E tree, current protected main, exact A/B anchors |
+| Runtime verification → terminal overlap handoff | A / same rotation | Completed deployment E | Current authenticated verifier | Exact task/image/state/readiness/receipt and native runtime acceptance |
+| Initial overlap → Release Train / Release Gate | Independently selected exact release | Authenticated rotation evidence | Explicit governed workflow checkout | Existing gate/compatibility/approval contracts; no implicit deployment |
+
+Completed workflow evidence is not a fresh selector: it retains its original
+execution E and must satisfy B≤E≤current. Fresh selectors and freshly signed
+preflight reports must match current tooling exactly. Runtime configuration
+adoption authenticates E's tree and unchanged A publication/B closure anchors;
+it does not modify the configuration to match C or D.
+
+The clone-based public regression commits B, C and D against a private Git origin,
+keeps different original/current checksums, runs the actual public preflight,
+approval, root-drop, QR/bootstrap, Release Gate checkout shell and overlap
+verifier, then verifies C's completed deployment/configuration from D. All
+external mutation boundaries are controlled fixtures; live AWS is never invoked.
+Completed publication/registration/pruning/policy/closure call counts and B's
+handoff bytes must remain unchanged. Exact-head CI and review are still required.
+
+Docker diagnosis is independent: both original failed jobs and the PR rerun fail
+before Compose assertions while pulling the approved immutable Alpine image,
+with `toomanyrequests: Rate exceeded`. This is registry throttling, not evidence
+of an application assertion or image-identity defect. No Docker/security workflow
+change is included in this recovery correction.
+
+Recommendation: retain this complete advancing-tooling fixture when any recovery
+artifact producer or consumer changes. Do not use passing controlled tests as
+production deployment or business-acceptance evidence.
+
+
+### Final hostile self-review of the advancing-tooling correction
+
+| Severity | File / contract | Failure mode found | Correction / remaining state |
+| --- | --- | --- | --- |
+| P0 | Complete inspected recovery graph | None found | 0 known |
+| P1 | Native executor reader, closure and recovery approval | Historical B was permanently required as current tooling | Authenticate signed B independently; authenticate clean protected-main C/D through existing canonical ancestry; preserve historical bytes |
+| P1 | Overlap receipt resolver | Completed workflow E was incorrectly required to equal today's tooling | Authenticate workflow/job/artifact E, B→E→current lineage and unchanged payload A independently |
+| P2 | Public overlap verifier | A completed runtime config E could strand verification after another main advance | Authenticate exact E tree and original A/publication/B-closure anchors without rewriting config or replaying deployment |
+| P2 | Read-only closure proof adapter | New execution-source verification needed a synchronous native adapter | Wire the same native boundary for direct closure readers; no permissive fallback |
+| P3 | Independent clone fixtures / CI registry | Local disk exhaustion and external immutable-image throttling | Private advancing-origin fixture shares Git objects; one proven merged clean worktree removed; Docker checks unchanged |
+
+All P1/P2 findings above are corrected. Remaining known P0=0, P1=0, P2=0 in
+the inspected changed recovery path. The complete branch diff, all six public
+recovery-reader callers, direct closure callers, optional/default checksum/source
+selection, original renderer dependencies and artifact resolver identities were
+reviewed. No ambiguous identity boundary remains in this changed public handoff.
+
+Current local evidence: 93 focused tests passed, including the real private-Git
+A→B→C→D public handoff with different contract inputs at each operational advance;
+1,626 broader tests passed with two existing skips; 151 audit/OSV policy tests
+passed; both actual Docker Compose tests passed. Canonical source security,
+workflow YAML, capability/dependency closure, RLS verification, fresh OSV/browser
+reachability and diff checks passed. Disk-limited earlier runs are failed attempts,
+not passing evidence. The successful final broader run includes the previously
+blocked independent image-reuse CLI clone test.
+
+PR #647 is not merged. New exact-head Codex review and required CI must pass
+before it can be considered merge-ready. Production mutations remain zero;
+controlled fixture verification does not claim production deployment.

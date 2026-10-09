@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
+import { isAuthenticatedBrokerRecoveryApproval, authenticateBrokerRecoveryExecutionSource } from "./stage-b-broker-recovery-approval.mjs";
 import { assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 import { canonicalSha256 } from "./stage-b-task-definition-recovery-contract.mjs";
 import { readBoundStageBPrivateJson, writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
@@ -66,7 +66,6 @@ export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workf
   if (!RUN.test(String(workflowRunId || "")) || !RUN.test(String(workflowRunAttempt || "")) || typeof run !== "function") throw new Error("Overlap deployment workflow identity is invalid.");
   if (!SHA40.test(sourceSha || "")) throw new Error("Overlap receipt release source is invalid.");
   if (brokerRecoveryApproval && (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.sourceSha !== sourceSha)) throw new Error("Overlap receipt recovery identity is unauthenticated.");
-  const workflowSourceSha = brokerRecoveryApproval?.tooling.sourceSha || sourceSha;
   const json = (args) => JSON.parse(run("gh", args));
   const pages = (endpoint, field) => {
     const value = json(["api", endpoint, "--paginate", "--slurp"]);
@@ -74,6 +73,11 @@ export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workf
     return field ? value.flatMap((page) => page?.[field] || []) : value.flat();
   };
   const workflow = json(["api", `repos/${OVERLAP_DEPLOYMENT_RECEIPT.repository}/actions/runs/${workflowRunId}`]);
+  const workflowSourceSha = workflow.head_sha;
+  if (brokerRecoveryApproval) {
+    try { authenticateBrokerRecoveryExecutionSource(brokerRecoveryApproval, workflowSourceSha); }
+    catch { throw new Error("Overlap deployment workflow is not the exact completed protected-main recovery run."); }
+  } else if (workflowSourceSha !== sourceSha) throw new Error("Overlap deployment workflow is not the exact completed protected-main run.");
   if (String(workflow.id) !== String(workflowRunId) || String(workflow.run_attempt) !== String(workflowRunAttempt) || workflow.repository?.full_name !== OVERLAP_DEPLOYMENT_RECEIPT.repository || workflow.head_repository?.full_name !== OVERLAP_DEPLOYMENT_RECEIPT.repository || workflow.head_sha !== workflowSourceSha || workflow.head_branch !== "main" || workflow.path !== ".github/workflows/release-gate.yml" || workflow.event !== "workflow_dispatch" || workflow.status !== "completed" || !["success", "failure"].includes(workflow.conclusion)) throw new Error("Overlap deployment workflow is not the exact completed protected-main run.");
   const jobs = pages(`repos/${OVERLAP_DEPLOYMENT_RECEIPT.repository}/actions/runs/${workflowRunId}/attempts/${workflowRunAttempt}/jobs`, "jobs");
   const job = jobs.filter((item) => item.name === "Deploy production ECS" && String(item.run_id) === String(workflowRunId) && String(item.run_attempt) === String(workflowRunAttempt) && item.head_sha === workflowSourceSha && item.status === "completed" && ["success", "failure"].includes(item.conclusion));

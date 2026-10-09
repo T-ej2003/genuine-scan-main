@@ -41,6 +41,10 @@ async function terminal(separate = false, recoveryTooling) {
     if (status === 'STAGED_BROKER_TERMINAL_HANDOFF') return handoff;
     const found = r.entries.find(e => e[0] === id && e[1] === status); assert.ok(found, 'Missing durable receipt'); return found[2];
   }, authenticateState: async (target, alias) => { assert.equal(target.version, alias.FunctionVersion); } };
+  const recorded = recoveryTooling || { sourceSha, treeSha256: r.p.treeSha256 };
+  deps.authenticateHistoricalTooling = (p, historical) => { assert.equal(p.sourceSha, sourceSha); assert.deepEqual(historical, recorded); };
+  deps.authenticateContinuationTooling = (p, current) => { deps.authenticateHistoricalTooling(p, recorded); assert.deepEqual(current, recorded); };
+  deps.authenticateHistoricalExecutionSource = (p, current, executionSourceSha) => { deps.authenticateContinuationTooling(p, current); assert.equal(executionSourceSha, current.sourceSha); return current; };
   assert.equal(brokerDigest(source.authorization), pub.authorizationSha256);
   return { ...r, source, handoff, deps };
 }
@@ -130,7 +134,7 @@ test('terminal closure preserves original release under authenticated descendant
   assert.equal(r.handoff.record.sourceSha, sourceSha);
   assert.equal(r.handoff.preparation.publication.sourceSha, sourceSha);
   assert.equal(r.calls.filter(c => typeof c === 'object').length, 1);
-  r.deps.authenticateRecoveryTooling = async () => { throw new Error('Unrelated tooling'); };
+  r.deps.authenticateContinuationTooling = async () => { throw new Error('Unrelated tooling'); };
   await assert.rejects(() => proof.revalidate(), /Unrelated/);
 });
 
@@ -195,8 +199,20 @@ test('approval recovery authenticates the native terminal handoff without rewrit
     await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, { ...attestDependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
 
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
-  context.tooling.sourceSha = 'f'.repeat(40);
-  assert.equal(isAuthenticatedBrokerRecoveryApproval(context), false);
+  assert.throws(() => { context.tooling.sourceSha = 'f'.repeat(40); }, TypeError);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval(context), true);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval({ ...context, tooling: { ...context.tooling, sourceSha: 'f'.repeat(40) } }), false);
   const altered = structuredClone(input); altered.result.sourceSha = tooling.sourceSha;
   await assert.rejects(() => authenticateBrokerRecoveryApproval(altered, r.deps));
+});
+
+
+test('same-source completed closure can authenticate normal approval continuation', async () => {
+  const r = await terminal();
+  const context = await authenticateBrokerRecoveryApproval({ preparation: r.p, authorization: r.auth, result: r.handoff.record }, {
+    ...r.deps, authenticateReconciliation: async (result, id) => assert.ok(r.entries.some(entry => entry[0] === id && brokerDigest(entry[2]) === brokerDigest(result))),
+  });
+  assert.equal(context.sourceSha, sourceSha);
+  assert.deepEqual(context.tooling, context.historicalTooling);
+  assert.equal(context.tooling.sourceSha, sourceSha);
 });

@@ -53,6 +53,8 @@ import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APP
 import { buildPartialRebaselineRecoveryCompletion, buildPartialRebaselineRecoveryRotationBindings, createPartialRebaselineRecoveryAuthorization, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, assertPartialRebaselineRecoveryAuthorization } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
 import { historicalRuntimeFixture } from "./fixtures/historical-runtime.mjs";
+import { authenticateBrokerRecoveryApproval, authenticateBrokerRecoveryExecutionSource } from "../aws/stage-b-broker-recovery-approval.mjs";
+import { assertReceiptBoundGitAncestry } from "../aws/stage-b-staged-broker-executor.mjs";
 import { recoveryApprovalFixture } from "./fixtures/staged-broker-runtime.mjs";
 import { resolvedBrokerEnvironment } from "./fixtures/staged-broker.mjs";
 import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
@@ -324,7 +326,7 @@ test("public descendant preflight preserves original contracts through approval 
       writeFileSync(path.join(checkout, 'documents/security/rls-program/generated/checksums.json'), JSON.stringify({ sourceContractSha256: 'f'.repeat(64), migrationSetDigest: 'f'.repeat(64) }));
       execFileSync('git', ['add', '.'], { cwd: checkout }); execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling with different release contracts'], { cwd: checkout, stdio: 'pipe' });
       const origin = path.join(directory, 'origin.git');
-      execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+      execFileSync('git', ['clone', '--bare', '--shared', checkout, origin], { stdio: 'pipe' });
       execFileSync('git', ['remote', 'set-url', 'origin', origin], { cwd: checkout });
       execFileSync('git', ['push', 'origin', 'HEAD:refs/heads/main'], { cwd: checkout, stdio: 'pipe' });
       execFileSync('git', ['tag', 'release-fixture-original', release], { cwd: checkout });
@@ -338,11 +340,11 @@ test("public descendant preflight preserves original contracts through approval 
     const originalChecksums = execFileSync('git', ['show', `${release}:${checksumPath}`], { cwd: checkout });
     git(['merge-base', '--is-ancestor', release, 'HEAD']);
     process.chdir(checkout); process.env.HOME = path.join(directory, 'home'); mkdirSync(process.env.HOME, { mode: 0o700 });
-    const tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: deriveStageBToolingInputTreeSha256(git(['rev-parse', 'HEAD'])) };
+    let tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: deriveStageBToolingInputTreeSha256(git(['rev-parse', 'HEAD'])) };
     const originalFile = path.join(directory, 'authenticated-original-checksums.json'); writeFileSync(originalFile, originalChecksums, { mode: 0o600 });
     const contracts = deriveContractDigests({ file: originalFile });
     assert.notDeepEqual(contracts, deriveContractDigests({ file: path.join(checkout, checksumPath) }));
-    const input = fullInput(directory, checkout, release, imagesSource);
+    let input = fullInput(directory, checkout, release, imagesSource);
     input.rotationBindings = { ...bindings, sourceSha: release };
     input.sourceSha = release; input.git = gitFixture(tooling.sourceSha);
     const publishedPackage = await packageStageBBroker({ outputPath: path.join(directory, 'broker.zip'), toolingSha: release, toolingTreeSha256: deriveStageBToolingInputTreeSha256(release), repositoryRoot: checkout });
@@ -355,7 +357,55 @@ test("public descendant preflight preserves original contracts through approval 
     const image = service => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${service === 'worker' ? 'mscqr-worker' : 'mscqr-backend'}@${imageRecords.find(record => record.service === service).digest}`;
     variables.BROKER_IMAGES_JSON = JSON.stringify({ backendImageDigest: image('backend'), workerImageDigest: image('worker'), executorImageDigest: image('rls-executor'), canaryImageDigest: image('rls-canary') });
     const r = await recoveryApprovalFixture({ sourceSha: release, imageReleaseSha: imagesSource, tooling, contracts, environment: variables, packageIdentity: hash(readFileSync(publishedPackage.package.path)), toolingTreeSha256: deriveStageBToolingInputTreeSha256(release) });
-    input.brokerRecoveryApproval = r.context;
+    const recoveryRequest = { preparation: r.handoff.preparation, authorization: r.handoff.authorization, result: r.handoff.record };
+    const historicalTooling = { ...tooling }, historicalReceipt = JSON.stringify(r.handoff), completedCalls = [...r.calls];
+    const authenticateCurrent = (p, current) => {
+      r.recoveryDeps.authenticateHistoricalTooling(p, historicalTooling);
+      assert.equal(current.sourceSha, git(['rev-parse', 'HEAD']));
+      assert.equal(current.sourceSha, git(['rev-parse', 'refs/remotes/origin/main']));
+      assert.equal(git(['status', '--porcelain']), '');
+      assert.equal(current.treeSha256, deriveStageBToolingInputTreeSha256(current.sourceSha));
+      assertReceiptBoundGitAncestry({ historicalSourceSha: historicalTooling.sourceSha, consumerSourceSha: current.sourceSha, cwd: checkout });
+    };
+    r.recoveryDeps.readCheckout = async () => ({ ...tooling });
+    r.recoveryDeps.authenticateContinuationTooling = authenticateCurrent;
+    r.recoveryDeps.authenticateHistoricalExecutionSource = (p, current, executionSourceSha) => {
+      authenticateCurrent(p, current);
+      assertReceiptBoundGitAncestry({ historicalSourceSha: historicalTooling.sourceSha, consumerSourceSha: executionSourceSha, cwd: checkout });
+      assertReceiptBoundGitAncestry({ historicalSourceSha: executionSourceSha, consumerSourceSha: current.sourceSha, cwd: checkout });
+      return { sourceSha: executionSourceSha, treeSha256: deriveStageBToolingInputTreeSha256(executionSourceSha) };
+    };
+    const fixtureDirectory = directory;
+    let previousVerification;
+    for (const advancement of ['C', 'D']) {
+      writeFileSync(path.join(checkout, checksumPath), JSON.stringify({ sourceContractSha256: advancement.toLowerCase().repeat(64), migrationSetDigest: 'f'.repeat(64) }));
+      git(['add', checksumPath]);
+      git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', `Protected-main continuation ${advancement}`]);
+      git(['push', 'origin', 'HEAD:refs/heads/main']); git(['fetch', 'origin', 'main']);
+      tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: deriveStageBToolingInputTreeSha256(git(['rev-parse', 'HEAD'])) };
+      r.context = await authenticateBrokerRecoveryApproval(recoveryRequest, r.recoveryDeps);
+      for (const change of [value => { value.result.sourceSha = tooling.sourceSha; }, value => { value.preparation.publication.sourceSha = tooling.sourceSha; }, value => { value.authorization.signature = 'invalid'; }, value => { value.preparation.recoveryTooling.sourceSha = tooling.sourceSha; }]) {
+        const altered = structuredClone(recoveryRequest); change(altered);
+        await assert.rejects(() => authenticateBrokerRecoveryApproval(altered, r.recoveryDeps));
+      }
+      await assert.rejects(() => authenticateBrokerRecoveryApproval(recoveryRequest, { ...r.recoveryDeps, readCheckout: async () => ({ ...tooling, sourceSha: release }) }));
+      await assert.rejects(() => authenticateBrokerRecoveryApproval(recoveryRequest, { ...r.recoveryDeps, authenticateContinuationTooling: () => { throw new Error('Protected-main authority missing'); } }), /Protected-main authority missing/);
+      assert.equal(r.context.sourceSha, release);
+      assert.deepEqual(r.context.historicalTooling, historicalTooling);
+      assert.deepEqual(r.context.tooling, tooling);
+      const sibling = git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit-tree', git(['rev-parse', `${historicalTooling.sourceSha}^{tree}`]), '-p', git(['rev-parse', `${historicalTooling.sourceSha}^`]), '-m', 'Unapproved sibling']);
+      for (const unapproved of [release, sibling, 'c'.repeat(40)]) assert.throws(() => authenticateBrokerRecoveryExecutionSource(r.context, unapproved));
+      git(['update-ref', 'refs/remotes/origin/main', historicalTooling.sourceSha]);
+      await assert.rejects(() => authenticateBrokerRecoveryApproval(recoveryRequest, r.recoveryDeps));
+      git(['update-ref', 'refs/remotes/origin/main', tooling.sourceSha]);
+      const dirtyFile = path.join(checkout, 'unauthorized-continuation.fixture'); writeFileSync(dirtyFile, 'dirty');
+      await assert.rejects(() => authenticateBrokerRecoveryApproval(recoveryRequest, r.recoveryDeps)); rmSync(dirtyFile);
+      assert.equal(JSON.stringify(r.handoff), historicalReceipt);
+      const directory = path.join(fixtureDirectory, advancement); mkdirSync(directory, { mode: 0o700 });
+      input = fullInput(directory, checkout, release, imagesSource);
+      input.rotationBindings = { ...bindings, sourceSha: release };
+      input.sourceSha = release; input.git = gitFixture(tooling.sourceSha);
+      input.brokerRecoveryApproval = r.context;
     const taskMap = JSON.parse(variables.BROKER_TASK_DEFINITIONS_JSON);
     const definitions = Object.fromEntries(STAGE_B_MODES.map(mode => {
       const kind = mode === 'full-rls-application-canary' ? 'canary' : 'executor';
@@ -532,13 +582,14 @@ test("public descendant preflight preserves original contracts through approval 
       deploymentReceipt: { persist: async () => ({ receiptSha256: receipt.receiptSha256 }), authenticate: async () => receipt },
     });
     assert.equal(deployment.terminalState, 'DEPLOYED_PENDING_VERIFICATION'); assert.equal(overlapDeployments, 1);
-    const workflowRun = ({ workflowSource = tooling.sourceSha, jobSource = tooling.sourceSha, artifactSource = tooling.sourceSha, payload = receipt } = {}) => (command, args) => {
+    const executionSourceSha = tooling.sourceSha;
+    const workflowRun = ({ workflowSource = executionSourceSha, jobSource = executionSourceSha, artifactSource = executionSourceSha, payload = receipt } = {}) => (command, args) => {
       assert.equal(command, 'gh');
       if (args[0] === 'run' && args[1] === 'download') { assert.equal(args[args.indexOf('--name') + 1], 'production-overlap-deployment-receipt-attempt-1'); writeFileSync(path.join(args[args.indexOf('--dir') + 1], 'production-overlap-deployment-receipt.json'), JSON.stringify(payload)); return ''; }
       const endpoint = args[1], repository = { id: 30, full_name: 'T-ej2003/genuine-scan-main' };
       if (endpoint.endsWith('/actions/runs/10')) return JSON.stringify({ id: 10, run_attempt: 1, repository, head_repository: repository, head_sha: workflowSource, head_branch: 'main', path: '.github/workflows/release-gate.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'success', actor: { login: 'operator' } });
       if (endpoint.endsWith('/attempts/1/jobs')) return JSON.stringify([{ jobs: [{ id: 20, run_id: 10, run_attempt: 1, name: 'Deploy production ECS', head_sha: jobSource, status: 'completed', conclusion: 'success', steps: ['Authenticate production environment approval boundary', 'Deploy rotation transition backend ECS service', 'Upload overlap deployment receipt'].map(name => ({ name, status: 'completed', conclusion: 'success', started_at: now, completed_at: now })) }] }]);
-      if (endpoint.includes('/deployments?')) { assert.ok(endpoint.includes(`sha=${tooling.sourceSha}`)); return JSON.stringify([[{ id: 40, sha: tooling.sourceSha, ref: 'main', task: 'deploy', environment: 'production', performed_via_github_app: { slug: 'github-actions' } }]]); }
+      if (endpoint.includes('/deployments?')) { assert.ok(endpoint.includes(`sha=${executionSourceSha}`)); return JSON.stringify([[{ id: 40, sha: executionSourceSha, ref: 'main', task: 'deploy', environment: 'production', performed_via_github_app: { slug: 'github-actions' } }]]); }
       if (endpoint.endsWith('/deployments/40/statuses')) return JSON.stringify([['waiting', 'in_progress', 'success'].map(state => ({ state, environment: 'production', log_url: 'https://github.com/T-ej2003/genuine-scan-main/actions/runs/10/job/20' }))]);
       if (endpoint.endsWith('/approvals')) return JSON.stringify([[{ state: 'approved', user: { login: 'reviewer', type: 'User', site_admin: false }, environments: [{ name: 'production', can_admins_bypass: false }] }]]);
       if (endpoint.endsWith('/artifacts')) return JSON.stringify([{ artifacts: [{ id: 50, name: 'production-overlap-deployment-receipt-attempt-1', expired: false, digest: `sha256:${'9'.repeat(64)}`, created_at: now, workflow_run: { id: 10, head_sha: artifactSource, head_branch: 'main', repository_id: 30, head_repository_id: 30 } }] }]);
@@ -571,7 +622,7 @@ test("public descendant preflight preserves original contracts through approval 
             return JSON.stringify({ phase: state.phase });
           },
         }),
-        onboarding: { run: expected => runStrictOnboardingProbes({ expected, probes: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map(name => [name, async ({ expected }) => { assert.equal(expected.sourceSha, release); assert.equal(expected.imageReleaseSha, imagesSource); return true; }])) }) },
+        onboarding: { bindPersistedEcsExecProof: persisted => assert.equal(persisted.targetTaskDefinitionArn, overlapTask), run: expected => runStrictOnboardingProbes({ expected, probes: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map(name => [name, async ({ expected }) => { assert.equal(expected.sourceSha, release); assert.equal(expected.imageReleaseSha, imagesSource); return true; }])) }) },
       }; },
     };
     await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: undefined }), /requires authenticated broker recovery/);
@@ -580,7 +631,17 @@ test("public descendant preflight preserves original contracts through approval 
     assert.equal(verified.terminalState, 'VERIFIED_OVERLAP'); assert.equal(verified.readyForOnboarding, true); assert.equal(coordinatorCalls, 1);
     assert.equal(verifierTooling, tooling.sourceSha);
     assert.equal(Date.parse(verified.cleanupEligibleAt) - Date.parse(verified.overlapReadyAt), 2592000 * 1000);
-    assert.equal(registerCalls, 0); assert.equal(r.calls.filter(call => call === 'publish').length, 1);
+    assert.equal(registerCalls, 0); assert.deepEqual(r.calls, completedCalls);
+    assert.equal(JSON.stringify(r.handoff), historicalReceipt);
+    if (previousVerification) {
+      const oldConfig = readFileSync(previousVerification.configFile);
+      const resumed = await verifyProductionCutoverOverlap({ ...previousVerification, brokerRecoveryApproval: r.context });
+      assert.equal(resumed.terminalState, 'VERIFIED_OVERLAP');
+      assert.deepEqual(readFileSync(previousVerification.configFile), oldConfig);
+      assert.deepEqual(r.calls, completedCalls);
+    }
+    previousVerification = verifierInput;
+    }
   } finally { process.chdir(originalCwd); if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; if (!childFixture) rmSync(directory, { recursive: true, force: true }); }
 });
 

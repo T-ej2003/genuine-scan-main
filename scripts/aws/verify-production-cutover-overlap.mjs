@@ -8,7 +8,7 @@ import { promptProductionHiddenInput } from "../security/production-interactive-
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { resolveProductionOverlapDeploymentReceipt } from "./production-overlap-deployment-receipt.mjs";
 import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
-import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
+import { isAuthenticatedBrokerRecoveryApproval, authenticateBrokerRecoveryExecutionSource } from "./stage-b-broker-recovery-approval.mjs";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -55,7 +55,8 @@ export async function verifyProductionCutoverOverlap({ configFile, configSha256,
   if (config.sourceSha !== sourceSha || config.rotationId !== rotationId) throw new Error("Verifier continuation config identity is wrong.");
   if (config.recoveryTooling || brokerRecoveryApproval) {
     if (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.sourceSha !== sourceSha) throw new Error("Verifier continuation requires authenticated broker recovery.");
-    const binding = { ...brokerRecoveryApproval.tooling, releaseSourceSha: sourceSha, publicationResultSha256: brokerRecoveryApproval.publicationResultSha256, closureResultSha256: brokerRecoveryApproval.closureResultSha256 };
+    const historicalExecution = authenticateBrokerRecoveryExecutionSource(brokerRecoveryApproval, config.recoveryTooling?.sourceSha);
+    const binding = { ...historicalExecution, releaseSourceSha: sourceSha, publicationResultSha256: brokerRecoveryApproval.publicationResultSha256, closureResultSha256: brokerRecoveryApproval.closureResultSha256 };
     if (canonicalJson(binding) !== canonicalJson(config.recoveryTooling)) throw new Error("Verifier continuation recovery tooling binding is wrong.");
     protectedMain({ cwd: root, expectedSourceSha: brokerRecoveryApproval.tooling.sourceSha });
   } else protectedMain({ cwd: root, expectedSourceSha: sourceSha });

@@ -3,12 +3,21 @@ import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { BROKER_CUTOVER, BROKER_STATE_REFRESH, brokerDigest, brokerExecutionCheckout, brokerTargetIdentity, assertBrokerPreparation, assertBrokerAuthorization, assertBrokerClosurePlan } from "./stage-b-staged-broker-contract.mjs";
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
 const authenticatedRecoveryApprovals = new WeakMap();
-export const isAuthenticatedBrokerRecoveryApproval = value => authenticatedRecoveryApprovals.has(value) && authenticatedRecoveryApprovals.get(value) === brokerDigest(value);
+export const isAuthenticatedBrokerRecoveryApproval = value => authenticatedRecoveryApprovals.has(value) && authenticatedRecoveryApprovals.get(value).digest === brokerDigest(value);
+
+// Completed execution evidence retains its own source; only fresh operational evidence must use today's tooling.
+export function authenticateBrokerRecoveryExecutionSource(context, sourceSha) {
+  assert.ok(isAuthenticatedBrokerRecoveryApproval(context), 'Execution recovery context is unauthenticated');
+  assert.match(sourceSha || '', /^[a-f0-9]{40}$/);
+  const identity = authenticatedRecoveryApprovals.get(context).authenticateExecutionSource(sourceSha);
+  assert.equal(identity.sourceSha, sourceSha);
+  assert.match(identity.treeSha256 || '', /^[a-f0-9]{64}$/);
+  return identity;
+}
 
 export async function authenticateBrokerRecoveryApproval({ preparation, authorization, result }, deps) {
   assertBrokerPreparation(preparation);
   assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose));
-  assert.ok(preparation.recoveryTooling, 'Approval recovery requires explicit tooling lineage');
   assert.equal(result.status, 'RECONCILED_PENDING_RELEASE_CAS');
   const { authenticateStagedBrokerClosure } = await import("./stage-b-staged-broker-closure.mjs");
   const closure = await authenticateStagedBrokerClosure({ sourceSha: preparation.sourceSha, deps });
@@ -19,7 +28,8 @@ export async function authenticateBrokerRecoveryApproval({ preparation, authoriz
   assert.equal(id, result.stateRefreshAuthorizationSha256 || result.cutoverAuthorizationSha256);
   await deps.authenticateReconciliation(result, id);
   await deps.authenticatePublicationResult(preparation.publication, preparation.publication.authorizationSha256);
-  equal(await deps.readCheckout(), brokerExecutionCheckout(preparation));
+  await closure.revalidate();
+  equal(await deps.readCheckout(), closure.tooling);
   equal(result.target, preparation.target); equal(result.sourceSha, preparation.sourceSha);
   equal(result.publicationResultSha256, brokerDigest(preparation.publication));
   equal(await deps.getAlias(), result.alias);
@@ -27,8 +37,8 @@ export async function authenticateBrokerRecoveryApproval({ preparation, authoriz
   equal(await deps.readStateIdentity(), result.stateAfter);
   assert.equal(result.closurePlanJsonSha256, brokerDigest(result.closurePlan));
   assertBrokerClosurePlan(result.closurePlan, preparation);
-  const context = Object.freeze({ sourceSha: preparation.sourceSha, tooling: brokerExecutionCheckout(preparation),
+  const context = Object.freeze({ sourceSha: preparation.sourceSha, historicalTooling: brokerExecutionCheckout(preparation), tooling: closure.tooling,
     publicationResultSha256: brokerDigest(preparation.publication), preparationSha256: brokerDigest(preparation),
     closureResultSha256: brokerDigest(result), target: structuredClone(result.target), alias: structuredClone(result.alias) });
-  authenticatedRecoveryApprovals.set(context, brokerDigest(context)); return context;
+  authenticatedRecoveryApprovals.set(context, { digest: brokerDigest(context), authenticateExecutionSource: closure.authenticateExecutionSource }); return context;
 }

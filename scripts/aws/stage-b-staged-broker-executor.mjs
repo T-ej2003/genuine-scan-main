@@ -1709,6 +1709,10 @@ export async function readBrokerRecoveryApproval({ filePath, expectedSha256 }) {
   const { request, result } = value;
   const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: 'mscqr-production-release-deployer' });
   const deps = createStagedBrokerExecutor({ ...request, phase: 'RECONCILIATION', runAws: run });
-  const closureReader = createStagedBrokerClosureReader({ run, readCheckout: deps.readCheckout, directory: request.directory });
+  const closureReader = createStagedBrokerClosureReader({ run, directory: request.directory, readCheckout: async () => {
+    await deps.readMakerCaller();
+    const checkout = readStageBProtectedMainCheckout({ cwd: path.resolve(fileURLToPath(new URL('../..', import.meta.url))), fetchOriginMain: true, requireCanonicalRepository: true });
+    return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
+  } });
   return authenticateBrokerRecoveryApproval({ preparation: request.preparation, authorization: request.authorization, result }, { ...deps, ...closureReader });
 }
