@@ -44,7 +44,21 @@ this authority.
 | QR selector resolution | Protected workflow → GitHub artifact resolver → bootstrap | 30 minutes / regenerate | RECOVERY_TOOLING | Fresh operational live selector read from current protected main |
 | Root-drop signature | Canonical root operator producer → bootstrap/control plane | 15 minutes / regenerate | RELEASE_SOURCE with authenticated RECOVERY_TOOLING execution | Exact rotation/image/administrator continuity; administrator digest binds the recovery tooling |
 | Artifact-signing binding | Canonical bootstrap → runtime constructor | Durable / authenticate existing binding | RELEASE_SOURCE | Key bindings belong to original selected release |
-| Rotation config, readiness, overlap receipt and runtime verification | Bootstrap / governed overlap / independent verifier → rotation lifecycle | Transaction/state-bound / reconcile | RELEASE_SOURCE with authenticated RECOVERY_TOOLING execution | Original deployment identity survives; verifier's checkout is protected recovery tooling |
+| Rotation config, readiness and runtime verification | Bootstrap / governed overlap / independent verifier → rotation lifecycle | Transaction/state-bound / reconcile | RELEASE_SOURCE with authenticated RECOVERY_TOOLING execution | Original deployment identity survives; verifier's checkout is protected recovery tooling |
+
+| Overlap workflow, job, production deployment and receipt artifact metadata | Release Gate → overlap receipt resolver | Exact run/attempt / fresh governed execution | RECOVERY_TOOLING | GitHub execution provenance identifies current protected tooling |
+| Overlap receipt payload | Governed deployment → receipt resolver / overlap verifier | Durable exact deployment / reconcile | RELEASE_SOURCE | Receipt describes the immutable release; native recovery context independently binds its producer tooling |
+
+The overlap resolver derives workflow provenance only from the authenticated native
+recovery context, never a caller-supplied alternative SHA. Run, job, GitHub deployment
+and artifact metadata must match that tooling identity. Receipt payload source must
+independently match the original release. Missing/cloned recovery authority, mismatched
+run/job/artifact sources or a receipt relabelled as the tooling release fail closed.
+The sealed public descendant test continues through the governed overlap operation,
+receipt resolution, independent overlap verifier and native rotation verification
+adapter into persisted `verified` state. The original release identity survives and
+the full 30-day cleanup deadline is calculated from actual fixture verification time.
+These fixtures prove contracts, not a production deployment or business acceptance.
 
 Root-drop and independent overlap verification use the existing native broker
 recovery transport and digest when their selected release is historical. The

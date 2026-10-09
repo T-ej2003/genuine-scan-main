@@ -7,10 +7,15 @@ import test from "node:test";
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
 import { assertQrVersionSelector, createQrVersionResolutionEvidence, resolveQrVersionResolutionArtifact, QR_VERSION_SELECTOR_RESOLUTION } from "../aws/production-qr-version-selector-resolution.mjs";
+import { buildProductionOverlapDeploymentReceipt, resolveProductionOverlapDeploymentReceipt } from "../aws/production-overlap-deployment-receipt.mjs";
+import { buildOverlapReadinessEvidence } from "../aws/produce-production-overlap-readiness-evidence.mjs";
+import { READY_FOR_OVERLAP_DEPLOYMENT_STAGES } from "../aws/production-overlap-readiness-contract.mjs";
+import { verify as verifyRotation } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { verifyProductionCutoverOverlap } from "../aws/verify-production-cutover-overlap.mjs";
 import { runCli as produceRootDrop } from "../aws/produce-production-root-drop-evidence.mjs";
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
-import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
+import { assertImageAuthorization, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
 import { buildInitialMigrationSourceAdvance, deriveRuntimeMetadata, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
@@ -485,13 +490,72 @@ test("public descendant preflight preserves original contracts through approval 
     assert.equal(runtime.config?.inventoryTaskDefinitionArn, input.inventoryTaskDefinitionArn);
     assert.equal(runtime.readyToConsumeMfa, true, runtime.blockers?.join('; '));
     assert.equal(runtime.config.sourceSha, release); assert.equal(runtime.protectedMainSha, tooling.sourceSha);
-    let verifierTooling;
-    const verifierInput = { configFile: runtime.configPath, configSha256: runtime.runtimeConfigSha256, sourceSha: release, rotationId: runtime.config.rotationId, brokerRecoveryApproval: r.context,
-      protectedMain: ({ expectedSourceSha }) => { verifierTooling = expectedSourceSha; }, githubRun: () => { throw new Error('Unexpected verifier external access'); } };
+    const config = runtime.config, now = new Date().toISOString();
+    const privateJson = (file, value) => { mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 }); writeFileSync(file, JSON.stringify(value), { mode: 0o600 }); };
+    privateJson(config.rotationStateFile, { stateVersion: 4, rotationId: config.rotationId, sourceSha: release, minimumGraceSeconds: config.minimumGraceSeconds, phase: 'overlap-deploy-required', overlapDeploymentSha: config.overlapDeploymentSha });
+    privateJson(config.rotationFixtureFile, { fixtureVersion: 1, rotationId: config.rotationId });
+    const preparedStateHash = hash(readFileSync(config.rotationStateFile)), fixtureHash = hash(readFileSync(config.rotationFixtureFile));
+    const overlapTask = 'arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:42';
+    const readiness = buildOverlapReadinessEvidence({ sourceSha: release, rotationId: config.rotationId, rotationStateSha256: preparedStateHash, generatedAt: now,
+      stages: Object.fromEntries(READY_FOR_OVERLAP_DEPLOYMENT_STAGES.map(name => [name, { valid: true, evidenceRef: name, evidenceSha256: '1'.repeat(64), identityBindings: { sourceSha: release, rotationId: config.rotationId, ...(name === 'imageAuthorization' ? { imageReleaseSha: imagesSource } : {}), ...(name === 'overlapTaskDefinition' ? { taskDefinitionArn: overlapTask, imageReleaseSha: imagesSource } : {}) } }])) });
+    privateJson(config.readinessEvidenceFile, readiness);
+    const approvalFor = sourceSha => createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: 'production', can_admins_bypass: false, protection_rules: [{ type: 'required_reviewers', prevent_self_review: true, reviewers: [{ type: 'User', reviewer: { id: 2, login: 'reviewer' } }] }] }, repository: 'T-ej2003/genuine-scan-main', environment: 'production', sourceSha, workflowRef: 'T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main', eventName: 'workflow_dispatch', workflowRunId: '10', workflowRunAttempt: '1', executionActor: 'operator', observedAt: now });
+    const receiptFor = sourceSha => buildProductionOverlapDeploymentReceipt({ sourceSha, rotationId: config.rotationId, rotationStateSha256: preparedStateHash, readinessSha256: hash(readFileSync(config.readinessEvidenceFile)), rotationFixtureSha256: fixtureHash, environmentApproval: approvalFor(sourceSha), deployedAt: now, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, taskDefinitionArn: overlapTask, imageDigest: config.backendImageDigest, deploymentSha: config.rotationDeploymentSha, deployment: { updateServiceCount: 1, metadata: { clusterName: 'mscqr-prod-euw2-main', serviceName: 'mscqr-backend-servi-euw2', observedTaskDefinitionArn: overlapTask, observedImageDigest: config.backendImageDigest, serviceStable: true } } });
+    const receipt = receiptFor(release);
+    let overlapDeployments = 0;
+    const deployment = await runProductionCutoverOverlapControlPlane({ transitionMode: 'rotation-overlap', readiness, sourceSha: release, rotationId: config.rotationId, rotationStateSha256: preparedStateHash, readinessSha256: hash(readFileSync(config.readinessEvidenceFile)), taskDefinitionArn: overlapTask,
+      deployOverlap: { run: async () => ({ updateServiceCount: ++overlapDeployments, propagateTags: 'TASK_DEFINITION', taskDefinitionArn: overlapTask }) },
+      deploymentReceipt: { persist: async () => ({ receiptSha256: receipt.receiptSha256 }), authenticate: async () => receipt },
+    });
+    assert.equal(deployment.terminalState, 'DEPLOYED_PENDING_VERIFICATION'); assert.equal(overlapDeployments, 1);
+    const workflowRun = ({ workflowSource = tooling.sourceSha, jobSource = tooling.sourceSha, artifactSource = tooling.sourceSha, payload = receipt } = {}) => (command, args) => {
+      assert.equal(command, 'gh');
+      if (args[0] === 'run' && args[1] === 'download') { assert.equal(args[args.indexOf('--name') + 1], 'production-overlap-deployment-receipt-attempt-1'); writeFileSync(path.join(args[args.indexOf('--dir') + 1], 'production-overlap-deployment-receipt.json'), JSON.stringify(payload)); return ''; }
+      const endpoint = args[1], repository = { id: 30, full_name: 'T-ej2003/genuine-scan-main' };
+      if (endpoint.endsWith('/actions/runs/10')) return JSON.stringify({ id: 10, run_attempt: 1, repository, head_repository: repository, head_sha: workflowSource, head_branch: 'main', path: '.github/workflows/release-gate.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'success', actor: { login: 'operator' } });
+      if (endpoint.endsWith('/attempts/1/jobs')) return JSON.stringify([{ jobs: [{ id: 20, run_id: 10, run_attempt: 1, name: 'Deploy production ECS', head_sha: jobSource, status: 'completed', conclusion: 'success', steps: ['Authenticate production environment approval boundary', 'Deploy rotation transition backend ECS service', 'Upload overlap deployment receipt'].map(name => ({ name, status: 'completed', conclusion: 'success', started_at: now, completed_at: now })) }] }]);
+      if (endpoint.includes('/deployments?')) { assert.ok(endpoint.includes(`sha=${tooling.sourceSha}`)); return JSON.stringify([[{ id: 40, sha: tooling.sourceSha, ref: 'main', task: 'deploy', environment: 'production', performed_via_github_app: { slug: 'github-actions' } }]]); }
+      if (endpoint.endsWith('/deployments/40/statuses')) return JSON.stringify([['waiting', 'in_progress', 'success'].map(state => ({ state, environment: 'production', log_url: 'https://github.com/T-ej2003/genuine-scan-main/actions/runs/10/job/20' }))]);
+      if (endpoint.endsWith('/approvals')) return JSON.stringify([[{ state: 'approved', user: { login: 'reviewer', type: 'User', site_admin: false }, environments: [{ name: 'production', can_admins_bypass: false }] }]]);
+      if (endpoint.endsWith('/artifacts')) return JSON.stringify([{ artifacts: [{ id: 50, name: 'production-overlap-deployment-receipt-attempt-1', expired: false, digest: `sha256:${'9'.repeat(64)}`, created_at: now, workflow_run: { id: 10, head_sha: artifactSource, head_branch: 'main', repository_id: 30, head_repository_id: 30 } }] }]);
+      throw new Error(`Unexpected external workflow access: ${args}`);
+    };
+    const resolution = { workflowRunId: '10', workflowRunAttempt: '1', sourceSha: release, brokerRecoveryApproval: r.context };
+    for (const workflowSource of [release, 'c'.repeat(40)]) assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, run: workflowRun({ workflowSource }) }), /exact completed protected-main/);
+    assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, run: workflowRun({ jobSource: release }) }), /job identity/);
+    assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, run: workflowRun({ artifactSource: release }) }), /immutable receipt artifact/);
+    for (const sourceSha of [tooling.sourceSha, 'c'.repeat(40)]) assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, run: workflowRun({ payload: receiptFor(sourceSha) }) }), /sourceSha binding/);
+    for (const context of [undefined, structuredClone(r.context)]) assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, brokerRecoveryApproval: context, run: workflowRun() }), /protected-main|unauthenticated/);
+    assert.throws(() => resolveProductionOverlapDeploymentReceipt({ ...resolution, sourceSha: tooling.sourceSha, run: workflowRun() }), /unauthenticated/);
+    const resolved = resolveProductionOverlapDeploymentReceipt({ ...resolution, run: workflowRun() });
+    assert.equal(resolved.workflowSourceSha, tooling.sourceSha); assert.equal(resolved.receipt.sourceSha, release);
+    const proof = { rotationId: config.rotationId, phase: 'overlap', deploymentSha: config.overlapDeploymentSha, runtimeInvocationRef: 'ecs-exec:sealed-fixture', observedAt: now, healthObservedAt: now, serviceHealthy: true, healthHttpStatus: 200, expectedReleaseGitSha: imagesSource, healthReleaseGitSha: imagesSource,
+      ...Object.fromEntries(['jwtCurrentRuntimeVerify', 'jwtPreviousRuntimeVerify', 'jwtInvalidRuntimeRejected', 'qrCurrentRuntimeVerify', 'qrPreviousRuntimeVerify', 'qrTamperMatchingKeyTest', 'qrUnknownKeyRejected'].map(name => [name, true])), targetTaskArn: 'arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fixture', targetTaskDefinitionArn: overlapTask, targetImageDigest: config.backendImageDigest };
+    let verifierTooling, coordinatorCalls = 0;
+    const verifierInput = { configFile: runtime.configPath, configSha256: runtime.runtimeConfigSha256, sourceSha: release, rotationId: config.rotationId, brokerRecoveryApproval: r.context, workflowRunId: '10', workflowRunAttempt: '1',
+      protectedMain: ({ expectedSourceSha }) => { verifierTooling = expectedSourceSha; }, githubRun: workflowRun(), collectOnboardingCredentials: async () => ({ fixture: 'non-secret' }),
+      constructAdapters: ({ sourceSha }) => { assert.equal(sourceSha, release); return {
+        identities: { establish: async () => ({ verifier: { callerArn: 'arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/fixture', session: {} } }) },
+        postDeploy: { run: async () => ({ valid: true, taskArn: proof.targetTaskArn, taskDefinitionArn: overlapTask, imageDigest: config.backendImageDigest, taskTag: 'MSCQRExecTarget=production-backend' }) },
+        ecsExec: { run: async () => ({ valid: true, proof }) },
+        rotationPrepare: createProductionRotationPrepareAdapter({ coordinator: 'backend/scripts/security/rotate-production-signing-material.mjs', configFile: runtime.configPath, configSha256: runtime.runtimeConfigSha256, stateFile: config.rotationStateFile, fixtureFile: config.rotationFixtureFile, runtimeProofFile: config.overlapRuntimeProofFile, repositoryRoot: checkout,
+          run: async args => {
+            assert.deepEqual(args.slice(0, 3), ['node', 'backend/scripts/security/rotate-production-signing-material.mjs', '--verify']);
+            coordinatorCalls++;
+            await verifyRotation({ config: JSON.parse(readFileSync(args[args.indexOf('--config') + 1])), values: new Map([['state-file', args[args.indexOf('--state-file') + 1]], ['runtime-verification-file', args[args.indexOf('--runtime-verification-file') + 1]]]), clock: () => Date.now() });
+            const state = JSON.parse(readFileSync(config.rotationStateFile)); assert.equal(state.phase, 'verified'); assert.equal(state.sourceSha, release);
+            return JSON.stringify({ phase: state.phase });
+          },
+        }),
+        onboarding: { run: expected => runStrictOnboardingProbes({ expected, probes: Object.fromEntries(STRICT_ONBOARDING_CHECKS.map(name => [name, async ({ expected }) => { assert.equal(expected.sourceSha, release); assert.equal(expected.imageReleaseSha, imagesSource); return true; }])) }) },
+      }; },
+    };
     await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: undefined }), /requires authenticated broker recovery/);
     await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: structuredClone(r.context) }), /requires authenticated broker recovery/);
-    await assert.rejects(verifyProductionCutoverOverlap(verifierInput), /Persisted rotation state must be a regular non-symlink file/);
+    const verified = await verifyProductionCutoverOverlap(verifierInput);
+    assert.equal(verified.terminalState, 'VERIFIED_OVERLAP'); assert.equal(verified.readyForOnboarding, true); assert.equal(coordinatorCalls, 1);
     assert.equal(verifierTooling, tooling.sourceSha);
+    assert.equal(Date.parse(verified.cleanupEligibleAt) - Date.parse(verified.overlapReadyAt), 2592000 * 1000);
     assert.equal(registerCalls, 0); assert.equal(r.calls.filter(call => call === 'publish').length, 1);
   } finally { process.chdir(originalCwd); if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; if (!childFixture) rmSync(directory, { recursive: true, force: true }); }
 });

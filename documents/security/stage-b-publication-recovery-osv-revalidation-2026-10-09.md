@@ -4,7 +4,7 @@ The Stage-B executable, test, and package-script changes invalidate the prior ex
 
 Fresh production browser compilation and closure inspection covered 204 packages and excluded braces. Backend lockfile and existing worker/server runtime packaging checks also exclude it. The sole locked braces instance remains development-only. This correction changes no dependency lockfiles, Tailwind content patterns, application inputs, or runtime packaging; it introduces no attacker-controlled build pattern. The existing non-runtime conclusion therefore remains valid.
 
-Canonical reviewed executable-input fingerprint: `bc60fe69ee7272d3607fc7d888e0f309090372229dbec2013075a3de271ca331`. Only that fingerprint changes in the acceptance record; owner, advisory, rationale, and exclusive expiry remain unchanged. Validate with `node scripts/check-osv-runtime.mjs <unfiltered-osv-report.json>`.
+Canonical reviewed executable-input fingerprint: `2939d8bce9a4e5f5307c58bd3a3088d5b6609829fc5f272fdf0749f1a6845bd1`. Only that fingerprint changes in the acceptance record; owner, advisory, rationale, and exclusive expiry remain unchanged. Validate with `node scripts/check-osv-runtime.mjs <unfiltered-osv-report.json>`.
 
 The administrator-report recovery binding correction was re-reviewed against this final fingerprint; the freshly rebuilt browser closure still excludes braces.
 

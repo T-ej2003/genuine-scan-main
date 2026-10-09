@@ -68,7 +68,7 @@ export async function verifyProductionCutoverOverlap({ configFile, configSha256,
   const fixture = readStageBPrivateFileBytes({ filePath: config.rotationFixtureFile, repositoryRoot: root, label: "Persisted rotation fixture" });
   const readiness = readStageBPrivateFileBytes({ filePath: config.readinessEvidenceFile, repositoryRoot: root, label: "Persisted overlap readiness" });
   const authenticatedReadiness = readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256: readiness.sha256, sourceSha, rotationId, rotationStateSha256: preparedStateSha256 });
-  const resolved = resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, run: githubRun });
+  const resolved = resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, brokerRecoveryApproval, run: githubRun });
   const receipt = resolved.receipt;
   assertVerifierContinuationReceiptBindings({ receipt, authenticatedReadiness, sourceSha, rotationId, preparedStateSha256, readinessSha256: readiness.sha256, rotationFixtureSha256: fixture.sha256, config });
   const adapters = constructAdapters({ config, sourceSha, rotationId, runtimeConfigSha256: configSha256 });
