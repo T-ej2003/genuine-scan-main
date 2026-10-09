@@ -1004,6 +1004,7 @@ async function preparationTransitionFixture() {
  const receipts={TASK_REGISTERED:structuredClone(result),TASK_REGISTRATION_INTENT:{savedPlanSha256:p.savedPlanSha256,authorizedAt:result.authorizedAt}};
  const reservation={kind:'STAGED_BROKER_RESERVATION',id,value:{purpose:p.purpose,nonce:authorization.nonce,preparationSha256:brokerDigest(p)}};
  const deps={readRegisteredTaskDefinition:async address=>states[address],describeTaskDefinition:async arn=>observed[arn],readCompletedRegistration:async()=>completed,
+  authenticateTransitionSource:async(historicalSource,completedSource)=>{assert.equal(historicalSource,x.registration.result.sourceSha);assert.equal(completedSource,p.sourceSha);},
   authenticateRegistration:(entry,checkout)=>authenticateRegistrationHandoffEvidence(entry,checkout,{verifyAuthorization,
    authenticateTransactionSource:async prep=>assert.equal(prep.sourceSha,p.sourceSha,'Unrelated transaction source'),
    readReceipt:async(transaction,status)=>{assert.equal(transaction,id);return receipts[status];},
@@ -1031,3 +1032,30 @@ for(const [name,mutate] of [
  ['altered current image',r=>{const arn=r.states['aws_ecs_task_definition.candidate["backend"]'].arn;r.observed[arn].containerDefinitions[0].image+='-wrong';}],
  ['altered historical image',r=>{const arn=r.historical.result.definitions['aws_ecs_task_definition.candidate["backend"]'].arn;r.observed[arn].containerDefinitions[0].image+='-wrong';}],
 ]) test(`preparation rejects ${name}`,async()=>{const r=await preparationTransitionFixture();mutate(r);await assert.rejects(()=>authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps));});
+
+test('preparation rejects sibling transaction sources even when both precede the checkout',async()=>{
+ const r=await preparationTransitionFixture(),directory=fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-transition-ancestry-'));
+ const git=args=>execFileSync('git',args,{cwd:directory,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+ try{
+  git(['init','-q']);git(['config','user.name','Fixture']);git(['config','user.email','fixture@example.invalid']);
+  git(['commit','-q','--allow-empty','-m','common']);const common=git(['rev-parse','HEAD']);
+  git(['checkout','-q','-b','historical']);git(['commit','-q','--allow-empty','-m','historical']);const historical=git(['rev-parse','HEAD']);
+  git(['checkout','-q','-b','completed',common]);git(['commit','-q','--allow-empty','-m','completed']);const completed=git(['rev-parse','HEAD']);
+  git(['merge','-q','--no-ff','historical','-m','checkout']);const checkout=git(['rev-parse','HEAD']);
+  assertReceiptBoundGitAncestry({historicalSourceSha:historical,consumerSourceSha:checkout,cwd:directory});
+  assertReceiptBoundGitAncestry({historicalSourceSha:completed,consumerSourceSha:checkout,cwd:directory});
+  r.deps.authenticateTransitionSource=(historicalSource,completedSource)=>{
+   assert.equal(historicalSource,r.historical.result.sourceSha);assert.equal(completedSource,r.completed.preparation.sourceSha);
+   return assertReceiptBoundGitAncestry({historicalSourceSha:historical,consumerSourceSha:completed,cwd:directory});
+  };
+  await assert.rejects(()=>authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps));
+  git(['checkout','-q','-b','valid-transition','historical']);git(['commit','-q','--allow-empty','-m','valid successor']);const valid=git(['rev-parse','HEAD']);
+  git(['checkout','-q','completed']);git(['merge','-q','--no-ff','valid-transition','-m','current checkout']);const current=git(['rev-parse','HEAD']);
+  assertReceiptBoundGitAncestry({historicalSourceSha:valid,consumerSourceSha:current,cwd:directory});
+  r.deps.authenticateTransitionSource=(historicalSource,completedSource)=>{
+   assert.equal(historicalSource,r.historical.result.sourceSha);assert.equal(completedSource,r.completed.preparation.sourceSha);
+   return assertReceiptBoundGitAncestry({historicalSourceSha:historical,consumerSourceSha:valid,cwd:directory});
+  };
+  assert.equal(await authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps),true);
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});

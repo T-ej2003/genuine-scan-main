@@ -101,6 +101,7 @@ export async function authenticateRegistrationPredecessorBindings(registration, 
   const completed = await deps.readCompletedRegistration();
   assert.ok(completed, 'Changed registration bindings require an authenticated completed transition');
   await deps.authenticateRegistration(completed, release);
+  await deps.authenticateTransitionSource(registration.result.sourceSha, completed.preparation.sourceSha);
   const predecessor = completed.preparation.registrationPredecessor;
   assert.ok(predecessor, 'Completed transition lacks authenticated registration predecessor');
   assert.equal(predecessor.registrationTransactionId, registration.registrationPredecessor.transactionId);
@@ -623,6 +624,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         readCompletedRegistration: async () => JSON.parse(fs.readFileSync(path.join(root,
           'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json'))),
         authenticateRegistration: readHistoricalRegistration,
+        authenticateTransitionSource: (historicalSourceSha, consumerSourceSha) =>
+          assertReceiptBoundGitAncestry({historicalSourceSha, consumerSourceSha, exec, cwd:root}),
       }) : false;
     const observedOutputs = [];
     for (const [address, definition] of Object.entries(result.definitions)) {

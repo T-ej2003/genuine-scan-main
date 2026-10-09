@@ -1,6 +1,6 @@
 # Preparation-transition reachability revalidation
 
-The executor and its focused regression tests changed the existing broad executable-input fingerprint from `5c64c20af7a5aeeacf49db50be976811a950346c6b6721db0940c9ea774ff1bd` to `f912872da2bcee0784ce933ff7aa657b11ec884441577df36e1074c1f61b7567`. The correction authenticates retained ECS definitions and completed registration receipts; it adds no build glob, vulnerable package invocation, runtime application input, dependency or packaging change.
+The executor and its focused regression tests changed the existing broad executable-input fingerprint from `5c64c20af7a5aeeacf49db50be976811a950346c6b6721db0940c9ea774ff1bd` to `2e513d612fa13230947c52488547e871097c2f2c196c91bf278b186612a3a60a`. The correction authenticates retained ECS definitions and completed registration receipts; it adds no build glob, vulnerable package invocation, runtime application input, dependency or packaging change.
 
 OSV Scanner 2.6.0 freshly scanned all five dependency manifests without filtering dev dependencies. Report SHA-256: `33e7bf0c367c79d31a9d974c905a20c9547e2eb023a0accb0fac3c4370214e64`. The existing HIGH unpatched `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` remains visible for build-only `braces@3.0.3`.
 
