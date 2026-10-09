@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { rig, publicationPlan, cutoverPlan, configuration as fixtureConfiguration, authorization as fixtureAuthorization } from "./fixtures/staged-broker-runtime.mjs";
+import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, authenticateBrokerRecoveryApproval } from "../aws/stage-b-staged-broker.mjs";
+import { brokerDigest } from "../aws/stage-b-staged-broker-contract.mjs";
+
 import { prepareStageBApproval } from "../aws/create-production-green-stage-b-approval.mjs";
 import { collectProductionGreenStageBApprovalEvidence } from "../aws/collect-production-green-stage-b-approval-evidence.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
@@ -90,9 +95,10 @@ function signedPreflightTrust(reportValue = preflight(), source = releaseSha) {
 }
 
 function evidence(overrides = {}) {
-  const selectedPreflight = { ...preflight(overrides.preflight), stageBApprovalLiveObservation: live(overrides.live) };
-  const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || releaseSha);
-  return collectProductionGreenStageBApprovalEvidence({ sourceSha: releaseSha, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: () => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") }), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, ...(overrides.historical || {}), ...(overrides.recoveryApproval ? { recoveryApproval: overrides.recoveryApproval } : {}) }).evidence;
+  const source = overrides.source || releaseSha;
+  const selectedPreflight = { ...preflight({ sourceSha: source, ...overrides.preflight }), stageBApprovalLiveObservation: live(overrides.live) };
+  const trust = overrides.trust || signedPreflightTrust(overrides.trustReport || selectedPreflight, overrides.trustSource || source);
+  return collectProductionGreenStageBApprovalEvidence({ sourceSha: source, imageAuthorization: authorization, tfvarsPath: "/secure/t.tfvars", bindingReportPath: "/secure/t.json", releasePreflightPath: "/secure/preflight.json", checkerIdentity, now, validateImageAuthorization: () => {}, validateTfvarsBinding: () => ({ ...report, ...(overrides.report || {}) }), deriveContracts: overrides.deriveContracts || (() => ({ sourceContractSha256: digest("a"), migrationSetDigest: digest("b"), packageChecksumSha256: digest("c") })), readTfvarsBinding: () => ({ tfvarsBytes, bindingReportBytes }), readPreflight: () => selectedPreflight, releasePreflightTrustEvidence: trust, verifyReleasePreflightAttestationSignature: () => true, ...(overrides.historical || {}), ...(overrides.recoveryApproval ? { recoveryApproval: overrides.recoveryApproval } : {}) }).evidence;
 }
 
 test("approval-input authenticates the release runner before root-attestation verification", async () => {
@@ -517,4 +523,89 @@ test('approval collection rejects caller-supplied recovery identity even for a v
 
 test("approval collection rejects recovery-labelled preflight when native recovery context is omitted", () => {
   assert.throws(() => evidence({ preflight: { recoveryTooling: { sourceSha: 'd'.repeat(40) } } }), /Approval recovery report requires authenticated/);
+});
+
+
+test("completed original publication, descendant closure and public approval collection retain original contracts", async () => {
+  const repositoryRoot = process.cwd(), directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-original-contracts-'));
+  const git = args => execFileSync('git', args, { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+  const templateDirectory = 'infra/aws/terraform/production-green-stage-b/task-definitions';
+  fs.cpSync(path.join(repositoryRoot, templateDirectory), path.join(directory, templateDirectory), { recursive: true });
+  git(['init', '--initial-branch=main']); git(['add', '.']); git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Original release']);
+  const originalSource = git(['rev-parse', 'HEAD']);
+  const executorFile = path.join(directory, templateDirectory, 'green-activation-executor.json');
+  const changedTemplate = JSON.parse(fs.readFileSync(executorFile)); changedTemplate.cpu = '512'; changedTemplate.memory = '1024';
+  fs.writeFileSync(executorFile, JSON.stringify(changedTemplate));
+  fs.writeFileSync(path.join(directory, 'descendant-contracts.json'), JSON.stringify({ sourceContractSha256: digest('f'), migrationSetDigest: digest('f') }));
+  git(['add', '.']); git(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling']);
+  const tooling = { sourceSha: git(['rev-parse', 'HEAD']), treeSha256: digest('e') };
+  process.chdir(directory);
+  assert.notDeepEqual(stageBTemplateHashes(originalSource), stageBTemplateHashes());
+
+  const r = rig(), originalLive = live();
+  const variables = structuredClone(originalLive.configuration.Environment.Variables);
+  variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ ...brokerApprovalExpected, releaseSha: originalSource });
+  variables.BROKER_TASK_TEMPLATE_HASHES_JSON = JSON.stringify(stageBTemplateHashes(originalSource));
+  const version = { ...fixtureConfiguration(), ...originalLive.configuration, FunctionArn: `${STAGE_B.brokerFunctionArn}:13`, Version: "13",
+    RuntimeVersionConfig: fixtureConfiguration().RuntimeVersionConfig, Environment: { Variables: variables } };
+  r.p.sourceSha = originalSource; r.p.configuration = variables;
+  r.p.prerequisites.taskMap = taskDefinitionArns;
+  r.p.prerequisites.policy = JSON.parse(JSON.stringify(r.p.prerequisites.policy).replace(/:1"/g, ':4"'));
+  const bindPlan = plan => {
+    plan.variables.tooling_sha.value = originalSource;
+    const fn = plan.resource_changes.find(change => change.address === 'aws_lambda_function.broker');
+    fn.change.after.environment[0].variables = structuredClone(variables);
+    if (fn.change.actions[0] === "no-op") fn.change.before.environment[0].variables = structuredClone(variables);
+    return plan;
+  };
+  const pubPlan = bindPlan(publicationPlan());
+  const predecessorVariables = structuredClone(variables); predecessorVariables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ ...brokerApprovalExpected, releaseSha: "b".repeat(40) });
+  pubPlan.resource_changes[0].change.before.environment[0].variables = predecessorVariables;
+  r.p.logicalPlanSha256 = brokerDigest(pubPlan);
+  const sign = p => ({ ...fixtureAuthorization(p), sourceSha: originalSource, issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 600000).toISOString() });
+  Object.assign(r.auth, sign(r.p));
+  r.deps.now = () => now;
+  r.deps.readCheckout = async () => ({ sourceSha: originalSource, treeSha256: r.p.treeSha256 });
+  r.deps.readPrerequisites = async () => structuredClone(r.p.prerequisites);
+  r.deps.getVersion = async requested => requested === "12" ? { ...structuredClone(version), Version: "12", FunctionArn: `${STAGE_B.brokerFunctionArn}:12`, Environment: { Variables: predecessorVariables } } : structuredClone(version);
+  r.deps.readPlan = async () => ({ plan: pubPlan, bytes: Buffer.from('publication'), artifactSetSha256: r.p.artifactSetSha256 });
+  const published = await executeBrokerPublication({ preparation: r.p, authorization: r.auth }, r.deps);
+  r.deps.readCheckout = async () => tooling;
+  r.deps.authenticateBrokerRecoveryTooling = async () => ({ ...tooling, publicationResultSha256: brokerDigest(published) });
+  const plan = bindPlan(cutoverPlan());
+  const p = await prepareBrokerCutover({ publicationPreparation: r.p, publicationAuthorization: r.auth, publicationResult: published,
+    plan, bytes: Buffer.from('cutover'), state: r.state(), artifactSetSha256: digest('4') }, r.deps);
+  const authorization = sign(p);
+  r.deps.readPlan = async () => ({ plan, bytes: Buffer.from('cutover'), artifactSetSha256: p.artifactSetSha256 });
+  r.deps.captureNormalPlan = async () => {
+    const closure = structuredClone(plan), alias = closure.resource_changes.find(change => change.address === 'aws_lambda_alias.reviewed');
+    alias.change = { actions: ['no-op'], before: structuredClone(alias.change.after), after: structuredClone(alias.change.after), after_unknown: {} };
+    return { plan: closure, bytes: Buffer.from('closure') };
+  };
+  const refresh = r.deps.captureRefreshOnlyPlan;
+  r.deps.captureRefreshOnlyPlan = async () => { const captured = await refresh(); captured.plan.variables.tooling_sha.value = originalSource; return captured; };
+  const casResult = await executeBrokerAliasCas({ preparation: p, authorization }, r.deps);
+  const record = await reconcileBrokerAlias({ preparation: p, authorization, casResult }, r.deps);
+  const handoff = { preparation: p, authorization, casResult, record };
+  const native = { ...r.deps, readSource: async () => ({ preparation: r.p, authorization: r.auth }),
+    readReceipt: async (id, status) => status === 'STAGED_BROKER_TERMINAL_HANDOFF' ? handoff : r.entries.find(e => e[0] === id && e[1] === status)?.[2],
+    authenticateRecoveryTooling: async (_p, observed) => assert.deepEqual(observed, tooling), authenticateState: async () => {},
+    authenticateReconciliation: async (value, id) => assert.ok(r.entries.some(e => e[0] === id && e[1] === value.status && brokerDigest(e[2]) === brokerDigest(value))) };
+  const recoveryApproval = await authenticateBrokerRecoveryApproval({ preparation: p, authorization, result: record }, native);
+  const selectedLive = { ...originalLive, configuration: version, alias: casResult.alias };
+  const preflightBinding = { ...tooling, releaseSourceSha: originalSource, publicationResultSha256: brokerDigest(published), closureResultSha256: brokerDigest(record) };
+  const originalContracts = { sourceContractSha256: digest('a'), migrationSetDigest: digest('b'), packageChecksumSha256: digest('c') };
+  const collected = evidence({ source: originalSource, live: selectedLive, preflight: { recoveryTooling: preflightBinding }, recoveryApproval,
+    report: originalContracts, deriveContracts: () => { throw new Error('Descendant contract digests must not be used'); } });
+  assert.equal(collected.releaseSha, originalSource); assert.equal(collected.sourceContractSha256, originalContracts.sourceContractSha256);
+  const approved = await prepareProductionGreenStageBApprovalInput({ evidence: collected, protectedSourceSha: tooling.sourceSha,
+    operator: { ticketId: 'MSCQR-REL-RECOVERY' }, now });
+  assert.equal(approved.input.releaseSha, originalSource); assert.equal(approved.input.brokerVersion, '13');
+  assert.deepEqual(approved.input.taskDefinitionTemplateHashes, stageBTemplateHashes(originalSource));
+  assert.notDeepEqual(approved.input.taskDefinitionTemplateHashes, stageBTemplateHashes());
+  assert.equal(r.calls.filter(call => call === 'publish').length, 1);
+  assert.throws(() => evidence({ source: originalSource, live: selectedLive, preflight: { recoveryTooling: preflightBinding }, recoveryApproval,
+    report: { ...originalContracts, sourceContractSha256: digest('f') } }), /original broker contracts/);
+  } finally { process.chdir(repositoryRoot); fs.rmSync(directory, { recursive: true, force: true }); }
 });

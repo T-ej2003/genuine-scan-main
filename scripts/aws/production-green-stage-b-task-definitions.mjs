@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { assertStageBRuntimePlatform, canonicalSha256, assertImmutableImage, STAGE_B, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS } from "./production-green-stage-b-contract.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
@@ -21,9 +22,10 @@ const confirmations = Object.freeze({
   "full-rls-rollback": "MSCQR_PRODUCTION_GREEN_ROLLBACK_EXACT_PACKAGE",
 });
 export const STAGE_B_BACKEND_PORT_MAPPING = Object.freeze({ containerPort: 4000, hostPort: 4000, protocol: "tcp", name: "backend-4000-tcp", appProtocol: "http" });
-const readTemplate = (kind) => {
+const readTemplate = (kind, sourceSha) => {
   if (!files[kind]) throw new Error("Unknown Stage B task template.");
-  return JSON.parse(fs.readFileSync(path.join(root, files[kind]), "utf8"));
+  if (sourceSha !== undefined && !/^[a-f0-9]{40}$/.test(sourceSha)) throw new Error("Task template source must be exact.");
+  return JSON.parse(sourceSha ? execFileSync("git", ["show", `${sourceSha}:${path.join(root, files[kind])}`], { encoding: "utf8" }) : fs.readFileSync(path.join(root, files[kind]), "utf8"));
 };
 const replace = (value, values) => {
   if (Array.isArray(value)) return value.map((item) => replace(item, values));
@@ -38,8 +40,8 @@ const assertNoTokens = (value) => {
   if (/{{[A-Z0-9_]+}}/.test(text)) throw new Error("Stage B task template has an unresolved binding.");
 };
 
-const reviewedTemplate = (kind) => ({ ...readTemplate(kind), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
-export const stageBTemplateHashes = () => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind))]));
+const reviewedTemplate = (kind, sourceSha) => ({ ...readTemplate(kind, sourceSha), runtimePlatform: { ...STAGE_B.taskRuntimePlatform } });
+export const stageBTemplateHashes = (sourceSha) => Object.fromEntries(Object.entries(files).map(([kind]) => [kind, canonicalSha256(reviewedTemplate(kind, sourceSha))]));
 export const approvedNetworkConfiguration = (privateSubnetIds) => {
   if (!Array.isArray(privateSubnetIds) || privateSubnetIds.length !== STAGE_B.privateSubnetIds.length
       || [...privateSubnetIds].sort().join(",") !== [...STAGE_B.privateSubnetIds].sort().join(",")) {
@@ -80,7 +82,7 @@ export function assertFixedTaskDefinition(definition) {
   return definition;
 }
 
-export function renderStageBTaskDefinition(kind, bindings) {
+export function renderStageBTaskDefinition(kind, bindings, sourceSha) {
   const base = { RELEASE_SHA: bindings.imageReleaseSha, SOURCE_CONTRACT_SHA256: bindings.sourceContractSha256, MIGRATION_SET_DIGEST: bindings.migrationSetDigest, PACKAGE_CHECKSUM_SHA256: bindings.packageChecksumSha256, RECEIPT_BUCKET: bindings.receiptBucket, EXECUTOR_LOG_GROUP: bindings.executorLogGroup, CANARY_LOG_GROUP: bindings.canaryLogGroup, BACKEND_LOG_GROUP: bindings.backendLogGroup, WORKER_LOG_GROUP: bindings.workerLogGroup };
   if (!/^[a-f0-9]{40}$/.test(base.RELEASE_SHA || "") || !/^[a-f0-9]{64}$/.test(base.SOURCE_CONTRACT_SHA256 || "") || !/^[a-f0-9]{64}$/.test(base.MIGRATION_SET_DIGEST || "") || !/^[a-f0-9]{64}$/.test(base.PACKAGE_CHECKSUM_SHA256 || "")) throw new Error("Stage B task release binding is invalid.");
   const imageField = `${kind.toUpperCase()}_IMAGE`;
@@ -93,7 +95,7 @@ export function renderStageBTaskDefinition(kind, bindings) {
     values.MODE = bindings.mode;
     values.CONFIRMATION = confirmations[bindings.mode] || "";
   }
-  const definition = replace(reviewedTemplate(kind), values);
+  const definition = replace(reviewedTemplate(kind, sourceSha), values);
   assertNoTokens(definition);
   return assertFixedTaskDefinition(definition);
 }

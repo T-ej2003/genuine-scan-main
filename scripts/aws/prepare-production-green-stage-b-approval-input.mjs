@@ -15,7 +15,6 @@ import {
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
-import { stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
 import { writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { collectProductionGreenStageBApprovalEvidence, isAuthenticatedProductionGreenStageBApprovalEvidence } from "./collect-production-green-stage-b-approval-evidence.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
@@ -40,7 +39,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9-]{16,64}$/;
 const OPERATOR_FIELDS = Object.freeze(["ticketId"]);
 const EVIDENCE_FIELDS = Object.freeze([
-  "schemaVersion", "producer", "observedAt", "authorityMode", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
+  "schemaVersion", "producer", "observedAt", "authorityMode", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionTemplateHashes", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
 ]);
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -64,6 +63,7 @@ function assertEvidence(evidence) {
     "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
   ])) throw new Error("Authenticated evidence task-definition map is not the exact broker map.");
   if (!Object.values(evidence.taskDefinitionArns).every((value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || ""))) throw new Error("Authenticated evidence task-definition ARN is malformed.");
+  if (!exactKeys(evidence.taskDefinitionTemplateHashes, ["executor", "canary", "backend", "worker"]) || !Object.values(evidence.taskDefinitionTemplateHashes).every(value => DIGEST.test(value))) throw new Error("Authenticated task-template hashes are incomplete.");
   if (!exactKeys(evidence.taskDefinitionContentSha256, Object.keys(evidence.taskDefinitionArns)) || !Object.values(evidence.taskDefinitionContentSha256).every((value) => DIGEST.test(value))) throw new Error("Authenticated evidence task-definition content bindings are incomplete.");
   const identityRoles = { checkerIdentity: "mscqr-production-rls-independent-checker", deployerIdentity: "mscqr-production-release-deployer" };
   for (const [field, role] of Object.entries(identityRoles)) {
@@ -136,7 +136,7 @@ export async function prepareProductionGreenStageBApprovalInput({ evidence, prot
     signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM,
     sourceContractSha256: evidence.sourceContractSha256,
     taskDefinitionArns: evidence.taskDefinitionArns,
-    taskDefinitionTemplateHashes: stageBTemplateHashes(),
+    taskDefinitionTemplateHashes: { ...evidence.taskDefinitionTemplateHashes },
     ticketId: operatorFields.ticketId,
     workerImageDigest: evidence.workerImageDigest,
   };
