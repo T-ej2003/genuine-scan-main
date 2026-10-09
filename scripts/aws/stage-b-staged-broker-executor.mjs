@@ -1098,7 +1098,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     captureBrokerPolicyPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('broker-policy', ['-target=aws_iam_policy.broker']); },
     captureBrokerPolicyPruningPlan: async versionId => {
       assert.equal(phase, 'PREPARATION'); assert.match(versionId || '', /^v[1-9][0-9]*$/);
-      const { version: defaultVersionId, versions: inventory } = readBrokerPolicyInventory(runAws);
+      const { version: defaultVersionId, versions: inventory } = normalizePolicyInventory(readBrokerPolicyInventory(runAws));
       const plan = { purpose: BROKER_POLICY_PRUNING, sourceSha: (await adapter.readCheckout()).sourceSha, policyArn: STAGE_B_BROKER_POLICY.arn,
         defaultVersionId, versionId, inventory, mutation: 'iam:DeletePolicyVersion' };
       const file = path.join(directory, `policy-pruning-${randomUUID()}.json`);
