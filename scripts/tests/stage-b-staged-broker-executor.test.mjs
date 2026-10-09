@@ -17,7 +17,7 @@ import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBAppl
 import { assertBrokerCallerPolicy, readStagedBrokerPrerequisites } from '../aws/stage-b-staged-broker-observations.mjs';
 import { classifyStageBPlan } from '../aws/stage-b-deployment-contract.mjs';
 import { publicationPlan, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
-import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy } from '../aws/stage-b-release-prerequisites.mjs';
+import { BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, deriveBrokerPolicy, assertBrokerPolicyPruningPlan } from '../aws/stage-b-release-prerequisites.mjs';
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
 test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects identity or digest substitution',()=>{
@@ -494,8 +494,37 @@ async function pruningRecoveryFixture(state = 'successor', fault) {
     adapter.readRecoveryCheckout = async () => ({ sourceSha, treeSha256: p.treeSha256 });
     adapter.readPrerequisites = async () => p.prerequisites; return adapter;
   };
-  return { execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
+  return { prepare: make('PREPARATION'), setInventory: value => { versions = structuredClone(value); }, execute: make('POLICY'), recovery: make('POLICY_RECOVERY'), p, plan, planPath, auth, objects, calls, alterOwner: change => { const row = JSON.parse(item.state.S); change(row); item.state.S = JSON.stringify(row); }, crashAfterReceipt: () => { failCompletion = true; }, state: () => ({ owner: item && JSON.parse(item.state.S), writes }) };
 }
+test('native pruning producer canonicalizes AWS inventory before binding the saved plan', async () => {
+  const r = await pruningRecoveryFixture();
+  const raw = r.plan.inventory.map(v => ({ ...v, CreateDate: '2026-10-07T11:34:26+00:00' })).reverse();
+  r.setInventory(raw);
+  const first = await r.prepare.captureBrokerPolicyPruningPlan(r.p.target.versionId);
+  assert.deepEqual(first.plan, r.plan);
+  assert.deepEqual(JSON.parse(first.bytes), r.plan);
+  assert.deepEqual(fs.readFileSync(first.file), first.bytes);
+  assertBrokerPolicyPruningPlan(first.plan, r.p);
+  r.setInventory([...raw.slice(2), ...raw.slice(0, 2)]);
+  const second = await r.prepare.captureBrokerPolicyPruningPlan(r.p.target.versionId);
+  assert.deepEqual(second.bytes, first.bytes);
+  for (const changed of [
+    raw.map(v => v.VersionId === 'v3' ? { ...v, VersionId: 'v6' } : v),
+    raw.filter(v => v.VersionId !== 'v3'),
+    [...raw, { VersionId: 'v6', IsDefaultVersion: false }],
+    raw.map(v => ({ ...v, IsDefaultVersion: v.VersionId === 'v4' })),
+    raw.map(v => v.VersionId === 'v3' ? { ...v, IsDefaultVersion: 'false' } : v),
+  ]) {
+    r.setInventory(changed);
+    await assert.rejects(async () => {
+      const captured = await r.prepare.captureBrokerPolicyPruningPlan(r.p.target.versionId);
+      assertBrokerPolicyPruningPlan(captured.plan, r.p);
+    });
+  }
+  assert.throws(() => assertBrokerPolicyPruningPlan({ ...first.plan, policyArn: `${first.plan.policyArn}-other` }, r.p));
+  assert.equal(r.state().writes, 0);
+  assert.ok(r.calls.every(args => ['get-policy', 'get-policy-version', 'list-policy-versions'].includes(args[1])));
+});
 for (const state of ['successor','predecessor','missing-other','added','default','policy']) test(`uncertain pruning recovery authenticates exact ${state} inventory without delete replay`, async () => {
   const r = await pruningRecoveryFixture(state);
   await assert.rejects(() => r.execute.executeBrokerPolicyPruning()); assert.equal(r.state().owner.status, 'HELD');
