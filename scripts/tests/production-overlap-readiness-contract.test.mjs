@@ -21,6 +21,18 @@ test("offline cutover sequence reaches READY_FOR_OVERLAP_DEPLOYMENT only before 
   assert.deepEqual(assertReadyForOverlapDeployment(completeEvidence(), { sourceSha: "a".repeat(40), rotationId: "rotation-test-1234", rotationStateSha256: "b".repeat(64) }).readyForOverlapDeployment, true);
 });
 
+test("readiness binds the prepared operation checkout before overlap deployment", () => {
+  const evidence = completeEvidence();
+  const original = evidence.sourceSha, current = "c".repeat(40), later = "d".repeat(40);
+  assert.doesNotThrow(() => assertReadyForOverlapDeployment(evidence, { executionSourceSha: original }));
+  assert.throws(() => assertReadyForOverlapDeployment(evidence, { executionSourceSha: current }), /execution source/);
+  evidence.rotationPrepare.identityBindings.executionSourceSha = current;
+  assert.doesNotThrow(() => assertReadyForOverlapDeployment(evidence, { executionSourceSha: current }));
+  assert.throws(() => assertReadyForOverlapDeployment(evidence, { executionSourceSha: later }), /execution source/);
+  evidence.rotationPrepare.identityBindings.executionSourceSha = "not-a-sha";
+  assert.throws(() => assertReadyForOverlapDeployment(evidence, { executionSourceSha: "not-a-sha" }), /execution source/);
+});
+
 test("every required pre-overlap stage is fail-closed", () => {
   for (const stage of READY_FOR_OVERLAP_DEPLOYMENT_STAGES) {
     const evidence = completeEvidence();
@@ -59,6 +71,7 @@ test("release gate and deploy wrapper enforce the same checkpoint immediately be
   const releaseGate = readFileSync(".github/workflows/release-gate.yml", "utf8");
   const deploy = readFileSync("scripts/aws/deploy-ecs-service.sh", "utf8");
   assert.ok(releaseGate.indexOf("Authorize rotation transition readiness immediately before mutation") < releaseGate.indexOf("Deploy rotation transition backend ECS service"));
+  assert.match(releaseGate.slice(releaseGate.indexOf("Authorize rotation transition readiness immediately before mutation"), releaseGate.indexOf("Deploy rotation transition backend ECS service")), /operation_source_args=\(--execution-source-sha "\$EXECUTION_SOURCE_SHA"\)/);
   assert.match(releaseGate, /OVERLAP_READINESS_EVIDENCE_FILE/);
   assert.match(releaseGate, /run-production-cutover\.mjs/);
   assert.match(deploy, /require_existing_activation_authorization/);

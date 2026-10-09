@@ -68,7 +68,7 @@ export async function verifyProductionCutoverOverlap({ configFile, configSha256,
   if (!/^[a-f0-9]{64}$/.test(preparedStateSha256 || "")) throw new Error("Verifier continuation prepared-state predecessor binding is missing.");
   const fixture = readStageBPrivateFileBytes({ filePath: config.rotationFixtureFile, repositoryRoot: root, label: "Persisted rotation fixture" });
   const readiness = readStageBPrivateFileBytes({ filePath: config.readinessEvidenceFile, repositoryRoot: root, label: "Persisted overlap readiness" });
-  const authenticatedReadiness = readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256: readiness.sha256, sourceSha, rotationId, rotationStateSha256: preparedStateSha256 });
+  const authenticatedReadiness = readAndAssertReadyForOverlapDeployment({ filePath: config.readinessEvidenceFile, evidenceSha256: readiness.sha256, sourceSha, executionSourceSha: config.recoveryTooling?.sourceSha || sourceSha, rotationId, rotationStateSha256: preparedStateSha256 });
   const resolved = resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, brokerRecoveryApproval, run: githubRun });
   if (resolved.workflowSourceSha !== (config.recoveryTooling?.sourceSha || sourceSha)) throw new Error("Overlap workflow differs from the runtime config execution source.");
   const receipt = resolved.receipt;

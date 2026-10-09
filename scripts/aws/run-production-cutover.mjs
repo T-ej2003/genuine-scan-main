@@ -73,6 +73,7 @@ const adapters = createProductionCutoverRuntimeComposition().constructAdapters({
 const result = await runProductionCutoverControlPlane({
   mode: mode === "prepare-overlap" ? PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP : PRODUCTION_CUTOVER_MODE.FULL,
   sourceSha,
+  operationExecutionSourceSha: config.recoveryTooling?.sourceSha || sourceSha,
   rotationId,
   imageAuthorization: readBoundStageBPrivateJson({ filePath: config.imageAuthorizationFile, expectedSha256: config.imageAuthorizationSha256, label: "Image authorization evidence" }),
   ...adapters,

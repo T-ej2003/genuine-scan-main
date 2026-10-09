@@ -283,9 +283,9 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
-  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, rootDropContinuity, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
+  const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, operationExecutionSourceSha = sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, rootDropContinuity, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!Object.values(PRODUCTION_CUTOVER_MODE).includes(mode)) throw new Error("Production cutover mode is invalid.");
-  if (!SHA40.test(sourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
+  if (!SHA40.test(sourceSha || "") || !SHA40.test(operationExecutionSourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
   const mutations = [];
   const results = { protectedMain: { valid: true, sourceSha, evidenceSha256: imageAuthorization?.evidenceSha256 } , imageAuthorization };
 
@@ -408,11 +408,12 @@ export async function runProductionCutoverControlPlane(input = {}) {
     artifactSigning: stageEvidence("artifactSigning", results.artifactSigning, { sourceSha }),
     overlapTaskDefinition: overlapTaskStage,
     inventory: stageEvidence("inventory", inventoryResult, { sourceSha, rotationId }),
-    rotationPrepare: stageEvidence("rotationPrepare", rotation, { sourceSha, rotationId }),
+    rotationPrepare: stageEvidence("rotationPrepare", rotation, { sourceSha, rotationId, executionSourceSha: operationExecutionSourceSha }),
   };
+  if (stages.rotationPrepare.identityBindings.executionSourceSha !== operationExecutionSourceSha) throw new Error("Rotation preparation execution source differs from the runtime configuration.");
   const readinessEvidence = typeof readiness?.produce === "function" ? await readiness.produce({ sourceSha, rotationId, rotationStateSha256, stages }) : buildOverlapReadinessEvidence({ sourceSha, rotationId, rotationStateSha256, stages });
   if (typeof readiness?.validate === "function") await readiness.validate(readinessEvidence);
-  else assertReadyForOverlapDeployment(readinessEvidence, { sourceSha, rotationId, rotationStateSha256 });
+  assertReadyForOverlapDeployment(readinessEvidence, { sourceSha, executionSourceSha: operationExecutionSourceSha, rotationId, rotationStateSha256 });
   const persistedReadiness = typeof readiness?.persist === "function" ? await readiness.persist(readinessEvidence) : null;
   if (persistedReadiness && !SHA256.test(persistedReadiness.evidenceSha256 || "")) throw new Error("Persisted readiness evidence hash is invalid.");
   results.readiness = readinessEvidence;

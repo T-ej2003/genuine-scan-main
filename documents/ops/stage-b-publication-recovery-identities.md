@@ -56,12 +56,23 @@ independently match the original release. Missing/cloned recovery authority, mis
 run/job/artifact sources or a receipt relabelled as the tooling release fail closed.
 The verifier also requires the resolved workflow SHA to equal the digest-bound runtime
 configuration's `recoveryTooling.sourceSha`. Two different authorized descendants
-cannot contribute to one overlap operation. If protected main advances before Release
-Gate executes, the C-bound configuration cannot be paired with a D workflow: prepare
-a fresh D-bound configuration and exact authorization before any overlap write, then
-dispatch under D. If main advances after a C workflow executes, authenticate and
-finish that C operation from its original configuration and receipt; do not rewrite
-the C configuration or historical closure. The public fixture exercises both cases.
+cannot contribute to one overlap operation. The canonical prepare-overlap producer
+records that execution SHA in its hashed readiness evidence; Release Gate compares
+it with its authenticated checkout and re-fetches protected main immediately before
+the overlap ECS deployment step. Cleanup keeps its separate existing readiness
+contract. If protected main
+advances before Release Gate executes, the C-bound configuration cannot be paired
+with a D workflow. Before native preparation, regenerate a D-bound runtime and
+fresh operational proofs. After native preparation, preserve the C artifacts and
+reconcile the native rotation state; dispatch only after a canonical D-bound
+preparation and exact authorization can be authenticated. The current bootstrap
+requires a fresh output directory and has no
+proven automatic import of an already-prepared C rotation state/fixture into D;
+stop at that boundary rather than copying or relabelling them. If main advances
+after a C workflow executes, authenticate and finish that C operation from its
+original configuration and receipt; do not rewrite the C configuration or
+historical closure. The public fixture proves rejection and post-execution
+continuation, not cross-directory native state migration.
 The sealed public descendant test continues through the governed overlap operation,
 receipt resolution, independent overlap verifier and native rotation verification
 adapter into persisted `verified` state. The original release identity survives and

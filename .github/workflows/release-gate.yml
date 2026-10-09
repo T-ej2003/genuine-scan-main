@@ -971,13 +971,23 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
+          git fetch --prune origin main
+          if [ "$EXECUTION_SOURCE_SHA" != "$DEPLOY_SHA" ] && [ "$EXECUTION_SOURCE_SHA" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::Rotation execution tooling is no longer current protected main."
+            exit 1
+          fi
           printf '%s' "$ROTATION_READINESS_EVIDENCE_JSON" > "$READINESS_FILE"
           chmod 600 "$READINESS_FILE"
+          operation_source_args=()
+          if [[ "${{ inputs.release_mode }}" == "rotation-overlap" ]]; then
+            operation_source_args=(--execution-source-sha "$EXECUTION_SOURCE_SHA")
+          fi
           node scripts/aws/production-overlap-readiness-contract.mjs \
             --mode rotation-overlap \
             --evidence-file "$READINESS_FILE" \
             --evidence-sha256 "$ROTATION_READINESS_EVIDENCE_SHA256" \
             --source-sha "$SOURCE_SHA" \
+            "${operation_source_args[@]}" \
             --rotation-id "$ROTATION_ID" \
             --rotation-state-sha256 "$ROTATION_STATE_SHA256"
 
