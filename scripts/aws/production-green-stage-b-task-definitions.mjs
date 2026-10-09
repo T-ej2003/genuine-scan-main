@@ -19,7 +19,10 @@ function originalRenderer(sourceSha, operation, args = []) {
     const expected = tree.map(entry => entry.split("\t")[1]).sort();
     if (inputs.slice(1).some(file => !expected.includes(file))) throw new Error("Original renderer dependency is missing.");
     const archive = execFileSync("git", ["archive", "--format=tar", sourceSha, ...inputs], { maxBuffer: 64 * 1024 * 1024 });
-    execFileSync("tar", ["-xf", "-", "-C", directory], { input: archive });
+    const archivePath = path.join(directory, "original-inputs.tar");
+    fs.writeFileSync(archivePath, archive, { mode: 0o600, flag: "wx" });
+    execFileSync("tar", ["-xf", archivePath, "-C", directory]);
+    fs.unlinkSync(archivePath);
     const observed = [];
     const visit = current => { for (const name of fs.readdirSync(current)) { const file = path.join(current, name), stat = fs.lstatSync(file); if (stat.isSymbolicLink()) throw new Error("Original renderer cannot contain symlinks."); if (stat.isDirectory()) visit(file); else { if (!stat.isFile()) throw new Error("Unsupported original renderer input."); observed.push(path.relative(directory, file).split(path.sep).join("/")); } } };
     visit(directory);

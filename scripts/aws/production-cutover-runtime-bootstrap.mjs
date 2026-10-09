@@ -24,7 +24,7 @@ import {
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
-import { assertQrVersionResolutionCurrent } from "./production-qr-version-selector-resolution.mjs";
+import { assertQrVersionResolutionCurrent, assertQrVersionResolutionEvidence } from "./production-qr-version-selector-resolution.mjs";
 import { assertPreDeploymentInventoryTaskDefinitionArn } from "./production-predeployment-inventory-task.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
@@ -412,7 +412,10 @@ export function prepareProductionCutoverRuntime({
     }
     const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
     const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
-    if (qrVersionResolution) assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
+    if (qrVersionResolution) {
+      assertQrVersionResolutionEvidence(qrVersionResolution, { sourceSha: toolingSha, changeTicket: approval.ticket, expectedSecretArn: qrVersionResolution.secretArn });
+      assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
+    }
     const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition, { legacyBaseline: liveLegacyBaseline });
     const initialMigrationSourceAdvance = buildInitialMigrationSourceAdvance({

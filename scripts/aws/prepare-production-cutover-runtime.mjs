@@ -86,7 +86,7 @@ if (args.has("qr-version-resolution-run-id") || args.has("qr-version-secret-arn"
   const currentTaskDefinition = loadCurrentTaskDefinition();
   const expectedSecretArn = args.get("qr-version-secret-arn");
   const secretMetadata = JSON.parse(releaseRun(["secretsmanager", "describe-secret", "--secret-id", expectedSecretArn]));
-  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: args.get("qr-version-resolution-run-id"), sourceSha: brokerRecoveryApproval?.sourceSha || discoverGit(), changeTicket: required("ticket"), expectedSecretArn, taskDefinition: currentTaskDefinition, secretMetadata, token: readGitHubApiToken() });
+  qrVersionResolution = await resolveQrVersionResolutionArtifact({ workflowRunId: args.get("qr-version-resolution-run-id"), sourceSha: brokerRecoveryApproval?.tooling.sourceSha || discoverGit(), changeTicket: required("ticket"), expectedSecretArn, taskDefinition: currentTaskDefinition, secretMetadata, token: readGitHubApiToken() });
 }
 const approval = {
   ticket: required("ticket"),

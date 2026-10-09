@@ -5,6 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createHash } from "node:crypto";
+import JSZip from "jszip";
+import { assertQrVersionSelector, createQrVersionResolutionEvidence, resolveQrVersionResolutionArtifact, QR_VERSION_SELECTOR_RESOLUTION } from "../aws/production-qr-version-selector-resolution.mjs";
+import { verifyProductionCutoverOverlap } from "../aws/verify-production-cutover-overlap.mjs";
+import { runCli as produceRootDrop } from "../aws/produce-production-root-drop-evidence.mjs";
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
@@ -213,6 +217,28 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageRele
   };
 }
 
+test("same-source bootstrap accepts fresh operational QR evidence and rejects expiry", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    const secret = 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE';
+    const backend = input.currentTaskDefinition.taskDefinition.containerDefinitions[0];
+    const version = backend.environment.find(item => item.name === 'QR_SIGN_ACTIVE_KEY_VERSION').value;
+    backend.environment = backend.environment.filter(item => item.name !== 'QR_SIGN_ACTIVE_KEY_VERSION');
+    backend.secrets.push({ name: 'QR_SIGN_ACTIVE_KEY_VERSION', valueFrom: `${secret}:value::` });
+    const binding = assertQrVersionSelector({ taskDefinition: input.currentTaskDefinition, expectedSecretArn: secret });
+    input.loadCurrentQrSecretMetadata = () => ({ ARN: secret, VersionIdsToStages: { ['a'.repeat(32)]: ['AWSCURRENT'] } });
+    const evidence = createdAt => createQrVersionResolutionEvidence({ binding, resolved: { secretArn: secret, versionId: 'a'.repeat(32), qrCurrentVersion: version }, sourceSha, changeTicket: input.approval.ticket, workflowRunId: '12345', createdAt });
+    const stale = prepareProductionCutoverRuntime({ ...input, qrVersionResolution: evidence(new Date(Date.now() - 31 * 60 * 1000).toISOString()), outputDirectory: path.join(directory, 'expired') });
+    assert.equal(stale.readyToConsumeMfa, false); assert.match(stale.blockers.join('; '), /stale/);
+    const fresh = prepareProductionCutoverRuntime({ ...input, qrVersionResolution: evidence(new Date().toISOString()) });
+    assert.equal(fresh.readyToConsumeMfa, true, fresh.blockers?.join('; '));
+    assert.equal(fresh.config.sourceSha, sourceSha);
+    const cli = readFileSync(new URL('../aws/prepare-production-cutover-runtime.mjs', import.meta.url), 'utf8');
+    assert.match(cli, /sourceSha: brokerRecoveryApproval\?\.tooling.sourceSha \|\| discoverGit\(\), changeTicket:/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fixture", () => {
   const repositoryRoot = process.cwd();
   const directory = fsTemp();
@@ -399,7 +425,48 @@ test("public descendant preflight preserves original contracts through approval 
     input.iamEvidence = { ...JSON.parse(readFileSync(input.iamEvidence.filePath)), filePath: input.iamEvidence.filePath };
     input.temporaryKmsCapabilityFile = undefined;
     input.stageBTfvarsBindingReportSha256 = hash(readFileSync(input.stageBTfvarsBindingReportPath));
-    writeFileSync(input.rootDropEvidenceFile, JSON.stringify(buildRootDropEvidence({ payload: buildRootDropPayload({ sourceSha: release, callerArn: 'arn:aws:iam::368992683803:root', now: new Date().toISOString(), nonce: 'runtime-bootstrap-root-with-entropy', rotationId: bindings.rotationId, imageAuthorizationSha256: input.imageAuthorization.authorizationSha256, successorRecoveryAuthorizationSha256: null, administratorEvidenceSha256: hash(readFileSync(input.iamEvidence.filePath)), administratorSignatureSha256: hash(readFileSync(input.iamEvidenceSignatureFile)) }), signatureBase64: 'AQ==' })), { mode: 0o600 });
+    rmSync(input.rootDropEvidenceFile);
+    const rootDropArgs = ['--source-sha', release, '--broker-recovery', 'sealed-transport', '--broker-recovery-sha256', 'a'.repeat(64), '--output', input.rootDropEvidenceFile, '--profile', 'fixture', '--rotation-id', bindings.rotationId, '--image-authorization-sha256', input.imageAuthorization.authorizationSha256, '--successor-recovery-authorization-sha256', 'none', '--administrator-evidence-sha256', hash(readFileSync(input.iamEvidence.filePath)), '--administrator-signature-sha256', hash(readFileSync(input.iamEvidenceSignatureFile))];
+    await assert.rejects(produceRootDrop(rootDropArgs, { readRecovery: async () => structuredClone(r.context), commandRunner: () => { throw new Error('No unsigned recovery may sign'); } }), /unauthenticated/);
+    await assert.rejects(produceRootDrop(rootDropArgs, { readRecovery: async () => r.context, protectedMain: () => ({ headSha: release }), commandRunner: () => { throw new Error('No wrong tooling may sign'); } }), /tooling differs/);
+    const rootDrop = await produceRootDrop(rootDropArgs, {
+      readRecovery: async () => r.context,
+      protectedMain: ({ expectedSourceSha }) => { assert.equal(expectedSourceSha, tooling.sourceSha); return { headSha: tooling.sourceSha }; },
+      commandRunner: () => args => {
+        if (args[0] === 'sts' && args[1] === 'get-caller-identity') return JSON.stringify({ Arn: 'arn:aws:iam::368992683803:root', Account: '368992683803' });
+        if (args[0] === 'kms' && args[1] === 'sign') return JSON.stringify({ Signature: 'AQ==' });
+        throw new Error(`Unexpected root-drop external command: ${args}`);
+      },
+    });
+    assert.equal(rootDrop.sourceSha, release);
+    const qrSecret = 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE';
+    const backend = input.currentTaskDefinition.taskDefinition.containerDefinitions[0];
+    const qrVersion = backend.environment.find(item => item.name === 'QR_SIGN_ACTIVE_KEY_VERSION').value;
+    backend.environment = backend.environment.filter(item => item.name !== 'QR_SIGN_ACTIVE_KEY_VERSION');
+    backend.secrets.push({ name: 'QR_SIGN_ACTIVE_KEY_VERSION', valueFrom: `${qrSecret}:value::` });
+    const selector = assertQrVersionSelector({ taskDefinition: input.currentTaskDefinition, expectedSecretArn: qrSecret });
+    const metadata = { ARN: qrSecret, VersionIdsToStages: { ['a'.repeat(32)]: ['AWSCURRENT'] } };
+    input.loadCurrentQrSecretMetadata = arn => { assert.equal(arn, qrSecret); return metadata; };
+    const qrArtifact = async (artifactSource, createdAt = new Date().toISOString()) => {
+      const evidence = createQrVersionResolutionEvidence({ binding: selector, resolved: { secretArn: qrSecret, versionId: 'a'.repeat(32), qrCurrentVersion: qrVersion }, sourceSha: artifactSource, changeTicket: input.approval.ticket, workflowRunId: '12345', createdAt });
+      const zip = await new JSZip().file('resolution.json', JSON.stringify(evidence)).generateAsync({ type: 'nodebuffer' });
+      const workflow = { id: 12345, path: QR_VERSION_SELECTOR_RESOLUTION.workflowPath, repository: { full_name: 'T-ej2003/genuine-scan-main' }, head_repository: { full_name: 'T-ej2003/genuine-scan-main' }, event: 'workflow_dispatch', head_sha: artifactSource, status: 'completed', conclusion: 'success', run_attempt: 1 };
+      const artifact = { name: QR_VERSION_SELECTOR_RESOLUTION.artifactName, id: 9, expired: false, digest: `sha256:${hash(zip)}`, workflow_run: { id: 12345, head_sha: artifactSource } };
+      const fetchImpl = async url => {
+        if (!url.startsWith('https://api.github.com/repos/T-ej2003/genuine-scan-main/actions/')) throw new Error('Unexpected external QR access');
+        return { ok: true, json: async () => url.endsWith('/12345') ? workflow : { artifacts: [artifact] }, arrayBuffer: async () => zip };
+      };
+      return resolveQrVersionResolutionArtifact({ workflowRunId: '12345', sourceSha: tooling.sourceSha, changeTicket: input.approval.ticket, expectedSecretArn: qrSecret, taskDefinition: input.currentTaskDefinition, secretMetadata: metadata, token: 'fixture', fetchImpl });
+    };
+    await assert.rejects(qrArtifact(release), /provenance/);
+    await assert.rejects(qrArtifact('c'.repeat(40)), /provenance/);
+    await assert.rejects(qrArtifact(tooling.sourceSha, new Date(Date.now() - 31 * 60 * 1000).toISOString()), /stale/);
+    const badQr = createQrVersionResolutionEvidence({ binding: selector, resolved: { secretArn: qrSecret, versionId: 'a'.repeat(32), qrCurrentVersion: qrVersion }, sourceSha: release, changeTicket: input.approval.ticket, workflowRunId: '12345' });
+    const rejectedQr = prepareProductionCutoverRuntime({ ...input, qrVersionResolution: badQr, outputDirectory: path.join(directory, 'wrong-qr-source') });
+    assert.equal(rejectedQr.readyToConsumeMfa, false);
+    assert.match(rejectedQr.blockers.join('; '), /QR version resolution evidence binding/);
+    input.qrVersionResolution = await qrArtifact(tooling.sourceSha);
+    assert.equal(input.qrVersionResolution.sourceSha, tooling.sourceSha);
     input.inventoryTaskDefinitionArn = 'arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:7';
     for (const [name, attack] of Object.entries({
       'plaintext-secret': reference => { reference.value = 'fixture-password'; },
@@ -418,6 +485,13 @@ test("public descendant preflight preserves original contracts through approval 
     assert.equal(runtime.config?.inventoryTaskDefinitionArn, input.inventoryTaskDefinitionArn);
     assert.equal(runtime.readyToConsumeMfa, true, runtime.blockers?.join('; '));
     assert.equal(runtime.config.sourceSha, release); assert.equal(runtime.protectedMainSha, tooling.sourceSha);
+    let verifierTooling;
+    const verifierInput = { configFile: runtime.configPath, configSha256: runtime.runtimeConfigSha256, sourceSha: release, rotationId: runtime.config.rotationId, brokerRecoveryApproval: r.context,
+      protectedMain: ({ expectedSourceSha }) => { verifierTooling = expectedSourceSha; }, githubRun: () => { throw new Error('Unexpected verifier external access'); } };
+    await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: undefined }), /requires authenticated broker recovery/);
+    await assert.rejects(verifyProductionCutoverOverlap({ ...verifierInput, brokerRecoveryApproval: structuredClone(r.context) }), /requires authenticated broker recovery/);
+    await assert.rejects(verifyProductionCutoverOverlap(verifierInput), /Persisted rotation state must be a regular non-symlink file/);
+    assert.equal(verifierTooling, tooling.sourceSha);
     assert.equal(registerCalls, 0); assert.equal(r.calls.filter(call => call === 'publish').length, 1);
   } finally { process.chdir(originalCwd); if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome; if (!childFixture) rmSync(directory, { recursive: true, force: true }); }
 });

@@ -8,6 +8,8 @@ import { promptProductionHiddenInput } from "../security/production-interactive-
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { resolveProductionOverlapDeploymentReceipt } from "./production-overlap-deployment-receipt.mjs";
 import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
+import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
+import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 
@@ -48,10 +50,15 @@ export function assertVerifierContinuationReceiptBindings({ receipt, authenticat
   return authorizedTaskDefinitionArn;
 }
 
-export async function verifyProductionCutoverOverlap({ configFile, configSha256, sourceSha, rotationId, workflowRunId, workflowRunAttempt, githubRun = (command, args) => execFileSync(command, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), protectedMain = readFreshProtectedMainIdentity, constructAdapters = constructInheritedVerifierAdapters, collectOnboardingCredentials = collectPostDeploymentOnboardingCredentials } = {}) {
-  protectedMain({ cwd: root, expectedSourceSha: sourceSha });
+export async function verifyProductionCutoverOverlap({ configFile, configSha256, sourceSha, rotationId, workflowRunId, workflowRunAttempt, brokerRecoveryApproval, githubRun = (command, args) => execFileSync(command, args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), protectedMain = readFreshProtectedMainIdentity, constructAdapters = constructInheritedVerifierAdapters, collectOnboardingCredentials = collectPostDeploymentOnboardingCredentials } = {}) {
   const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot: root, label: "Production cutover runtime config" });
   if (config.sourceSha !== sourceSha || config.rotationId !== rotationId) throw new Error("Verifier continuation config identity is wrong.");
+  if (config.recoveryTooling || brokerRecoveryApproval) {
+    if (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.sourceSha !== sourceSha) throw new Error("Verifier continuation requires authenticated broker recovery.");
+    const binding = { ...brokerRecoveryApproval.tooling, releaseSourceSha: sourceSha, publicationResultSha256: brokerRecoveryApproval.publicationResultSha256, closureResultSha256: brokerRecoveryApproval.closureResultSha256 };
+    if (canonicalJson(binding) !== canonicalJson(config.recoveryTooling)) throw new Error("Verifier continuation recovery tooling binding is wrong.");
+    protectedMain({ cwd: root, expectedSourceSha: brokerRecoveryApproval.tooling.sourceSha });
+  } else protectedMain({ cwd: root, expectedSourceSha: sourceSha });
   const state = readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot: root, label: "Persisted rotation state" });
   const stateValue = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(state.bytes));
   const preparedStateSha256 = ["overlap-ready", "verified"].includes(stateValue.phase)
@@ -83,7 +90,10 @@ export async function verifyProductionCutoverOverlap({ configFile, configSha256,
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
-  verifyProductionCutoverOverlap({ configFile: required(process.argv, "--config"), configSha256: required(process.argv, "--config-sha256"), sourceSha: required(process.argv, "--source-sha"), rotationId: required(process.argv, "--rotation-id"), workflowRunId: required(process.argv, "--workflow-run-id"), workflowRunAttempt: required(process.argv, "--workflow-run-attempt") })
+  const argv = process.argv;
+  if (argv.includes("--broker-recovery") !== argv.includes("--broker-recovery-sha256")) throw new Error("Broker recovery requires its exact transport digest.");
+  const brokerRecoveryApproval = argv.includes("--broker-recovery") ? await (await import("./stage-b-staged-broker-executor.mjs")).readBrokerRecoveryApproval({ filePath: required(argv, "--broker-recovery"), expectedSha256: required(argv, "--broker-recovery-sha256") }) : undefined;
+  verifyProductionCutoverOverlap({ brokerRecoveryApproval, configFile: required(process.argv, "--config"), configSha256: required(process.argv, "--config-sha256"), sourceSha: required(process.argv, "--source-sha"), rotationId: required(process.argv, "--rotation-id"), workflowRunId: required(process.argv, "--workflow-run-id"), workflowRunAttempt: required(process.argv, "--workflow-run-attempt") })
     .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
     .catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
 }
