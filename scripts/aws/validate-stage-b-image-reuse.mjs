@@ -28,6 +28,7 @@ const PUBLICATION_ENV_SUSPECT = /(?:IMAGE|ECR|DOCKER|BUILD|PLATFORM|SOURCE|RELEA
 const TRUSTED_TOOLING_STEP_NAMES = new Set(["Checkout trusted workflow tooling", "Bind the trusted workflow tooling revision"]);
 
 const IMAGE_INPUTS = [
+  /^docker\/base-image-identities\.json$/,
   /^\.github\/workflows\/production-green-stage-b-image-build\.yml$/,
   /(^|\/)Dockerfile(?:\.|$)/,
   /(^|\/)(?:\.dockerignore|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/,
@@ -40,6 +41,7 @@ const IMAGE_INPUTS = [
   /^documents\/security\/mscqr_.*\.sql$/,
 ];
 const WEB_IMAGE_INPUTS = [
+  /^docker\/base-image-identities\.json$/,
   /^\.github\/workflows\/production-web-image\.yml$/,
   /^\.dockerignore$/,
   /^Dockerfile\.ecs-frontend$/,
@@ -63,7 +65,7 @@ const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-i
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
 const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:e2e|tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
-const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker/nginx-root-entrypoint.sh"]);
+const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker/nginx-root-entrypoint.sh"]);
 
 const canonicalJson = (value) => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;

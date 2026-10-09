@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { setTimeout as pause } from "node:timers/promises";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const digest = value => assert.match(value || "", /^sha256:[a-f0-9]{64}$/);
@@ -69,14 +70,22 @@ export function assertImageManifest(bytes, expectedDigest) {
   return JSON.parse(Buffer.from(bytes));
 }
 
-export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false } = {}) {
+export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, wait = pause } = {}) {
   const name = image.upstream.split(":")[0];
   const host = upstream ? "registry-1.docker.io" : "public.ecr.aws";
   const repository = upstream ? `library/${name}` : `docker/library/${name}`;
   const get = async (url, headers = {}) => {
-    const response = await fetcher(url, { headers, signal: AbortSignal.timeout(30000) });
-    assert.ok(response.ok, `Registry read failed: ${host} HTTP ${response.status}`);
-    return Buffer.from(await response.arrayBuffer());
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const response = await fetcher(url, { headers, signal: AbortSignal.timeout(30000) });
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+      if (attempt === 3 || ![429, 500, 502, 503, 504].includes(response.status)) {
+        assert.fail(`Registry read failed: ${host} HTTP ${response.status}`);
+      }
+      // Retry read-only requests for the same identity; every returned byte still authenticates.
+      const retryAfter = Number(response.headers.get("retry-after"));
+      await response.body?.cancel();
+      await wait(Math.max(1000 * 2 ** attempt, Math.min(30000, Number.isFinite(retryAfter) ? retryAfter * 1000 : 0)));
+    }
   };
   const tokenUrl = upstream
     ? `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repository}:pull`

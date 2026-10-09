@@ -119,9 +119,20 @@ for (const field of ["manifestDigest", "configDigest", "layerDigests"]) {
 }
 for (const status of [401, 429, 500]) {
   test(`registry HTTP ${status} never falls back or passes`, async () => {
-    const f = fixture(); await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => new Response("unavailable", { status }) }), /Registry read failed/);
+    const f = fixture(); await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => new Response("unavailable", { status }), wait: async () => {} }), /Registry read failed/);
   });
 }
+test("bounded read-only registry retries still authenticate every immutable byte", async () => {
+  const f = fixture(); let attempts = 0; const delays = [];
+  await verifyApprovedImage(f.image, { fetcher: async url => attempts++ === 0 ? new Response("throttled", { status: 429, headers: { "retry-after": "2" } }) : f.fetcher(url), wait: async delay => delays.push(delay) });
+  assert.deepEqual(delays, [2000]);
+  const invalid = fixture(); invalid.resources.set(invalid.image.digest, bytes({ substituted: true }));
+  let retry = true;
+  await assert.rejects(verifyApprovedImage(invalid.image, { fetcher: async url => { if (retry) { retry = false; return new Response("throttled", { status: 429 }); } return invalid.fetcher(url); }, wait: async () => {} }), /substituted/);
+  let reads = 0;
+  await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => { reads++; return new Response("throttled", { status: 429 }); }, wait: async () => {} }), /HTTP 429/);
+  assert.equal(reads, 4);
+});
 test("PostgreSQL mirror keeps strict reference and native content identity assertions", () => {
   const reference = images.postgres.reference;
   for (const platform of Object.values(images.postgres.platforms)) assertDisposablePostgresImage({ Config: { Image: reference }, Image: platform.configDigest });

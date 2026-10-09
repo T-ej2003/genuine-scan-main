@@ -85,7 +85,11 @@ https://www.docker.com/blog/news-from-aws-reinvent-docker-official-images-on-ama
 
 The original container Trivy scan at v0.70.0 reported 179 occurrences: **0 critical,
 44 high, 83 medium, 50 low, 2 unknown**. These are findings, not a clean-security
-claim. The existing action uses all severities, does not ignore unfixed findings,
+claim. All findings are Alpine OS-package occurrences; all 44 high occurrences have
+reported fixes (including curl, OpenSSL, expat, XML, HTTP and image libraries).
+Prioritize a separate reviewed base-image security update using the procedure
+above; this equivalent-registry correction does not silently upgrade packages.
+The existing action uses all severities, does not ignore unfixed findings,
 and defaults to reporting exit code zero. No container high/critical rejection
 threshold is configured in this audit. The stricter npm production-dependency and
 OSV runtime gates remain blocking. No finding, severity, threshold, exception
@@ -136,6 +140,16 @@ canonical source/migration digests changed. A fresh unfiltered OSV scan and
 canonical 204-package browser closure reauthenticated the existing non-runtime
 finding, preserving its November 2 expiry. Trivy repeated the same 179 findings;
 SPDX 2.3 SBOM generation (1,138 packages) and IaC scanning succeeded.
+
+The first corrected-head CI additionally exposed two independently diagnosed
+issues: the existing impact classifier did not recognize the new lock/two test
+Compose inputs, and ECR Public returned HTTP 429 during provenance reads. The
+lock is now explicitly image-affecting for backend and frontend; only the two
+named disposable harnesses are tooling-only. Unknown neighboring paths still
+fail closed. Registry reads retry the same URL at most four times with bounded
+backoff for 429/temporary 5xx responses. Each successful response still undergoes
+full authentication; exhaustion, auth failure or substituted bytes still fails.
+The expanded suites contain 21 image-contract and 31 image-impact regressions.
 
 Required GitHub CI and a new exact-head review remain necessary before merge;
 local results do not substitute for them. Keep security updates in the documented
