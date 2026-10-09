@@ -66,3 +66,15 @@ native reader authenticates publication, closure, lineage and clean protected
 checkout before either producer/verifier may execute from descendant tooling.
 A recovery config without that authenticated context is rejected. Fresh root-drop
 signatures retain the release source; they do not change the published broker.
+
+Release Gate's rotation deployment job checks out its explicit
+`EXECUTION_SOURCE_SHA` (the workflow's protected-main SHA), independently of
+`DEPLOY_SHA` / `RELEASE_GIT_SHA`. Before credentials or writes, it verifies the
+clean exact checkout, original release ancestry, and current protected-main
+identity for descendant tooling. The existing historical-target authorization
+(Release Train identity or exact release tag), required gates, environment
+approval and release-bound readiness remain mandatory. Normal application
+release checkout behavior is unchanged. The full fixture executes the actual
+YAML target-resolution and checkout-verification shell blocks against a private
+local Git origin before the overlap operation; workflow metadata alone is not
+proof of which checkout executed the scripts.

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import yaml from "js-yaml";
 
 test("rotation-overlap has one governed production entrypoint", () => {
   const workflow = readFileSync(".github/workflows/release-gate.yml", "utf8");
@@ -56,4 +57,18 @@ test("strict onboarding cannot delegate acceptance to optional smoke skips", () 
   assert.match(strict, /Mandatory onboarding check failed/);
   assert.match(strict, /assertNoOnboardingEvidenceLeak/);
   assert.doesNotMatch(strict, /SKIP|ALLOW_STAGING_SMOKE_DEGRADED_ON_PR/);
+});
+
+
+test("rotation jobs execute authenticated current tooling without rewriting release target", () => {
+  const job = yaml.load(readFileSync(".github/workflows/release-gate.yml", "utf8")).jobs["deploy-production-ecs"];
+  assert.equal(job.env.EXECUTION_SOURCE_SHA, "${{ (inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup') && github.sha || needs.resolve-deploy-target.outputs.deploy_sha }}");
+  assert.equal(job.steps.find(step => step.uses === "actions/checkout@v6").with.ref, "${{ env.EXECUTION_SOURCE_SHA }}");
+  assert.equal(job.env.DEPLOY_SHA, "${{ needs.resolve-deploy-target.outputs.deploy_sha }}");
+  assert.equal(job.env.RELEASE_GIT_SHA, job.env.DEPLOY_SHA);
+  const verify = job.steps.find(step => step.name === "Verify exact clean main checkout").run;
+  assert.match(verify, /merge-base --is-ancestor "\$DEPLOY_SHA" "\$EXECUTION_SOURCE_SHA"/);
+  assert.match(verify, /EXECUTION_SOURCE_SHA.*git rev-parse origin\/main/);
+  for (const name of ["Authenticate production environment approval boundary", "Authorize rotation transition readiness immediately before mutation"]) assert.equal(job.steps.find(step => step.name === name).env.SOURCE_SHA, job.env.DEPLOY_SHA);
+  assert.equal(job.steps.find(step => step.name === "Deploy rotation transition backend ECS service").env.DEPLOYMENT_SOURCE_SHA, job.env.DEPLOY_SHA);
 });

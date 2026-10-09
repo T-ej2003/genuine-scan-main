@@ -416,6 +416,7 @@ jobs:
       PLATFORMS: linux/amd64
       PUBLIC_BASE_URL: https://www.mscqr.com
       DEPLOY_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      EXECUTION_SOURCE_SHA: ${{ (inputs.release_mode == 'rotation-overlap' || inputs.release_mode == 'rotation-cleanup') && github.sha || needs.resolve-deploy-target.outputs.deploy_sha }}
       RELEASE_GIT_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       P2_TEST_DATABASE_REQUIRED: "true"
       P2_TEST_DB_PROTOCOL: postgresql
@@ -426,10 +427,10 @@ jobs:
       REDIS_URL: redis://127.0.0.1:6379/0
       REDIS_TLS: "false"
     steps:
-      - name: Checkout exact deployment target
+      - name: Checkout authenticated execution source
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          ref: ${{ env.EXECUTION_SOURCE_SHA }}
           fetch-depth: 0
 
       - name: Verify exact clean main checkout
@@ -437,14 +438,22 @@ jobs:
           set -euo pipefail
 
           actual_sha="$(git rev-parse HEAD)"
-          if [ "$actual_sha" != "$DEPLOY_SHA" ]; then
-            echo "::error::Checked out ${actual_sha}; expected ${DEPLOY_SHA}."
+          if [ "$actual_sha" != "$EXECUTION_SOURCE_SHA" ]; then
+            echo "::error::Checked out ${actual_sha}; expected tooling ${EXECUTION_SOURCE_SHA}."
             exit 1
           fi
 
           git fetch --prune origin main
-          if ! git merge-base --is-ancestor "$DEPLOY_SHA" origin/main; then
-            echo "::error::Production deploy target must remain reachable from origin/main."
+          if ! git merge-base --is-ancestor "$DEPLOY_SHA" "$EXECUTION_SOURCE_SHA"; then
+            echo "::error::Release source must be an authenticated ancestor of execution tooling."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$EXECUTION_SOURCE_SHA" origin/main; then
+            echo "::error::Execution tooling must remain reachable from origin/main."
+            exit 1
+          fi
+          if [ "$EXECUTION_SOURCE_SHA" != "$DEPLOY_SHA" ] && [ "$EXECUTION_SOURCE_SHA" != "$(git rev-parse origin/main)" ]; then
+            echo "::error::Descendant rotation tooling must equal current protected main."
             exit 1
           fi
 
@@ -454,7 +463,7 @@ jobs:
             exit 1
           fi
 
-          echo "Deploy SHA verified: ${DEPLOY_SHA}"
+          echo "Release SHA verified: ${DEPLOY_SHA}; execution SHA: ${EXECUTION_SOURCE_SHA}"
 
       - name: Setup Node
         uses: actions/setup-node@v6
