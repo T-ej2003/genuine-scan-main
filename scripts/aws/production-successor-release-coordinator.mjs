@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {brokerDigest,brokerExecutionCheckout,prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
+import {releaseTransitionDispatchInputs} from './production-release-coordinator.mjs';
 
 const sha=/^[a-f0-9]{40}$/,digest=/^[a-f0-9]{64}$/;
 
@@ -66,39 +67,73 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
    assert.equal(prepared.preparation.sourceSha,release.sourceSha);
    assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
    await runtime.hydratePreparation({release,inputs},phase,prepared);
-   const preparedReference=brokerDigest(prepared),authorized=await read(`${phase}:authorized:0`);
-   if(authorized){assert.equal(authorized.prepared,preparedReference);authorization=await get(authorized.authorization);}
-   else{
-    const pending=await read(`${phase}:pending:0`);
-    if(pending)assert.equal(pending.prepared,preparedReference);
-    const approval=await runtime.obtainAuthorization({release,store,inputs,authorizationRound:0,pendingApproval:pending},phase,prepared,preparedReference);
-    if(approval.status==='WAITING_FOR_APPROVAL'){
-     if(!pending)await write(`${phase}:pending:0`,{prepared:preparedReference,runId:String(approval.runId),runUrl:approval.runUrl});
-     return {status:'WAITING_FOR_APPROVAL',releaseId:release.releaseId,sourceSha:release.sourceSha,
-      phase,runId:String(approval.runId),runUrl:approval.runUrl};
+   const preparedReference=brokerDigest(prepared);
+   for(let round=0;;round++){
+    assert.ok(round<20,'Repeated expired successor approvals require a new governed operation');
+    const attempt=await read(`${phase}:attempt:${round}`);
+    const authenticatedDispatch=async()=>{
+     const journal=await read(`${phase}:dispatch:${round}`),identity=journal?.dispatch?.identity;
+     assert.ok(identity,'Timed-out approval lacks authenticated dispatch');
+     assert.equal(identity.repository,'T-ej2003/genuine-scan-main');
+     assert.equal(identity.workflow,'authorize-production-stage-b-release-transition.yml');
+     assert.equal(identity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
+     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,request.recoveryToolingSha);
+     assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},phase,preparedReference,prepared.preparation));
+    };
+    const timedOut=await read(`${phase}:approval-timeout:${round}`);
+    if(timedOut){assert.equal(attempt,null);assert.equal(await read(`${phase}:authorized:${round}`),null);
+     assert.equal(timedOut.prepared,preparedReference);assert.match(timedOut.runId,/^[1-9][0-9]*$/);
+     const pending=await read(`${phase}:pending:${round}`);
+     if(pending){assert.equal(pending.prepared,preparedReference);assert.equal(pending.runId,timedOut.runId);}
+     else await authenticatedDispatch();
+     continue;}
+    const authorized=await read(`${phase}:authorized:${round}`);
+    if(authorized){assert.equal(authorized.prepared,preparedReference);authorization=await get(authorized.authorization);}
+    else{
+     assert.equal(attempt,null,'Native intent cannot lack its authenticated authorization');
+     const pending=await read(`${phase}:pending:${round}`);
+     if(pending)assert.equal(pending.prepared,preparedReference);
+     const approval=await runtime.obtainAuthorization({release,store,inputs,authorizationRound:round,pendingApproval:pending},phase,prepared,preparedReference);
+     if(approval.status==='APPROVAL_TIMED_OUT'){
+      assert.match(String(approval.runId),/^[1-9][0-9]*$/);
+      if(pending)assert.equal(String(approval.runId),pending.runId);
+      else await authenticatedDispatch();
+      await write(`${phase}:approval-timeout:${round}`,{prepared:preparedReference,runId:String(approval.runId)});
+      continue;
+     }
+     if(approval.status==='WAITING_FOR_APPROVAL'){
+      assert.match(String(approval.runId),/^[1-9][0-9]*$/);
+      assert.equal(approval.runUrl,`https://github.com/T-ej2003/genuine-scan-main/actions/runs/${approval.runId}`);
+      if(pending){assert.equal(String(approval.runId),pending.runId);assert.equal(approval.runUrl,pending.runUrl);}
+      else await write(`${phase}:pending:${round}`,{prepared:preparedReference,runId:String(approval.runId),runUrl:approval.runUrl});
+      return {status:'WAITING_FOR_APPROVAL',releaseId:release.releaseId,sourceSha:release.sourceSha,
+       phase,authorizationRound:round,runId:String(approval.runId),runUrl:approval.runUrl};
+     }
+     assert.equal(approval.status,'AUTHORIZED');authorization=approval.authorization;
+     if(pending){assert.equal(authorization.schemaVersion,2);
+      assert.equal(authorization.protectedEnvironmentApprovalEvidence.workflowRunId,pending.runId);}
+     await runtime.authenticateAuthorization(prepared.preparation,authorization);
+     assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,preparationReference:preparedReference,authorizationRound:round});
+     await write(`${phase}:authorized:${round}`,{prepared:preparedReference,authorization:await put(authorization)});
     }
-    assert.equal(approval.status,'AUTHORIZED');authorization=approval.authorization;
     await runtime.authenticateAuthorization(prepared.preparation,authorization);
-    assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,preparationReference:preparedReference,authorizationRound:0});
-    await write(`${phase}:authorized:0`,{prepared:preparedReference,authorization:await put(authorization)});
+    assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,preparationReference:preparedReference,authorizationRound:round});
+    const native=await runtime.classifyNativeAttempt({release,inputs},phase,prepared,authorization);
+    assert.ok(['PRE_NATIVE','RECOVER'].includes(native));
+    if(!attempt){assert.equal(native,'PRE_NATIVE');if(Date.parse(authorization.expiresAt)<=Date.now())continue;
+     await write(`${phase}:attempt:${round}`,{prepared:preparedReference,authorization:brokerDigest(authorization)});}
+    else{assert.equal(attempt.prepared,preparedReference);assert.equal(attempt.authorization,brokerDigest(authorization));
+     if(native==='PRE_NATIVE'&&Date.parse(authorization.expiresAt)<=Date.now())continue;}
+    const executionInputs={files:inputs.files,directory:inputs.directory,terraformDataDir:inputs.terraformDataDir};
+    result=await runtime.runStageOperation({...executionInputs,operation:native==='RECOVER'
+     ?phase==='cutover'?'recover-cutover':'recover-reconciliation'
+     :phase==='cutover'?'cutover':'reconcile',preparation:prepared.preparation,authorization,planPath:prepared.planPath,
+     ...(phase==='closure'?{casResult:cutover.result,cutoverPreparation:cutover.prepared.preparation,
+      cutoverAuthorization:cutover.authorization}:{})});
+    await runtime.authenticateCompletedTransition({release,inputs,request},phase,prepared,authorization,result,cutover);
+    await write(`${phase}:result`,{prepared:preparedReference,authorization:brokerDigest(authorization),result:await put(result)});
+    break;
    }
-   await runtime.authenticateAuthorization(prepared.preparation,authorization);
-   assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,preparationReference:preparedReference,authorizationRound:0});
-   const attempt=await read(`${phase}:attempt:0`),native=await runtime.classifyNativeAttempt({release,inputs},phase,prepared,authorization);
-   assert.ok(['PRE_NATIVE','RECOVER'].includes(native));
-   if(!attempt){assert.equal(native,'PRE_NATIVE');assert.ok(Date.parse(authorization.expiresAt)>Date.now(),'Successor authorization expired before native intent');
-    await write(`${phase}:attempt:0`,{prepared:preparedReference,authorization:brokerDigest(authorization)});}
-   else{assert.equal(attempt.prepared,preparedReference);assert.equal(attempt.authorization,brokerDigest(authorization));
-    if(native==='PRE_NATIVE')assert.ok(Date.parse(authorization.expiresAt)>Date.now(),
-     'Pre-native successor authorization expired');}
-   const executionInputs={files:inputs.files,directory:inputs.directory,terraformDataDir:inputs.terraformDataDir};
-   result=await runtime.runStageOperation({...executionInputs,operation:native==='RECOVER'
-    ?phase==='cutover'?'recover-cutover':'recover-reconciliation'
-    :phase==='cutover'?'cutover':'reconcile',preparation:prepared.preparation,authorization,planPath:prepared.planPath,
-    ...(phase==='closure'?{casResult:cutover.result,cutoverPreparation:cutover.prepared.preparation,
-     cutoverAuthorization:cutover.authorization}:{})});
-   await runtime.authenticateCompletedTransition({release,inputs,request},phase,prepared,authorization,result,cutover);
-   await write(`${phase}:result`,{prepared:preparedReference,authorization:brokerDigest(authorization),result:await put(result)});
   }
   if(phase==='cutover')cutover={prepared,authorization,result};
   else{const closure=await runtime.authenticateClosure({release,inputs,request},{cutover,closure:{prepared,authorization,result}});

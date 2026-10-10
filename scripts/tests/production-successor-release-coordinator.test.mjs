@@ -11,7 +11,7 @@ const request={kind:'STAGE_B_SUCCESSOR_CUTOVER_REQUEST',releaseSourceSha:A,recov
  historicalImportReference:'3'.repeat(64),currentStateSha256:'4'.repeat(64),
  publicationResultSha256:'5'.repeat(64),imageEvidenceReference:'6'.repeat(64),imageSignatureReference:'7'.repeat(64)};
 
-async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeResponse=false}={}) {
+async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeResponse=false,expireFirstApproval=false}={}) {
  const original=rig({sourceSha:A}),r=await ready(original),p=structuredClone(r.p);
  p.recoveryTooling={sourceSha:C,treeSha256:'8'.repeat(64),publicationResultSha256:brokerDigest(p.publication)};
  const selected={...request,publicationResultSha256:brokerDigest(p.publication)};
@@ -45,10 +45,15 @@ async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeRespo
   capturePreparation:async(_context,_phase,value)=>({...value,materializationSha256:'9'.repeat(64)}),
   hydratePreparation:async()=>{},authenticateAuthorization:async()=>{},
   obtainAuthorization:async(context,phase,prepared,preparationReference)=>{counts.approval++;
-   if(approval==='WAITING_FOR_APPROVAL'&&counts.approval===1)return {status:approval,runId:'700',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};
+   if(approval==='UNRECORDED_TIMEOUT')return {status:'APPROVAL_TIMED_OUT',runId:'700'};
+   if(['WAITING_FOR_APPROVAL','APPROVAL_TIMED_OUT'].includes(approval)&&counts.approval===1)
+    return {status:'WAITING_FOR_APPROVAL',runId:'700',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};
+   if(approval==='APPROVAL_TIMED_OUT'&&counts.approval===2)return {status:'APPROVAL_TIMED_OUT',runId:'700'};
    return {status:'AUTHORIZED',authorization:{schemaVersion:2,issuedAt:new Date().toISOString(),
-    expiresAt:new Date(Date.now()+20*60_000).toISOString(),release:{releaseId:context.release.releaseId,
-     phase,preparationReference,authorizationRound:0}}};},
+    expiresAt:new Date(Date.now()+(expireFirstApproval&&context.authorizationRound===0?-1000:20*60_000)).toISOString(),
+    ...(context.pendingApproval?{protectedEnvironmentApprovalEvidence:{workflowRunId:context.pendingApproval.runId}}:{}),
+    release:{releaseId:context.release.releaseId,
+     phase,preparationReference,authorizationRound:context.authorizationRound}}};},
   classifyNativeAttempt:async(_context,phase)=>phase==='cutover'&&nativeCutover?'RECOVER':'PRE_NATIVE',
   authenticateCompletedTransition:async()=>{},authenticateClosure:async()=>({status:'CLOSED',sourceSha:A})};
  return {runtime,reference,store,steps,counts,releaseId};
@@ -79,6 +84,34 @@ test('protected authorization pending boundary resumes the same immutable prepar
  assert.equal(first.status,'WAITING_FOR_APPROVAL');assert.equal(first.phase,'cutover');assert.equal(f.counts.cutover,0);
  const second=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
  assert.equal(second.status,'BROKER_CLOSURE_COMPLETE');assert.equal(f.counts.cutover,1);
+});
+
+test('timed-out protected child records round zero and authorizes a fresh round without replay',async()=>{
+ const f=await fixture({approval:'APPROVAL_TIMED_OUT'});
+ const first=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(first.status,'WAITING_FOR_APPROVAL');assert.equal(first.authorizationRound,0);
+ const result=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(result.status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(f.steps.get(`${f.releaseId}/cutover:approval-timeout:0`).runId,'700');
+ assert.ok(f.steps.has(`${f.releaseId}/cutover:authorized:1`));
+ assert.equal(f.counts.cutover,1);
+});
+
+test('expired pre-native authorization advances round while keeping the preparation',async()=>{
+ const f=await fixture({expireFirstApproval:true});
+ const result=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(result.status,'BROKER_CLOSURE_COMPLETE');
+ assert.ok(f.steps.has(`${f.releaseId}/cutover:authorized:0`));
+ assert.ok(f.steps.has(`${f.releaseId}/cutover:authorized:1`));
+ assert.equal(f.counts.cutover,1);
+});
+
+test('an unrecorded timed-out approval cannot authorize another child',async()=>{
+ const f=await fixture({approval:'UNRECORDED_TIMEOUT'});
+ await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),
+  /authenticated dispatch/);
+ assert.equal(f.counts.cutover,0);
+ assert.equal(f.steps.has(`${f.releaseId}/cutover:approval-timeout:0`),false);
 });
 
 test('lost coordinator attempt response resumes only after native intent absence is authenticated',async()=>{
