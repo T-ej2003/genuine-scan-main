@@ -19,6 +19,11 @@ const request={kind:'STAGE_B_SUCCESSOR_CUTOVER_REQUEST',releaseSourceSha:A,recov
 async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeResponse=false,expireFirstApproval=false,
  expireEvidenceBeforeExecution=false,expireBeforeClosure=false}={}) {
  const original=rig({sourceSha:A}),r=await ready(original),p=structuredClone(r.p);
+ // The published prerequisite chain, not the reviewed predecessor's runtime map,
+ // authenticates the post-registration IAM task revisions during successor preparation.
+ const successorMap=Object.fromEntries(Object.entries(original.p.prerequisites.taskMap)
+  .map(([mode,arn])=>[mode,arn.replace(/:([0-9]+)$/,(_,revision)=>`:${Number(revision)+4}`)]));
+ original.p.prerequisiteChain={registration:{result:{taskMap:successorMap}}};
  p.recoveryTooling={sourceSha:C,treeSha256:'8'.repeat(64),publicationResultSha256:brokerDigest(p.publication)};
  const selected={...request,publicationResultSha256:brokerDigest(p.publication)};
  let clock=Date.now();
@@ -53,6 +58,7 @@ async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeRespo
   materializeInputs:async({phase})=>({phase,files:{},directory:'/tmp',terraformDataDir:'/tmp',successorRecovery:{}}),
   runStageOperation:async input=>{
    if(input.operation==='prepare-successor-cutover'){
+    assert.deepEqual(input.prerequisiteChain,original.p.prerequisiteChain);
     counts.prepare++;
     if(counts.prepare>1){p.savedPlanSha256='e'.repeat(64);p.successorReconciliation=successorEvidence();}
     return {preparation:p,planPath:'/tmp/plan.tfplan'};

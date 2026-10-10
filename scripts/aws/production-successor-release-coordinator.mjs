@@ -59,7 +59,8 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
     const value=phase==='cutover'
      ?await runtime.runStageOperation({...inputs,operation:'prepare-successor-cutover',
       publicationPreparation:publication.preparation,publicationAuthorization:publication.authorization,
-      publicationResult:publication.result,successorRecovery:inputs.successorRecovery})
+      publicationResult:publication.result,prerequisiteChain:publication.preparation.prerequisiteChain,
+      successorRecovery:inputs.successorRecovery})
      :{...cutover.prepared,preparation:prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,
       authorization:cutover.authorization,casResult:cutover.result})};
     prepared=await runtime.capturePreparation({release,inputs},phase,value);
@@ -77,7 +78,8 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       if(Date.parse(prepared.preparation.successorReconciliation?.expiresAt||'')<=now()){
        const value=await runtime.runStageOperation({...inputs,operation:'prepare-successor-cutover',
         publicationPreparation:publication.preparation,publicationAuthorization:publication.authorization,
-        publicationResult:publication.result,successorRecovery:inputs.successorRecovery});
+        publicationResult:publication.result,prerequisiteChain:publication.preparation.prerequisiteChain,
+        successorRecovery:inputs.successorRecovery});
        prepared=await runtime.capturePreparation({release,inputs},phase,value);
       }
       await write(`${phase}:prepared:${round}`,{result:await put(prepared)});
