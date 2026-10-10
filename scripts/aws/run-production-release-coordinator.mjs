@@ -21,7 +21,7 @@ import {createBrokerPolicyOwnershipClient} from './stage-b-broker-policy-ownersh
 import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertRegistrationHandoff,assertPolicyPruningHandoff} from './stage-b-staged-broker-contract.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import {readStagedBrokerReceipt,stagedBrokerSourceReservation} from './stage-b-staged-broker-executor.mjs';
-import {authenticateRegisteredDefinition} from './stage-b-release-prerequisites.mjs';
+import {authenticateReceiptBoundRegisteredDefinition} from './stage-b-release-prerequisites.mjs';
 import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
@@ -134,7 +134,8 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    for(const [address,definition] of Object.entries(entry.result.definitions)){
     const observed=JSON.parse(awsRun(['ecs','describe-task-definition','--task-definition',definition.arn,'--include','TAGS','--output','json','--no-cli-pager']));
     const state={...definition.desired,arn:definition.arn,revision:definition.revision};
-    exact(authenticateRegisteredDefinition({address,desired:definition.desired,state,observed:{...observed.taskDefinition,tags:observed.tags}}),definition);
+    exact(authenticateReceiptBoundRegisteredDefinition({address,desired:definition.desired,state,
+     observed:{...observed.taskDefinition,tags:observed.tags},receipt:definition}),definition);
    }
    if(entry.adoption&&!predecessorAdvanced){
     const observed=await runStageOperation({...inputs,predecessorReceiptRecovery:undefined,operation:'prepare-registration-adoption',
