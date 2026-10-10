@@ -7,12 +7,12 @@
       "affectedVersion": "3.0.3",
       "advisory": "GHSA-vfj7-8cjw-p6xm",
       "cve": "CVE-2026-93687",
-      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces.",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-10: hosted Stage B authorization dependency installation and broker-package stdout handling changed; frontend source, dependency locks, and runtime packaging did not.",
       "owner": "@T-ej2003",
       "createdAt": "2026-10-03",
       "expiresOn": "2026-11-02",
       "reachability": {
-        "inputsSha256": "b553e0e9e75049e4168ac32b9a991c7d141f237d54aa04e2230af0f46225ccf4",
+        "inputsSha256": "d9aa3c385f2e09ccc2de63d312b1078aadb82d02a728c56ce241c718f62cc86b",
         "execution": {
           "backend": "NO",
           "worker": "NO",
