@@ -11,6 +11,12 @@ import path from 'node:path';
 import {rig,ready} from './fixtures/staged-broker-runtime.mjs';
 
 const A='a'.repeat(40),C='c'.repeat(40);
+test('protected authorization installs the backend dependency graph before loading the entrypoint',()=>{
+ const workflow=fs.readFileSync(new URL('../../.github/workflows/authorize-production-stage-b-release-transition.yml',import.meta.url),'utf8');
+ const install=workflow.indexOf('npm --prefix backend ci --ignore-scripts --no-audit --no-fund');
+ const authorize=workflow.indexOf('node scripts/aws/authorize-production-stage-b-release-transition.mjs');
+ assert.ok(install>0&&authorize>install);
+});
 const request={kind:'STAGE_B_SUCCESSOR_CUTOVER_REQUEST',releaseSourceSha:A,recoveryToolingSha:C,
  recoveryId:'2'.repeat(64),ticketId:'MSCQR-RECOVER',brokerVersion:'13',expectedAliasVersion:'12',expectedAliasRevision:'revision-before',
  historicalImportReference:'3'.repeat(64),currentStateSha256:'4'.repeat(64),

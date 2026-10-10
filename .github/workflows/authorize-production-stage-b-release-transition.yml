@@ -41,6 +41,7 @@ jobs:
       - uses: actions/setup-node@v6
         with: {node-version: 24, cache: npm}
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm --prefix backend ci --ignore-scripts --no-audit --no-fund
       - uses: hashicorp/setup-terraform@v3
         with: {terraform_version: 1.15.8, terraform_wrapper: false}
       - name: Authenticate exact protected source and private phase paths

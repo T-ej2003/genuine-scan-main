@@ -258,7 +258,7 @@ export async function packageStageBBroker({ outputPath, manifestPath, toolingSha
     const sourceLockSha256 = sha256(fs.readFileSync(path.join(sourceDirectory, "package-lock.json")));
     fs.cpSync(sourceDirectory, directory, { recursive: true, filter: (entry) => !entry.includes("node_modules") });
     fs.copyFileSync(path.join(repositoryRoot, "scripts/aws/production-green-stage-b-contract.mjs"), path.join(directory, "stage-b-contract.mjs"));
-    execFileSync(npmCommand, npmArgs, { cwd: directory, stdio: "inherit" });
+    execFileSync(npmCommand, npmArgs, { cwd: directory, stdio: ["ignore", "pipe", "inherit"] });
     if (sha256(fs.readFileSync(path.join(directory, "package-lock.json"))) !== sourceLockSha256) throw new Error("Broker package installation mutated package-lock.json.");
     const npmVersion = execFileSync(npmCommand, ["--version"], { encoding: "utf8" }).trim();
     if (!/^\d+\.\d+\.\d+$/.test(npmVersion)) throw new Error("Broker package npm version is malformed.");

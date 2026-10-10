@@ -28,6 +28,13 @@ async function packageFixture() {
   return { directory, outputPath, manifestPath: `${outputPath}.manifest.json`, bytes, result };
 }
 
+test("packaging keeps npm progress off machine-readable stdout", () => {
+  const directory = fs.mkdtempSync(path.join(root, "stdout-"));
+  const script = `import {packageStageBBroker} from ${JSON.stringify(new URL("../aws/package-production-green-stage-b-broker.mjs", import.meta.url).href)};
+await packageStageBBroker({outputPath:${JSON.stringify(path.join(directory, "broker.zip"))},toolingSha:${JSON.stringify(toolingSha)},toolingTreeSha256:${JSON.stringify(toolingTreeSha256)},repositoryRoot:${JSON.stringify(repositoryRoot)}});`;
+  assert.equal(execFileSync(process.execPath, ["--input-type=module", "-e", script], {encoding: "utf8"}), "");
+});
+
 test("three clean package runs are byte-for-byte deterministic", async () => {
   const runs = await Promise.all([packageFixture(), packageFixture(), packageFixture()]);
   const hashes = runs.map(({ bytes }) => sha256(bytes));
