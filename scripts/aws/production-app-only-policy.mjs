@@ -4,7 +4,7 @@ import { APP_ONLY } from "./production-app-only-contract.mjs";
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
 
-export const APP_ONLY_STAGE_B_SOURCE_SHA256 = "cafb12ffdd6b068e5a0e103e58a87f72ae6eef970b4b1070cdc9bd984435f170";
+export const APP_ONLY_STAGE_B_SOURCE_SHA256 = "67cdbdde79ee6bab80ae32b6858026cf4b2c823d50e569e5dd588100c933efeb";
 
 export const APP_ONLY_VERIFIER = Object.freeze({
   family: "mscqr-production-app-only-compatibility-verifier",
