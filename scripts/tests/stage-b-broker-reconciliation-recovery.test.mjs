@@ -4,6 +4,7 @@ import { rig, ready, authorization, cutoverPlan, sourceSha } from './fixtures/st
 import { prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, assertSuccessorCasTime } from '../aws/stage-b-staged-broker.mjs';
 import { assertBrokerPreparation, assertBrokerCutoverPlan, assertBrokerRefreshPlan, assertBrokerClosurePlan, brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
 import { assertReceiptBoundHistoricalSourceAncestry } from '../aws/stage-b-staged-broker-executor.mjs';
+import { signBrokerAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
 
 const tooling = { sourceSha: 'd'.repeat(40), treeSha256: '5'.repeat(64) };
 function evidence(p) {
@@ -85,7 +86,11 @@ test('receipt-bound successor cutover uses new evidence without relabeling the p
     const bad = structuredClone(p); alter(bad);
     assert.throws(() => { assertBrokerPreparation(bad); assertBrokerCutoverPlan(plan, bad); });
   }
-  const auth = authorization(p);
+  const maker = 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/operator';
+  const auth = await signBrokerAuthorization(p, { makerIdentity: maker, humanReviewId: 'successor-review',
+    makerCaller: async () => ({ Account: '368992683803', Arn: maker }),
+    caller: async () => ({ Arn: 'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker' }),
+    sign: async () => 'c2ln', verify: async () => true, now: r.deps.now() });
   r.deps.readPlan = async () => ({ plan, bytes: Buffer.from('successor-cutover'), artifactSetSha256: p.artifactSetSha256 });
   r.deps.readCheckout = async () => ({ sourceSha: 'f'.repeat(40), treeSha256: tooling.treeSha256 });
   await assert.rejects(() => executeBrokerAliasCas({ preparation: p, authorization: auth }, r.deps));

@@ -8,8 +8,11 @@ import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { stageBStaticConfiguration } from './fixtures/stage-b-static-configuration.mjs';
-import { rig, ready, authorization, cutoverPlan, sourceSha } from './fixtures/staged-broker-runtime.mjs';
+import { rig, ready, cutoverPlan, sourceSha } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
+import { assertBrokerAuthorization, receiptBoundCheckerDisclosure } from '../aws/stage-b-staged-broker-contract.mjs';
+import { brokerAuthorizationMessage, signBrokerAuthorization, createBrokerProtectedEnvironmentAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
+import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from '../aws/production-github-environment-approval.mjs';
 
 test('public successor preparation preserves published source and consumes explicit new evidence', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-successor-entrypoint-'));
@@ -60,10 +63,52 @@ test('public successor preparation preserves published source and consumes expli
     assert.equal(result.preparation.recoveryTooling.sourceSha, current.sourceSha);
     assert.equal(evidenceCalls, 1);
     assert.equal(r.calls.filter(call => call === 'publish' || typeof call === 'object').length, 1);
-    const prepared = result.preparation, approved = authorization(prepared);
+    const prepared = result.preparation;
+    const disclosure = receiptBoundCheckerDisclosure(prepared);
+    assert.equal(disclosure.kind, 'SUCCESSOR_CUTOVER_RECOVERY_DISCLOSURE');
+    assert.equal(disclosure.successorEvidence.originalReleaseSourceSha, sourceSha);
+    assert.equal(disclosure.successorEvidence.brokerVersion, '13');
+    assert.equal(disclosure.successorEvidence.operationId, prepared.successorReconciliation.operationId);
+    assert.ok(disclosure.statements.includes('ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED'));
+    const maker = 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/operator';
+    const checker = 'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/checker';
+    let signedBytes;
+    const checkerAuthorization = await signBrokerAuthorization(prepared, {
+      makerIdentity: maker, humanReviewId: 'successor-review', makerCaller: async () => ({ Account: '368992683803', Arn: maker }),
+      caller: async () => ({ Arn: checker }), sign: async bytes => { signedBytes = bytes; return 'c2ln'; },
+      verify: async () => true, now: r.deps.now(),
+    });
+    assert.deepEqual(checkerAuthorization.recoveryDisclosure, disclosure);
+    assert.deepEqual(signedBytes, brokerAuthorizationMessage(checkerAuthorization));
+    const environment = { id: 1, name: 'production', can_admins_bypass: false,
+      protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
+        reviewers: [{ type: 'User', reviewer: { id: 2, login: 'reviewer' } }] }] };
+    const environmentApproval = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment,
+      repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: 'production', sourceSha,
+      workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+      eventName: 'workflow_dispatch', workflowRunId: '123', workflowRunAttempt: '1', executionActor: 'operator',
+      observedAt: '2026-10-04T11:59:00.000Z', actualApproval: { state: 'approved', environmentId: 1,
+        environmentName: 'production', userId: 2, userLogin: 'reviewer' } });
+    const protectedAuthorization = createBrokerProtectedEnvironmentAuthorization(prepared, {
+      approval: environmentApproval, release: { releaseId: 'a'.repeat(64), phase: 'cutover',
+        preparationReference: brokerDigest(prepared), authorizationRound: 0 }, now: r.deps.now() });
+    assert.deepEqual(protectedAuthorization.recoveryDisclosure, disclosure);
+    for (const auth of [checkerAuthorization, protectedAuthorization]) {
+      await assertBrokerAuthorization(auth, prepared, { verify: async () => true, now: r.deps.now() });
+      for (const mutate of [
+        copy => { delete copy.recoveryDisclosure; },
+        copy => { copy.recoveryDisclosure.successorEvidence.operationId = '0'.repeat(64); },
+        copy => { copy.recoveryDisclosure.successorEvidence.evidenceSha256 = '0'.repeat(64); },
+        copy => { copy.recoveryDisclosure.successorEvidence.originalReleaseSourceSha = 'f'.repeat(40); },
+        copy => { copy.recoveryDisclosure.successorEvidence.brokerVersion = '14'; },
+      ]) {
+        const changed = structuredClone(auth); mutate(changed);
+        await assert.rejects(() => assertBrokerAuthorization(changed, prepared, { verify: async () => true, now: r.deps.now() }));
+      }
+    }
     r.deps.readPlan = async () => ({ plan, bytes: planBytes, artifactSetSha256: prepared.artifactSetSha256 });
-    const cas = await executeBrokerAliasCas({ preparation: prepared, authorization: approved }, r.deps);
-    const closure = await reconcileBrokerAlias({ preparation: prepared, authorization: approved, casResult: cas }, r.deps);
+    const cas = await executeBrokerAliasCas({ preparation: prepared, authorization: checkerAuthorization }, r.deps);
+    const closure = await reconcileBrokerAlias({ preparation: prepared, authorization: checkerAuthorization, casResult: cas }, r.deps);
     assert.equal(cas.alias.FunctionVersion, '13'); assert.equal(closure.sourceSha, sourceSha);
     assert.equal(r.calls.filter(call => typeof call === 'object').length, 1);
     assert.equal(r.calls.filter(call => call === 'publish').length, 1);

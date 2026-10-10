@@ -463,15 +463,18 @@ export function receiptBoundCheckerDisclosure(preparation) {
   if (['STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(preparation.purpose) && chain?.registration?.preparation?.schemaVersion === 3) {
     assert.ok(chain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
   }
-  if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
+  const successor = preparation.successorReconciliation;
+  const receiptBound = chain?.registration?.receiptBoundAdoption || chain?.policy?.receiptBoundAdoption;
+  if (!receiptBound && !successor) return null;
   const policyConvergence = ['STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(preparation.purpose) &&
-    chain.registration?.preparation?.schemaVersion === 3 &&
+    chain?.registration?.preparation?.schemaVersion === 3 &&
     chain.registration.preparation.purpose === 'STAGE_B_TASK_REGISTRATION' &&
     chain.registration.preparation.registrationPredecessor && chain.policy?.receiptBoundAdoption;
   const publicationOrCutover = [BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose) &&
-    chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption;
-  assert.ok(policyConvergence || publicationOrCutover,
+    chain?.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption;
+  assert.ok(receiptBound ? policyConvergence || publicationOrCutover : successor && [BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose),
     'Receipt-bound recovery disclosure is limited to authenticated policy convergence, publication, or cutover chains');
+  if (successor) assertBrokerSuccessorReconciliation(successor, preparation);
   if (policyConvergence) {
     assertBrokerPreparation(chain.registration.preparation);
     assertRegistrationHandoff(chain.registration, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
@@ -499,6 +502,25 @@ export function receiptBoundCheckerDisclosure(preparation) {
       authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_EXACT_STATE_REFRESH_PACKAGE',
     },
   }[preparation.purpose];
+  const successorEvidence = successor && {
+    originalReleaseSourceSha: preparation.sourceSha,
+    brokerFunctionArn: STAGE_B.brokerFunctionArn,
+    brokerVersion: preparation.target.version,
+    publicationResultSha256: successor.publicationResultSha256,
+    operationId: successor.operationId,
+    evidenceSha256: brokerDigest(successor),
+  };
+  if (successor && !receiptBound) {
+    return { kind: 'SUCCESSOR_CUTOVER_RECOVERY_DISCLOSURE',
+      statements: ['ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED',
+        'FRESH_SUCCESSOR_EVIDENCE_AUTHORIZES_ONLY_THIS_EXACT_ALIAS_OR_CLOSURE_OPERATION',
+        operation.authorizationStatement],
+      successorEvidence, consumerSourceSha: preparation.sourceSha,
+      intendedOperation: operation.intendedOperation,
+      packageSha256: preparation.packageSha256, savedPlanSha256: preparation.savedPlanSha256,
+      logicalPlanSha256: preparation.logicalPlanSha256, preparationSha256: brokerDigest(preparation),
+      freshIndependentCheckerRequired: true };
+  }
   const identity = (entry, name) => {
     if (entry.receiptBoundAdoption) {
       const r = entry.receiptBoundAdoption;
@@ -548,7 +570,7 @@ export function receiptBoundCheckerDisclosure(preparation) {
       operation.authorizationStatement],
     recoveryArtifactSha256: brokerDigest(chain),
     ...(preparation.successorReconciliation ? { successorOperationId: preparation.successorReconciliation.operationId,
-      successorEvidenceSha256: brokerDigest(preparation.successorReconciliation) } : {}),
+      successorEvidenceSha256: brokerDigest(preparation.successorReconciliation), successorEvidence } : {}),
     ...(chain.pruning ? { pruningHandoffSha256: brokerDigest(chain.pruning) } : {}),
     registration: identity(chain.registration, 'registration'), policy: identity(chain.policy, 'policy'),
     consumerSourceSha: preparation.sourceSha, intendedOperation: operation.intendedOperation,

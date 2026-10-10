@@ -328,6 +328,29 @@ test('receipt-bound publication carries verified provenance into a distinct cuto
  assert.equal(prerequisiteAuthentications,1);
  const cutoverAuthorization=await signBrokerAuthorization(cutoverPreparation,{...signer,humanReviewId:'cutover-review'});
  assert.equal(cutoverAuthorization.purpose,BROKER_CUTOVER);assert.deepEqual(cutoverAuthorization.recoveryDisclosure,cutoverDisclosure);
+ const successorCutover=clone(cutoverPreparation);
+ successorCutover.recoveryTooling={sourceSha:'d'.repeat(40),treeSha256:'e'.repeat(64),
+  publicationResultSha256:brokerDigest(successorCutover.publication)};
+ const successor={historicalStatePath:'/historical.json',historicalStateSha256:'1'.repeat(64),
+  currentStatePath:'/current.json',currentStateSha256:successorCutover.state.stateSha256,
+  bindingReportPath:'/binding.json',bindingReportSha256:'2'.repeat(64),
+  imageEvidencePath:'/image.json',imageEvidenceSha256:'3'.repeat(64),
+  imageSignaturePath:'/image.sig',imageSignatureSha256:'4'.repeat(64),
+  publicationResultSha256:brokerDigest(successorCutover.publication),outputChanges:[],
+  createdAt:new Date(now.getTime()-60000).toISOString(),expiresAt:new Date(now.getTime()+600000).toISOString()};
+ successor.operationId=brokerDigest({purpose:BROKER_CUTOVER,sourceSha:successorCutover.sourceSha,
+  recoveryTooling:successorCutover.recoveryTooling,publicationResultSha256:successor.publicationResultSha256,
+  historicalStateSha256:successor.historicalStateSha256,currentStateSha256:successor.currentStateSha256,
+  alias:successorCutover.alias,target:successorCutover.target,bindingReportSha256:successor.bindingReportSha256,
+  imageEvidenceSha256:successor.imageEvidenceSha256,imageSignatureSha256:successor.imageSignatureSha256,
+  outputChanges:successor.outputChanges});
+ successorCutover.successorReconciliation=successor;
+ const successorAuthorization=await signBrokerAuthorization(successorCutover,{...signer,humanReviewId:'successor-review'});
+ assert.equal(successorAuthorization.recoveryDisclosure.kind,'RECEIPT_BOUND_RECOVERY_DISCLOSURE');
+ assert.equal(successorAuthorization.recoveryDisclosure.successorEvidence.operationId,successor.operationId);
+ assert.ok(successorAuthorization.recoveryDisclosure.statements.includes('ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED'));
+ const missingSuccessorDisclosure=clone(successorAuthorization);delete missingSuccessorDisclosure.recoveryDisclosure;
+ await assert.rejects(()=>assertBrokerAuthorization(missingSuccessorDisclosure,successorCutover,{verify:async()=>true,now}));
  await assert.rejects(()=>assertBrokerAuthorization(publicationAuthorization,cutoverPreparation,{verify:async()=>true,now}));
  assert.throws(()=>receiptBoundCheckerDisclosure({...cutoverPreparation,purpose:'UNRELATED'}),/limited to authenticated policy convergence, publication, or cutover/);
  for(const mutate of [
