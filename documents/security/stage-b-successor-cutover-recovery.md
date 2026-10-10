@@ -21,6 +21,8 @@ After this tooling reaches protected main, the operator first establishes the ca
 
 The state comparison permits only the independently authenticated broker v12-to-v13 publication and Terraform representation changes. Outputs must still match the historical state before successor planning. The proposed `bound_images` transition is derived from the current state, the signed image observation, the canonical binding report, and published v13 configuration. Every other output change fails. The cutover and refresh plans must match that exact transition.
 
+The successor request compares each signed image digest as a complete ECR repository reference (`account.dkr.ecr.region.amazonaws.com/repository@sha256:digest`) to the published broker configuration. A bare digest does not represent the broker's image binding.
+
 The successor reconciliation is bound to the original release, publication receipt, broker target, alias revision, current protected-main tooling, state and binding hashes, and a 30-minute operation identity. A fresh cutover authorization signs the complete preparation. Alias compare-and-swap remains v12 to the already published v13; closure uses the existing state-only refresh and receipt path. Expired preparation requires new read-only preparation and fresh authorization. Uncertain alias outcomes require alias readback and native recovery, never blind replay.
 
 Every successor authorization, including one following an ordinary publication chain, discloses that original planning bytes were not recovered. Its signed or protected-workflow artifact binds the original release, published broker version, successor evidence hash, and exact operation identity. Any missing or altered disclosure fails authorization verification.

@@ -24,6 +24,15 @@ const importerArn='arn:aws:iam::368992683803:root';
 const source={bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key:STAGE_B_TERRAFORM_BACKEND.stateKey};
 const hash=value=>brokerDigest(value);
 
+export function assertPublishedBrokerImages(evidence,images) {
+ for(const [name,field] of Object.entries({backend:'backendImageDigest',worker:'workerImageDigest',
+  executor:'executorImageDigest',canary:'canaryImageDigest'})) {
+  const image=evidence.images.find(item=>item.service===(name==='executor'?'rls-executor':name==='canary'?'rls-canary':name));
+  assert.ok(image,`Missing ${name} image evidence`);
+  assert.equal(images[field],`${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${image.repository}@${image.digest}`);
+ }
+}
+
 export function assertHistoricalStateImport(receipt,{releaseSourceSha,recoveryToolingSha,recoveryId,brokerVersion,publication,store,verifyImport}) {
  assert.deepEqual(Object.keys(receipt).sort(),['artifactReference','historical','importerArn','kind','publicationResultSha256','recoveryId','recoveryToolingSha','releaseSourceSha','signature']);
  const {signature,...body}=receipt,receiptSha256=hash(body);
@@ -181,9 +190,7 @@ export async function publishSuccessorRecoveryRequest({releaseSourceSha,recovery
  assertImageEvidenceReuseBridge(evidence,{currentSourceSha:releaseSourceSha,
   imageReuseEvidence:deriveStageBImageImpactReport({imageReleaseSha,toolingSha:releaseSourceSha})});
  const images=JSON.parse(publication.target.configuration.Environment.Variables.BROKER_IMAGES_JSON);
- for(const [name,field] of Object.entries({backend:'backendImageDigest',worker:'workerImageDigest',
-  executor:'executorImageDigest',canary:'canaryImageDigest'}))
-  assert.equal(evidence.images.find(image=>image.service===(name==='executor'?'rls-executor':name==='canary'?'rls-canary':name))?.digest,images[field]);
+ assertPublishedBrokerImages(evidence,images);
  const imageEvidenceReference=hash(binary.imageEvidence),imageSignatureReference=hash(binary.imageSignature);
  await store.putArtifact(imageEvidenceReference,binary.imageEvidence);
  await store.putArtifact(imageSignatureReference,binary.imageSignature);

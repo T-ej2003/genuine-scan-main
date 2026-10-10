@@ -5,10 +5,26 @@ import path from 'node:path';
 import test from 'node:test';
 import {brokerDigest} from '../aws/stage-b-staged-broker-contract.mjs';
 import {STAGE_B_TERRAFORM_BACKEND} from '../aws/stage-b-terraform-backend-contract.mjs';
-import {importHistoricalStageBState,assertHistoricalStateImport} from '../aws/import-production-stage-b-historical-state.mjs';
+import {importHistoricalStageBState,assertHistoricalStateImport,assertPublishedBrokerImages} from '../aws/import-production-stage-b-historical-state.mjs';
 import {rig,ready,authorization as authorize} from './fixtures/staged-broker-runtime.mjs';
 
 const releaseSourceSha='2'.repeat(40),recoveryToolingSha='3'.repeat(40),recoveryId='4'.repeat(64),versionId='exact-version';
+
+test('successor request binds full published ECR references to signed image digests',()=>{
+ const names={backend:'mscqr-backend',worker:'mscqr-worker','rls-executor':'mscqr-rls-executor','rls-canary':'mscqr-rls-canary'};
+ const evidence={images:Object.entries(names).map(([service,repository],index)=>({service,repository,digest:`sha256:${'a'.repeat(63)}${index}`}))};
+ const registry='368992683803.dkr.ecr.eu-west-2.amazonaws.com';
+ const images={backendImageDigest:`${registry}/${names.backend}@${evidence.images[0].digest}`,
+  workerImageDigest:`${registry}/${names.worker}@${evidence.images[1].digest}`,
+  executorImageDigest:`${registry}/${names['rls-executor']}@${evidence.images[2].digest}`,
+  canaryImageDigest:`${registry}/${names['rls-canary']}@${evidence.images[3].digest}`};
+ assertPublishedBrokerImages(evidence,images);
+ for(const changed of [{...images,backendImageDigest:evidence.images[0].digest},
+  {...images,backendImageDigest:images.backendImageDigest.replace('mscqr-backend','other')},
+  {...images,canaryImageDigest:images.canaryImageDigest.replace('sha256:','sha256:b')}])
+  assert.throws(()=>assertPublishedBrokerImages(evidence,changed));
+ assert.throws(()=>assertPublishedBrokerImages({images:evidence.images.slice(1)},images),/Missing backend/);
+});
 
 async function fixture(overrides={}) {
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'mscqr-historical-import-test-'));fs.chmodSync(directory,0o700);
