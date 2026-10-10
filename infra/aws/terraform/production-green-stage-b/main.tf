@@ -617,7 +617,7 @@ resource "aws_lambda_function" "broker" {
   handler          = "index.handler"
   runtime          = "nodejs24.x"
   filename         = var.broker_package_path
-  source_code_hash = filebase64sha256(var.broker_package_path)
+  source_code_hash = filebase64sha256(coalesce(var.broker_package_bytes_path, var.broker_package_path))
   timeout          = 180
   publish          = true
 

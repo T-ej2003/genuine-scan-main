@@ -8,7 +8,7 @@ import test from "node:test";
 import { assertImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
-import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, parseCli, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
+import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, assertSuccessorBrokerPackageStatePath, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, parseCli, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
@@ -348,6 +348,21 @@ test("recovery-only bindings are derived from exact broker state identity", () =
   assert.equal(bindings.packagePath, path.resolve(f.packagePath));
   assert.deepEqual(bindings.taskDefinitionArns, taskDefinitionArns);
   assert.deepEqual(bindings.environment, environment);
+});
+
+test("successor package state filename binds exact hosted package bytes", () => {
+  const statePath = "/private/tmp/original-publication/broker-package.zip";
+  const args = input();
+  const state = JSON.parse(fs.readFileSync(args.stateBackup, "utf8"));
+  state.resources.push({ mode: "managed", type: "aws_lambda_function", name: "broker", instances: [{ attributes: {
+    filename: statePath, source_code_hash: crypto.createHash("sha256").update(fs.readFileSync(args.brokerPackagePath)).digest("base64"),
+  } }] });
+  assert.equal(assertSuccessorBrokerPackageStatePath(state, args.brokerPackagePath, statePath), statePath);
+  assert.throws(() => assertSuccessorBrokerPackageStatePath(state, args.brokerPackagePath, "/tmp/wrong.zip"), /differs/);
+  state.resources.at(-1).instances[0].attributes.source_code_hash = "wrong";
+  assert.throws(() => assertSuccessorBrokerPackageStatePath(state, args.brokerPackagePath, statePath), /differs/);
+  assert.throws(() => generateStageBTfvars(input({ successorBrokerPackageStatePath: statePath })),
+    /requires historical package authentication/);
 });
 
 test("current task-definition family and address mismatches fail closed", () => {

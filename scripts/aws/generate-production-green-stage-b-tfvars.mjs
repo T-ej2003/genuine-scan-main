@@ -73,6 +73,15 @@ export const stageBBoundImagesFromBindingReport = (report) => {
     return [output, image.imageReference];
   })));
 };
+export function assertSuccessorBrokerPackageStatePath(state, brokerPackagePath, statePath) {
+  if (!path.isAbsolute(statePath || "")) throw new Error("Successor broker state filename must be absolute.");
+  const broker = (state.resources || []).filter(item => !item.module && item.mode === "managed" && item.type === "aws_lambda_function" && item.name === "broker");
+  if (broker.length !== 1 || broker[0].instances?.length !== 1 || broker[0].instances[0].deposed !== undefined ||
+      broker[0].instances[0].attributes?.filename !== statePath ||
+      broker[0].instances[0].attributes?.source_code_hash !== base64Sha256(fs.readFileSync(brokerPackagePath)))
+    throw new Error("Successor broker package differs from authenticated current Terraform state.");
+  return statePath;
+}
 const sortedEntries = (value) => Object.entries(value || {}).sort(([a], [b]) => a.localeCompare(b));
 
 function assertAbsoluteFile(file, label) {
@@ -430,6 +439,7 @@ export function renderTfvars(values) {
     `approval_kms_key_arn = ${quote(values.approval_kms_key_arn)}`,
     `receipt_bucket_arn = ${quote(values.receipt_bucket_arn)}`,
     `broker_package_path = ${quote(values.broker_package_path)}`,
+    ...(values.broker_package_bytes_path ? [`broker_package_bytes_path = ${quote(values.broker_package_bytes_path)}`] : []),
     `stage_b_recovery_only = ${values.stage_b_recovery_only === true}`,
     `stage_b_recovery_alias_target_version = ${values.stage_b_recovery_alias_target_version === null ? "null" : quote(values.stage_b_recovery_alias_target_version)}`,
     `stage_b_recovery_broker_environment = ${renderMap(values.stage_b_recovery_broker_environment || {}, quote)}`,
@@ -463,13 +473,19 @@ function readGeneratedString(tfvarsBytes, variable) {
 function assertBrokerPackageBinding(tfvarsBytes, report, brokerPackageHistoricalSourceSha) {
   if (!path.isAbsolute(report.brokerPackagePath)) throw new Error("Stage B broker package path in the binding report must be absolute.");
   const tfvarsBrokerPath = readGeneratedString(tfvarsBytes, "broker_package_path");
-  if (!path.isAbsolute(tfvarsBrokerPath) || tfvarsBrokerPath !== report.brokerPackagePath) throw new Error("Stage B broker package path does not match the canonical binding report.");
-  assertStageBPrivateFile({ filePath: tfvarsBrokerPath, repositoryRoot: root, label: "Stage B broker package" });
-  if (fs.statSync(tfvarsBrokerPath).size === 0) throw new Error("Stage B broker package must be a non-empty regular file.");
-  const bytes = fs.readFileSync(tfvarsBrokerPath);
+  if (Object.hasOwn(report, "brokerPackageStatePath")) {
+    if (!brokerPackageHistoricalSourceSha || !path.isAbsolute(report.brokerPackageStatePath) || tfvarsBrokerPath !== report.brokerPackageStatePath ||
+        readGeneratedString(tfvarsBytes, "broker_package_bytes_path") !== report.brokerPackagePath)
+      throw new Error("Successor broker state and package-byte paths differ from the binding report.");
+  } else if (!path.isAbsolute(tfvarsBrokerPath) || tfvarsBrokerPath !== report.brokerPackagePath ||
+             tfvarsBytes.toString("utf8").includes("broker_package_bytes_path = "))
+    throw new Error("Stage B broker package path does not match the canonical binding report.");
+  assertStageBPrivateFile({ filePath: report.brokerPackagePath, repositoryRoot: root, label: "Stage B broker package" });
+  if (fs.statSync(report.brokerPackagePath).size === 0) throw new Error("Stage B broker package must be a non-empty regular file.");
+  const bytes = fs.readFileSync(report.brokerPackagePath);
   if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
-  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, historicalSourceSha: brokerPackageHistoricalSourceSha, ...(report.recoveryOnly ? {} : { expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 }) });
+  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: report.brokerPackagePath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, historicalSourceSha: brokerPackageHistoricalSourceSha, ...(report.recoveryOnly ? {} : { expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 }) });
   if (manifest.sha256 !== report.brokerPackageManifestSha256 || manifest.manifest.rawSha256 !== report.brokerPackageRawSha256) throw new Error("Stage B broker package manifest binding does not match the canonical report.");
 }
 
@@ -565,7 +581,7 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, brokerPackageHistoricalSourceSha, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, successorBrokerPackageStatePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, brokerPackageHistoricalSourceSha, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
   const partialRecoveryMode = recoveryMode === "PARTIAL_APPLY_RECOVERY" || recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
@@ -587,6 +603,11 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
   const evidenceSha256 = imageEvidenceSha256(report);
   const images = extractImages(report, imageReleaseSha);
   const state = readJson(stateBackup); const retained = deriveRetainedDefinitions(state);
+  if (successorBrokerPackageStatePath !== undefined) {
+    if (!brokerPackageHistoricalSourceSha || recoveryOnly || partialRecoveryMode)
+      throw new Error("Successor broker state path requires historical package authentication.");
+    assertSuccessorBrokerPackageStatePath(state, brokerPackagePath, successorBrokerPackageStatePath);
+  }
   const recoveryEvidence = recoveryOnly ? assertRecoveryOnlyEvidence({ recovery, state, toolingSha }) : null;
   const partialRecoveryEvidence = partialRecoveryMode ? assertPartialApplyRecoveryEvidence({ recovery: { ...recovery, stateBackupPath: stateBackup }, state, toolingSha, toolingTreeSha256, freshImagePartialApplyRecovery }) : null;
   const recoveryBindings = recoveryOnly ? deriveRecoveryOnlyBindings(state) : null;
@@ -603,7 +624,9 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
     stage_a_database_security_group_id: stageAPrerequisiteInput.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageAPrerequisiteInput.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageAPrerequisiteInput.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageAPrerequisiteInput.stageABrokerRoleArn,
     stage_a_executor_log_group_name: stageAPrerequisiteInput.stageAExecutorLogGroupName, stage_a_executor_log_group_arn: stageAPrerequisiteInput.stageAExecutorLogGroupArn, stage_a_broker_log_group_name: stageAPrerequisiteInput.stageABrokerLogGroupName, stage_a_broker_log_group_arn: stageAPrerequisiteInput.stageABrokerLogGroupArn,
     stage_a_runtime_secret_arns: stageAPrerequisiteInput.stageARuntimeSecretArns, stage_a_executor_networking_ready: stageAPrerequisiteInput.stageAExecutorNetworkingReady, approval_secret_arn: stageAPrerequisiteInput.approvalSecretArn, approval_kms_key_arn: stageAPrerequisiteInput.approvalKmsKeyArn, receipt_bucket_arn: stageAPrerequisiteInput.receiptBucketArn,
-    broker_package_path: path.resolve(brokerPackagePath), tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
+    broker_package_path: successorBrokerPackageStatePath || path.resolve(brokerPackagePath),
+    ...(successorBrokerPackageStatePath ? { broker_package_bytes_path: path.resolve(brokerPackagePath) } : {}),
+    tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
     backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageAPrerequisiteInput.stageAReadOnlyCanaryDatabaseSecretArn,
     retained_candidate_task_definitions: retained.retainedCandidateTaskDefinitions, retained_executor_task_definitions: retained.retainedExecutorTaskDefinitions,
     stage_b_recovery_only: recoveryOnly,
@@ -627,7 +650,8 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
     recoveryMode,
     toolingSha, toolingTreeSha256, imageReleaseSha, imageEvidenceCanonicalSha256: evidenceSha256,
     imageEvidenceSource: path.basename(imageEvidence), imageEvidenceWorkflowRunId: String(report.workflowRunId), imagePublicationIdentitySha256: report.publicationIdentitySha256, imagePublicationSourceSha: report.publicationIdentity.imageReleaseSha, imagePublicationWorkflowDefinitionSha: report.publicationIdentity.workflowDefinitionSha, imageEvidenceSignatureSha256: sha256(signatureBytes), stageAInputPath: path.resolve(stageAInput), stageAInputSha256: sha256(fs.readFileSync(stageAInput)), stageAStateBackupPath: path.resolve(stageAStateBackup), stageAStateBackupSha256: stageAStateSha256, stageAStateObject: stageAPrerequisiteInput.stageAStateObject, stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial, stateLineage: state.lineage, stateSerial: retained.serial, stateBackupSha256: sha256(stateBytes),
-    brokerPackagePath: path.resolve(brokerPackagePath), brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
+    brokerPackagePath: path.resolve(brokerPackagePath), ...(successorBrokerPackageStatePath ? { brokerPackageStatePath: successorBrokerPackageStatePath } : {}),
+    brokerPackageManifestPath: brokerManifest.path, brokerPackageManifestSha256: brokerManifest.sha256, brokerPackageManifestFormat: brokerManifest.manifest.format, brokerPackageRawSha256: sha256(brokerBytes), brokerPackageBase64Sha256: base64Sha256(brokerBytes), sourceContractSha256: contract.sourceContractSha256, migrationSetDigest: contract.migrationSetDigest, packageChecksumSha256: contract.packageChecksumSha256,
     images: Object.fromEntries(Object.entries(images).map(([variable, image]) => [variable === "read_only_canary_image" ? "readOnlyCanary" : variable.replace(/_image$/, ""), { terraformVariable: variable, service: image.service, repository: image.repository, tag: image.tag, imageReference: image.value, digestLength: image.digest.length, digest: image.digest, matchesEvidence: report.images.find((record) => record.service === image.service)?.digest === image.digest }])),
     retainedDefinitions: { candidate: retained.counts.candidate, executor: retained.counts.executor },
     recoveryOnly,

@@ -177,8 +177,12 @@ export function createHostedSuccessorRuntime({env=process.env,
     ['show',`${request.releaseSourceSha}:documents/security/rls-program/generated/checksums.json`],{cwd:root,maxBuffer:8*1024*1024}));
    if(!fs.existsSync(stageFiles.tfvars)){
     const evidence=JSON.parse(fs.readFileSync(successorRecovery.imageEvidencePath));
+    const currentBroker=JSON.parse(fs.readFileSync(successorRecovery.currentStatePath)).resources.filter(item=>
+     !item.module&&item.mode==='managed'&&item.type==='aws_lambda_function'&&item.name==='broker');
+    assert.equal(currentBroker.length,1);assert.equal(currentBroker[0].instances?.length,1);
     generateTfvars({imageEvidence:successorRecovery.imageEvidencePath,imageEvidenceSignature:successorRecovery.imageSignaturePath,
      stateBackup:successorRecovery.currentStatePath,stageAInput,stageAStateBackup:stageAState,brokerPackagePath:stageFiles.package,
+     successorBrokerPackageStatePath:currentBroker[0].instances[0].attributes.filename,
      toolingSha:request.releaseSourceSha,toolingTreeSha256:originalTree,imageReleaseSha:evidence.imageReleaseSha,
      workflowRunId:evidence.workflowRunId,canonicalArtifactSha256:evidence.canonicalArtifactSha256,
      checksumsFile,brokerPackageHistoricalSourceSha:request.releaseSourceSha,

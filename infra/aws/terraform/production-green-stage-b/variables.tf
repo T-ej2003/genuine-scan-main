@@ -18,6 +18,10 @@ variable "approval_secret_arn" { type = string }
 variable "approval_kms_key_arn" { type = string }
 variable "receipt_bucket_arn" { type = string }
 variable "broker_package_path" { type = string }
+variable "broker_package_bytes_path" {
+  type    = string
+  default = null
+}
 variable "stage_b_recovery_only" {
   type    = bool
   default = false
@@ -221,7 +225,7 @@ check "stage_a_release_resources" {
       var.receipt_bucket_arn == "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an" &&
       length(var.private_subnet_ids) == 2 &&
       toset(var.private_subnet_ids) == toset(["subnet-068d949017bd2ce45", "subnet-07e0a76e3a5241138"]) &&
-      fileexists(var.broker_package_path)
+      fileexists(coalesce(var.broker_package_bytes_path, var.broker_package_path))
     )
     error_message = "Stage B requires the exact reviewed Stage A release resources, private subnets, and local broker package."
   }

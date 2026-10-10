@@ -441,6 +441,16 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     const binding = assertStageBTfvarsBinding({ tfvarsPath: files.tfvars, bindingReportPath: paths.bindingReportPath,
       bindingReportSha256: brokerDigest(bytes.bindingReportPath), expectedToolingSha: p.sourceSha,
       expectedToolingTreeSha256: p.treeSha256, brokerPackageHistoricalSourceSha: p.sourceSha });
+    const currentBroker = JSON.parse(bytes.currentStatePath).resources.filter(item =>
+      !item.module && item.mode === 'managed' && item.type === 'aws_lambda_function' && item.name === 'broker');
+    assert.equal(currentBroker.length, 1);
+    assert.equal(currentBroker[0].instances?.length, 1);
+    assert.equal(binding.brokerPackagePath, files.package,
+      'Successor package bytes are not the captured broker artifact');
+    assert.equal(binding.brokerPackageStatePath, currentBroker[0].instances[0].attributes.filename,
+      'Successor package filename differs from authenticated Terraform state');
+    assert.equal(binding.brokerPackageBase64Sha256, currentBroker[0].instances[0].attributes.source_code_hash,
+      'Successor package bytes differ from authenticated Terraform state');
     const imageEvidence = JSON.parse(bytes.imageEvidencePath), imageSignature = JSON.parse(bytes.imageSignaturePath);
     assertImageEvidence(imageEvidence, { signatureArtifact: imageSignature,
       publicationSourceSha: imageEvidence.publicationSourceSha || imageEvidence.imageReleaseSha,

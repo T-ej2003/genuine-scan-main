@@ -287,7 +287,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     ],
     filename: ["var.broker_package_path"],
     role: ["var.stage_a_broker_role_arn"],
-    source_code_hash: ["var.broker_package_path"],
+    source_code_hash: ["var.broker_package_bytes_path", "var.broker_package_path"],
     tags: ["local.tags"],
   },
   "aws_lambda_alias.reviewed": {

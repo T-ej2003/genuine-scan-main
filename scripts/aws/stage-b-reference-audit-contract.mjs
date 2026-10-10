@@ -848,6 +848,7 @@ function assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, expe
   }
   const planChecksum = plan?.variables?.package_checksum_sha256?.value;
   const packagePath = plan?.variables?.broker_package_path?.value;
+  if (plan?.variables?.broker_package_bytes_path?.value != null) throw new Error("Ordinary broker publication cannot substitute recovery package bytes.");
   if (!/^[a-f0-9]{64}$/.test(planChecksum || "")) throw new Error("Atomic broker package transition plan checksum is missing or malformed.");
   if (typeof packagePath !== "string" || !packagePath.startsWith("/")) throw new Error("Atomic broker package transition package path is missing or malformed.");
   if (proof.plannedReleasePackageChecksumSha256 !== planChecksum) {
@@ -884,7 +885,7 @@ function assertBrokerPackagePlanCommon(plan, proof, terraformConfiguration, expe
   if (!/packageChecksumSha256\s*=\s*var\.package_checksum_sha256/.test(normalizedConfiguration)
     || !/BROKER_APPROVAL_EXPECTED_JSON\s*=\s*jsonencode\(local\.broker_approval_expected\)/.test(normalizedConfiguration)
     || !/filename\s*=\s*var\.broker_package_path/.test(normalizedConfiguration)
-    || !/source_code_hash\s*=\s*filebase64sha256\(var\.broker_package_path\)/.test(normalizedConfiguration)) {
+    || !/source_code_hash\s*=\s*filebase64sha256\(coalesce\(var\.broker_package_bytes_path, var\.broker_package_path\)\)/.test(normalizedConfiguration)) {
     throw new Error("Broker Terraform checksum/package wiring is missing or malformed.");
   }
   const after = brokerChange.change?.after || {};
