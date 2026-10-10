@@ -23,7 +23,7 @@ function normalizeRepresentation(state) {
     copy.check_results.sort((a, b) => key(a).localeCompare(key(b)));
   }
   for (const resource of copy.resources || []) {
-    for (const instance of resource.instances || []) delete instance.create_before_destroy;
+    for (const instance of resource.instances || []) if (instance.create_before_destroy === false) delete instance.create_before_destroy;
   }
   return copy;
 }

@@ -50,6 +50,8 @@ test('state history rejects changed receipts, lineage, outputs, and unrelated re
     f => mutate(f, 'after', x => { x.lineage = '00000000-0000-0000-0000-000000000000'; }),
     f => mutate(f, 'after', x => { x.outputs.bound_images.value.backend = 'other'; }),
     f => mutate(f, 'after', x => { x.resources[1].instances[0].attributes.id = 'other'; }),
+    f => mutate(f, 'after', x => { x.resources[1].instances[0].create_before_destroy = true; }),
+    f => mutate(f, 'after', x => { x.resources[0].instances[0].create_before_destroy = true; }),
     f => mutate(f, 'after', x => { x.resources[0].instances[0].attributes.version = '14'; }),
     f => mutate(f, 'after', x => { x.resources[0].instances[0].attributes.code_sha256 = oldCode; }),
     f => mutate(f, 'after', x => { x.resources[0].instances[0].attributes.source_code_hash = oldCode; }),
