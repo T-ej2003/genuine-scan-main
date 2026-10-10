@@ -460,7 +460,7 @@ function readGeneratedString(tfvarsBytes, variable) {
   try { return JSON.parse(encoded); } catch { throw new Error(`Stage B tfvars ${variable} is malformed.`); }
 }
 
-function assertBrokerPackageBinding(tfvarsBytes, report) {
+function assertBrokerPackageBinding(tfvarsBytes, report, brokerPackageHistoricalSourceSha) {
   if (!path.isAbsolute(report.brokerPackagePath)) throw new Error("Stage B broker package path in the binding report must be absolute.");
   const tfvarsBrokerPath = readGeneratedString(tfvarsBytes, "broker_package_path");
   if (!path.isAbsolute(tfvarsBrokerPath) || tfvarsBrokerPath !== report.brokerPackagePath) throw new Error("Stage B broker package path does not match the canonical binding report.");
@@ -469,7 +469,7 @@ function assertBrokerPackageBinding(tfvarsBytes, report) {
   const bytes = fs.readFileSync(tfvarsBrokerPath);
   if (sha256(bytes) !== report.brokerPackageRawSha256) throw new Error("Stage B broker package raw SHA256 does not match the canonical binding report.");
   if (base64Sha256(bytes) !== report.brokerPackageBase64Sha256) throw new Error("Stage B broker package base64 SHA256 does not match the canonical binding report.");
-  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, ...(report.recoveryOnly ? {} : { expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 }) });
+  const manifest = assertStageBBrokerPackageManifest({ brokerPackagePath: tfvarsBrokerPath, manifestPath: report.brokerPackageManifestPath, repositoryRoot: root, historicalSourceSha: brokerPackageHistoricalSourceSha, ...(report.recoveryOnly ? {} : { expectedToolingSha: report.toolingSha, expectedToolingTreeSha256: report.toolingTreeSha256 }) });
   if (manifest.sha256 !== report.brokerPackageManifestSha256 || manifest.manifest.rawSha256 !== report.brokerPackageRawSha256) throw new Error("Stage B broker package manifest binding does not match the canonical report.");
 }
 
@@ -501,7 +501,7 @@ function assertStageAPrerequisiteBinding(report) {
   assertStageAInputMatchesStateBackup(input, stateBytes, stageAState, report);
 }
 
-export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256, validatePrerequisiteFiles = true } = {}) {
+export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, tfvarsBytes, bindingReportBytes, bindingReportSha256, expectedToolingSha, expectedToolingTreeSha256, expectedImageReleaseSha, expectedImageEvidenceSha256, brokerPackageHistoricalSourceSha, validatePrerequisiteFiles = true } = {}) {
   assertAbsoluteFile(tfvarsPath, "Tfvars"); assertAbsoluteFile(bindingReportPath, "Binding report");
   assertStageBPrivateFile({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" });
   if (!Buffer.isBuffer(tfvarsBytes) || !Buffer.isBuffer(bindingReportBytes)) throw new Error("Stage B tfvars binding requires captured immutable bytes.");
@@ -520,7 +520,7 @@ export function assertStageBTfvarsBindingBytes({ tfvarsPath, bindingReportPath, 
   const expectedRecoveryMode = resolveStageBRecoveryMode({ recoveryOnly: report.recoveryOnly, partialApplyRecovery: report.partialApplyRecovery, freshImagePartialApplyRecovery: report.freshImagePartialApplyRecovery });
   if (report.recoveryMode !== expectedRecoveryMode) throw new Error("Stage B tfvars binding recovery mode is inconsistent.");
   if (validatePrerequisiteFiles) {
-    assertBrokerPackageBinding(tfvarsBytes, report);
+    assertBrokerPackageBinding(tfvarsBytes, report, brokerPackageHistoricalSourceSha);
     assertStageAPrerequisiteBinding(report);
   }
   for (const [key, expected] of [["toolingSha", expectedToolingSha], ["toolingTreeSha256", expectedToolingTreeSha256], ["imageReleaseSha", expectedImageReleaseSha], ["imageEvidenceCanonicalSha256", expectedImageEvidenceSha256]]) if (expected !== undefined && report[key] !== expected) throw new Error(`Stage B tfvars binding report ${key} does not match the current deployment identity.`);
@@ -565,7 +565,7 @@ function validateTfvarsValues(values) {
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, brokerPackageHistoricalSourceSha, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
   const partialRecoveryMode = recoveryMode === "PARTIAL_APPLY_RECOVERY" || recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
@@ -597,7 +597,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
   const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
   const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
-  const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, ...(recoveryOnly ? {} : { expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 }) });
+  const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, historicalSourceSha: brokerPackageHistoricalSourceSha, ...(recoveryOnly ? {} : { expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 }) });
   const values = {
     account_id: STAGE_B.account, aws_region: STAGE_B.region, deployment_environment: environment, vpc_id: stageAPrerequisiteInput.vpcId, private_subnet_ids: [...stageAPrerequisiteInput.privateSubnetIds].sort(), ecs_cluster_arn: stageAPrerequisiteInput.ecsClusterArn,
     stage_a_database_security_group_id: stageAPrerequisiteInput.stageADatabaseSecurityGroupId, stage_a_executor_security_group_id: stageAPrerequisiteInput.stageAExecutorSecurityGroupId, stage_a_executor_task_role_arn: stageAPrerequisiteInput.stageAExecutorTaskRoleArn, stage_a_broker_role_arn: stageAPrerequisiteInput.stageABrokerRoleArn,

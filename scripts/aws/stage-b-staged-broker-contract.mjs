@@ -49,9 +49,42 @@ export function assertBrokerOutputReconciliation(value, preparation) {
   }
 }
 
+export function assertBrokerSuccessorReconciliation(value, preparation) {
+  keys(value, ['operationId', 'historicalStatePath', 'historicalStateSha256', 'currentStatePath', 'currentStateSha256',
+    'bindingReportPath', 'bindingReportSha256', 'imageEvidencePath', 'imageEvidenceSha256',
+    'imageSignaturePath', 'imageSignatureSha256', 'publicationResultSha256', 'outputChanges', 'createdAt', 'expiresAt']);
+  assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose));
+  assert.ok(preparation.recoveryTooling, 'Successor reconciliation requires authenticated descendant tooling');
+  assert.equal(preparation.outputReconciliation, undefined, 'Historical and successor output evidence cannot be mixed');
+  assert.equal(value.publicationResultSha256, brokerDigest(preparation.publication));
+  assert.equal(value.currentStateSha256, preparation.state.stateSha256);
+  for (const field of ['operationId', 'historicalStateSha256', 'currentStateSha256', 'bindingReportSha256',
+    'imageEvidenceSha256', 'imageSignatureSha256']) hash(value[field]);
+  for (const field of ['historicalStatePath', 'currentStatePath', 'bindingReportPath', 'imageEvidencePath', 'imageSignaturePath'])
+    assert.equal(typeof value[field], 'string');
+  const created = Date.parse(value.createdAt), expires = Date.parse(value.expiresAt);
+  assert.ok(Number.isFinite(created) && Number.isFinite(expires) && expires > created && expires - created <= 30 * 60_000,
+    'Successor evidence lifetime is invalid');
+  assert.equal(new Date(created).toISOString(), value.createdAt);
+  assert.equal(new Date(expires).toISOString(), value.expiresAt);
+  assert.equal(value.operationId, brokerDigest({ purpose: BROKER_CUTOVER, sourceSha: preparation.sourceSha,
+    recoveryTooling: preparation.recoveryTooling, publicationResultSha256: value.publicationResultSha256,
+    historicalStateSha256: value.historicalStateSha256, currentStateSha256: value.currentStateSha256,
+    alias: preparation.alias, target: preparation.target, bindingReportSha256: value.bindingReportSha256,
+    imageEvidenceSha256: value.imageEvidenceSha256, imageSignatureSha256: value.imageSignatureSha256,
+    outputChanges: value.outputChanges }));
+  assert.ok(Array.isArray(value.outputChanges));
+  assert.equal(new Set(value.outputChanges.map(o => o.name)).size, value.outputChanges.length);
+  for (const output of value.outputChanges) {
+    keys(output, ['name', 'before', 'after']); assert.equal(typeof output.name, 'string');
+    assert.notEqual(brokerDigest(output.before), brokerDigest(output.after));
+  }
+}
+
 export function assertBrokerOutputChanges(plan, preparation, { completed = false } = {}) {
-  const outputs = plan.output_changes || {}, evidence = preparation.outputReconciliation;
-  if (evidence) assertBrokerOutputReconciliation(evidence, preparation);
+  const outputs = plan.output_changes || {}, evidence = preparation.outputReconciliation || preparation.successorReconciliation;
+  if (preparation.outputReconciliation) assertBrokerOutputReconciliation(evidence, preparation);
+  if (preparation.successorReconciliation) assertBrokerSuccessorReconciliation(evidence, preparation);
   const expected = new Map((evidence?.outputChanges || []).map(o => [o.name, o]));
   const changed = Object.entries(outputs).filter(([, o]) => canonicalJson(o.actions) !== '["no-op"]');
   equal(changed.map(([name]) => name).sort(), completed ? [] : [...expected.keys()].sort(), 'Unapproved or missing reconciled output change');
@@ -430,15 +463,18 @@ export function receiptBoundCheckerDisclosure(preparation) {
   if (['STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(preparation.purpose) && chain?.registration?.preparation?.schemaVersion === 3) {
     assert.ok(chain.policy?.receiptBoundAdoption, 'Schema-3 policy convergence requires authenticated historical policy evidence');
   }
-  if (!chain?.registration?.receiptBoundAdoption && !chain?.policy?.receiptBoundAdoption) return null;
+  const successor = preparation.successorReconciliation;
+  const receiptBound = chain?.registration?.receiptBoundAdoption || chain?.policy?.receiptBoundAdoption;
+  if (!receiptBound && !successor) return null;
   const policyConvergence = ['STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(preparation.purpose) &&
-    chain.registration?.preparation?.schemaVersion === 3 &&
+    chain?.registration?.preparation?.schemaVersion === 3 &&
     chain.registration.preparation.purpose === 'STAGE_B_TASK_REGISTRATION' &&
     chain.registration.preparation.registrationPredecessor && chain.policy?.receiptBoundAdoption;
   const publicationOrCutover = [BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose) &&
-    chain.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption;
-  assert.ok(policyConvergence || publicationOrCutover,
+    chain?.registration?.receiptBoundAdoption && chain.policy?.receiptBoundAdoption;
+  assert.ok(receiptBound ? policyConvergence || publicationOrCutover : successor && [BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(preparation.purpose),
     'Receipt-bound recovery disclosure is limited to authenticated policy convergence, publication, or cutover chains');
+  if (successor) assertBrokerSuccessorReconciliation(successor, preparation);
   if (policyConvergence) {
     assertBrokerPreparation(chain.registration.preparation);
     assertRegistrationHandoff(chain.registration, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
@@ -466,6 +502,25 @@ export function receiptBoundCheckerDisclosure(preparation) {
       authorizationStatement: 'FRESH_AUTHORIZATION_COVERS_ONLY_THIS_EXACT_STATE_REFRESH_PACKAGE',
     },
   }[preparation.purpose];
+  const successorEvidence = successor && {
+    originalReleaseSourceSha: preparation.sourceSha,
+    brokerFunctionArn: STAGE_B.brokerFunctionArn,
+    brokerVersion: preparation.target.version,
+    publicationResultSha256: successor.publicationResultSha256,
+    operationId: successor.operationId,
+    evidenceSha256: brokerDigest(successor),
+  };
+  if (successor && !receiptBound) {
+    return { kind: 'SUCCESSOR_CUTOVER_RECOVERY_DISCLOSURE',
+      statements: ['ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED',
+        'FRESH_SUCCESSOR_EVIDENCE_AUTHORIZES_ONLY_THIS_EXACT_ALIAS_OR_CLOSURE_OPERATION',
+        operation.authorizationStatement],
+      successorEvidence, consumerSourceSha: preparation.sourceSha,
+      intendedOperation: operation.intendedOperation,
+      packageSha256: preparation.packageSha256, savedPlanSha256: preparation.savedPlanSha256,
+      logicalPlanSha256: preparation.logicalPlanSha256, preparationSha256: brokerDigest(preparation),
+      freshIndependentCheckerRequired: true };
+  }
   const identity = (entry, name) => {
     if (entry.receiptBoundAdoption) {
       const r = entry.receiptBoundAdoption;
@@ -506,12 +561,16 @@ export function receiptBoundCheckerDisclosure(preparation) {
       'COMPLETED_OUTPUTS_AND_TERMINAL_TRANSACTION_VERIFIED', 'LIVE_SUCCESSOR_INDEPENDENTLY_CORROBORATED',
       'REGISTRATION_IMAGE_REUSE_COMPATIBILITY_VERIFIED',
       'TERRAFORM_OWNERSHIP_AND_STATE_CORROBORATED', 'RECEIPT_BOUND_HANDOFF_PREPARATION_IS_NON_MUTATING',
+      ...(preparation.successorReconciliation ? ['ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED',
+        'FRESH_SUCCESSOR_EVIDENCE_AUTHORIZES_ONLY_THIS_EXACT_ALIAS_OR_CLOSURE_OPERATION'] : []),
       ...(policyConvergence ? ['HISTORICAL_REGISTRATION_USED_ONLY_AS_PREDECESSOR_PROVENANCE',
         'HISTORICAL_REGISTRATION_IMAGE_REUSE_COMPATIBILITY_REMAINS_FALSE',
         'CURRENT_RELEASE_REGISTRATION_REQUIRES_ITS_OWN_AUTHORIZATION',
         'POLICY_CONVERGENCE_AUTHORIZATION_DOES_NOT_AUTHORIZE_PUBLICATION_OR_CUTOVER'] : []),
       operation.authorizationStatement],
     recoveryArtifactSha256: brokerDigest(chain),
+    ...(preparation.successorReconciliation ? { successorOperationId: preparation.successorReconciliation.operationId,
+      successorEvidenceSha256: brokerDigest(preparation.successorReconciliation), successorEvidence } : {}),
     ...(chain.pruning ? { pruningHandoffSha256: brokerDigest(chain.pruning) } : {}),
     registration: identity(chain.registration, 'registration'), policy: identity(chain.policy, 'policy'),
     consumerSourceSha: preparation.sourceSha, intendedOperation: operation.intendedOperation,
@@ -735,10 +794,11 @@ export function assertBrokerPreparation(p) {
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
   if (p.schemaVersion === 3) fields.push('prerequisiteChain', 'registrationPredecessor', 'registrationPolicyPredecessor');
   if (p.purpose === BROKER_STATE_REFRESH) fields.push('cutover');
-  for (const name of ['recoveryTooling', 'outputReconciliation']) if (p[name] !== undefined) fields.push(name);
+  for (const name of ['recoveryTooling', 'outputReconciliation', 'successorReconciliation']) if (p[name] !== undefined) fields.push(name);
   keys(p, fields);
   if (p.recoveryTooling) assertBrokerRecoveryTooling(p.recoveryTooling, p);
   if (p.outputReconciliation) { assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(p.purpose)); assertBrokerOutputReconciliation(p.outputReconciliation, p); }
+  if (p.successorReconciliation) assertBrokerSuccessorReconciliation(p.successorReconciliation, p);
   assert.ok([1, 2, 3].includes(p.schemaVersion)); assert.ok([BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, 'STAGE_B_TASK_REGISTRATION', 'STAGE_B_BROKER_POLICY_CONVERGENCE', 'STAGE_B_BROKER_POLICY_PRUNING'].includes(p.purpose));
   if (p.purpose === BROKER_STATE_REFRESH) {
     keys(p.cutover, ['preparationSha256', 'authorizationSha256', 'resultSha256']);
@@ -883,11 +943,12 @@ export async function assertBrokerAuthorization(authorization, preparation, { ve
     assert.equal(authorization.purpose,preparation.purpose);assert.equal(authorization.sourceSha,preparation.sourceSha);
     assert.equal(authorization.preparationSha256,brokerDigest(preparation));hash(authorization.nonce);
     const approval=authorization.protectedEnvironmentApprovalEvidence;
-    assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:preparation.sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
+    const executionSourceSha=brokerExecutionCheckout(preparation).sourceSha;
+    assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:executionSourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
     assertProductionEnvironmentApprovalFreshness(approval,{now});
     assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
     assert.equal(approval.workflowRunAttempt,'1');
-    const approvedBy=assertProductionEnvironmentActualReviewer(approval,{sourceSha:preparation.sourceSha,repository:approval.repository,executionActor:approval.executionActor});
+    const approvedBy=assertProductionEnvironmentActualReviewer(approval,{sourceSha:executionSourceSha,repository:approval.repository,executionActor:approval.executionActor});
     keys(authorization.review,['approvedBy','checkerIndependent','soleOperatorModel']);
     assert.equal(authorization.review.approvedBy,approvedBy);
     const independent=approvedBy.toLowerCase()!==approval.executionActor.toLowerCase();

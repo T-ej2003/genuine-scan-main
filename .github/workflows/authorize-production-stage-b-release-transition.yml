@@ -4,7 +4,8 @@ run-name: Stage B approval ${{ inputs.release_id }}/${{ inputs.phase }}/${{ inpu
 on:
   workflow_dispatch:
     inputs:
-      source_sha: {description: Exact protected-main release source, required: true, type: string}
+      source_sha: {description: Immutable release source for the prepared operation, required: true, type: string}
+      tooling_sha: {description: Authenticated descendant tooling for successor recovery, required: false, type: string}
       ticket_id: {description: Original governed release ticket, required: true, type: string}
       release_id: {description: Immutable coordinator release identity, required: true, type: string}
       phase:
@@ -28,6 +29,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       SOURCE_SHA: ${{ inputs.source_sha }}
+      TOOLING_SHA: ${{ inputs.tooling_sha || inputs.source_sha }}
       TICKET_ID: ${{ inputs.ticket_id }}
       RELEASE_ID: ${{ inputs.release_id }}
       RELEASE_PHASE: ${{ inputs.phase }}
@@ -35,7 +37,7 @@ jobs:
       RELEASE_AUTHORIZATION_ROUND: ${{ inputs.authorization_round }}
     steps:
       - uses: actions/checkout@v6
-        with: {ref: '${{ inputs.source_sha }}', fetch-depth: 0, persist-credentials: false}
+        with: {ref: '${{ inputs.tooling_sha || inputs.source_sha }}', fetch-depth: 0, persist-credentials: false}
       - uses: actions/setup-node@v6
         with: {node-version: 24, cache: npm}
       - run: npm ci --ignore-scripts --no-audit --no-fund
@@ -44,15 +46,15 @@ jobs:
       - name: Authenticate exact protected source and private phase paths
         run: |
           set -euo pipefail
-          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$TOOLING_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
           [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover|closure)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
-          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$GITHUB_SHA" = "$TOOLING_SHA"
           git fetch --no-tags origin main
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$TOOLING_SHA"
+          test "$(git rev-parse origin/main)" = "$TOOLING_SHA"
           test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .protected)" = true
-          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(gh api repos/$GITHUB_REPOSITORY/branches/main --jq .commit.sha)" = "$TOOLING_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           umask 077
           install -d -m 700 "/tmp/mscqr-production-release"

@@ -119,7 +119,7 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
     for (const field of ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"]) if (contracts[field] !== expected[field]) throw new Error("Original release checksums differ from authenticated broker.");
   }
   const generated = generateStageBTfvars({
-    ...(checksumsFile ? { checksumsFile } : {}),
+    ...(checksumsFile ? { checksumsFile, brokerPackageHistoricalSourceSha: recoveryApproval.sourceSha } : {}),
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     imageEvidenceBytes, imageEvidenceSignatureBytes,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,

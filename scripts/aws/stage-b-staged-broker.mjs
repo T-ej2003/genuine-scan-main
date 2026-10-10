@@ -12,6 +12,7 @@ async function authenticate(preparation, authorization, deps) {
   const digest = await assertBrokerAuthorization(authorization, preparation, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
   equal(await deps.readCheckout(), brokerExecutionCheckout(preparation), "Checkout authority changed");
   if (preparation.outputReconciliation) await deps.authenticateOutputReconciliation(preparation);
+  if (preparation.successorReconciliation) await deps.authenticateSuccessorReconciliation(preparation);
   if (preparation.prerequisiteChain) await deps.authenticatePrerequisiteChain(preparation.prerequisiteChain);
   equal(brokerPrerequisiteIdentity(await deps.readPrerequisites()), preparation.prerequisites, "Broker prerequisite changed");
   equal(await deps.readStateIdentity(), preparation.state, "State predecessor changed");
@@ -58,7 +59,7 @@ export async function executeBrokerPublication({ preparation, authorization }, d
   await deps.record(authorizationSha256, "PUBLISHED", result); return result;
 }
 
-export async function prepareBrokerCutover({ publicationPreparation, publicationAuthorization, publicationResult, plan, bytes, state, artifactSetSha256, outputReconciliation }, deps) {
+export async function prepareBrokerCutover({ publicationPreparation, publicationAuthorization, publicationResult, plan, bytes, state, artifactSetSha256, outputReconciliation, successorRecovery }, deps) {
   const old = context(publicationPreparation, BROKER_PUBLICATION);
   const authHash = await assertBrokerAuthorization(publicationAuthorization, old, { verify: deps.verifyAuthorization, now: new Date(publicationResult.authorizedAt) });
   assert.equal(publicationResult.status, "PUBLISHED"); assert.equal(publicationResult.authorizationSha256, authHash);
@@ -78,8 +79,10 @@ export async function prepareBrokerCutover({ publicationPreparation, publication
     artifactSetSha256, target, publication: structuredClone(publicationResult) };
   if (recoveryTooling) p.recoveryTooling = recoveryTooling;
   if (outputReconciliation) p.outputReconciliation = outputReconciliation;
+  if (successorRecovery) p.successorReconciliation = await deps.createSuccessorReconciliation(p, successorRecovery);
   assertBrokerPreparation(p);
   if (p.outputReconciliation) await deps.authenticateOutputReconciliation(p);
+  if (p.successorReconciliation) await deps.authenticateSuccessorReconciliation(p);
   assertBrokerCutoverPlan(plan, p); return p;
 }
 
@@ -116,6 +119,13 @@ export async function executeBrokerAliasCas({ preparation, authorization }, deps
   await deps.record(authorizationSha256, result.status, result); return result;
 }
 
+export function assertSuccessorCasTime(preparation, authorizedAt) {
+  const evidence = preparation.successorReconciliation;
+  assert.ok(Date.parse(evidence.createdAt) <= Date.parse(authorizedAt)
+    && Date.parse(authorizedAt) < Date.parse(evidence.expiresAt),
+  'Successor evidence expired before the alias operation');
+}
+
 export async function reconcileBrokerAlias({ preparation, authorization, casResult, cutoverPreparation, cutoverAuthorization }, deps) {
   const p = context(preparation, cutoverPreparation ? BROKER_STATE_REFRESH : BROKER_CUTOVER);
   const authHash = await assertBrokerAuthorization(authorization, p, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
@@ -123,6 +133,7 @@ export async function reconcileBrokerAlias({ preparation, authorization, casResu
   const oldAuthorization = cutoverPreparation ? cutoverAuthorization : authorization;
   if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult}));
   const cutoverHash=await assertBrokerAuthorization(oldAuthorization,old,{verify:deps.verifyAuthorization,now:new Date(casResult.authorizedAt)});
+  if (old.successorReconciliation) assertSuccessorCasTime(old, casResult.authorizedAt);
   assert.equal(casResult.status, "CUTOVER_COMMITTED_STATE_PENDING"); assert.equal(casResult.authorizationSha256, cutoverHash);
   assert.equal(casResult.preparationSha256, brokerDigest(old));
   await deps.authenticateCasResult(casResult, cutoverHash);
@@ -134,16 +145,19 @@ export async function reconcileBrokerAlias({ preparation, authorization, casResu
     assert.equal(await deps.readTerraformFunctionVersion(), p.target.version, "New publication invalidates desired alias");
   };
   if (p.outputReconciliation) await deps.authenticateOutputReconciliation(p);
+  if (p.successorReconciliation) await deps.authenticateSuccessorReconciliation(p);
   await revalidate(); equal(await deps.readStateIdentity(), p.state);
   const refresh = await deps.captureRefreshOnlyPlan(); assertBrokerRefreshPlan(refresh.plan, p, casResult.alias);
   assert.ok(Buffer.isBuffer(refresh.bytes)); const refreshPlanSha256 = brokerDigest(refresh.bytes);
   if (p.outputReconciliation) await deps.authenticateOutputReconciliation(p);
+  if (p.successorReconciliation) await deps.authenticateSuccessorReconciliation(p);
   await revalidate(); equal(await deps.readStateIdentity(), p.state);
   await deps.reserve(brokerStateReservation(authHash), { purpose: "STAGE_B_BROKER_STATE_ONLY", parent: authHash, refreshPlanSha256 });
   const stateAuthorizedAt=(deps.now?.() || new Date()).toISOString();
   await deps.record(authHash, "STATE_REFRESH_INTENT", { refreshPlanSha256, authorizedAt:stateAuthorizedAt });
   await assertBrokerAuthorization(authorization, p, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
   if (p.outputReconciliation) await deps.authenticateOutputReconciliation(p);
+  if (p.successorReconciliation) await deps.authenticateSuccessorReconciliation(p);
   await revalidate(); equal(await deps.readStateIdentity(), p.state);
   try { await deps.applyRefreshOnlyPlan(refresh.bytes); }
   catch (error) { await deps.record(authHash, "STATE_REFRESH_UNKNOWN", {}); throw error; }
@@ -193,6 +207,10 @@ export async function recoverBrokerAliasCas({ preparation: p, authorization }, d
   context(p, BROKER_CUTOVER);
   const { id, authorizedAt } = await deps.authenticateRecoveryIntent('CUTOVER_INTENT', { predecessor: p.alias, target: p.target });
   assert.equal(id, brokerDigest(authorization));
+  if (p.successorReconciliation) {
+    assertSuccessorCasTime(p, authorizedAt);
+    await deps.authenticateSuccessorReconciliation(p);
+  }
   equal(await deps.readCheckout(), brokerExecutionCheckout(p));
   if (p.prerequisiteChain) await deps.authenticatePrerequisiteChain(p.prerequisiteChain);
   await deps.authenticatePublicationResult(p.publication, p.publication.authorizationSha256);
@@ -222,6 +240,10 @@ export async function recoverBrokerReconciliation({ preparation: p, authorizatio
   assert.equal(casResult.alias.FunctionVersion, p.target.version); assert.notEqual(casResult.alias.RevisionId, p.alias.RevisionId);
   equal({ ...brokerAliasIdentity(casResult.alias), FunctionVersion: p.alias.FunctionVersion, RevisionId: p.alias.RevisionId }, p.alias);
   const cutoverHash=await assertBrokerAuthorization(oldAuthorization,old,{verify:deps.verifyAuthorization,now:new Date(casResult.authorizedAt)});
+  if (old.successorReconciliation) {
+    assertSuccessorCasTime(old, casResult.authorizedAt);
+    await deps.authenticateSuccessorReconciliation(old);
+  }
   await deps.authenticateCasResult(casResult, cutoverHash); assert.equal(casResult.authorizationSha256, cutoverHash); assert.equal(casResult.preparationSha256, brokerDigest(old));
   equal(await deps.readCheckout(), brokerExecutionCheckout(p));
   if (p.prerequisiteChain) await deps.authenticatePrerequisiteChain(p.prerequisiteChain);

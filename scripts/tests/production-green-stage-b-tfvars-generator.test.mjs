@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import test from "node:test";
 import { assertImageEvidence, imageEvidenceSha256, signImageEvidence } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
@@ -13,6 +13,7 @@ import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { readPlanningInputs } from "../plan-production-green-stage-b.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "../aws/validate-stage-b-image-reuse.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const now = "2026-08-03T12:00:00.000Z";
@@ -540,4 +541,42 @@ test("readiness historical checksums produce original contracts despite differen
   assert.equal(generated.bindingReport.migrationSetDigest, "2".repeat(64));
   assert.equal(generated.bindingReport.packageChecksumSha256, crypto.createHash("sha256").update(original).digest("hex"));
   assert.notDeepEqual(deriveContractDigests({ file: checksumsFile }), deriveContractDigests());
+});
+
+test("successor binding generation and verification use the original broker source", async () => {
+  const originalSha = "29406b0ec537ac60618642bba20133dd0cf45529";
+  const originalTree = deriveStageBToolingInputTreeSha256(originalSha);
+  const historicalRoot = fs.mkdtempSync(path.join(tempRoot, "historical-broker-"));
+  try {
+    const paths = ["infra/aws/terraform/lambda/production-rls-approval-broker",
+      "infra/aws/terraform/production-green-stage-b/broker/deployment-contract.json",
+      "scripts/aws/production-green-stage-b-contract.mjs"];
+    const archive = execFileSync("git", ["archive", "--format=tar", originalSha, "--", ...paths]);
+    execFileSync("tar", ["-xf", "-", "-C", historicalRoot], { input: archive });
+    const args = input({ toolingSha: originalSha, toolingTreeSha256: originalTree,
+      brokerPackageHistoricalSourceSha: originalSha });
+    const publishedPackage = path.join(path.dirname(args.outputPath), "historical-broker.zip");
+    await packageStageBBroker({ outputPath: publishedPackage, repositoryRoot: historicalRoot,
+      sourceDirectory: path.join(historicalRoot, paths[0]), toolingSha: originalSha, toolingTreeSha256: originalTree,
+      npmArgs: ["ci", "--offline", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"] });
+    args.brokerPackagePath = publishedPackage;
+    const originalChecksums = path.join(path.dirname(args.outputPath), "original-checksums.json");
+    fs.writeFileSync(originalChecksums, execFileSync("git", ["show", `${originalSha}:documents/security/rls-program/generated/checksums.json`]));
+    args.checksumsFile = originalChecksums;
+    const stageAInput = JSON.parse(fs.readFileSync(args.stageAInput));
+    fs.writeFileSync(args.stageAInput, `${JSON.stringify({ ...stageAInput, toolingSha: originalSha, toolingTreeSha256: originalTree })}\n`);
+    const image = JSON.parse(fs.readFileSync(args.imageEvidence));
+    image.currentSourceSha = originalSha;
+    fs.writeFileSync(args.imageEvidence, `${JSON.stringify(image)}\n`);
+    fs.writeFileSync(args.imageEvidenceSignature, `${JSON.stringify(signImageEvidence(image, { now, sign: () => "AQ==" }))}\n`);
+    const generated = generateStageBTfvars(args);
+    assert.equal(generated.bindingReport.toolingSha, originalSha);
+    assert.equal(generated.bindingReport.brokerPackageRawSha256,
+      crypto.createHash("sha256").update(fs.readFileSync(publishedPackage)).digest("hex"));
+    assert.doesNotThrow(() => assertStageBTfvarsBinding({ tfvarsPath: generated.outputPath,
+      bindingReportPath: generated.bindingReportPath, expectedToolingSha: originalSha,
+      brokerPackageHistoricalSourceSha: originalSha }));
+    assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: generated.outputPath,
+      bindingReportPath: generated.bindingReportPath, brokerPackageHistoricalSourceSha: releaseSha }), /publication identity/);
+  } finally { fs.rmSync(historicalRoot, { recursive: true, force: true }); }
 });

@@ -1,0 +1,65 @@
+name: Recover production Stage B successor cutover
+
+on:
+  workflow_dispatch:
+    inputs:
+      recovery_reference:
+        description: Immutable coordinator evidence reference for the exact successor operation.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+  id-token: write
+
+concurrency:
+  group: production-stage-b-successor-cutover
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SUCCESSOR_RECOVERY_REFERENCE: ${{ inputs.recovery_reference }}
+      TF_WORKSPACE: default
+    steps:
+      - uses: actions/checkout@v6
+        with: {ref: main, fetch-depth: 0}
+      - name: Authenticate protected recovery tooling
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          [[ "$SUCCESSOR_RECOVERY_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
+      - uses: actions/setup-node@v6
+        with: {node-version: 24, cache: npm}
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: 1.15.8, terraform_wrapper: false}
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          role-session-name: successor-${{ github.run_id }}
+          unset-current-credentials: true
+      - name: Resume exact governed successor operation
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 75); do
+            result="$(node scripts/aws/run-production-successor-release-coordinator.mjs)"
+            status="$(node -e 'const v=JSON.parse(process.argv[1]);if(!["WAITING_FOR_APPROVAL","BROKER_CLOSURE_COMPLETE"].includes(v.status))process.exit(2);process.stdout.write(v.status)' "$result")"
+            if [ "$status" = BROKER_CLOSURE_COMPLETE ]; then
+              printf '%s\n' "$result"
+              exit 0
+            fi
+            node -e 'const v=JSON.parse(process.argv[1]);console.log(`Waiting for exact ${v.phase} production approval: ${v.runUrl}`)' "$result"
+            sleep 30
+          done
+          echo '::error::Exact governed successor approval has not completed; rerun this workflow with the same immutable reference.'
+          exit 1
