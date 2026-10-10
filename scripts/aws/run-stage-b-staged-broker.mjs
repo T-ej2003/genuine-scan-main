@@ -110,7 +110,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     equal(prerequisites,preparation.prerequisites);equal(await deps.readStateIdentity(),preparation.state);
     equal(await deps.getAlias(),request.casResult.alias);
     equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version),preparation.packageSha256),preparation.target);
-    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:preparation.sourceSha,now});
+    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:brokerExecutionCheckout(preparation).sourceSha,now});
     if(approval)return createBrokerProtectedEnvironmentAuthorization(preparation,{...approval,now});
     return signBrokerAuthorization(preparation,{...checker(),makerCaller:deps.readMakerCaller,makerIdentity:request.makerIdentity,humanReviewId:request.humanReviewId});
   }
@@ -205,7 +205,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
       equal(await deps.getAlias(), preparation.alias);
       equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version), preparation.packageSha256), preparation.target);
     }
-    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:preparation.sourceSha,now});
+    const now=deps.now?.()||new Date(),approval=await readProtectedApproval({sourceSha:brokerExecutionCheckout(preparation).sourceSha,now});
     if(approval)return createBrokerProtectedEnvironmentAuthorization(preparation,{...approval,now});
     return signBrokerAuthorization(preparation, { ...checker(), makerCaller: deps.readMakerCaller, makerIdentity: request.makerIdentity, humanReviewId: request.humanReviewId });
   }

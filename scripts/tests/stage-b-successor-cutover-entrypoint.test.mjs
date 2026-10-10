@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
+import JSZip from 'jszip';
 import { assertStageBBrokerPackageManifest, packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { stagedBrokerArtifactSet } from '../aws/stage-b-staged-broker-executor.mjs';
@@ -13,7 +15,7 @@ import { stageBStaticConfiguration } from './fixtures/stage-b-static-configurati
 import { rig, ready, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
 import { assertBrokerAuthorization, receiptBoundCheckerDisclosure } from '../aws/stage-b-staged-broker-contract.mjs';
-import { brokerAuthorizationMessage, signBrokerAuthorization, createBrokerProtectedEnvironmentAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
+import { brokerAuthorizationMessage, signBrokerAuthorization, createBrokerProtectedEnvironmentAuthorization, readBrokerProtectedEnvironmentAuthorization, verifyBrokerProtectedEnvironmentAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from '../aws/production-github-environment-approval.mjs';
 import { deriveStageBToolingInputTreeSha256 } from '../aws/validate-stage-b-image-reuse.mjs';
 
@@ -130,7 +132,7 @@ test('public successor preparation preserves published source and consumes expli
       protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
         reviewers: [{ type: 'User', reviewer: { id: 2, login: 'reviewer' } }] }] };
     const environmentApproval = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment,
-      repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: 'production', sourceSha: ORIGINAL_RELEASE,
+      repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: 'production', sourceSha: RECOVERY_TOOLING,
       workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
       eventName: 'workflow_dispatch', workflowRunId: '123', workflowRunAttempt: '1', executionActor: 'operator',
       observedAt: '2026-10-04T11:59:00.000Z', actualApproval: { state: 'approved', environmentId: 1,
@@ -139,6 +141,33 @@ test('public successor preparation preserves published source and consumes expli
       approval: environmentApproval, release: { releaseId: 'a'.repeat(64), phase: 'cutover',
         preparationReference: brokerDigest(prepared), authorizationRound: 0 }, now: r.deps.now() });
     assert.deepEqual(protectedAuthorization.recoveryDisclosure, disclosure);
+    assert.equal(protectedAuthorization.sourceSha, ORIGINAL_RELEASE);
+    assert.equal(protectedAuthorization.protectedEnvironmentApprovalEvidence.sourceSha, RECOVERY_TOOLING);
+    const zip = new JSZip(); zip.file('authorization.json', JSON.stringify(protectedAuthorization));
+    const archiveBytes = await zip.generateAsync({ type: 'nodebuffer' });
+    const repository = PRODUCTION_ENVIRONMENT_APPROVAL.repository;
+    const workflow = { id: 123, repository: { id: 9, full_name: repository }, head_repository: { full_name: repository },
+      path: '.github/workflows/authorize-production-stage-b-release-transition.yml', head_sha: RECOVERY_TOOLING,
+      event: 'workflow_dispatch', status: 'completed', conclusion: 'success', run_attempt: 1, actor: { login: 'operator' } };
+    const artifact = { id: 456, name: 'production-stage-b-release-transition-authorization', expired: false,
+      digest: `sha256:${createHash('sha256').update(archiveBytes).digest('hex')}`,
+      workflow_run: { id: 123, head_sha: RECOVERY_TOOLING, repository_id: 9 } };
+    const payloads = { 'actions/runs/123': workflow, 'actions/runs/123/artifacts': [{ artifacts: [artifact] }],
+      'actions/artifacts/456/zip': archiveBytes, 'environments/production': environment,
+      'actions/runs/123/approvals': [{ state: 'approved', environments: [{ id: 1, name: 'production' }],
+        user: { id: 2, login: 'reviewer' } }] };
+    const githubRun = args => { const key = args[1].slice(`repos/${repository}/`.length);
+      return Buffer.isBuffer(payloads[key]) ? payloads[key] : JSON.stringify(payloads[key]); };
+    assert.equal((await readBrokerProtectedEnvironmentAuthorization({ workflowRunId: '123', sourceSha: ORIGINAL_RELEASE,
+      workflowSourceSha: RECOVERY_TOOLING, run: githubRun })).authorization.sourceSha, ORIGINAL_RELEASE);
+    await assertBrokerAuthorization(protectedAuthorization, prepared,
+      { verify: value => verifyBrokerProtectedEnvironmentAuthorization(value, { run: githubRun }), now: r.deps.now() });
+    workflow.head_sha = ORIGINAL_RELEASE;
+    await assert.rejects(() => verifyBrokerProtectedEnvironmentAuthorization(protectedAuthorization, { run: githubRun }));
+    workflow.head_sha = RECOVERY_TOOLING;
+    const wrongApproval = structuredClone(protectedAuthorization);
+    wrongApproval.protectedEnvironmentApprovalEvidence.sourceSha = ORIGINAL_RELEASE;
+    await assert.rejects(() => assertBrokerAuthorization(wrongApproval, prepared, { verify: async () => true, now: r.deps.now() }));
     for (const auth of [checkerAuthorization, protectedAuthorization]) {
       await assertBrokerAuthorization(auth, prepared, { verify: async () => true, now: r.deps.now() });
       for (const mutate of [
@@ -153,6 +182,12 @@ test('public successor preparation preserves published source and consumes expli
       }
     }
     r.deps.readPlan = async () => ({ plan, bytes: planBytes, artifactSetSha256: prepared.artifactSetSha256 });
+    const publicAuthorization = await runStagedBrokerRequest({ files, directory, terraformDataDir: directory, operation: 'authorize-cutover',
+      preparation: prepared, planPath: result.planPath }, { adapterFactory: () => r.deps,
+      readProtectedApproval: async ({ sourceSha }) => { assert.equal(sourceSha, RECOVERY_TOOLING);
+        return { approval: environmentApproval, release: protectedAuthorization.release }; } });
+    assert.equal(publicAuthorization.sourceSha, ORIGINAL_RELEASE);
+    assert.equal(publicAuthorization.protectedEnvironmentApprovalEvidence.sourceSha, RECOVERY_TOOLING);
     const cas = await executeBrokerAliasCas({ preparation: prepared, authorization: checkerAuthorization }, r.deps);
     const closure = await reconcileBrokerAlias({ preparation: prepared, authorization: checkerAuthorization, casResult: cas }, r.deps);
     assert.equal(cas.alias.FunctionVersion, '13'); assert.equal(closure.sourceSha, ORIGINAL_RELEASE);

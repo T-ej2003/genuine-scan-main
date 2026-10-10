@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {createReleaseCoordinatorStore,hydrateReleasePhaseMaterial,HOSTED_RELEASE_ROOT} from './production-release-coordinator.mjs';
-import {brokerDigest,prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
+import {brokerDigest,brokerExecutionCheckout,prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
 import {PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
 import {ensureStageBPrivateDirectory,writeStageBPrivateFileAtomic} from './stage-b-artifact-contract.mjs';
@@ -17,7 +17,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  {env=process.env,run=createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env}),runRequest=runStagedBrokerRequest,createStore=createReleaseCoordinatorStore}={}) {
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
  assert.equal(env.GITHUB_REPOSITORY,PRODUCTION_ENVIRONMENT_APPROVAL.repository);assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');assert.equal(env.GITHUB_RUN_ATTEMPT,'1');
- assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.equal(env.GITHUB_SHA,sourceSha);assert.match(releaseId||'',/^[a-f0-9]{64}$/);
+ assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.match(env.GITHUB_SHA||'',/^[a-f0-9]{40}$/);assert.match(releaseId||'',/^[a-f0-9]{64}$/);
  assert.match(preparationReference||'',/^[a-f0-9]{64}$/);assert.ok(Object.hasOwn(operations,phase));assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
  assert.ok(path.isAbsolute(env.RUNNER_TEMP||''));
  assert.equal(env.RELEASE_ID,releaseId);assert.equal(env.RELEASE_PHASE,phase);assert.equal(env.RELEASE_PREPARATION_REFERENCE,preparationReference);assert.equal(env.RELEASE_AUTHORIZATION_ROUND,String(authorizationRound));
@@ -31,6 +31,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  const pending=store.readStep(releaseId,`${phase}:pending:${authorizationRound}`);
  if(pending){assert.equal(pending.prepared,preparationReference);assert.equal(pending.runId,env.GITHUB_RUN_ID);}
  const prepared=store.getArtifact(preparationReference);assert.equal(prepared.preparation.sourceSha,sourceSha);
+ assert.equal(env.GITHUB_SHA,brokerExecutionCheckout(prepared.preparation).sourceSha,'Authorization workflow differs from authenticated preparation tooling');
  assert.match(prepared.materializationSha256||'',/^[a-f0-9]{64}$/);
  assert.equal(path.dirname(prepared.planPath),directory,'Saved plan escaped its immutable phase directory');
  assert.match(path.basename(prepared.planPath),/^[a-z0-9-]+\.(tfplan|json)$/);

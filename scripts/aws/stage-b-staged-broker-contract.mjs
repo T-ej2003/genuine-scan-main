@@ -943,11 +943,12 @@ export async function assertBrokerAuthorization(authorization, preparation, { ve
     assert.equal(authorization.purpose,preparation.purpose);assert.equal(authorization.sourceSha,preparation.sourceSha);
     assert.equal(authorization.preparationSha256,brokerDigest(preparation));hash(authorization.nonce);
     const approval=authorization.protectedEnvironmentApprovalEvidence;
-    assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:preparation.sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
+    const executionSourceSha=brokerExecutionCheckout(preparation).sourceSha;
+    assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:executionSourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
     assertProductionEnvironmentApprovalFreshness(approval,{now});
     assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
     assert.equal(approval.workflowRunAttempt,'1');
-    const approvedBy=assertProductionEnvironmentActualReviewer(approval,{sourceSha:preparation.sourceSha,repository:approval.repository,executionActor:approval.executionActor});
+    const approvedBy=assertProductionEnvironmentActualReviewer(approval,{sourceSha:executionSourceSha,repository:approval.repository,executionActor:approval.executionActor});
     keys(authorization.review,['approvedBy','checkerIndependent','soleOperatorModel']);
     assert.equal(authorization.review.approvedBy,approvedBy);
     const independent=approvedBy.toLowerCase()!==approval.executionActor.toLowerCase();

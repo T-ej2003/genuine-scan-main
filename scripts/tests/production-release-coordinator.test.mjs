@@ -96,6 +96,10 @@ test('maximum governed transition dispatch uses references and stays far below G
   assert.equal(inputs.preparation_reference,'c'.repeat(64));assert.equal(Object.hasOwn(inputs,'preparation'),false);
  }
  assert.equal(releaseTransitionDispatchInputs({release,authorizationRound:0},'closure','c'.repeat(64)).phase,'closure');
+ const successor=releaseTransitionDispatchInputs({release,authorizationRound:0},'cutover','c'.repeat(64),
+  {recoveryTooling:{sourceSha:'d'.repeat(40)}});
+ assert.equal(successor.source_sha,sourceSha);
+ assert.equal(successor.tooling_sha,'d'.repeat(40));
 });
 
 test('release identity binds exact source, deployed baseline and deterministic classification', () => {
@@ -700,4 +704,33 @@ test('governed approval dispatch resumes its exact child at the human boundary w
  child.conclusion='failure';await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),/Exact approval child failed/);assert.equal(posts,1);
  child.head_sha='f'.repeat(40);await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps));assert.equal(posts,1);
  await assert.rejects(()=>obtainReleaseTransitionAuthorization(context,'pruning',prepared,reference,deps));assert.equal(posts,1);
+});
+
+test('successor approval dispatch executes from protected descendant without relabeling the release',async()=>{
+ const toolingSha='d'.repeat(40),release={sourceSha,releaseId:'b'.repeat(64),ticketId:'current-release'};
+ const prepared={preparation:{sourceSha,recoveryTooling:{sourceSha:toolingSha}}},reference=brokerDigest(prepared);
+ const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
+ const child={id:702,workflow_id:8,path:`.github/workflows/${workflow}`,head_sha:toolingSha,head_branch:'main',
+  event:'workflow_dispatch',run_attempt:1,status:'waiting',repository:{full_name:repository},head_repository:{full_name:repository}};
+ let posted;
+ const run=args=>{const suffix=args[1].slice(`repos/${repository}/`.length);
+  if(suffix==='branches/main')return JSON.stringify({protected:true,commit:{sha:toolingSha}});
+  if(suffix==='actions/runs/702')return JSON.stringify(child);
+  if(suffix==='actions/runs/702/pending_deployments')return JSON.stringify([{environment:{id:9,name:'production'}}]);
+  throw new Error(`Unexpected approval read ${suffix}`);};
+ const fetchImpl=async(url,options)=>{let body;
+  if(url.endsWith(`/workflows/${workflow}`))body={id:8,path:child.path};
+  else if(url.endsWith('/actions/runs/702'))body=child;
+  else if(url.includes('/runs?'))body={total_count:posted?1:0,workflow_runs:posted?[child]:[]};
+  else if(options?.method==='POST'){posted=JSON.parse(options.body);body={workflow_run_id:702};}
+  else throw new Error(`Unexpected approval API ${url}`);
+  return new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});};
+ const context={release,authorizationRound:0,store:{readStep:async()=>null,writeStep:async()=>{}}};
+ const result=await obtainReleaseTransitionAuthorization(context,'cutover',prepared,reference,
+  {token:'fixture-only',run,fetchImpl,sleep:rejectExternalAccess,attempts:1});
+ assert.equal(result.status,'WAITING_FOR_APPROVAL');assert.equal(posted.ref,'main');
+ assert.equal(posted.inputs.source_sha,sourceSha);assert.equal(posted.inputs.tooling_sha,toolingSha);
+ child.head_sha=sourceSha;
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:{runId:'702',prepared:reference}},
+  'cutover',prepared,reference,{token:'fixture-only',run,fetchImpl,sleep:rejectExternalAccess,attempts:1}));
 });

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { brokerDigest,assertBrokerPreparation,prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
+import { brokerDigest,brokerExecutionCheckout,assertBrokerPreparation,prepareBrokerStateRefresh } from './stage-b-staged-broker-contract.mjs';
 import { assertProductionComponentDeploymentState } from './production-component-deployment-state.mjs';
 import { classifyProductionChanges } from './production-deployment-classification.mjs';
 import fs from 'node:fs';
@@ -43,11 +43,12 @@ export function authenticateReleaseGateRuns(release,evidence) {
  return entries.map(({workflowFile,run})=>({workflowFile,runId:String(run.id),sourceSha:run.head_sha}));
 }
 
-export function releaseTransitionDispatchInputs({release,authorizationRound},phase,preparationReference){
+export function releaseTransitionDispatchInputs({release,authorizationRound},phase,preparationReference,preparation){
  assert.match(release.sourceSha||'',/^[a-f0-9]{40}$/);assert.match(release.releaseId||'',/^[a-f0-9]{64}$/);
  assert.match(release.ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);assert.match(preparationReference||'',/^[a-f0-9]{64}$/);
  assert.ok(['registration','pruning','policy','publication','cutover','closure'].includes(phase));assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
- const inputs={source_sha:release.sourceSha,ticket_id:release.ticketId,release_id:release.releaseId,phase,preparation_reference:preparationReference,authorization_round:String(authorizationRound)};
+ const executionSourceSha=preparation?brokerExecutionCheckout(preparation).sourceSha:release.sourceSha;
+ const inputs={source_sha:release.sourceSha,...(executionSourceSha!==release.sourceSha?{tooling_sha:executionSourceSha}:{}),ticket_id:release.ticketId,release_id:release.releaseId,phase,preparation_reference:preparationReference,authorization_round:String(authorizationRound)};
  assert.ok(Buffer.byteLength(JSON.stringify({ref:'main',inputs}))<60*1024,'Release approval dispatch exceeds safe transport size');return inputs;
 }
 
@@ -58,8 +59,9 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
  const {dispatchSourceBoundWorkflow}=await import('../github/dispatch-source-bound-workflow.mjs');
  const {readBrokerProtectedEnvironmentAuthorization,verifyBrokerProtectedEnvironmentAuthorization}=await import('./stage-b-staged-broker-authorization.mjs');
  const {release,authorizationRound,pendingApproval,store}=context;
- const inputs=releaseTransitionDispatchInputs({release,authorizationRound},phase,preparationReference);
+ const inputs=releaseTransitionDispatchInputs({release,authorizationRound},phase,preparationReference,prepared.preparation);
  assert.equal(brokerDigest(prepared),preparationReference);assert.equal(prepared.preparation.sourceSha,release.sourceSha);
+ const executionSourceSha=brokerExecutionCheckout(prepared.preparation).sourceSha;
  assert.equal(typeof run,'function');assert.ok(Number.isSafeInteger(attempts)&&attempts>0&&attempts<=120);
  const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
  const api=suffix=>JSON.parse(run(['api',`repos/${repository}/${suffix}`],{encoding:'utf8',maxBuffer:8*1024*1024}));
@@ -69,20 +71,20 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
  let workflowRunId=pendingApproval?.runId;
  if(pendingApproval){assert.equal(pendingApproval.prepared,preparationReference);assert.match(String(workflowRunId),/^[1-9][0-9]*$/);}
  if(!workflowRunId){
-  if(!prior){const main=api('branches/main');assert.equal(main.protected,true);assert.equal(main.commit.sha,release.sourceSha,'Protected main advanced before approval dispatch');}
-  const child=await dispatchSourceBoundWorkflow({repository,token,workflow,ref:'main',targetSha:release.sourceSha,inputs,fetchImpl,sleep,
+  if(!prior){const main=api('branches/main');assert.equal(main.protected,true);assert.equal(main.commit.sha,executionSourceSha,'Protected main advanced before approval dispatch');}
+  const child=await dispatchSourceBoundWorkflow({repository,token,workflow,ref:'main',targetSha:executionSourceSha,inputs,fetchImpl,sleep,
    dispatchJournal:{read:async()=>prior?.dispatch||null,write:async dispatch=>store.writeStep({releaseId:release.releaseId,sourceSha:release.sourceSha,name,dispatch})}});
   workflowRunId=String(child.id);
  }
  for(let attempt=0;attempt<attempts;attempt++){
   const child=api(`actions/runs/${workflowRunId}`);
-  assert.equal(String(child.id),String(workflowRunId));assert.equal(child.head_sha,release.sourceSha);
+  assert.equal(String(child.id),String(workflowRunId));assert.equal(child.head_sha,executionSourceSha);
   assert.equal(child.path,`.github/workflows/${workflow}`);assert.equal(child.head_branch,'main');assert.equal(child.event,'workflow_dispatch');assert.equal(String(child.run_attempt),'1');
   assert.equal(child.repository?.full_name,repository);assert.equal(child.head_repository?.full_name,repository);
   if(child.status==='completed'){
    if(child.conclusion==='timed_out')return {status:'APPROVAL_TIMED_OUT',runId:String(workflowRunId)};
    assert.equal(child.conclusion,'success','Exact approval child failed');
-   const {authorization}=await readBrokerProtectedEnvironmentAuthorization({workflowRunId,sourceSha:release.sourceSha,run});
+   const {authorization}=await readBrokerProtectedEnvironmentAuthorization({workflowRunId,sourceSha:release.sourceSha,workflowSourceSha:executionSourceSha,run});
    await assertReleaseTransitionApproval(authorization);
    return {status:'AUTHORIZED',authorization};
   }
@@ -397,8 +399,8 @@ export async function runReleaseCoordinator(request, runtime) {
      assert.equal(identity.repository,'T-ej2003/genuine-scan-main');
      assert.equal(identity.workflow,'authorize-production-stage-b-release-transition.yml');
      assert.equal(identity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
-     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,release.sourceSha);
-     assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},name,preparedDigest));
+     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,brokerExecutionCheckout(prepared.preparation).sourceSha);
+     assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},name,preparedDigest,prepared.preparation));
     };
     {
      const timedOut=await readStep(`${name}:approval-timeout:${round}`);
