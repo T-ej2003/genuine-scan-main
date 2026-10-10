@@ -28,6 +28,32 @@ function normalizeRepresentation(state) {
   return copy;
 }
 
+// Only the reviewed v13 publication snapshots and their exact instance set may use this recovery allowance.
+const reviewedPublicationLifecycle = Object.freeze({
+  historicalStateSha256: '747d0e50cf0a4ace40bce60bd75e997be9631539fd38af0381afe043c49da3d4',
+  currentStateSha256: 'fd34c9d740a9d1335d2b54bc892fc99b210f793bd7379cf9cd7681b382d20c96',
+  publicationResultSha256: 'dfd1382bc16d3c786b64b1f7a7c0465d860c13cf9b4301309e409a95e655ff5b',
+  removedInstancesSha256: '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec',
+});
+
+export function reconcileReviewedLifecycleMetadata(before, after, rawCurrent, expectedInstancesSha256) {
+  const removed = [];
+  for (let r = 0; r < before.resources.length; r++) {
+    const resource = before.resources[r];
+    if (resource.mode === 'managed' && resource.type === 'aws_lambda_function' && resource.name === 'broker' && !resource.module) continue;
+    const prior = resource.instances || [], next = after.resources[r]?.instances || [];
+    for (let i = 0; i < prior.length; i++) {
+      if (prior[i].create_before_destroy !== true || !next[i] ||
+          Object.hasOwn(rawCurrent.resources[r]?.instances?.[i] || {}, 'create_before_destroy')) continue;
+      const key = prior[i].index_key;
+      removed.push(`${resource.module ? `${resource.module}.` : ''}${resource.type}.${resource.name}${key === undefined ? '' : `[${JSON.stringify(key)}]`}`);
+      delete prior[i].create_before_destroy;
+    }
+  }
+  assert.equal(new Set(removed).size, removed.length, 'Duplicate reviewed lifecycle instance');
+  assert.equal(brokerDigest(removed.sort()), expectedInstancesSha256, 'Unreviewed lifecycle instance removal');
+}
+
 export function authenticateSuccessorStateHistory({ historicalBytes, currentBytes, publicationPreparation, publicationResult, currentIdentity }) {
   assert.ok(Buffer.isBuffer(historicalBytes) && Buffer.isBuffer(currentBytes), 'Exact Terraform state bytes are required');
   assert.equal(sha256(historicalBytes), publicationPreparation.state.stateSha256, 'Historical state differs from signed publication predecessor');
@@ -48,6 +74,10 @@ export function authenticateSuccessorStateHistory({ historicalBytes, currentByte
   assert.equal(after.qualified_arn, publicationResult.target.versionArn, 'Current Terraform broker ARN differs from publication');
   const allowedBrokerFields = new Set(['version', 'code_sha256', 'source_code_hash', 'source_code_size', 'environment', 'filename', 'last_modified', 'qualified_arn', 'qualified_invoke_arn']);
   const normalizedBefore = normalizeRepresentation(historical), normalizedAfter = normalizeRepresentation(current);
+  if (sha256(historicalBytes) === reviewedPublicationLifecycle.historicalStateSha256 &&
+      sha256(currentBytes) === reviewedPublicationLifecycle.currentStateSha256 &&
+      brokerDigest(publicationResult) === reviewedPublicationLifecycle.publicationResultSha256)
+    reconcileReviewedLifecycleMetadata(normalizedBefore, normalizedAfter, current, reviewedPublicationLifecycle.removedInstancesSha256);
   const oldAttributes = brokerInstance(normalizedBefore), newAttributes = brokerInstance(normalizedAfter);
   for (const field of allowedBrokerFields) { delete oldAttributes[field]; delete newAttributes[field]; }
   const brokerCheck = state => (state.check_results || []).find(item => item.object_kind === 'resource' && item.config_addr === BROKER_FUNCTION);

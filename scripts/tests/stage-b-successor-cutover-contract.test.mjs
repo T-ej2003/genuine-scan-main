@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition } from '../aws/stage-b-successor-cutover-contract.mjs';
+import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition, reconcileReviewedLifecycleMetadata } from '../aws/stage-b-successor-cutover-contract.mjs';
+import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
 import { STAGE_B } from '../aws/production-green-stage-b-contract.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -34,6 +35,32 @@ const fixture = () => {
   return { before, after, historicalBytes, currentBytes, publicationPreparation, publicationResult, currentIdentity };
 };
 const checkHistory = f => authenticateSuccessorStateHistory(f);
+
+test('publication may clear only historical propagated lifecycle metadata on unchanged dependencies', () => {
+  const f = fixture();
+  f.before.resources[1].instances[0].create_before_destroy = true;
+  f.historicalBytes = Buffer.from(JSON.stringify(f.before));
+  f.publicationPreparation.state.stateSha256 = sha(f.historicalBytes);
+  assert.throws(() => checkHistory(f), /Terraform state changed outside/);
+  const reviewedAddressSha256 = brokerDigest(['aws_iam_policy.broker']);
+  const prior = structuredClone(f.before), next = structuredClone(f.after);
+  reconcileReviewedLifecycleMetadata(prior, next, f.after, reviewedAddressSha256);
+  assert.equal(Object.hasOwn(prior.resources[1].instances[0], 'create_before_destroy'), false);
+  for (const change of [
+    x => { x.after.resources[1].instances[0].create_before_destroy = false; },
+    x => { x.before.resources[1].instances[0].index_key = 'other'; },
+    x => { x.after.resources[1].instances = []; },
+  ]) {
+    const altered = structuredClone(f);
+    altered.historicalBytes = Buffer.from(f.historicalBytes);
+    change(altered);
+    assert.throws(() => reconcileReviewedLifecycleMetadata(altered.before, altered.after, altered.after, reviewedAddressSha256));
+  }
+  assert.throws(() => reconcileReviewedLifecycleMetadata(structuredClone(f.before), structuredClone(f.after), f.after, '0'.repeat(64)));
+  const brokerLifecycle = fixture();
+  brokerLifecycle.before.resources[0].instances[0].create_before_destroy = true;
+  assert.throws(() => reconcileReviewedLifecycleMetadata(brokerLifecycle.before, brokerLifecycle.after, brokerLifecycle.after, reviewedAddressSha256));
+});
 const mutate = (f, target, fn) => { fn(f[target]); f[`${target === 'before' ? 'historical' : 'current'}Bytes`] = Buffer.from(JSON.stringify(f[target]));
   if (target === 'after') f.currentIdentity.stateSha256 = sha(f.currentBytes); };
 
