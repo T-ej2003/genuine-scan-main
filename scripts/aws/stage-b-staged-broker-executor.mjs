@@ -7,7 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation, PREPUBLICATION_POLICY_OPERATIONS, registrationPolicyPredecessorRelease, assertPolicyPruningHandoff } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, brokerExecutionCheckout, assertBrokerOutputReconciliation, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, brokerTargetIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation, PREPUBLICATION_POLICY_OPERATIONS, registrationPolicyPredecessorRelease, assertPolicyPruningHandoff } from './stage-b-staged-broker-contract.mjs';
+import { assertStageBTfvarsBinding } from './generate-production-green-stage-b-tfvars.mjs';
+import { assertStageBRefreshEvidence } from './stage-b-refresh-contract.mjs';
+import { createStagedBrokerClosureReader } from './stage-b-staged-broker-closure.mjs';
+import { authenticateBrokerRecoveryApproval } from './stage-b-staged-broker.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, productionGithubExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
 import {
@@ -352,7 +356,7 @@ function readVersionedStageBReceipt({ run, id, key, directory, expected, sequenc
   } finally { fs.rmSync(file, { force: true }); }
 }
 
-export function createStagedBrokerExecutor({ phase, operation, preparation, authorization, planPath, files, directory, terraformDataDir, registrationPredecessorRecovery,
+export function createStagedBrokerExecutor({ phase, operation, preparation, authorization, planPath, files, directory, terraformDataDir, registrationPredecessorRecovery, publicationPreparation, publicationResult,
   prerequisiteChain = preparation?.prerequisiteChain, env = process.env, exec = execFileSync, runAws: injectedAws, writerSessionBoundary } = {}) {
   assert.ok(PHASES.includes(phase));
   const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
@@ -424,6 +428,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(preparation.purpose, purpose);
     const id = await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify });
     assert.equal(stagedBrokerArtifactSet(files, root, preparation), preparation.artifactSetSha256);
+    if (preparation.recoveryTooling) equal(await adapter.readCheckout(), brokerExecutionCheckout(preparation));
+    if (preparation.outputReconciliation) await adapter.authenticateOutputReconciliation(preparation);
     return id;
   };
   const consumeMutation = reservation => {
@@ -914,10 +920,48 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     },
     readMakerCaller,
     readCheckout: async () => {
-      const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: preparation?.sourceSha, requireCanonicalRepository: true });
+      const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: preparation?.recoveryTooling?.sourceSha || ((publicationPreparation || preparation?.publication) ? undefined : preparation?.sourceSha), requireCanonicalRepository: true });
       await readMakerCaller();
       const treeSha256 = deriveStageBToolingInputTreeSha256(checkout.currentHead);
-      return { sourceSha: checkout.currentHead, treeSha256 };
+      const current = { sourceSha: checkout.currentHead, treeSha256 };
+      if (preparation?.recoveryTooling) {
+        const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory });
+        const identity = await adapter.authenticateBrokerRecoveryTooling(source.preparation, preparation.publication, current);
+        equal(identity, preparation.recoveryTooling);
+      }
+      return current;
+    },
+    authenticateBrokerRecoveryTooling: async (publishedPreparation, result, checkout) => {
+      assertBrokerPreparation(publishedPreparation); assert.equal(publishedPreparation.purpose, BROKER_PUBLICATION);
+      assert.equal(result.sourceSha, publishedPreparation.sourceSha);
+      await adapter.authenticatePublicationResult(result, result.authorizationSha256);
+      const authority = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: publishedPreparation.sourceSha, directory });
+      equal(authority.preparation, publishedPreparation);
+      assert.equal(deriveStageBToolingInputTreeSha256(publishedPreparation.sourceSha), publishedPreparation.treeSha256);
+      assertReceiptBoundGitAncestry({ historicalSourceSha: publishedPreparation.sourceSha, consumerSourceSha: checkout.sourceSha, exec, cwd: root });
+      assert.notEqual(checkout.sourceSha, publishedPreparation.sourceSha);
+      const protectedCheckout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: checkout.sourceSha, requireCanonicalRepository: true });
+      assert.equal(protectedCheckout.currentHead, protectedCheckout.originMainHead);
+      assert.equal(deriveStageBToolingInputTreeSha256(checkout.sourceSha), checkout.treeSha256);
+      equal(brokerTargetIdentity(await adapter.getVersion(result.target.version), publishedPreparation.packageSha256), result.target);
+      return { ...checkout, publicationResultSha256: brokerDigest(result) };
+    },
+    authenticateOutputReconciliation: async p => {
+      const evidence = p.outputReconciliation; assertBrokerOutputReconciliation(evidence, p);
+      const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: p.sourceSha, directory });
+      await adapter.authenticatePublicationResult(p.publication, p.publication.authorizationSha256);
+      assert.equal(stagedBrokerArtifactSet(files, root, source.preparation), source.preparation.artifactSetSha256);
+      const binding = assertStageBTfvarsBinding({ tfvarsPath: files.tfvars, bindingReportPath: evidence.bindingReportPath,
+        bindingReportSha256: evidence.bindingReportSha256, expectedToolingSha: p.sourceSha, expectedToolingTreeSha256: p.treeSha256 });
+      equal({ lineage: binding.stateLineage, serial: binding.stateSerial, stateSha256: binding.stateBackupSha256 }, source.preparation.state);
+      const report = assertStageBRefreshEvidence({ refreshReportPath: evidence.refreshReportPath, refreshReportSha256: evidence.refreshReportSha256,
+        bindingReport: binding, bindingReportSha256: evidence.bindingReportSha256, expectedToolingSha: p.sourceSha,
+        expectedToolingTreeSha256: p.treeSha256, expectedStateSha256: source.preparation.state.stateSha256,
+        expectedBackendMetadataSha256: brokerDigest(fs.readFileSync(files.backendMetadata)), expectedTerraformDataDir: terraformDataDir });
+      assert.equal(report.status, 'REVIEWED_OUTPUT_RECONCILIATION');
+      equal(evidence.outputChanges, report.outputChanges.map(({ name, before, after }) => ({ name, before, after })));
+      assert.equal(p.state.lineage, source.preparation.state.lineage);
+      assert.ok(p.state.serial > source.preparation.state.serial);
     },
     readRecoveryCheckout: async () => {
       assert.ok(['POLICY_RECOVERY', 'REGISTRATION_RECOVERY'].includes(phase));
@@ -1073,6 +1117,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     authenticatePublicationResult: async (result, id) => {
       const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation?.sourceSha || result.sourceSha, directory });
       assert.ok(source); assert.equal(source.preparation.purpose, BROKER_PUBLICATION);
+      assert.equal(result.sourceSha, source.preparation.sourceSha);
       assert.equal(await assertBrokerAuthorization(source.authorization, source.preparation, { verify: kms.verify, now: new Date(result.authorizedAt) }), id);
       assert.equal(result.preparationSha256, brokerDigest(source.preparation)); assert.equal(result.savedPlanSha256, source.preparation.savedPlanSha256);
       equal(result.alias, source.preparation.alias);
@@ -1172,10 +1217,18 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
             catch { return false; }
           },
         });
-      } else checkout = await adapter.readCheckout();
+      } else {
+        recoveryCheckoutForChain = await adapter.readCheckout();
+        const original = publicationPreparation || (preparation?.recoveryTooling ? preparation : undefined);
+        if (original && recoveryCheckoutForChain.sourceSha !== original.sourceSha) {
+          const published = publicationPreparation || readStagedBrokerSourceAuthority({ run: runAws, sourceSha: original.sourceSha, directory }).preparation;
+          await adapter.authenticateBrokerRecoveryTooling(published, publicationResult || preparation.publication, recoveryCheckoutForChain);
+          checkout = { sourceSha: original.sourceSha, treeSha256: original.treeSha256 };
+        } else checkout = recoveryCheckoutForChain;
+      }
       const assertCheckoutUnchanged = async () => {
         if (historicalRecovery) equal(await adapter.readRecoveryCheckout(), recoveryCheckoutForChain);
-        else equal(await adapter.readCheckout(), checkout);
+        else equal(await adapter.readCheckout(), recoveryCheckoutForChain);
       };
       const receiptBoundPolicyEntry = Boolean(chain.policy?.receiptBoundAdoption);
       const adoptedPolicyEntry = Boolean(chain.policy?.adoption);
@@ -1646,4 +1699,20 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     },
   };
   return adapter;
+}
+
+export async function readBrokerRecoveryApproval({ filePath, expectedSha256 }) {
+  assertStageBPrivateFile({ filePath, repositoryRoot: path.resolve(fileURLToPath(new URL('../..', import.meta.url))), label: 'Broker recovery closure' });
+  const bytes = fs.readFileSync(filePath); assert.equal(brokerDigest(bytes), expectedSha256);
+  const value = JSON.parse(bytes); assert.deepEqual(Object.keys(value).sort(), ['request', 'result']);
+  assert.equal(value.request.operation, 'reconcile');
+  const { request, result } = value;
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: 'mscqr-production-release-deployer' });
+  const deps = createStagedBrokerExecutor({ ...request, phase: 'RECONCILIATION', runAws: run });
+  const closureReader = createStagedBrokerClosureReader({ run, directory: request.directory, readCheckout: async () => {
+    await deps.readMakerCaller();
+    const checkout = readStageBProtectedMainCheckout({ cwd: path.resolve(fileURLToPath(new URL('../..', import.meta.url))), fetchOriginMain: true, requireCanonicalRepository: true });
+    return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
+  } });
+  return authenticateBrokerRecoveryApproval({ preparation: request.preparation, authorization: request.authorization, result }, { ...deps, ...closureReader });
 }

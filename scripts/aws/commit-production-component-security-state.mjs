@@ -100,7 +100,7 @@ async function main() {
   }
   const historicalRuntimeEvidence = historical ? readBoundJson(values["historical-runtime-evidence"], values["historical-runtime-evidence-sha256"], "Historical runtime evidence") : undefined;
   const stagedBrokerProof = await readStagedBrokerClosure({ sourceSha: values["source-sha"], run, readCheckout: () => {
-    const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: values["source-sha"], requireCanonicalRepository: true });
+    const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, requireCanonicalRepository: true });
     return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
   } });
   const result = await commitSecurityComponentState({ stagedBrokerProof, historicalRuntimeRequired, historicalRuntimeEvidence, runtimeReader, sourceSha: values["source-sha"], authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource: frontendLive?.sourceSha, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {

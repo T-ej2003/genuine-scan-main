@@ -61,6 +61,8 @@ export function assertReadyForOverlapDeployment(evidence, expected = {}) {
     if (evidence[stage].identityBindings.sourceSha !== evidence.sourceSha) fail(`${stage} source SHA binding does not match readiness source SHA.`);
     if (evidence[stage].identityBindings.rotationId !== undefined && evidence[stage].identityBindings.rotationId !== evidence.rotationId) fail(`${stage} rotation ID binding does not match readiness rotation ID.`);
   }
+  const executionSourceSha = evidence.rotationPrepare.identityBindings.executionSourceSha || evidence.sourceSha;
+  if (!SHA40.test(executionSourceSha) || (expected.executionSourceSha !== undefined && executionSourceSha !== expected.executionSourceSha)) fail("READY_FOR_OVERLAP_DEPLOYMENT execution source does not match the prepared operation.");
   if (evidence.evidenceVersion === 2) rotationExpectedImageReleaseSha(evidence);
   if (evidence.rotationPrepared !== true) fail("READY_FOR_OVERLAP_DEPLOYMENT requires rotationPrepared=true");
   if (evidence.ecsUpdateServiceCount !== 0) fail("READY_FOR_OVERLAP_DEPLOYMENT must be evaluated before ECS UpdateService");
@@ -79,13 +81,13 @@ export function rotationExpectedImageReleaseSha(evidence) {
   return imageReleaseSha;
 }
 
-export function readAndAssertReadyForOverlapDeployment({ filePath, evidenceSha256, sourceSha, rotationId, rotationStateSha256, now = Date.now() } = {}) {
+export function readAndAssertReadyForOverlapDeployment({ filePath, evidenceSha256, sourceSha, executionSourceSha, rotationId, rotationStateSha256, now = Date.now() } = {}) {
   if (typeof filePath !== "string" || filePath.trim() === "") fail("READY_FOR_OVERLAP_DEPLOYMENT evidence file is required");
   if (!SHA256.test(evidenceSha256)) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 is invalid");
   const captured = readStageBPrivateFileBytes({ filePath, repositoryRoot: process.cwd(), label: "READY_FOR_OVERLAP_DEPLOYMENT evidence" });
   if (captured.sha256 !== evidenceSha256) fail("READY_FOR_OVERLAP_DEPLOYMENT evidence SHA-256 does not match the evidence file");
   const evidence = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(captured.bytes));
-  const result = assertReadyForOverlapDeployment(evidence, { sourceSha, rotationId, rotationStateSha256, now });
+  const result = assertReadyForOverlapDeployment(evidence, { sourceSha, executionSourceSha, rotationId, rotationStateSha256, now });
   return { ...result, evidenceSha256, evidence };
 }
 
@@ -103,6 +105,7 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
       filePath: argument("--evidence-file", argv),
       evidenceSha256: argument("--evidence-sha256", argv),
       sourceSha: argument("--source-sha", argv),
+      executionSourceSha: argv.includes("--execution-source-sha") ? argument("--execution-source-sha", argv) : undefined,
       rotationId: argument("--rotation-id", argv),
       rotationStateSha256: argument("--rotation-state-sha256", argv),
     })));

@@ -1,15 +1,30 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { runReleasePreflightCheckerTrustAttestationCli } from '../aws/production-release-preflight-checker-attestation.mjs';
+import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from '../aws/production-checker-chain-contract.mjs';
+import { signPermissionReport } from '../aws/validate-production-green-stage-b-permissions.mjs';
+import { runProductionPreflightCli } from '../aws/run-production-green-stage-b-preflight.mjs';
 import { ready, sourceSha, now, configuration, authorization as signFixture } from './fixtures/staged-broker-runtime.mjs';
-import { executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
+import { executeBrokerAliasCas, reconcileBrokerAlias, authenticateBrokerRecoveryApproval, isAuthenticatedBrokerRecoveryApproval } from '../aws/stage-b-staged-broker.mjs';
 import { authenticateStagedBrokerClosure, assertStagedBrokerProof, assertStagedBrokerTerminal } from '../aws/stage-b-staged-broker-closure.mjs';
 import { brokerDigest, prepareBrokerStateRefresh } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState } from '../aws/production-component-deployment-state.mjs';
 import { canonicalSha256 } from '../aws/production-green-stage-b-contract.mjs';
 import { commitSecurityComponentState } from '../aws/commit-production-component-security-state.mjs';
 
-async function terminal(separate = false) {
+async function terminal(separate = false, recoveryTooling) {
   const r = await ready();
+  if (recoveryTooling) {
+    r.p.recoveryTooling = { ...recoveryTooling, publicationResultSha256: brokerDigest(r.p.publication) };
+    r.auth = signFixture(r.p); r.deps.readCheckout = async () => recoveryTooling;
+    r.deps.authenticateRecoveryTooling = async (p, checkout) => {
+      assert.equal(p.sourceSha, sourceSha); assert.deepEqual(checkout, recoveryTooling);
+      assert.equal(p.recoveryTooling.publicationResultSha256, brokerDigest(p.publication));
+    };
+  }
   const pub = r.entries.find(e => e[1] === 'PUBLISHED')[2];
   // The publication preparation/approval are independently retained by the
   // source reservation, not reconstructed from the cutover approval.
@@ -26,6 +41,10 @@ async function terminal(separate = false) {
     if (status === 'STAGED_BROKER_TERMINAL_HANDOFF') return handoff;
     const found = r.entries.find(e => e[0] === id && e[1] === status); assert.ok(found, 'Missing durable receipt'); return found[2];
   }, authenticateState: async (target, alias) => { assert.equal(target.version, alias.FunctionVersion); } };
+  const recorded = recoveryTooling || { sourceSha, treeSha256: r.p.treeSha256 };
+  deps.authenticateHistoricalTooling = (p, historical) => { assert.equal(p.sourceSha, sourceSha); assert.deepEqual(historical, recorded); };
+  deps.authenticateContinuationTooling = (p, current) => { deps.authenticateHistoricalTooling(p, recorded); assert.deepEqual(current, recorded); };
+  deps.authenticateHistoricalExecutionSource = (p, current, executionSourceSha) => { deps.authenticateContinuationTooling(p, current); assert.equal(executionSourceSha, current.sourceSha); return current; };
   assert.equal(brokerDigest(source.authorization), pub.authorizationSha256);
   return { ...r, source, handoff, deps };
 }
@@ -105,4 +124,95 @@ test('verified proof revalidates before later use', async () => {
   const r = await terminal(), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
   r.deps.getAlias = async () => ({ ...r.handoff.casResult.alias, RevisionId: 'changed' });
   await assert.rejects(() => proof.revalidate());
+});
+
+test('terminal closure preserves original release under authenticated descendant tooling', async () => {
+  const tooling = { sourceSha: 'd'.repeat(40), treeSha256: 'e'.repeat(64) };
+  const r = await terminal(true, tooling);
+  const proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
+  assertStagedBrokerProof(proof, sourceSha);
+  assert.equal(r.handoff.record.sourceSha, sourceSha);
+  assert.equal(r.handoff.preparation.publication.sourceSha, sourceSha);
+  assert.equal(r.calls.filter(c => typeof c === 'object').length, 1);
+  r.deps.authenticateContinuationTooling = async () => { throw new Error('Unrelated tooling'); };
+  await assert.rejects(() => proof.revalidate(), /Unrelated/);
+});
+
+test('approval recovery authenticates the native terminal handoff without rewriting publication identity', async () => {
+  const tooling = { sourceSha: 'd'.repeat(40), treeSha256: 'e'.repeat(64) };
+  const r = await terminal(true, tooling);
+  r.deps.authenticateReconciliation = async (record, id) => assert.ok(r.entries.some(e => e[0] === id && e[1] === record.status && brokerDigest(e[2]) === brokerDigest(record)));
+  const input = { ...r.handoff.closure, result: r.handoff.record };
+  const context = await authenticateBrokerRecoveryApproval(input, r.deps);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval(context), true);
+  assert.equal(context.sourceSha, sourceSha); assert.equal(context.tooling.sourceSha, tooling.sourceSha);
+  assert.equal(context.target.version, '13');
+  assert.equal(r.calls.filter(c => c === 'publish').length, 1);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval(structuredClone(context)), false);
+  const argv = ['--identity', 'administrator', '--phase', 'initial', '--source-sha', sourceSha, '--output', '/private/tmp/not-written.json',
+    '--image-authorization', '/private/tmp/not-read.json', '--image-authorization-sha256', 'a'.repeat(64)];
+  const dependencies = { recoveryApproval: context, commandRun: () => { throw new Error('Unexpected external access'); },
+    caller: () => 'arn:aws:iam::368992683803:root', validateCapabilityGraph: () => ({}),
+    readProtectedMainCheckout: () => ({ toolingSha: tooling.sourceSha, currentHead: tooling.sourceSha, originMainHead: tooling.sourceSha, porcelainStatus: '' }),
+    readImageAuthorization: (_path, _hash, release) => { assert.equal(release, sourceSha); throw new Error('Authenticated original-release image boundary'); } };
+  assert.throws(() => runProductionPreflightCli(argv, dependencies), /Authenticated original-release image boundary/);
+  for (const contradiction of [{ porcelainStatus: ' M file' }, { originMainHead: 'f'.repeat(40) }]) {
+    const read = dependencies.readProtectedMainCheckout;
+    assert.throws(() => runProductionPreflightCli(argv, { ...dependencies, readProtectedMainCheckout: () => ({ ...read(), ...contradiction }) }), /clean protected-main/);
+  }
+  assert.throws(() => runProductionPreflightCli(argv, { ...dependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-b-recovery-admin-'));
+  try {
+    const reportPath = path.join(directory, 'administrator.json'), signaturePath = path.join(directory, 'signature.json');
+    fs.writeFileSync(signaturePath, '{}');
+    const binding = { ...tooling, releaseSourceSha: sourceSha, publicationResultSha256: context.publicationResultSha256, closureResultSha256: context.closureResultSha256 };
+    const releaseArgv = ['--identity', 'release-deployer', '--tooling-sha', sourceSha, '--output', path.join(directory, 'preflight.json'),
+      '--administrator-report', reportPath, '--administrator-report-signature', signaturePath,
+      '--image-authorization', '/private/tmp/not-read.json', '--image-authorization-sha256', 'a'.repeat(64)];
+    let signatureChecks = 0;
+    const releaseDependencies = { ...dependencies, caller: () => 'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test',
+      verify: () => { signatureChecks++; } };
+    for (const recoveryTooling of [undefined, { ...binding, sourceSha: 'f'.repeat(40) }, { ...binding, closureResultSha256: 'f'.repeat(64) }, binding]) {
+      fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling }));
+      assert.throws(() => runProductionPreflightCli(releaseArgv, releaseDependencies), recoveryTooling === binding
+        ? /Authenticated original-release image boundary/ : /Administrator report differs/);
+    }
+    assert.equal(signatureChecks, 4);
+    const ordinaryCheckout = () => ({ toolingSha: sourceSha, currentHead: sourceSha, originMainHead: sourceSha, porcelainStatus: '' });
+    assert.throws(() => runProductionPreflightCli(releaseArgv, { ...releaseDependencies, recoveryApproval: undefined, readProtectedMainCheckout: ordinaryCheckout }), /Administrator recovery report requires authenticated/);
+
+    const attestArgv = ['--source-sha', sourceSha, '--administrator-report-sha256', 'a'.repeat(64), '--release-preflight-report', reportPath,
+      '--output', path.join(directory, 'attestation.json'), '--signature-output', path.join(directory, 'attestation.signature.json')];
+    const attestDependencies = { ...dependencies, sign: (value, { reportBytes }) => signPermissionReport(value, { now: now.toISOString(), reportBytes, sign: () => 'AQ==' }) };
+    for (const recoveryTooling of [undefined, { ...binding, closureResultSha256: 'f'.repeat(64) }]) {
+      fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling }), { mode: 0o600 }); fs.chmodSync(reportPath, 0o600);
+      await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, attestDependencies), /Checker-trust report differs/);
+    }
+    fs.writeFileSync(reportPath, JSON.stringify({ recoveryTooling: binding, status: 'ready-for-plan', sourceSha, administratorReportSha256: 'a'.repeat(64),
+      checkerTrust: { exact: true, mfaRequired: true, principal: CHECKER_USER_ARN, roleArn: CHECKER_SOURCE_ROLE_ARN } }));
+    const attested = await runReleasePreflightCheckerTrustAttestationCli(attestArgv, attestDependencies);
+    assert.equal(attested.status, 'attested');
+    assert.equal(JSON.parse(fs.readFileSync(attested.attestationPath)).sourceSha, sourceSha);
+    assert.throws(() => runReleasePreflightCheckerTrustAttestationCli([...attestArgv.slice(0, 7), path.join(directory, 'ordinary.json'), '--signature-output', path.join(directory, 'ordinary.signature.json')],
+      { ...attestDependencies, recoveryApproval: undefined, readProtectedMainCheckout: ordinaryCheckout }), /Checker-trust recovery report requires authenticated/);
+
+    await assert.rejects(() => runReleasePreflightCheckerTrustAttestationCli(attestArgv, { ...attestDependencies, recoveryApproval: structuredClone(context) }), /unauthenticated/);
+
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  assert.throws(() => { context.tooling.sourceSha = 'f'.repeat(40); }, TypeError);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval(context), true);
+  assert.equal(isAuthenticatedBrokerRecoveryApproval({ ...context, tooling: { ...context.tooling, sourceSha: 'f'.repeat(40) } }), false);
+  const altered = structuredClone(input); altered.result.sourceSha = tooling.sourceSha;
+  await assert.rejects(() => authenticateBrokerRecoveryApproval(altered, r.deps));
+});
+
+
+test('same-source completed closure can authenticate normal approval continuation', async () => {
+  const r = await terminal();
+  const context = await authenticateBrokerRecoveryApproval({ preparation: r.p, authorization: r.auth, result: r.handoff.record }, {
+    ...r.deps, authenticateReconciliation: async (result, id) => assert.ok(r.entries.some(entry => entry[0] === id && brokerDigest(entry[2]) === brokerDigest(result))),
+  });
+  assert.equal(context.sourceSha, sourceSha);
+  assert.deepEqual(context.tooling, context.historicalTooling);
+  assert.equal(context.tooling.sourceSha, sourceSha);
 });

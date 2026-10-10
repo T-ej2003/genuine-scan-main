@@ -1,4 +1,6 @@
 import { resolveHistoricalRuntimeAuthority } from "./verify-production-historical-runtime-handoff.mjs";
+import { normalizeBrokerAlias } from "./stage-b-staged-broker-executor.mjs";
+import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-staged-broker.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +9,7 @@ import { assertStageBBrokerConfigurationBindings, assertStageBBrokerLambdaConfig
 import { assertStageBTfvarsBindingBytes, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { assertStageBDeploymentEvidenceFreshness } from "./stage-b-evidence-freshness.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { renderStageBTaskDefinition, stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
+import { renderStageBTaskDefinition, stageBTemplateHashes, stageBTaskDefinitionBindings } from "./production-green-stage-b-task-definitions.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
 import { assertEcsTaskDefinitionReadback, canonicalizeEcsTaskDefinition } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
@@ -20,13 +22,13 @@ const exact = (left, right) => canonicalJson(left) === canonicalJson(right);
 const parse = (value, label) => { try { return JSON.parse(value); } catch { throw new Error(`${label} is malformed.`); } };
 const authenticatedEvidence = new WeakSet();
 
-function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, imageReleaseSha, contracts, images }) {
+function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions, imageReleaseSha, contracts, images, sourceSha }) {
   if (!liveTaskDefinitions || typeof liveTaskDefinitions !== "object" || Array.isArray(liveTaskDefinitions)) throw new Error("Exact live broker task-definition readbacks are required.");
-  const bindings = { imageReleaseSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, receiptBucket: STAGE_B.receiptBucket, executorLogGroup: STAGE_B.executorLogGroupName, canaryLogGroup: STAGE_B.canaryLogGroupName, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", workerLogGroup: "/ecs/mscqr-production/rls-green-worker" };
+  const bindings = { imageReleaseSha, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256, ...stageBTaskDefinitionBindings(sourceSha) };
   const contentHashes = {};
   for (const [mode, taskDefinitionArn] of Object.entries(taskDefinitionArns)) {
     const kind = mode === "full-rls-application-canary" ? "canary" : "executor";
-    const expected = renderStageBTaskDefinition(kind, { ...bindings, [`${kind}Image`]: kind === "canary" ? images.canaryImageDigest : images.executorImageDigest, ...(kind === "executor" ? { mode } : {}) });
+    const expected = renderStageBTaskDefinition(kind, { ...bindings, [`${kind}Image`]: kind === "canary" ? images.canaryImageDigest : images.executorImageDigest, ...(kind === "executor" ? { mode } : {}) }, sourceSha);
     const readback = liveTaskDefinitions[mode]?.taskDefinition || liveTaskDefinitions[mode];
     assertEcsTaskDefinitionReadback({ definition: readback, taskDefinitionArn, expected, label: `Live broker task definition ${mode}` });
     contentHashes[mode] = digest(canonicalizeEcsTaskDefinition(readback));
@@ -37,8 +39,10 @@ function authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinit
 export const STAGE_B_APPROVAL_EVIDENCE_PRODUCER = "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs";
 export const STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION = 1;
 
-export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding, historicalRuntimeEvidence, verifyHistoricalRuntimeSignature, historicalRuntimeState, historicalRuntimeReader } = {}) {
+export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageAuthorization, tfvarsPath, bindingReportPath, releasePreflightPath, releasePreflightAttestationPath, releasePreflightAttestationSignaturePath, releasePreflightTrustEvidence, checkerIdentity, now = new Date(), verifyImageEvidence, verifyReleasePreflightAttestationSignature, validateImageAuthorization = assertImageAuthorization, validateTfvarsBinding = assertStageBTfvarsBindingBytes, deriveContracts = deriveContractDigests, readPreflight, readTfvarsBinding, historicalRuntimeEvidence, verifyHistoricalRuntimeSignature, historicalRuntimeState, historicalRuntimeReader, recoveryApproval } = {}) {
   if (!SHA.test(sourceSha || "") || !CHECKER.test(checkerIdentity || "")) throw new Error("Approval evidence source or checker identity is invalid.");
+  if (recoveryApproval && (!isAuthenticatedBrokerRecoveryApproval(recoveryApproval) || recoveryApproval.sourceSha !== sourceSha)) throw new Error("Broker recovery approval context is unauthenticated.");
+  const toolingSha = recoveryApproval?.tooling.sourceSha || sourceSha;
   validateImageAuthorization(imageAuthorization, sourceSha, { now, verifyImageEvidence });
   const imageEvidenceSha256 = imageAuthorization.imageEvidenceSha256;
   const capturedTfvars = readTfvarsBinding
@@ -93,10 +97,14 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
       || preflight.bindingReportSha256 !== undefined && preflight.bindingReportSha256 !== bindingReportSha256) {
     throw new Error("Release-deployer preflight is not bound to the selected canonical tfvars and binding report.");
   }
+  if (preflight.recoveryTooling && !recoveryApproval) throw new Error("Approval recovery report requires authenticated recovery context.");
+  if (recoveryApproval && (!exact(preflight.recoveryTooling, { sourceSha: toolingSha, treeSha256: recoveryApproval.tooling.treeSha256, releaseSourceSha: sourceSha,
+    publicationResultSha256: recoveryApproval.publicationResultSha256, closureResultSha256: recoveryApproval.closureResultSha256 }))) throw new Error("Release preflight is not bound to the authenticated broker recovery.");
   const live = preflight.stageBApprovalLiveObservation;
   if (!live || typeof live !== "object" || Array.isArray(live)) throw new Error("Runtime broker approval requires post-creation authenticated live Stage B observations; PLAN_APPROVED is the separate authority for resource creation or replacement.");
   const brokerConfiguration = assertStageBBrokerLambdaConfiguration({ configuration: live.configuration, alias: live.alias, brokerPackageRawSha256: report.brokerPackageRawSha256 });
   const { broker, codeSha256: brokerCodeSha256 } = brokerConfiguration;
+  if (recoveryApproval && (!exact(normalizeBrokerAlias(live.alias), recoveryApproval.alias) || !exact({ ...brokerConfiguration.configuration, FunctionArn: brokerConfiguration.broker.resolvedVersionArn }, recoveryApproval.target.configuration))) throw new Error("Approval live broker differs from authenticated recovery closure.");
   const variables = live.configuration?.Environment?.Variables;
   if (variables?.BROKER_IMAGE_RELEASE_SHA !== imageAuthorization.imageReleaseSha) throw new Error("Live broker image release SHA does not match authenticated image authorization.");
   const taskDefinitionArns = parse(variables?.BROKER_TASK_DEFINITIONS_JSON, "Live broker task-definition map");
@@ -110,17 +118,22 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
   const images = Object.fromEntries(imageAuthorization.images.map(({ service, digest: value }) => [service, value]));
   const reportImages = { backend: report.images.backend.digest, worker: report.images.worker.digest, "rls-executor": report.images.executor.digest, "rls-canary": report.images.canary.digest };
   if (!exact(images, reportImages)) throw new Error("Signed image authorization does not match the canonical Stage B tfvars bindings.");
-  const contracts = deriveContracts();
+  const contractFields = ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"];
+  const contracts = recoveryApproval ? Object.fromEntries(contractFields.map(name => [name, approvalExpected[name]])) : deriveContracts();
+  if (recoveryApproval && contractFields.some(name => report[name] !== contracts[name])) throw new Error("Recovery binding report differs from the original broker contracts.");
   const expectedApproval = canonicalStageBBrokerApprovalExpected({ releaseSha: sourceSha, ...contracts });
   const expectedImages = { backendImageDigest: report.images.backend.imageReference, workerImageDigest: report.images.worker.imageReference, executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference };
   assertStageBBrokerConfigurationBindings({ approvalExpected, images: liveImages, templateHashes });
   if (!exact(approvalExpected, expectedApproval)
-      || !exact(liveImages, expectedImages) || !exact(templateHashes, stageBTemplateHashes())) throw new Error("Live broker bindings are stale or do not match the authenticated Stage B authorities.");
-  const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, imageReleaseSha: imageAuthorization.imageReleaseSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference } });
+      || !exact(liveImages, expectedImages) || !exact(templateHashes, stageBTemplateHashes(recoveryApproval ? sourceSha : undefined))) throw new Error("Live broker bindings are stale or do not match the authenticated Stage B authorities.");
+  const taskDefinitionContentSha256 = authenticateBrokerTaskDefinitions({ taskDefinitionArns, liveTaskDefinitions: live.taskDefinitions, imageReleaseSha: imageAuthorization.imageReleaseSha, contracts, images: { executorImageDigest: report.images.executor.imageReference, canaryImageDigest: report.images.canary.imageReference }, ...(recoveryApproval ? { sourceSha } : {}) });
   const observedAt = live.observedAt;
   assertStageBDeploymentEvidenceFreshness(observedAt, { now, evidenceType: "Stage B approval live observation" });
   const historicalRuntimeReferenceSha256 = resolveHistoricalRuntimeAuthority({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: historicalRuntimeReader, sourceSha, now, verify: verifyHistoricalRuntimeSignature });
   const evidence = Object.freeze({
+    ...(recoveryApproval ? { recoveryTooling: Object.freeze({ sourceSha: toolingSha, treeSha256: recoveryApproval.tooling.treeSha256,
+      publicationResultSha256: recoveryApproval.publicationResultSha256, preparationSha256: recoveryApproval.preparationSha256,
+      closureResultSha256: recoveryApproval.closureResultSha256 }) } : {}),
     ...(historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256 } : {}),
     schemaVersion: STAGE_B_APPROVAL_EVIDENCE_SCHEMA_VERSION,
     producer: STAGE_B_APPROVAL_EVIDENCE_PRODUCER,
@@ -137,6 +150,7 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
     migrationSetDigest: contracts.migrationSetDigest,
     packageChecksumSha256: contracts.packageChecksumSha256,
     taskDefinitionArns: Object.freeze({ ...taskDefinitionArns }),
+    taskDefinitionTemplateHashes: Object.freeze({ ...templateHashes }),
     taskDefinitionContentSha256,
     brokerVersion: broker.configurationVersion,
     brokerPackageRawSha256: report.brokerPackageRawSha256,

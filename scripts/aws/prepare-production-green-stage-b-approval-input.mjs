@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -14,7 +15,6 @@ import {
   stageBApprovalIdForReleaseSha,
   validateStageBApprovalPayload,
 } from "./production-green-stage-b-contract.mjs";
-import { stageBTemplateHashes } from "./production-green-stage-b-task-definitions.mjs";
 import { writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { collectProductionGreenStageBApprovalEvidence, isAuthenticatedProductionGreenStageBApprovalEvidence } from "./collect-production-green-stage-b-approval-evidence.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
@@ -39,7 +39,7 @@ const DIGEST = /^[a-f0-9]{64}$/;
 const UUID = /^[a-f0-9-]{16,64}$/;
 const OPERATOR_FIELDS = Object.freeze(["ticketId"]);
 const EVIDENCE_FIELDS = Object.freeze([
-  "schemaVersion", "producer", "observedAt", "authorityMode", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
+  "schemaVersion", "producer", "observedAt", "authorityMode", "sourceCurrent", "runtimeBindingsCurrent", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "taskDefinitionArns", "taskDefinitionTemplateHashes", "taskDefinitionContentSha256", "brokerVersion", "brokerPackageRawSha256", "brokerCodeSha256", "checkerIdentity", "deployerIdentity", "imageAuthorizationSha256", "tfvarsBindingSha256", "runtimeBindingSha256",
 ]);
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -48,7 +48,7 @@ const option = (argv, name) => { const index = argv.indexOf(name); return index 
 const requiredOption = (argv, name) => option(argv, name) || (() => { throw new Error(`${name} is required.`); })();
 
 function assertEvidence(evidence) {
-  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, [...EVIDENCE_FIELDS, ...(evidence.historicalRuntimeReferenceSha256 ? ["historicalRuntimeReferenceSha256"] : [])])) {
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence) || !exactKeys(evidence, [...EVIDENCE_FIELDS, ...(evidence.historicalRuntimeReferenceSha256 ? ["historicalRuntimeReferenceSha256"] : []), ...(evidence.recoveryTooling ? ["recoveryTooling"] : [])])) {
     throw new Error("Authenticated Stage B approval evidence fields are incomplete or unexpected.");
   }
   if (evidence.schemaVersion !== 1 || evidence.producer !== "scripts/aws/collect-production-green-stage-b-approval-evidence.mjs" || evidence.authorityMode !== STAGE_B_RUNTIME_APPROVAL_AUTHORITY || evidence.sourceCurrent !== true || evidence.runtimeBindingsCurrent !== true || !/^\d{4}-\d\d-\d\dT/.test(evidence.observedAt || "")) throw new Error("Authenticated evidence provenance or currentness is incomplete.");
@@ -63,6 +63,7 @@ function assertEvidence(evidence) {
     "full-rls-admin-ownership", "full-rls-runtime-policy", "full-rls-verification", "full-rls-application-canary", "full-rls-rollback",
   ])) throw new Error("Authenticated evidence task-definition map is not the exact broker map.");
   if (!Object.values(evidence.taskDefinitionArns).every((value) => /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[A-Za-z0-9_-]+:[1-9][0-9]*$/.test(value || ""))) throw new Error("Authenticated evidence task-definition ARN is malformed.");
+  if (!exactKeys(evidence.taskDefinitionTemplateHashes, ["executor", "canary", "backend", "worker"]) || !Object.values(evidence.taskDefinitionTemplateHashes).every(value => DIGEST.test(value))) throw new Error("Authenticated task-template hashes are incomplete.");
   if (!exactKeys(evidence.taskDefinitionContentSha256, Object.keys(evidence.taskDefinitionArns)) || !Object.values(evidence.taskDefinitionContentSha256).every((value) => DIGEST.test(value))) throw new Error("Authenticated evidence task-definition content bindings are incomplete.");
   const identityRoles = { checkerIdentity: "mscqr-production-rls-independent-checker", deployerIdentity: "mscqr-production-release-deployer" };
   for (const [field, role] of Object.entries(identityRoles)) {
@@ -103,7 +104,7 @@ export async function prepareProductionGreenStageBApprovalInput({ evidence, prot
   if (!isAuthenticatedProductionGreenStageBApprovalEvidence(evidence)) throw new Error("Approval input requires canonical authenticated evidence collection.");
   assertEvidence(evidence);
   assertStageBDeploymentEvidenceFreshness(evidence.observedAt, { now, evidenceType: "Stage B approval evidence" });
-  if (!SHA.test(protectedSourceSha || "") || evidence.releaseSha !== protectedSourceSha) throw new Error("Approval evidence is not bound to the protected source.");
+  if (!SHA.test(protectedSourceSha || "") || (evidence.recoveryTooling?.sourceSha || evidence.releaseSha) !== protectedSourceSha) throw new Error("Approval evidence is not bound to the protected source.");
   const operatorFields = deriveOperatorFields(operator, now, randomUuid);
   const input = {
     ...(evidence.historicalRuntimeReferenceSha256 ? { historicalRuntimeReferenceSha256: evidence.historicalRuntimeReferenceSha256 } : {}),
@@ -135,7 +136,7 @@ export async function prepareProductionGreenStageBApprovalInput({ evidence, prot
     signatureAlgorithm: STAGE_B_APPROVAL_ALGORITHM,
     sourceContractSha256: evidence.sourceContractSha256,
     taskDefinitionArns: evidence.taskDefinitionArns,
-    taskDefinitionTemplateHashes: stageBTemplateHashes(),
+    taskDefinitionTemplateHashes: { ...evidence.taskDefinitionTemplateHashes },
     ticketId: operatorFields.ticketId,
     workerImageDigest: evidence.workerImageDigest,
   };
@@ -224,20 +225,26 @@ export async function runApprovalInputCli(argv = process.argv.slice(2), {
   verifyHandoff = verifyHistoricalRuntimeHandoff, source = currentHead,
 } = {}) {
   checkSource();
-  const allowed = new Set(["--historical-runtime-evidence", "--historical-runtime-evidence-sha256", "--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
+  const allowed = new Set(["--broker-recovery", "--broker-recovery-sha256", "--historical-runtime-evidence", "--historical-runtime-evidence-sha256", "--ticket-id", "--image-authorization", "--tfvars", "--binding-report", "--release-preflight", "--release-preflight-attestation", "--release-preflight-attestation-signature", "--output", "--review-output"]);
   for (let index = 0; index < argv.length; index += 1) { if (!allowed.has(argv[index])) throw new Error("Unknown approval-input option."); index += 1; }
   const runners = await createRunners();
   const checkerIdentity = authenticateApprovalInputCheckerIdentity(runners.checkerRun);
+  let recoveryApproval;
+  if (option(argv, "--broker-recovery")) {
+    recoveryApproval = await readBrokerRecoveryApproval({ filePath: option(argv, "--broker-recovery"), expectedSha256: requiredOption(argv, "--broker-recovery-sha256") });
+    if (recoveryApproval.tooling.sourceSha !== source()) throw new Error("Broker recovery tooling differs from protected checkout.");
+  }
+  const releaseSourceSha = recoveryApproval?.sourceSha || source();
   const imageAuthorizationBytes = readPrivate({ filePath: requiredOption(argv, "--image-authorization"), repositoryRoot: root, label: "Stage B image authorization" }).bytes;
   const imageAuthorization = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(imageAuthorizationBytes));
   const historicalRuntimeEvidence = option(argv, "--historical-runtime-evidence") ? readHistoricalRuntimeTransport({ bytes: readPrivate({ filePath: option(argv, "--historical-runtime-evidence"), repositoryRoot: root, label: "Historical runtime handoff" }).bytes, expectedSha256: requiredOption(argv, "--historical-runtime-evidence-sha256") }) : undefined;
   const runtimeReader = makeReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: runners.releaseRun });
   const historicalRuntimeState = makeStateClient({ run: runners.releaseRun }).read();
-  verifyHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: runtimeReader, sourceSha: source() });
-  const { evidence } = collectProductionGreenStageBApprovalEvidence({ historicalRuntimeEvidence, historicalRuntimeState, historicalRuntimeReader: runtimeReader, sourceSha: currentHead(), imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: runners.verifyImageEvidence, verifyReleasePreflightAttestationSignature: runners.verifyReleasePreflightAttestationSignature });
+  verifyHandoff({ evidence: historicalRuntimeEvidence, state: historicalRuntimeState, reader: runtimeReader, sourceSha: releaseSourceSha });
+  const { evidence } = collectProductionGreenStageBApprovalEvidence({ historicalRuntimeEvidence, historicalRuntimeState, historicalRuntimeReader: runtimeReader, recoveryApproval, sourceSha: releaseSourceSha, imageAuthorization, tfvarsPath: requiredOption(argv, "--tfvars"), bindingReportPath: requiredOption(argv, "--binding-report"), releasePreflightPath: requiredOption(argv, "--release-preflight"), releasePreflightAttestationPath: requiredOption(argv, "--release-preflight-attestation"), releasePreflightAttestationSignaturePath: requiredOption(argv, "--release-preflight-attestation-signature"), checkerIdentity, verifyImageEvidence: runners.verifyImageEvidence, verifyReleasePreflightAttestationSignature: runners.verifyReleasePreflightAttestationSignature });
   const result = await prepareProductionGreenStageBApprovalInput({
     evidence,
-    protectedSourceSha: currentHead(),
+    protectedSourceSha: source(),
     operator: { ticketId: requiredOption(argv, "--ticket-id") },
   });
   const output = writeProductionGreenStageBApprovalInput({ result, outputPath: option(argv, "--output"), reviewOutputPath: option(argv, "--review-output"), repositoryRoot: root });

@@ -24,9 +24,11 @@ import {
   PRODUCTION_INITIAL_MIGRATION_SOURCE_ADVANCE_KIND,
 } from "../security/production-initial-migration-source-advance.mjs";
 import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from "./production-legacy-rotation-baseline.mjs";
-import { assertQrVersionResolutionCurrent } from "./production-qr-version-selector-resolution.mjs";
+import { assertQrVersionResolutionCurrent, assertQrVersionResolutionEvidence } from "./production-qr-version-selector-resolution.mjs";
 import { assertPreDeploymentInventoryTaskDefinitionArn } from "./production-predeployment-inventory-task.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
+import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
+import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
 import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const ACCOUNT = STAGE_B.account;
@@ -56,6 +58,20 @@ function assertRebaselineAuthorizationCoordinates(value) {
 }
 
 function assertNoSecretMaterial(value, label) {
+  // Canonical ECS observations contain secret selectors, never secret values.
+  if (label === "Release-preflight checker-trust evidence") {
+    value = structuredClone(value);
+    for (const readback of Object.values(value.stageBApprovalLiveObservation?.taskDefinitions || {})) {
+      for (const container of readback.taskDefinition?.containerDefinitions || []) {
+        if (container.secrets !== undefined) container.secrets = container.secrets.map(reference => {
+          if (canonical(Object.keys(reference).sort()) !== canonical(["name", "valueFrom"])
+              || !/^[A-Z][A-Z0-9_]*$/.test(reference.name || "")) throw new Error("Live ECS secret reference is malformed or contains material.");
+          parseEcsSecretsManagerReference(reference.valueFrom);
+          return { reference: "ECS_SELECTOR" };
+        });
+      }
+    }
+  }
   const serialized = JSON.stringify(value).replaceAll("clientRequestToken", "");
   if (/(BEGIN [A-Z ]+PRIVATE KEY|SecretString|AccessKeyId|SecretAccessKey|SessionToken|DATABASE_URL=|password|token)/i.test(serialized)) throw new Error(`${label} contains prohibited secret material.`);
 }
@@ -252,6 +268,7 @@ export function prepareProductionCutoverRuntime({
   verifyInitialBindingOrigin,
   rotationSupersessionEvidence,
   sourceSha,
+  brokerRecoveryApproval,
   git,
   imageAuthorization,
   iamEvidence,
@@ -293,10 +310,20 @@ export function prepareProductionCutoverRuntime({
   assertFutureArtifactsAbsent(paths, repositoryRoot);
   const blockers = [];
   let protectedSha;
+  let toolingSha;
+  let brokerRecoveryBinding;
   try {
     const discoveredSha = discoverGit({ run: git });
-    if (sourceSha && sourceSha !== discoveredSha) throw new Error("Caller-supplied source SHA does not match protected main.");
-    protectedSha = discoveredSha;
+    toolingSha = discoveredSha;
+    if (brokerRecoveryApproval) {
+      if (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.tooling.sourceSha !== discoveredSha
+          || (sourceSha && sourceSha !== brokerRecoveryApproval.sourceSha)) throw new Error("Rotation bootstrap broker recovery identity is unauthenticated or does not match protected main.");
+      protectedSha = brokerRecoveryApproval.sourceSha;
+      brokerRecoveryBinding = { ...brokerRecoveryApproval.tooling, releaseSourceSha: protectedSha, publicationResultSha256: brokerRecoveryApproval.publicationResultSha256, closureResultSha256: brokerRecoveryApproval.closureResultSha256 };
+    } else {
+      if (sourceSha && sourceSha !== discoveredSha) throw new Error("Caller-supplied source SHA does not match protected main.");
+      protectedSha = discoveredSha;
+    }
   } catch (error) { blockers.push(error.message); }
   let config;
   let staticBindings;
@@ -317,6 +344,7 @@ export function prepareProductionCutoverRuntime({
     const suppliedImageAuthorization = { ...imageAuthorization }; delete suppliedImageAuthorization.filePath;
     if (canonicalHash(suppliedImageAuthorization) !== canonicalHash(preparedImageAuthorization.value)) throw new Error("Image authorization input differs from its authenticated file.");
     assertImageAuthorization(preparedImageAuthorization.value, protectedSha, imageAuthorizationValidation);
+    if (brokerRecoveryApproval && brokerRecoveryApproval.target.configuration.Environment.Variables.BROKER_IMAGE_RELEASE_SHA !== preparedImageAuthorization.value.imageReleaseSha) throw new Error("Rotation bootstrap image release differs from authenticated broker recovery.");
     const backendImageDigest = authorizedBackendDigest(preparedImageAuthorization.value);
     if (!backendImageDigest) throw new Error("Authorized backend image digest is missing.");
     if (!iamEvidence?.filePath) throw new Error("IAM evidence file is required.");
@@ -332,6 +360,7 @@ export function prepareProductionCutoverRuntime({
     assertPreCutoverTemporaryCapabilityAbsent(preparedIamEvidence.value.temporaryKmsCapability, { sourceSha: protectedSha });
     if (!releasePreflightEvidenceFile) throw new Error("Release-preflight checker-trust evidence file is required.");
     const releasePreflightEvidence = readInputFile(releasePreflightEvidenceFile, repositoryRoot, "Release-preflight checker-trust evidence");
+    if (canonicalHash(releasePreflightEvidence.value.recoveryTooling ?? null) !== canonicalHash(brokerRecoveryBinding ?? null)) throw new Error("Rotation bootstrap preflight differs from authenticated broker recovery.");
     if (!releasePreflightAttestationFile || !releasePreflightAttestationSignatureFile) throw new Error("Release-preflight checker-trust attestation and signature files are required.");
     const releasePreflightAttestation = readInputFile(releasePreflightAttestationFile, repositoryRoot, "Release-preflight checker-trust attestation");
     const releasePreflightAttestationSignature = readInputFile(releasePreflightAttestationSignatureFile, repositoryRoot, "Release-preflight checker-trust attestation signature");
@@ -383,7 +412,10 @@ export function prepareProductionCutoverRuntime({
     }
     const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
     const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
-    if (qrVersionResolution) assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
+    if (qrVersionResolution) {
+      assertQrVersionResolutionEvidence(qrVersionResolution, { sourceSha: toolingSha, changeTicket: approval.ticket, expectedSecretArn: qrVersionResolution.secretArn });
+      assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
+    }
     const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition, { legacyBaseline: liveLegacyBaseline });
     const initialMigrationSourceAdvance = buildInitialMigrationSourceAdvance({
@@ -431,6 +463,7 @@ export function prepareProductionCutoverRuntime({
     rotationTerraformInputBytes = Buffer.from(renderRotationTerraformInput(rotationTerraformInputs));
     staticBindings = {
       ...approvalConfig,
+      ...(brokerRecoveryBinding ? { recoveryTooling: brokerRecoveryBinding } : {}),
       artifactBindingFile: path.resolve(artifactBindingFile),
       imageAuthorizationFile: preparedImageAuthorization.path,
       iamEvidenceFile: preparedIamEvidence.path,
@@ -497,7 +530,9 @@ export function prepareProductionCutoverRuntime({
   const manifest = {
     schemaVersion: 1,
     generatedBy: "scripts/aws/prepare-production-cutover-runtime.mjs",
-    protectedMainSha: protectedSha || null,
+    protectedMainSha: toolingSha || null,
+    releaseSourceSha: protectedSha || null,
+    ...(brokerRecoveryBinding ? { recoveryTooling: brokerRecoveryBinding } : {}),
     staticBindingSha256: staticBindings ? canonicalHash(staticBindings) : null,
     runtimeConfigSha256,
     phaseArtifacts: { rotationState: paths.rotationStateFile, rotationFixture: paths.rotationFixtureFile, overlapRuntimeProof: paths.overlapRuntimeProofFile, readinessEvidence: paths.readinessEvidenceFile, rotationTerraformInput: paths.rotationTerraformInputFile },
@@ -508,7 +543,7 @@ export function prepareProductionCutoverRuntime({
   const manifestBytes = Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
   if (blockers.length) {
     writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: manifestBytes, repositoryRoot, label: "Cutover runtime manifest" });
-    return { readyToConsumeMfa: false, blockers: manifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha || null };
+    return { readyToConsumeMfa: false, blockers: manifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: toolingSha || null, releaseSourceSha: protectedSha || null };
   }
   const configPath = paths.rotationConfigFile;
   writeStageBPrivateFilesAtomic({ files: [
@@ -524,11 +559,11 @@ export function prepareProductionCutoverRuntime({
       for (const filePath of [onboardingPathsFile, rotationTerraformInputFile, manifestPath, configPath]) rmSync(filePath, { force: true });
       const failedManifest = { ...manifest, blockers: [error.message], readyToConsumeMfa: false };
       writeStageBPrivateFileAtomic({ filePath: manifestPath, bytes: Buffer.from(`${JSON.stringify(failedManifest, null, 2)}\n`), repositoryRoot, label: "Cutover runtime manifest" });
-      return { readyToConsumeMfa: false, blockers: failedManifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: protectedSha };
+      return { readyToConsumeMfa: false, blockers: failedManifest.blockers, runtimeDirectory: directory, manifestPath, phasePaths: paths, protectedMainSha: toolingSha, releaseSourceSha: protectedSha };
     }
   }
   const command = `npm run stage-b:run-cutover-operator -- --mode prepare-overlap --config ${shellQuote(configPath)} --config-sha256 ${runtimeConfigSha256} --source-sha ${staticBindings.sourceSha} --rotation-id ${staticBindings.rotationId}`;
-  return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, runtimeConfigSha256, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
+  return { readyToConsumeMfa: true, runtimeDirectory: directory, configPath, runtimeConfigSha256, manifestPath, staticBindingSha256: manifest.staticBindingSha256, protectedMainSha: toolingSha, releaseSourceSha: protectedSha, nextCommand: command, config: staticBindings, phasePaths: paths };
 }
 
 function envelopeEcsValueFrom(secretId, name) {
@@ -567,6 +602,7 @@ export function parseBootstrapArgs(argv) {
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
+    "broker-recovery", "broker-recovery-sha256",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs";
+import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-staged-broker.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -11,7 +13,7 @@ import { assertStageBTerraformInitializedBackendMetadata, ensureStageBTerraformB
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, writeStageBPrivateFileAtomic, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertStageBTerraformWorkspace } from "./stage-b-terraform-workspace.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
+import { generateStageBTfvars, deriveContractDigests } from "./generate-production-green-stage-b-tfvars.mjs";
 import { resolveStageBRecoveryMode } from "./stage-b-deployment-contract.mjs";
 import {
   ACCOUNT,
@@ -95,7 +97,7 @@ function assertReadinessImageAuthorizationBinding(argv, authorization) {
   return { imageEvidenceBytes: evidence.bytes, imageEvidenceSignatureBytes: signature.bytes, imageAuthorization: authorization };
 }
 
-function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes } = {}) {
+function continueReleaseReadiness(argv, { run = (command, args, options) => execFileSync(command, args, options), imageEvidenceBytes, imageEvidenceSignatureBytes, recoveryApproval } = {}) {
   const backendConfig = value(argv, "--backend-config"); const terraformDataDir = value(argv, "--terraform-data-dir");
   const preflightDirectory = path.dirname(path.resolve(value(argv, "--output")));
   const stageAState = path.join(preflightDirectory, "stage-a-state.json"); const stageBState = path.join(preflightDirectory, "stage-b-state.json");
@@ -106,7 +108,18 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly: false, partialApplyRecovery, freshImagePartialApplyRecovery });
   const releaseAwsRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer", exec: (command, args, options) => run(command, args, options) });
   generateStageAPrerequisites({ stateBackup: stageAState, stateObject: STAGE_A_STATE_OBJECT, toolingSha, toolingTreeSha256, outputPath: handoff, phase: "POST_APPLY", run: (args) => releaseAwsRun(args) });
+  let checksumsFile;
+  if (recoveryApproval) {
+    if (!isAuthenticatedBrokerRecoveryApproval(recoveryApproval) || recoveryApproval.sourceSha !== toolingSha) throw new Error("Readiness recovery requires authenticated original release.");
+    const bytes = run("git", ["show", `${toolingSha}:documents/security/rls-program/generated/checksums.json`], { cwd: root });
+    checksumsFile = path.join(preflightDirectory, "original-release-checksums.json");
+    writeStageBPrivateFileAtomic({ filePath: checksumsFile, bytes, repositoryRoot: root, label: "Original release checksums" });
+    const contracts = deriveContractDigests({ file: checksumsFile });
+    const expected = JSON.parse(recoveryApproval.target.configuration.Environment.Variables.BROKER_APPROVAL_EXPECTED_JSON);
+    for (const field of ["sourceContractSha256", "migrationSetDigest", "packageChecksumSha256"]) if (contracts[field] !== expected[field]) throw new Error("Original release checksums differ from authenticated broker.");
+  }
   const generated = generateStageBTfvars({
+    ...(checksumsFile ? { checksumsFile } : {}),
     imageEvidence: value(argv, "--image-evidence"), imageEvidenceSignature: value(argv, "--image-evidence-signature"), stateBackup: stageBState,
     imageEvidenceBytes, imageEvidenceSignatureBytes,
     stageAInput: handoff, stageAStateBackup: stageAState, brokerPackagePath: value(argv, "--broker-package"), toolingSha, toolingTreeSha256,
@@ -129,6 +142,16 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
 }
 
 export function runProductionPreflightCli(argv = process.argv.slice(2), dependencies = {}) {
+  if (argv.includes('--broker-recovery') && !dependencies.recoveryApproval) {
+    return readBrokerRecoveryApproval({ filePath: value(argv, '--broker-recovery'), expectedSha256: value(argv, '--broker-recovery-sha256') })
+      .then(recoveryApproval => runProductionPreflightCli(argv, { ...dependencies, recoveryApproval }));
+  }
+  const recoveryApproval = dependencies.recoveryApproval;
+  if (recoveryApproval && !isAuthenticatedBrokerRecoveryApproval(recoveryApproval)) throw new Error('Preflight broker recovery is unauthenticated.');
+  const recoveryBinding = recoveryApproval ? { sourceSha: recoveryApproval.tooling.sourceSha, treeSha256: recoveryApproval.tooling.treeSha256,
+    releaseSourceSha: recoveryApproval.sourceSha, publicationResultSha256: recoveryApproval.publicationResultSha256,
+    closureResultSha256: recoveryApproval.closureResultSha256 } : undefined;
+
   const identity = value(argv, "--identity");
   const profile = identity === "administrator" ? "default" : identity === "release-deployer" ? "mscqr-production-release-deployer" : undefined;
   const commandRun = dependencies.commandRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile });
@@ -140,7 +163,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
   const verify = dependencies.verify;
   const verifyImageEvidence = dependencies.verifyImageEvidence;
   const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
-  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, publication));
+  const continueReadiness = dependencies.continueReadiness || ((args, publication) => continueReleaseReadiness(args, { ...publication, recoveryApproval, ...(dependencies.run ? { run: dependencies.run } : {}) }));
   const validateCapabilityGraph = dependencies.validateCapabilityGraph || assertStageBDeploymentCapabilityGraph;
   const readStageATerraformSource = dependencies.readStageATerraformSource || (() => fs.readFileSync(path.join(root, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8"));
   const readProtectedMainCheckout = dependencies.readProtectedMainCheckout || (() => readStageBProtectedMainCheckout({ cwd: root }));
@@ -152,7 +175,9 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const sourceSha = value(argv, "--source-sha");
     if (!SHA40.test(sourceSha)) throw new Error("Administrator production preflight requires a full protected source SHA.");
     const protectedMain = readProtectedMainCheckout();
-    if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Administrator production preflight requires the exact clean protected-main source.");
+    const expectedToolingSha = recoveryApproval?.tooling.sourceSha || sourceSha;
+    if (recoveryApproval && recoveryApproval.sourceSha !== sourceSha) throw new Error('Preflight release differs from completed recovery.');
+    if (!protectedMain || protectedMain.toolingSha !== expectedToolingSha || protectedMain.currentHead !== expectedToolingSha || protectedMain.originMainHead !== expectedToolingSha || protectedMain.porcelainStatus) throw new Error("Administrator production preflight requires the exact clean protected-main source.");
     const imageAuthorizationFile = dependencies.readImageAuthorization
       ? dependencies.readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha)
       : readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha, commandRun, verifyImageEvidence || undefined);
@@ -203,6 +228,7 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
       observedAt: generatedAt,
     });
     report.capabilityGraph = capabilityGraph;
+    if (recoveryBinding) report.recoveryTooling = recoveryBinding;
     if (report.status !== "valid") {
       const reportFile = write(output, report);
       return { identity, status: "blocked", administratorSimulation: { failed: report.deniedCount, skipped: 0 }, policySourceLiveMismatches: report.policySourceLiveMismatchCount, report: reportFile, capabilityGraph };
@@ -217,17 +243,21 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const sourceSha = value(argv, "--tooling-sha");
     if (!SHA40.test(sourceSha)) throw new Error("Release production preflight requires a full protected source SHA.");
     const protectedMain = readProtectedMainCheckout();
-    if (!protectedMain || protectedMain.toolingSha !== sourceSha || protectedMain.currentHead !== sourceSha || protectedMain.originMainHead !== sourceSha || protectedMain.porcelainStatus) throw new Error("Release production preflight requires the exact clean protected-main source.");
+    const expectedToolingSha = recoveryApproval?.tooling.sourceSha || sourceSha;
+    if (recoveryApproval && recoveryApproval.sourceSha !== sourceSha) throw new Error('Preflight release differs from completed recovery.');
+    if (!protectedMain || protectedMain.toolingSha !== expectedToolingSha || protectedMain.currentHead !== expectedToolingSha || protectedMain.originMainHead !== expectedToolingSha || protectedMain.porcelainStatus) throw new Error("Release production preflight requires the exact clean protected-main source.");
     const adminReportBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report"))); const adminReport = JSON.parse(adminReportBytes);
     const administratorSignatureBytes = fs.readFileSync(path.resolve(value(argv, "--administrator-report-signature")));
     const signature = JSON.parse(administratorSignatureBytes);
-    const releaseRun = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    const releaseRun = dependencies.commandRun || createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-release-deployer" });
+    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
+    if (adminReport.recoveryTooling && !recoveryBinding) throw new Error("Administrator recovery report requires authenticated recovery context.");
+    if (recoveryBinding && canonicalizeJson(adminReport.recoveryTooling) !== canonicalizeJson(recoveryBinding)) throw new Error("Administrator report differs from authenticated broker recovery.");
     const imageAuthorizationFile = dependencies.readImageAuthorization
       ? dependencies.readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha)
       : readImageAuthorization(value(argv, "--image-authorization"), value(argv, "--image-authorization-sha256"), sourceSha, (args) => releaseRun(args), verifyImageEvidence || undefined);
     if (imageAuthorizationFile.fileSha256 !== value(argv, "--image-authorization-sha256")) throw new Error("Current image authorization file SHA-256 does not match the supplied binding.");
     if (dependencies.readImageAuthorization) assertImageAuthorization(imageAuthorizationFile.authorization, sourceSha, { verifyImageEvidence: verifyImageEvidence || (() => true) });
-    (verify || ((options) => verifyPermissionReportSignature({ ...options, run: (args) => releaseRun(args) })))({ report: adminReport, signatureArtifact: signature, reportBytes: adminReportBytes, signatureBytes: administratorSignatureBytes });
     assertStageBPermissionEvidenceKind(adminReport, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
     assertStageBAdministratorEvidenceIdentity(adminReport, { sourceSha, imageAuthorization: imageAuthorizationFile.authorization, imageAuthorizationFileSha256: imageAuthorizationFile.fileSha256 });
     if (adminReport.purpose !== "pre-plan-capability" || adminReport.status !== "valid" || adminReport.simulatedRoleArn !== RELEASE_ROLE_ARN) throw new Error("Administrator pre-plan capability report is invalid.");
@@ -249,14 +279,14 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
     const stageBApprovalLiveObservation = argv.includes("--capture-stage-b-approval-live-observation")
       ? observeStageBBrokerApprovalBindings({ reader: createAwsReader({ region: STAGE_B.region, clusterArn: STAGE_B.clusterArn, run: releaseRun }) })
       : undefined;
-    const finalReport = { ...report, ...readiness, ...(stageBApprovalLiveObservation ? { stageBApprovalLiveObservation } : {}), capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
+    const finalReport = { ...report, ...readiness, ...(recoveryBinding ? { recoveryTooling: recoveryBinding } : {}), ...(stageBApprovalLiveObservation ? { stageBApprovalLiveObservation } : {}), capabilityGraph, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourceLivePolicyMismatches: 0, administratorSimulationFailures: 0, releaseReadFailures: 0, configurationFailures: 0, status: "ready-for-plan" }; const reportFile = write(output, finalReport);
     return { identity, status: "ready-for-plan", releaseReadCapabilities: { failed: 0, skipped: 0 }, report: reportFile, ...readiness, capabilityGraph };
   }
   throw new Error("--identity must be administrator or release-deployer.");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const result = runProductionPreflightCli();
+  const result = await runProductionPreflightCli();
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!new Set(["valid", "ready-for-plan"]).has(result.status)) process.exitCode = 1;
 }

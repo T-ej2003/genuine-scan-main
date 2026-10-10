@@ -668,4 +668,6 @@ jobs:
       - name: Docker verification contract
         run: |
           node scripts/verify-container-image-provenance.mjs
+          alpine_ref="$(node --input-type=module -e 'import { readApprovedImages } from "./scripts/lib/container-image-identity.mjs"; process.stdout.write(readApprovedImages().alpine.reference)')"
+          docker image inspect "$alpine_ref" >/dev/null 2>&1 || docker pull "$alpine_ref"
           npm run verify:ci:docker

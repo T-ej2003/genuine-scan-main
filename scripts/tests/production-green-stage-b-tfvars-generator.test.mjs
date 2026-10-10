@@ -528,3 +528,16 @@ test("binding report rejects a modified tfvars file and overwrite is opt-in", ()
   fs.appendFileSync(result.outputPath, "\n# modified\n"); const reportSha = crypto.createHash("sha256").update(fs.readFileSync(result.bindingReportPath)).digest("hex");
   assert.throws(() => assertStageBTfvarsBinding({ tfvarsPath: result.outputPath, bindingReportPath: result.bindingReportPath, bindingReportSha256: reportSha }), /tfvars SHA256/);
 });
+
+
+test("readiness historical checksums produce original contracts despite different checkout contracts", () => {
+  const args = input();
+  const original = Buffer.from(JSON.stringify({ sourceContractSha256: "1".repeat(64), migrationSetDigest: "2".repeat(64) }) + "\n");
+  const checksumsFile = path.join(path.dirname(args.outputPath), "original-release-checksums.json");
+  fs.writeFileSync(checksumsFile, original, { mode: 0o600 });
+  const generated = generateStageBTfvars({ ...args, checksumsFile });
+  assert.equal(generated.bindingReport.sourceContractSha256, "1".repeat(64));
+  assert.equal(generated.bindingReport.migrationSetDigest, "2".repeat(64));
+  assert.equal(generated.bindingReport.packageChecksumSha256, crypto.createHash("sha256").update(original).digest("hex"));
+  assert.notDeepEqual(deriveContractDigests({ file: checksumsFile }), deriveContractDigests());
+});

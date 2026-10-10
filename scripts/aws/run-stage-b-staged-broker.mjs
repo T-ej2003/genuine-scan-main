@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, BROKER_FUNCTION, BROKER_ALIAS, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerCutoverPlan, prepareBrokerStateRefresh, registrationPolicyPrerequisiteChain, PREPUBLICATION_POLICY_OPERATIONS } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, BROKER_FUNCTION, BROKER_ALIAS, brokerExecutionCheckout, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerCutoverPlan, prepareBrokerStateRefresh, registrationPolicyPrerequisiteChain, PREPUBLICATION_POLICY_OPERATIONS } from './stage-b-staged-broker-contract.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
 import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary,readBrokerProtectedEnvironmentApproval,createBrokerProtectedEnvironmentAuthorization } from './stage-b-staged-broker-authorization.mjs';
@@ -64,7 +64,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   const adapterPrerequisites = operation === 'prepare-registration-adoption' ? undefined
     : operation === 'prepare-policy-adoption' ? { registration: prerequisiteChain?.registration } : prerequisiteChain;
   const deps = adapterFactory({ phase: MODES[operation], operation, preparation, authorization, planPath, files, directory, terraformDataDir,
-    prerequisiteChain: adapterPrerequisites, registrationPredecessorRecovery: request.predecessorReceiptRecovery });
+    prerequisiteChain: adapterPrerequisites, registrationPredecessorRecovery: request.predecessorReceiptRecovery, publicationPreparation: request.publicationPreparation, publicationResult: request.publicationResult });
   if (operation === 'recover-registration') return recoverTaskRegistration({ preparation, authorization }, deps);
   if (['recover-policy', 'verify-policy-writer-termination'].includes(operation)) {
     // Historical source is authenticated by the durable transaction chain inside recovery, not by today's checkout SHA.
@@ -97,7 +97,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     await assertBrokerAuthorization(request.cutoverAuthorization,request.cutoverPreparation,
       {verify:deps.verifyAuthorization,now:new Date(request.casResult.authorizedAt)});
     await deps.authenticateCasResult(request.casResult,brokerDigest(request.cutoverAuthorization));
-    equal(checkout,{sourceSha:preparation.sourceSha,treeSha256:preparation.treeSha256});
+    equal(checkout,brokerExecutionCheckout(preparation));
+    if (preparation.outputReconciliation) await deps.authenticateOutputReconciliation(preparation);
     equal(prerequisites,preparation.prerequisites);equal(await deps.readStateIdentity(),preparation.state);
     equal(await deps.getAlias(),request.casResult.alias);
     equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version),preparation.packageSha256),preparation.target);
@@ -181,9 +182,10 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.equal(preparation.purpose, { 'authorize-publication': BROKER_PUBLICATION, 'authorize-cutover': BROKER_CUTOVER,
       'authorize-registration': TASK_REGISTRATION, 'authorize-policy': BROKER_POLICY_CONVERGENCE, 'authorize-pruning': BROKER_POLICY_PRUNING }[operation]);
     if (prerequisiteChain) await deps.authenticatePrerequisiteChain(prerequisiteChain);
-    equal(checkout, { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 });
+    equal(checkout, brokerExecutionCheckout(preparation));
     equal(prerequisites, preparation.prerequisites); equal(await deps.readStateIdentity(), preparation.state);
     const artifacts = await deps.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256); assert.equal(artifacts.artifactSetSha256, preparation.artifactSetSha256);
+    if (preparation.outputReconciliation) await deps.authenticateOutputReconciliation(preparation);
     if (operation !== 'authorize-pruning') staticPlan(artifacts.plan);
     if (operation === 'authorize-pruning') assertBrokerPolicyPruningPlan(artifacts.plan, preparation);
     else if (['authorize-registration', 'authorize-policy'].includes(operation)) assertPrerequisitePlan(artifacts.plan, preparation);
@@ -204,9 +206,25 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   if (operation === 'publish') return executeBrokerPublication({ preparation, authorization }, deps);
   if (operation === 'prepare-cutover') {
     const old = request.publicationPreparation; assertBrokerPreparation(old);
-    equal(checkout, { sourceSha: old.sourceSha, treeSha256: old.treeSha256 }); equal(prerequisites, old.prerequisites);
+    equal(prerequisites, old.prerequisites);
+    await deps.authenticatePublicationResult(request.publicationResult, request.publicationResult.authorizationSha256);
+    if (checkout.sourceSha !== old.sourceSha) await deps.authenticateBrokerRecoveryTooling(old, request.publicationResult, checkout);
+    else equal(checkout, brokerExecutionCheckout(old));
     const captured = await deps.captureCutoverPlan(); staticPlan(captured.plan);
-    const p = await prepareBrokerCutover({ publicationPreparation: old, publicationAuthorization: request.publicationAuthorization, publicationResult: request.publicationResult,
+    let outputReconciliation;
+    if (Object.values(captured.plan.output_changes || {}).some(o => JSON.stringify(o.actions) !== '["no-op"]')) {
+      const backendMetadata = assertStageBPlanningBackendMetadata({ env: { TF_DATA_DIR: terraformDataDir }, repositoryRoot: root });
+      const inputs = planningInputs(files.tfvars, request.planningOptions, { currentHead: old.sourceSha }, { backendMetadata });
+      assert.equal(inputs.recoveryMode, 'NORMAL'); assert.equal(inputs.toolingTreeSha256, old.treeSha256);
+      const report = read(inputs.refreshReportPath, inputs.refreshReportSha256);
+      assert.equal(report.status, 'REVIEWED_OUTPUT_RECONCILIATION');
+      outputReconciliation = { sourceSha: old.sourceSha, publicationResultSha256: brokerDigest(request.publicationResult),
+        targetSha256: brokerDigest(request.publicationResult.target), state: await deps.readStateIdentity(),
+        refreshReportPath: inputs.refreshReportPath, refreshReportSha256: inputs.refreshReportSha256,
+        bindingReportPath: inputs.bindingReportPath, bindingReportSha256: inputs.bindingReportSha256,
+        outputChanges: report.outputChanges.map(({ name, before, after }) => ({ name, before, after })) };
+    }
+    const p = await prepareBrokerCutover({ outputReconciliation, publicationPreparation: old, publicationAuthorization: request.publicationAuthorization, publicationResult: request.publicationResult,
       plan: captured.plan, bytes: captured.bytes, state: await deps.readStateIdentity(), artifactSetSha256: stagedBrokerArtifactSet(files, root) }, deps);
     classifyStageBPlan(captured.plan, { stagedBroker: p });
     return { preparation: p, planPath: captured.file };
