@@ -93,7 +93,9 @@ export function createHostedSuccessorRuntime({env=process.env,
    const alias=readAlias();
    const body={schemaVersion:2,sourceSha:request.releaseSourceSha,ticketId:request.ticketId,
     recoveryReference:brokerDigest(request),toolingSha:request.recoveryToolingSha};
-   const releaseId=brokerDigest(body),attempt=store.readStep(releaseId,'cutover:attempt:0');
+   const releaseId=brokerDigest(body),attempts=Array.from({length:20},(_,round)=>({round,
+    record:store.readStep(releaseId,`cutover:attempt:${round}`)})).filter(({record})=>record);
+   const attempt=attempts.at(-1)?.record;
    const completed=store.readStep(releaseId,'cutover:result');
    assert.ok(completed?alias.FunctionVersion===request.brokerVersion:attempt
     ?[request.expectedAliasVersion,request.brokerVersion].includes(alias.FunctionVersion)
@@ -104,8 +106,10 @@ export function createHostedSuccessorRuntime({env=process.env,
     'Reviewed alias revision changed before successor cutover');
    const evidence=JSON.parse(output(request.imageEvidenceReference)),signature=JSON.parse(output(request.imageSignatureReference));
    const imageReleaseSha=publication.result.target.configuration.Environment.Variables.BROKER_IMAGE_RELEASE_SHA;
-   const saved=store.readStep(releaseId,'cutover:prepared');
+   const saved=store.readStep(releaseId,attempts.length
+    ?attempts.at(-1).round===0?'cutover:prepared':`cutover:prepared:${attempts.at(-1).round}`:'cutover:prepared');
    const preparation=saved?store.getArtifact(saved.result).preparation:null;
+   if(attempt)assert.equal(attempt.prepared,brokerDigest(store.getArtifact(saved.result)));
    const evidenceTime=attempt&&preparation?.successorReconciliation?.createdAt
     ?preparation.successorReconciliation.createdAt:new Date().toISOString();
    if(authenticateImages)await authenticateImages({request,evidence,signature,imageReleaseSha,now:evidenceTime});

@@ -24,6 +24,7 @@ export function assertSuccessorRecoveryRequest(value) {
 // pruning, policy convergence or publication, all of which are durable history.
 export async function runSuccessorReleaseCoordinator({recoveryReference},runtime) {
  assert.match(recoveryReference||'',digest);
+ const now=()=>runtime.now?.()??Date.now();
  const store=runtime.store,request=assertSuccessorRecoveryRequest(await store.getArtifact(recoveryReference));
  assert.equal(brokerDigest(request),recoveryReference);
  await runtime.authenticateRequest(request);
@@ -67,10 +68,33 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
    assert.equal(prepared.preparation.sourceSha,release.sourceSha);
    assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
    await runtime.hydratePreparation({release,inputs},phase,prepared);
-   const preparedReference=brokerDigest(prepared);
    for(let round=0;;round++){
     assert.ok(round<20,'Repeated expired successor approvals require a new governed operation');
+    if(phase==='cutover'&&round>0){
+     const renewed=await read(`${phase}:prepared:${round}`);
+     if(renewed)prepared=await get(renewed.result);
+     else{
+      if(Date.parse(prepared.preparation.successorReconciliation?.expiresAt||'')<=now()){
+       const value=await runtime.runStageOperation({...inputs,operation:'prepare-successor-cutover',
+        publicationPreparation:publication.preparation,publicationAuthorization:publication.authorization,
+        publicationResult:publication.result,successorRecovery:inputs.successorRecovery});
+       prepared=await runtime.capturePreparation({release,inputs},phase,value);
+      }
+      await write(`${phase}:prepared:${round}`,{result:await put(prepared)});
+     }
+     assert.equal(prepared.preparation.sourceSha,release.sourceSha);
+     assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
+     await runtime.hydratePreparation({release,inputs},phase,prepared);
+    }
+    const preparedReference=brokerDigest(prepared);
     const attempt=await read(`${phase}:attempt:${round}`);
+    const retired=await read(`${phase}:retired:${round}`);
+    if(retired){assert.equal(retired.prepared,preparedReference);
+     if(attempt){const signed=await read(`${phase}:authorized:${round}`);assert.equal(signed?.prepared,preparedReference);
+      assert.equal(await runtime.classifyNativeAttempt({release,inputs},phase,prepared,await get(signed.authorization)),'PRE_NATIVE');}
+     continue;}
+    const evidenceExpired=()=>phase==='cutover'&&Date.parse(prepared.preparation.successorReconciliation?.expiresAt||'')<=now();
+    if(evidenceExpired()&&!attempt){await write(`${phase}:retired:${round}`,{prepared:preparedReference,reason:'EVIDENCE_EXPIRED'});continue;}
     const authenticatedDispatch=async()=>{
      const journal=await read(`${phase}:dispatch:${round}`),identity=journal?.dispatch?.identity;
      assert.ok(identity,'Timed-out approval lacks authenticated dispatch');
@@ -120,10 +144,12 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
     assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,preparationReference:preparedReference,authorizationRound:round});
     const native=await runtime.classifyNativeAttempt({release,inputs},phase,prepared,authorization);
     assert.ok(['PRE_NATIVE','RECOVER'].includes(native));
-    if(!attempt){assert.equal(native,'PRE_NATIVE');if(Date.parse(authorization.expiresAt)<=Date.now())continue;
+    if(!attempt){assert.equal(native,'PRE_NATIVE');if(Date.parse(authorization.expiresAt)<=now()||evidenceExpired()){
+      await write(`${phase}:retired:${round}`,{prepared:preparedReference,reason:evidenceExpired()?'EVIDENCE_EXPIRED':'AUTHORIZATION_EXPIRED'});continue;}
      await write(`${phase}:attempt:${round}`,{prepared:preparedReference,authorization:brokerDigest(authorization)});}
     else{assert.equal(attempt.prepared,preparedReference);assert.equal(attempt.authorization,brokerDigest(authorization));
-     if(native==='PRE_NATIVE'&&Date.parse(authorization.expiresAt)<=Date.now())continue;}
+     if(native==='PRE_NATIVE'&&(Date.parse(authorization.expiresAt)<=now()||evidenceExpired())){
+      await write(`${phase}:retired:${round}`,{prepared:preparedReference,reason:evidenceExpired()?'EVIDENCE_EXPIRED':'AUTHORIZATION_EXPIRED'});continue;}}
     const executionInputs={files:inputs.files,directory:inputs.directory,terraformDataDir:inputs.terraformDataDir};
     result=await runtime.runStageOperation({...executionInputs,operation:native==='RECOVER'
      ?phase==='cutover'?'recover-cutover':'recover-reconciliation'

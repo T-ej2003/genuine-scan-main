@@ -23,8 +23,9 @@ test('hosted successor materializer consumes immutable import reference and orig
  const currentBytes=Buffer.from(JSON.stringify({version:4,lineage:preparation.state.lineage,serial:preparation.state.serial+1,outputs:{},resources:[]}));
  const imageBytes=Buffer.from(JSON.stringify({imageReleaseSha:'9'.repeat(40),workflowRunId:'123',canonicalArtifactSha256:'1'.repeat(64)}));
  const signatureBytes=Buffer.from(JSON.stringify({signed:true}));
- const artifacts=new Map();const store={putArtifact:(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,value);},
-  getArtifact:id=>{assert.ok(artifacts.has(id));return structuredClone(artifacts.get(id));},readStep:()=>null};
+ const artifacts=new Map(),steps=new Map();const store={putArtifact:(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,value);},
+  getArtifact:id=>{assert.ok(artifacts.has(id));return structuredClone(artifacts.get(id));},
+  readStep:(id,name)=>steps.get(`${id}/${name}`)||null};
  const put=value=>{const ref=brokerDigest(value);store.putArtifact(ref,value);return ref;};
  const historicalReference=put(binary(historicalBytes)),imageEvidenceReference=put(binary(imageBytes)),
   imageSignatureReference=put(binary(signatureBytes));
@@ -47,12 +48,13 @@ test('hosted successor materializer consumes immutable import reference and orig
  const run=args=>{if(args[0]!=='s3api'||args[1]!=='get-object')throw new Error('Unexpected AWS operation');
   const bytes=args.includes('env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate')?currentBytes:Buffer.from('{}');
   fs.writeFileSync(args.at(-1),bytes,{mode:0o600});return '{}';};
+ let imageObservation;
  const runtime=createHostedSuccessorRuntime({env,awsRun:run,ghRun:()=>{throw new Error('Unexpected GitHub call');},
   createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.equal(c,C);},verifyImport:()=>true,
   readAuthority:()=>({preparation,authorization}),readReceipt:()=>result,
   verifyAuthorization:async()=>true,readVersion:()=>rigged.deps.getVersion('13'),readReviewedAlias:()=>preparation.alias,
-  authenticateImages:({request:seen,evidence,imageReleaseSha})=>{
-   assert.equal(seen.recoveryToolingSha,C);assert.equal(evidence.imageReleaseSha,imageReleaseSha);},
+  authenticateImages:({request:seen,evidence,imageReleaseSha,now})=>{
+   assert.equal(seen.recoveryToolingSha,C);assert.equal(evidence.imageReleaseSha,imageReleaseSha);imageObservation=now;},
   packageBroker:async({outputPath,manifestPath,toolingSha})=>{
    assert.equal(toolingSha,A);fs.writeFileSync(outputPath,packageBytes,{mode:0o600});
    fs.writeFileSync(manifestPath,'{}',{mode:0o600});},
@@ -76,5 +78,15 @@ test('hosted successor materializer consumes immutable import reference and orig
   assert.deepEqual(fs.readFileSync(inputs.successorRecovery.imageSignaturePath),signatureBytes);
   assert.equal(JSON.parse(fs.readFileSync(inputs.successorRecovery.bindingReportPath)).toolingSha,A);
   assert.equal(fs.readFileSync(inputs.files.package).toString(),'published-broker-package');
+  const identity={schemaVersion:2,sourceSha:A,ticketId:request.ticketId,
+   recoveryReference:brokerDigest(request),toolingSha:C},operationId=brokerDigest(identity);
+  const old={preparation:{successorReconciliation:{createdAt:'2026-10-01T00:00:00.000Z'}}};
+  const renewed={preparation:{successorReconciliation:{createdAt:'2026-10-10T09:00:00.000Z'}}};
+  const oldRef=put(old),renewedRef=put(renewed);
+  steps.set(`${operationId}/cutover:prepared`,{result:oldRef});
+  steps.set(`${operationId}/cutover:prepared:1`,{result:renewedRef});
+  steps.set(`${operationId}/cutover:attempt:1`,{prepared:renewedRef});
+  await runtime.authenticateRequest(request);
+  assert.equal(imageObservation,'2026-10-10T09:00:00.000Z');
  }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,releaseId),{recursive:true,force:true});}
 });

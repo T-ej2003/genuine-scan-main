@@ -26,8 +26,17 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  const store=createStore({run,directory,repositoryRoot:root}),start=store.readStart({sourceSha,ticketId});assert.ok(start,'Missing governed release start');
  const release=store.getArtifact(start.release),{releaseId:originalId,...identity}=release;
  assert.equal(originalId,releaseId);assert.equal(identity.ticketId,ticketId);assert.equal(identity.sourceSha,sourceSha);assert.equal(brokerDigest(identity),releaseId);
- const record=store.readStep(releaseId,`${phase}:prepared`);assert.ok(record,'Missing exact transition preparation');
- assert.equal(record.result,preparationReference);assert.equal(record.sourceSha,sourceSha);assert.equal(record.name,`${phase}:prepared`);
+ const successor=Boolean(start.recovery);
+ if(successor){assert.equal(start.recovery,release.recoveryReference);assert.match(release.toolingSha||'',/^[a-f0-9]{40}$/);}
+ const preparationName=successor&&phase==='cutover'&&authorizationRound>0
+  ?`${phase}:prepared:${authorizationRound}`:`${phase}:prepared`;
+ const record=store.readStep(releaseId,preparationName);assert.ok(record,'Missing exact transition preparation');
+ assert.equal(record.result,preparationReference);assert.equal(record.sourceSha,sourceSha);assert.equal(record.name,preparationName);
+ const assertSuccessorRoundActive=()=>{if(successor){
+  assert.equal(store.readStep(releaseId,`${phase}:retired:${authorizationRound}`),null,'Successor preparation was retired');
+  assert.equal(store.readStep(releaseId,`${phase}:approval-timeout:${authorizationRound}`),null,'Successor approval timed out');
+ }};
+ assertSuccessorRoundActive();
  const pending=store.readStep(releaseId,`${phase}:pending:${authorizationRound}`);
  if(pending){assert.equal(pending.prepared,preparationReference);assert.equal(pending.runId,env.GITHUB_RUN_ID);}
  const prepared=store.getArtifact(preparationReference);assert.equal(prepared.preparation.sourceSha,sourceSha);
@@ -47,6 +56,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
    authorization:predecessor.cutoverAuthorization,casResult:predecessor.casResult})));
  }
  const authorization=await runRequest({operation:operations[phase],files,directory,terraformDataDir,preparation:prepared.preparation,planPath:prepared.planPath,...predecessor});
+ assertSuccessorRoundActive();
  assert.equal(authorization.schemaVersion,2);assert.equal(authorization.protectedEnvironmentApprovalEvidence.workflowRunId,env.GITHUB_RUN_ID);
  assert.equal(authorization.preparationSha256,brokerDigest(prepared.preparation));
  assert.equal(path.resolve(output),path.join(HOSTED_RELEASE_ROOT,releaseId,phase,'authorization.json'));
