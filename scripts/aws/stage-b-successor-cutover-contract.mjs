@@ -48,6 +48,16 @@ export function authenticateSuccessorStateHistory({ historicalBytes, currentByte
   assert.equal(after.qualified_arn, publicationResult.target.versionArn, 'Current Terraform broker ARN differs from publication');
   const allowedBrokerFields = new Set(['version', 'code_sha256', 'source_code_hash', 'source_code_size', 'environment', 'filename', 'last_modified', 'qualified_arn', 'qualified_invoke_arn']);
   const normalizedBefore = normalizeRepresentation(historical), normalizedAfter = normalizeRepresentation(current);
+  // A publication apply can clear propagated create-before-destroy state on unchanged dependencies.
+  for (let r = 0; r < normalizedBefore.resources.length; r++) {
+    const resource = normalizedBefore.resources[r];
+    if (resource.mode === 'managed' && resource.type === 'aws_lambda_function' && resource.name === 'broker' && !resource.module) continue;
+    const prior = resource.instances || [], next = normalizedAfter.resources[r]?.instances || [];
+    for (let i = 0; i < prior.length; i++)
+      if (prior[i].create_before_destroy === true && next[i] &&
+          !Object.hasOwn(current.resources[r]?.instances?.[i] || {}, 'create_before_destroy'))
+        delete prior[i].create_before_destroy;
+  }
   const oldAttributes = brokerInstance(normalizedBefore), newAttributes = brokerInstance(normalizedAfter);
   for (const field of allowedBrokerFields) { delete oldAttributes[field]; delete newAttributes[field]; }
   const brokerCheck = state => (state.check_results || []).find(item => item.object_kind === 'resource' && item.config_addr === BROKER_FUNCTION);

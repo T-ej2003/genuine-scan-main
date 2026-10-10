@@ -34,6 +34,31 @@ const fixture = () => {
   return { before, after, historicalBytes, currentBytes, publicationPreparation, publicationResult, currentIdentity };
 };
 const checkHistory = f => authenticateSuccessorStateHistory(f);
+
+test('publication may clear only historical propagated lifecycle metadata on unchanged dependencies', () => {
+  const f = fixture();
+  f.before.resources[1].instances[0].create_before_destroy = true;
+  f.historicalBytes = Buffer.from(JSON.stringify(f.before));
+  f.publicationPreparation.state.stateSha256 = sha(f.historicalBytes);
+  assert.equal(checkHistory(f).currentSerial, 121);
+  for (const change of [
+    x => { x.after.resources[1].instances[0].create_before_destroy = false; },
+    x => { x.after.resources[1].instances[0].attributes.id = 'changed'; },
+    x => { x.after.resources[1].instances = []; },
+  ]) {
+    const altered = structuredClone(f);
+    altered.historicalBytes = Buffer.from(f.historicalBytes);
+    change(altered);
+    altered.currentBytes = Buffer.from(JSON.stringify(altered.after));
+    altered.currentIdentity.stateSha256 = sha(altered.currentBytes);
+    assert.throws(() => checkHistory(altered));
+  }
+  const brokerLifecycle = fixture();
+  brokerLifecycle.before.resources[0].instances[0].create_before_destroy = true;
+  brokerLifecycle.historicalBytes = Buffer.from(JSON.stringify(brokerLifecycle.before));
+  brokerLifecycle.publicationPreparation.state.stateSha256 = sha(brokerLifecycle.historicalBytes);
+  assert.throws(() => checkHistory(brokerLifecycle));
+});
 const mutate = (f, target, fn) => { fn(f[target]); f[`${target === 'before' ? 'historical' : 'current'}Bytes`] = Buffer.from(JSON.stringify(f[target]));
   if (target === 'after') f.currentIdentity.stateSha256 = sha(f.currentBytes); };
 
