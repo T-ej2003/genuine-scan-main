@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, BROKER_FUNCTION, BROKER_ALIAS, brokerExecutionCheckout, brokerDigest, brokerPrerequisiteIdentity, brokerTargetIdentity, assertBrokerPreparation, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerCutoverPlan, prepareBrokerStateRefresh, registrationPolicyPrerequisiteChain, PREPUBLICATION_POLICY_OPERATIONS } from './stage-b-staged-broker-contract.mjs';
-import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from './stage-b-staged-broker.mjs';
+import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias, recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation, assertSuccessorCasTime } from './stage-b-staged-broker.mjs';
 import { createStagedBrokerExecutor, stagedBrokerArtifactSet } from './stage-b-staged-broker-executor.mjs';
 import { signBrokerAuthorization, createBrokerCheckerAuthorizationBoundary,readBrokerProtectedEnvironmentApproval,createBrokerProtectedEnvironmentAuthorization } from './stage-b-staged-broker-authorization.mjs';
 import { assertStageBStaticConfigurationCoverage } from './stage-b-plan-semantic-contract.mjs';
@@ -16,7 +16,7 @@ import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TA
 
 const root = path.resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const equal = (a, b) => assert.equal(brokerDigest(a), brokerDigest(b));
-const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'authorize-closure':'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
+const MODES = { 'prepare-registration-adoption': 'ADOPTION', 'prepare-policy-adoption': 'ADOPTION', 'prepare-publication': 'PREPARATION', 'authorize-publication': 'PREPARATION', 'publish': 'PUBLICATION', 'prepare-cutover': 'PREPARATION', 'prepare-successor-cutover': 'PREPARATION', 'authorize-cutover': 'PREPARATION', 'authorize-closure':'PREPARATION', 'cutover': 'CUTOVER', 'reconcile': 'RECONCILIATION' };
 Object.assign(MODES, { 'prepare-registration': 'PREPARATION', 'authorize-registration': 'PREPARATION', register: 'REGISTRATION', 'prepare-policy': 'PREPARATION', 'authorize-policy': 'PREPARATION', 'converge-policy': 'POLICY' });
 Object.assign(MODES, { 'prepare-pruning': 'PREPARATION', 'authorize-pruning': 'PREPARATION', prune: 'POLICY', 'recover-policy': 'POLICY_RECOVERY', 'verify-policy-writer-termination': 'POLICY_RECOVERY' });
 Object.assign(MODES, { 'recover-registration': 'REGISTRATION_RECOVERY', 'recover-publication': 'PUBLICATION_RECOVERY', 'recover-cutover': 'CUTOVER_RECOVERY', 'recover-reconciliation': 'RECONCILIATION_RECOVERY' });
@@ -51,7 +51,13 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     assert.deepEqual(Object.keys(request.predecessorReceiptRecovery).sort(), ['policyTransactionId', 'registrationTransactionId']);
     for (const id of Object.values(request.predecessorReceiptRecovery)) assert.match(id || '', /^[a-f0-9]{64}$/);
   }
-  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'cutoverPreparation', 'cutoverAuthorization', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery'];
+  const allowed = ['operation', 'files', 'directory', 'terraformDataDir', 'preparation', 'authorization', 'planPath', 'planningOptions', 'publicationPreparation', 'publicationAuthorization', 'publicationResult', 'casResult', 'cutoverPreparation', 'cutoverAuthorization', 'humanReviewId', 'makerIdentity', 'prerequisiteChain', 'versionId', 'receiptRecovery', 'predecessorReceiptRecovery', 'successorRecovery'];
+  if (operation === 'prepare-successor-cutover') {
+    assert.deepEqual(Object.keys(request.successorRecovery || {}).sort(), ['bindingReportPath', 'currentStatePath', 'historicalStatePath', 'imageEvidencePath', 'imageSignaturePath']);
+    assert.equal(request.planningOptions, undefined, 'Successor cutover cannot consume historical refresh planning inputs');
+    if (request.prerequisiteChain !== undefined) equal(request.prerequisiteChain,
+      request.publicationPreparation?.prerequisiteChain, 'Successor prerequisites differ from the signed publication');
+  } else assert.equal(request.successorRecovery, undefined, 'Successor evidence requires its explicit preparation operation');
   if(!['authorize-closure','reconcile','recover-reconciliation'].includes(operation)){
     assert.equal(request.cutoverPreparation,undefined);assert.equal(request.cutoverAuthorization,undefined);
   }
@@ -97,8 +103,10 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     await assertBrokerAuthorization(request.cutoverAuthorization,request.cutoverPreparation,
       {verify:deps.verifyAuthorization,now:new Date(request.casResult.authorizedAt)});
     await deps.authenticateCasResult(request.casResult,brokerDigest(request.cutoverAuthorization));
+    if (request.cutoverPreparation.successorReconciliation) assertSuccessorCasTime(request.cutoverPreparation, request.casResult.authorizedAt);
     equal(checkout,brokerExecutionCheckout(preparation));
     if (preparation.outputReconciliation) await deps.authenticateOutputReconciliation(preparation);
+    if (preparation.successorReconciliation) await deps.authenticateSuccessorReconciliation(preparation);
     equal(prerequisites,preparation.prerequisites);equal(await deps.readStateIdentity(),preparation.state);
     equal(await deps.getAlias(),request.casResult.alias);
     equal(brokerTargetIdentity(await deps.getVersion(preparation.target.version),preparation.packageSha256),preparation.target);
@@ -186,6 +194,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     equal(prerequisites, preparation.prerequisites); equal(await deps.readStateIdentity(), preparation.state);
     const artifacts = await deps.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256); assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256); assert.equal(artifacts.artifactSetSha256, preparation.artifactSetSha256);
     if (preparation.outputReconciliation) await deps.authenticateOutputReconciliation(preparation);
+    if (preparation.successorReconciliation) await deps.authenticateSuccessorReconciliation(preparation);
     if (operation !== 'authorize-pruning') staticPlan(artifacts.plan);
     if (operation === 'authorize-pruning') assertBrokerPolicyPruningPlan(artifacts.plan, preparation);
     else if (['authorize-registration', 'authorize-policy'].includes(operation)) assertPrerequisitePlan(artifacts.plan, preparation);
@@ -204,15 +213,18 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
   if (operation === 'converge-policy') return deps.executeBrokerPolicyConvergence();
   if (operation === 'prune') return deps.executeBrokerPolicyPruning();
   if (operation === 'publish') return executeBrokerPublication({ preparation, authorization }, deps);
-  if (operation === 'prepare-cutover') {
+  if (['prepare-cutover', 'prepare-successor-cutover'].includes(operation)) {
     const old = request.publicationPreparation; assertBrokerPreparation(old);
     equal(prerequisites, old.prerequisites);
     await deps.authenticatePublicationResult(request.publicationResult, request.publicationResult.authorizationSha256);
     if (checkout.sourceSha !== old.sourceSha) await deps.authenticateBrokerRecoveryTooling(old, request.publicationResult, checkout);
     else equal(checkout, brokerExecutionCheckout(old));
+    if (operation === 'prepare-successor-cutover') assert.equal(brokerDigest(fs.readFileSync(files.package)), old.packageSha256,
+      'Successor package differs from the immutable published broker');
+    const artifactSetSha256 = operation === 'prepare-successor-cutover' ? stagedBrokerArtifactSet(files, root, old) : undefined;
     const captured = await deps.captureCutoverPlan(); staticPlan(captured.plan);
     let outputReconciliation;
-    if (Object.values(captured.plan.output_changes || {}).some(o => JSON.stringify(o.actions) !== '["no-op"]')) {
+    if (operation === 'prepare-cutover' && Object.values(captured.plan.output_changes || {}).some(o => JSON.stringify(o.actions) !== '["no-op"]')) {
       const backendMetadata = assertStageBPlanningBackendMetadata({ env: { TF_DATA_DIR: terraformDataDir }, repositoryRoot: root });
       const inputs = planningInputs(files.tfvars, request.planningOptions, { currentHead: old.sourceSha }, { backendMetadata });
       assert.equal(inputs.recoveryMode, 'NORMAL'); assert.equal(inputs.toolingTreeSha256, old.treeSha256);
@@ -224,8 +236,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
         bindingReportPath: inputs.bindingReportPath, bindingReportSha256: inputs.bindingReportSha256,
         outputChanges: report.outputChanges.map(({ name, before, after }) => ({ name, before, after })) };
     }
-    const p = await prepareBrokerCutover({ outputReconciliation, publicationPreparation: old, publicationAuthorization: request.publicationAuthorization, publicationResult: request.publicationResult,
-      plan: captured.plan, bytes: captured.bytes, state: await deps.readStateIdentity(), artifactSetSha256: stagedBrokerArtifactSet(files, root) }, deps);
+    const p = await prepareBrokerCutover({ outputReconciliation, successorRecovery: request.successorRecovery, publicationPreparation: old, publicationAuthorization: request.publicationAuthorization, publicationResult: request.publicationResult,
+      plan: captured.plan, bytes: captured.bytes, state: await deps.readStateIdentity(), artifactSetSha256: artifactSetSha256 || stagedBrokerArtifactSet(files, root) }, deps);
     classifyStageBPlan(captured.plan, { stagedBroker: p });
     return { preparation: p, planPath: captured.file };
   }

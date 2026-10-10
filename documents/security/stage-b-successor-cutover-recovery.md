@@ -1,0 +1,26 @@
+# Receipt-bound successor cutover recovery
+
+Use `prepare-successor-cutover` only when broker publication completed but the reviewed alias did not advance, and the original cutover planning files are unavailable. This path creates **new** cutover evidence. It does not recover or replace the original planning files or their authorization.
+
+The publication source remains the release identity. A later protected-main checkout is recovery tooling only. The existing source authority, signed publication authorization, publication receipt, and live published Lambda version must authenticate before successor preparation. The ordinary `prepare-cutover` path and its historical output-reconciliation contract remain unchanged.
+
+The new request uses the usual broker package, manifest, Terraform variables, and backend metadata plus `successorRecovery` paths for:
+
+| Input | Required proof |
+| --- | --- |
+| Historical Terraform state | Exact raw bytes match the signed publication predecessor state hash and lineage. An S3 version identifier alone is insufficient. |
+| Current Terraform state | Exact raw bytes match the live backend identity at preparation. The serial advances on the same lineage. |
+| Stage-B binding report | Canonical generator output, original-release checksums/contracts, current state backup, and exact published broker package. |
+| Image evidence and signature | Fresh canonical signed observation of the original release's authorized image publication; images equal the published broker configuration. This is new evidence, not a recovered original image authorization. |
+
+The state comparison permits only the independently authenticated broker v12-to-v13 publication and Terraform representation changes. Outputs must still match the historical state before successor planning. The proposed `bound_images` transition is derived from the current state, the signed image observation, the canonical binding report, and published v13 configuration. Every other output change fails. The cutover and refresh plans must match that exact transition.
+
+The successor reconciliation is bound to the original release, publication receipt, broker target, alias revision, current protected-main tooling, state and binding hashes, and a 30-minute operation identity. A fresh cutover authorization signs the complete preparation. Alias compare-and-swap remains v12 to the already published v13; closure uses the existing state-only refresh and receipt path. Expired preparation requires new read-only preparation and fresh authorization. Uncertain alias outcomes require alias readback and native recovery, never blind replay.
+
+Generate successor inputs with the existing Stage-A prerequisite producer from an authenticated Stage-A state backup, the existing image-evidence producer for the original release's compatible immutable image publication, and the canonical Stage-B tfvars generator with `toolingSha` set to the original release and `checksumsFile` loaded from that commit. The resulting binding report must identify current Stage-B state serial 121 and the published v13 package. The current protected-main checkout supplies execution code and is authenticated separately by broker recovery tooling. None of these fresh files is labelled as the lost original planning artifact.
+
+For the pending release, historical state serial 120 is identified by SHA-256 `747d0e50cf0a4ace40bce60bd75e997be9631539fd38af0381afe043c49da3d4` and S3 version `uNSEz1lgrisi84A.Am7mMBo.Et6M1wd_`. Current state serial 121 was read back at SHA-256 `fd34c9d740a9d1335d2b54bc892fc99b210f793bd7379cf9cd7681b382d20c96`. A read-only retrieval of the exact historical S3 version through the existing root identity authenticated its raw hash and the state-transition verifier accepted its relationship to the signed publication receipt and current state. The release-deployer role can read current state but lacks `s3:GetObjectVersion` for that historical version; the exact historical bytes must be supplied by an identity already authorized for that read. Do not broaden IAM or substitute a reconstructed state.
+
+Read-only comparison found the same six Terraform outputs in both states, with equal values. Using the authenticated v13 publication configuration and current state as inputs to the transition derivation produced exactly one candidate output change: `bound_images`, to the published image release `3666118ab57fb4ba32ff1597e7b74e47f1050f3b`. This candidate still requires a fresh canonical binding report, signed image observation, exact Terraform plan, and cutover authorization before any alias write.
+
+No registration, IAM pruning, policy convergence, or Lambda publication is part of this successor operation. Their completed receipts remain immutable. No production action is authorized merely by this document or by a successful preparation: the independent checker or protected-production environment must authorize the exact prepared cutover.

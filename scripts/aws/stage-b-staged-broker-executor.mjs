@@ -7,8 +7,10 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, brokerExecutionCheckout, assertBrokerOutputReconciliation, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, brokerTargetIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation, PREPUBLICATION_POLICY_OPERATIONS, registrationPolicyPredecessorRelease, assertPolicyPruningHandoff } from './stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, brokerExecutionCheckout, assertBrokerOutputReconciliation, assertBrokerSuccessorReconciliation, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, brokerTargetIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation, PREPUBLICATION_POLICY_OPERATIONS, registrationPolicyPredecessorRelease, assertPolicyPruningHandoff } from './stage-b-staged-broker-contract.mjs';
 import { assertStageBTfvarsBinding } from './generate-production-green-stage-b-tfvars.mjs';
+import { assertImageEvidence, assertImageEvidenceReuseBridge, verifyImageEvidenceSignature, imageEvidenceSha256 } from './production-green-stage-b-image-evidence.mjs';
+import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition } from './stage-b-successor-cutover-contract.mjs';
 import { assertStageBRefreshEvidence } from './stage-b-refresh-contract.mjs';
 import { createStagedBrokerClosureReader } from './stage-b-staged-broker-closure.mjs';
 import { authenticateBrokerRecoveryApproval } from './stage-b-staged-broker.mjs';
@@ -415,6 +417,48 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
   };
   const getAlias = async () => normalizeBrokerAlias(json(['lambda', 'get-alias', '--function-name', STAGE_B.brokerFunctionArn, '--name', STAGE_B.brokerAliasQualifier]));
   const readReceipt = (id, status, expected) => readStagedBrokerReceipt({ run: runAws, id, status, directory, expected });
+  const readSuccessorReconciliation = async (p, paths, observedAt) => {
+    const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: p.sourceSha, directory });
+    assert.ok(source, 'Original publication source authority is absent');
+    assert.equal(brokerDigest(source.preparation), p.publication.preparationSha256);
+    assert.equal(brokerDigest(source.authorization), p.publication.authorizationSha256);
+    await adapter.authenticatePublicationResult(p.publication, p.publication.authorizationSha256);
+    const bytes = {};
+    for (const [name, filePath] of Object.entries(paths)) {
+      assertStageBPrivateFile({ filePath, repositoryRoot: root, label: `Successor ${name}` });
+      bytes[name] = fs.readFileSync(filePath);
+    }
+    const currentIdentity = await adapter.readStateIdentity();
+    if (!['RECONCILIATION_RECOVERY'].includes(phase) && (phase !== 'RECONCILIATION' || !capturedRefresh)) equal(currentIdentity, p.state,
+      'Successor state changed before native recoverability');
+    const history = authenticateSuccessorStateHistory({ historicalBytes: bytes.historicalStatePath,
+      currentBytes: bytes.currentStatePath, publicationPreparation: source.preparation,
+      publicationResult: p.publication, currentIdentity: p.state });
+    const binding = assertStageBTfvarsBinding({ tfvarsPath: files.tfvars, bindingReportPath: paths.bindingReportPath,
+      bindingReportSha256: brokerDigest(bytes.bindingReportPath), expectedToolingSha: p.sourceSha,
+      expectedToolingTreeSha256: p.treeSha256 });
+    const imageEvidence = JSON.parse(bytes.imageEvidencePath), imageSignature = JSON.parse(bytes.imageSignaturePath);
+    assertImageEvidence(imageEvidence, { signatureArtifact: imageSignature,
+      publicationSourceSha: imageEvidence.publicationSourceSha || imageEvidence.imageReleaseSha,
+      currentSourceSha: p.sourceSha, imageReleaseSha: binding.imageReleaseSha,
+      workflowRunId: imageEvidence.workflowRunId, artifactSha256: imageEvidence.canonicalArtifactSha256,
+      now: observedAt, verifySignature: options => verifyImageEvidenceSignature({ ...options, run: runAws }) });
+    assertImageEvidenceReuseBridge(imageEvidence, { currentSourceSha: p.sourceSha,
+      imageReuseEvidence: deriveStageBImageImpactReport({ imageReleaseSha: binding.imageReleaseSha, toolingSha: p.sourceSha }) });
+    assert.equal(binding.imageEvidenceCanonicalSha256, imageEvidenceSha256(imageEvidence));
+    assert.equal(binding.imageEvidenceSignatureSha256, brokerDigest(bytes.imageSignaturePath));
+    for (const image of Object.values(binding.images)) {
+      const signed = imageEvidence.images.find(candidate => candidate.service === image.service);
+      assert.ok(signed && signed.digest === image.digest &&
+        image.imageReference === `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/${signed.repository}@${signed.digest}`,
+        'Successor image binding differs from signed evidence');
+    }
+    return { outputChanges: deriveSuccessorOutputTransition({ stateHistory: history, bindingReport: binding,
+      publicationPreparation: source.preparation, publicationResult: p.publication }),
+      historicalStateSha256: brokerDigest(bytes.historicalStatePath), currentStateSha256: brokerDigest(bytes.currentStatePath),
+      bindingReportSha256: brokerDigest(bytes.bindingReportPath), imageEvidenceSha256: brokerDigest(bytes.imageEvidencePath),
+      imageSignatureSha256: brokerDigest(bytes.imageSignaturePath) };
+  };
   const policyReservation = () => ({ purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) });
   const policyOperation = (id, session) => ({ policyArn: STAGE_B_BROKER_POLICY.arn, sourceSha: preparation.sourceSha, operationIdentity: id, writerSession: session,
     acquisition: { purpose: preparation.purpose, preparationSha256: brokerDigest(preparation), authorizedAt: new Date().toISOString(),
@@ -430,6 +474,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(stagedBrokerArtifactSet(files, root, preparation), preparation.artifactSetSha256);
     if (preparation.recoveryTooling) equal(await adapter.readCheckout(), brokerExecutionCheckout(preparation));
     if (preparation.outputReconciliation) await adapter.authenticateOutputReconciliation(preparation);
+    if (preparation.successorReconciliation) await adapter.authenticateSuccessorReconciliation(preparation);
     return id;
   };
   const consumeMutation = reservation => {
@@ -962,6 +1007,36 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       equal(evidence.outputChanges, report.outputChanges.map(({ name, before, after }) => ({ name, before, after })));
       assert.equal(p.state.lineage, source.preparation.state.lineage);
       assert.ok(p.state.serial > source.preparation.state.serial);
+    },
+    createSuccessorReconciliation: async (p, paths) => {
+      assert.deepEqual(Object.keys(paths).sort(), ['bindingReportPath', 'currentStatePath', 'historicalStatePath', 'imageEvidencePath', 'imageSignaturePath']);
+      const observed = await readSuccessorReconciliation(p, paths, new Date().toISOString());
+      assert.equal(observed.historicalStateSha256, readStagedBrokerSourceAuthority({ run: runAws,
+        sourceSha: p.sourceSha, directory }).preparation.state.stateSha256);
+      const createdAt = new Date().toISOString(), expiresAt = new Date(Date.parse(createdAt) + 30 * 60_000).toISOString();
+      const publicationResultSha256 = brokerDigest(p.publication);
+      const operationId = brokerDigest({ purpose: BROKER_CUTOVER, sourceSha: p.sourceSha,
+        recoveryTooling: p.recoveryTooling, publicationResultSha256,
+        historicalStateSha256: observed.historicalStateSha256, currentStateSha256: observed.currentStateSha256,
+        alias: p.alias, target: p.target, bindingReportSha256: observed.bindingReportSha256,
+        imageEvidenceSha256: observed.imageEvidenceSha256, imageSignatureSha256: observed.imageSignatureSha256,
+        outputChanges: observed.outputChanges });
+      return { operationId, ...paths, ...observed, publicationResultSha256, createdAt, expiresAt };
+    },
+    authenticateSuccessorReconciliation: async p => {
+      const evidence = p.successorReconciliation;
+      assertBrokerSuccessorReconciliation(evidence, p);
+      const now = new Date();
+      if ((phase === 'PREPARATION' && operation !== 'authorize-closure') || phase === 'CUTOVER')
+        assert.ok(Date.parse(evidence.createdAt) <= now.getTime() && now.getTime() < Date.parse(evidence.expiresAt),
+          'Successor preparation expired before alias intent');
+      const paths = Object.fromEntries(['historicalStatePath', 'currentStatePath', 'bindingReportPath',
+        'imageEvidencePath', 'imageSignaturePath'].map(name => [name, evidence[name]]));
+      const observed = await readSuccessorReconciliation(p, paths,
+        operation === 'authorize-closure' || ['RECONCILIATION', 'RECONCILIATION_RECOVERY', 'CUTOVER_RECOVERY'].includes(phase)
+          ? evidence.createdAt : now.toISOString());
+      for (const [name, value] of Object.entries(observed)) equal(value, evidence[name], `Successor ${name} changed`);
+      return true;
     },
     readRecoveryCheckout: async () => {
       assert.ok(['POLICY_RECOVERY', 'REGISTRATION_RECOVERY'].includes(phase));
