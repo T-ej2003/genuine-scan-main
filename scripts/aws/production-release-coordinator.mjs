@@ -137,7 +137,7 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
 // Saved plans and package bytes survive runner replacement. Paths are supplied
 // by the trusted runtime; external artifacts cannot choose filesystem targets.
 export async function captureReleasePhaseMaterial({prepared,files,store,repositoryRoot}) {
- const p=prepared.preparation;assertBrokerPreparation(p);assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p),p.artifactSetSha256);
+ const p=prepared.preparation;assertBrokerPreparation(p);assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p,p.successorReconciliation?p.sourceSha:undefined),p.artifactSetSha256);
  const members={};
  for(const [name,filePath] of Object.entries({...files,plan:prepared.planPath})){
   assertStageBPrivateFile({filePath,repositoryRoot,label:`Release ${name}`});const bytes=fs.readFileSync(filePath);
@@ -174,7 +174,7 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
   if(fs.existsSync(filePath)){assertStageBPrivateFile({filePath,repositoryRoot,label:`Release ${name}`});assert.equal(brokerDigest(fs.readFileSync(filePath)),brokerDigest(contents[name]),'Existing material differs');}
   else writeStageBPrivateFileAtomic({filePath,bytes:contents[name],repositoryRoot,label:`Release ${name}`});
  }
- assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p),p.artifactSetSha256);
+ assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p,p.successorReconciliation?p.sourceSha:undefined),p.artifactSetSha256);
  return {...prepared,planPath};
 }
 

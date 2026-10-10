@@ -2,32 +2,68 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test from 'node:test';
-import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
+import { assertStageBBrokerPackageManifest, packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
+import { stagedBrokerArtifactSet } from '../aws/stage-b-staged-broker-executor.mjs';
 import { executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from '../aws/stage-b-terraform-backend-contract.mjs';
 import { stageBStaticConfiguration } from './fixtures/stage-b-static-configuration.mjs';
-import { rig, ready, cutoverPlan, sourceSha } from './fixtures/staged-broker-runtime.mjs';
+import { rig, ready, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
 import { assertBrokerAuthorization, receiptBoundCheckerDisclosure } from '../aws/stage-b-staged-broker-contract.mjs';
 import { brokerAuthorizationMessage, signBrokerAuthorization, createBrokerProtectedEnvironmentAuthorization } from '../aws/stage-b-staged-broker-authorization.mjs';
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from '../aws/production-github-environment-approval.mjs';
+import { deriveStageBToolingInputTreeSha256 } from '../aws/validate-stage-b-image-reuse.mjs';
+
+const ORIGINAL_RELEASE = '29406b0ec537ac60618642bba20133dd0cf45529';
+const RECOVERY_TOOLING = '7b40ee371b7751e19a413a4789c516c779af09d9';
 
 test('public successor preparation preserves published source and consumes explicit new evidence', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-successor-entrypoint-'));
   fs.chmodSync(directory, 0o700);
   try {
+    const historicalRoot = path.join(directory, 'historical'); fs.mkdirSync(historicalRoot);
+    const historicalPaths = ['infra/aws/terraform/lambda/production-rls-approval-broker',
+      'infra/aws/terraform/production-green-stage-b/broker/deployment-contract.json',
+      'documents/ops/iam/MSCQRProductionGreenStageBBrokerPackageManifest-v1.schema.json',
+      'scripts/aws/production-green-stage-b-contract.mjs'];
+    const historicalArchive = execFileSync('git', ['archive', '--format=tar', ORIGINAL_RELEASE, '--', ...historicalPaths]);
+    execFileSync('tar', ['-xf', '-', '-C', historicalRoot], { input: historicalArchive });
     const archive = path.join(directory, 'broker.zip');
-    await packageStageBBroker({ outputPath: archive, toolingSha: sourceSha, toolingTreeSha256: '1'.repeat(64),
-      repositoryRoot: process.cwd(), npmArgs: ['ci', '--offline', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'] });
+    const historicalTree = deriveStageBToolingInputTreeSha256(ORIGINAL_RELEASE);
+    await packageStageBBroker({ outputPath: archive, toolingSha: ORIGINAL_RELEASE, toolingTreeSha256: historicalTree,
+      repositoryRoot: historicalRoot, sourceDirectory: path.join(historicalRoot, historicalPaths[0]),
+      npmArgs: ['ci', '--offline', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'] });
+    const currentRoot = path.join(directory, 'current');
+    execFileSync('git', ['clone', '--quiet', '--shared', '--no-checkout', process.cwd(), currentRoot]);
+    const currentArchive = execFileSync('git', ['archive', '--format=tar', RECOVERY_TOOLING, '--', ...historicalPaths], { cwd: currentRoot });
+    execFileSync('tar', ['-xf', '-', '-C', currentRoot], { input: currentArchive });
+    for (const file of [path.join(historicalPaths[0], 'package-lock.json'),
+      path.join(historicalPaths[0], 'index.mjs'), historicalPaths[1]]) {
+      const full = path.join(currentRoot, file);
+      if (fs.existsSync(full)) fs.appendFileSync(full, '\nrecovery-tooling-only-change\n');
+    }
+    const manifestOptions = { brokerPackagePath: archive, repositoryRoot: currentRoot,
+      expectedToolingSha: ORIGINAL_RELEASE, expectedToolingTreeSha256: historicalTree };
+    assert.doesNotThrow(() => assertStageBBrokerPackageManifest({ ...manifestOptions, historicalSourceSha: ORIGINAL_RELEASE }));
+    assert.throws(() => assertStageBBrokerPackageManifest(manifestOptions), /provenance/);
+    assert.throws(() => assertStageBBrokerPackageManifest({ ...manifestOptions, historicalSourceSha: RECOVERY_TOOLING }), /publication identity/);
+    assert.throws(() => assertStageBBrokerPackageManifest({ ...manifestOptions, expectedToolingTreeSha256: '0'.repeat(64), historicalSourceSha: ORIGINAL_RELEASE }), /authenticated/);
+    const changedManifest = JSON.parse(fs.readFileSync(`${archive}.manifest.json`));
+    changedManifest.deploymentContractSha256 = '0'.repeat(64);
+    fs.writeFileSync(`${archive}.manifest.json`, `${JSON.stringify(changedManifest)}\n`, { mode: 0o600 });
+    assert.throws(() => assertStageBBrokerPackageManifest({ ...manifestOptions, historicalSourceSha: ORIGINAL_RELEASE }), /provenance/);
+    fs.writeFileSync(`${archive}.manifest.json`, `${JSON.stringify({ ...changedManifest,
+      deploymentContractSha256: brokerDigest(fs.readFileSync(path.join(historicalRoot, historicalPaths[1]))) })}\n`, { mode: 0o600 });
     const files = { package: archive, packageManifest: `${archive}.manifest.json`, tfvars: path.join(directory, 'stage-b.tfvars'),
       backendMetadata: path.join(directory, 'terraform.tfstate') };
     fs.writeFileSync(files.tfvars, 'fixture-current-tfvars', { mode: 0o600 });
     fs.writeFileSync(files.backendMetadata, JSON.stringify({ backend: { type: 's3', hash: 1, config: STAGE_B_TERRAFORM_BACKEND_CONFIG } }), { mode: 0o600 });
-    const original = rig({ packageIdentity: brokerDigest(fs.readFileSync(archive)) });
+    const original = rig({ sourceSha: ORIGINAL_RELEASE, toolingTreeSha256: historicalTree, packageIdentity: brokerDigest(fs.readFileSync(archive)) });
     const r = await ready(original);
-    const current = { sourceSha: 'd'.repeat(40), treeSha256: '5'.repeat(64) };
+    const current = { sourceSha: RECOVERY_TOOLING, treeSha256: deriveStageBToolingInputTreeSha256(RECOVERY_TOOLING) };
     r.deps.readCheckout = async () => current;
     r.deps.authenticateBrokerRecoveryTooling = async (_old, publication, checkout) =>
       ({ ...checkout, publicationResultSha256: brokerDigest(publication) });
@@ -39,7 +75,7 @@ test('public successor preparation preserves published source and consumes expli
     let evidenceCalls = 0;
     r.deps.createSuccessorReconciliation = async p => {
       evidenceCalls++;
-      assert.equal(p.sourceSha, sourceSha); assert.equal(p.recoveryTooling.sourceSha, current.sourceSha);
+      assert.equal(p.sourceSha, ORIGINAL_RELEASE); assert.equal(p.recoveryTooling.sourceSha, current.sourceSha);
       assert.equal(p.publication.target.version, '13');
       const publicationResultSha256 = brokerDigest(p.publication), historicalStateSha256 = '6'.repeat(64),
         currentStateSha256 = p.state.stateSha256, bindingReportSha256 = '7'.repeat(64),
@@ -59,14 +95,24 @@ test('public successor preparation preserves published source and consumes expli
     await assert.rejects(() => runStagedBrokerRequest({ ...request, prerequisiteChain: {} },
       { adapterFactory: () => assert.fail('Unsigned successor prerequisites must fail before executor construction') }));
     const result = await runStagedBrokerRequest(request, { adapterFactory: () => r.deps });
-    assert.equal(result.preparation.sourceSha, sourceSha);
+    assert.equal(result.preparation.sourceSha, ORIGINAL_RELEASE);
     assert.equal(result.preparation.recoveryTooling.sourceSha, current.sourceSha);
     assert.equal(evidenceCalls, 1);
+    assert.equal(stagedBrokerArtifactSet(files, currentRoot, original.p, ORIGINAL_RELEASE),
+      result.preparation.artifactSetSha256);
+    assert.throws(() => stagedBrokerArtifactSet(files, currentRoot, original.p), /provenance/);
+    assert.equal(result.preparation.packageSha256, brokerDigest(fs.readFileSync(archive)));
+    assert.equal(result.preparation.publication.target.version, '13');
+    const publishedBytes = fs.readFileSync(archive);
+    fs.appendFileSync(archive, 'changed-published-package');
+    await assert.rejects(() => runStagedBrokerRequest(request, { adapterFactory: () => r.deps }),
+      /Successor package differs from the immutable published broker/);
+    fs.writeFileSync(archive, publishedBytes, { mode: 0o600 });
     assert.equal(r.calls.filter(call => call === 'publish' || typeof call === 'object').length, 1);
     const prepared = result.preparation;
     const disclosure = receiptBoundCheckerDisclosure(prepared);
     assert.equal(disclosure.kind, 'SUCCESSOR_CUTOVER_RECOVERY_DISCLOSURE');
-    assert.equal(disclosure.successorEvidence.originalReleaseSourceSha, sourceSha);
+    assert.equal(disclosure.successorEvidence.originalReleaseSourceSha, ORIGINAL_RELEASE);
     assert.equal(disclosure.successorEvidence.brokerVersion, '13');
     assert.equal(disclosure.successorEvidence.operationId, prepared.successorReconciliation.operationId);
     assert.ok(disclosure.statements.includes('ORIGINAL_PUBLICATION_PLANNING_BYTES_NOT_RECOVERED'));
@@ -84,7 +130,7 @@ test('public successor preparation preserves published source and consumes expli
       protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
         reviewers: [{ type: 'User', reviewer: { id: 2, login: 'reviewer' } }] }] };
     const environmentApproval = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment,
-      repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: 'production', sourceSha,
+      repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: 'production', sourceSha: ORIGINAL_RELEASE,
       workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
       eventName: 'workflow_dispatch', workflowRunId: '123', workflowRunAttempt: '1', executionActor: 'operator',
       observedAt: '2026-10-04T11:59:00.000Z', actualApproval: { state: 'approved', environmentId: 1,
@@ -109,7 +155,7 @@ test('public successor preparation preserves published source and consumes expli
     r.deps.readPlan = async () => ({ plan, bytes: planBytes, artifactSetSha256: prepared.artifactSetSha256 });
     const cas = await executeBrokerAliasCas({ preparation: prepared, authorization: checkerAuthorization }, r.deps);
     const closure = await reconcileBrokerAlias({ preparation: prepared, authorization: checkerAuthorization, casResult: cas }, r.deps);
-    assert.equal(cas.alias.FunctionVersion, '13'); assert.equal(closure.sourceSha, sourceSha);
+    assert.equal(cas.alias.FunctionVersion, '13'); assert.equal(closure.sourceSha, ORIGINAL_RELEASE);
     assert.equal(r.calls.filter(call => typeof call === 'object').length, 1);
     assert.equal(r.calls.filter(call => call === 'publish').length, 1);
     await assert.rejects(() => runStagedBrokerRequest({ ...request, operation: 'prepare-cutover' },

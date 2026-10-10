@@ -318,7 +318,11 @@ test("public descendant preflight preserves original contracts through approval 
   const hash = bytes => createHash('sha256').update(bytes).digest('hex');
   try {
     if (!childFixture) {
-      execFileSync('git', ['clone', '--shared', originalCwd, checkout], { stdio: 'pipe' });
+      execFileSync('git', ['clone', '--shared', '--no-checkout', originalCwd, checkout], { stdio: 'pipe' });
+      // The handoff needs source/contracts, not archived operational evidence.
+      execFileSync('git', ['sparse-checkout', 'set', '--cone', '.github', 'backend', 'components', 'documents/ops/iam',
+        'documents/security', 'docker', 'infra', 'pages', 'public', 'scripts', 'shared', 'src'], { cwd: checkout, stdio: 'pipe' });
+      execFileSync('git', ['checkout'], { cwd: checkout, stdio: 'pipe' });
       symlinkSync(path.join(originalCwd, 'node_modules'), path.join(checkout, 'node_modules'), 'dir');
       symlinkSync(path.join(originalCwd, 'backend/node_modules'), path.join(checkout, 'backend/node_modules'), 'dir');
       const changed = execFileSync('git', ['diff', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);

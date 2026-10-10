@@ -52,7 +52,8 @@ export function collectProductionGreenStageBApprovalEvidence({ sourceSha, imageA
       bindingReportBytes: readStageBPrivateFileBytes({ filePath: bindingReportPath, repositoryRoot: root, label: "Stage B tfvars binding report" }).bytes,
     };
   if (!Buffer.isBuffer(capturedTfvars?.tfvarsBytes) || !Buffer.isBuffer(capturedTfvars?.bindingReportBytes)) throw new Error("Stage B tfvars binding must be captured as immutable bytes.");
-  const report = validateTfvarsBinding({ tfvarsPath, bindingReportPath, tfvarsBytes: capturedTfvars.tfvarsBytes, bindingReportBytes: capturedTfvars.bindingReportBytes, expectedToolingSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256 });
+  const report = validateTfvarsBinding({ tfvarsPath, bindingReportPath, tfvarsBytes: capturedTfvars.tfvarsBytes, bindingReportBytes: capturedTfvars.bindingReportBytes, expectedToolingSha: sourceSha, expectedImageReleaseSha: imageAuthorization.imageReleaseSha, expectedImageEvidenceSha256: imageEvidenceSha256,
+    ...(recoveryApproval ? { brokerPackageHistoricalSourceSha: recoveryApproval.sourceSha } : {}) });
   const reportBytes = readPreflight
     ? Buffer.from(`${JSON.stringify(readPreflight(releasePreflightPath))}\n`)
     : readStageBPrivateFileBytes({ filePath: releasePreflightPath, repositoryRoot: root, label: "Release-deployer preflight evidence" }).bytes;

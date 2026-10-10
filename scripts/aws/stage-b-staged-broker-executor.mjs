@@ -211,7 +211,7 @@ export function normalizeBrokerAlias(raw) {
   return brokerAliasIdentity({ ...raw, Description: raw.Description ?? '', RoutingConfig: raw.RoutingConfig ?? { AdditionalVersionWeights: {} } });
 }
 
-export function stagedBrokerArtifactSet(files, root, preparation) {
+export function stagedBrokerArtifactSet(files, root, preparation, historicalSourceSha) {
   assert.deepEqual(Object.keys(files).sort(), ['backendMetadata', 'package', 'packageManifest', 'tfvars']);
   const hashes = {};
   for (const [name, filePath] of Object.entries(files)) {
@@ -219,7 +219,7 @@ export function stagedBrokerArtifactSet(files, root, preparation) {
     hashes[name] = brokerDigest(fs.readFileSync(filePath));
   }
   assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(files.backendMetadata)).backend);
-  assertStageBBrokerPackageManifest({ brokerPackagePath: files.package, manifestPath: files.packageManifest, repositoryRoot: root, expectedToolingSha: preparation?.sourceSha, expectedToolingTreeSha256: preparation?.treeSha256 });
+  assertStageBBrokerPackageManifest({ brokerPackagePath: files.package, manifestPath: files.packageManifest, repositoryRoot: root, expectedToolingSha: preparation?.sourceSha, expectedToolingTreeSha256: preparation?.treeSha256, historicalSourceSha });
   return brokerDigest(hashes);
 }
 
@@ -382,6 +382,10 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     ? createHostedBrokerWriterSessionBoundary({env,exec}) : createBrokerWriterSessionBoundary({ env, exec }));
   let writerSession;
   let recoveryCheckout;
+  const artifactPreparation = operation === 'prepare-successor-cutover' ? publicationPreparation : preparation;
+  const artifactHistoricalSourceSha = operation === 'prepare-successor-cutover' || preparation?.successorReconciliation
+    ? artifactPreparation?.sourceSha : undefined;
+  const currentArtifactSet = () => stagedBrokerArtifactSet(files, root, artifactPreparation, artifactHistoricalSourceSha);
   const pinPolicyWriter = () => {
     if (!writerSession) {
       const pinned = writerBoundary.pin(); writerSession = pinned.session;
@@ -397,7 +401,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     const metadata = path.join(dataDirectory, 'terraform.tfstate');
     if (dataDirectory === terraformDataDir) assert.equal(fs.realpathSync(files.backendMetadata), fs.realpathSync(metadata), 'Backend metadata changed');
     else assertStageBTerraformInitializedBackendMetadata(JSON.parse(fs.readFileSync(metadata, 'utf8')).backend);
-    stagedBrokerArtifactSet(files, root, preparation);
+    currentArtifactSet();
     return exec('terraform', [`-chdir=${moduleDirectory}`, ...args],
       { cwd: root, env: { ...credential, AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard', TF_DATA_DIR: dataDirectory, TF_WORKSPACE: 'default' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 });
   };
@@ -436,7 +440,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       publicationResult: p.publication, currentIdentity: p.state });
     const binding = assertStageBTfvarsBinding({ tfvarsPath: files.tfvars, bindingReportPath: paths.bindingReportPath,
       bindingReportSha256: brokerDigest(bytes.bindingReportPath), expectedToolingSha: p.sourceSha,
-      expectedToolingTreeSha256: p.treeSha256 });
+      expectedToolingTreeSha256: p.treeSha256, brokerPackageHistoricalSourceSha: p.sourceSha });
     const imageEvidence = JSON.parse(bytes.imageEvidencePath), imageSignature = JSON.parse(bytes.imageSignaturePath);
     assertImageEvidence(imageEvidence, { signatureArtifact: imageSignature,
       publicationSourceSha: imageEvidence.publicationSourceSha || imageEvidence.imageReleaseSha,
@@ -471,7 +475,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
   const requireAuthorization = async purpose => {
     assert.equal(preparation.purpose, purpose);
     const id = await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify });
-    assert.equal(stagedBrokerArtifactSet(files, root, preparation), preparation.artifactSetSha256);
+    assert.equal(currentArtifactSet(), preparation.artifactSetSha256);
     if (preparation.recoveryTooling) equal(await adapter.readCheckout(), brokerExecutionCheckout(preparation));
     if (preparation.outputReconciliation) await adapter.authenticateOutputReconciliation(preparation);
     if (preparation.successorReconciliation) await adapter.authenticateSuccessorReconciliation(preparation);
@@ -1132,7 +1136,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     getVersion: async version => { assert.match(version || '', /^[1-9][0-9]*$/); return json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn, '--qualifier', version]); },
     readPlan: async () => {
       assertStageBPrivateFile({ filePath: planPath, repositoryRoot: root, label: 'Staged broker saved plan' });
-      return { bytes: fs.readFileSync(planPath), plan: preparation?.purpose === BROKER_POLICY_PRUNING ? JSON.parse(fs.readFileSync(planPath)) : JSON.parse(terraform(['show', '-json', planPath])), artifactSetSha256: stagedBrokerArtifactSet(files, root, preparation) };
+      return { bytes: fs.readFileSync(planPath), plan: preparation?.purpose === BROKER_POLICY_PRUNING ? JSON.parse(fs.readFileSync(planPath)) : JSON.parse(terraform(['show', '-json', planPath])), artifactSetSha256: currentArtifactSet() };
     },
     reserve: async (id, value) => {
       assert.ok(['PUBLICATION', 'CUTOVER', 'RECONCILIATION', 'REGISTRATION', 'POLICY'].includes(phase));
@@ -1175,7 +1179,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       const id = await requireAuthorization(BROKER_PUBLICATION);
       readIntent(id, 'PUBLICATION_INTENT', { savedPlanSha256: preparation.savedPlanSha256 });
       assert.equal(brokerDigest(bytes), preparation.savedPlanSha256); assert.ok(bytes.equals(fs.readFileSync(planPath)));
-      assert.equal(stagedBrokerArtifactSet(files, root, preparation), preparation.artifactSetSha256);
+      assert.equal(currentArtifactSet(), preparation.artifactSetSha256);
       assertBrokerPublicationPlan(JSON.parse(terraform(['show', '-json', planPath])), preparation);
       consumeMutation(id);
       terraform(['apply', '-input=false', planPath]);

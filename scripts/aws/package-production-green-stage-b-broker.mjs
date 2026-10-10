@@ -7,6 +7,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { assertStageBArtifactPath, ensureStageBPrivateDirectory, ensureStageBPrivateFile, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
+import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 
 const root = process.cwd();
 const source = path.join(root, "infra/aws/terraform/lambda/production-rls-approval-broker");
@@ -207,20 +208,42 @@ function packageManifest({ archive, entries, repositoryRoot, sourceDirectory, to
   return Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-export function assertStageBBrokerPackageManifest({ brokerPackagePath, manifestPath = `${brokerPackagePath}.manifest.json`, repositoryRoot = root, sourceDirectory = source, expectedToolingSha, expectedToolingTreeSha256 } = {}) {
+export function assertStageBBrokerPackageManifest({ brokerPackagePath, manifestPath = `${brokerPackagePath}.manifest.json`, repositoryRoot = root, sourceDirectory, expectedToolingSha, expectedToolingTreeSha256, historicalSourceSha } = {}) {
   const packageFile = ensureStageBPrivateFile({ filePath: brokerPackagePath, repositoryRoot, label: "Stage B broker package" });
   const manifestFile = ensureStageBPrivateFile({ filePath: manifestPath, repositoryRoot, label: "Stage B broker package manifest" });
+  let historicalDirectory;
+  let provenanceRoot = repositoryRoot;
+  if (historicalSourceSha !== undefined) {
+    if (sourceDirectory !== undefined) throw new Error("Historical broker package source cannot be overridden.");
+    if (historicalSourceSha !== expectedToolingSha || !/^[a-f0-9]{64}$/.test(expectedToolingTreeSha256 || "")) throw new Error("Historical broker package source is not bound to the publication identity.");
+    const resolved = execFileSync("git", ["rev-parse", "--verify", `${historicalSourceSha}^{commit}`], { cwd: repositoryRoot, encoding: "utf8" }).trim();
+    if (resolved !== historicalSourceSha || deriveStageBToolingInputTreeSha256(historicalSourceSha) !== expectedToolingTreeSha256) throw new Error("Historical broker package source is not authenticated.");
+    historicalDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-historical-broker-"));
+    provenanceRoot = historicalDirectory;
+  }
+  try {
+  if (historicalDirectory) {
+    const paths = ["infra/aws/terraform/lambda/production-rls-approval-broker", "infra/aws/terraform/production-green-stage-b/broker/deployment-contract.json", STAGE_B_BROKER_MANIFEST_SCHEMA_PATH];
+    const archive = execFileSync("git", ["archive", "--format=tar", historicalSourceSha, "--", ...paths], { cwd: repositoryRoot, maxBuffer: 64 * 1024 * 1024 });
+    execFileSync("tar", ["-xf", "-", "-C", historicalDirectory], { input: archive, maxBuffer: 64 * 1024 * 1024 });
+    const expected = execFileSync("git", ["ls-tree", "-r", "--name-only", historicalSourceSha, "--", ...paths], { cwd: repositoryRoot, encoding: "utf8" }).trim().split("\n").filter(Boolean).sort();
+    const observed = [];
+    const visit = directory => { for (const name of fs.readdirSync(directory)) { const file = path.join(directory, name), stat = fs.lstatSync(file); if (stat.isSymbolicLink()) throw new Error("Historical broker source contains a symlink."); if (stat.isDirectory()) visit(file); else { if (!stat.isFile()) throw new Error("Historical broker source contains an unsupported entry."); observed.push(path.relative(historicalDirectory, file).split(path.sep).join("/")); } } };
+    visit(historicalDirectory);
+    if (JSON.stringify(observed.sort()) !== JSON.stringify(expected)) throw new Error("Historical broker source archive differs from its Git tree.");
+  }
   let manifest;
   try { manifest = JSON.parse(fs.readFileSync(manifestFile.path, "utf8")); } catch { throw new Error("Stage B broker package manifest is malformed."); }
-  assertManifestSchema(manifest, readBrokerManifestSchema(repositoryRoot));
+  assertManifestSchema(manifest, readBrokerManifestSchema(provenanceRoot));
   if (manifest.schemaVersion !== 1 || manifest.format !== STAGE_B_BROKER_ARCHIVE_FORMAT || manifest.archiveTimestamp !== STAGE_B_BROKER_ARCHIVE_TIMESTAMP || manifest.compression !== ARCHIVE_COMPRESSION || manifest.compressionLevel !== ARCHIVE_COMPRESSION_LEVEL) throw new Error("Stage B broker package manifest format is not canonical.");
   if (expectedToolingSha !== undefined && manifest.toolingSha !== expectedToolingSha) throw new Error("Stage B broker package manifest tooling SHA does not match the deployment identity.");
   if (expectedToolingTreeSha256 !== undefined && manifest.toolingTreeSha256 !== expectedToolingTreeSha256) throw new Error("Stage B broker package manifest tooling tree SHA does not match the deployment identity.");
   const bytes = fs.readFileSync(packageFile.path);
   if (manifest.rawSha256 !== sha256(bytes) || manifest.base64Sha256 !== base64Sha256(bytes)) throw new Error("Stage B broker package manifest does not match the package bytes.");
-  assertManifestProvenance({ manifest, repositoryRoot, sourceDirectory });
+  assertManifestProvenance({ manifest, repositoryRoot: provenanceRoot, sourceDirectory: sourceDirectory || path.join(provenanceRoot, "infra/aws/terraform/lambda/production-rls-approval-broker") });
   assertManifestEntries({ manifest, bytes });
   return { ...manifestFile, manifest, package: packageFile };
+  } finally { if (historicalDirectory) fs.rmSync(historicalDirectory, { recursive: true, force: true }); }
 }
 
 export async function packageStageBBroker({ outputPath, manifestPath, toolingSha, toolingTreeSha256, repositoryRoot = root, sourceDirectory = source, npmCommand = "npm", npmArgs = ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"] } = {}) {

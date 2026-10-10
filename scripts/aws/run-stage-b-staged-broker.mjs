@@ -221,7 +221,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     else equal(checkout, brokerExecutionCheckout(old));
     if (operation === 'prepare-successor-cutover') assert.equal(brokerDigest(fs.readFileSync(files.package)), old.packageSha256,
       'Successor package differs from the immutable published broker');
-    const artifactSetSha256 = operation === 'prepare-successor-cutover' ? stagedBrokerArtifactSet(files, root, old) : undefined;
+    const artifactSetSha256 = operation === 'prepare-successor-cutover' ? stagedBrokerArtifactSet(files, root, old, old.sourceSha) : undefined;
     const captured = await deps.captureCutoverPlan(); staticPlan(captured.plan);
     let outputReconciliation;
     if (operation === 'prepare-cutover' && Object.values(captured.plan.output_changes || {}).some(o => JSON.stringify(o.actions) !== '["no-op"]')) {
