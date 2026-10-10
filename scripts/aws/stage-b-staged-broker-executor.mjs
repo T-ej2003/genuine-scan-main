@@ -31,7 +31,7 @@ import { assertStageBBrokerPackageManifest } from './package-production-green-st
 import { readStagedBrokerPrerequisites, readBrokerPolicyInventory } from './stage-b-staged-broker-observations.mjs';
 import { reserveStageBSharedApplyAttempt, reserveStageBApplyAttemptTransition, assertStageBApplyTerraformEnvironment } from '../apply-production-green-stage-b.mjs';
 import { createBrokerPolicyOwnershipClient, executeOwnedBrokerPolicyMutation, recoverOwnedBrokerPolicyMutation, assertBrokerPolicyPredecessorOwnership } from './stage-b-broker-policy-ownership.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from './stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateReceiptBoundRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, deriveBrokerPolicy, taskMapFromRegisteredDefinitions, assertBrokerPolicyReconciliation, assertBrokerPolicyClosurePlan, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from './stage-b-release-prerequisites.mjs';
 import { STAGE_B_BROKER_POLICY } from './stage-b-deployment-contract.mjs';
 import { createBrokerWriterSessionBoundary,createHostedBrokerWriterSessionBoundary } from './stage-b-broker-writer-session.mjs';
 
@@ -86,7 +86,7 @@ export async function authenticatePreparedPrepublicationPredecessor({ operation,
 }
 export function authenticateRetainedRegistrationPredecessor(address, definition, observed) {
   const state = { ...definition.desired, arn: definition.arn, revision: definition.revision };
-  const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed });
+  const authenticated = authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired, state, observed, receipt: definition });
   equal(authenticated, definition);
   return authenticated;
 }
@@ -100,8 +100,8 @@ export async function authenticateRegistrationPredecessorBindings(registration, 
   }
   if (Object.entries(definitions).every(([address, definition]) => current[address].arn === definition.arn)) {
     for (const [address, definition] of Object.entries(definitions))
-      equal(authenticateRegisteredDefinition({address, desired:definition.desired, state:current[address],
-        observed:await deps.describeTaskDefinition(definition.arn)}), definition);
+      equal(authenticateReceiptBoundRegisteredDefinition({address, desired:definition.desired, state:current[address],
+        observed:await deps.describeTaskDefinition(definition.arn),receipt:definition}), definition);
     return false;
   }
   const completed = await deps.readCompletedRegistration();
@@ -119,8 +119,8 @@ export async function authenticateRegistrationPredecessorBindings(registration, 
   equal(Object.keys(completed.result.definitions).sort(), Object.keys(definitions).sort());
   equal(completed.result.taskMap, taskMapFromRegisteredDefinitions(completed.result.definitions));
   for (const [address, definition] of Object.entries(completed.result.definitions))
-    equal(authenticateRegisteredDefinition({address, desired:definition.desired, state:current[address],
-      observed:await deps.describeTaskDefinition(definition.arn)}), definition);
+    equal(authenticateReceiptBoundRegisteredDefinition({address, desired:definition.desired, state:current[address],
+      observed:await deps.describeTaskDefinition(definition.arn),receipt:definition}), definition);
   return true;
 }
 export async function authenticatePrepublicationPolicyChain({ operation, chain, checkout, authenticateChain, observe }) {
@@ -528,8 +528,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     equal(Object.keys(entry.result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
     equal(entry.result.taskMap, taskMapFromRegisteredDefinitions(entry.result.definitions));
     for (const [address, definition] of Object.entries(entry.result.definitions)) {
-      equal(authenticateRegisteredDefinition({ address, desired: definition.desired,
-        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) }), definition);
+      equal(authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired,
+        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn), receipt: definition }), definition);
     }
     registrationAdoptionPreparation = entry.preparation;
     return entry.result.taskMap;
@@ -556,8 +556,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.ok(Date.parse(result.value.authorizedAt) > 0);
     const observedOutputs = [];
     for (const [address, definition] of Object.entries(result.value.definitions)) {
-      const authenticated = authenticateRegisteredDefinition({ address, desired: definition.desired,
-        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn) });
+      const authenticated = authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired,
+        state: await adapter.readRegisteredTaskDefinition(address), observed: await adapter.describeTaskDefinition(definition.arn), receipt: definition });
       equal(authenticated, definition);
       observedOutputs.push({ address, arn: definition.arn, revision: definition.revision, definitionSha256: brokerDigest(authenticated) });
     }
@@ -687,8 +687,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       const observed = await adapter.describeTaskDefinition(definition.arn);
       const authenticated = predecessorOnly && (authenticatedBindingTransition || ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase))
         ? authenticateRetainedRegistrationPredecessor(address, definition, observed)
-        : authenticateRegisteredDefinition({ address, desired: definition.desired,
-          state: await adapter.readRegisteredTaskDefinition(address), observed });
+        : authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired,
+          state: await adapter.readRegisteredTaskDefinition(address), observed, receipt: definition });
       equal(authenticated, definition); observedOutputs.push({ address, arn: definition.arn, revision: definition.revision, definitionSha256: brokerDigest(authenticated) });
     }
     const registrationEvidence = registration[predecessorOnly ? 'registrationPredecessor' : 'receiptBoundAdoption'];
@@ -1365,7 +1365,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       equal(chain.registration.result.taskMap, taskMapFromRegisteredDefinitions(chain.registration.result.definitions));
       for (const [address, definition] of Object.entries(chain.registration.result.definitions)) {
         const state = await adapter.readRegisteredTaskDefinition(address), observed = await adapter.describeTaskDefinition(definition.arn);
-        equal(authenticateRegisteredDefinition({ address, desired: definition.desired, state, observed }), definition);
+        equal(authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired, state, observed, receipt: definition }), definition);
       }
       if (chain.policy?.receiptBoundAdoption) {
         assert.equal(prepublicationPolicyOperation, true, 'Mixed receipt-bound policy chain is not valid in this lifecycle phase');

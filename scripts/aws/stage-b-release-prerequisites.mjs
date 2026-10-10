@@ -217,6 +217,31 @@ export function authenticateRegisteredDefinition({ address, desired, observed, s
   return { arn, revision: observed.revision, definitionSha256: brokerDigest({ desired, observed }), desired: structuredClone(desired) };
 }
 
+// AWS CLI renders registeredAt in the runner's local timezone. Legacy signed
+// receipts hashed that rendering, so authenticate the same instant in every
+// valid UTC offset without changing any other observed field or receipt byte.
+export function authenticateReceiptBoundRegisteredDefinition({ receipt, ...input }) {
+  const authenticated = authenticateRegisteredDefinition(input);
+  if (authenticated.definitionSha256 !== receipt.definitionSha256) {
+    const timestamp = input.observed.registeredAt;
+    const match = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d{6})([+-])(\d\d):(\d\d)$/.exec(timestamp || '');
+    assert.ok(match, 'Receipt-bound ECS timestamp is not canonical');
+    const instant = Date.parse(timestamp), offset = (match[3] === '-' ? -1 : 1) * (Number(match[4]) * 60 + Number(match[5]));
+    assert.ok(Number.isFinite(instant) && offset >= -720 && offset <= 840 && offset % 15 === 0,
+      'Receipt-bound ECS timestamp offset is invalid');
+    const render = minutes => {
+      const sign = minutes < 0 ? '-' : '+', absolute = Math.abs(minutes);
+      return `${new Date(instant + minutes * 60_000).toISOString().slice(0, 19)}${match[2]}${sign}${String(Math.floor(absolute / 60)).padStart(2, '0')}:${String(absolute % 60).padStart(2, '0')}`;
+    };
+    assert.equal(render(offset), timestamp, 'Receipt-bound ECS timestamp instant is invalid');
+    assert.ok(Array.from({ length: 105 }, (_, index) => -720 + index * 15).some(minutes =>
+      brokerDigest({ desired: input.desired, observed: { ...input.observed, registeredAt: render(minutes) } }) === receipt.definitionSha256),
+    'Registered definition differs from the signed receipt beyond timestamp timezone rendering');
+    authenticated.definitionSha256 = receipt.definitionSha256;
+  }
+  return authenticated;
+}
+
 export async function executeTaskRegistration({ preparation: p, authorization }, deps) {
   const id = await deps.authenticatePrerequisiteAuthorization(p, authorization);
   assert.equal(p.purpose, TASK_REGISTRATION);

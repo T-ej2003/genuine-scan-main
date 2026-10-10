@@ -7,7 +7,7 @@ import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import test from 'node:test';
 import { taskChange, rotationVariables } from './fixtures/stage-b-task-rotation.mjs';
 import { canonicalBrokerPolicy } from './fixtures/staged-broker.mjs';
-import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from '../aws/stage-b-release-prerequisites.mjs';
+import { TASK_REGISTRATION, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, assertPrerequisitePlan, authenticateRegisteredDefinition, authenticateReceiptBoundRegisteredDefinition, assertRegisteredTaskDefinitionState, assertRegistrationRecoveryIdentity, taskMapFromRegisteredDefinitions, executeTaskRegistration, deriveBrokerPolicy, assertBrokerPolicyReconciliation, assertBrokerPolicyPruningPlan, adoptRegisteredOutputs, authenticateRegistrationHandoffEvidence } from '../aws/stage-b-release-prerequisites.mjs';
 import { brokerDigest, assertBrokerPublicationPlan, assertRegistrationHandoff } from '../aws/stage-b-staged-broker-contract.mjs';
 import { preparation as brokerPreparation, publicationPlan, rig as brokerRig, configuration, authorization as brokerAuthorization, cutoverPlan } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerPublication, prepareBrokerCutover, executeBrokerAliasCas, reconcileBrokerAlias } from '../aws/stage-b-staged-broker.mjs';
@@ -273,6 +273,27 @@ function fixture(address = TASK_REGISTRATION_ADDRESSES[0], revision = 42) {
 }
 const normal = r => authenticateRegisteredDefinition(r);
 const recoveryState = r => assertRegisteredTaskDefinitionState(r.desired, r.state, r.after_unknown);
+test('signed ECS definition digest accepts only timezone-equivalent registeredAt renderings', () => {
+  const source = fixture();
+  source.observed.registeredAt = '2026-10-09T11:54:28.467000+01:00';
+  source.observed.registeredBy = 'arn:aws:iam::368992683803:root';
+  const receipt = authenticateRegisteredDefinition(source);
+  const hosted = structuredClone(source);
+  hosted.observed.registeredAt = '2026-10-09T10:54:28.467000+00:00';
+  assert.notEqual(authenticateRegisteredDefinition(hosted).definitionSha256, receipt.definitionSha256);
+  assert.deepEqual(authenticateReceiptBoundRegisteredDefinition({ ...hosted, receipt }), receipt);
+  assert.deepEqual(authenticateReceiptBoundRegisteredDefinition({ ...source, receipt }), receipt);
+  for (const change of [
+    input => { input.observed.registeredAt = '2026-10-09T10:54:29.467000+00:00'; },
+    input => { input.observed.registeredBy = 'arn:aws:iam::368992683803:role/other'; },
+    input => { input.observed.containerDefinitions[0].image = 'unapproved-image'; },
+    input => { input.observed.registeredAt = 'not-a-timestamp'; },
+  ]) {
+    const changed = structuredClone(hosted); change(changed);
+    assert.throws(() => authenticateReceiptBoundRegisteredDefinition({ ...changed, receipt }));
+  }
+  assert.throws(() => authenticateReceiptBoundRegisteredDefinition({ ...hosted, receipt: { ...receipt, definitionSha256: '0'.repeat(64) } }));
+});
 for (const address of TASK_REGISTRATION_ADDRESSES) test(`normal and recovery share bounded provider equivalences: ${address}`, () => {
   const r = fixture(address); normal(r); recoveryState(r);
   const absent = structuredClone(r); absent.observed.volumes.forEach(v => delete v.host); absent.observed.containerDefinitions.forEach(c => delete c.cpu);
