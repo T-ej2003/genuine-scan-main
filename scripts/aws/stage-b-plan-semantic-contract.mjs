@@ -287,7 +287,7 @@ const CONFIGURATION_REFERENCE_RULES = Object.freeze({
     ],
     filename: ["var.broker_package_path"],
     role: ["var.stage_a_broker_role_arn"],
-    source_code_hash: ["var.broker_package_path"],
+    source_code_hash: ["var.broker_package_bytes_path", "var.broker_package_path"],
     tags: ["local.tags"],
   },
   "aws_lambda_alias.reviewed": {
@@ -653,6 +653,10 @@ function configurationBase(address) {
 }
 
 function allowedConfigurationReferences(plan, address, field) {
+  if (address === "aws_lambda_function.broker" && field === "source_code_hash" &&
+      plan?.variables && !Object.hasOwn(plan.variables, "broker_package_bytes_path")) {
+    return ["var.broker_package_path"];
+  }
   if (address === "aws_lambda_alias.reviewed" && field === "function_version") {
     return plan?.variables?.stage_b_recovery_only?.value === true
       ? [

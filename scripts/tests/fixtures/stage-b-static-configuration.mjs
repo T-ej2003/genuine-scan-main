@@ -37,7 +37,7 @@ export function stageBStaticConfiguration() {
         environment: [{ variables: ref([
           "local.broker_environment",
         ]) }],
-        filename: ref(["var.broker_package_path"]), function_name: { constant_value: "mscqr-production-rls-approval-broker" }, handler: { constant_value: "index.handler" }, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: { constant_value: "nodejs24.x" }, source_code_hash: ref(["var.broker_package_path"]), tags: ref(["local.tags"]), timeout: { constant_value: 180 },
+        filename: ref(["var.broker_package_path"]), function_name: { constant_value: "mscqr-production-rls-approval-broker" }, handler: { constant_value: "index.handler" }, role: ref(["var.stage_a_broker_role_arn"]), publish: { constant_value: true }, runtime: { constant_value: "nodejs24.x" }, source_code_hash: ref(["var.broker_package_bytes_path", "var.broker_package_path"]), tags: ref(["local.tags"]), timeout: { constant_value: 180 },
       } },
       { address: "aws_lambda_alias.reviewed", type: "aws_lambda_alias", expressions: {
         name: { constant_value: "reviewed" },

@@ -1,6 +1,7 @@
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../../aws/stage-b-reference-audit-contract.mjs";
 const image = (character) => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${character.repeat(64)}`;
 export const rotationVariables = {
+  broker_package_bytes_path: { value: null },
   backend_image: { value: image("1") },
   worker_image: { value: image("2") },
   executor_image: { value: image("3") },

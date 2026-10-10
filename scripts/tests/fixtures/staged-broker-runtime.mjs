@@ -31,7 +31,7 @@ const target = brokerTargetIdentity(configuration(), packageSha256);
 const tfAlias = { arn: alias.AliasArn, function_name: 'mscqr-production-rls-approval-broker', name: 'reviewed', description: '', routing_config: [], function_version: '12' };
 const tfFn = { function_name: 'mscqr-production-rls-approval-broker', role: STAGE_B.brokerRoleArn, publish: true, timeout: 180, source_code_hash: target.codeSha256, code_sha256: target.codeSha256, version: '12', source_code_size: 100, last_modified: 'yesterday', qualified_arn: `${STAGE_B.brokerFunctionArn}:12`, qualified_invoke_arn: `${STAGE_B.brokerFunctionArn}:12`, environment: [{ variables: clone(env) }] };
 const change = (address, before, after, actions = ['no-op'], after_unknown = {}) => ({ address, mode: 'managed', type: address.split('.')[0], change: { actions, before, after, after_unknown } });
-const envelope = changes => ({ variables: { tooling_sha: { value: sourceSha } }, errored: false, complete: true, resource_changes: changes });
+const envelope = changes => ({ variables: { tooling_sha: { value: sourceSha }, broker_package_bytes_path: { value: null } }, errored: false, complete: true, resource_changes: changes });
 function publicationPlan() {
  const before = clone(tfFn), after = clone(tfFn);
  before.environment[0].variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ ...JSON.parse(env.BROKER_APPROVAL_EXPECTED_JSON), releaseSha: oldSha });

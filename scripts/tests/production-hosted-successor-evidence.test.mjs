@@ -20,7 +20,11 @@ test('hosted successor materializer consumes immutable import reference and orig
  const historicalBytes=Buffer.from(JSON.stringify({version:4,lineage:preparation.state.lineage,serial:preparation.state.serial,outputs:{},resources:[]}));
  preparation.state.stateSha256=brokerDigest(historicalBytes);const authorization=authorize(preparation);
  result.preparationSha256=brokerDigest(preparation);result.authorizationSha256=brokerDigest(authorization);
- const currentBytes=Buffer.from(JSON.stringify({version:4,lineage:preparation.state.lineage,serial:preparation.state.serial+1,outputs:{},resources:[]}));
+ const statePath='/private/tmp/original-publication/broker-package.zip';
+ const currentBytes=Buffer.from(JSON.stringify({version:4,lineage:preparation.state.lineage,serial:preparation.state.serial+1,outputs:{},resources:[
+  {mode:'managed',type:'aws_lambda_function',name:'broker',instances:[{attributes:{filename:statePath,
+   source_code_hash:Buffer.from(packageSha256,'hex').toString('base64')}}]},
+ ]}));
  const imageBytes=Buffer.from(JSON.stringify({imageReleaseSha:'9'.repeat(40),workflowRunId:'123',canonicalArtifactSha256:'1'.repeat(64)}));
  const signatureBytes=Buffer.from(JSON.stringify({signed:true}));
  const artifacts=new Map(),steps=new Map();const store={putArtifact:(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,value);},
@@ -59,8 +63,9 @@ test('hosted successor materializer consumes immutable import reference and orig
    assert.equal(toolingSha,A);fs.writeFileSync(outputPath,packageBytes,{mode:0o600});
    fs.writeFileSync(manifestPath,'{}',{mode:0o600});},
   generateStageA:({outputPath,toolingSha})=>{assert.equal(toolingSha,A);fs.writeFileSync(outputPath,'{}',{mode:0o600});},
-  generateTfvars:({outputPath,bindingReportPath,checksumsFile,toolingSha,brokerPackageHistoricalSourceSha})=>{
+  generateTfvars:({outputPath,bindingReportPath,checksumsFile,toolingSha,brokerPackageHistoricalSourceSha,successorBrokerPackageStatePath})=>{
    assert.equal(toolingSha,A);assert.equal(brokerPackageHistoricalSourceSha,A);
+   assert.equal(successorBrokerPackageStatePath,statePath);
    assert.deepEqual(fs.readFileSync(checksumsFile),Buffer.from(fs.readFileSync(checksumsFile)));
    fs.writeFileSync(outputPath,'tooling_sha = "'+A+'"\n',{mode:0o600});
    fs.writeFileSync(bindingReportPath,'{"toolingSha":"'+A+'"}',{mode:0o600});},
