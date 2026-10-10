@@ -412,6 +412,7 @@ function recoveryPlan() {
   value.variables = {
     stage_b_recovery_only: { value: true },
     stage_b_recovery_alias_target_version: { value: "3" },
+    broker_package_bytes_path: { value: null },
   };
   value.resource_changes = [value.resource_changes.find((item) => item.address === "aws_lambda_alias.reviewed")];
   const alias = value.resource_changes[0];
@@ -446,6 +447,7 @@ function productionForensicPlan() {
 function baselinePlan() {
   const value = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-production-shaped.plan.json", "utf8"));
   value.configuration = configuration();
+  value.variables.broker_package_bytes_path = { value: null };
   const tags = { Component: "full-rls-green-stage-b", Environment: "production", ManagedBy: "Terraform" };
   const policy = value.resource_changes.find((change) => change.address === "aws_iam_policy.broker");
   policy.change = { actions: ["create"], before: null, after: { description: null, name: "mscqr-production-rls-approval-broker-runtime", name_prefix: null, path: "/", tags, tags_all: { ...tags } }, after_unknown: { arn: true, attachment_count: true, id: true, policy: true, policy_id: true, tags: {}, tags_all: {} }, before_sensitive: {}, after_sensitive: {} };
@@ -1477,6 +1479,21 @@ test("broker publish updates admit source-bound package digest and exact provide
   const contradictionChange = contradiction.resource_changes.find((item) => item.address === "aws_lambda_function.broker").change;
   contradictionChange.after_unknown.code_sha256 = true;
   assert.throws(() => assertStageBPlanSemanticCompleteness(contradiction), /UNFAITHFUL_PROVIDER_COMPUTED_FIELDS/);
+});
+
+test("broker hash references follow the authenticated Terraform variable schema", () => {
+  const historical = JSON.parse(fs.readFileSync("scripts/tests/fixtures/production-green-stage-b-state-reconciliation-serial-104.json", "utf8")).refreshPlan;
+  assert.doesNotThrow(() => assertStageBStaticConfigurationCoverage(historical));
+  const current = plan();
+  current.variables = { broker_package_bytes_path: { value: null } };
+  assert.doesNotThrow(() => assertStageBStaticConfigurationCoverage(current));
+  const broker = (value) => value.configuration.root_module.resources.find((item) => item.address === "aws_lambda_function.broker").expressions;
+  broker(current).source_code_hash = ref(["var.broker_package_path"]);
+  assert.throws(() => assertStageBStaticConfigurationCoverage(current), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  broker(current).source_code_hash = ref(["var.broker_package_bytes_path", "var.unreviewed"]);
+  assert.throws(() => assertStageBStaticConfigurationCoverage(current), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
+  broker(historical).source_code_hash = ref(["var.broker_package_bytes_path", "var.broker_package_path"]);
+  assert.throws(() => assertStageBStaticConfigurationCoverage(historical), /UNCLASSIFIED_CONFIGURATION_REFERENCES/);
 });
 
 test("semantic census feeds the normal offline action classifier without widening recovery", () => {
