@@ -3,6 +3,10 @@ import test from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import JSZip from 'jszip';
+import {createBrokerProtectedEnvironmentAuthorization} from '../aws/stage-b-staged-broker-authorization.mjs';
+import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
+import {createProductionGithubCommandRunner} from '../aws/production-credential-source-contract.mjs';
 import { runReleasePreflightCheckerTrustAttestationCli } from '../aws/production-release-preflight-checker-attestation.mjs';
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from '../aws/production-checker-chain-contract.mjs';
 import { signPermissionReport } from '../aws/validate-production-green-stage-b-permissions.mjs';
@@ -16,7 +20,7 @@ import { createProductionComponentDeploymentState, advanceProductionComponentDep
 import { canonicalSha256 } from '../aws/production-green-stage-b-contract.mjs';
 import { commitSecurityComponentState } from '../aws/commit-production-component-security-state.mjs';
 
-async function terminal(separate = false, recoveryTooling) {
+async function terminal(separate = false, recoveryTooling, protectedApproval = false) {
   const r = await ready();
   if (recoveryTooling) {
     r.p.recoveryTooling = { ...recoveryTooling, publicationResultSha256: brokerDigest(r.p.publication) };
@@ -33,7 +37,14 @@ async function terminal(separate = false, recoveryTooling) {
   const publicationPreparation = preparation(), publicationAuthorization = authorization(publicationPreparation);
   const casResult = await executeBrokerAliasCas({ preparation: r.p, authorization: r.auth }, r.deps);
   const closure = separate ? { preparation: prepareBrokerStateRefresh({ preparation: r.p, authorization: r.auth, casResult }) } : null;
-  if (closure) closure.authorization = signFixture(closure.preparation);
+  let protectedFixture;
+  if (closure) {
+    if(protectedApproval){
+      protectedFixture=await protectedClosureFixture(closure.preparation);
+      closure.authorization=protectedFixture.authorization;
+      r.deps.verifyAuthorization=protectedFixture.reader.verifyAuthorization;
+    }else closure.authorization=signFixture(closure.preparation);
+  }
   const record = await reconcileBrokerAlias({ preparation: closure?.preparation || r.p, authorization: closure?.authorization || r.auth,
     casResult, ...(closure ? { cutoverPreparation: r.p, cutoverAuthorization: r.auth } : {}) }, r.deps);
   const handoff = { preparation: r.p, authorization: r.auth, ...(closure ? { closure } : {}), casResult, record };
@@ -47,7 +58,7 @@ async function terminal(separate = false, recoveryTooling) {
   deps.authenticateContinuationTooling = (p, current) => { deps.authenticateHistoricalTooling(p, recorded); assert.deepEqual(current, recorded); };
   deps.authenticateHistoricalExecutionSource = (p, current, executionSourceSha) => { deps.authenticateContinuationTooling(p, current); assert.equal(executionSourceSha, current.sourceSha); return current; };
   assert.equal(brokerDigest(source.authorization), pub.authorizationSha256);
-  return { ...r, source, handoff, deps };
+  return { ...r, source, handoff, deps, protectedFixture };
 }
 test('terminal proof authenticates a distinct state-refresh authorization bound to completed cutover', async () => {
   const r = await terminal(true), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
@@ -181,9 +192,9 @@ test('terminal reader uses authorized closure tooling rather than historical CAS
  assert.equal(r.handoff.preparation.recoveryTooling.sourceSha,C.sourceSha);
 });
 
-test('approval recovery authenticates the native terminal handoff without rewriting publication identity', async () => {
+for(const protectedApproval of [false,true])test(`approval recovery authenticates ${protectedApproval?'protected':'historical checker'} terminal handoff through public preflight and attestation`, async () => {
   const tooling = { sourceSha: 'd'.repeat(40), treeSha256: 'e'.repeat(64) };
-  const r = await terminal(true, tooling);
+  const r = await terminal(true, tooling, protectedApproval);
   r.deps.authenticateReconciliation = async (record, id) => assert.ok(r.entries.some(e => e[0] === id && e[1] === record.status && brokerDigest(e[2]) === brokerDigest(record)));
   const input = { ...r.handoff.closure, result: r.handoff.record };
   const context = await authenticateBrokerRecoveryApproval(input, r.deps);
@@ -258,4 +269,52 @@ test('same-source completed closure can authenticate normal approval continuatio
   assert.equal(context.sourceSha, sourceSha);
   assert.deepEqual(context.tooling, context.historicalTooling);
   assert.equal(context.tooling.sourceSha, sourceSha);
+});
+
+async function protectedClosureFixture(preparation){
+ const repository=PRODUCTION_ENVIRONMENT_APPROVAL.repository;
+ const environment={id:7,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]};
+ const actual={state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'};
+ const approval=createProductionEnvironmentApprovalEvidence({environmentConfig:environment,repository,environment:'production',sourceSha:brokerExecutionCheckout(preparation).sourceSha,
+  workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,eventName:'workflow_dispatch',workflowRunId:'700',workflowRunAttempt:'1',executionActor:'operator',observedAt:now.toISOString(),actualApproval:actual});
+ const authorization=createBrokerProtectedEnvironmentAuthorization(preparation,{approval,now,release:{releaseId:'b'.repeat(64),phase:'closure',preparationReference:brokerDigest({preparation}),authorizationRound:1}});
+ const zip=new JSZip();zip.file('authorization.json',JSON.stringify(authorization));const archive=await zip.generateAsync({type:'nodebuffer',streamFiles:true});
+ const workflow={id:700,repository:{id:9,full_name:repository},head_repository:{full_name:repository},path:'.github/workflows/authorize-production-stage-b-release-transition.yml',head_sha:approval.sourceSha,event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,actor:{login:'operator'}};
+ const artifact={id:701,name:'production-stage-b-release-transition-authorization',expired:false,digest:`sha256:${brokerDigest(archive)}`,workflow_run:{id:700,head_sha:approval.sourceSha,repository_id:9}};
+ const payloads={'actions/runs/700':workflow,'actions/runs/700/artifacts':[{artifacts:[artifact]}],'actions/artifacts/701/zip':archive,'environments/production':environment,'actions/runs/700/approvals':[{state:'approved',environments:[{id:7,name:'production'}],user:{id:1,login:'operator'}}]};
+ const calls=[];
+ const githubRun=createProductionGithubCommandRunner({env:{PATH:process.env.PATH,GH_TOKEN:'fixture-only',AWS_SECRET_ACCESS_KEY:'must-not-reach-github'},exec:(command,args,options)=>{
+  assert.equal(command,'gh');assert.equal(options.env.AWS_SECRET_ACCESS_KEY,undefined);assert.equal(options.env.GH_HOST,'github.com');
+  const key=args[1].slice(`repos/${repository}/`.length);calls.push(key);assert.ok(Object.hasOwn(payloads,key),'Missing authenticated GitHub evidence');
+  return Buffer.isBuffer(payloads[key])?payloads[key]:JSON.stringify(payloads[key]);
+ }});
+ const reader=createStagedBrokerClosureReader({run:args=>{assert.equal(args[0],'kms');assert.equal(args[1],'verify');return JSON.stringify({SignatureValid:true});},githubRun,readCheckout:()=>brokerExecutionCheckout(preparation),directory:os.tmpdir()});
+ return {authorization,reader,payloads,calls};
+}
+
+test('protected hosted closure authenticates Stage B recovery and Release Gate security handoff',async()=>{
+ const r=await terminal(true,undefined,true);
+ const proof=await authenticateStagedBrokerClosure({sourceSha,deps:r.deps});assertStagedBrokerProof(proof,sourceSha);
+ const context=await authenticateBrokerRecoveryApproval({preparation:r.handoff.closure.preparation,authorization:r.handoff.closure.authorization,result:r.handoff.record},{...r.deps,
+  authenticateReconciliation:async(result,id)=>assert.ok(r.entries.some(e=>e[0]===id&&brokerDigest(e[2])===brokerDigest(result)))});
+ assert.equal(isAuthenticatedBrokerRecoveryApproval(context),true);assert.equal(context.sourceSha,sourceSha);
+ let state=createProductionComponentDeploymentState({components:{backend:null,frontend:null,database:null,security:null}});
+ const body={sourceSha,valid:true},authorization={...body,authorizationSha256:canonicalSha256(body)};
+ const result=await commitSecurityComponentState({sourceSha,authorization,stagedBrokerProof:proof,client:{read:()=>state,advance:(_before,next)=>{state=next;}}});
+ assert.equal(result.stagedBroker.status,'COMMITTED');assert.equal(state.components.security.stagedBrokerEvidenceSha256,proof.evidenceSha256);
+ assert.ok(r.protectedFixture.calls.includes('actions/runs/700/approvals'));
+});
+
+for(const [name,mutate] of [
+ ['missing evidence',f=>delete f.payloads['actions/runs/700']],
+ ['wrong workflow source',f=>f.payloads['actions/runs/700'].head_sha='f'.repeat(40)],
+ ['wrong repository',f=>f.payloads['actions/runs/700'].repository.full_name='untrusted/repository'],
+ ['failed workflow',f=>f.payloads['actions/runs/700'].conclusion='failure'],
+ ['missing actual approval',f=>f.payloads['actions/runs/700/approvals']=[]],
+ ['tampered reviewer',f=>f.payloads['actions/runs/700/approvals'][0].user.login='intruder'],
+ ['substituted artifact',f=>f.payloads['actions/artifacts/701/zip']=Buffer.from('tampered')],
+])test(`protected closure fails closed for ${name}`,async()=>{
+ const r=await terminal(true,undefined,true);mutate(r.protectedFixture);
+ await assert.rejects(()=>authenticateStagedBrokerClosure({sourceSha,deps:r.deps}));
+ await assert.rejects(()=>authenticateBrokerRecoveryApproval({preparation:r.handoff.closure.preparation,authorization:r.handoff.closure.authorization,result:r.handoff.record},r.deps));
 });

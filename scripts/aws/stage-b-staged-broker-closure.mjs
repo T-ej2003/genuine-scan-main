@@ -13,6 +13,7 @@ import { readStageBProtectedMainCheckout } from './stage-b-deployment-identity.m
 import { deriveStageBToolingInputTreeSha256 } from './validate-stage-b-image-reuse.mjs';
 import { fileURLToPath } from 'node:url';
 import { stateHash, assertProductionComponentDeploymentState, componentDeploymentProvenance } from './production-component-deployment-state.mjs';
+import { createProductionGithubCommandRunner } from './production-credential-source-contract.mjs';
 
 const verified = new WeakSet();
 const equal = (a, b, message) => assert.equal(brokerDigest(a), brokerDigest(b), message);
@@ -101,9 +102,9 @@ export function assertStagedBrokerTerminal(proof, { client, result, previousGene
   return { status: 'COMMITTED', evidenceSha256: proof.evidenceSha256, componentStateSha256: stateHash(result.state), generation: result.state.generation };
 }
 
-export function createStagedBrokerClosureReader({ run, readCheckout, directory }) {
+export function createStagedBrokerClosureReader({ run, readCheckout, directory, githubRun = createProductionGithubCommandRunner() }) {
   const json = args => JSON.parse(run([...args, '--output', 'json', '--no-cli-pager']));
-  const kms = createBrokerKmsAuthorizationBoundary({ run });
+  const kms = createBrokerKmsAuthorizationBoundary({ run, githubRun: (args, options) => githubRun('gh', args, options) });
   const readState = () => {
     const file = path.join(directory, `closure-state-${randomUUID()}.json`);
     try {
