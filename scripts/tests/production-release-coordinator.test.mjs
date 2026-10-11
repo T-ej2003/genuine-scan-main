@@ -380,6 +380,14 @@ test('protected approval authenticates exact workflow artifact before public reg
   assert.throws(()=>readZipCentralDirectory(wrongLocalVersion,{allowSingleMemberDataDescriptor:true}),/local header placement is invalid/);
   const zeroFlagArchive=await zip.generateAsync({type:'nodebuffer'});
   assert.equal(readZipCentralDirectory(zeroFlagArchive,{allowSingleMemberDataDescriptor:true}).length,1);
+  for(const name of ['../authorization.json','foo/../authorization.json']){
+   const unsafeZip=new JSZip();unsafeZip.file(name,JSON.stringify(authorization),{createFolders:false});
+   const unsafeArchive=await unsafeZip.generateAsync({type:'nodebuffer',streamFiles:true});
+   artifact.digest=`sha256:${createHash('sha256').update(unsafeArchive).digest('hex')}`;
+   payloads['actions/artifacts/701/zip']=unsafeArchive;
+   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/Unexpected raw authorization ZIP member/);
+  }
+  artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:'f'.repeat(40),run}));
   const verify=a=>verifyBrokerProtectedEnvironmentAuthorization(a,{run});
   await assertBrokerAuthorization(authorization,p,{verify,now:f.now});
