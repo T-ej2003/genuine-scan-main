@@ -19,6 +19,7 @@ import { brokerAuthorizationMessage, signBrokerAuthorization, createBrokerProtec
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from '../aws/production-github-environment-approval.mjs';
 import { deriveStageBToolingInputTreeSha256 } from '../aws/validate-stage-b-image-reuse.mjs';
 import { captureReleasePhaseMaterial, hydrateReleasePhaseMaterial } from '../aws/production-release-coordinator.mjs';
+import { stageAStateSemanticSha256 } from '../aws/generate-production-green-stage-a-prerequisites.mjs';
 
 const ORIGINAL_RELEASE = '29406b0ec537ac60618642bba20133dd0cf45529';
 const RECOVERY_TOOLING = '7b40ee371b7751e19a413a4789c516c779af09d9';
@@ -111,12 +112,16 @@ test('public successor preparation preserves published source and consumes expli
     const stageAFiles = { stageAInput: path.join(directory, 'stage-a-input.json'),
       stageAStateBackup: path.join(directory, 'stage-a-state.json') };
     const stageAInputBytes = Buffer.from('authenticated-stage-a-input');
+    const stageAState = { lineage: '02afb75a-f902-ab8a-f4c1-751d4aef7837', serial: 35 };
+    const stageAStateBytes = Buffer.from(JSON.stringify(stageAState));
     fs.writeFileSync(stageAFiles.stageAInput, stageAInputBytes, { mode: 0o600 });
-    fs.writeFileSync(stageAFiles.stageAStateBackup, 'authenticated-stage-a-state', { mode: 0o600 });
+    fs.writeFileSync(stageAFiles.stageAStateBackup, stageAStateBytes, { mode: 0o600 });
     for (const [name, file] of Object.entries(paths)) {
       const bytes = name === 'bindingReportPath'
         ? Buffer.from(JSON.stringify({ stageAInputPath: stageAFiles.stageAInput,
-          stageAStateBackupPath: stageAFiles.stageAStateBackup, stageAInputSha256: brokerDigest(stageAInputBytes) }))
+          stageAStateBackupPath: stageAFiles.stageAStateBackup, stageAInputSha256: brokerDigest(stageAInputBytes),
+          stageAStateBackupSha256: stageAStateSemanticSha256(stageAState),
+          stageAStateLineage: stageAState.lineage, stageAStateSerial: stageAState.serial }))
         : Buffer.from(`authenticated-${name}`);
       fs.writeFileSync(file, bytes, { mode: 0o600 });
       capsulePreparation.successorReconciliation[name.replace(/Path$/, 'Sha256')] = brokerDigest(bytes);
@@ -137,6 +142,10 @@ test('public successor preparation preserves published source and consumes expli
     await assert.rejects(() => captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot }));
     assert.equal(artifacts.size, 0);
     fs.writeFileSync(paths.bindingReportPath, bindingBytes, { mode: 0o600 });
+    fs.writeFileSync(stageAFiles.stageAStateBackup, JSON.stringify({ ...stageAState, serial: 36 }), { mode: 0o600 });
+    await assert.rejects(() => captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot }));
+    assert.equal(artifacts.size, 0);
+    fs.writeFileSync(stageAFiles.stageAStateBackup, stageAStateBytes, { mode: 0o600 });
     const materialization = await captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot });
     const capsule = store.getArtifact(materialization);
     assert.deepEqual(Object.keys(capsule.members).sort(), ['backendMetadata', 'bindingReportPath', 'currentStatePath',
@@ -169,6 +178,17 @@ test('public successor preparation preserves published source and consumes expli
     replacedStageA.members.stageAInput = { sha256: substitutedArtifact.sha256, reference: substitutedReference };
     const replacedStageADigest = brokerDigest(replacedStageA); store.putArtifact(replacedStageADigest, replacedStageA);
     await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: replacedStageADigest, prepared: capsulePrepared,
+      files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
+    assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
+    const substitutedStateBytes = Buffer.from(JSON.stringify({ ...stageAState, serial: 36 }));
+    const substitutedStateArtifact = { kind: 'PRODUCTION_RELEASE_BINARY', sha256: brokerDigest(substitutedStateBytes),
+      base64: substitutedStateBytes.toString('base64') };
+    const substitutedStateReference = brokerDigest(substitutedStateArtifact);
+    store.putArtifact(substitutedStateReference, substitutedStateArtifact);
+    const replacedState = structuredClone(capsule);
+    replacedState.members.stageAStateBackup = { sha256: substitutedStateArtifact.sha256, reference: substitutedStateReference };
+    const replacedStateDigest = brokerDigest(replacedState); store.putArtifact(replacedStateDigest, replacedState);
+    await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: replacedStateDigest, prepared: capsulePrepared,
       files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
     assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
     await hydrateReleasePhaseMaterial({ reference: materialization, prepared: capsulePrepared,

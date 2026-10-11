@@ -20,6 +20,7 @@ import {createProductionComponentDeploymentStateClient} from './production-compo
 import {unpackReleaseEvidenceTransport} from './production-release-dispatch-contract.mjs';
 import {verifyProductionReleaseImageAuthorization} from './verify-production-release-image-authorization.mjs';
 import {verifyImageEvidenceSignature} from './production-green-stage-b-image-evidence.mjs';
+import {parseAuthenticatedStateBytes,stageAStateSemanticSha256} from './generate-production-green-stage-a-prerequisites.mjs';
 export const HOSTED_RELEASE_ROOT='/tmp/mscqr-production-release';
 
 export function authenticateReleaseGateRuns(release,evidence) {
@@ -142,11 +143,15 @@ function successorStageAFiles(preparation,files) {
  return {stageAInput:path.join(directory,'stage-a-input.json'),stageAStateBackup:path.join(directory,'stage-a-state.json')};
 }
 
-function assertSuccessorStageABinding(bindingBytes,stageAFiles,inputBytes) {
+function assertSuccessorStageABinding(bindingBytes,stageAFiles,inputBytes,stateBytes) {
  const binding=JSON.parse(bindingBytes);
  assert.equal(binding.stageAInputPath,stageAFiles.stageAInput);
  assert.equal(binding.stageAStateBackupPath,stageAFiles.stageAStateBackup);
  assert.equal(binding.stageAInputSha256,brokerDigest(inputBytes));
+ const state=parseAuthenticatedStateBytes(stateBytes);
+ assert.equal(binding.stageAStateBackupSha256,stageAStateSemanticSha256(state));
+ assert.equal(binding.stageAStateLineage,state.lineage);
+ assert.equal(binding.stageAStateSerial,state.serial);
 }
 
 // Saved plans and package bytes survive runner replacement. Paths are supplied
@@ -161,7 +166,8 @@ export async function captureReleasePhaseMaterial({prepared,files,store,reposito
  if(p.successorReconciliation){
   for(const filePath of [successorFiles.bindingReportPath,...Object.values(stageAFiles)])
    assertStageBPrivateFile({filePath,repositoryRoot,label:'Successor Stage-A binding'});
-  assertSuccessorStageABinding(fs.readFileSync(successorFiles.bindingReportPath),stageAFiles,fs.readFileSync(stageAFiles.stageAInput));
+  assertSuccessorStageABinding(fs.readFileSync(successorFiles.bindingReportPath),stageAFiles,
+   fs.readFileSync(stageAFiles.stageAInput),fs.readFileSync(stageAFiles.stageAStateBackup));
  }
  const members={};
  for(const [name,filePath] of Object.entries(materialFiles)){
@@ -200,7 +206,7 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
  assert.equal(brokerDigest(Object.fromEntries(Object.keys(files).map(name=>[name,brokerDigest(contents[name])]))),p.artifactSetSha256);
  assert.equal(brokerDigest(contents.plan),p.savedPlanSha256);
  for(const name of Object.keys(successorFiles))assert.equal(brokerDigest(contents[name]),p.successorReconciliation[name.replace(/Path$/,'Sha256')],`Successor ${name} differs from preparation`);
- if(p.successorReconciliation)assertSuccessorStageABinding(contents.bindingReportPath,stageAFiles,contents.stageAInput);
+ if(p.successorReconciliation)assertSuccessorStageABinding(contents.bindingReportPath,stageAFiles,contents.stageAInput,contents.stageAStateBackup);
  // Validate the complete content binding before writing even one local member.
  for(const [name,filePath] of Object.entries(materialFiles)){
   ensureStageBPrivateDirectory({directory:path.dirname(filePath),repositoryRoot,create:true});
