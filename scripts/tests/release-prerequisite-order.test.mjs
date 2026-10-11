@@ -38,3 +38,32 @@ test('both deployment routes retain rotation gates while prerequisite-only stops
  }
  assert.doesNotMatch(fs.readFileSync('.github/workflows/release-gate.yml','utf8'),/prerequisites\)/);
 });
+
+
+test('coordinator composite installs locked backend dependencies before credentials and startup',()=>{
+ const action=yaml.load(fs.readFileSync('.github/actions/converge-stage-b-prerequisites/action.yml','utf8'));
+ const steps=action.runs.steps,installation=steps.findIndex(step=>step.name==='Install locked coordinator backend dependencies');
+ assert.ok(installation>=0);
+ assert.equal(steps[installation].shell,'bash');
+ assert.equal(steps[installation].run,'npm --prefix backend ci --ignore-scripts --no-audit --no-fund');
+ assert.equal(steps[installation]['continue-on-error'],undefined);
+ assert.equal(steps[installation].if,undefined);
+ assert.ok(installation<steps.findIndex(step=>step.id==='credentials'));
+ assert.ok(installation<steps.findIndex(step=>step.id==='converge'));
+ assert.ok(fs.existsSync('backend/package-lock.json'));
+});
+
+test('root-only hosted layout reproduces missing backend SDK; installed backend loads the real coordinator without production context',()=>{
+ const root=process.cwd(),dir=fs.mkdtempSync(path.join(os.tmpdir(),'mscqr-coordinator-startup-test-'));
+ try{
+  fs.mkdirSync(path.join(dir,'backend'));
+  fs.copyFileSync(path.join(root,'backend/package.json'),path.join(dir,'backend/package.json'));
+  const code=`const m=await import(${JSON.stringify(new URL('../../scripts/aws/run-production-release-coordinator.mjs',import.meta.url).href)});if(typeof m.runHostedReleaseCoordinator!=='function'||typeof m.createHostedReleaseRuntime!=='function')throw Error('Coordinator entrypoints unavailable');console.log('COORDINATOR_LOADED')`;
+  const load=()=>spawnSync(process.execPath,['--input-type=module','-e',code],{cwd:dir,encoding:'utf8',env:{HOME:process.env.HOME,PATH:process.env.PATH},timeout:30000});
+  const missing=load();assert.notEqual(missing.status,0);assert.match(missing.stderr,/Cannot find module '@aws-sdk\/client-secrets-manager'/);
+  // The installer flags/order are checked above; use existing installed packages
+  // for this import regression, without a second installation or live AWS context.
+  fs.symlinkSync(fs.realpathSync(path.join(root,'backend/node_modules')),path.join(dir,'backend/node_modules'),'dir');
+  const installed=load();assert.equal(installed.status,0,installed.stderr);assert.match(installed.stdout,/COORDINATOR_LOADED/);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

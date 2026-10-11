@@ -7,6 +7,9 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install locked coordinator backend dependencies
+      shell: bash
+      run: npm --prefix backend ci --ignore-scripts --no-audit --no-fund
     - uses: aws-actions/configure-aws-credentials@v6
       id: credentials
       with:
