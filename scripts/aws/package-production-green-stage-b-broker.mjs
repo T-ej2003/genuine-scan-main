@@ -105,7 +105,8 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
   const directorySize = bytes.readUInt32LE(endOffset + 12);
   const directoryOffset = bytes.readUInt32LE(endOffset + 16);
   if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff || directoryOffset + directorySize > bytes.length) throw new Error("Stage B broker package ZIP64 or out-of-range metadata is unsupported.");
-  if (allowSingleMemberDataDescriptor && entryCount !== 1) throw new Error("Authorization ZIP must contain one member.");
+  if (allowSingleMemberDataDescriptor && (entryCount !== 1 || bytes.readUInt16LE(endOffset + 8) !== 1 || bytes.readUInt16LE(endOffset + 4) !== 0 || bytes.readUInt16LE(endOffset + 6) !== 0 || bytes.readUInt16LE(endOffset + 20) !== 0)) throw new Error("Authorization ZIP must have one member on one disk without a comment.");
+  if (allowSingleMemberDataDescriptor && (directoryOffset + directorySize !== endOffset || endOffset + 22 !== bytes.length)) throw new Error("Authorization ZIP directory placement is invalid.");
   const entries = [];
   let cursor = directoryOffset;
   while (cursor < directoryOffset + directorySize) {
@@ -135,6 +136,10 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
     if (!localName.equals(nameBytes) || localFlags !== flags || localExtraLength !== 0 || localModificationTime !== modificationTime || localModificationDate !== modificationDate) throw new Error("Stage B broker package ZIP local metadata is not canonical.");
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (dataOffset + compressedSize > bytes.length) throw new Error("Stage B broker package ZIP entry is out of range.");
+    if (allowSingleMemberDataDescriptor && localOffset !== 0) throw new Error("Authorization ZIP local header placement is invalid.");
+    if (allowSingleMemberDataDescriptor && flags === 0 && (dataOffset + compressedSize !== directoryOffset
+      || bytes.readUInt16LE(localOffset + 8) !== method || bytes.readUInt32LE(localOffset + 14) !== bytes.readUInt32LE(cursor + 16)
+      || bytes.readUInt32LE(localOffset + 18) !== compressedSize || bytes.readUInt32LE(localOffset + 22) !== uncompressedSize)) throw new Error("Authorization ZIP local metadata is invalid.");
     if (flags === 8) {
       if (bytes.readUInt16LE(localOffset + 8) !== method || bytes.readUInt32LE(localOffset + 14) !== 0
         || bytes.readUInt32LE(localOffset + 18) !== 0 || bytes.readUInt32LE(localOffset + 22) !== 0) throw new Error("Authorization ZIP local descriptor metadata is invalid.");
