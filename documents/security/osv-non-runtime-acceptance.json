@@ -7,12 +7,12 @@
       "affectedVersion": "3.0.3",
       "advisory": "GHSA-vfj7-8cjw-p6xm",
       "cve": "CVE-2026-93687",
-      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11 for PR #663: broker refresh-only JSON compatibility and isolated mocked closure regressions change only recovery scripts and tests. Frontend source, dependency locks, runtime packaging, and build patterns are unchanged; canonical browser closure and runtime packaging were independently revalidated.",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11 for bounded pre-native closure recovery: only coordinator authentication, retirement, protected authorization and mocked recovery tests change. Frontend source, dependency locks, runtime packaging and build patterns are unchanged; canonical browser closure and runtime packaging were independently revalidated against the retained unfiltered hosted OSV report.",
       "owner": "@T-ej2003",
       "createdAt": "2026-10-03",
       "expiresOn": "2026-11-02",
       "reachability": {
-        "inputsSha256": "efd79d9225db624f47cc30a0f721c5aa3c422c326bf8365f7d50ef2ff3c13916",
+        "inputsSha256": "5ae878006344317bfd88fae76c32329d65f7ef2d035b14b5cd9aaefa38abb754",
         "execution": {
           "backend": "NO",
           "worker": "NO",

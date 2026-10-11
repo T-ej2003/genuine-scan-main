@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {authenticatePreNativeClosureAbort} from './stage-b-pre-native-closure.mjs';
+import {readStageBTerraformStateIdentity} from './stage-b-terraform-backend-contract.mjs';
 import {runSuccessorReleaseCoordinator} from './production-successor-release-coordinator.mjs';
 import {HOSTED_RELEASE_ROOT,createReleaseCoordinatorStore,captureReleasePhaseMaterial,
  authenticateFailedReleaseTransitionAttempt,hydrateReleasePhaseMaterial,obtainReleaseTransitionAuthorization,
@@ -44,7 +46,7 @@ export function createHostedSuccessorRuntime({env=process.env,
  generateStageA=generateStageAPrerequisites,verifyImage=verifyImageEvidenceSignature,
  authorize=obtainReleaseTransitionAuthorization,authenticateTooling=authenticateProtectedTooling,
  readAuthority=readStagedBrokerSourceAuthority,readReceipt=readStagedBrokerReceipt,
- verifyAuthorization,readVersion,readReviewedAlias,authenticateImages,verifyImport,
+ verifyAuthorization,readVersion,readReviewedAlias,readState=()=>readStageBTerraformStateIdentity(awsRun),authenticateImages,verifyImport,
  commandRun=(cmd,args,options)=>execFileSync(cmd,args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe'],...options})}={}) {
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
  assert.equal(env.GITHUB_REPOSITORY,'T-ej2003/genuine-scan-main');
@@ -158,13 +160,15 @@ export function createHostedSuccessorRuntime({env=process.env,
     if(latest?.round&&brokerDigest(brokerExecutionCheckout(latest.prepared.preparation))===brokerDigest(currentTooling)
       &&!store.readStep(releaseId,`closure:retired:${latest.round}`)
       &&!store.readStep(releaseId,`closure:approval-timeout:${latest.round}`))return {currentTooling,round:latest.round};
-    let supersededAuthorization;
+    let supersededAuthorization,preNativeAbort;
     if(latest){
      const {round,record,prepared}=latest;
-     assert.equal(store.readStep(releaseId,`closure:attempt:${round}`),null,'Existing closure intent requires native recovery');
-     assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null,'Existing closure authorization cannot be rebound');
+     if(store.readStep(releaseId,`closure:attempt:${round}`))preNativeAbort=await authenticatePreNativeClosureAbort({
+      store,releaseId,release,sourceSha:request.releaseSourceSha,round,prepared,currentTooling,casResult,run:awsRun,
+      directory:HOSTED_RELEASE_ROOT,verify:verifier,readReceipt,readState,readAlias});
+     else assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null,'Existing closure authorization cannot be rebound');
      const pending=store.readStep(releaseId,`closure:pending:${round}`),dispatch=store.readStep(releaseId,`closure:dispatch:${round}`);
-     if(dispatch){
+     if(dispatch&&!preNativeAbort){
       const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);
       assert.ok(pending||timedOut,'Unresolved closure authorization dispatch cannot be replaced');
       assert.equal((pending||timedOut).prepared,record.result);assert.ok(dispatch.dispatch);
@@ -177,10 +181,10 @@ export function createHostedSuccessorRuntime({env=process.env,
       const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:(pending||timedOut).runId,toolingSha,
        workflowId:identity.workflowId,beforeRunIds:dispatch.dispatch.beforeRunIds});
       supersededAuthorization={...failed,preparationReference:record.result,authorizationRound:round};
-     }else assert.equal(pending,null,'Pending closure approval has no authenticated dispatch');
+     }else if(!preNativeAbort)assert.equal(pending,null,'Pending closure approval has no authenticated dispatch');
     }
     const round=latest?latest.round+1:1;assert.ok(round<20,'Closure continuation rounds exhausted');
-    return {currentTooling,round,...(latest?{previousRound:latest.round}:{}),...(supersededAuthorization?{supersededAuthorization}:{})};
+    return {currentTooling,round,...(latest?{previousRound:latest.round}:{}),...(supersededAuthorization?{supersededAuthorization}:{}),...(preNativeAbort?{preNativeAbort}:{})};
    }
    assert.equal(currentSha,request.recoveryToolingSha,'Hosted recovery checkout differs from operation tooling');
    const attempts=Array.from({length:20},(_,round)=>({round,

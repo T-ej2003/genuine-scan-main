@@ -481,7 +481,7 @@ test('failed authorization attempt with an artifact cannot be superseded',()=>{
  assert.equal(calls.length,2);
 });
 
-test('hosted closure consumes authorized omitted-resource refresh, persists its receipt and adopts it without CAS replay', async t => {
+for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'renews an authenticated pre-native abort':'consumes an authorized omitted-resource refresh'} and adopts its durable receipt without CAS replay`, async t => {
  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-hosted-closure-'));
  fs.chmodSync(directory, 0o700);
  t.after(() => fs.rmSync(directory, {recursive:true,force:true}));
@@ -489,8 +489,12 @@ test('hosted closure consumes authorized omitted-resource refresh, persists its 
  const {createBrokerProtectedEnvironmentAuthorization} = await import('../aws/stage-b-staged-broker-authorization.mjs');
  const {brokerExecutionCheckout, assertBrokerClosurePlan} = await import('../aws/stage-b-staged-broker-contract.mjs');
  const {runStagedBrokerRequest} = await import('../aws/run-stage-b-staged-broker.mjs');
- const f = await fixture(), clock = new Date(), records = [], live = await ready(rig({sourceSha:A}));
- let waiting = true, refreshWrites = 0;
+ const f = await fixture(), records = [], live = await ready(rig({sourceSha:A}));
+ let clock=new Date(),waiting = true, refreshWrites = 0,failBeforeNative=preNativeAbort;
+ const capture=f.runtime.capturePreparation;
+ f.runtime.capturePreparation=async(context,phase,value)=>capture(context,phase,{...value,
+  planPath:path.join(HOSTED_RELEASE_ROOT,f.releaseId,'cutover','reconcile.tfplan')});
+ t.after(()=>fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true}));
  f.runtime.obtainAuthorization = async (context, phase, prepared, preparationReference) => {
   if (phase === 'closure' && waiting) return {status:'WAITING_FOR_APPROVAL',runId:'701',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/701'};
   const environment = {id:7,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]};
@@ -499,12 +503,35 @@ test('hosted closure consumes authorized omitted-resource refresh, persists its 
    workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,eventName:'workflow_dispatch',workflowRunId:phase==='closure'?'701':'700',
    workflowRunAttempt:'1',executionActor:'operator',observedAt:clock.toISOString(),
    actualApproval:{state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'}});
-  return {status:'AUTHORIZED',authorization:createBrokerProtectedEnvironmentAuthorization(prepared.preparation,{approval,now:clock,
-   release:{releaseId:context.release.releaseId,phase,preparationReference,authorizationRound:context.authorizationRound}})};
+  const freshAuthorization=createBrokerProtectedEnvironmentAuthorization(prepared.preparation,{approval,now:clock,
+   release:{releaseId:context.release.releaseId,phase,preparationReference,authorizationRound:context.authorizationRound}});
+  if(preNativeAbort&&phase==='closure'&&context.authorizationRound===1){
+   const output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'closure','authorization.json');
+   ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
+   const {authenticatePreNativeClosureAbort}=await import('../aws/stage-b-pre-native-closure.mjs');
+   const authenticate=()=>authorizeReleaseTransition({sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,phase,
+    preparationReference,authorizationRound:1,output},{env:{GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',
+     GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,
+     GITHUB_SHA:D,GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'701',RUNNER_TEMP:directory,RELEASE_ID:f.releaseId,
+     RELEASE_PHASE:phase,RELEASE_PREPARATION_REFERENCE:preparationReference,RELEASE_AUTHORIZATION_ROUND:'1'},
+    run:()=>{throw new Error('No production API is permitted in authorization fixture');},createStore:()=>f.store,
+    hydrateMaterial:async()=>{},authenticateAbort:input=>authenticatePreNativeClosureAbort({...input,verify:async()=>true,
+     now:clock,readReceipt:()=>{throw Object.assign(new Error('Absent'),{code:'RECEIPT_ABSENT'});},
+     readState:()=>input.prepared.preparation.state,readAlias:()=>input.casResult.alias}),
+    runRequest:async input=>{assert.equal(input.operation,'authorize-closure');return freshAuthorization;}});
+   const retired=f.steps.get(`${f.releaseId}/closure:retired:0`),originalProof=structuredClone(retired.preNativeAbort);
+   retired.preNativeAbort.attemptSha256='f'.repeat(64);
+   await assert.rejects(authenticate,/abort proof differs/);
+   retired.preNativeAbort=originalProof;
+   const result=await authenticate();
+   assert.equal(result.authorizationSha256,brokerDigest(freshAuthorization));
+  }
+  return {status:'AUTHORIZED',authorization:freshAuthorization};
  };
  const stage = f.runtime.runStageOperation;
  f.runtime.runStageOperation = async input => {
   if (input.operation !== 'reconcile') return stage(input);
+  if(failBeforeNative){failBeforeNative=false;throw new Error('Historical pre-native plan validation failed');}
   f.counts.closure++;
   let state = structuredClone(input.preparation.state);
   const deps = {...live.deps,now:()=>clock,readCheckout:async()=>brokerExecutionCheckout(input.preparation),
@@ -522,7 +549,25 @@ test('hosted closure consumes authorized omitted-resource refresh, persists its 
  const execute=()=>runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime});
  assert.equal((await execute()).status,'WAITING_FOR_APPROVAL');
  assert.equal(refreshWrites,0);const casCount=f.counts.cutover;
- waiting=false;assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
+ waiting=false;
+ if(preNativeAbort){
+  await assert.rejects(execute,/Historical pre-native/);assert.equal(refreshWrites,0);assert.equal(records.length,0);
+  const historical=structuredClone([...f.steps]),old=f.steps.get(`${f.releaseId}/closure:prepared`);
+  clock=new Date(clock.getTime()+60*60_000);
+  const {authenticatePreNativeClosureAbort}=await import('../aws/stage-b-pre-native-closure.mjs');
+  const proof=await authenticatePreNativeClosureAbort({store:f.store,releaseId:f.releaseId,sourceSha:A,round:0,
+   prepared:f.store.getArtifact(old.result),currentTooling:{sourceSha:D,treeSha256:'d'.repeat(64)},
+   casResult:f.store.getArtifact(f.steps.get(`${f.releaseId}/cutover:result`).result),now:clock,verify:async()=>true,
+   readReceipt:()=>{throw Object.assign(new Error('Absent'),{code:'RECEIPT_ABSENT'});},
+   readState:()=>f.store.getArtifact(old.result).preparation.state,
+   readAlias:()=>f.store.getArtifact(f.steps.get(`${f.releaseId}/cutover:result`).result).alias});
+  f.runtime.authenticateRequest=async()=>({currentTooling:proof.currentTooling,round:1,previousRound:0,preNativeAbort:proof});
+  assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal(f.steps.get(`${f.releaseId}/closure:retired:0`).reason,'PRE_NATIVE_ABORTED');
+  for(const [key,value]of historical)assert.deepEqual(f.steps.get(key),value,'Historical record changed');
+  assert.notEqual(f.steps.get(`${f.releaseId}/closure:authorized:1`).authorization,
+   f.steps.get(`${f.releaseId}/closure:authorized:0`).authorization,'Fresh round must require fresh authority');
+ }else assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
  assert.equal(refreshWrites,1);assert.equal(f.counts.cutover,casCount);
  assert.ok(records.some(record=>record[1]==='RECONCILED_PENDING_RELEASE_CAS'));
  assert.ok(f.steps.get(`${f.releaseId}/closure:result`));

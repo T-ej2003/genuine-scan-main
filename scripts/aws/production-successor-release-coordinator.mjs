@@ -75,11 +75,19 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       const old=await read(previousRound?`closure:prepared:${previousRound}`:'closure:prepared');
       if(old){
        const oldReference=old.result;
-       assert.equal(await read(`closure:attempt:${previousRound}`),null,'Historical closure intent must be recovered, not replaced');
-       assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
+       const oldAttempt=await read(`closure:attempt:${previousRound}`);
+       if(oldAttempt){
+        const proof=continuation.preNativeAbort;assert.equal(proof?.status,'PRE_NATIVE_ABORTED');
+        assert.equal(proof.releaseId,release.releaseId);assert.equal(proof.sourceSha,release.sourceSha);
+        assert.equal(proof.round,previousRound);assert.equal(proof.prepared,oldReference);
+        assert.equal(proof.attemptSha256,brokerDigest(oldAttempt));
+        assert.equal(proof.authorization,(await read(`closure:authorized:${previousRound}`))?.authorization);
+        assert.deepEqual(proof.currentTooling,continuation.currentTooling);
+       }else assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
        const retired=await read(`closure:retired:${previousRound}`);
        if(retired)assert.equal(retired.prepared,oldReference);
-       else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:'TOOLING_ADVANCED_AFTER_CAS',
+       else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:continuation.preNativeAbort?'PRE_NATIVE_ABORTED':'TOOLING_ADVANCED_AFTER_CAS',
+        ...(continuation.preNativeAbort?{preNativeAbort:continuation.preNativeAbort}:{}),
         ...(continuation.supersededAuthorization?{runId:continuation.supersededAuthorization.runId}: {})});
       }
       return {...cutover.prepared,preparation:prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,

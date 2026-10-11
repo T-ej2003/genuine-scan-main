@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import {createBrokerProtectedEnvironmentAuthorization} from '../aws/stage-b-staged-broker-authorization.mjs';
+import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
 import {brokerDigest,prepareBrokerStateRefresh} from '../aws/stage-b-staged-broker-contract.mjs';
 import {STAGE_B_TERRAFORM_BACKEND_CONFIG} from '../aws/stage-b-terraform-backend-contract.mjs';
 import {createHostedSuccessorRuntime} from '../aws/run-production-successor-release-coordinator.mjs';
@@ -53,7 +55,7 @@ test('hosted successor materializer consumes immutable import reference and orig
   const bytes=args.includes('env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate')?currentBytes:Buffer.from('{}');
   fs.writeFileSync(args.at(-1),bytes,{mode:0o600});return '{}';};
  let imageObservation,providerError=false;const terraformCalls=[];
- let liveAlias=preparation.alias,casReceipt;
+ let liveAlias=preparation.alias,casReceipt,nativeStatus,liveState;
  const runtime=createHostedSuccessorRuntime({env,awsRun:run,ghRun:args=>{
    if(args[1].endsWith('/actions/runs/700'))return JSON.stringify({id:700,workflow_id:77,repository:{full_name:'T-ej2003/genuine-scan-main'},
     head_repository:{full_name:'T-ej2003/genuine-scan-main'},head_sha:C,head_branch:'main',
@@ -61,7 +63,10 @@ test('hosted successor materializer consumes immutable import reference and orig
    if(args[1].endsWith('/artifacts'))return JSON.stringify([{artifacts:[]}]);
    throw new Error(`Unexpected GitHub call ${args.join(' ')}`);},
   createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.ok([C,D,E].includes(c));},verifyImport:()=>true,
-  readAuthority:()=>({preparation,authorization}),readReceipt:({status})=>status==='CUTOVER_COMMITTED_STATE_PENDING'?casReceipt:result,
+  readAuthority:()=>({preparation,authorization}),readState:()=>liveState,readReceipt:({status})=>{
+   if(['STATE_REFRESH_INTENT','STATE_REFRESH_UNKNOWN','RECONCILED_PENDING_RELEASE_CAS','STAGED_BROKER_TERMINAL_HANDOFF'].includes(status)){
+    if(status===nativeStatus)return {};throw Object.assign(new Error('Absent'),{code:'RECEIPT_ABSENT'});}
+   return status==='CUTOVER_COMMITTED_STATE_PENDING'?casReceipt:result;},
   verifyAuthorization:async()=>true,readVersion:()=>rigged.deps.getVersion('13'),readReviewedAlias:()=>liveAlias,
   authenticateImages:({request:seen,evidence,imageReleaseSha,now})=>{
    assert.equal(seen.recoveryToolingSha,C);assert.equal(evidence.imageReleaseSha,imageReleaseSha);imageObservation=now;},
@@ -163,6 +168,28 @@ test('hosted successor materializer consumes immutable import reference and orig
   const advanced=await runtime.authenticateRequest(request);
   assert.equal(advanced.round,2);assert.equal(advanced.previousRound,1);assert.equal(advanced.currentTooling.sourceSha,E);
   assert.deepEqual(steps.get(`${continuationReleaseId}/closure:prepared:1`),savedRound,'Historical round remains immutable');
+  const issued=new Date(Date.now()-60*60_000);
+  const approval=createProductionEnvironmentApprovalEvidence({environmentConfig:{id:7,name:'production',can_admins_bypass:false,
+   protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]},
+   repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:D,
+   workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,eventName:'workflow_dispatch',workflowRunId:'701',
+   workflowRunAttempt:'1',executionActor:'operator',observedAt:issued.toISOString(),
+   actualApproval:{state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'}});
+  liveState=continued.preparation.state;
+  const oldAuthorization=createBrokerProtectedEnvironmentAuthorization(continued.preparation,{approval,now:issued,
+   release:{releaseId:continuationReleaseId,phase:'closure',preparationReference:continuedRef,authorizationRound:1}});
+  for(const kind of ['attempt','authorized'])steps.set(`${continuationReleaseId}/closure:${kind}:1`,{
+   releaseId:continuationReleaseId,sourceSha:A,name:`closure:${kind}:1`,prepared:continuedRef,authorization:put(oldAuthorization)});
+  const aborted=await runtime.authenticateRequest(request);
+  assert.equal(aborted.round,2);assert.equal(aborted.preNativeAbort.status,'PRE_NATIVE_ABORTED');
+  assert.equal(aborted.preNativeAbort.authorization,brokerDigest(oldAuthorization));
+  assert.equal(aborted.preNativeAbort.currentTooling.sourceSha,E);
+  for(const status of ['STATE_REFRESH_INTENT','STATE_REFRESH_UNKNOWN','RECONCILED_PENDING_RELEASE_CAS','STAGED_BROKER_TERMINAL_HANDOFF']){
+   nativeStatus=status;await assert.rejects(()=>runtime.authenticateRequest(request),/requires native recovery/);
+  }
+  nativeStatus=undefined;
+  steps.delete(`${continuationReleaseId}/closure:attempt:1`);steps.delete(`${continuationReleaseId}/closure:authorized:1`);
+
   const forged=structuredClone(continued);forged.preparation.closureContinuation.currentTooling.treeSha256='0'.repeat(64);
   steps.set(`${continuationReleaseId}/closure:prepared:1`,{...savedRound,result:put(forged)});
   await assert.rejects(()=>runtime.authenticateRequest(request));
