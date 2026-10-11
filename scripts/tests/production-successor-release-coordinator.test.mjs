@@ -480,3 +480,51 @@ test('failed authorization attempt with an artifact cannot be superseded',()=>{
  assert.throws(()=>authenticateFailedReleaseTransitionAttempt({run,runId:'700',toolingSha:C,workflowId:77,beforeRunIds:['699']}),/produced an authorization artifact/);
  assert.equal(calls.length,2);
 });
+
+test('hosted closure consumes authorized omitted-resource refresh, persists its receipt and adopts it without CAS replay', async t => {
+ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-hosted-closure-'));
+ fs.chmodSync(directory, 0o700);
+ t.after(() => fs.rmSync(directory, {recursive:true,force:true}));
+ const {createProductionEnvironmentApprovalEvidence} = await import('../aws/production-github-environment-approval.mjs');
+ const {createBrokerProtectedEnvironmentAuthorization} = await import('../aws/stage-b-staged-broker-authorization.mjs');
+ const {brokerExecutionCheckout, assertBrokerClosurePlan} = await import('../aws/stage-b-staged-broker-contract.mjs');
+ const {runStagedBrokerRequest} = await import('../aws/run-stage-b-staged-broker.mjs');
+ const f = await fixture(), clock = new Date(), records = [], live = await ready(rig({sourceSha:A}));
+ let waiting = true, refreshWrites = 0;
+ f.runtime.obtainAuthorization = async (context, phase, prepared, preparationReference) => {
+  if (phase === 'closure' && waiting) return {status:'WAITING_FOR_APPROVAL',runId:'701',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/701'};
+  const environment = {id:7,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]};
+  const approval = createProductionEnvironmentApprovalEvidence({environmentConfig:environment,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,
+   environment:'production',sourceSha:brokerExecutionCheckout(prepared.preparation).sourceSha,
+   workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,eventName:'workflow_dispatch',workflowRunId:phase==='closure'?'701':'700',
+   workflowRunAttempt:'1',executionActor:'operator',observedAt:clock.toISOString(),
+   actualApproval:{state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'}});
+  return {status:'AUTHORIZED',authorization:createBrokerProtectedEnvironmentAuthorization(prepared.preparation,{approval,now:clock,
+   release:{releaseId:context.release.releaseId,phase,preparationReference,authorizationRound:context.authorizationRound}})};
+ };
+ const stage = f.runtime.runStageOperation;
+ f.runtime.runStageOperation = async input => {
+  if (input.operation !== 'reconcile') return stage(input);
+  f.counts.closure++;
+  let state = structuredClone(input.preparation.state);
+  const deps = {...live.deps,now:()=>clock,readCheckout:async()=>brokerExecutionCheckout(input.preparation),
+   readStateIdentity:async()=>structuredClone(state),readPrerequisites:async()=>input.preparation.prerequisites,
+   getAlias:async()=>input.casResult.alias,
+   authenticateCasResult:async result=>assert.deepEqual(result,f.store.getArtifact(f.steps.get(`${f.releaseId}/cutover:result`).result)),
+   authenticateSuccessorReconciliation:async p=>assert.deepEqual(p.successorReconciliation,input.cutoverPreparation.successorReconciliation),
+   captureRefreshOnlyPlan:async()=>{const value=await live.deps.captureRefreshOnlyPlan();delete value.plan.resource_changes;return value;},
+   updateAlias:async()=>{throw new Error('Completed CAS must never replay');},
+   record:async(...record)=>records.push(record),
+   applyRefreshOnlyPlan:async()=>{assert.ok(records.some(record=>record[1]==='STATE_REFRESH_INTENT'));refreshWrites++;state.serial++;},
+   authenticateTerraformState:async()=>{},publishTerminalHandoff:async value=>assertBrokerClosurePlan(value.record.closurePlan,input.preparation)};
+  return runStagedBrokerRequest({...input,directory}, {adapterFactory:()=>deps});
+ };
+ const execute=()=>runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime});
+ assert.equal((await execute()).status,'WAITING_FOR_APPROVAL');
+ assert.equal(refreshWrites,0);const casCount=f.counts.cutover;
+ waiting=false;assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(refreshWrites,1);assert.equal(f.counts.cutover,casCount);
+ assert.ok(records.some(record=>record[1]==='RECONCILED_PENDING_RELEASE_CAS'));
+ assert.ok(f.steps.get(`${f.releaseId}/closure:result`));
+ assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');assert.equal(refreshWrites,1);assert.equal(f.counts.cutover,casCount);
+});
