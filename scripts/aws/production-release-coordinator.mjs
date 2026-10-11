@@ -32,11 +32,12 @@ export function authenticateReleaseGateRuns(release,evidence) {
   assert.equal(workflow.path,`.github/workflows/${file}`);assert.ok(Number.isSafeInteger(workflow.id)&&workflow.id>0);
  }
  const entries=buildGateEntries({requiredWorkflowFiles:required,workflowPayloads:evidence.workflowPayloads,targetSha:release.sourceSha,
-  targetEvents:['push','workflow_dispatch'],expectedWorkflowRunIds:expected});
+  targetEvents:evidence.lifecycle==='prerequisites'?['push']:['workflow_dispatch'],expectedWorkflowRunIds:expected});
  for(const {run} of entries){
   assert.ok(run,'Missing exact-source required gate');
   assert.equal(run.repository?.full_name,'T-ej2003/genuine-scan-main');assert.equal(run.head_repository?.full_name,'T-ej2003/genuine-scan-main');
   assert.equal(String(run.run_attempt),'1','Gate attempt identity changed');
+  if(evidence.lifecycle==='prerequisites')assert.equal(run.head_branch,'main','Prerequisite gate must execute on main');
  }
  assert.equal(evaluateGateState(entries).ok,true,'Required exact-source gates are not successful');
  return entries.map(({workflowFile,run})=>({workflowFile,runId:String(run.id),sourceSha:run.head_sha}));
@@ -324,7 +325,7 @@ export async function runReleaseCoordinator(request, runtime) {
   const value=await runtime.resolveArtifacts(release);await runtime.authenticateArtifacts(release,value);return value;
  });
  await runtime.authenticateArtifacts(release, artifacts);
- const gates = await once('GATES_PASSED', async () => {
+ const gates = await once(runtime.gateLifecycle==='prerequisites'?'PREREQUISITE_GATES_PASSED':'GATES_PASSED', async () => {
   const value=await runtime.resolveGates(release);await runtime.authenticateGates(release,value);return value;
  });
  await runtime.authenticateGates(release, gates);
@@ -510,6 +511,6 @@ export async function runReleaseCoordinator(request, runtime) {
  const result={status:'PREREQUISITES_CONVERGED', releaseId:release.releaseId, sourceSha:release.sourceSha,
   registrationTransactionId:chain.registration.result.authorizationSha256,
   closureSha256:await put(closure), artifactsSha256:await put(artifacts), gatesSha256:await put(gates)};
- assert.deepEqual(await once('PREREQUISITES_CONVERGED', async()=>result),result,'Terminal prerequisite closure changed');
+ assert.deepEqual(await once(runtime.gateLifecycle==='prerequisites'?'PREREQUISITE_PREPARATION_CONVERGED':'PREREQUISITES_CONVERGED', async()=>result),result,'Terminal prerequisite closure changed');
  return result;
 }

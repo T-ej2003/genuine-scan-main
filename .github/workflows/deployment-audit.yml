@@ -117,9 +117,10 @@ jobs:
               trap 'rm -f "$state_file"' EXIT
               printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
               chmod 600 "$state_file"
+              image_release_sha="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.overlapRuntime?.expectedReleaseSha || ""))' "$ROTATION_STATE_JSON")"
               node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
                 --mode validate-candidate --state-file "$state_file" --state-sha256 "$ROTATION_STATE_SHA256" \
-                --source-sha "$TARGET_SHA" --rotation-id "$ROTATION_ID" --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+                --source-sha "$TARGET_SHA" --image-release-sha "$image_release_sha" --rotation-id "$ROTATION_ID" --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                 --task-definition "$ROTATION_TASK_DEFINITION_ARN" --image-digest "$ROTATION_IMAGE_DIGEST"
               npm run verify:release:pre-rotation
               ;;

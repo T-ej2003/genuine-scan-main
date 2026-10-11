@@ -16,6 +16,11 @@ on:
         description: "Externally issued production release ticket bound to the prerequisite coordinator."
         required: true
         type: string
+      prerequisites_only:
+        description: "Prepare governed current-main broker/image prerequisites only; never dispatch Release Gate. Rotation eligibility remains mandatory for subsequent deployment."
+        required: false
+        type: boolean
+        default: false
       release_lifecycle:
         description: "Strict post-rotation release or exact authenticated initial-overlap activation."
         required: false
@@ -156,7 +161,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           DISPATCH_REF: ${{ steps.resolve.outputs.dispatch_ref }}
-          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+          RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
@@ -171,6 +176,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ "$RELEASE_LIFECYCLE" = prerequisites ]; then
+            test "$DISPATCH_REF" = main
+            gate_runs_file="$RUNNER_TEMP/prerequisite-gate-runs.json"
+            printf '{}' > "$gate_runs_file"
+            chmod 600 "$gate_runs_file"
+            trap 'rm -f "$gate_runs_file"' EXIT
+            while read -r workflow_file; do
+              run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file/runs?event=push&head_sha=$TARGET_SHA&per_page=100" \
+                --jq '.workflow_runs | map(select(.head_branch == "main")) | sort_by(.created_at) | reverse | .[0].id // empty')"
+              [[ "$run_id" =~ ^[1-9][0-9]*$ ]] || { echo "::error::Missing exact-source main-push gate: $workflow_file"; exit 1; }
+              node --input-type=module - "$gate_runs_file" "$workflow_file" "$run_id" <<'NODE'
+          import fs from "node:fs";
+          const [file, workflow, id] = process.argv.slice(2);
+          const ids = JSON.parse(fs.readFileSync(file)); ids[workflow] = id;
+          fs.writeFileSync(file, JSON.stringify(ids), {mode: 0o600});
+          NODE
+            done < <(node scripts/github/release-lifecycle-contract.mjs --lifecycle prerequisites lines)
+            echo "REQUIRED_GATE_RUN_IDS_JSON=$(cat "$gate_runs_file")" >> "$GITHUB_ENV"
+            echo "gate_run_ids_json=$(cat "$gate_runs_file")" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           case "$RELEASE_LIFECYCLE" in
             strict)
               ;;
@@ -183,9 +210,10 @@ jobs:
               trap 'rm -f "$state_file" "$authorization_file"' EXIT
               printf '%s' "$ROTATION_STATE_JSON" > "$state_file"
               chmod 600 "$state_file"
+              image_release_sha="$(node -e 'const value=JSON.parse(process.argv[1]); process.stdout.write(String(value.overlapRuntime?.expectedReleaseSha || ""))' "$ROTATION_STATE_JSON")"
               node scripts/aws/manage-production-initial-activation-lifecycle.mjs \
                 --mode validate-candidate --state-file "$state_file" --state-sha256 "$ROTATION_STATE_SHA256" \
-                --source-sha "$TARGET_SHA" --rotation-id "$ROTATION_ID" --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
+                --source-sha "$TARGET_SHA" --image-release-sha "$image_release_sha" --rotation-id "$ROTATION_ID" --deployment-sha "$ROTATION_DEPLOYMENT_SHA" \
                 --task-definition "$ROTATION_TASK_DEFINITION_ARN" --image-digest "$ROTATION_IMAGE_DIGEST"
               printf '%s' "$NORMAL_IMAGE_AUTHORIZATION_JSON" > "$authorization_file"
               chmod 600 "$authorization_file"
@@ -248,8 +276,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
-          TARGET_EVENTS: push,workflow_dispatch
-          RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+          TARGET_EVENTS: ${{ inputs.prerequisites_only && 'push' || 'push,workflow_dispatch' }}
+          RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
           MAX_ATTEMPTS: 90
           POLL_SECONDS: 30
         run: |
@@ -266,7 +294,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
       RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
-      RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
+      RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
+      RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
       NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
       REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}
@@ -336,6 +365,7 @@ jobs:
           fi
 
       - name: Trigger final Release Gate
+        if: ${{ !inputs.prerequisites_only }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ needs.gates.outputs.target_ref }}
