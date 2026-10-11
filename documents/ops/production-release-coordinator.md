@@ -252,3 +252,45 @@ The Release Train gate reader now exposes the exact workflow and child-run
 payloads already used by the canonical gate checker. The coordinator verifies
 those identities itself; a success-only summary or a substituted child run
 cannot satisfy `GATES_PASSED`.
+
+
+## State-private standalone prerequisite handoff
+
+The standalone prerequisite and state-reconciliation preparation workflows use
+this same encrypted coordinator store. Their GitHub artifacts contain only
+`private-evidence-reference.json` or `preparation-reference.json`. Raw state,
+prerequisite ZIPs and saved Terraform plans stay in the existing Terraform
+backend's apply-attempt namespace, with AES256 encryption, conditional creation,
+content-addressed identity and exact readback. No new bucket or IAM policy is
+introduced.
+
+Use the existing production-protected producer, preparation, authorization and
+execution workflows in that order. Dispatch fields and protected approvals
+remain required. Consumers authenticate the exact successful producer run,
+repository, source, attempt and GitHub artifact digest before reading the private
+reference. The reference binds kind, workflow, run, source, byte size and payload
+digest; the store independently verifies its immutable envelope and content hash.
+The existing bundle manifest, state lineage/serial, plan and authorization checks
+still run after private materialization. A missing object, access denial or any
+substitution fails closed. Never upload the reconstructed ZIP or saved plan.
+
+The authorization workflow uses the existing production release-deployer OIDC
+role to read the referenced preparation. This does not grant new IAM permissions
+or authorize Terraform execution. Execution still requires its separate protected
+approval and exact authorization. New producer attempts require new authenticated
+references; references from different runs cannot be combined. Historical
+reconciliation receipt readers retain support for already-issued legacy artifacts,
+but these workflows no longer publish state-bearing artifacts.
+
+This transport does not satisfy rotation grace, current image bindings or Stage-B
+approval prerequisites by itself. Keep an existing rotation and authenticate its
+own durable evidence before Release Train. Recommended hardening is to keep the
+reference-only artifact regression in required CI so future bundle additions
+cannot accidentally expose production state.
+
+Private reference readers require an explicit credential-bound AWS runner.
+Hosted workflow hydration uses the existing OIDC release-deployer session;
+local normal-activation convergence passes its explicit `--admin-profile` runner
+for both evidence reads and policy execution. Neither path inherits ambient
+credentials or falls back to another credential source. Legacy GitHub-only
+receipt authentication remains compatible without AWS hydration.

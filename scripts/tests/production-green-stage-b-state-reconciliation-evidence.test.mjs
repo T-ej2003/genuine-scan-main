@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
+import {createProductionCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from "../aws/production-cutover-production-adapters.mjs";
+import {publishPrivateEvidence} from "../aws/stage-b-private-evidence.mjs";
+import {brokerDigest} from "../aws/stage-b-staged-broker-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { assertHistoricalFinalApplyWriteV16Successor, HISTORICAL_FINAL_APPLY_WRITE_V16, readHistoricalFinalApplyWriteV16Artifacts, buildNormalActivationPolicy, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 import { stageBBoundImagesFromBindingReport } from "../aws/generate-production-green-stage-b-tfvars.mjs";
@@ -84,7 +87,7 @@ function createFixture({ predecessorSerial = HISTORICAL_FINAL_APPLY_WRITE_V16.st
 }
 
 function resolve(fixture) {
-  return resolveStageBStateReconciliationEvidence({ currentProtectedMainSha: sourceSha, preparationRunId: fixture.runIds.preparation, authorizationRunId: fixture.runIds.authorization, executionRunId: fixture.runIds.execution, expectedResultSha256: sha(fixture.files["result.json"]), expectedResultArtifactId: fixture.artifactIds.result, expectedResultArtifactDigest: fixture.artifactDigest.result, githubRun: fixture.githubRun, unzipRun: fixture.unzipRun, gitRun: () => "" });
+  return resolveStageBStateReconciliationEvidence({ currentProtectedMainSha: sourceSha, preparationRunId: fixture.runIds.preparation, authorizationRunId: fixture.runIds.authorization, executionRunId: fixture.runIds.execution, expectedResultSha256: sha(fixture.files["result.json"]), expectedResultArtifactId: fixture.artifactIds.result, expectedResultArtifactDigest: fixture.artifactDigest.result, githubRun: fixture.githubRun, unzipRun: fixture.unzipRun, privateEvidenceRun: fixture.privateEvidenceRun, gitRun: () => "" });
 }
 
 test("authenticated OUTPUT_ONLY run artifacts compose the historical serial 115 predecessor to the exact live successor", (t) => {
@@ -162,4 +165,52 @@ test("canonical result validator rejects wrong predecessor, successor, source, a
   const resourceChangingPreparation = structuredClone(f.preparation); resourceChangingPreparation.planSemantics.resourceStateChangeCount = 1; const { preparationSha256, ...preparationBody } = resourceChangingPreparation; resourceChangingPreparation.preparationSha256 = stageBStateReconciliationSha256(preparationBody);
   const resourceChangingAuthorization = createStageBStateReconciliationAuthorization({ preparation: resourceChangingPreparation, approval: f.authorization.protectedEnvironmentApprovalEvidence, now: new Date(timestamp.authCreated) });
   assert.throws(() => check(f.result, resourceChangingPreparation, resourceChangingAuthorization), /resourceStateChangeCount|result/);
+});
+
+
+test("private preparation reference authenticates the complete protected authorization and execution handoff", (t) => {
+ const f=createFixture();t.after(()=>fs.rmSync(f.historicalTmp,{recursive:true,force:true}));
+ let evidence;
+ const store={putArtifact:(_sha,value)=>{evidence=value;},getArtifact:()=>evidence};
+ const reference=publishPrivateEvidence({bytes:f.files["preparation-bundle.zip"],kind:"preparation",sourceSha,workflowRunId:f.runIds.preparation,store});
+ const originalUnzip=f.unzipRun;
+ f.unzipRun=(command,args,options={})=>{
+  if(path.basename(args[1])==="stage-b-reconciliation-preparation.zip") {
+   if(args[0]==="-Z1")return "preparation-reference.json\n";
+   assert.equal(args[2],"preparation-reference.json");
+   const bytes=Buffer.from(JSON.stringify(reference));return options.encoding===null?bytes:bytes.toString();
+  }
+  return originalUnzip(command,args,options);
+ };
+ f.privateEvidenceRun=args=>{
+  assert.equal(args[0],"s3api");assert.equal(args[1],"get-object");
+  fs.writeFileSync(args.find(arg=>path.isAbsolute(arg)&&path.basename(arg).startsWith("coordinator-read-")),JSON.stringify({kind:"PRODUCTION_RELEASE_COORDINATOR_ARTIFACT",key:{sha256:brokerDigest(evidence)},value:evidence}));
+  return JSON.stringify({ServerSideEncryption:"AES256"});
+ };
+ const awsRead=f.privateEvidenceRun;
+ for(const credentialSource of [PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER]) {
+  const local=credentialSource===PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
+  f.privateEvidenceRun=createProductionCommandRunner({credentialSource,...(local?{profile:"approved-admin"}:{}),env:{HOME:os.homedir(),PATH:process.env.PATH,AWS_PROFILE:"wrong",AWS_ACCESS_KEY_ID:"session-access",AWS_SECRET_ACCESS_KEY:"session-secret",AWS_SESSION_TOKEN:"session-token"},exec:(command,args,options)=>{
+   assert.equal(command,"aws");assert.equal(options.env.AWS_PROFILE,local?"approved-admin":undefined);
+   assert.equal(options.env.AWS_ACCESS_KEY_ID,local?undefined:"session-access");
+   assert.equal(options.env.AWS_SESSION_TOKEN,local?undefined:"session-token");return awsRead(args);
+  }});
+  assert.deepEqual(resolve(f).successorState,f.successorState);
+ }
+ assert.throws(()=>createProductionCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE}));
+ assert.throws(()=>createProductionCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env:{}}));
+ f.privateEvidenceRun=undefined;assert.throws(()=>resolve(f),/explicit credential-bound/);f.privateEvidenceRun=awsRead;
+ const saved=structuredClone(evidence);evidence.payloadBase64=Buffer.from("substituted plan").toString("base64");
+ assert.throws(()=>resolve(f));evidence=saved;
+ reference.workflowRunId="999";assert.throws(()=>resolve(f));reference.workflowRunId=f.runIds.preparation;
+ reference.sourceSha="f".repeat(40);assert.throws(()=>resolve(f));reference.sourceSha=sourceSha;
+ f.privateEvidenceRun=()=>{throw new Error("AccessDenied");};assert.throws(()=>resolve(f));
+});
+
+
+test("local convergence composes the same explicit administrator runner into private evidence and policy execution",()=>{
+ const source=fs.readFileSync("scripts/aws/production-normal-backend-activation.mjs","utf8");
+ const branch=source.split('if (mode === "converge-policy") {')[1].split('if (mode === "contract-policy") {')[0];
+ assert.match(branch,/const run = createProductionCommandRunner\(\{ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required\(values, "--admin-profile"\)/);
+ assert.match(branch,/privateEvidenceRun: run/);assert.match(branch,/convergeNormalActivationPolicy\(\{ run, sourceSha/);
 });

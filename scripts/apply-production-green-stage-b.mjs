@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import {reserveStageBSharedApplyAttempt} from "./aws/production-release-evidence-store.mjs";
+export {reserveStageBSharedApplyAttempt};
 import crypto from "node:crypto";
 import { verifyStageBHistoricalRuntime } from "./aws/verify-production-historical-runtime-handoff.mjs";
 import fs from "node:fs";
@@ -157,30 +159,6 @@ const runAwsWithResult = (run, args) => {
   }
 };
 
-export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run } = {}) {
-  if (typeof run !== "function") throw new Error("Stage B shared apply reservation requires an explicit credential-bound AWS command runner.");
-  const key = stageBApplyAttemptS3Key(artifactSetIdentity);
-  if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage B shared apply reservation bytes are missing.");
-  const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".shared-reservation-"));
-  fs.chmodSync(temporaryDirectory, 0o700);
-  const requestPath = path.join(temporaryDirectory, "request.json");
-  const readbackPath = path.join(temporaryDirectory, "readback.json");
-  try {
-    fs.writeFileSync(requestPath, bytes, { mode: 0o600, flag: "wx" });
-    const create = runAwsWithResult(run, ["s3api", "put-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", key, "--body", requestPath, "--if-none-match", "*", "--server-side-encryption", "AES256", "--region", STAGE_B_TERRAFORM_BACKEND.region, "--no-cli-pager"]);
-    if (create?.status !== 0) {
-      const result = classifyStageBReservationAwsResult(create);
-      const error = new Error(result.classification === "OCCUPIED" ? "Stage B shared apply reservation already exists; Terraform apply is unreachable." : result.classification === "CONCURRENT_CONFLICT" ? "Stage B shared apply reservation encountered a concurrent conflict; Terraform apply is unreachable." : "Stage B shared apply reservation could not be created; Terraform apply is unreachable.");
-      error.reservationResult = result; throw error;
-    }
-    const readback = runAwsWithResult(run, ["s3api", "get-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", key, "--region", STAGE_B_TERRAFORM_BACKEND.region, "--no-cli-pager", readbackPath]);
-    const bytesMatch = readback?.status === 0 && fs.existsSync(readbackPath) && fs.readFileSync(readbackPath).equals(bytes);
-    if (!bytesMatch) { const error = new Error("Stage B shared apply reservation readback verification failed; Terraform apply is unreachable."); error.reservationResult = classifyStageBReservationReadback({ status: readback?.status, exists: fs.existsSync(readbackPath), bytesMatch }); throw error; }
-    return { status: "reserved", key };
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  }
-}
 
 export function reserveStageBApplyAttemptTransition({ attemptId, sequence, bytes, privateDirectory, run } = {}) {
   if (typeof run !== "function") throw new Error("Stage B apply-attempt transition requires an explicit credential-bound AWS command runner.");

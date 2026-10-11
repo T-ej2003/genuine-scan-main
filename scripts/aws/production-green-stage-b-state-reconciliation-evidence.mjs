@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { readPrivateEvidence, privateEvidenceStore } from "./stage-b-private-evidence.mjs";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { STAGE_B_STATE_RECONCILIATION as CONTRACT, STAGE_B_STATE_RECONCILIATION_MODES, assertStageBOutputOnlyReconciliationResult, assertStageBStateReconciliationAuthorization, assertStageBStateReconciliationPreparation } from "./production-green-stage-b-state-reconciliation.mjs";
 
@@ -45,7 +46,7 @@ function listZip(run, archivePath) { return String(run("unzip", ["-Z1", archiveP
 function unzip(run, archivePath, member) { return Buffer.from(run("unzip", ["-p", archivePath, member], { encoding: null, maxBuffer: 64 * 1024 * 1024 })); }
 function deepFreeze(value) { if (!value || typeof value !== "object" || Object.isFrozen(value)) return value; Object.values(value).forEach(deepFreeze); return Object.freeze(value); }
 
-export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, privateEvidenceRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!/^[a-f0-9]{40}$/.test(currentProtectedMainSha || "") || !HEX.test(expectedResultSha256 || "") || !/^sha256:[a-f0-9]{64}$/.test(expectedResultArtifactDigest || "")) throw new Error("Stage B reconciliation evidence references are incomplete.");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-reconciliation-proof-")); fs.chmodSync(directory, 0o700);
   try {
@@ -53,8 +54,18 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     const preparationMeta = assertRun(preparationRun, { runId: preparationRunId, attempt: preparationRunAttempt, workflowPath: ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", sourceSha: preparationRun.head_sha });
     const prepArtifact = exactArtifact(githubRun, { runId: preparationRunId, runAttempt: preparationRunAttempt, sourceSha: preparationRun.head_sha, runMetadata: preparationMeta, name: "production-green-stage-b-state-reconciliation-preparation" });
     const prepArchive = path.join(directory, "stage-b-reconciliation-preparation.zip"); fs.writeFileSync(prepArchive, prepArtifact.archive, { mode: 0o600 });
-    if (!equal(listZip(unzipRun, prepArchive), ["preparation-bundle.zip"])) throw new Error("Stage B preparation artifact contents are not exact.");
-    const bundle = unzip(unzipRun, prepArchive, "preparation-bundle.zip"); const bundlePath = path.join(directory, "preparation-bundle.zip"); fs.writeFileSync(bundlePath, bundle, { mode: 0o600 });
+    const members = listZip(unzipRun, prepArchive);
+    let bundle;
+    if (equal(members, ["preparation-reference.json"])) {
+      const reference = json(unzip(unzipRun, prepArchive, "preparation-reference.json"), "Private preparation reference");
+      if (typeof privateEvidenceRun !== "function") throw new Error("Private Stage B evidence requires an explicit credential-bound AWS reader.");
+      const run = privateEvidenceRun;
+      bundle = readPrivateEvidence({ reference, kind: "preparation", sourceSha: preparationRun.head_sha, workflowRunId: preparationRunId, workflowRunAttempt: preparationRunAttempt, store: privateEvidenceStore({ run, directory }) });
+    } else if (equal(members, ["preparation-bundle.zip"])) {
+      // Retained historical receipts keep their original authenticated transport.
+      bundle = unzip(unzipRun, prepArchive, "preparation-bundle.zip");
+    } else throw new Error("Stage B preparation artifact contents are not exact.");
+    const bundlePath = path.join(directory, "preparation-bundle.zip"); fs.writeFileSync(bundlePath, bundle, { mode: 0o600 });
     if (!equal(listZip(unzipRun, bundlePath).sort(), ["preparation.json", "prerequisite-bundle.zip", "refresh.tfplan", "release-preflight.json"].sort())) throw new Error("Stage B preparation bundle contents are not exact.");
     const preparationBytes = unzip(unzipRun, bundlePath, "preparation.json"); const preparation = json(preparationBytes, "Stage B reconciliation preparation");
     const planBytes = unzip(unzipRun, bundlePath, "refresh.tfplan");
