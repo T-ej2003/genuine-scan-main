@@ -108,8 +108,17 @@ test('public successor preparation preserves published source and consumes expli
     assert.equal(result.preparation.publication.target.version, '13');
     fs.writeFileSync(result.planPath, planBytes, { mode: 0o600 });
     const capsulePrepared = structuredClone(result), capsulePreparation = capsulePrepared.preparation;
+    const stageAFiles = { stageAInput: path.join(directory, 'stage-a-input.json'),
+      stageAStateBackup: path.join(directory, 'stage-a-state.json') };
+    const stageAInputBytes = Buffer.from('authenticated-stage-a-input');
+    fs.writeFileSync(stageAFiles.stageAInput, stageAInputBytes, { mode: 0o600 });
+    fs.writeFileSync(stageAFiles.stageAStateBackup, 'authenticated-stage-a-state', { mode: 0o600 });
     for (const [name, file] of Object.entries(paths)) {
-      const bytes = Buffer.from(`authenticated-${name}`); fs.writeFileSync(file, bytes, { mode: 0o600 });
+      const bytes = name === 'bindingReportPath'
+        ? Buffer.from(JSON.stringify({ stageAInputPath: stageAFiles.stageAInput,
+          stageAStateBackupPath: stageAFiles.stageAStateBackup, stageAInputSha256: brokerDigest(stageAInputBytes) }))
+        : Buffer.from(`authenticated-${name}`);
+      fs.writeFileSync(file, bytes, { mode: 0o600 });
       capsulePreparation.successorReconciliation[name.replace(/Path$/, 'Sha256')] = brokerDigest(bytes);
     }
     capsulePreparation.state.stateSha256 = capsulePreparation.successorReconciliation.currentStateSha256;
@@ -122,17 +131,30 @@ test('public successor preparation preserves published source and consumes expli
       outputChanges: evidence.outputChanges });
     const artifacts = new Map(), store = { putArtifact: (digest, value) => { assert.equal(brokerDigest(value), digest); artifacts.set(digest, structuredClone(value)); },
       getArtifact: digest => { const value = artifacts.get(digest); assert.ok(value); return structuredClone(value); } };
+    const bindingBytes = fs.readFileSync(paths.bindingReportPath);
+    fs.writeFileSync(paths.bindingReportPath, JSON.stringify({ ...JSON.parse(bindingBytes),
+      stageAInputPath: path.join(directory, 'other-stage-a-input.json') }), { mode: 0o600 });
+    await assert.rejects(() => captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot }));
+    assert.equal(artifacts.size, 0);
+    fs.writeFileSync(paths.bindingReportPath, bindingBytes, { mode: 0o600 });
     const materialization = await captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot });
     const capsule = store.getArtifact(materialization);
     assert.deepEqual(Object.keys(capsule.members).sort(), ['backendMetadata', 'bindingReportPath', 'currentStatePath',
-      'historicalStatePath', 'imageEvidencePath', 'imageSignaturePath', 'package', 'packageManifest', 'plan', 'tfvars']);
-    const evidenceBytes = Object.fromEntries(Object.entries(paths).map(([name, file]) => [name, fs.readFileSync(file)]));
-    for (const file of Object.values(paths)) fs.rmSync(file);
-    const incomplete = structuredClone(capsule); delete incomplete.members.imageEvidencePath;
+      'historicalStatePath', 'imageEvidencePath', 'imageSignaturePath', 'package', 'packageManifest', 'plan',
+      'stageAInput', 'stageAStateBackup', 'tfvars']);
+    const recoveredFiles = { ...paths, ...stageAFiles };
+    const evidenceBytes = Object.fromEntries(Object.entries(recoveredFiles).map(([name, file]) => [name, fs.readFileSync(file)]));
+    for (const file of Object.values(recoveredFiles)) fs.rmSync(file);
+    const incomplete = structuredClone(capsule); delete incomplete.members.stageAInput;
     const incompleteDigest = brokerDigest(incomplete); store.putArtifact(incompleteDigest, incomplete);
     await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: incompleteDigest, prepared: capsulePrepared,
       files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
-    assert.ok(Object.values(paths).every(file => !fs.existsSync(file)));
+    assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
+    const missingState = structuredClone(capsule); delete missingState.members.stageAStateBackup;
+    const missingStateDigest = brokerDigest(missingState); store.putArtifact(missingStateDigest, missingState);
+    await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: missingStateDigest, prepared: capsulePrepared,
+      files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
+    assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
     const substitutedBytes = Buffer.from('different-successor-evidence');
     const substitutedArtifact = { kind: 'PRODUCTION_RELEASE_BINARY', sha256: brokerDigest(substitutedBytes),
       base64: substitutedBytes.toString('base64') };
@@ -142,10 +164,16 @@ test('public successor preparation preserves published source and consumes expli
     const substitutedDigest = brokerDigest(substituted); store.putArtifact(substitutedDigest, substituted);
     await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: substitutedDigest, prepared: capsulePrepared,
       files, planPath: result.planPath, store, repositoryRoot: currentRoot }), /Successor imageEvidencePath differs/);
-    assert.ok(Object.values(paths).every(file => !fs.existsSync(file)));
+    assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
+    const replacedStageA = structuredClone(capsule);
+    replacedStageA.members.stageAInput = { sha256: substitutedArtifact.sha256, reference: substitutedReference };
+    const replacedStageADigest = brokerDigest(replacedStageA); store.putArtifact(replacedStageADigest, replacedStageA);
+    await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: replacedStageADigest, prepared: capsulePrepared,
+      files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
+    assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
     await hydrateReleasePhaseMaterial({ reference: materialization, prepared: capsulePrepared,
       files, planPath: result.planPath, store, repositoryRoot: currentRoot });
-    for (const [name, file] of Object.entries(paths)) assert.deepEqual(fs.readFileSync(file), evidenceBytes[name]);
+    for (const [name, file] of Object.entries(recoveredFiles)) assert.deepEqual(fs.readFileSync(file), evidenceBytes[name]);
     const publishedBytes = fs.readFileSync(archive);
     fs.appendFileSync(archive, 'changed-published-package');
     await assert.rejects(() => runStagedBrokerRequest(request, { adapterFactory: () => r.deps }),
