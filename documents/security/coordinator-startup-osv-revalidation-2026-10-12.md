@@ -12,10 +12,14 @@ GHSA-vfj7-8cjw-p6xm / CVE-2026-93687, in frontend build dependencies.
 Canonical runtime packaging, browser closure and finding enforcement passed:
 204 browser packages, no braces; backend/worker locks and Nginx runtime exclude it.
 Reviewed executable-input hash:
-66c5ff8266317228138bffbe5751e3b1e9b5fd9061acf5c7de3121c660e0aeed.
+b4f400122ef1aea0931fcd2e352744fdbd47c10d7efcea589dbc9a81d90e3212.
 
 Only the existing acceptance input binding advances. Owner, scope, rationale,
 creation date, runtime exclusions and exclusive2026-11-02 expiry are unchanged.
 No finding is hidden or policy weakened. Private evidence is retained under
 /private/tmp/mscqr-current-release-e8e1047/startup-correction-osv/.
 No production workflow or mutation was executed during this correction.
+
+The current-source ticket documentation regression was included in this fresh
+unfiltered scan and browser/runtime review. It changes no executable release
+behavior; acceptance scope and expiry remain unchanged.

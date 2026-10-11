@@ -45,7 +45,13 @@ startup, not production execution or approval.
 After merge, authenticate the new protected-main source and derive canonical
 image impact against image source `e8e1047befc78d81a38fd78cf81924d1a9151fc0`.
 Reuse the existing images only if that contract passes; issue fresh current-source
-image authorization without modifying the old evidence. Resume prerequisite-only
-Release Train with `CHG-20261011-001` under its existing protected approval and
+image authorization without modifying the old evidence. Before Release Train
+dispatch, obtain a genuinely issued current-source CHG ticket or formally authorized
+re-scoping from the authorized production change-ticket issuer. Retain the
+authenticated issuance or re-scoping record binding the ticket to the exact new
+protected-main SHA and release scope. `CHG-20261011-001` remains historical; do not
+reuse it for another source without that authenticated authorization. A ticket
+identifier alone is not authorization. Resume prerequisite-only Release Train only
+after this binding is verified, with fresh protected approval and the required
 per-operation authorizations. Preserve v13, historical CAS/closure, state serial122
 and inventory8; never retry the failed startup run as a substitute for new bindings.

@@ -67,3 +67,14 @@ test('root-only hosted layout reproduces missing backend SDK; installed backend 
   const installed=load();assert.equal(installed.status,0,installed.stderr);assert.match(installed.stdout,/COORDINATOR_LOADED/);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+
+test('post-merge instructions require authenticated current-source ticket issuance or re-scoping before dispatch',()=>{
+ const document=fs.readFileSync('documents/ops/CURRENT_RELEASE_PREREQUISITE_ORDER.md','utf8');
+ const instructions=document.slice(document.indexOf('## Coordinator startup dependencies'));
+ assert.match(instructions,/Before Release Train\s+dispatch, obtain a genuinely issued current-source CHG ticket or formally authorized\s+re-scoping from the authorized production change-ticket issuer/);
+ assert.match(instructions,/authenticated issuance or re-scoping record binding the ticket to the exact new\s+protected-main SHA and release scope/);
+ assert.match(instructions,/do not\s+reuse it for another source without that authenticated authorization/);
+ assert.match(instructions,/only\s+after this binding is verified, with fresh protected approval/);
+ assert.doesNotMatch(instructions,/Release Train with `CHG-20261011-001`/);
+});
