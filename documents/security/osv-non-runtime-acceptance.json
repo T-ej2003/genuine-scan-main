@@ -7,12 +7,12 @@
       "affectedVersion": "3.0.3",
       "advisory": "GHSA-vfj7-8cjw-p6xm",
       "cve": "CVE-2026-93687",
-      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-10: the protected Stage B authorization workflow now selects Terraform's default workspace, with a workflow contract test and operational documentation. Frontend source, dependency locks, and runtime packaging did not change.",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11: successor recovery captures and hydrates exact Stage-A prerequisite files and verifies the state backup's semantic identity before storage or restoration. Frontend source, dependency locks, and runtime packaging did not change.",
       "owner": "@T-ej2003",
       "createdAt": "2026-10-03",
       "expiresOn": "2026-11-02",
       "reachability": {
-        "inputsSha256": "cf375ef69d214aa71feca73923798364aff62189e9c7274716b22562fec9f2c6",
+        "inputsSha256": "451e20970de6d88230b1da720415908555129f19f312255160969453ca1bb6c1",
         "execution": {
           "backend": "NO",
           "worker": "NO",
