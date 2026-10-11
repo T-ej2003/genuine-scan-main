@@ -131,7 +131,8 @@ export async function reconcileBrokerAlias({ preparation, authorization, casResu
   const authHash = await assertBrokerAuthorization(authorization, p, { verify: deps.verifyAuthorization, now: deps.now?.() || new Date() });
   const old = cutoverPreparation ? context(cutoverPreparation,BROKER_CUTOVER) : p;
   const oldAuthorization = cutoverPreparation ? cutoverAuthorization : authorization;
-  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult}));
+  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult,
+    ...(p.closureContinuation?{closureContinuation:p.closureContinuation}:{})}));
   const cutoverHash=await assertBrokerAuthorization(oldAuthorization,old,{verify:deps.verifyAuthorization,now:new Date(casResult.authorizedAt)});
   if (old.successorReconciliation) assertSuccessorCasTime(old, casResult.authorizedAt);
   assert.equal(casResult.status, "CUTOVER_COMMITTED_STATE_PENDING"); assert.equal(casResult.authorizationSha256, cutoverHash);
@@ -232,7 +233,8 @@ export async function recoverBrokerReconciliation({ preparation: p, authorizatio
   context(p, cutoverPreparation ? BROKER_STATE_REFRESH : BROKER_CUTOVER);
   const old=cutoverPreparation?context(cutoverPreparation,BROKER_CUTOVER):p;
   const oldAuthorization=cutoverPreparation?cutoverAuthorization:authorization;
-  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult}));
+  if(cutoverPreparation)equal(p,prepareBrokerStateRefresh({preparation:old,authorization:oldAuthorization,casResult,
+    ...(p.closureContinuation?{closureContinuation:p.closureContinuation}:{})}));
   const { refreshPlanSha256 } = await deps.readRecoveryStateIntent();
   const { id,authorizedAt:stateAuthorizedAt } = await deps.authenticateRecoveryIntent('STATE_REFRESH_INTENT', { refreshPlanSha256 });
   assert.equal(id, brokerDigest(authorization));

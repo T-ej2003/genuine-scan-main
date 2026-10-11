@@ -6,10 +6,12 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {runSuccessorReleaseCoordinator} from './production-successor-release-coordinator.mjs';
 import {HOSTED_RELEASE_ROOT,createReleaseCoordinatorStore,captureReleasePhaseMaterial,
- hydrateReleasePhaseMaterial,obtainReleaseTransitionAuthorization} from './production-release-coordinator.mjs';
+ authenticateFailedReleaseTransitionAttempt,hydrateReleasePhaseMaterial,obtainReleaseTransitionAuthorization,
+ releaseTransitionDispatchInputs} from './production-release-coordinator.mjs';
 import {assertHistoricalStateImport,authenticateProtectedTooling} from './import-production-stage-b-historical-state.mjs';
-import {brokerDigest,brokerTargetIdentity,assertBrokerAuthorization,assertBrokerClosurePlan} from './stage-b-staged-broker-contract.mjs';
-import {readStagedBrokerSourceAuthority,readStagedBrokerReceipt,stagedBrokerSourceReservation,
+import {brokerDigest,brokerExecutionCheckout,brokerTargetIdentity,assertBrokerAuthorization,assertBrokerClosurePlan,assertBrokerPreparation,
+ prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
+import {readStagedBrokerSourceAuthority,readStagedBrokerReceipt,stagedBrokerSourceReservation,assertReceiptBoundGitAncestry,
  normalizeBrokerAlias} from './stage-b-staged-broker-executor.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
@@ -84,8 +86,9 @@ export function createHostedSuccessorRuntime({env=process.env,
  return {
   store,
   authenticateRequest:async request=>{
-   assert.equal(env.GITHUB_SHA,request.recoveryToolingSha,'Hosted recovery checkout differs from operation tooling');
-   authenticateTooling(request.releaseSourceSha,request.recoveryToolingSha);
+   const currentSha=env.GITHUB_SHA,continuing=currentSha!==request.recoveryToolingSha;
+   if(continuing)authenticateTooling(request.releaseSourceSha,currentSha);
+   else authenticateTooling(request.releaseSourceSha,request.recoveryToolingSha);
    const publication=await readPublication(request),historical=store.getArtifact(request.historicalImportReference);
    assertHistoricalStateImport(historical,{releaseSourceSha:request.releaseSourceSha,
     recoveryToolingSha:request.recoveryToolingSha,recoveryId:request.recoveryId,brokerVersion:request.brokerVersion,
@@ -93,7 +96,94 @@ export function createHostedSuccessorRuntime({env=process.env,
    const alias=readAlias();
    const body={schemaVersion:2,sourceSha:request.releaseSourceSha,ticketId:request.ticketId,
     recoveryReference:brokerDigest(request),toolingSha:request.recoveryToolingSha};
-   const releaseId=brokerDigest(body),attempts=Array.from({length:20},(_,round)=>({round,
+   const releaseId=brokerDigest(body),release={...body,releaseId};
+   if(continuing){
+    const directory=path.join(HOSTED_RELEASE_ROOT,releaseId,'cutover');
+    ensureStageBPrivateDirectory({directory,repositoryRoot:root,create:true});
+    const completed=store.readStep(releaseId,'cutover:result');assert.ok(completed,'Tooling continuation requires a durably completed alias CAS');
+    assert.equal(completed.sourceSha,request.releaseSourceSha);assert.equal(completed.releaseId,releaseId);
+    const cutoverPrepared=store.getArtifact(completed.prepared),cutoverAuthorization=store.getArtifact(completed.authorization),casResult=store.getArtifact(completed.result);
+    assert.equal(brokerDigest(cutoverPrepared),completed.prepared);assert.equal(brokerDigest(cutoverAuthorization),completed.authorization);
+    assert.equal(brokerDigest(casResult),completed.result);const cutoverPreparation=cutoverPrepared.preparation;
+    assertBrokerPreparation(cutoverPreparation);assert.equal(cutoverPreparation.sourceSha,request.releaseSourceSha);
+    assert.equal(cutoverPreparation.purpose,'STAGE_B_BROKER_ALIAS_CAS');
+    assert.equal(cutoverPreparation.recoveryTooling?.sourceSha,request.recoveryToolingSha);
+    assert.equal(cutoverPreparation.publication.sourceSha,request.releaseSourceSha);
+    assert.equal(cutoverPreparation.target.version,request.brokerVersion);
+    assert.equal(cutoverPreparation.alias.FunctionVersion,request.expectedAliasVersion);
+    assert.equal(cutoverPreparation.alias.RevisionId,request.expectedAliasRevision);
+    assert.equal(casResult.status,'CUTOVER_COMMITTED_STATE_PENDING');
+    assert.equal(casResult.preparationSha256,brokerDigest(cutoverPreparation));
+    assert.equal(casResult.authorizationSha256,brokerDigest(cutoverAuthorization));
+    await assertBrokerAuthorization(cutoverAuthorization,cutoverPreparation,
+     {verify:verifier,now:new Date(casResult.authorizedAt)});
+    const native=readReceipt({run:awsRun,id:brokerDigest(cutoverAuthorization),status:'CUTOVER_COMMITTED_STATE_PENDING',directory});
+    equal(native,casResult,'Durable coordinator CAS differs from native receipt');
+    equal(readAlias(),casResult.alias,'Live alias differs from authenticated completed CAS');
+    assert.equal(deriveStageBToolingInputTreeSha256(request.recoveryToolingSha),cutoverPreparation.recoveryTooling.treeSha256);
+    assertReceiptBoundGitAncestry({historicalSourceSha:request.recoveryToolingSha,consumerSourceSha:currentSha,cwd:root});
+    const currentTooling={sourceSha:currentSha,treeSha256:deriveStageBToolingInputTreeSha256(currentSha)};
+    const rounds=Array.from({length:20},(_,round)=>({round,record:store.readStep(releaseId,
+     round?`closure:prepared:${round}`:'closure:prepared')})).filter(({record})=>record);
+    let latest;
+    for(const entry of rounds){
+     const {round,record}=entry;
+     assert.equal(round,latest?latest.round+1:round===0?0:1,'Closure continuation history has a missing round');assert.equal(record.sourceSha,request.releaseSourceSha);
+     assert.equal(record.releaseId,releaseId);assert.equal(record.name,round?`closure:prepared:${round}`:'closure:prepared');
+     const saved=store.getArtifact(record.result);assert.equal(brokerDigest(saved),record.result);
+     const value=saved.preparation;assertBrokerPreparation(value);
+     if(value.closureContinuation){
+      const binding=value.closureContinuation;assert.equal(binding?.releaseId,releaseId);
+      assert.equal(binding.recoveryReference,brokerDigest(request));assert.equal(binding.releaseSourceSha,request.releaseSourceSha);
+      assert.equal(deriveStageBToolingInputTreeSha256(binding.currentTooling.sourceSha),binding.currentTooling.treeSha256);
+      assertReceiptBoundGitAncestry({historicalSourceSha:request.recoveryToolingSha,consumerSourceSha:binding.currentTooling.sourceSha,cwd:root});
+      assertReceiptBoundGitAncestry({historicalSourceSha:binding.currentTooling.sourceSha,consumerSourceSha:currentSha,cwd:root});
+     }
+     equal(value,prepareBrokerStateRefresh({preparation:cutoverPreparation,authorization:cutoverAuthorization,casResult,
+      ...(value.closureContinuation?{closureContinuation:value.closureContinuation}:{})}),'Saved closure preparation differs from authenticated completed CAS');
+     latest={...entry,prepared:saved};
+    }
+    // Completed closure is immutable history; later tooling only authenticates its readback.
+    const closed=store.readStep(releaseId,'closure:result');
+    if(closed){
+     const saved=store.getArtifact(closed.prepared);assert.equal(brokerDigest(saved),closed.prepared);
+     assertBrokerPreparation(saved.preparation);
+     equal(saved.preparation,prepareBrokerStateRefresh({preparation:cutoverPreparation,authorization:cutoverAuthorization,casResult,
+      ...(saved.preparation.closureContinuation?{closureContinuation:saved.preparation.closureContinuation}:{})}));
+     const effective=saved.preparation.closureContinuation?.currentTooling||saved.preparation.recoveryTooling;
+     assert.equal(deriveStageBToolingInputTreeSha256(effective.sourceSha),effective.treeSha256);
+     assertReceiptBoundGitAncestry({historicalSourceSha:effective.sourceSha,consumerSourceSha:currentSha,cwd:root});
+     return {currentTooling,completed:true};
+    }
+    if(latest?.round&&brokerDigest(brokerExecutionCheckout(latest.prepared.preparation))===brokerDigest(currentTooling)
+      &&!store.readStep(releaseId,`closure:retired:${latest.round}`)
+      &&!store.readStep(releaseId,`closure:approval-timeout:${latest.round}`))return {currentTooling,round:latest.round};
+    let supersededAuthorization;
+    if(latest){
+     const {round,record,prepared}=latest;
+     assert.equal(store.readStep(releaseId,`closure:attempt:${round}`),null,'Existing closure intent requires native recovery');
+     assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null,'Existing closure authorization cannot be rebound');
+     const pending=store.readStep(releaseId,`closure:pending:${round}`),dispatch=store.readStep(releaseId,`closure:dispatch:${round}`);
+     if(dispatch){
+      const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);
+      assert.ok(pending||timedOut,'Unresolved closure authorization dispatch cannot be replaced');
+      assert.equal((pending||timedOut).prepared,record.result);assert.ok(dispatch.dispatch);
+      const identity=dispatch.dispatch.identity,toolingSha=prepared.preparation.closureContinuation?.currentTooling.sourceSha||request.recoveryToolingSha;
+      assert.equal(identity.repository,'T-ej2003/genuine-scan-main');
+      assert.equal(identity.workflow,'authorize-production-stage-b-release-transition.yml');
+      assert.equal(identity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
+      assert.equal(identity.ref,'main');assert.equal(identity.targetSha,toolingSha);
+      assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},'closure',record.result,prepared.preparation));
+      const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:(pending||timedOut).runId,toolingSha,
+       workflowId:identity.workflowId,beforeRunIds:dispatch.dispatch.beforeRunIds});
+      supersededAuthorization={...failed,preparationReference:record.result,authorizationRound:round};
+     }else assert.equal(pending,null,'Pending closure approval has no authenticated dispatch');
+    }
+    const round=latest?latest.round+1:1;assert.ok(round<20,'Closure continuation rounds exhausted');
+    return {currentTooling,round,...(latest?{previousRound:latest.round}:{}),...(supersededAuthorization?{supersededAuthorization}:{})};
+   }
+   assert.equal(currentSha,request.recoveryToolingSha,'Hosted recovery checkout differs from operation tooling');
+   const attempts=Array.from({length:20},(_,round)=>({round,
     record:store.readStep(releaseId,`cutover:attempt:${round}`)})).filter(({record})=>record);
    const attempt=attempts.at(-1)?.record;
    const completed=store.readStep(releaseId,'cutover:result');
@@ -121,6 +211,7 @@ export function createHostedSuccessorRuntime({env=process.env,
     assertImageEvidenceReuseBridge(evidence,{currentSourceSha:request.releaseSourceSha,
      imageReuseEvidence:deriveStageBImageImpactReport({imageReleaseSha,toolingSha:request.releaseSourceSha})});
    }
+   return null;
   },
   authenticatePublication:readPublication,
   materializeInputs:async({request,release,phase,prepared,publication,cutover})=>{

@@ -27,7 +27,7 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
  const now=()=>runtime.now?.()??Date.now();
  const store=runtime.store,request=assertSuccessorRecoveryRequest(await store.getArtifact(recoveryReference));
  assert.equal(brokerDigest(request),recoveryReference);
- await runtime.authenticateRequest(request);
+ const continuation=await runtime.authenticateRequest(request)||null;
  const identity={schemaVersion:2,sourceSha:request.releaseSourceSha,ticketId:request.ticketId,
   recoveryReference,toolingSha:request.recoveryToolingSha};
  const release={...identity,releaseId:brokerDigest(identity)};
@@ -46,7 +46,9 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
  assert.equal(brokerDigest(publication.result),request.publicationResultSha256);
  let cutover;
  for(const phase of ['cutover','closure']){
-  const prior=await read(`${phase}:result`),saved=await read(`${phase}:prepared`);
+  const continuationPreparation=phase==='closure'&&continuation?await read(`closure:prepared:${continuation.round??1}`):null;
+  const saved=continuationPreparation||(phase==='closure'&&continuation?null:await read(`${phase}:prepared`));
+  const prior=await read(`${phase}:result`);
   const inputs=await runtime.materializeInputs({request,release,phase,prepared:prior?await get(prior.prepared):saved?await get(saved.result):null,publication,cutover});
   let prepared,authorization,result;
   if(prior){prepared=await get(prior.prepared);authorization=await get(prior.authorization);result=await get(prior.result);
@@ -61,15 +63,37 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       publicationPreparation:publication.preparation,publicationAuthorization:publication.authorization,
       publicationResult:publication.result,prerequisiteChain:publication.preparation.prerequisiteChain,
       successorRecovery:inputs.successorRecovery})
-     :{...cutover.prepared,preparation:prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,
-      authorization:cutover.authorization,casResult:cutover.result})};
+     :await (async()=>{
+      const base=prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,authorization:cutover.authorization,casResult:cutover.result});
+      if(!continuation)return {...cutover.prepared,preparation:base};
+      assert.equal(phase,'closure');assert.ok(continuation.currentTooling);
+      const identity={schemaVersion:1,releaseId:release.releaseId,recoveryReference,
+       releaseSourceSha:release.sourceSha,historicalTooling:cutover.prepared.preparation.recoveryTooling,
+       currentTooling:continuation.currentTooling,cutover:base.cutover};
+      const closureContinuation={...identity,operationId:brokerDigest(identity)};
+      const previousRound=continuation.previousRound??0;
+      const old=await read(previousRound?`closure:prepared:${previousRound}`:'closure:prepared');
+      if(old){
+       const oldReference=old.result;
+       assert.equal(await read(`closure:attempt:${previousRound}`),null,'Historical closure intent must be recovered, not replaced');
+       assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
+       const retired=await read(`closure:retired:${previousRound}`);
+       if(retired)assert.equal(retired.prepared,oldReference);
+       else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:'TOOLING_ADVANCED_AFTER_CAS',
+        ...(continuation.supersededAuthorization?{runId:continuation.supersededAuthorization.runId}: {})});
+      }
+      return {...cutover.prepared,preparation:prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,
+       authorization:cutover.authorization,casResult:cutover.result,closureContinuation})};
+     })();
     prepared=await runtime.capturePreparation({release,inputs},phase,value);
-    await write(`${phase}:prepared`,{result:await put(prepared)});
+    await write(phase==='closure'&&continuation?`closure:prepared:${continuation.round??1}`:`${phase}:prepared`,{result:await put(prepared)});
    }
    assert.equal(prepared.preparation.sourceSha,release.sourceSha);
-   assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
+   assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,
+    continuation&&phase==='closure'?continuation.currentTooling.sourceSha:request.recoveryToolingSha);
    await runtime.hydratePreparation({release,inputs},phase,prepared);
-   for(let round=0;;round++){
+   const firstRound=phase==='closure'&&continuation?(continuation.round??1):0;
+   for(let round=firstRound;;round++){
     assert.ok(round<20,'Repeated expired successor approvals require a new governed operation');
     if(phase==='cutover'&&round>0){
      const renewed=await read(`${phase}:prepared:${round}`);
@@ -88,6 +112,12 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
      assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
      await runtime.hydratePreparation({release,inputs},phase,prepared);
     }
+    if(phase==='closure'&&round>firstRound){
+     const renewed=await read(`closure:prepared:${round}`);
+     if(renewed)prepared=await get(renewed.result);
+     else await write(`closure:prepared:${round}`,{result:await put(prepared)});
+     assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,continuation?.currentTooling.sourceSha||request.recoveryToolingSha);
+    }
     const preparedReference=brokerDigest(prepared);
     const attempt=await read(`${phase}:attempt:${round}`);
     const retired=await read(`${phase}:retired:${round}`);
@@ -103,7 +133,7 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
      assert.equal(identity.repository,'T-ej2003/genuine-scan-main');
      assert.equal(identity.workflow,'authorize-production-stage-b-release-transition.yml');
      assert.equal(identity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
-     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,request.recoveryToolingSha);
+     assert.equal(identity.ref,'main');assert.equal(identity.targetSha,brokerExecutionCheckout(prepared.preparation).sourceSha);
      assert.deepEqual(identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},phase,preparedReference,prepared.preparation));
     };
     const timedOut=await read(`${phase}:approval-timeout:${round}`);
@@ -165,8 +195,9 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
   }
   if(phase==='cutover')cutover={prepared,authorization,result};
   else{const closure=await runtime.authenticateClosure({release,inputs,request},{cutover,closure:{prepared,authorization,result}});
-   return {status:'BROKER_CLOSURE_COMPLETE',releaseId:release.releaseId,sourceSha:release.sourceSha,
-    toolingSha:request.recoveryToolingSha,closureSha256:await put(closure)};}
+    return {status:'BROKER_CLOSURE_COMPLETE',releaseId:release.releaseId,sourceSha:release.sourceSha,
+    toolingSha:request.recoveryToolingSha,closureToolingSha:brokerExecutionCheckout(prepared.preparation).sourceSha,
+    closureSha256:await put(closure)};}
  }
  throw new Error('Unreachable successor phase');
 }

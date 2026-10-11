@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import {brokerDigest} from '../aws/stage-b-staged-broker-contract.mjs';
+import {brokerDigest,prepareBrokerStateRefresh} from '../aws/stage-b-staged-broker-contract.mjs';
 import {STAGE_B_TERRAFORM_BACKEND_CONFIG} from '../aws/stage-b-terraform-backend-contract.mjs';
 import {createHostedSuccessorRuntime} from '../aws/run-production-successor-release-coordinator.mjs';
-import {HOSTED_RELEASE_ROOT} from '../aws/production-release-coordinator.mjs';
+import {HOSTED_RELEASE_ROOT,releaseTransitionDispatchInputs} from '../aws/production-release-coordinator.mjs';
 import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-reuse.mjs';
 import {ROOT_ATTESTATION_KEY_ALIAS_ARN,ROOT_ATTESTATION_SIGNING_ALGORITHM} from '../aws/production-root-attestation-key.mjs';
 import {rig,ready,authorization as authorize} from './fixtures/staged-broker-runtime.mjs';
 
-const A='29406b0ec537ac60618642bba20133dd0cf45529',C='7b40ee371b7751e19a413a4789c516c779af09d9';
+const A='29406b0ec537ac60618642bba20133dd0cf45529',C='7b40ee371b7751e19a413a4789c516c779af09d9',E='cdcc33eeee92eadaf0b07333d241015e220bf37b',D='dbc862c8aea597fb0d7c34bc1b1d04b26c83801d';
 const binary=bytes=>({kind:'PRODUCTION_RELEASE_BINARY',sha256:brokerDigest(bytes),base64:bytes.toString('base64')});
 
 test('hosted successor materializer consumes immutable import reference and original-release contracts under descendant tooling',async()=>{
@@ -48,15 +48,21 @@ test('hosted successor materializer consumes immutable import reference and orig
  const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
   GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/recover-production-stage-b-successor.yml@refs/heads/main',
   GITHUB_SHA:C,GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',RUNNER_TEMP:'/tmp'};
- const releaseId='d'.repeat(64),directory=path.join(HOSTED_RELEASE_ROOT,releaseId,'cutover');
+ const releaseId='d'.repeat(64),directory=path.join(HOSTED_RELEASE_ROOT,releaseId,'cutover');let continuationReleaseId;
  const run=args=>{if(args[0]!=='s3api'||args[1]!=='get-object')throw new Error('Unexpected AWS operation');
   const bytes=args.includes('env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate')?currentBytes:Buffer.from('{}');
   fs.writeFileSync(args.at(-1),bytes,{mode:0o600});return '{}';};
  let imageObservation,providerError=false;const terraformCalls=[];
- const runtime=createHostedSuccessorRuntime({env,awsRun:run,ghRun:()=>{throw new Error('Unexpected GitHub call');},
-  createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.equal(c,C);},verifyImport:()=>true,
-  readAuthority:()=>({preparation,authorization}),readReceipt:()=>result,
-  verifyAuthorization:async()=>true,readVersion:()=>rigged.deps.getVersion('13'),readReviewedAlias:()=>preparation.alias,
+ let liveAlias=preparation.alias,casReceipt;
+ const runtime=createHostedSuccessorRuntime({env,awsRun:run,ghRun:args=>{
+   if(args[1].endsWith('/actions/runs/700'))return JSON.stringify({id:700,workflow_id:77,repository:{full_name:'T-ej2003/genuine-scan-main'},
+    head_repository:{full_name:'T-ej2003/genuine-scan-main'},head_sha:C,head_branch:'main',
+    path:'.github/workflows/authorize-production-stage-b-release-transition.yml',event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion:'failure'});
+   if(args[1].endsWith('/artifacts'))return JSON.stringify([{artifacts:[]}]);
+   throw new Error(`Unexpected GitHub call ${args.join(' ')}`);},
+  createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.ok([C,D,E].includes(c));},verifyImport:()=>true,
+  readAuthority:()=>({preparation,authorization}),readReceipt:({status})=>status==='CUTOVER_COMMITTED_STATE_PENDING'?casReceipt:result,
+  verifyAuthorization:async()=>true,readVersion:()=>rigged.deps.getVersion('13'),readReviewedAlias:()=>liveAlias,
   authenticateImages:({request:seen,evidence,imageReleaseSha,now})=>{
    assert.equal(seen.recoveryToolingSha,C);assert.equal(evidence.imageReleaseSha,imageReleaseSha);imageObservation=now;},
   packageBroker:async({outputPath,manifestPath,toolingSha})=>{
@@ -118,5 +124,56 @@ test('hosted successor materializer consumes immutable import reference and orig
   steps.set(`${operationId}/cutover:attempt:1`,{prepared:renewedRef});
   await runtime.authenticateRequest(request);
   assert.equal(imageObservation,'2026-10-10T09:00:00.000Z');
- }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,releaseId),{recursive:true,force:true});}
+  const recoveryReference=brokerDigest(request),release={schemaVersion:2,sourceSha:A,ticketId:request.ticketId,recoveryReference,toolingSha:C};
+  continuationReleaseId=brokerDigest(release);release.releaseId=continuationReleaseId;
+  const cutoverPreparation=structuredClone(published.p);cutoverPreparation.recoveryTooling={sourceSha:C,
+   treeSha256:deriveStageBToolingInputTreeSha256(C),publicationResultSha256:brokerDigest(cutoverPreparation.publication)};
+  const cutoverAuthorization=authorize(cutoverPreparation),casResult={status:'CUTOVER_COMMITTED_STATE_PENDING',
+   preparationSha256:brokerDigest(cutoverPreparation),authorizationSha256:brokerDigest(cutoverAuthorization),
+   alias:{...preparation.alias,FunctionVersion:'13',RevisionId:'cas-complete'},authorizedAt:cutoverAuthorization.issuedAt};
+  casReceipt=casResult;liveAlias=casResult.alias;
+  const cutoverPrepared={preparation:cutoverPreparation,planPath:path.join(HOSTED_RELEASE_ROOT,continuationReleaseId,'cutover','cutover.tfplan'),
+   materializationSha256:'8'.repeat(64)};
+  const cutoverPreparedRef=put(cutoverPrepared),cutoverAuthorizationRef=put(cutoverAuthorization),casResultRef=put(casResult);
+  steps.set(`${continuationReleaseId}/cutover:result`,{sourceSha:A,releaseId:continuationReleaseId,prepared:cutoverPreparedRef,
+   authorization:cutoverAuthorizationRef,result:casResultRef});
+  const oldClosure={...cutoverPrepared,preparation:prepareBrokerStateRefresh({preparation:cutoverPreparation,authorization:cutoverAuthorization,casResult})};
+  const oldClosureRef=put(oldClosure),dispatchInputs=releaseTransitionDispatchInputs({release,authorizationRound:0},'closure',oldClosureRef,oldClosure.preparation);
+  steps.set(`${continuationReleaseId}/closure:prepared`,{releaseId:continuationReleaseId,sourceSha:A,name:'closure:prepared',result:oldClosureRef});
+  steps.set(`${continuationReleaseId}/closure:pending:0`,{releaseId:continuationReleaseId,sourceSha:A,name:'closure:pending:0',prepared:oldClosureRef,runId:'700'});
+  steps.set(`${continuationReleaseId}/closure:dispatch:0`,{releaseId:continuationReleaseId,sourceSha:A,name:'closure:dispatch:0',
+   dispatch:{identity:{repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+    workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',workflowId:77,ref:'main',targetSha:C,inputs:dispatchInputs},
+    beforeRunIds:['699']}});
+  env.GITHUB_SHA=D;
+  const continuation=await runtime.authenticateRequest(request);
+  assert.deepEqual(continuation,{round:1,previousRound:0,currentTooling:{sourceSha:D,treeSha256:deriveStageBToolingInputTreeSha256(D)},
+   supersededAuthorization:{runId:'700',toolingSha:C,conclusion:'failure',preparationReference:oldClosureRef,authorizationRound:0}});
+  assert.equal(steps.get(`${continuationReleaseId}/cutover:result`).result,casResultRef,'Continuation must adopt the completed CAS receipt');
+  assert.equal(liveAlias.FunctionVersion,'13','Continuation must not move the reviewed alias');
+  const binding={schemaVersion:1,releaseId:continuationReleaseId,recoveryReference,releaseSourceSha:A,
+   historicalTooling:cutoverPreparation.recoveryTooling,currentTooling:continuation.currentTooling,
+   cutover:oldClosure.preparation.cutover};
+  const continued={...cutoverPrepared,preparation:prepareBrokerStateRefresh({preparation:cutoverPreparation,
+   authorization:cutoverAuthorization,casResult,closureContinuation:{...binding,operationId:brokerDigest(binding)}})};
+  const continuedRef=put(continued),savedRound={releaseId:continuationReleaseId,sourceSha:A,name:'closure:prepared:1',result:continuedRef};
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,savedRound);
+  assert.deepEqual(await runtime.authenticateRequest(request),{currentTooling:continuation.currentTooling,round:1});
+  env.GITHUB_SHA=E;
+  const advanced=await runtime.authenticateRequest(request);
+  assert.equal(advanced.round,2);assert.equal(advanced.previousRound,1);assert.equal(advanced.currentTooling.sourceSha,E);
+  assert.deepEqual(steps.get(`${continuationReleaseId}/closure:prepared:1`),savedRound,'Historical round remains immutable');
+  const forged=structuredClone(continued);forged.preparation.closureContinuation.currentTooling.treeSha256='0'.repeat(64);
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,{...savedRound,result:put(forged)});
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,savedRound);
+  steps.set(`${continuationReleaseId}/closure:result`,{prepared:continuedRef});
+  assert.deepEqual(await runtime.authenticateRequest(request),{currentTooling:advanced.currentTooling,completed:true});
+  env.GITHUB_SHA=C;
+  // Earlier tooling must not authenticate closure executed by D.
+  env.GITHUB_SHA='a61282bfebbf45002c164669838fd3dfb7b86220';
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+
+}finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,releaseId),{recursive:true,force:true});
+ if(continuationReleaseId)fs.rmSync(path.join(HOSTED_RELEASE_ROOT,continuationReleaseId),{recursive:true,force:true});}
 });

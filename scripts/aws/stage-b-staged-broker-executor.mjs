@@ -979,14 +979,21 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     },
     readMakerCaller,
     readCheckout: async () => {
-      const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: preparation?.recoveryTooling?.sourceSha || ((publicationPreparation || preparation?.publication) ? undefined : preparation?.sourceSha), requireCanonicalRepository: true });
+      const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, expectedSourceSha: preparation ? brokerExecutionCheckout(preparation).sourceSha : ((publicationPreparation || preparation?.publication) ? undefined : preparation?.sourceSha), requireCanonicalRepository: true });
       await readMakerCaller();
       const treeSha256 = deriveStageBToolingInputTreeSha256(checkout.currentHead);
       const current = { sourceSha: checkout.currentHead, treeSha256 };
       if (preparation?.recoveryTooling) {
         const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: preparation.sourceSha, directory });
         const identity = await adapter.authenticateBrokerRecoveryTooling(source.preparation, preparation.publication, current);
-        equal(identity, preparation.recoveryTooling);
+        if (preparation.closureContinuation) {
+          const { historicalTooling, currentTooling } = preparation.closureContinuation;
+          equal(historicalTooling, preparation.recoveryTooling);
+          equal(currentTooling, current, 'Closure continuation checkout differs from authenticated protected main');
+          assert.equal(deriveStageBToolingInputTreeSha256(historicalTooling.sourceSha), historicalTooling.treeSha256);
+          assertReceiptBoundGitAncestry({ historicalSourceSha: historicalTooling.sourceSha, consumerSourceSha: current.sourceSha, exec, cwd: root });
+          equal(identity, { ...current, publicationResultSha256: brokerDigest(preparation.publication) });
+        } else equal(identity, preparation.recoveryTooling);
       }
       return current;
     },

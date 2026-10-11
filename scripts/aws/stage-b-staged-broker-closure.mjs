@@ -50,7 +50,8 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   let stateHash=authHash;
   if(separate){
     assert.deepEqual(Object.keys(closure).sort(),['authorization','preparation']);
-    equal(closure.preparation,prepareBrokerStateRefresh({preparation:p,authorization:auth,casResult:cas}));
+    equal(closure.preparation,prepareBrokerStateRefresh({preparation:p,authorization:auth,casResult:cas,
+      ...(closure.preparation.closureContinuation?{closureContinuation:closure.preparation.closureContinuation}:{})}));
     stateHash=await assertBrokerAuthorization(closure.authorization,closure.preparation,
       {verify:deps.verifyAuthorization,now:new Date(record.stateAuthorizedAt)});
     assert.equal(record.stateRefreshAuthorizationSha256,stateHash);
@@ -64,13 +65,14 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   assert.equal(record.closurePlanJsonSha256, brokerDigest(record.closurePlan));
   assertBrokerClosurePlan(record.closurePlan, p);
   equal(record.target, p.target); equal(record.alias, cas.alias);
-  const historicalTooling = Object.freeze(brokerExecutionCheckout(p));
-  await deps.authenticateHistoricalTooling(p, historicalTooling);
+  const effectivePreparation = separate ? closure.preparation : p;
+  const historicalTooling = Object.freeze(brokerExecutionCheckout(effectivePreparation));
+  await deps.authenticateHistoricalTooling(effectivePreparation, historicalTooling);
   const tooling = Object.freeze({ ...await deps.readCheckout() });
   const revalidate = async () => {
     equal(await deps.readCheckout(), tooling, 'Continuation checkout changed during authentication');
-    await deps.authenticateHistoricalTooling(p, historicalTooling);
-    await deps.authenticateContinuationTooling(p, tooling);
+    await deps.authenticateHistoricalTooling(effectivePreparation, historicalTooling);
+    await deps.authenticateContinuationTooling(effectivePreparation, tooling);
     equal(await deps.readStateIdentity(), record.stateAfter, 'Reconciled Terraform state changed');
     equal(await deps.getAlias(), cas.alias, 'Terminal alias changed');
     equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -80,7 +82,7 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   };
   await revalidate();
   const proof = Object.freeze({ sourceSha, historicalTooling, tooling, evidenceSha256: brokerDigest(record), revalidate,
-    authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(p, tooling, executionSourceSha) });
+    authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(effectivePreparation, tooling, executionSourceSha) });
   verified.add(proof); return proof;
 }
 export function assertStagedBrokerProof(proof, sourceSha) {
@@ -115,6 +117,14 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
     assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
     assert.equal(deriveStageBToolingInputTreeSha256(historical.sourceSha), historical.treeSha256);
     assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: historical.sourceSha, cwd: root });
+    if (p.closureContinuation) {
+      const { historicalTooling, currentTooling } = p.closureContinuation;
+      equal(historicalTooling, p.recoveryTooling, 'Historical CAS tooling differs from closure continuation');
+      assert.equal(deriveStageBToolingInputTreeSha256(historicalTooling.sourceSha), historicalTooling.treeSha256);
+      equal(currentTooling, historical, 'Continuation tooling differs from closure execution');
+      assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: historicalTooling.sourceSha, cwd: root });
+      assertReceiptBoundGitAncestry({ historicalSourceSha: historicalTooling.sourceSha, consumerSourceSha: currentTooling.sourceSha, cwd: root });
+    }
   };
   const authenticateContinuationTooling = (p, checkout) => {
     authenticateHistoricalTooling(p, brokerExecutionCheckout(p));

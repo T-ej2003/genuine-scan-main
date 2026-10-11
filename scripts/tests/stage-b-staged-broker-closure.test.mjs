@@ -9,8 +9,9 @@ import { signPermissionReport } from '../aws/validate-production-green-stage-b-p
 import { runProductionPreflightCli } from '../aws/run-production-green-stage-b-preflight.mjs';
 import { ready, sourceSha, now, configuration, authorization as signFixture } from './fixtures/staged-broker-runtime.mjs';
 import { executeBrokerAliasCas, reconcileBrokerAlias, authenticateBrokerRecoveryApproval, isAuthenticatedBrokerRecoveryApproval } from '../aws/stage-b-staged-broker.mjs';
-import { authenticateStagedBrokerClosure, assertStagedBrokerProof, assertStagedBrokerTerminal } from '../aws/stage-b-staged-broker-closure.mjs';
-import { brokerDigest, prepareBrokerStateRefresh } from '../aws/stage-b-staged-broker-contract.mjs';
+import { authenticateStagedBrokerClosure, assertStagedBrokerProof, assertStagedBrokerTerminal, createStagedBrokerClosureReader } from '../aws/stage-b-staged-broker-closure.mjs';
+import { brokerDigest, brokerExecutionCheckout, prepareBrokerStateRefresh } from '../aws/stage-b-staged-broker-contract.mjs';
+import { deriveStageBToolingInputTreeSha256 } from '../aws/validate-stage-b-image-reuse.mjs';
 import { createProductionComponentDeploymentState, advanceProductionComponentDeploymentState } from '../aws/production-component-deployment-state.mjs';
 import { canonicalSha256 } from '../aws/production-green-stage-b-contract.mjs';
 import { commitSecurityComponentState } from '../aws/commit-production-component-security-state.mjs';
@@ -136,6 +137,48 @@ test('terminal closure preserves original release under authenticated descendant
   assert.equal(r.calls.filter(c => typeof c === 'object').length, 1);
   r.deps.authenticateContinuationTooling = async () => { throw new Error('Unrelated tooling'); };
   await assert.rejects(() => proof.revalidate(), /Unrelated/);
+});
+
+test('closure continuation authenticates historical CAS tooling and current closure tooling independently', () => {
+  const release = '29406b0ec537ac60618642bba20133dd0cf45529';
+  const historical = 'a61282bfebbf45002c164669838fd3dfb7b86220';
+  const current = 'dbc862c8aea597fb0d7c34bc1b1d04b26c83801d';
+  const p = { sourceSha: release, treeSha256: deriveStageBToolingInputTreeSha256(release), recoveryTooling: {
+    sourceSha: historical, treeSha256: deriveStageBToolingInputTreeSha256(historical), publicationResultSha256: 'f'.repeat(64) },
+    closureContinuation: { historicalTooling: { sourceSha: historical, treeSha256: deriveStageBToolingInputTreeSha256(historical), publicationResultSha256: 'f'.repeat(64) },
+      currentTooling: { sourceSha: current, treeSha256: deriveStageBToolingInputTreeSha256(current) } } };
+  const reader = createStagedBrokerClosureReader({ run: () => assert.fail('Unexpected AWS call'), readCheckout: () => brokerExecutionCheckout(p), directory: os.tmpdir() });
+  assert.doesNotThrow(() => reader.authenticateHistoricalTooling(p, brokerExecutionCheckout(p)));
+  const wrongTree = structuredClone(p); wrongTree.closureContinuation.historicalTooling.treeSha256 = '0'.repeat(64);
+  assert.throws(() => reader.authenticateHistoricalTooling(wrongTree, brokerExecutionCheckout(wrongTree)));
+  const wrongClosureTree = structuredClone(p); wrongClosureTree.closureContinuation.currentTooling.treeSha256 = '0'.repeat(64);
+  assert.throws(() => reader.authenticateHistoricalTooling(wrongClosureTree, brokerExecutionCheckout(wrongClosureTree)));
+  const wrongDescendant = structuredClone(p); wrongDescendant.closureContinuation.currentTooling = {
+    sourceSha: release, treeSha256: deriveStageBToolingInputTreeSha256(release) };
+  assert.throws(() => reader.authenticateHistoricalTooling(wrongDescendant, brokerExecutionCheckout(wrongDescendant)));
+});
+
+test('terminal reader uses authorized closure tooling rather than historical CAS tooling',async()=>{
+ const C={sourceSha:'c'.repeat(40),treeSha256:'c'.repeat(64)},D={sourceSha:'d'.repeat(40),treeSha256:'d'.repeat(64)},E={sourceSha:'e'.repeat(40),treeSha256:'e'.repeat(64)};
+ const r=await terminal(true,C),original=r.handoff.closure.preparation;
+ const identity={schemaVersion:1,releaseId:'1'.repeat(64),recoveryReference:'2'.repeat(64),releaseSourceSha:sourceSha,
+  historicalTooling:r.handoff.preparation.recoveryTooling,currentTooling:D,cutover:original.cutover};
+ r.handoff.closure.preparation=prepareBrokerStateRefresh({preparation:r.handoff.preparation,
+  authorization:r.handoff.authorization,casResult:r.handoff.casResult,closureContinuation:{...identity,operationId:brokerDigest(identity)}});
+ r.handoff.closure.authorization=signFixture(r.handoff.closure.preparation);
+ const hash=brokerDigest(r.handoff.closure.authorization);r.handoff.record.stateRefreshAuthorizationSha256=hash;
+ r.entries.push([hash,r.handoff.record.status,r.handoff.record]);
+ r.deps.readCheckout=async()=>E;
+ const check=p=>assert.deepEqual(brokerExecutionCheckout(p),D,'Effective preparation must be D-bound');
+ r.deps.authenticateHistoricalTooling=(p,tooling)=>{check(p);assert.deepEqual(tooling,D);};
+ r.deps.authenticateContinuationTooling=(p,tooling)=>{check(p);assert.deepEqual(tooling,E);};
+ r.deps.authenticateHistoricalExecutionSource=(p,tooling,execution)=>{check(p);assert.deepEqual(tooling,E);
+  assert.ok([D.sourceSha,E.sourceSha].includes(execution),'Execution predates closure tooling');return {sourceSha:execution};};
+ const proof=await authenticateStagedBrokerClosure({sourceSha,deps:r.deps});
+ assert.deepEqual(proof.historicalTooling,D);await proof.revalidate();
+ assert.equal(proof.authenticateExecutionSource(D.sourceSha).sourceSha,D.sourceSha);
+ assert.throws(()=>proof.authenticateExecutionSource(C.sourceSha),/predates/);
+ assert.equal(r.handoff.preparation.recoveryTooling.sourceSha,C.sourceSha);
 });
 
 test('approval recovery authenticates the native terminal handoff without rewriting publication identity', async () => {
