@@ -15,7 +15,7 @@ GHSA-vfj7-8cjw-p6xm / CVE-2026-93687 remains, in frontend build dependencies.
 
 Canonical assertRuntimePackaging, buildBrowserClosure and enforceRuntimeFindings
 passed against frozen executable/build inputs
-e23152cf9759db2cca0d5a450051a00881ae3c3bb138d891d5b9e516ad9faa01.
+44d8f335df7a4f6fdab1fadfb6c6564874b9305b73c303230f009fb5425a3798.
 The browser census includes204 packages and no braces. Backend/worker dependency
 locks and Nginx runtime packaging exclude braces; production users cannot supply
 build patterns. A shared dependency symlink was rejected during the first browser
@@ -27,3 +27,9 @@ creation date, runtime exclusions and exclusive2026-11-02 expiry remain unchange
 The finding remains visible. Private evidence is retained under
 /private/tmp/mscqr-current-release-4cade94/prerequisite-order-osv/.
 No production mutation occurred during this validation.
+
+The canonical RLS certification package was regenerated because ReleaseTrain is
+a source-contract input. All generated SQL changes are the original source hash
+replaced by the new authoritative hash; migrationSetDigest remains unchanged.
+Canonical full RLS verification and artifact-contract tests passed. This advances
+source/role-marker integrity bindings without changing policy SQL behavior.
