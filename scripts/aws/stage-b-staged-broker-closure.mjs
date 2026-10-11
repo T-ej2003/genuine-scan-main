@@ -50,7 +50,8 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   let stateHash=authHash;
   if(separate){
     assert.deepEqual(Object.keys(closure).sort(),['authorization','preparation']);
-    equal(closure.preparation,prepareBrokerStateRefresh({preparation:p,authorization:auth,casResult:cas}));
+    equal(closure.preparation,prepareBrokerStateRefresh({preparation:p,authorization:auth,casResult:cas,
+      ...(closure.preparation.closureContinuation?{closureContinuation:closure.preparation.closureContinuation}:{})}));
     stateHash=await assertBrokerAuthorization(closure.authorization,closure.preparation,
       {verify:deps.verifyAuthorization,now:new Date(record.stateAuthorizedAt)});
     assert.equal(record.stateRefreshAuthorizationSha256,stateHash);
@@ -115,6 +116,14 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory }
     assert.equal(deriveStageBToolingInputTreeSha256(p.sourceSha), p.treeSha256);
     assert.equal(deriveStageBToolingInputTreeSha256(historical.sourceSha), historical.treeSha256);
     assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: historical.sourceSha, cwd: root });
+    if (p.closureContinuation) {
+      const { historicalTooling, currentTooling } = p.closureContinuation;
+      equal(historicalTooling, p.recoveryTooling, 'Historical CAS tooling differs from closure continuation');
+      assert.equal(deriveStageBToolingInputTreeSha256(historicalTooling.sourceSha), historicalTooling.treeSha256);
+      equal(currentTooling, historical, 'Continuation tooling differs from closure execution');
+      assertReceiptBoundGitAncestry({ historicalSourceSha: p.sourceSha, consumerSourceSha: historicalTooling.sourceSha, cwd: root });
+      assertReceiptBoundGitAncestry({ historicalSourceSha: historicalTooling.sourceSha, consumerSourceSha: currentTooling.sourceSha, cwd: root });
+    }
   };
   const authenticateContinuationTooling = (p, checkout) => {
     authenticateHistoricalTooling(p, brokerExecutionCheckout(p));

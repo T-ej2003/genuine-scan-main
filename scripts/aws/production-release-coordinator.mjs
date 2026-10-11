@@ -53,6 +53,26 @@ export function releaseTransitionDispatchInputs({release,authorizationRound},pha
  assert.ok(Buffer.byteLength(JSON.stringify({ref:'main',inputs}))<60*1024,'Release approval dispatch exceeds safe transport size');return inputs;
 }
 
+export function authenticateFailedReleaseTransitionAttempt({run,runId,toolingSha,workflowId,beforeRunIds}) {
+ assert.match(String(runId||''),/^[1-9][0-9]*$/);assert.match(toolingSha||'',/^[a-f0-9]{40}$/);
+ assert.ok(Number.isSafeInteger(workflowId)&&workflowId>0);assert.ok(Array.isArray(beforeRunIds));
+ assert.ok(beforeRunIds.every(id=>/^[1-9][0-9]*$/.test(String(id))));assert.ok(!beforeRunIds.map(String).includes(String(runId)));
+ const repository='T-ej2003/genuine-scan-main';
+ const child=JSON.parse(run(['api',`repos/${repository}/actions/runs/${runId}`],{encoding:'utf8',maxBuffer:8*1024*1024}));
+ assert.equal(String(child.id),String(runId));assert.equal(child.repository?.full_name,repository);
+ assert.equal(child.head_repository?.full_name,repository);assert.equal(child.head_sha,toolingSha);
+ assert.equal(String(child.workflow_id),String(workflowId));
+ assert.equal(child.head_branch,'main');assert.equal(child.path,'.github/workflows/authorize-production-stage-b-release-transition.yml');
+ assert.equal(child.event,'workflow_dispatch');assert.equal(String(child.run_attempt),'1');assert.equal(child.status,'completed');
+ assert.ok(['failure','cancelled','timed_out'].includes(child.conclusion),'Prior approval attempt is not terminal without authorization');
+ const pages=JSON.parse(run(['api',`repos/${repository}/actions/runs/${runId}/artifacts`,'--paginate','--slurp'],
+  {encoding:'utf8',maxBuffer:8*1024*1024}));
+ assert.ok(Array.isArray(pages));
+ assert.equal(pages.flatMap(page=>page.artifacts||[]).filter(artifact=>artifact.name==='production-stage-b-release-transition-authorization'
+  &&String(artifact.workflow_run?.id)===String(runId)).length,0,'Failed approval attempt produced an authorization artifact');
+ return {runId:String(runId),toolingSha,conclusion:child.conclusion};
+}
+
 // The Release Train owns this child. Resume authenticates the recorded dispatch
 // attempt/run rather than dispatching another approval after an interrupted POST.
 export async function obtainReleaseTransitionAuthorization(context,phase,prepared,preparationReference,

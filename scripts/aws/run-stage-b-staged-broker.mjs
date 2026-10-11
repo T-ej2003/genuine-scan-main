@@ -99,7 +99,8 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     : registrationPredecessorEvidence?.prerequisites || await deps.readPrerequisites());
   if(operation==='authorize-closure'){
     assert.equal(preparation?.purpose,BROKER_STATE_REFRESH);
-    equal(preparation,prepareBrokerStateRefresh({preparation:request.cutoverPreparation,authorization:request.cutoverAuthorization,casResult:request.casResult}));
+    equal(preparation,prepareBrokerStateRefresh({preparation:request.cutoverPreparation,authorization:request.cutoverAuthorization,
+      casResult:request.casResult,...(preparation.closureContinuation?{closureContinuation:preparation.closureContinuation}:{})}));
     await assertBrokerAuthorization(request.cutoverAuthorization,request.cutoverPreparation,
       {verify:deps.verifyAuthorization,now:new Date(request.casResult.authorizedAt)});
     await deps.authenticateCasResult(request.casResult,brokerDigest(request.cutoverAuthorization));

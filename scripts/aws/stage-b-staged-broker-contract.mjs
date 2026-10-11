@@ -20,9 +20,28 @@ const keys = (value, expected) => equal(Object.keys(value || {}).sort(), [...exp
 
 // The artifact source is immutable; this identity describes only its executing checkout.
 export function brokerExecutionCheckout(preparation) {
-  return preparation.recoveryTooling
+  return preparation.closureContinuation
+    ? structuredClone(preparation.closureContinuation.currentTooling)
+    : preparation.recoveryTooling
     ? { sourceSha: preparation.recoveryTooling.sourceSha, treeSha256: preparation.recoveryTooling.treeSha256 }
     : { sourceSha: preparation.sourceSha, treeSha256: preparation.treeSha256 };
+}
+
+export function assertBrokerClosureContinuation(value, preparation) {
+  keys(value, ['schemaVersion', 'releaseId', 'recoveryReference', 'releaseSourceSha', 'historicalTooling',
+    'currentTooling', 'cutover', 'operationId']);
+  assert.equal(value.schemaVersion, 1);
+  hash(value.releaseId); hash(value.recoveryReference); hash(value.operationId);
+  assert.equal(value.releaseSourceSha, preparation.sourceSha);
+  keys(value.historicalTooling, ['sourceSha', 'treeSha256', 'publicationResultSha256']);
+  assert.deepEqual(value.historicalTooling, preparation.recoveryTooling);
+  keys(value.currentTooling, ['sourceSha', 'treeSha256']);
+  assert.match(value.currentTooling.sourceSha || '', /^[a-f0-9]{40}$/); hash(value.currentTooling.treeSha256);
+  assert.notEqual(value.currentTooling.sourceSha, value.historicalTooling.sourceSha);
+  equal(value.cutover, preparation.cutover, 'Closure continuation changed completed CAS identity');
+  const { operationId, ...identity } = value;
+  assert.equal(operationId, brokerDigest(identity), 'Closure continuation identity is invalid');
+  return value;
 }
 
 export function assertBrokerRecoveryTooling(value, preparation) {
@@ -794,7 +813,7 @@ export function assertBrokerPreparation(p) {
   if (p.schemaVersion === 2) fields.push('prerequisiteChain');
   if (p.schemaVersion === 3) fields.push('prerequisiteChain', 'registrationPredecessor', 'registrationPolicyPredecessor');
   if (p.purpose === BROKER_STATE_REFRESH) fields.push('cutover');
-  for (const name of ['recoveryTooling', 'outputReconciliation', 'successorReconciliation']) if (p[name] !== undefined) fields.push(name);
+  for (const name of ['recoveryTooling', 'outputReconciliation', 'successorReconciliation', 'closureContinuation']) if (p[name] !== undefined) fields.push(name);
   keys(p, fields);
   if (p.recoveryTooling) assertBrokerRecoveryTooling(p.recoveryTooling, p);
   if (p.outputReconciliation) { assert.ok([BROKER_CUTOVER, BROKER_STATE_REFRESH].includes(p.purpose)); assertBrokerOutputReconciliation(p.outputReconciliation, p); }
@@ -803,6 +822,10 @@ export function assertBrokerPreparation(p) {
   if (p.purpose === BROKER_STATE_REFRESH) {
     keys(p.cutover, ['preparationSha256', 'authorizationSha256', 'resultSha256']);
     for (const value of Object.values(p.cutover)) hash(value);
+  }
+  if (p.closureContinuation) {
+    assert.equal(p.purpose, BROKER_STATE_REFRESH);
+    assertBrokerClosureContinuation(p.closureContinuation, p);
   }
   if (p.schemaVersion === 3) assert.equal(p.purpose, 'STAGE_B_TASK_REGISTRATION', 'Pre-publication predecessor evidence is registration-only');
   assert.match(p.sourceSha || "", /^[a-f0-9]{40}$/);
@@ -918,7 +941,7 @@ export function assertBrokerPreparation(p) {
   return p;
 }
 
-export function prepareBrokerStateRefresh({preparation,authorization,casResult}) {
+export function prepareBrokerStateRefresh({preparation,authorization,casResult,closureContinuation}) {
   assertBrokerPreparation(preparation);assert.equal(preparation.purpose,BROKER_CUTOVER);
   assert.equal(casResult.status,'CUTOVER_COMMITTED_STATE_PENDING');
   assert.equal(casResult.preparationSha256,brokerDigest(preparation));
@@ -929,6 +952,7 @@ export function prepareBrokerStateRefresh({preparation,authorization,casResult})
   equal({...alias,FunctionVersion:preparation.alias.FunctionVersion,RevisionId:preparation.alias.RevisionId},preparation.alias);
   const closure={...structuredClone(preparation),purpose:BROKER_STATE_REFRESH,cutover:{preparationSha256:brokerDigest(preparation),
     authorizationSha256:brokerDigest(authorization),resultSha256:brokerDigest(casResult)}};
+  if (closureContinuation) closure.closureContinuation = structuredClone(closureContinuation);
   return assertBrokerPreparation(closure);
 }
 
