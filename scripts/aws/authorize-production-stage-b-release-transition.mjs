@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import {authenticatePreNativeClosureAbort} from './stage-b-pre-native-closure.mjs';
+import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
@@ -18,7 +20,7 @@ const operations=Object.freeze({registration:'authorize-registration',pruning:'a
 export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,phase,preparationReference,authorizationRound,output},
  {env=process.env,run=createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env}),
   ghRun=(args,options)=>execFileSync('gh',args,{encoding:'utf8',maxBuffer:8*1024*1024,...options}),runRequest=runStagedBrokerRequest,
-  hydrateMaterial=hydrateReleasePhaseMaterial,createStore=createReleaseCoordinatorStore}={}) {
+  hydrateMaterial=hydrateReleasePhaseMaterial,createStore=createReleaseCoordinatorStore,authenticateAbort=authenticatePreNativeClosureAbort}={}) {
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
  assert.equal(env.GITHUB_REPOSITORY,PRODUCTION_ENVIRONMENT_APPROVAL.repository);assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');assert.equal(env.GITHUB_RUN_ATTEMPT,'1');
  assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.match(env.GITHUB_SHA||'',/^[a-f0-9]{40}$/);assert.match(releaseId||'',/^[a-f0-9]{64}$/);
@@ -58,14 +60,22 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
    assert.equal(brokerDigest(oldPrepared),old.result);
    const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);
    assert.equal((retired||timedOut)?.prepared,old.result,'Earlier closure round remains active');
-   assert.equal(store.readStep(releaseId,`closure:attempt:${round}`),null);
-   assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null);
+   const oldAttempt=store.readStep(releaseId,`closure:attempt:${round}`);
+   if(oldAttempt){
+    assert.ok(['PRE_NATIVE_ABORTED','AUTHORIZATION_EXPIRED'].includes(retired?.reason),'Historical attempted round requires authenticated retirement');
+    if(retired.reason==='PRE_NATIVE_ABORTED')assert.ok(retired.preNativeAbort);
+    const cutover=store.readStep(releaseId,'cutover:result');
+    const proof=await authenticateAbort({store,releaseId,release,sourceSha,round,prepared:oldPrepared,
+     currentTooling:retired.reason==='PRE_NATIVE_ABORTED'?retired.preNativeAbort.currentTooling:continuation.currentTooling,casResult:store.getArtifact(cutover.result),run,directory,
+     verify:createBrokerKmsAuthorizationBoundary({run,githubRun:ghRun}).verify});
+    if(retired.reason==='PRE_NATIVE_ABORTED')assert.deepEqual(proof,retired.preNativeAbort,'Historical pre-native abort proof differs');
+   }else assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null);
    const cutover=store.readStep(releaseId,'cutover:result');
    assert.equal(brokerDigest(oldPrepared.preparation),brokerDigest(prepareBrokerStateRefresh({preparation:store.getArtifact(cutover.prepared).preparation,
     authorization:store.getArtifact(cutover.authorization),casResult:store.getArtifact(cutover.result),
     ...(oldPrepared.preparation.closureContinuation?{closureContinuation:oldPrepared.preparation.closureContinuation}:{})})));
    const pendingOld=store.readStep(releaseId,`closure:pending:${round}`),dispatchOld=store.readStep(releaseId,`closure:dispatch:${round}`);
-   if(dispatchOld){
+   if(dispatchOld&&!oldAttempt){
     assert.ok(pendingOld||timedOut);assert.equal((pendingOld||timedOut).prepared,old.result);
     const oldIdentity=dispatchOld.dispatch.identity,toolingSha=brokerExecutionCheckout(oldPrepared.preparation).sourceSha;
     assert.deepEqual(oldIdentity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},'closure',old.result,oldPrepared.preparation));
@@ -75,7 +85,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
     const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:(pendingOld||timedOut).runId,toolingSha,
      workflowId:oldIdentity.workflowId,beforeRunIds:dispatchOld.dispatch.beforeRunIds});
     if(retired?.runId)assert.equal(retired.runId,failed.runId);
-   }else assert.equal(pendingOld,null);
+   }else if(!oldAttempt)assert.equal(pendingOld,null);
   }
  }
  assert.match(prepared.materializationSha256||'',/^[a-f0-9]{64}$/);
