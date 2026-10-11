@@ -5,6 +5,11 @@ import { pathToFileURL } from "node:url";
 const isMain = import.meta.url === pathToFileURL(process.argv[1] || "").href;
 
 const contracts = Object.freeze({
+  // Source CI permits protected prerequisite preparation, never deployment.
+  prerequisites: Object.freeze({
+    requiredWorkflows: Object.freeze(["quality-gate.yml", "secret-scan.yml", "deployment-audit.yml", "auth-security-tests.yml", "release-candidate-gate.yml"]),
+    lifecycleInputWorkflows: Object.freeze([]),
+  }),
   strict: Object.freeze({
     requiredWorkflows: Object.freeze(["quality-gate.yml", "secret-scan.yml", "deployment-audit.yml", "auth-security-tests.yml", "release-candidate-gate.yml"]),
     lifecycleInputWorkflows: Object.freeze([]),

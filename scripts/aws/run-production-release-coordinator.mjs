@@ -44,6 +44,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  materialize=materializeStageBPrerequisiteFiles,refresh=runRefreshOnly,
  createStore=createReleaseCoordinatorStore,verifyAuthorization,readReceipt=readStagedBrokerReceipt,
  completedRegistrationPath=path.join(root,'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json')}={}) {
+ if(lifecycle==='prerequisites')assert.equal(env.RELEASE_PREREQUISITES_ONLY,'true','Prerequisite gates require explicit prerequisite-only execution');
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
  assert.equal(env.GITHUB_REPOSITORY,'T-ej2003/genuine-scan-main');
  assert.equal(env.GITHUB_WORKFLOW_REF,`${env.GITHUB_REPOSITORY}/.github/workflows/release-train.yml@refs/heads/main`);
@@ -66,6 +67,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  const githubJson=async endpoint=>JSON.parse(ghRun(['api',`repos/${env.GITHUB_REPOSITORY}${endpoint}`],{encoding:'utf8'}));
  const receipts={registration:'TASK_REGISTERED',pruning:'BROKER_POLICY_PRUNED',policy:'BROKER_POLICY_CONVERGED',publication:'PUBLISHED',cutover:'CUTOVER_COMMITTED_STATE_PENDING'};
  return {
+  gateLifecycle:lifecycle,
   store,
   authenticateSource:async(source,frozen)=>{
    const observed=sourceReader(source,{run:awsRun});
@@ -76,7 +78,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   resolveArtifacts:async()=>imageArtifacts(),
   authenticateArtifacts:async(_release,artifacts)=>exact(artifacts,imageArtifacts()),
   resolveGates:async()=>gateReader({sourceSha,lifecycle,expectedWorkflowRunIds:gateIds,githubJson}),
-  authenticateGates:async(release,evidence)=>authenticateReleaseGateRuns(release,evidence),
+  authenticateGates:async(release,evidence)=>{assert.equal(evidence.lifecycle,lifecycle,'Gate lifecycle substitution');return authenticateReleaseGateRuns(release,evidence);},
   materializeInputs:async(release,artifacts,{phase,prepared,adopted=false})=>{
    const directory=prepareDirectory(release,phase),terraformDataDir=path.join(directory,'terraform'),files=phaseFiles(directory);
    if(adopted){assert.equal(phase,'registration');assert.equal(prepared,null);

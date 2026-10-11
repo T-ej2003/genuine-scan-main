@@ -6,15 +6,15 @@ import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
 import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.mjs';
 import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime} from '../aws/run-production-release-coordinator.mjs';
 
-function gateFixture(sourceSha){
- const files=requiredWorkflowFiles('strict'),workflowPayloads={},expectedWorkflowRunIds={};
+function gateFixture(sourceSha,lifecycle='strict'){
+ const files=requiredWorkflowFiles(lifecycle),workflowPayloads={},expectedWorkflowRunIds={};
  files.forEach((file,i)=>{
   const id=i+1,runId=i+100;expectedWorkflowRunIds[file]=String(runId);
   const workflow={id,path:`.github/workflows/${file}`};
-  workflowPayloads[file]={workflow,runs:[{id:runId,workflow_id:id,path:workflow.path,head_sha:sourceSha,head_branch:'main',event:'workflow_dispatch',run_attempt:1,
+  workflowPayloads[file]={workflow,runs:[{id:runId,workflow_id:id,path:workflow.path,head_sha:sourceSha,head_branch:'main',event:lifecycle==='prerequisites'?'push':'workflow_dispatch',run_attempt:1,
    status:'completed',conclusion:'success',created_at:'2026-10-08T12:00:00.000Z',repository:{full_name:'T-ej2003/genuine-scan-main'},head_repository:{full_name:'T-ej2003/genuine-scan-main'}}]};
  });
- return {sourceSha,lifecycle:'strict',workflowPayloads,expectedWorkflowRunIds};
+ return {sourceSha,lifecycle,workflowPayloads,expectedWorkflowRunIds};
 }
 import { CURRENT_REGISTRATION_OPERATION, rejectExternalAccess, prepublicationPredecessorFixture, schema3RegistrationPredecessor } from './fixtures/production-release-system.mjs';
 
@@ -477,7 +477,7 @@ test('current completed operation retains its real signed identity and all twelv
  assert.throws(()=>adoptRegisteredOutputs(entry,descendant,plan,{...impact,imageReuseCompatible:false,newImagesRequired:true}));
 });
 
-for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
+for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
  const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
   ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
  const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:lostResponse==='adopt-current-registration',descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
@@ -487,7 +487,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
  const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
- const hostedApproval=lostResponse===null||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
+ const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
  if(hostedApproval)f.checker.verify=a=>a.schemaVersion===2?hostedVerifiers.get(a.nonce)?.(a)||false:priorVerify(a);
  const runtime={
   store:{...f.coordinatorStore,
@@ -501,9 +501,10 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   },
   resolveArtifacts:async release=>({sourceSha:release.sourceSha,fixturePackageSha256:brokerDigest(f.files.package)}),
   authenticateArtifacts:async(release,evidence)=>assert.equal(evidence.sourceSha,release.sourceSha),
+  gateLifecycle:lostResponse?.startsWith('prerequisites-only')?'prerequisites':'strict',
   resolveGates:async release=>{
-   const fixture=gateFixture(release.sourceSha);
-   return readReleaseGateEvidence({sourceSha:release.sourceSha,lifecycle:'strict',expectedWorkflowRunIds:fixture.expectedWorkflowRunIds,
+   const fixture=gateFixture(release.sourceSha,runtime.gateLifecycle);
+   return readReleaseGateEvidence({sourceSha:release.sourceSha,lifecycle:fixture.lifecycle,expectedWorkflowRunIds:fixture.expectedWorkflowRunIds,
     githubJson:async endpoint=>{
      const workflow=/^\/actions\/workflows\/([^/]+)$/.exec(endpoint),run=/^\/actions\/runs\/([1-9][0-9]*)$/.exec(endpoint);
      if(workflow)return fixture.workflowPayloads[decodeURIComponent(workflow[1])]?.workflow;
@@ -657,7 +658,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    if(lostResponse.startsWith('expired-'))f.advanceClock(31*60*1000);
   }
   else if(lostResponse?.startsWith('reservation-'))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Injected reservation-only failure/);
-  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
+  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
   if(lostResponse==='hosted-runner-replacement'){
    const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
    for(const binding of ['needs: gates','TARGET_SHA: ${{ needs.gates.outputs.target_sha }}',
@@ -675,10 +676,10 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    assert.ok(workflow.includes("if: needs.gates.outputs.target_ref == 'main'"));
    assert.ok(workflow.includes('git merge-base --is-ancestor "$TARGET_SHA" origin/main'));
   }
-  const invoke=()=>['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)
+  const invoke=()=>['prerequisites-only','prerequisites-only-overlap','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)
    ? runHostedReleaseCoordinator(hostedReleaseTrainRequest({TARGET_SHA:request.sourceSha,RELEASE_TICKET_ID:request.ticketId,
       NORMAL_IMAGE_AUTHORIZATION_JSON:'fixture-transport',NORMAL_IMAGE_AUTHORIZATION_SHA256:'0'.repeat(64),
-      REQUIRED_GATE_RUN_IDS_JSON:'{}',RELEASE_LIFECYCLE:'strict'}),{runtimeFactory:()=>({...runtime})})
+      REQUIRED_GATE_RUN_IDS_JSON:'{}',RELEASE_LIFECYCLE:runtime.gateLifecycle}),{runtimeFactory:()=>({...runtime})})
    : runReleaseCoordinator(request,runtime);
   const result=await invoke();
   assert.equal(result.status,'PREREQUISITES_CONVERGED');
@@ -698,7 +699,7 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
   if(lostResponse==='hosted-runner-replacement')expected.splice(expected.indexOf('prune')+1,0,'recover-policy');
   else if(lostResponse==='proved-no-policy-write')expected.splice(expected.indexOf('prune')+1,0,'prune');
   else if(lostResponse?.includes('pre-intent-')||lostResponse?.startsWith('reservation-'))expected.splice(expected.indexOf(nativeOperation)+1,0,nativeOperation);
-  else if(lostResponse&&!['normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover',reconcile:'recover-reconciliation'}[lostOperation]);
+  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover',reconcile:'recover-reconciliation'}[lostOperation]);
   assert.deepEqual(calls,expected);
   if(['pre-intent-register','expired-pre-intent-register','reservation-register'].includes(lostResponse))assert.equal(calls.filter(call=>call==='recover-registration').length,0);
   if(lostResponse==='expired-pre-intent-register')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:authorized:1')));
@@ -724,10 +725,16 @@ for(const lostResponse of [null,'normal-predecessor','adopt-registration','adopt
    assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
   }
   if(lostResponse==='approval-expired-before-consumption'){assert.equal(hostedVerifiers.size,7);assert.equal([...steps.keys()].filter(k=>k.endsWith('registration:authorized:0')||k.endsWith('registration:authorized:1')).length,2);}
-  assert.ok(steps.has(`${result.releaseId}/GATES_PASSED`));
+  assert.ok(steps.has(`${result.releaseId}/${lostResponse?.startsWith('prerequisites-only')?'PREREQUISITE_GATES_PASSED':'GATES_PASSED'}`));
   if(lostResponse==='source-advance')runtime.authenticateSource=async(source,frozen)=>{assert.equal(source,request.sourceSha);assert.equal(frozen.releaseId,result.releaseId);return {baseline:{...baseline,generation:baseline.generation+1},changedFiles:['frontend/src/app.ts']};};
   await invoke();
   assert.deepEqual(calls,expected);
+  if(lostResponse?.startsWith('prerequisites-only')){
+   const prior=structuredClone(steps.get(`${result.releaseId}/PREREQUISITE_GATES_PASSED`));
+   runtime.gateLifecycle=lostResponse==='prerequisites-only-overlap'?'authenticated-initial-overlap':'strict';
+   await invoke();assert.ok(steps.has(`${result.releaseId}/GATES_PASSED`));assert.deepEqual(calls,expected);
+   assert.deepEqual(steps.get(`${result.releaseId}/PREREQUISITE_GATES_PASSED`),prior);
+  }
   if(lostResponse==='authorization-response-lost'){assert.ok(steps.has(`${result.releaseId}/registration:authorized:0`));assert.ok(steps.has(`${result.releaseId}/registration:authorized:1`));}
   assert.equal(f.snapshot().registrationApplyCalls,1);assert.equal(f.snapshot().policyDeletes,lostResponse==='no-prune-policy-lost'?0:1);assert.equal(f.snapshot().policyCreates,1);assert.equal(f.snapshot().publicationCalls,1);assert.equal(f.snapshot().aliasCalls,1);assert.equal(f.snapshot().refreshCalls,1);
  }finally{f.dispose();if(hostedClosureRelease)fs.rmSync(path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId),{recursive:true,force:true});}
@@ -800,3 +807,14 @@ test('successor approval dispatch executes from protected descendant without rel
  await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:{runId:'702',prepared:reference}},
   'cutover',prepared,reference,{token:'fixture-only',run,fetchImpl,sleep:rejectExternalAccess,attempts:1}));
 });
+
+ test('prerequisite CI cannot substitute dispatch, branch, source, repository or deployment gate evidence',()=>{
+  const valid=gateFixture(sourceSha,'prerequisites');
+  assert.equal(authenticateReleaseGateRuns({sourceSha},valid).length,5);
+  for(const [field,value] of [['event','workflow_dispatch'],['head_branch','attacker'],['head_sha','a'.repeat(40)],['conclusion','failure']]){
+   const evidence=structuredClone(valid);evidence.workflowPayloads['quality-gate.yml'].runs[0][field]=value;
+   assert.throws(()=>authenticateReleaseGateRuns({sourceSha},evidence));
+  }
+  assert.throws(()=>authenticateReleaseGateRuns({sourceSha},{...valid,lifecycle:'strict'}));
+  assert.throws(()=>createHostedReleaseRuntime({sourceSha,ticketId:'ticket',lifecycle:'prerequisites',env:{},awsRun:rejectExternalAccess,ghRun:rejectExternalAccess}),/explicit prerequisite-only/);
+ });
