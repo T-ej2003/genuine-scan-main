@@ -8,6 +8,10 @@ import {HOSTED_RELEASE_ROOT} from '../aws/production-release-coordinator.mjs';
 import {PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import {execFileSync} from 'node:child_process';
+import yaml from 'js-yaml';
+import {ensureStageBPrivateDirectory} from '../aws/stage-b-artifact-contract.mjs';
 import {rig,ready} from './fixtures/staged-broker-runtime.mjs';
 
 const A='a'.repeat(40),C='c'.repeat(40);
@@ -17,6 +21,41 @@ test('protected authorization installs dependencies and selects the direct produ
  const authorize=workflow.indexOf('node scripts/aws/authorize-production-stage-b-release-transition.mjs');
  assert.ok(install>0&&authorize>install);
  assert.match(workflow,/^    env:\n(?:      [^\n]*\n)*      TF_WORKSPACE: default$/m);
+});
+test('hosted cutover and closure setup creates every private authorization directory',()=>{
+ const workflow=yaml.load(fs.readFileSync(new URL('../../.github/workflows/authorize-production-stage-b-release-transition.yml',import.meta.url),'utf8'));
+ const steps=workflow.jobs.authorize.steps;
+ const setup=steps.find(step=>step.name==='Authenticate exact protected source and private phase paths').run;
+ const initialize=steps.find(step=>step.name==='Initialize exact provider schemas without applying or accessing the backend').run;
+ for(const phase of ['cutover','closure']) for(const existing of [false,true]) {
+  const sandbox=fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-authorization-permissions-'));
+  try {
+   const root=path.join(sandbox,'evidence'),releaseId='1'.repeat(64),operation=path.join(root,releaseId);
+   const bin=path.join(sandbox,'bin');fs.mkdirSync(bin);
+   const commands={git:'case "$1" in rev-parse) printf "%s\\n" "$TOOLING_SHA";; esac',
+    gh:'case "$*" in *protected*) echo true;; *) echo "$TOOLING_SHA";; esac',
+    terraform:'touch "$TF_DATA_DIR/terraform.tfstate"'};
+   for(const [name,body] of Object.entries(commands)) fs.writeFileSync(path.join(bin,name),'#!/bin/bash\n'+body+'\n',{mode:0o700});
+   if(existing) for(const relative of ['', 'cutover','cutover/terraform','closure']) {
+    const directory=path.join(operation,relative);fs.mkdirSync(directory,{recursive:true});fs.chmodSync(directory,0o755);
+   }
+   const environment=path.join(sandbox,'github-env');
+   const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,SOURCE_SHA:A,TOOLING_SHA:C,
+    RELEASE_ID:releaseId,RELEASE_PREPARATION_REFERENCE:'2'.repeat(64),RELEASE_PHASE:phase,
+    RELEASE_AUTHORIZATION_ROUND:'0',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:C,
+    GITHUB_REPOSITORY:'test/repository',GITHUB_ENV:environment};
+   execFileSync('bash',['-c',setup.replaceAll(HOSTED_RELEASE_ROOT,root)],{env});
+   const variables=Object.fromEntries(fs.readFileSync(environment,'utf8').trim().split('\n').map(line=>line.split('=')));
+   assert.equal(variables.TF_DATA_DIR,path.join(operation,'cutover/terraform'));
+   assert.equal(variables.AUTHORIZATION_OUTPUT,path.join(operation,phase,'authorization.json'));
+   execFileSync('bash',['-e','-c',initialize],{env:{...env,...variables}});
+   assert.equal(fs.existsSync(path.join(variables.TF_DATA_DIR,'terraform.tfstate')),false);
+   for(const directory of [root,operation,path.join(operation,'cutover'),variables.TF_DATA_DIR,path.dirname(variables.AUTHORIZATION_OUTPUT)])
+    assert.equal(ensureStageBPrivateDirectory({directory,repositoryRoot:process.cwd()}),directory);
+   fs.chmodSync(path.join(operation,'cutover'),0o755);
+   assert.throws(()=>ensureStageBPrivateDirectory({directory:path.join(operation,'cutover'),repositoryRoot:process.cwd()}),/0700/);
+  } finally { fs.rmSync(sandbox,{recursive:true,force:true}); }
+ }
 });
 const request={kind:'STAGE_B_SUCCESSOR_CUTOVER_REQUEST',releaseSourceSha:A,recoveryToolingSha:C,
  recoveryId:'2'.repeat(64),ticketId:'MSCQR-RECOVER',brokerVersion:'13',expectedAliasVersion:'12',expectedAliasRevision:'revision-before',

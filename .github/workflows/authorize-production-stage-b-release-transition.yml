@@ -62,6 +62,8 @@ jobs:
           install -d -m 700 "/tmp/mscqr-production-release"
           phase_dir="$RELEASE_PHASE"
           if test "$phase_dir" = closure; then phase_dir=cutover; fi
+          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID"
+          install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$phase_dir"
           install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$phase_dir/terraform"
           install -d -m 700 "/tmp/mscqr-production-release/$RELEASE_ID/$RELEASE_PHASE"
           printf 'TF_DATA_DIR=%s\n' "/tmp/mscqr-production-release/$RELEASE_ID/$phase_dir/terraform" >> "$GITHUB_ENV"
