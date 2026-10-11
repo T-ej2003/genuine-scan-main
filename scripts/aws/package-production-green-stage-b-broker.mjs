@@ -98,7 +98,7 @@ function assertCanonicalEntryPath(entryPath) {
   if (!entryPath || entryPath.startsWith("/") || entryPath.includes("\\") || entryPath.split("/").some((part) => part === ".." || part === ".") || entryPath.includes("\0")) throw new Error("Stage B broker package manifest contains an unsafe entry path.");
 }
 
-export function readZipCentralDirectory(bytes) {
+export function readZipCentralDirectory(bytes, { allowDataDescriptor = false } = {}) {
   const endOffset = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (endOffset < 0 || endOffset + 22 > bytes.length) throw new Error("Stage B broker package ZIP end record is malformed.");
   const entryCount = bytes.readUInt16LE(endOffset + 10);
@@ -123,14 +123,15 @@ export function readZipCentralDirectory(bytes) {
     const nameStart = cursor + 46;
     const nameBytes = bytes.subarray(nameStart, nameStart + nameLength);
     const name = nameBytes.toString("utf8");
-    if (!nameBytes.equals(Buffer.from(name)) || flags !== 0 || extraLength !== 0 || commentLength !== 0) throw new Error("Stage B broker package ZIP metadata is not canonical.");
+    if (!nameBytes.equals(Buffer.from(name)) || (flags !== 0 && !(allowDataDescriptor && flags === 8)) || extraLength !== 0 || commentLength !== 0) throw new Error("Stage B broker package ZIP metadata is not canonical.");
     if (localOffset + 30 > bytes.length || bytes.readUInt32LE(localOffset) !== 0x04034b50) throw new Error("Stage B broker package ZIP local header is malformed.");
     const localNameLength = bytes.readUInt16LE(localOffset + 26);
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
+    const localFlags = bytes.readUInt16LE(localOffset + 6);
     const localModificationTime = bytes.readUInt16LE(localOffset + 10);
     const localModificationDate = bytes.readUInt16LE(localOffset + 12);
     const localName = bytes.subarray(localOffset + 30, localOffset + 30 + localNameLength);
-    if (!localName.equals(nameBytes) || localExtraLength !== 0 || localModificationTime !== modificationTime || localModificationDate !== modificationDate) throw new Error("Stage B broker package ZIP local metadata is not canonical.");
+    if (!localName.equals(nameBytes) || localFlags !== flags || localExtraLength !== 0 || localModificationTime !== modificationTime || localModificationDate !== modificationDate) throw new Error("Stage B broker package ZIP local metadata is not canonical.");
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (dataOffset + compressedSize > bytes.length) throw new Error("Stage B broker package ZIP entry is out of range.");
     entries.push({ name, flags, method, modificationTime, modificationDate, compressedSize, uncompressedSize, externalAttributes, localOffset, dataOffset });

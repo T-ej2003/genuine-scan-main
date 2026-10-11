@@ -173,6 +173,7 @@ import {readBrokerProtectedEnvironmentApproval,readBrokerProtectedEnvironmentAut
 import {PRODUCTION_ENVIRONMENT_APPROVAL,createProductionEnvironmentApprovalEvidence} from '../aws/production-github-environment-approval.mjs';
 import JSZip from 'jszip';
 import {createHash} from 'node:crypto';
+import {readZipCentralDirectory} from '../aws/package-production-green-stage-b-broker.mjs';
 import {adoptRegisteredOutputs} from '../aws/stage-b-release-prerequisites.mjs';
 import {authorizeReleaseTransition} from '../aws/authorize-production-stage-b-release-transition.mjs';
 
@@ -182,7 +183,8 @@ function hostedApprovalTransport(sourceSha,now,runId){
  const actual={state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'};
  const approval=createProductionEnvironmentApprovalEvidence({environmentConfig:environment,repository,environment:'production',sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,eventName:'workflow_dispatch',workflowRunId:String(runId),workflowRunAttempt:'1',executionActor:'operator',observedAt:now.toISOString(),actualApproval:actual});
  return {approval,publish:async authorization=>{
-  const zip=new JSZip();zip.file('authorization.json',JSON.stringify(authorization));const archive=await zip.generateAsync({type:'nodebuffer'});
+  const zip=new JSZip();zip.file('authorization.json',JSON.stringify(authorization));const archive=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',streamFiles:true});
+  assert.throws(()=>readZipCentralDirectory(archive),/ZIP metadata is not canonical/);
   const workflow={id:runId,repository:{id:9,full_name:repository},head_repository:{full_name:repository},path:'.github/workflows/authorize-production-stage-b-release-transition.yml',head_sha:sourceSha,event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,actor:{login:'operator'}};
   const artifact={id:runId+10000,name:'production-stage-b-release-transition-authorization',expired:false,digest:`sha256:${createHash('sha256').update(archive).digest('hex')}`,workflow_run:{id:runId,head_sha:sourceSha,repository_id:9}};
   const payloads={['actions/runs/'+runId]:workflow,['actions/runs/'+runId+'/artifacts']:[{artifacts:[artifact]}],['actions/artifacts/'+artifact.id+'/zip']:archive,['environments/production']:environment,['actions/runs/'+runId+'/approvals']:[{state:'approved',environments:[{id:7,name:'production'}],user:{id:1,login:'operator'}}]};
@@ -335,6 +337,12 @@ test('protected approval authenticates exact workflow artifact before public reg
   const run=args=>{assert.equal(args[0],'api');const key=args[1].slice(`repos/${repository}/`.length);assert.ok(Object.hasOwn(payloads,key),'Unexpected GitHub access');return Buffer.isBuffer(payloads[key])?payloads[key]:JSON.stringify(payloads[key]);};
   const retrieved=await readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run});
   assert.deepEqual(retrieved.authorization,authorization);assert.equal(retrieved.workflow.id,700);
+  const malformedArchive=Buffer.from(archive),end=malformedArchive.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));
+  malformedArchive.writeUInt16LE(9,malformedArchive.readUInt32LE(end+16)+8);
+  const originalDigest=artifact.digest;artifact.digest=`sha256:${createHash('sha256').update(malformedArchive).digest('hex')}`;
+  payloads['actions/artifacts/701/zip']=malformedArchive;
+  await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/ZIP metadata is not canonical/);
+  artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:'f'.repeat(40),run}));
   const verify=a=>verifyBrokerProtectedEnvironmentAuthorization(a,{run});
   await assertBrokerAuthorization(authorization,p,{verify,now:f.now});
