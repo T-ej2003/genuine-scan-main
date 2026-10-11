@@ -122,6 +122,7 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
     const commentLength = bytes.readUInt16LE(cursor + 32);
     const externalAttributes = bytes.readUInt32LE(cursor + 38);
     const localOffset = bytes.readUInt32LE(cursor + 42);
+    if (allowSingleMemberDataDescriptor && bytes.readUInt16LE(cursor + 34) !== 0) throw new Error("Authorization ZIP member belongs to another disk.");
     const nameStart = cursor + 46;
     const nameBytes = bytes.subarray(nameStart, nameStart + nameLength);
     const name = nameBytes.toString("utf8");
@@ -136,7 +137,7 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
     if (!localName.equals(nameBytes) || localFlags !== flags || localExtraLength !== 0 || localModificationTime !== modificationTime || localModificationDate !== modificationDate) throw new Error("Stage B broker package ZIP local metadata is not canonical.");
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (dataOffset + compressedSize > bytes.length) throw new Error("Stage B broker package ZIP entry is out of range.");
-    if (allowSingleMemberDataDescriptor && localOffset !== 0) throw new Error("Authorization ZIP local header placement is invalid.");
+    if (allowSingleMemberDataDescriptor && (localOffset !== 0 || bytes.readUInt16LE(localOffset + 4) !== bytes.readUInt16LE(cursor + 6))) throw new Error("Authorization ZIP local header placement is invalid.");
     if (allowSingleMemberDataDescriptor && flags === 0 && (dataOffset + compressedSize !== directoryOffset
       || bytes.readUInt16LE(localOffset + 8) !== method || bytes.readUInt32LE(localOffset + 14) !== bytes.readUInt32LE(cursor + 16)
       || bytes.readUInt32LE(localOffset + 18) !== compressedSize || bytes.readUInt32LE(localOffset + 22) !== uncompressedSize)) throw new Error("Authorization ZIP local metadata is invalid.");

@@ -371,6 +371,13 @@ test('protected approval authenticates exact workflow artifact before public reg
   assert.throws(()=>readZipCentralDirectory(prefixed,{allowSingleMemberDataDescriptor:true}),/directory placement is invalid/);
   const wrongDisk=Buffer.from(archive);wrongDisk.writeUInt16LE(1,end+4);
   assert.throws(()=>readZipCentralDirectory(wrongDisk,{allowSingleMemberDataDescriptor:true}),/one member on one disk/);
+  const wrongMemberDisk=Buffer.from(archive);wrongMemberDisk.writeUInt16LE(1,directoryOffset+34);
+  artifact.digest=`sha256:${createHash('sha256').update(wrongMemberDisk).digest('hex')}`;
+  payloads['actions/artifacts/701/zip']=wrongMemberDisk;
+  await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/member belongs to another disk/);
+  artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
+  const wrongLocalVersion=Buffer.from(archive);wrongLocalVersion.writeUInt16LE(21,4);
+  assert.throws(()=>readZipCentralDirectory(wrongLocalVersion,{allowSingleMemberDataDescriptor:true}),/local header placement is invalid/);
   const zeroFlagArchive=await zip.generateAsync({type:'nodebuffer'});
   assert.equal(readZipCentralDirectory(zeroFlagArchive,{allowSingleMemberDataDescriptor:true}).length,1);
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:'f'.repeat(40),run}));

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
-import {readZipCentralDirectory} from './package-production-green-stage-b-broker.mjs';
+import {readZipCentralDirectory,zipEntryBytes} from './package-production-green-stage-b-broker.mjs';
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson } from './production-green-stage-b-contract.mjs';
 import { brokerDigest, brokerExecutionCheckout, assertBrokerPreparation, assertBrokerAuthorization, receiptBoundCheckerDisclosure,assertBrokerReleaseAuthorizationContext } from './stage-b-staged-broker-contract.mjs';
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
@@ -59,6 +59,7 @@ export async function readBrokerProtectedEnvironmentAuthorization({workflowRunId
   const zip=await JSZip.loadAsync(archive,{checkCRC32:true}),entries=Object.values(zip.files).filter(e=>!e.dir);
   assert.equal(entries.length,1);assert.equal(entries[0].name,'authorization.json');assert.notEqual(Number(entries[0].unixPermissions||0)&0o170000,0o120000);
   const bytes=await entries[0].async('uint8array');assert.ok(bytes.length<=8*1024*1024,'Oversized authorization payload');
+  assert.deepEqual(Buffer.from(bytes),zipEntryBytes(archive,members[0]),'Authorization ZIP member interpretation differs');
   const authorization=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));
   assert.equal(authorization.schemaVersion,2);assert.equal(authorization.sourceSha,sourceSha);
   assert.equal(authorization.protectedEnvironmentApprovalEvidence.workflowRunId,String(workflowRunId));

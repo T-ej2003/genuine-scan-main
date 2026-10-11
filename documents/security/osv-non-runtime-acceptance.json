@@ -7,12 +7,12 @@
       "affectedVersion": "3.0.3",
       "advisory": "GHSA-vfj7-8cjw-p6xm",
       "cve": "CVE-2026-93687",
-      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11: protected authorization now authenticates GitHub's single-member ZIP layout, including directory placement, local header, descriptor fields and payload CRC, while broker ZIP validation remains strict. Frontend source, dependency locks, and runtime packaging did not change.",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11: protected authorization now authenticates GitHub's single-member ZIP layout, including one-disk membership, directory placement, local header, descriptor fields, payload CRC and matching decoded member bytes, while broker ZIP validation remains strict. Frontend source, dependency locks, and runtime packaging did not change.",
       "owner": "@T-ej2003",
       "createdAt": "2026-10-03",
       "expiresOn": "2026-11-02",
       "reachability": {
-        "inputsSha256": "c80f8ca65a112ffee8e2471b48fb35cc8ebe29edf78c62b9721d3327fc60b70a",
+        "inputsSha256": "50d1e72c3f26813dc0075eaea0f92eebfbb66153857c85cb48484a450d205b82",
         "execution": {
           "backend": "NO",
           "worker": "NO",
