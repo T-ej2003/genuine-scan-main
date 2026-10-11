@@ -351,6 +351,12 @@ test('protected approval authenticates exact workflow artifact before public reg
    assert.throws(()=>readZipCentralDirectory(corrupted,{allowSingleMemberDataDescriptor:true}),/data descriptor is invalid/);
    await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/data descriptor is invalid/);
   }
+  for(const [offset,size] of [[8,2],[14,4],[18,4],[22,4]]){
+   const corrupted=Buffer.from(archive);if(size===2)corrupted.writeUInt16LE(corrupted.readUInt16LE(offset)^1,offset);else corrupted.writeUInt32LE(corrupted.readUInt32LE(offset)^1,offset);
+   artifact.digest=`sha256:${createHash('sha256').update(corrupted).digest('hex')}`;
+   payloads['actions/artifacts/701/zip']=corrupted;
+   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/local descriptor metadata is invalid/);
+  }
   artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
   const directoryOffset=archive.readUInt32LE(end+16);
   const gap=Buffer.concat([archive.subarray(0,directoryOffset),Buffer.from([0]),archive.subarray(directoryOffset)]);

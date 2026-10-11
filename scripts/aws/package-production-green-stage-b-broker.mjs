@@ -136,6 +136,8 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (dataOffset + compressedSize > bytes.length) throw new Error("Stage B broker package ZIP entry is out of range.");
     if (flags === 8) {
+      if (bytes.readUInt16LE(localOffset + 8) !== method || bytes.readUInt32LE(localOffset + 14) !== 0
+        || bytes.readUInt32LE(localOffset + 18) !== 0 || bytes.readUInt32LE(localOffset + 22) !== 0) throw new Error("Authorization ZIP local descriptor metadata is invalid.");
       const descriptor = dataOffset + compressedSize;
       if (descriptor + 16 !== directoryOffset || bytes.readUInt32LE(descriptor) !== 0x08074b50
         || bytes.readUInt32LE(descriptor + 4) !== bytes.readUInt32LE(cursor + 16)
