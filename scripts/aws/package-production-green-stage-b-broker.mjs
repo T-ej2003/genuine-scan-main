@@ -158,10 +158,15 @@ export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor
   return entries;
 }
 
-export function zipEntryBytes(bytes, zipEntry) {
+export function zipEntryBytes(bytes, zipEntry, { requireFullInput = false } = {}) {
   const compressed = bytes.subarray(zipEntry.dataOffset, zipEntry.dataOffset + zipEntry.compressedSize);
   if (zipEntry.method === 0) return compressed;
-  if (zipEntry.method === 8) return zlib.inflateRawSync(compressed);
+  if (zipEntry.method === 8) {
+    if (!requireFullInput) return zlib.inflateRawSync(compressed);
+    const decoded = zlib.inflateRawSync(compressed, { info: true });
+    if (decoded.engine.bytesWritten !== compressed.length) throw new Error("Authorization ZIP DEFLATE stream has trailing bytes.");
+    return decoded.buffer;
+  }
   throw new Error("Stage B broker package ZIP uses an unsupported compression method.");
 }
 

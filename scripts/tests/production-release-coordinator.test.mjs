@@ -388,6 +388,19 @@ test('protected approval authenticates exact workflow artifact before public reg
    await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/Unexpected raw authorization ZIP member/);
   }
   artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
+  const deflated=await zip.generateAsync({type:'nodebuffer',compression:'DEFLATE',streamFiles:true});
+  const deflatedEnd=deflated.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]));
+  const deflatedDirectory=deflated.readUInt32LE(deflatedEnd+16);
+  const deflatedEntry=readZipCentralDirectory(deflated,{allowSingleMemberDataDescriptor:true})[0];
+  const descriptorStart=deflatedEntry.dataOffset+deflatedEntry.compressedSize;
+  const trailingDeflate=Buffer.concat([deflated.subarray(0,descriptorStart),Buffer.from([0]),deflated.subarray(descriptorStart)]);
+  trailingDeflate.writeUInt32LE(deflatedDirectory+1,deflatedEnd+17);
+  trailingDeflate.writeUInt32LE(deflatedEntry.compressedSize+1,deflatedDirectory+21);
+  trailingDeflate.writeUInt32LE(deflatedEntry.compressedSize+1,descriptorStart+9);
+  artifact.digest=`sha256:${createHash('sha256').update(trailingDeflate).digest('hex')}`;
+  payloads['actions/artifacts/701/zip']=trailingDeflate;
+  await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/DEFLATE stream has trailing bytes/);
+  artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:'f'.repeat(40),run}));
   const verify=a=>verifyBrokerProtectedEnvironmentAuthorization(a,{run});
   await assertBrokerAuthorization(authorization,p,{verify,now:f.now});

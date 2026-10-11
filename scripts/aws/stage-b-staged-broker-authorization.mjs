@@ -59,7 +59,7 @@ export async function readBrokerProtectedEnvironmentAuthorization({workflowRunId
   const zip=await JSZip.loadAsync(archive,{checkCRC32:true}),entries=Object.values(zip.files).filter(e=>!e.dir);
   assert.equal(entries.length,1);assert.equal(entries[0].name,'authorization.json');assert.notEqual(Number(entries[0].unixPermissions||0)&0o170000,0o120000);
   const bytes=await entries[0].async('uint8array');assert.ok(bytes.length<=8*1024*1024,'Oversized authorization payload');assert.equal(bytes.length,members[0].uncompressedSize,'Authorization ZIP member size differs');
-  assert.deepEqual(Buffer.from(bytes),zipEntryBytes(archive,members[0]),'Authorization ZIP member interpretation differs');
+  assert.deepEqual(Buffer.from(bytes),zipEntryBytes(archive,members[0],{requireFullInput:true}),'Authorization ZIP member interpretation differs');
   const authorization=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));
   assert.equal(authorization.schemaVersion,2);assert.equal(authorization.sourceSha,sourceSha);
   assert.equal(authorization.protectedEnvironmentApprovalEvidence.workflowRunId,String(workflowRunId));
