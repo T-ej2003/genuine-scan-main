@@ -52,7 +52,7 @@ test('hosted successor materializer consumes immutable import reference and orig
  const run=args=>{if(args[0]!=='s3api'||args[1]!=='get-object')throw new Error('Unexpected AWS operation');
   const bytes=args.includes('env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate')?currentBytes:Buffer.from('{}');
   fs.writeFileSync(args.at(-1),bytes,{mode:0o600});return '{}';};
- let imageObservation;
+ let imageObservation,providerError=false;const terraformCalls=[];
  const runtime=createHostedSuccessorRuntime({env,awsRun:run,ghRun:()=>{throw new Error('Unexpected GitHub call');},
   createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.equal(c,C);},verifyImport:()=>true,
   readAuthority:()=>({preparation,authorization}),readReceipt:()=>result,
@@ -69,7 +69,9 @@ test('hosted successor materializer consumes immutable import reference and orig
    assert.deepEqual(fs.readFileSync(checksumsFile),Buffer.from(fs.readFileSync(checksumsFile)));
    fs.writeFileSync(outputPath,'tooling_sha = "'+A+'"\n',{mode:0o600});
    fs.writeFileSync(bindingReportPath,'{"toolingSha":"'+A+'"}',{mode:0o600});},
-  commandRun:(_command,_args,{env:commandEnv})=>{const metadata=path.join(commandEnv.TF_DATA_DIR,'terraform.tfstate');
+  commandRun:(command,args,{env:commandEnv})=>{terraformCalls.push({command,args,env:commandEnv});
+   if(args.includes('-backend=false')){if(providerError)throw new Error('Provider installation failed');return;}
+   const metadata=path.join(commandEnv.TF_DATA_DIR,'terraform.tfstate');
    fs.writeFileSync(metadata,JSON.stringify({backend:{type:'s3',hash:1,config:STAGE_B_TERRAFORM_BACKEND_CONFIG}}),{mode:0o600});}});
  try{
   await assert.rejects(()=>runtime.authenticateRequest({...request,expectedAliasRevision:'other-revision'}),
@@ -83,6 +85,29 @@ test('hosted successor materializer consumes immutable import reference and orig
   assert.deepEqual(fs.readFileSync(inputs.successorRecovery.imageSignaturePath),signatureBytes);
   assert.equal(JSON.parse(fs.readFileSync(inputs.successorRecovery.bindingReportPath)).toolingSha,A);
   assert.equal(fs.readFileSync(inputs.files.package).toString(),'published-broker-package');
+  const saved={planPath:path.join(directory,'saved.tfplan')};
+  const metadata=fs.readFileSync(inputs.files.backendMetadata);
+  for(const phase of ['cutover','closure']){
+   const resumed=await runtime.materializeInputs({request,release:{sourceSha:A,releaseId},phase,prepared:saved});
+   assert.equal(resumed.terraformDataDir,inputs.terraformDataDir);
+   assert.deepEqual(terraformCalls.at(-1).args,[terraformCalls[0].args[0],'init','-backend=false','-input=false','-lockfile=readonly','-no-color']);
+   assert.equal(terraformCalls.at(-1).env.TF_DATA_DIR,inputs.terraformDataDir);
+   assert.equal(terraformCalls.at(-1).env.TF_WORKSPACE,'default');
+   assert.deepEqual(fs.readFileSync(inputs.files.backendMetadata),metadata,'Provider installation must preserve authenticated backend metadata');
+  }
+  const callsBeforeInvalid=terraformCalls.length;
+  await assert.rejects(()=>runtime.materializeInputs({release:{releaseId},phase:'cutover',prepared:{planPath:'/tmp/other/saved.tfplan'}}));
+  assert.equal(terraformCalls.length,callsBeforeInvalid,'Reject substituted phase path before initialization');
+  fs.unlinkSync(inputs.files.backendMetadata);
+  await runtime.materializeInputs({release:{releaseId},phase:'cutover',prepared:saved});
+  assert.equal(fs.existsSync(inputs.files.backendMetadata),false,'Fresh runner must obtain metadata from authenticated hydration');
+  fs.writeFileSync(inputs.files.backendMetadata,metadata,{mode:0o600});
+  providerError=true;
+  await assert.rejects(()=>runtime.materializeInputs({release:{releaseId},phase:'closure',prepared:saved}),/Provider installation failed/);
+  await assert.rejects(()=>runtime.materializeInputs({release:{releaseId},phase:'closure',prepared:null,
+   cutover:{prepared:{materializationSha256:'1'.repeat(64)}}}),/Provider installation failed/,
+  'First closure materialization must initialize providers before hydrating cutover evidence');
+  providerError=false;
   const identity={schemaVersion:2,sourceSha:A,ticketId:request.ticketId,
    recoveryReference:brokerDigest(request),toolingSha:C},operationId=brokerDigest(identity);
   const old={preparation:{successorReconciliation:{createdAt:'2026-10-01T00:00:00.000Z'}}};

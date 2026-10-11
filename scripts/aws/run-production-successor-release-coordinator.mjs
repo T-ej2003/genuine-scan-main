@@ -128,7 +128,11 @@ export function createHostedSuccessorRuntime({env=process.env,
    ensureStageBPrivateDirectory({directory,repositoryRoot:root,create:true});
    ensureStageBPrivateDirectory({directory:terraformDataDir,repositoryRoot:root,create:true});
    const inputs={files:stageFiles,directory,terraformDataDir,successorRecovery};
-   if(prepared){assert.equal(path.dirname(prepared.planPath),directory);return inputs;}
+   if(prepared)assert.equal(path.dirname(prepared.planPath),directory);
+   // Saved material contains authenticated backend metadata, not runner-local providers.
+   if(prepared||phase==='closure')commandRun('terraform',[`-chdir=${terraformRoot}`,'init','-backend=false','-input=false','-lockfile=readonly','-no-color'],
+    {env:{...env,TF_DATA_DIR:terraformDataDir,TF_WORKSPACE:'default'}});
+   if(prepared)return inputs;
    if(phase==='closure'){
     assert.ok(cutover?.prepared?.materializationSha256,'Closure requires captured cutover material');
     await hydrateReleasePhaseMaterial({reference:cutover.prepared.materializationSha256,prepared:cutover.prepared,
