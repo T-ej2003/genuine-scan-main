@@ -5,7 +5,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { readPrivateEvidence, privateEvidenceStore } from "./stage-b-private-evidence.mjs";
-import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE, createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
+import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { STAGE_B_STATE_RECONCILIATION as CONTRACT, STAGE_B_STATE_RECONCILIATION_MODES, assertStageBOutputOnlyReconciliationResult, assertStageBStateReconciliationAuthorization, assertStageBStateReconciliationPreparation } from "./production-green-stage-b-state-reconciliation.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -58,7 +58,8 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     let bundle;
     if (equal(members, ["preparation-reference.json"])) {
       const reference = json(unzip(unzipRun, prepArchive, "preparation-reference.json"), "Private preparation reference");
-      const run = privateEvidenceRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
+      if (typeof privateEvidenceRun !== "function") throw new Error("Private Stage B evidence requires an explicit credential-bound AWS reader.");
+      const run = privateEvidenceRun;
       bundle = readPrivateEvidence({ reference, kind: "preparation", sourceSha: preparationRun.head_sha, workflowRunId: preparationRunId, workflowRunAttempt: preparationRunAttempt, store: privateEvidenceStore({ run, directory }) });
     } else if (equal(members, ["preparation-bundle.zip"])) {
       // Retained historical receipts keep their original authenticated transport.

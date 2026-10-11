@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
+import {createProductionCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from "../aws/production-cutover-production-adapters.mjs";
 import {publishPrivateEvidence} from "../aws/stage-b-private-evidence.mjs";
 import {brokerDigest} from "../aws/stage-b-staged-broker-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -183,13 +184,33 @@ test("private preparation reference authenticates the complete protected authori
  };
  f.privateEvidenceRun=args=>{
   assert.equal(args[0],"s3api");assert.equal(args[1],"get-object");
-  fs.writeFileSync(args.at(-1),JSON.stringify({kind:"PRODUCTION_RELEASE_COORDINATOR_ARTIFACT",key:{sha256:brokerDigest(evidence)},value:evidence}));
+  fs.writeFileSync(args.find(arg=>path.isAbsolute(arg)&&path.basename(arg).startsWith("coordinator-read-")),JSON.stringify({kind:"PRODUCTION_RELEASE_COORDINATOR_ARTIFACT",key:{sha256:brokerDigest(evidence)},value:evidence}));
   return JSON.stringify({ServerSideEncryption:"AES256"});
  };
- assert.deepEqual(resolve(f).successorState,f.successorState);
+ const awsRead=f.privateEvidenceRun;
+ for(const credentialSource of [PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER]) {
+  const local=credentialSource===PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE;
+  f.privateEvidenceRun=createProductionCommandRunner({credentialSource,...(local?{profile:"approved-admin"}:{}),env:{HOME:os.homedir(),PATH:process.env.PATH,AWS_PROFILE:"wrong",AWS_ACCESS_KEY_ID:"session-access",AWS_SECRET_ACCESS_KEY:"session-secret",AWS_SESSION_TOKEN:"session-token"},exec:(command,args,options)=>{
+   assert.equal(command,"aws");assert.equal(options.env.AWS_PROFILE,local?"approved-admin":undefined);
+   assert.equal(options.env.AWS_ACCESS_KEY_ID,local?undefined:"session-access");
+   assert.equal(options.env.AWS_SESSION_TOKEN,local?undefined:"session-token");return awsRead(args);
+  }});
+  assert.deepEqual(resolve(f).successorState,f.successorState);
+ }
+ assert.throws(()=>createProductionCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE}));
+ assert.throws(()=>createProductionCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env:{}}));
+ f.privateEvidenceRun=undefined;assert.throws(()=>resolve(f),/explicit credential-bound/);f.privateEvidenceRun=awsRead;
  const saved=structuredClone(evidence);evidence.payloadBase64=Buffer.from("substituted plan").toString("base64");
  assert.throws(()=>resolve(f));evidence=saved;
  reference.workflowRunId="999";assert.throws(()=>resolve(f));reference.workflowRunId=f.runIds.preparation;
  reference.sourceSha="f".repeat(40);assert.throws(()=>resolve(f));reference.sourceSha=sourceSha;
  f.privateEvidenceRun=()=>{throw new Error("AccessDenied");};assert.throws(()=>resolve(f));
+});
+
+
+test("local convergence composes the same explicit administrator runner into private evidence and policy execution",()=>{
+ const source=fs.readFileSync("scripts/aws/production-normal-backend-activation.mjs","utf8");
+ const branch=source.split('if (mode === "converge-policy") {')[1].split('if (mode === "contract-policy") {')[0];
+ assert.match(branch,/const run = createProductionCommandRunner\(\{ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required\(values, "--admin-profile"\)/);
+ assert.match(branch,/privateEvidenceRun: run/);assert.match(branch,/convergeNormalActivationPolicy\(\{ run, sourceSha/);
 });

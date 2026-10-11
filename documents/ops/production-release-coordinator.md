@@ -287,3 +287,10 @@ approval prerequisites by itself. Keep an existing rotation and authenticate its
 own durable evidence before Release Train. Recommended hardening is to keep the
 reference-only artifact regression in required CI so future bundle additions
 cannot accidentally expose production state.
+
+Private reference readers require an explicit credential-bound AWS runner.
+Hosted workflow hydration uses the existing OIDC release-deployer session;
+local normal-activation convergence passes its explicit `--admin-profile` runner
+for both evidence reads and policy execution. Neither path inherits ambient
+credentials or falls back to another credential source. Legacy GitHub-only
+receipt authentication remains compatible without AWS hydration.

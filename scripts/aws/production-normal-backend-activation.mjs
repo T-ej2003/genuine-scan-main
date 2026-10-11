@@ -516,6 +516,7 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "converge-policy") {
     const checkout = readStageBProtectedMainCheckout({ cwd: process.cwd() });
     if (checkout.currentHead !== sourceSha) throw new Error("Normal activation convergence must run from exact protected main.");
+    const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") });
     let historicalPredecessor;
     const historicalArguments = ["--historical-refresh-report", "--historical-refresh-report-sha256", "--historical-binding-report", "--historical-binding-report-sha256"].map((name) => values.get(name));
     if (historicalArguments.some(Boolean)) {
@@ -527,6 +528,7 @@ export function runCli(argv = process.argv.slice(2)) {
       historicalPredecessor = { artifacts, protectedMainAncestorAuthenticated: true };
       if (evidenceArguments.every(Boolean)) historicalPredecessor.reconciliationEvidence = resolveStageBStateReconciliationEvidence({
         currentProtectedMainSha: sourceSha,
+        privateEvidenceRun: run,
         preparationRunId: evidenceArguments[0],
         authorizationRunId: evidenceArguments[1],
         executionRunId: evidenceArguments[2],
@@ -535,7 +537,7 @@ export function runCli(argv = process.argv.slice(2)) {
         expectedResultArtifactDigest: evidenceArguments[5],
       });
     }
-    const result = convergeNormalActivationPolicy({ run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required(values, "--admin-profile") }), sourceSha, imageReleaseSha: required(values, "--image-release-sha"), historicalPredecessor });
+    const result = convergeNormalActivationPolicy({ run, sourceSha, imageReleaseSha: required(values, "--image-release-sha"), historicalPredecessor });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
   }
