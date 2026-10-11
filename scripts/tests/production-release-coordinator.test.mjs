@@ -330,7 +330,7 @@ test('protected approval authenticates exact workflow artifact before public reg
   const authorization=await f.run({...inputs,operation:'authorize-registration',preparation:p,planPath:prepared.planPath},{readProtectedApproval:async()=>({approval,release:{releaseId:'b'.repeat(64),phase:'registration',preparationReference:brokerDigest(prepared),authorizationRound:0}})});
   assert.equal(authorization.schemaVersion,2);assert.equal(authorization.preparationSha256,brokerDigest(p));
   assert.equal(authorization.review.checkerIndependent,false);assert.equal(authorization.review.soleOperatorModel,true);
-  const zip=new JSZip();zip.file('authorization.json',JSON.stringify(authorization));const archive=await zip.generateAsync({type:'nodebuffer'});
+  const zip=new JSZip();zip.file('authorization.json',JSON.stringify(authorization));const archive=await zip.generateAsync({type:'nodebuffer',streamFiles:true});
   const workflow={id:700,repository:{id:9,full_name:repository},head_repository:{full_name:repository},path:'.github/workflows/authorize-production-stage-b-release-transition.yml',head_sha:f.source,event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,actor:{login:'operator'}};
   const artifact={id:701,name:'production-stage-b-release-transition-authorization',expired:false,digest:`sha256:${createHash('sha256').update(archive).digest('hex')}`,workflow_run:{id:700,head_sha:f.source,repository_id:9}};
   const payloads={['actions/runs/700']:workflow,['actions/runs/700/artifacts']:[{artifacts:[artifact]}],['actions/artifacts/701/zip']:archive,['environments/production']:environment,['actions/runs/700/approvals']:[{state:'approved',environments:[{id:7,name:'production'}],user:{id:1,login:'operator'}}]};
@@ -343,6 +343,19 @@ test('protected approval authenticates exact workflow artifact before public reg
   payloads['actions/artifacts/701/zip']=malformedArchive;
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/ZIP metadata is not canonical/);
   artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
+  const descriptorOffset=archive.readUInt32LE(end+16)-16;
+  for(const offset of [0,4,8,12]){
+   const corrupted=Buffer.from(archive);corrupted.writeUInt32LE(corrupted.readUInt32LE(descriptorOffset+offset)^1,descriptorOffset+offset);
+   artifact.digest=`sha256:${createHash('sha256').update(corrupted).digest('hex')}`;
+   payloads['actions/artifacts/701/zip']=corrupted;
+   assert.throws(()=>readZipCentralDirectory(corrupted,{allowSingleMemberDataDescriptor:true}),/data descriptor is invalid/);
+   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:f.source,run}),/data descriptor is invalid/);
+  }
+  artifact.digest=originalDigest;payloads['actions/artifacts/701/zip']=archive;
+  const directoryOffset=archive.readUInt32LE(end+16);
+  const gap=Buffer.concat([archive.subarray(0,directoryOffset),Buffer.from([0]),archive.subarray(directoryOffset)]);
+  gap.writeUInt32LE(directoryOffset+1,gap.lastIndexOf(Buffer.from([0x50,0x4b,0x05,0x06]))+16);
+  assert.throws(()=>readZipCentralDirectory(gap,{allowSingleMemberDataDescriptor:true}),/data descriptor is invalid/);
   await assert.rejects(()=>readBrokerProtectedEnvironmentAuthorization({workflowRunId:'700',sourceSha:'f'.repeat(40),run}));
   const verify=a=>verifyBrokerProtectedEnvironmentAuthorization(a,{run});
   await assertBrokerAuthorization(authorization,p,{verify,now:f.now});

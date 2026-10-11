@@ -55,8 +55,8 @@ export async function readBrokerProtectedEnvironmentAuthorization({workflowRunId
   assert.match(artifact.digest||'',/^sha256:[a-f0-9]{64}$/);
   const archive=Buffer.from(run(['api',`repos/${repository}/actions/artifacts/${artifact.id}/zip`],{encoding:null,maxBuffer:8*1024*1024}));
   assert.equal(`sha256:${createHash('sha256').update(archive).digest('hex')}`,artifact.digest);
-  const members=readZipCentralDirectory(archive,{allowDataDescriptor:true});assert.equal(members.length,1);assert.ok(members[0].uncompressedSize<=8*1024*1024,'Oversized authorization archive member');
-  const zip=await JSZip.loadAsync(archive),entries=Object.values(zip.files).filter(e=>!e.dir);
+  const members=readZipCentralDirectory(archive,{allowSingleMemberDataDescriptor:true});assert.equal(members.length,1);assert.ok(members[0].uncompressedSize<=8*1024*1024,'Oversized authorization archive member');
+  const zip=await JSZip.loadAsync(archive,{checkCRC32:true}),entries=Object.values(zip.files).filter(e=>!e.dir);
   assert.equal(entries.length,1);assert.equal(entries[0].name,'authorization.json');assert.notEqual(Number(entries[0].unixPermissions||0)&0o170000,0o120000);
   const bytes=await entries[0].async('uint8array');assert.ok(bytes.length<=8*1024*1024,'Oversized authorization payload');
   const authorization=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));

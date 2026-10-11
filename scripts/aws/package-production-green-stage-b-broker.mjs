@@ -98,13 +98,14 @@ function assertCanonicalEntryPath(entryPath) {
   if (!entryPath || entryPath.startsWith("/") || entryPath.includes("\\") || entryPath.split("/").some((part) => part === ".." || part === ".") || entryPath.includes("\0")) throw new Error("Stage B broker package manifest contains an unsafe entry path.");
 }
 
-export function readZipCentralDirectory(bytes, { allowDataDescriptor = false } = {}) {
+export function readZipCentralDirectory(bytes, { allowSingleMemberDataDescriptor = false } = {}) {
   const endOffset = bytes.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
   if (endOffset < 0 || endOffset + 22 > bytes.length) throw new Error("Stage B broker package ZIP end record is malformed.");
   const entryCount = bytes.readUInt16LE(endOffset + 10);
   const directorySize = bytes.readUInt32LE(endOffset + 12);
   const directoryOffset = bytes.readUInt32LE(endOffset + 16);
   if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff || directoryOffset + directorySize > bytes.length) throw new Error("Stage B broker package ZIP64 or out-of-range metadata is unsupported.");
+  if (allowSingleMemberDataDescriptor && entryCount !== 1) throw new Error("Authorization ZIP must contain one member.");
   const entries = [];
   let cursor = directoryOffset;
   while (cursor < directoryOffset + directorySize) {
@@ -123,7 +124,7 @@ export function readZipCentralDirectory(bytes, { allowDataDescriptor = false } =
     const nameStart = cursor + 46;
     const nameBytes = bytes.subarray(nameStart, nameStart + nameLength);
     const name = nameBytes.toString("utf8");
-    if (!nameBytes.equals(Buffer.from(name)) || (flags !== 0 && !(allowDataDescriptor && flags === 8)) || extraLength !== 0 || commentLength !== 0) throw new Error("Stage B broker package ZIP metadata is not canonical.");
+    if (!nameBytes.equals(Buffer.from(name)) || (flags !== 0 && !(allowSingleMemberDataDescriptor && flags === 8)) || extraLength !== 0 || commentLength !== 0) throw new Error("Stage B broker package ZIP metadata is not canonical.");
     if (localOffset + 30 > bytes.length || bytes.readUInt32LE(localOffset) !== 0x04034b50) throw new Error("Stage B broker package ZIP local header is malformed.");
     const localNameLength = bytes.readUInt16LE(localOffset + 26);
     const localExtraLength = bytes.readUInt16LE(localOffset + 28);
@@ -134,6 +135,13 @@ export function readZipCentralDirectory(bytes, { allowDataDescriptor = false } =
     if (!localName.equals(nameBytes) || localFlags !== flags || localExtraLength !== 0 || localModificationTime !== modificationTime || localModificationDate !== modificationDate) throw new Error("Stage B broker package ZIP local metadata is not canonical.");
     const dataOffset = localOffset + 30 + localNameLength + localExtraLength;
     if (dataOffset + compressedSize > bytes.length) throw new Error("Stage B broker package ZIP entry is out of range.");
+    if (flags === 8) {
+      const descriptor = dataOffset + compressedSize;
+      if (descriptor + 16 !== directoryOffset || bytes.readUInt32LE(descriptor) !== 0x08074b50
+        || bytes.readUInt32LE(descriptor + 4) !== bytes.readUInt32LE(cursor + 16)
+        || bytes.readUInt32LE(descriptor + 8) !== compressedSize
+        || bytes.readUInt32LE(descriptor + 12) !== uncompressedSize) throw new Error("Authorization ZIP data descriptor is invalid.");
+    }
     entries.push({ name, flags, method, modificationTime, modificationDate, compressedSize, uncompressedSize, externalAttributes, localOffset, dataOffset });
     cursor = nameStart + nameLength + extraLength + commentLength;
   }
