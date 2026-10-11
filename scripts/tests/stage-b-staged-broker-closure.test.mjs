@@ -151,9 +151,34 @@ test('closure continuation authenticates historical CAS tooling and current clos
   assert.doesNotThrow(() => reader.authenticateHistoricalTooling(p, brokerExecutionCheckout(p)));
   const wrongTree = structuredClone(p); wrongTree.closureContinuation.historicalTooling.treeSha256 = '0'.repeat(64);
   assert.throws(() => reader.authenticateHistoricalTooling(wrongTree, brokerExecutionCheckout(wrongTree)));
+  const wrongClosureTree = structuredClone(p); wrongClosureTree.closureContinuation.currentTooling.treeSha256 = '0'.repeat(64);
+  assert.throws(() => reader.authenticateHistoricalTooling(wrongClosureTree, brokerExecutionCheckout(wrongClosureTree)));
   const wrongDescendant = structuredClone(p); wrongDescendant.closureContinuation.currentTooling = {
     sourceSha: release, treeSha256: deriveStageBToolingInputTreeSha256(release) };
   assert.throws(() => reader.authenticateHistoricalTooling(wrongDescendant, brokerExecutionCheckout(wrongDescendant)));
+});
+
+test('terminal reader uses authorized closure tooling rather than historical CAS tooling',async()=>{
+ const C={sourceSha:'c'.repeat(40),treeSha256:'c'.repeat(64)},D={sourceSha:'d'.repeat(40),treeSha256:'d'.repeat(64)},E={sourceSha:'e'.repeat(40),treeSha256:'e'.repeat(64)};
+ const r=await terminal(true,C),original=r.handoff.closure.preparation;
+ const identity={schemaVersion:1,releaseId:'1'.repeat(64),recoveryReference:'2'.repeat(64),releaseSourceSha:sourceSha,
+  historicalTooling:r.handoff.preparation.recoveryTooling,currentTooling:D,cutover:original.cutover};
+ r.handoff.closure.preparation=prepareBrokerStateRefresh({preparation:r.handoff.preparation,
+  authorization:r.handoff.authorization,casResult:r.handoff.casResult,closureContinuation:{...identity,operationId:brokerDigest(identity)}});
+ r.handoff.closure.authorization=signFixture(r.handoff.closure.preparation);
+ const hash=brokerDigest(r.handoff.closure.authorization);r.handoff.record.stateRefreshAuthorizationSha256=hash;
+ r.entries.push([hash,r.handoff.record.status,r.handoff.record]);
+ r.deps.readCheckout=async()=>E;
+ const check=p=>assert.deepEqual(brokerExecutionCheckout(p),D,'Effective preparation must be D-bound');
+ r.deps.authenticateHistoricalTooling=(p,tooling)=>{check(p);assert.deepEqual(tooling,D);};
+ r.deps.authenticateContinuationTooling=(p,tooling)=>{check(p);assert.deepEqual(tooling,E);};
+ r.deps.authenticateHistoricalExecutionSource=(p,tooling,execution)=>{check(p);assert.deepEqual(tooling,E);
+  assert.ok([D.sourceSha,E.sourceSha].includes(execution),'Execution predates closure tooling');return {sourceSha:execution};};
+ const proof=await authenticateStagedBrokerClosure({sourceSha,deps:r.deps});
+ assert.deepEqual(proof.historicalTooling,D);await proof.revalidate();
+ assert.equal(proof.authenticateExecutionSource(D.sourceSha).sourceSha,D.sourceSha);
+ assert.throws(()=>proof.authenticateExecutionSource(C.sourceSha),/predates/);
+ assert.equal(r.handoff.preparation.recoveryTooling.sourceSha,C.sourceSha);
 });
 
 test('approval recovery authenticates the native terminal handoff without rewriting publication identity', async () => {

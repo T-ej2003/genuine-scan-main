@@ -46,7 +46,7 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
  assert.equal(brokerDigest(publication.result),request.publicationResultSha256);
  let cutover;
  for(const phase of ['cutover','closure']){
-  const continuationPreparation=phase==='closure'&&continuation?await read('closure:prepared:1'):null;
+  const continuationPreparation=phase==='closure'&&continuation?await read(`closure:prepared:${continuation.round??1}`):null;
   const saved=continuationPreparation||(phase==='closure'&&continuation?null:await read(`${phase}:prepared`));
   const prior=await read(`${phase}:result`);
   const inputs=await runtime.materializeInputs({request,release,phase,prepared:prior?await get(prior.prepared):saved?await get(saved.result):null,publication,cutover});
@@ -71,25 +71,28 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
        releaseSourceSha:release.sourceSha,historicalTooling:cutover.prepared.preparation.recoveryTooling,
        currentTooling:continuation.currentTooling,cutover:base.cutover};
       const closureContinuation={...identity,operationId:brokerDigest(identity)};
-      const old=await read('closure:prepared');
+      const previousRound=continuation.previousRound??0;
+      const old=await read(previousRound?`closure:prepared:${previousRound}`:'closure:prepared');
       if(old){
        const oldReference=old.result;
-       assert.equal(await read('closure:attempt:0'),null,'Historical closure intent must be recovered, not replaced');
-       assert.equal(await read('closure:authorized:0'),null,'Historical closure authorization cannot be replaced');
-       await write('closure:retired:0',{prepared:oldReference,reason:'TOOLING_ADVANCED_AFTER_CAS',
+       assert.equal(await read(`closure:attempt:${previousRound}`),null,'Historical closure intent must be recovered, not replaced');
+       assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
+       const retired=await read(`closure:retired:${previousRound}`);
+       if(retired)assert.equal(retired.prepared,oldReference);
+       else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:'TOOLING_ADVANCED_AFTER_CAS',
         ...(continuation.supersededAuthorization?{runId:continuation.supersededAuthorization.runId}: {})});
       }
       return {...cutover.prepared,preparation:prepareBrokerStateRefresh({preparation:cutover.prepared.preparation,
        authorization:cutover.authorization,casResult:cutover.result,closureContinuation})};
      })();
     prepared=await runtime.capturePreparation({release,inputs},phase,value);
-    await write(phase==='closure'&&continuation?'closure:prepared:1':`${phase}:prepared`,{result:await put(prepared)});
+    await write(phase==='closure'&&continuation?`closure:prepared:${continuation.round??1}`:`${phase}:prepared`,{result:await put(prepared)});
    }
    assert.equal(prepared.preparation.sourceSha,release.sourceSha);
    assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,
     continuation&&phase==='closure'?continuation.currentTooling.sourceSha:request.recoveryToolingSha);
    await runtime.hydratePreparation({release,inputs},phase,prepared);
-   const firstRound=phase==='closure'&&continuation?1:0;
+   const firstRound=phase==='closure'&&continuation?(continuation.round??1):0;
    for(let round=firstRound;;round++){
     assert.ok(round<20,'Repeated expired successor approvals require a new governed operation');
     if(phase==='cutover'&&round>0){
@@ -108,6 +111,12 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
      assert.equal(prepared.preparation.sourceSha,release.sourceSha);
      assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,request.recoveryToolingSha);
      await runtime.hydratePreparation({release,inputs},phase,prepared);
+    }
+    if(phase==='closure'&&round>firstRound){
+     const renewed=await read(`closure:prepared:${round}`);
+     if(renewed)prepared=await get(renewed.result);
+     else await write(`closure:prepared:${round}`,{result:await put(prepared)});
+     assert.equal(brokerExecutionCheckout(prepared.preparation).sourceSha,continuation?.currentTooling.sourceSha||request.recoveryToolingSha);
     }
     const preparedReference=brokerDigest(prepared);
     const attempt=await read(`${phase}:attempt:${round}`);

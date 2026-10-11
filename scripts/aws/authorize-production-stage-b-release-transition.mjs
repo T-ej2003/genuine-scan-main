@@ -32,9 +32,8 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  assert.equal(originalId,releaseId);assert.equal(identity.ticketId,ticketId);assert.equal(identity.sourceSha,sourceSha);assert.equal(brokerDigest(identity),releaseId);
  const successor=Boolean(start.recovery);
  if(successor){assert.equal(start.recovery,release.recoveryReference);assert.match(release.toolingSha||'',/^[a-f0-9]{40}$/);}
- const continuationRound=successor&&phase==='closure'&&authorizationRound>=1;
- const preparationName=successor&&phase==='cutover'&&authorizationRound>0?`${phase}:prepared:${authorizationRound}`
-  :continuationRound?'closure:prepared:1':`${phase}:prepared`;
+ const preparationName=successor&&['cutover','closure'].includes(phase)&&authorizationRound>0
+  ?`${phase}:prepared:${authorizationRound}`:`${phase}:prepared`;
  const record=store.readStep(releaseId,preparationName);assert.ok(record,'Missing exact transition preparation');
  assert.equal(record.result,preparationReference);assert.equal(record.sourceSha,sourceSha);assert.equal(record.name,preparationName);
  const assertSuccessorRoundActive=()=>{if(successor){
@@ -46,30 +45,36 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  if(pending){assert.equal(pending.prepared,preparationReference);assert.equal(pending.runId,env.GITHUB_RUN_ID);}
  const prepared=store.getArtifact(preparationReference);assert.equal(prepared.preparation.sourceSha,sourceSha);
  assert.equal(env.GITHUB_SHA,brokerExecutionCheckout(prepared.preparation).sourceSha,'Authorization workflow differs from authenticated preparation tooling');
- if(continuationRound){
+ if(successor&&phase==='closure'&&prepared.preparation.closureContinuation){
   const continuation=prepared.preparation.closureContinuation;assert.ok(continuation,'Closure continuation identity is required');
   assert.equal(continuation.releaseId,releaseId);assert.equal(continuation.recoveryReference,start.recovery);
   assert.equal(continuation.releaseSourceSha,sourceSha);assert.equal(continuation.currentTooling.sourceSha,env.GITHUB_SHA);
-  const old=store.readStep(releaseId,'closure:prepared');
-  if(old){
-   const oldPrepared=store.getArtifact(old.result);
-   assert.equal(old.result,store.readStep(releaseId,'closure:retired:0')?.prepared);
-   assert.equal(store.readStep(releaseId,'closure:retired:0')?.reason,'TOOLING_ADVANCED_AFTER_CAS');
-   assert.equal(brokerDigest(oldPrepared.preparation),brokerDigest(prepareBrokerStateRefresh({preparation:store.getArtifact(store.readStep(releaseId,'cutover:result').prepared).preparation,
-    authorization:store.getArtifact(store.readStep(releaseId,'cutover:result').authorization),
-    casResult:store.getArtifact(store.readStep(releaseId,'cutover:result').result)})));
-   assert.equal(store.readStep(releaseId,'closure:attempt:0'),null);assert.equal(store.readStep(releaseId,'closure:authorized:0'),null);
-   const pendingOld=store.readStep(releaseId,'closure:pending:0'),dispatchOld=store.readStep(releaseId,'closure:dispatch:0');
+  for(let round=0;round<authorizationRound;round++){
+   const old=store.readStep(releaseId,round?`closure:prepared:${round}`:'closure:prepared');
+   if(!old){assert.equal(round,0,'Earlier continuation preparation is missing');continue;}
+   assert.equal(old.releaseId,releaseId);assert.equal(old.sourceSha,sourceSha);
+   assert.equal(old.name,round?`closure:prepared:${round}`:'closure:prepared');
+   const oldPrepared=store.getArtifact(old.result),retired=store.readStep(releaseId,`closure:retired:${round}`);
+   assert.equal(brokerDigest(oldPrepared),old.result);
+   const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);
+   assert.equal((retired||timedOut)?.prepared,old.result,'Earlier closure round remains active');
+   assert.equal(store.readStep(releaseId,`closure:attempt:${round}`),null);
+   assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null);
+   const cutover=store.readStep(releaseId,'cutover:result');
+   assert.equal(brokerDigest(oldPrepared.preparation),brokerDigest(prepareBrokerStateRefresh({preparation:store.getArtifact(cutover.prepared).preparation,
+    authorization:store.getArtifact(cutover.authorization),casResult:store.getArtifact(cutover.result),
+    ...(oldPrepared.preparation.closureContinuation?{closureContinuation:oldPrepared.preparation.closureContinuation}:{})})));
+   const pendingOld=store.readStep(releaseId,`closure:pending:${round}`),dispatchOld=store.readStep(releaseId,`closure:dispatch:${round}`);
    if(dispatchOld){
-    assert.ok(pendingOld);assert.equal(pendingOld.prepared,old.result);
-    assert.deepEqual(dispatchOld.dispatch.identity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:0},'closure',old.result,oldPrepared.preparation));
-    const oldIdentity=dispatchOld.dispatch.identity;
+    assert.ok(pendingOld||timedOut);assert.equal((pendingOld||timedOut).prepared,old.result);
+    const oldIdentity=dispatchOld.dispatch.identity,toolingSha=brokerExecutionCheckout(oldPrepared.preparation).sourceSha;
+    assert.deepEqual(oldIdentity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},'closure',old.result,oldPrepared.preparation));
     assert.equal(oldIdentity.repository,'T-ej2003/genuine-scan-main');assert.equal(oldIdentity.workflow,'authorize-production-stage-b-release-transition.yml');
     assert.equal(oldIdentity.workflowPath,'.github/workflows/authorize-production-stage-b-release-transition.yml');
-    assert.equal(oldIdentity.ref,'main');assert.equal(oldIdentity.targetSha,continuation.historicalTooling.sourceSha);
-    const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:pendingOld.runId,toolingSha:continuation.historicalTooling.sourceSha,
+    assert.equal(oldIdentity.ref,'main');assert.equal(oldIdentity.targetSha,toolingSha);
+    const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:(pendingOld||timedOut).runId,toolingSha,
      workflowId:oldIdentity.workflowId,beforeRunIds:dispatchOld.dispatch.beforeRunIds});
-    assert.equal(store.readStep(releaseId,'closure:retired:0')?.runId,failed.runId);
+    if(retired?.runId)assert.equal(retired.runId,failed.runId);
    }else assert.equal(pendingOld,null);
   }
  }

@@ -65,13 +65,14 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   assert.equal(record.closurePlanJsonSha256, brokerDigest(record.closurePlan));
   assertBrokerClosurePlan(record.closurePlan, p);
   equal(record.target, p.target); equal(record.alias, cas.alias);
-  const historicalTooling = Object.freeze(brokerExecutionCheckout(p));
-  await deps.authenticateHistoricalTooling(p, historicalTooling);
+  const effectivePreparation = separate ? closure.preparation : p;
+  const historicalTooling = Object.freeze(brokerExecutionCheckout(effectivePreparation));
+  await deps.authenticateHistoricalTooling(effectivePreparation, historicalTooling);
   const tooling = Object.freeze({ ...await deps.readCheckout() });
   const revalidate = async () => {
     equal(await deps.readCheckout(), tooling, 'Continuation checkout changed during authentication');
-    await deps.authenticateHistoricalTooling(p, historicalTooling);
-    await deps.authenticateContinuationTooling(p, tooling);
+    await deps.authenticateHistoricalTooling(effectivePreparation, historicalTooling);
+    await deps.authenticateContinuationTooling(effectivePreparation, tooling);
     equal(await deps.readStateIdentity(), record.stateAfter, 'Reconciled Terraform state changed');
     equal(await deps.getAlias(), cas.alias, 'Terminal alias changed');
     equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -81,7 +82,7 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
   };
   await revalidate();
   const proof = Object.freeze({ sourceSha, historicalTooling, tooling, evidenceSha256: brokerDigest(record), revalidate,
-    authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(p, tooling, executionSourceSha) });
+    authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(effectivePreparation, tooling, executionSourceSha) });
   verified.add(proof); return proof;
 }
 export function assertStagedBrokerProof(proof, sourceSha) {

@@ -10,7 +10,7 @@ import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-
 import {ROOT_ATTESTATION_KEY_ALIAS_ARN,ROOT_ATTESTATION_SIGNING_ALGORITHM} from '../aws/production-root-attestation-key.mjs';
 import {rig,ready,authorization as authorize} from './fixtures/staged-broker-runtime.mjs';
 
-const A='29406b0ec537ac60618642bba20133dd0cf45529',C='7b40ee371b7751e19a413a4789c516c779af09d9',D='dbc862c8aea597fb0d7c34bc1b1d04b26c83801d';
+const A='29406b0ec537ac60618642bba20133dd0cf45529',C='7b40ee371b7751e19a413a4789c516c779af09d9',E='cdcc33eeee92eadaf0b07333d241015e220bf37b',D='dbc862c8aea597fb0d7c34bc1b1d04b26c83801d';
 const binary=bytes=>({kind:'PRODUCTION_RELEASE_BINARY',sha256:brokerDigest(bytes),base64:bytes.toString('base64')});
 
 test('hosted successor materializer consumes immutable import reference and original-release contracts under descendant tooling',async()=>{
@@ -60,7 +60,7 @@ test('hosted successor materializer consumes immutable import reference and orig
     path:'.github/workflows/authorize-production-stage-b-release-transition.yml',event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion:'failure'});
    if(args[1].endsWith('/artifacts'))return JSON.stringify([{artifacts:[]}]);
    throw new Error(`Unexpected GitHub call ${args.join(' ')}`);},
-  createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.ok([C,D].includes(c));},verifyImport:()=>true,
+  createStore:()=>store,authenticateTooling:(a,c)=>{assert.equal(a,A);assert.ok([C,D,E].includes(c));},verifyImport:()=>true,
   readAuthority:()=>({preparation,authorization}),readReceipt:({status})=>status==='CUTOVER_COMMITTED_STATE_PENDING'?casReceipt:result,
   verifyAuthorization:async()=>true,readVersion:()=>rigged.deps.getVersion('13'),readReviewedAlias:()=>liveAlias,
   authenticateImages:({request:seen,evidence,imageReleaseSha,now})=>{
@@ -147,10 +147,33 @@ test('hosted successor materializer consumes immutable import reference and orig
     beforeRunIds:['699']}});
   env.GITHUB_SHA=D;
   const continuation=await runtime.authenticateRequest(request);
-  assert.deepEqual(continuation,{currentTooling:{sourceSha:D,treeSha256:deriveStageBToolingInputTreeSha256(D)},
+  assert.deepEqual(continuation,{round:1,previousRound:0,currentTooling:{sourceSha:D,treeSha256:deriveStageBToolingInputTreeSha256(D)},
    supersededAuthorization:{runId:'700',toolingSha:C,conclusion:'failure',preparationReference:oldClosureRef,authorizationRound:0}});
   assert.equal(steps.get(`${continuationReleaseId}/cutover:result`).result,casResultRef,'Continuation must adopt the completed CAS receipt');
   assert.equal(liveAlias.FunctionVersion,'13','Continuation must not move the reviewed alias');
+  const binding={schemaVersion:1,releaseId:continuationReleaseId,recoveryReference,releaseSourceSha:A,
+   historicalTooling:cutoverPreparation.recoveryTooling,currentTooling:continuation.currentTooling,
+   cutover:oldClosure.preparation.cutover};
+  const continued={...cutoverPrepared,preparation:prepareBrokerStateRefresh({preparation:cutoverPreparation,
+   authorization:cutoverAuthorization,casResult,closureContinuation:{...binding,operationId:brokerDigest(binding)}})};
+  const continuedRef=put(continued),savedRound={releaseId:continuationReleaseId,sourceSha:A,name:'closure:prepared:1',result:continuedRef};
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,savedRound);
+  assert.deepEqual(await runtime.authenticateRequest(request),{currentTooling:continuation.currentTooling,round:1});
+  env.GITHUB_SHA=E;
+  const advanced=await runtime.authenticateRequest(request);
+  assert.equal(advanced.round,2);assert.equal(advanced.previousRound,1);assert.equal(advanced.currentTooling.sourceSha,E);
+  assert.deepEqual(steps.get(`${continuationReleaseId}/closure:prepared:1`),savedRound,'Historical round remains immutable');
+  const forged=structuredClone(continued);forged.preparation.closureContinuation.currentTooling.treeSha256='0'.repeat(64);
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,{...savedRound,result:put(forged)});
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+  steps.set(`${continuationReleaseId}/closure:prepared:1`,savedRound);
+  steps.set(`${continuationReleaseId}/closure:result`,{prepared:continuedRef});
+  assert.deepEqual(await runtime.authenticateRequest(request),{currentTooling:advanced.currentTooling,completed:true});
+  env.GITHUB_SHA=C;
+  // Earlier tooling must not authenticate closure executed by D.
+  env.GITHUB_SHA='a61282bfebbf45002c164669838fd3dfb7b86220';
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+
 }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,releaseId),{recursive:true,force:true});
  if(continuationReleaseId)fs.rmSync(path.join(HOSTED_RELEASE_ROOT,continuationReleaseId),{recursive:true,force:true});}
 });
