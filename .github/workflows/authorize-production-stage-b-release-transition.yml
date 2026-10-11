@@ -35,6 +35,7 @@ jobs:
       RELEASE_PHASE: ${{ inputs.phase }}
       RELEASE_PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
       RELEASE_AUTHORIZATION_ROUND: ${{ inputs.authorization_round }}
+      TF_WORKSPACE: default
     steps:
       - uses: actions/checkout@v6
         with: {ref: '${{ inputs.tooling_sha || inputs.source_sha }}', fetch-depth: 0, persist-credentials: false}
