@@ -62,12 +62,13 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
    assert.equal((retired||timedOut)?.prepared,old.result,'Earlier closure round remains active');
    const oldAttempt=store.readStep(releaseId,`closure:attempt:${round}`);
    if(oldAttempt){
-    assert.equal(retired?.reason,'PRE_NATIVE_ABORTED');assert.ok(retired.preNativeAbort);
+    assert.ok(['PRE_NATIVE_ABORTED','AUTHORIZATION_EXPIRED'].includes(retired?.reason),'Historical attempted round requires authenticated retirement');
+    if(retired.reason==='PRE_NATIVE_ABORTED')assert.ok(retired.preNativeAbort);
     const cutover=store.readStep(releaseId,'cutover:result');
     const proof=await authenticateAbort({store,releaseId,release,sourceSha,round,prepared:oldPrepared,
-     currentTooling:retired.preNativeAbort.currentTooling,casResult:store.getArtifact(cutover.result),run,directory,
+     currentTooling:retired.reason==='PRE_NATIVE_ABORTED'?retired.preNativeAbort.currentTooling:continuation.currentTooling,casResult:store.getArtifact(cutover.result),run,directory,
      verify:createBrokerKmsAuthorizationBoundary({run,githubRun:ghRun}).verify});
-    assert.deepEqual(proof,retired.preNativeAbort,'Historical pre-native abort proof differs');
+    if(retired.reason==='PRE_NATIVE_ABORTED')assert.deepEqual(proof,retired.preNativeAbort,'Historical pre-native abort proof differs');
    }else assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null);
    const cutover=store.readStep(releaseId,'cutover:result');
    assert.equal(brokerDigest(oldPrepared.preparation),brokerDigest(prepareBrokerStateRefresh({preparation:store.getArtifact(cutover.prepared).preparation,

@@ -13,6 +13,8 @@ The explicit `PRE_NATIVE_ABORTED` classification requires all of:
 
 The coordinator appends a retirement record containing the abort proof, preserves the old attempt and authorization, and creates a new immutable continuation preparation/round. The public protected-authorization producer repeats the abort authentication and live-state readback. The new authorization binds the exact new preparation and round. No timestamp, old receipt or historical identity is rewritten.
 
+Historical `AUTHORIZATION_EXPIRED` retirements are candidates only: the protected authorizer independently repeats the complete pre-native authentication before issuing fresh authority. Their original retirement records remain unchanged; an expired authorization never authorizes the new operation. `PRE_NATIVE_ABORTED` retirements additionally require the recomputed proof to match their saved proof exactly.
+
 Native intent/result/uncertain-execution evidence blocks this path and requires the existing native recovery process. Changed live state, a different alias revision, active old authorization or an unavailable historical artifact also blocks it. Receipt absence alone never authorizes retry.
 
 ## Governed execution after merge

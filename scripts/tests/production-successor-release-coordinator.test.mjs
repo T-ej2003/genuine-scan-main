@@ -481,7 +481,8 @@ test('failed authorization attempt with an artifact cannot be superseded',()=>{
  assert.equal(calls.length,2);
 });
 
-for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'renews an authenticated pre-native abort':'consumes an authorized omitted-resource refresh'} and adopts its durable receipt without CAS replay`, async t => {
+for(const retirement of [null,'PRE_NATIVE_ABORTED','AUTHORIZATION_EXPIRED'])test(`hosted closure ${retirement||'ordinary refresh'} authenticates continuation and adopts its durable receipt without CAS replay`, async t => {
+ const preNativeAbort=retirement!==null;
  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-hosted-closure-'));
  fs.chmodSync(directory, 0o700);
  t.after(() => fs.rmSync(directory, {recursive:true,force:true}));
@@ -509,6 +510,7 @@ for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'
    const output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'closure','authorization.json');
    ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
    const {authenticatePreNativeClosureAbort}=await import('../aws/stage-b-pre-native-closure.mjs');
+   let historicalFailure=null;
    const authenticate=()=>authorizeReleaseTransition({sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,phase,
     preparationReference,authorizationRound:1,output},{env:{GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',
      GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,
@@ -516,13 +518,26 @@ for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'
      RELEASE_PHASE:phase,RELEASE_PREPARATION_REFERENCE:preparationReference,RELEASE_AUTHORIZATION_ROUND:'1'},
     run:()=>{throw new Error('No production API is permitted in authorization fixture');},createStore:()=>f.store,
     hydrateMaterial:async()=>{},authenticateAbort:input=>authenticatePreNativeClosureAbort({...input,verify:async()=>true,
-     now:clock,readReceipt:()=>{throw Object.assign(new Error('Absent'),{code:'RECEIPT_ABSENT'});},
-     readState:()=>input.prepared.preparation.state,readAlias:()=>input.casResult.alias}),
+     now:clock,readReceipt:({status})=>{
+      if(status===historicalFailure)return {};
+      throw Object.assign(new Error('Absent'),{code:'RECEIPT_ABSENT'});},
+     readState:()=>historicalFailure==='STATE_CHANGED'?{...input.prepared.preparation.state,serial:999}:input.prepared.preparation.state,
+     readAlias:()=>input.casResult.alias}),
     runRequest:async input=>{assert.equal(input.operation,'authorize-closure');return freshAuthorization;}});
-   const retired=f.steps.get(`${f.releaseId}/closure:retired:0`),originalProof=structuredClone(retired.preNativeAbort);
-   retired.preNativeAbort.attemptSha256='f'.repeat(64);
-   await assert.rejects(authenticate,/abort proof differs/);
-   retired.preNativeAbort=originalProof;
+   const retired=f.steps.get(`${f.releaseId}/closure:retired:0`);
+   if(retirement==='PRE_NATIVE_ABORTED'){
+    const originalProof=structuredClone(retired.preNativeAbort);retired.preNativeAbort.attemptSha256='f'.repeat(64);
+    await assert.rejects(authenticate,/abort proof differs/);retired.preNativeAbort=originalProof;
+   }else{
+    const authorized=f.steps.get(`${f.releaseId}/closure:authorized:0`),originalReference=authorized.prepared;
+    authorized.prepared='f'.repeat(64);await assert.rejects(authenticate);authorized.prepared=originalReference;
+    const authorizationKey=`${f.releaseId}/closure:authorized:0`;
+    f.steps.delete(authorizationKey);await assert.rejects(authenticate,/authorization are required/);f.steps.set(authorizationKey,authorized);
+    for(const failure of ['STATE_REFRESH_INTENT','STATE_REFRESH_UNKNOWN','RECONCILED_PENDING_RELEASE_CAS','STAGED_BROKER_TERMINAL_HANDOFF','STATE_CHANGED']){
+     historicalFailure=failure;await assert.rejects(authenticate,/native recovery|state changed/);
+    }
+    historicalFailure=null;
+   }
    const result=await authenticate();
    assert.equal(result.authorizationSha256,brokerDigest(freshAuthorization));
   }
@@ -552,7 +567,9 @@ for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'
  waiting=false;
  if(preNativeAbort){
   await assert.rejects(execute,/Historical pre-native/);assert.equal(refreshWrites,0);assert.equal(records.length,0);
-  const historical=structuredClone([...f.steps]),old=f.steps.get(`${f.releaseId}/closure:prepared`);
+  const old=f.steps.get(`${f.releaseId}/closure:prepared`);
+  if(retirement==='AUTHORIZATION_EXPIRED')await f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'closure:retired:0',prepared:old.result,reason:retirement});
+  const historical=structuredClone([...f.steps]);
   clock=new Date(clock.getTime()+60*60_000);
   const {authenticatePreNativeClosureAbort}=await import('../aws/stage-b-pre-native-closure.mjs');
   const proof=await authenticatePreNativeClosureAbort({store:f.store,releaseId:f.releaseId,sourceSha:A,round:0,
@@ -563,7 +580,8 @@ for(const preNativeAbort of [false,true])test(`hosted closure ${preNativeAbort?'
    readAlias:()=>f.store.getArtifact(f.steps.get(`${f.releaseId}/cutover:result`).result).alias});
   f.runtime.authenticateRequest=async()=>({currentTooling:proof.currentTooling,round:1,previousRound:0,preNativeAbort:proof});
   assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
-  assert.equal(f.steps.get(`${f.releaseId}/closure:retired:0`).reason,'PRE_NATIVE_ABORTED');
+  assert.equal(f.steps.get(`${f.releaseId}/closure:retired:0`).reason,retirement);
+  if(retirement==='AUTHORIZATION_EXPIRED')assert.equal(f.steps.get(`${f.releaseId}/closure:retired:0`).preNativeAbort,undefined);
   for(const [key,value]of historical)assert.deepEqual(f.steps.get(key),value,'Historical record changed');
   assert.notEqual(f.steps.get(`${f.releaseId}/closure:authorized:1`).authorization,
    f.steps.get(`${f.releaseId}/closure:authorized:0`).authorization,'Fresh round must require fresh authority');
