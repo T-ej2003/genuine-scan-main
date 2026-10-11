@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { execFileSync } from "node:child_process";
+import {publishPrivateEvidence} from "../aws/stage-b-private-evidence.mjs";
+import {brokerDigest} from "../aws/stage-b-staged-broker-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { assertHistoricalFinalApplyWriteV16Successor, HISTORICAL_FINAL_APPLY_WRITE_V16, readHistoricalFinalApplyWriteV16Artifacts, buildNormalActivationPolicy, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 import { stageBBoundImagesFromBindingReport } from "../aws/generate-production-green-stage-b-tfvars.mjs";
@@ -84,7 +86,7 @@ function createFixture({ predecessorSerial = HISTORICAL_FINAL_APPLY_WRITE_V16.st
 }
 
 function resolve(fixture) {
-  return resolveStageBStateReconciliationEvidence({ currentProtectedMainSha: sourceSha, preparationRunId: fixture.runIds.preparation, authorizationRunId: fixture.runIds.authorization, executionRunId: fixture.runIds.execution, expectedResultSha256: sha(fixture.files["result.json"]), expectedResultArtifactId: fixture.artifactIds.result, expectedResultArtifactDigest: fixture.artifactDigest.result, githubRun: fixture.githubRun, unzipRun: fixture.unzipRun, gitRun: () => "" });
+  return resolveStageBStateReconciliationEvidence({ currentProtectedMainSha: sourceSha, preparationRunId: fixture.runIds.preparation, authorizationRunId: fixture.runIds.authorization, executionRunId: fixture.runIds.execution, expectedResultSha256: sha(fixture.files["result.json"]), expectedResultArtifactId: fixture.artifactIds.result, expectedResultArtifactDigest: fixture.artifactDigest.result, githubRun: fixture.githubRun, unzipRun: fixture.unzipRun, privateEvidenceRun: fixture.privateEvidenceRun, gitRun: () => "" });
 }
 
 test("authenticated OUTPUT_ONLY run artifacts compose the historical serial 115 predecessor to the exact live successor", (t) => {
@@ -162,4 +164,32 @@ test("canonical result validator rejects wrong predecessor, successor, source, a
   const resourceChangingPreparation = structuredClone(f.preparation); resourceChangingPreparation.planSemantics.resourceStateChangeCount = 1; const { preparationSha256, ...preparationBody } = resourceChangingPreparation; resourceChangingPreparation.preparationSha256 = stageBStateReconciliationSha256(preparationBody);
   const resourceChangingAuthorization = createStageBStateReconciliationAuthorization({ preparation: resourceChangingPreparation, approval: f.authorization.protectedEnvironmentApprovalEvidence, now: new Date(timestamp.authCreated) });
   assert.throws(() => check(f.result, resourceChangingPreparation, resourceChangingAuthorization), /resourceStateChangeCount|result/);
+});
+
+
+test("private preparation reference authenticates the complete protected authorization and execution handoff", (t) => {
+ const f=createFixture();t.after(()=>fs.rmSync(f.historicalTmp,{recursive:true,force:true}));
+ let evidence;
+ const store={putArtifact:(_sha,value)=>{evidence=value;},getArtifact:()=>evidence};
+ const reference=publishPrivateEvidence({bytes:f.files["preparation-bundle.zip"],kind:"preparation",sourceSha,workflowRunId:f.runIds.preparation,store});
+ const originalUnzip=f.unzipRun;
+ f.unzipRun=(command,args,options={})=>{
+  if(path.basename(args[1])==="stage-b-reconciliation-preparation.zip") {
+   if(args[0]==="-Z1")return "preparation-reference.json\n";
+   assert.equal(args[2],"preparation-reference.json");
+   const bytes=Buffer.from(JSON.stringify(reference));return options.encoding===null?bytes:bytes.toString();
+  }
+  return originalUnzip(command,args,options);
+ };
+ f.privateEvidenceRun=args=>{
+  assert.equal(args[0],"s3api");assert.equal(args[1],"get-object");
+  fs.writeFileSync(args.at(-1),JSON.stringify({kind:"PRODUCTION_RELEASE_COORDINATOR_ARTIFACT",key:{sha256:brokerDigest(evidence)},value:evidence}));
+  return JSON.stringify({ServerSideEncryption:"AES256"});
+ };
+ assert.deepEqual(resolve(f).successorState,f.successorState);
+ const saved=structuredClone(evidence);evidence.payloadBase64=Buffer.from("substituted plan").toString("base64");
+ assert.throws(()=>resolve(f));evidence=saved;
+ reference.workflowRunId="999";assert.throws(()=>resolve(f));reference.workflowRunId=f.runIds.preparation;
+ reference.sourceSha="f".repeat(40);assert.throws(()=>resolve(f));reference.sourceSha=sourceSha;
+ f.privateEvidenceRun=()=>{throw new Error("AccessDenied");};assert.throws(()=>resolve(f));
 });

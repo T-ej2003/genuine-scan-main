@@ -20,7 +20,7 @@ test("Stage B state reconciliation workflows are protected, artifact-bound, and 
     assert.doesNotMatch(source, /continue-on-error|set \+e|\|\| true/);
   }
   assert.deepEqual(prepare.permissions, { actions: "read", contents: "read", "id-token": "write" });
-  assert.deepEqual(authorize.permissions, { actions: "read", contents: "read" });
+  assert.deepEqual(authorize.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.deepEqual(execute.permissions, { actions: "read", contents: "read", "id-token": "write" });
   assert.equal(prepare.jobs.prepare.environment, "production");
   assert.equal(execute.jobs.execute.environment, "production");
@@ -57,7 +57,7 @@ test("Stage B closure CI runs the authenticated reconciliation evidence regressi
   const workflow = yaml.load(fs.readFileSync(path.join(root, ".github/workflows/quality-gate.yml"), "utf8"));
   const steps = workflow.jobs["stage-b-deployment-closure"].steps;
   const testStep = steps.find(({ name }) => name === "Test authenticated Stage B reconciliation evidence");
-  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs");
+  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs scripts/tests/stage-b-private-evidence.test.mjs");
 });
 
 test("preparation passes the required dispatch mode explicitly under nounset", () => {
@@ -206,4 +206,28 @@ test("the prerequisite producer is source-bound and transports generated inputs 
   assert.match(source, /produce-production-green-stage-b-state-reconciliation-image-authorization\.yml/); assert.match(source, /IMAGE_ARTIFACT/); assert.match(source, /IMAGE_DIGEST/);
   assert.doesNotMatch(source, /(?:tfvars|binding|release_preflight|saved_plan|preparation)_base64|raw filesystem/);
   assert.match(producer, /stage-b\.tfvars/); assert.match(producer, /stage-b-tfvars-binding\.json/);
+});
+
+
+test("state-bearing bundles stay encrypted while hosted artifacts contain only references", () => {
+  const producer = parse("produce-production-green-stage-b-prerequisite-bundle.yml");
+  const prepare = parse("prepare-production-green-stage-b-state-reconciliation.yml");
+  for (const [workflow, suffix] of [[producer, "private-evidence-reference.json"], [prepare, "preparation-reference.json"]]) {
+    const steps = Object.values(workflow.jobs).flatMap(job => job.steps);
+    const upload = steps.find(step => step.uses?.startsWith("actions/upload-artifact@"));
+    assert.ok(upload.with.path.endsWith(`/${suffix}`));
+    assert.doesNotMatch(upload.with.path, /\.zip|\.tfplan|state-backup|\*|\n/);
+    assert.ok(steps.some(step => step.run?.includes("stage-b-private-evidence.mjs --mode publish")));
+  }
+  for (const name of ["prepare", "authorize", "execute"]) {
+    const workflow = parse(`${name}-production-green-stage-b-state-reconciliation.yml`);
+    const job = Object.values(workflow.jobs)[0];
+    assert.equal(job.environment, "production");
+    assert.equal(workflow.permissions["id-token"], "write");
+    const credentials = job.steps.findIndex(step => step.uses?.startsWith("aws-actions/configure-aws-credentials@"));
+    const hydration = job.steps.findIndex(step => step.run?.includes("stage-b-private-evidence.mjs --mode read"));
+    assert.ok(credentials >= 0 && hydration > credentials);
+    assert.equal(job.steps[credentials].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
+    assert.equal(job.steps[hydration].env.GITHUB_TOKEN, "${{ github.token }}");
+  }
 });

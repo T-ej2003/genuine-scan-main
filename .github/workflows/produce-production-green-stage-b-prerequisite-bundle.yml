@@ -74,9 +74,15 @@ jobs:
             --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" \
             --image-authorization "$RUNNER_TEMP/stage-b-prerequisite-bundle/image-authorization.json" \
             --image-authorization-sha256 "$(sha256sum "$RUNNER_TEMP/stage-b-prerequisite-bundle/image-authorization.json" | awk '{print $1}')"
+      - name: Persist prerequisites in the encrypted coordinator store
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/stage-b-private-evidence.mjs --mode publish --kind prerequisite --source-sha "$SOURCE_SHA" --producer-run-id "$GITHUB_RUN_ID" --input "$RUNNER_TEMP/stage-b-prerequisite-bundle/prerequisite-bundle.zip" --output "$RUNNER_TEMP/stage-b-prerequisite-bundle/private-evidence-reference.json"
       - uses: actions/upload-artifact@v4
         with:
           name: production-green-stage-b-state-reconciliation-prerequisites
-          path: ${{ runner.temp }}/stage-b-prerequisite-bundle/prerequisite-bundle.zip
+          path: ${{ runner.temp }}/stage-b-prerequisite-bundle/private-evidence-reference.json
           if-no-files-found: error
           retention-days: 1

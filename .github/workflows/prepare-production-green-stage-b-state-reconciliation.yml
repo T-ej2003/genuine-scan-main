@@ -37,6 +37,10 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with: { terraform_version: 1.15.8, terraform_wrapper: false }
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
       - name: Download and authenticate the canonical prerequisite bundle
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -62,8 +66,10 @@ jobs:
           test "$(jq -r '[.artifacts[] | select((.id|tostring) == $id) | .digest] | .[0]' --arg id "$PRODUCER_ARTIFACT" <<<"$artifacts")" = "$PRODUCER_DIGEST"
           gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$PRODUCER_ARTIFACT/zip" > "$d/producer-artifact.zip"
           test "sha256:$(sha256sum "$d/producer-artifact.zip" | awk '{print $1}')" = "$PRODUCER_DIGEST"
-          test "$(unzip -Z1 "$d/producer-artifact.zip")" = prerequisite-bundle.zip
-          install -m 600 /dev/null "$d/prerequisite-bundle.zip"; unzip -p "$d/producer-artifact.zip" prerequisite-bundle.zip > "$d/prerequisite-bundle.zip"
+          test "$(unzip -Z1 "$d/producer-artifact.zip")" = private-evidence-reference.json
+          unzip -p "$d/producer-artifact.zip" private-evidence-reference.json > "$d/private-evidence-reference.json"
+          chmod 600 "$d/private-evidence-reference.json"
+          node scripts/aws/stage-b-private-evidence.mjs --mode read --kind prerequisite --source-sha "$SOURCE_SHA" --producer-run-id "$PRODUCER_RUN" --input "$d/private-evidence-reference.json" --output "$d/prerequisite-bundle.zip"
           printf '%s' "$PRODUCER_RUN" > "$d/producer-run-id"
           printf '%s' "$PRODUCER_ATTEMPT" > "$d/producer-run-attempt"
           printf '%s' "$PRODUCER_ARTIFACT" > "$d/producer-artifact-id"
@@ -95,10 +101,6 @@ jobs:
           test "$(unzip -Z1 "$d/preflight-artifact.zip")" = release-preflight.json
           install -m 600 /dev/null "$d/release-preflight.json"
           unzip -p "$d/preflight-artifact.zip" release-preflight.json > "$d/release-preflight.json"
-      - uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
       - name: Prepare and bundle only the authenticated refresh-only transition
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -114,9 +116,10 @@ jobs:
           umask 077; d="$RUNNER_TEMP/stage-b-state-reconciliation"; install -d -m 700 "$d/terraform-data"
           node scripts/aws/reconcile-production-green-stage-b-state.mjs --mode prepare --reconciliation-mode "$RECONCILIATION_MODE" --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-preflight "$d/release-preflight.json" --release-preflight-sha256 "$(sha256sum "$d/release-preflight.json" | awk '{print $1}')" --prerequisite-bundle "$d/prerequisite-bundle.zip" --prerequisite-producer-workflow-run-id "$(cat "$d/producer-run-id")" --prerequisite-producer-workflow-run-attempt "$(cat "$d/producer-run-attempt")" --prerequisite-bundle-artifact-id "$(cat "$d/producer-artifact-id")" --prerequisite-bundle-artifact-digest "$(cat "$d/producer-artifact-digest")" --terraform-data-dir "$d/terraform-data" --saved-plan-out "$d/refresh.tfplan" --preparation-out "$d/preparation.json"
           (cd "$d" && zip -q preparation-bundle.zip preparation.json refresh.tfplan release-preflight.json prerequisite-bundle.zip)
+          node scripts/aws/stage-b-private-evidence.mjs --mode publish --kind preparation --source-sha "$SOURCE_SHA" --producer-run-id "$GITHUB_RUN_ID" --input "$d/preparation-bundle.zip" --output "$d/preparation-reference.json"
       - uses: actions/upload-artifact@v4
         with:
           name: production-green-stage-b-state-reconciliation-preparation
-          path: ${{ runner.temp }}/stage-b-state-reconciliation/preparation-bundle.zip
+          path: ${{ runner.temp }}/stage-b-state-reconciliation/preparation-reference.json
           if-no-files-found: error
           retention-days: 90

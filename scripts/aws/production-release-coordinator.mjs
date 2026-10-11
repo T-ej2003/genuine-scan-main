@@ -4,13 +4,11 @@ import { assertProductionComponentDeploymentState } from './production-component
 import { classifyProductionChanges } from './production-deployment-classification.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import {randomUUID,createHash} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
-import {canonicalJson} from './production-green-stage-b-contract.mjs';
-import {STAGE_B_TERRAFORM_BACKEND,stageBApplyAttemptS3Key} from './stage-b-terraform-backend-contract.mjs';
-import {readProductionReceiptObject} from './production-receipt-read.mjs';
-import {reserveStageBSharedApplyAttempt} from '../apply-production-green-stage-b.mjs';
+import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
+export {createReleaseCoordinatorStore};
 import {ensureStageBPrivateDirectory,assertStageBPrivateFile,writeStageBPrivateFileAtomic} from './stage-b-artifact-contract.mjs';
 import {stagedBrokerArtifactSet} from './stage-b-staged-broker-executor.mjs';
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
@@ -121,40 +119,6 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
   const {assertBrokerAuthorization}=await import('./stage-b-staged-broker-contract.mjs');
   await assertBrokerAuthorization(authorization,prepared.preparation,{verify:a=>verifyBrokerProtectedEnvironmentAuthorization(a,{run}),now:new Date(authorization.issuedAt)});
  }
-}
-
-// Reuse the existing conditional, encrypted Stage-B receipt namespace. These
-// records are coordinator references, never authority to bypass native journals.
-export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
- ensureStageBPrivateDirectory({directory,repositoryRoot,create:false});
- assert.equal(typeof run,'function');
- const id=(kind,key)=>brokerDigest({kind:`PRODUCTION_RELEASE_COORDINATOR_${kind}`,key});
- const read=(kind,key)=>{
-  const file=path.join(directory,`coordinator-read-${randomUUID()}.json`);
-  try {
-   if(!readProductionReceiptObject({run,bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key:stageBApplyAttemptS3Key(id(kind,key)),file}))return undefined;
-   const value=JSON.parse(fs.readFileSync(file));
-   assert.deepEqual(Object.keys(value).sort(),['key','kind','value']);
-   assert.equal(value.kind,`PRODUCTION_RELEASE_COORDINATOR_${kind}`);assert.deepEqual(value.key,key);
-   return value.value;
-  }finally{fs.rmSync(file,{force:true});}
- };
- const write=(kind,key,value)=>{
-  const bytes=Buffer.from(canonicalJson({kind:`PRODUCTION_RELEASE_COORDINATOR_${kind}`,key,value}));
-  try {reserveStageBSharedApplyAttempt({artifactSetIdentity:id(kind,key),bytes,privateDirectory:directory,run});}
-  catch(error){
-   // A lost create response or repeated content-addressed write is safe only
-   // after exact readback. Neither condition authorizes an AWS business write.
-   const existing=read(kind,key);if(existing===undefined)throw error;assert.deepEqual(existing,value,'Immutable coordinator record conflict');
-  }
- };
- return {
-  readStart:request=>read('START',request)??null,writeStart:(request,value)=>write('START',request,value),
-  readStep:(releaseId,name)=>read('STEP',{releaseId,name})??null,
-  writeStep:value=>write('STEP',{releaseId:value.releaseId,name:value.name},value),
-  putArtifact:(sha256,value)=>{assert.equal(brokerDigest(value),sha256);write('ARTIFACT',{sha256},value);},
-  getArtifact:sha256=>{assert.match(sha256||'',/^[a-f0-9]{64}$/);const value=read('ARTIFACT',{sha256});assert.ok(value!==undefined,'Missing release artifact');assert.equal(brokerDigest(value),sha256);return value;},
- };
 }
 
 function successorStageAFiles(preparation,files) {
