@@ -742,3 +742,29 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
   await assert.rejects(()=>run({operation:'prepare-policy',prerequisiteChain:{registration,policy:substituted}}));assert.equal(writes,1);
  } finally {process.env.PATH=oldPath;fs.rmSync(directory,{recursive:true,force:true});}
 });
+
+for (const shape of ['omitted', 'empty']) test(`broker refresh accepts ${shape} resource_changes without changing the plan`, async () => {
+ const r = await ready(), plan = (await r.deps.captureRefreshOnlyPlan()).plan;
+ if (shape === 'omitted') delete plan.resource_changes;
+ else plan.resource_changes = [];
+ const original = clone(plan);
+ assertBrokerRefreshPlan(plan, r.p, { ...alias, FunctionVersion: '13', RevisionId: 'after' });
+ assert.deepEqual(plan, original);
+});
+for (const value of [null, {}, 'no-op', 0, false]) test(`broker refresh rejects malformed resource_changes ${JSON.stringify(value)}`, async () => {
+ const r = await ready(), plan = (await r.deps.captureRefreshOnlyPlan()).plan;
+ plan.resource_changes = value;
+ assert.throws(() => assertBrokerRefreshPlan(plan, r.p, { ...alias, FunctionVersion: '13', RevisionId: 'after' }));
+});
+for (const actions of [['create'], ['delete'], ['read'], ['unexpected']]) test(`broker refresh rejects resource actions ${actions}`, async () => {
+ const r = await ready(), plan = (await r.deps.captureRefreshOnlyPlan()).plan;
+ plan.resource_changes = [change(BROKER_ALIAS, tfAlias, tfAlias, actions)];
+ assert.throws(() => assertBrokerRefreshPlan(plan, r.p, { ...alias, FunctionVersion: '13', RevisionId: 'after' }));
+});
+test('normal publication, cutover and closure still require resource_changes', async () => {
+ const r = await ready(), pub = publicationPlan(), cut = cutoverPlan(), normal = (await r.deps.captureNormalPlan()).plan;
+ delete pub.resource_changes; delete cut.resource_changes; delete normal.resource_changes;
+ assert.throws(() => assertBrokerPublicationPlan(pub, preparation()));
+ assert.throws(() => assertBrokerCutoverPlan(cut, r.p));
+ assert.throws(() => assertBrokerClosurePlan(normal, r.p));
+});

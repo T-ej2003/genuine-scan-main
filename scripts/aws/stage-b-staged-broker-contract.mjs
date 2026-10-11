@@ -598,15 +598,18 @@ export function receiptBoundCheckerDisclosure(preparation) {
     freshIndependentCheckerRequired: true };
 }
 
-function planEnvelope(plan, sourceSha, { targeted = false } = {}) {
+function planEnvelope(plan, sourceSha, { targeted = false, refreshOnly = false } = {}) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.equal(plan.variables?.tooling_sha?.value, sourceSha);
   assert.equal(plan.errored, false); assert.equal(plan.complete, !targeted);
   assert.equal((plan.deferred_changes || []).length, 0, "Deferred changes are not authorized");
-  assert.ok(Array.isArray(plan.resource_changes));
-  const addresses = plan.resource_changes.map(c => c.address);
+  // Terraform may omit resource_changes in refresh-only plans, but never accept malformed values.
+  assert.ok((refreshOnly && plan.resource_changes === undefined) || Array.isArray(plan.resource_changes));
+  const changes = plan.resource_changes ?? [];
+  const addresses = changes.map(c => c.address);
   assert.equal(new Set(addresses).size, addresses.length, "Duplicate resource action");
   assert.ok(addresses.every(a => typeof a === "string" && a));
+  return changes;
 }
 
 export function assertBrokerPublicationPlan(plan, { sourceSha, prerequisites, canonicalAddresses, prerequisiteChain, configuration, packageSha256, treeSha256 }) {
@@ -1011,10 +1014,10 @@ export async function assertBrokerAuthorization(authorization, preparation, { ve
 }
 
 export function assertBrokerRefreshPlan(plan, preparation, aliasAfter) {
-  planEnvelope(plan, preparation.sourceSha); brokerAliasIdentity(aliasAfter);
+  const changes = planEnvelope(plan, preparation.sourceSha, { refreshOnly: true }); brokerAliasIdentity(aliasAfter);
   assert.equal(aliasAfter.FunctionVersion, preparation.target.version);
-  assert.ok((plan.resource_changes || []).every(c => canonicalJson(c.change.actions) === '["no-op"]'), "Refresh contains a remote mutation");
-  for (const c of plan.resource_changes) {
+  assert.ok(changes.every(c => canonicalJson(c.change.actions) === '["no-op"]'), "Refresh contains a remote mutation");
+  for (const c of changes) {
     assert.ok(preparation.canonicalAddresses.includes(c.address), "Unknown refresh resource");
     assert.equal(c.mode, "managed"); assert.equal(c.deposed, undefined);
     equal(c.change.before, c.change.after, "False refresh no-op");

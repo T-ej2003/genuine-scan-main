@@ -36,7 +36,7 @@ test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects id
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
 let files;
-async function native(phase = "CUTOVER") {
+async function native(phase = "CUTOVER", { omitRefreshChanges = false } = {}) {
   if (!files) {
     const publication = preparation(), archive = path.join(directory, 'broker.zip');
     await packageStageBBroker({ outputPath: archive, toolingSha: sourceSha, toolingTreeSha256: publication.treeSha256, repositoryRoot: root });
@@ -73,7 +73,7 @@ async function native(phase = "CUTOVER") {
         assert.equal(phase, 'RECONCILIATION');
         const file = args.find(a => a.startsWith('-out=')).slice(5);
         let body;
-        if (args.includes('-refresh-only')) body = refreshPlan;
+        if (args.includes('-refresh-only')) { body = structuredClone(refreshPlan); if (omitRefreshChanges) delete body.resource_changes; }
         else { body = cutoverPlan(); const a = body.resource_changes[1]; a.change.actions = ['no-op']; a.change.before = structuredClone(a.change.after); body.resource_changes[0].change.before.code_sha256 = body.resource_changes[0].change.after.code_sha256 = raw.CodeSha256; }
         capturedPlans.set(file, body); fs.writeFileSync(file, Buffer.from(file)); return '';
       }
@@ -1087,4 +1087,19 @@ test('preparation rejects sibling transaction sources even when both precede the
   };
   assert.equal(await authenticateRegistrationPredecessorBindings(r.historical,r.release,r.deps),true);
  }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
+
+test('native authorized closure refresh accepts omitted resource_changes and never replays alias CAS', async () => {
+ const r = await native('RECONCILIATION', { omitRefreshChanges: true });
+ const refresh = await r.adapter.captureRefreshOnlyPlan();
+ assert.equal(Object.hasOwn(refresh.plan, 'resource_changes'), false);
+ await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
+ const id = brokerDigest(r.auth), refreshPlanSha256 = brokerDigest(refresh.bytes);
+ await r.adapter.reserve(brokerStateReservation(id), { purpose: 'STAGE_B_BROKER_STATE_ONLY', parent: id, refreshPlanSha256 });
+ await r.adapter.record(id, 'STATE_REFRESH_INTENT', { refreshPlanSha256, authorizedAt: new Date().toISOString() });
+ await r.adapter.applyRefreshOnlyPlan(refresh.bytes);
+ await assert.rejects(() => r.adapter.applyRefreshOnlyPlan(refresh.bytes));
+ assertBrokerClosurePlan((await r.adapter.captureNormalPlan()).plan, r.p);
+ assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 1);
+ assert.equal(r.calls.filter(c => c.args[1] === 'update-alias').length, 0);
 });
