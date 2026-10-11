@@ -877,6 +877,7 @@ jobs:
         id: database-release
         if: ${{ inputs.release_mode == 'normal' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           MSCQR_FULL_RLS_SOURCE_CONTRACT_SHA256: ${{ steps.rls-package.outputs.source_contract_sha256 }}
           MSCQR_FULL_RLS_MIGRATION_SET_DIGEST: ${{ steps.rls-package.outputs.migration_set_digest }}
           MSCQR_FULL_RLS_PACKAGE_CHECKSUM_SHA256: ${{ steps.rls-package.outputs.package_checksum_sha256 }}
@@ -1310,6 +1311,7 @@ jobs:
       - name: Commit authenticated security component state
         if: ${{ inputs.release_mode == 'normal' }}
         env:
+          GH_TOKEN: ${{ github.token }}
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           AUTHORIZATION_FILE: ${{ steps.images.outputs.authorization_file }}

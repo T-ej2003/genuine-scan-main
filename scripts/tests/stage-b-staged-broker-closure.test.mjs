@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
+import yaml from 'js-yaml';
 import {createBrokerProtectedEnvironmentAuthorization} from '../aws/stage-b-staged-broker-authorization.mjs';
 import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
 import {createProductionGithubCommandRunner} from '../aws/production-credential-source-contract.mjs';
@@ -291,6 +292,27 @@ async function protectedClosureFixture(preparation){
  const reader=createStagedBrokerClosureReader({run:args=>{assert.equal(args[0],'kms');assert.equal(args[1],'verify');return JSON.stringify({SignatureValid:true});},githubRun,readCheckout:()=>brokerExecutionCheckout(preparation),directory:os.tmpdir()});
  return {authorization,reader,payloads,calls};
 }
+
+test('hosted closure consumers receive the workflow token with read-only GitHub permissions',()=>{
+ const workflow=yaml.load(fs.readFileSync('.github/workflows/release-gate.yml','utf8'));
+ const consumers=['apply-production-full-rls-release.mjs','commit-production-component-security-state.mjs'];
+ for(const consumer of consumers){
+  const matches=Object.entries(workflow.jobs).flatMap(([jobId,job])=>(job.steps||[]).filter(step=>step.run?.includes(consumer)).map(step=>({jobId,job,step})));
+  assert.equal(matches.length,1,`Exact hosted consumer required: ${consumer}`);
+  const {job,step}=matches[0],permissions=job.permissions||workflow.permissions;
+  assert.equal(step.env.GH_TOKEN,'${{ github.token }}',`${consumer} requires an authenticated hosted GitHub reader`);
+  assert.equal(permissions.actions,'read');assert.equal(permissions.contents,'read');assert.equal(permissions.deployments,'read');
+  assert.deepEqual(Object.keys(permissions).sort(),['actions','contents','deployments','id-token']);
+ }
+ // Other hosted recovery/authorization roots already inherit the workflow token.
+ for(const file of ['recover-production-stage-b-successor.yml','authorize-production-stage-b-release-transition.yml']){
+  const hosted=yaml.load(fs.readFileSync(`.github/workflows/${file}`,'utf8'));
+  for(const job of Object.values(hosted.jobs)){
+   assert.equal(job.env.GH_TOKEN,'${{ github.token }}');
+   assert.equal((job.permissions||hosted.permissions).actions,file==='recover-production-stage-b-successor.yml'?'write':'read');
+  }
+ }
+});
 
 test('protected hosted closure authenticates Stage B recovery and Release Gate security handoff',async()=>{
  const r=await terminal(true,undefined,true);
