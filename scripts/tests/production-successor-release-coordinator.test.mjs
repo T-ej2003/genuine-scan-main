@@ -481,7 +481,10 @@ test('failed authorization attempt with an artifact cannot be superseded',()=>{
  assert.equal(calls.length,2);
 });
 
-test('hosted closure consumes authorized omitted-resource refresh, persists its receipt and adopts it without CAS replay', async () => {
+test('hosted closure consumes authorized omitted-resource refresh, persists its receipt and adopts it without CAS replay', async t => {
+ const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-hosted-closure-'));
+ fs.chmodSync(directory, 0o700);
+ t.after(() => fs.rmSync(directory, {recursive:true,force:true}));
  const {createProductionEnvironmentApprovalEvidence} = await import('../aws/production-github-environment-approval.mjs');
  const {createBrokerProtectedEnvironmentAuthorization} = await import('../aws/stage-b-staged-broker-authorization.mjs');
  const {brokerExecutionCheckout, assertBrokerClosurePlan} = await import('../aws/stage-b-staged-broker-contract.mjs');
@@ -514,7 +517,7 @@ test('hosted closure consumes authorized omitted-resource refresh, persists its 
    record:async(...record)=>records.push(record),
    applyRefreshOnlyPlan:async()=>{assert.ok(records.some(record=>record[1]==='STATE_REFRESH_INTENT'));refreshWrites++;state.serial++;},
    authenticateTerraformState:async()=>{},publishTerminalHandoff:async value=>assertBrokerClosurePlan(value.record.closurePlan,input.preparation)};
-  return runStagedBrokerRequest({...input,directory:os.tmpdir()}, {adapterFactory:()=>deps});
+  return runStagedBrokerRequest({...input,directory}, {adapterFactory:()=>deps});
  };
  const execute=()=>runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime});
  assert.equal((await execute()).status,'WAITING_FOR_APPROVAL');
