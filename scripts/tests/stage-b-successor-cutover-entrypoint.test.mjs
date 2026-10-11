@@ -142,7 +142,7 @@ test('public successor preparation preserves published source and consumes expli
     await assert.rejects(() => captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot }));
     assert.equal(artifacts.size, 0);
     fs.writeFileSync(paths.bindingReportPath, bindingBytes, { mode: 0o600 });
-    fs.writeFileSync(stageAFiles.stageAStateBackup, JSON.stringify({ ...stageAState, serial: 36 }), { mode: 0o600 });
+    fs.writeFileSync(stageAFiles.stageAStateBackup, JSON.stringify({ ...stageAState, terraform_version: '1.15.7' }), { mode: 0o600 });
     await assert.rejects(() => captureReleasePhaseMaterial({ prepared: capsulePrepared, files, store, repositoryRoot: currentRoot }));
     assert.equal(artifacts.size, 0);
     fs.writeFileSync(stageAFiles.stageAStateBackup, stageAStateBytes, { mode: 0o600 });
@@ -180,7 +180,7 @@ test('public successor preparation preserves published source and consumes expli
     await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: replacedStageADigest, prepared: capsulePrepared,
       files, planPath: result.planPath, store, repositoryRoot: currentRoot }));
     assert.ok(Object.values(recoveredFiles).every(file => !fs.existsSync(file)));
-    const substitutedStateBytes = Buffer.from(JSON.stringify({ ...stageAState, serial: 36 }));
+    const substitutedStateBytes = Buffer.from(JSON.stringify({ ...stageAState, terraform_version: '1.15.7' }));
     const substitutedStateArtifact = { kind: 'PRODUCTION_RELEASE_BINARY', sha256: brokerDigest(substitutedStateBytes),
       base64: substitutedStateBytes.toString('base64') };
     const substitutedStateReference = brokerDigest(substitutedStateArtifact);
