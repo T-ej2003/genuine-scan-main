@@ -337,7 +337,8 @@ export async function runReleaseCoordinator(request, runtime) {
   adopted:Boolean(adoptedRegistration),prepared:registrationResult?await get(registrationResult.prepared):registrationPrepared?await get(registrationPrepared.result):null});
  let chain;
  const context = {release, artifacts, gates, store, inputs:initialInputs};
- const stablePolicyPreparation=({savedPlanSha256,logicalPlanSha256,...identity})=>identity;
+ // Saved plans and phase-local tfvars paths differ; each preparation verifies its own artifact set.
+ const stablePolicyPreparation=({savedPlanSha256,logicalPlanSha256,artifactSetSha256,...identity})=>identity;
  const assertReleaseApproval=(phase,prepared,authorization,round=authorization.release?.authorizationRound)=>{
   if(authorization.schemaVersion===2)assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,
    preparationReference:brokerDigest(prepared),authorizationRound:round},'Authorization substituted release/phase identity');
