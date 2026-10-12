@@ -160,6 +160,18 @@ Object.assign(SEQUENCES, { BROKER_POLICY_PRUNING_INTENT: 1, BROKER_POLICY_PRUNED
 const stateStep = status => ['STATE_REFRESH_INTENT', 'STATE_REFRESH_UNKNOWN', 'RECONCILED_PENDING_RELEASE_CAS'].includes(status);
 const receiptId = (id, status, value) => stateStep(status) ? brokerStateReservation(id) : id;
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
+// Completed capacity pruning remains part of the signed policy predecessor.
+export async function authenticateNormalPolicyPrerequisite(chain, checkout, authenticatePruning) {
+  const p = chain.policy.preparation;
+  assertBrokerPreparation(p);
+  const predecessor = p.prerequisiteChain;
+  equal(predecessor, { registration: chain.registration,
+    ...(predecessor.pruning ? { pruning: predecessor.pruning } : {}) });
+  if (predecessor.pruning) {
+    assert.equal(typeof authenticatePruning, 'function');
+    await authenticatePruning(predecessor, checkout);
+  }
+}
 function normalizePolicyInventory(snapshot) {
   const versions = snapshot.versions.map(v => ({ VersionId: v.VersionId, IsDefaultVersion: v.IsDefaultVersion })).sort((a, b) => a.VersionId.localeCompare(b.VersionId));
   assert.ok(versions.length > 0 && versions.length <= 5); assert.equal(new Set(versions.map(v => v.VersionId)).size, versions.length);
@@ -1353,7 +1365,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         if (chain.registration.preparation?.schemaVersion === 3) {
           assertBrokerPreparation(chain.policy.preparation);
           equal(chain.policy.preparation.prerequisiteChain.registration, chain.registration);
-        } else equal(chain.policy.preparation.prerequisiteChain, { registration: chain.registration });
+        } else await authenticateNormalPolicyPrerequisite(chain, checkout, authenticatePruningHandoff);
         equal(chain.policy.result.policy, chain.policy.preparation.target.policy);
       }
       if (chain.pruning) {
