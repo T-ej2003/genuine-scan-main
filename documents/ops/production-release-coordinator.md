@@ -346,3 +346,27 @@ authenticate pruning ownership/native history and renew expired preparation/appr
 through existing protected workflows. Rotation, RLS and deployment gates remain
 mandatory. No raw state goes in the transport. Recommendation: select immutable
 durable authority explicitly instead of inferring completion from revision numbers.
+
+## Schema2 registration adoption before IAM convergence
+
+A completed registration receipt identifies the new ECS map; its signed prerequisite
+snapshot identifies the IAM policy and reviewed-alias runtime that existed before
+registration. Those maps legitimately differ until independently authorized policy
+convergence. The schema2 adoption reader selects the signed predecessor map only
+when live IAM policy exactly matches that signed policy, and then authenticates
+the complete predecessor snapshot. The twelve registered outputs remain separately
+verified against receipts, images, live ECS and Terraform state.
+
+If IAM already authorizes the registered map, existing converged adoption behavior
+remains supported. Unknown revisions, changed predecessor role/policy/version, or
+alias drift fail closed. Schema1 and schema3 paths and the shared task-map validator
+are unchanged. The regression reproduces old IAM/new registered-map disagreement
+using the real prerequisite reader and the public cross-source adoption entrypoint.
+
+After merge, authenticate new protected main, ticket scope and fresh image reuse
+evidence. Use the durable2c2d63e registration reference documented above. Never
+retry Release Train38247736410 as a substitute for new tooling/source bindings.
+Preserve all twelve definitions, state123, broker13, historical CAS/closure and
+expired approvals. Obtain fresh pruning authorization before pending mutation.
+Recommendation: keep IAM-authorized and registered task maps distinct until their
+authenticated convergence; revision numbers alone are never authority.
