@@ -1,0 +1,7 @@
+# Release Gate retry reachability review
+
+PR #677 changes only the production release coordinator's validation of an exact-source GitHub Actions gate run attempt and its mocked tests. GitHub run ID, workflow, repository, protected-main source, event, branch and successful conclusion checks remain. Protected production approval attempt checks are unchanged. Application and browser source, package locks, build patterns and runtime packaging are unchanged from protected main `72c8a7174ae0e0f9ef78bc72eb81636917f6e25b`.
+
+The exact-branch unfiltered OSV report from Deployment Audit run `38317971717` contains only dev-only `braces@3.0.3` (GHSA-vfj7-8cjw-p6xm / CVE-2026-93687). The root lockfile marks this package `dev: true`; the backend lockfile does not contain it. No repository-controlled build glob or runtime dependency changed. The reviewed executable/build-input SHA-256 is `24ab77a2fe2a4204cd4dcb030f8dadb50f6890f1cfdd7352c9044d037defde36`. The acceptance scope, owner and `2026-11-02` expiry are unchanged.
+
+The initial audit stopped at the stale hash assertion. The complete canonical browser closure and runtime packaging gate must pass on the refreshed exact head before merge. Docker provenance and security integration failures on that head were registry HTTP 429 responses before image verification and PostgreSQL startup; they require retries of the existing checks, not changes to the acceptance decision.
