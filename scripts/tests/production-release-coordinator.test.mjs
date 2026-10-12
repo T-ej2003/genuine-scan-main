@@ -668,7 +668,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    const hostedAction=fs.readFileSync('.github/actions/converge-stage-b-prerequisites/action.yml','utf8');
    assert.ok(workflow.includes('uses: ./.github/actions/converge-stage-b-prerequisites'));
    assert.ok(hostedAction.includes('node scripts/aws/run-production-release-coordinator.mjs'));
-   assert.ok(hostedAction.includes('AWS_CREDENTIAL_EXPIRATION: ${{ steps.credentials.outputs.aws-expiration }}'));
+   assert.ok(hostedAction.includes('AWS_CREDENTIAL_EXPIRATION: ${{ fromJSON(steps.credentials.outputs.aws-expiration) }}'));
    assert.ok(workflow.indexOf('  gates:')<workflow.indexOf('  orchestrate:'));
    assert.ok(workflow.slice(workflow.indexOf('  orchestrate:')).includes('environment: production'));
    assert.ok(workflow.indexOf('Wait for required workflow gates')<workflow.indexOf('Converge exact Stage B prerequisites'));
