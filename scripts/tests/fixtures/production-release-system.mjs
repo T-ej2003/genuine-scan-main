@@ -1,7 +1,7 @@
 // Shared authenticated Stage-B predecessor fixture. No network transports are provided here.
 import { STAGE_B, canonicalJson } from '../../aws/production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, assertBrokerPreparation, brokerDigest,brokerPrerequisiteIdentity, createTerminalPolicySuccessorAdoption } from '../../aws/stage-b-staged-broker-contract.mjs';
-import {readSchema2RegistrationAdoptionPrerequisites} from '../../aws/stage-b-staged-broker-executor.mjs';
+import {readSchema2RegistrationAdoptionPrerequisites,authenticateNormalPolicyPrerequisite} from '../../aws/stage-b-staged-broker-executor.mjs';
 import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, deriveBrokerPolicy } from '../../aws/stage-b-release-prerequisites.mjs';
 import { STAGE_B_TERRAFORM_BACKEND } from '../../aws/stage-b-terraform-backend-contract.mjs';
 import { preparation, authorization, prerequisites, sourceSha, oldSha, state, now, alias } from './staged-broker-runtime.mjs';
@@ -232,6 +232,12 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
     assert.equal(ownership.read().terminal.receiptSha256,brokerDigest(chain.pruning.result));
    }
    if(chain.policy&&!chain.policy.receiptBoundAdoption){
+    if(chain.registration.preparation.schemaVersion!==3)await authenticateNormalPolicyPrerequisite(chain,{sourceSha:source,treeSha256:tree},async predecessor=>{
+     const entry=predecessor.pruning;assertPolicyPruningHandoff(entry,predecessor);
+     await assertBrokerAuthorization(entry.authorization,entry.preparation,{verify:kms.verify,now:new Date(entry.result.authorizedAt)});
+     assert.deepEqual(receipts.find(r=>r[0]===brokerDigest(entry.authorization)&&r[1]==='BROKER_POLICY_PRUNED')?.[2],entry.result);
+     assert.ok(receipts.some(r=>r[0]===brokerDigest(entry.authorization)&&r[1]==='BROKER_POLICY_PRUNING_INTENT'));
+    });
     await assertBrokerAuthorization(chain.policy.authorization,chain.policy.preparation,{verify:kms.verify,now:new Date(chain.policy.result.authorizedAt)});
     assert.deepEqual(chain.policy.result.policy,livePolicy);
     assert.deepEqual(receipts.find(r=>r[0]===chain.policy.result.authorizationSha256&&r[1]==='BROKER_POLICY_CONVERGED')[2],chain.policy.result);

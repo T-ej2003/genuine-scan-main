@@ -150,7 +150,7 @@ test('fixture carries current operation as immutable provenance, never as a new 
 
 // Capacity is an authenticated continuation of the same three-identity predecessor.
 // The caller cannot opt into a mismatch outside these exact operations.
-import { authenticatePrepublicationPolicyChain } from '../aws/stage-b-staged-broker-executor.mjs';
+import { authenticatePrepublicationPolicyChain, authenticateNormalPolicyPrerequisite } from '../aws/stage-b-staged-broker-executor.mjs';
 for (const operation of ['prepare-pruning','authorize-pruning','prune']) test(`mixed-chain predecessor survives ${operation}`, async () => {
  const f = prepublicationPredecessorFixture(), p = schema3RegistrationPredecessor(f);
  const chain = {registration: {preparation: p}, policy: f.policy};
@@ -709,6 +709,24 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    : runReleaseCoordinator(request,runtime);
   const result=await invoke();
   assert.equal(result.status,'PREREQUISITES_CONVERGED');
+  if(lostResponse==='normal-predecessor'){
+   const record=steps.get(`${result.releaseId}/policy:result`),get=f.coordinatorStore.getArtifact;
+   const policy={preparation:get(record.prepared).preparation,authorization:get(record.authorization),result:get(record.result)};
+   const chain={registration:policy.preparation.prerequisiteChain.registration,policy};
+   let checks=0;const verifyPruning=async predecessor=>{
+    checks++;const entry=predecessor.pruning;assertPolicyPruningHandoff(entry,predecessor);
+    await assertBrokerAuthorization(entry.authorization,entry.preparation,{verify:f.checker.verify,now:new Date(entry.result.authorizedAt)});
+    assert.deepEqual(f.snapshot().receipts.find(r=>r[0]===brokerDigest(entry.authorization)&&r[1]==='BROKER_POLICY_PRUNED')?.[2],entry.result);
+   };
+   await authenticateNormalPolicyPrerequisite(chain,{sourceSha:f.source,treeSha256:f.tree},verifyPruning);assert.equal(checks,1);
+   const ordinary=structuredClone(chain);delete ordinary.policy.preparation.prerequisiteChain.pruning;
+   await authenticateNormalPolicyPrerequisite(ordinary,{},async()=>{throw new Error('Unexpected pruning authentication');});
+   await assert.rejects(()=>authenticateNormalPolicyPrerequisite(chain,{},undefined));
+   await assert.rejects(()=>authenticateNormalPolicyPrerequisite(chain,{},async()=>{throw new Error('Missing native pruning intent');}),/Missing native pruning intent/);
+   for(const alter of [c=>{c.registration.result.sourceSha='f'.repeat(40);},c=>{c.policy.preparation.prerequisiteChain.pruning.result.authorizationSha256='0'.repeat(64);},c=>{c.policy.preparation.prerequisiteChain.pruning.authorization.nonce='f'.repeat(64);},c=>{c.policy.preparation.prerequisiteChain.unapproved={};}]){
+    const wrong=structuredClone(chain);alter(wrong);await assert.rejects(()=>authenticateNormalPolicyPrerequisite(wrong,{},verifyPruning));
+   }
+  }
   const cutoverApproval=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/cutover:result`).authorization);
   const closureApproval=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/closure:result`).authorization);
   const closurePrepared=f.coordinatorStore.getArtifact(steps.get(`${result.releaseId}/closure:result`).prepared);
@@ -905,5 +923,16 @@ test('public schema2 cross-source adoption keeps IAM predecessor separate and ne
   assert.deepEqual(adopted.prerequisiteChain.registration.preparation.prerequisites.taskMap,entry.preparation.prerequisites.taskMap);
   assert.deepEqual(adopted.prerequisiteChain.registration.result.taskMap,entry.result.taskMap);
   const after=current.snapshot();assert.equal(after.registeredTaskDefinitionCalls,before.registeredTaskDefinitionCalls);assert.equal(after.policyDeletes,0);assert.equal(after.policyCreates,0);assert.equal(after.aliasCalls,0);assert.equal(after.refreshCalls,0);
+  let chain=adopted.prerequisiteChain;
+  const {predecessorReceiptRecovery,...inputs}=current.initialRequest;
+  for(const [prepare,authorize,execute] of [['prepare-pruning','authorize-pruning','prune'],['prepare-policy','authorize-policy','converge-policy'],['prepare-publication','authorize-publication','publish']]){
+   const prepared=await current.run({...inputs,operation:prepare,prerequisiteChain:chain,...(execute==='prune'?{versionId:'v9'}:{})});
+   const authorization=await current.run({...inputs,operation:authorize,preparation:prepared.preparation,planPath:prepared.planPath,makerIdentity:current.maker,humanReviewId:'schema2-publication-regression'});
+   const result=await current.run({...inputs,operation:execute,preparation:prepared.preparation,authorization,planPath:prepared.planPath});
+   const entry={preparation:prepared.preparation,authorization,result};
+   if(execute==='prune')chain={...chain,pruning:entry};
+   if(execute==='converge-policy')chain={registration:chain.registration,policy:entry};
+  }
+  const published=current.snapshot();assert.equal(published.registeredTaskDefinitionCalls,before.registeredTaskDefinitionCalls);assert.equal(published.policyDeletes,1);assert.equal(published.policyCreates,1);assert.equal(published.publicationCalls,1);assert.equal(published.aliasCalls,0);assert.equal(published.refreshCalls,0);
  }finally{current.dispose();}
 });
