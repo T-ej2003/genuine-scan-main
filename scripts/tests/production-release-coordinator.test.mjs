@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {packReleaseEvidenceTransport} from '../aws/production-release-dispatch-contract.mjs';
 import { brokerDigest, assertRegistrationHandoff, assertBrokerAuthorization, assertPolicyPruningHandoff, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createReleaseIdentity, selectReleasePolicyDeletion, createReleaseCoordinatorStore, authenticateReleaseGateRuns,captureReleasePhaseMaterial,hydrateReleasePhaseMaterial,releaseTransitionDispatchInputs,obtainReleaseTransitionAuthorization,readHostedReleaseSource,authenticateHostedStageBImages,HOSTED_RELEASE_ROOT } from '../aws/production-release-coordinator.mjs';
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
 import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.mjs';
-import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime} from '../aws/run-production-release-coordinator.mjs';
+import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration} from '../aws/run-production-release-coordinator.mjs';
 
 function gateFixture(sourceSha,lifecycle='strict'){
  const files=requiredWorkflowFiles(lifecycle),workflowPayloads={},expectedWorkflowRunIds={};
@@ -62,6 +63,10 @@ test('hosted image resolver carries the exact source-bound transport to the cano
   verifyAuthorization:({authorization,sourceSha:actual})=>{verified++;assert.equal(actual,sourceSha);assert.deepEqual(authorization,JSON.parse(authorizationJson));
    return Object.fromEntries(['backend','worker','rls-executor','rls-canary'].map(name=>[name,`example@sha256:${'a'.repeat(64)}`]));}});
  assert.equal(verified,1);assert.equal(evidence.authorizationRawSha256,transportSha256);assert.equal(evidence.sourceSha,sourceSha);
+ const packed=packReleaseEvidenceTransport({authorizationJson,authorizationSha256:transportSha256,completedRegistrationSourceSha:'b'.repeat(40)});
+ const durable=authenticateHostedStageBImages({sourceSha,transportJson:packed.json,transportSha256:packed.sha256,run:rejectExternalAccess,
+  verifyAuthorization:()=>Object.fromEntries(['backend','worker','rls-executor','rls-canary'].map(name=>[name,'fixture-ref']))});
+ assert.equal(durable.completedRegistrationSourceSha,'b'.repeat(40));assert.equal(durable.authorizationRawSha256,transportSha256);
  assert.throws(()=>authenticateHostedStageBImages({sourceSha,transportJson:authorizationJson,transportSha256:'0'.repeat(64),run:rejectExternalAccess,
   verifyAuthorization:()=>{assert.fail('Changed transport cannot reach verifier');}}));
 });
@@ -477,6 +482,15 @@ test('current completed operation retains its real signed identity and all twelv
  assert.throws(()=>adoptRegisteredOutputs(entry,descendant,plan,{...impact,imageReuseCompatible:false,newImagesRequired:true}));
 });
 
+async function seedDurableRegistration(store,entry,ticketId='current-release'){
+ const release=createReleaseIdentity({sourceSha:entry.preparation.sourceSha,ticketId,baseline,changedFiles:[]});
+ const put=async value=>{const hash=brokerDigest(value);await store.putArtifact(hash,value);return hash;};
+ await store.writeStart({sourceSha:release.sourceSha,ticketId},{release:await put(release),baseline:await put(baseline)});
+ await store.writeStep({releaseId:release.releaseId,sourceSha:release.sourceSha,name:'registration:result',
+  prepared:await put({preparation:entry.preparation}),authorization:await put(entry.authorization),result:await put(entry.result)});
+ return release;
+}
+
 for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
  const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
   ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
@@ -526,7 +540,19 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   hydratePreparation:async(context,name,prepared)=>{
    await hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,files:f.files,planPath:prepared.planPath,store:f.coordinatorStore,repositoryRoot:process.cwd()});
   },
-  findCompletedRegistration:async()=>f.completedRegistration||null,
+  findCompletedRegistration:async release=>{
+   if(lostResponse!=='adopt-descendant-registration')return f.completedRegistration||null;
+   await seedDurableRegistration(f.coordinatorStore,f.completedRegistration);
+   const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+    GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:f.source,RUNNER_TEMP:'/tmp'};
+   const hosted=createHostedReleaseRuntime({sourceSha:f.source,ticketId:'current-release',
+    imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',env,
+    awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>f.coordinatorStore,verifyAuthorization:f.checker.verify,
+    imageReader:()=>({sourceSha:f.source,completedRegistrationSourceSha:f.completedRegistration.preparation.sourceSha}),
+    readReceipt:({id,status})=>{assert.equal(id,brokerDigest(f.completedRegistration.authorization));assert.equal(status,'TASK_REGISTERED');return f.completedRegistration.result;},
+    imageImpact:({imageReleaseSha,toolingSha})=>{assert.equal(imageReleaseSha,f.completedRegistration.preparation.sourceSha);assert.equal(toolingSha,f.source);return {imageReuseCompatible:true,newImagesRequired:false};}});
+   return hosted.findCompletedRegistration(release);
+  },
   authenticateRegistration:async(release,entry,_inputs,{predecessorAdvanced}={})=>{
    if(entry.adoption){
     assertRegistrationHandoff(entry,{sourceSha:release.sourceSha,treeSha256:f.tree});
@@ -818,3 +844,49 @@ test('successor approval dispatch executes from protected descendant without rel
   assert.throws(()=>authenticateReleaseGateRuns({sourceSha},{...valid,lifecycle:'strict'}));
   assert.throws(()=>createHostedReleaseRuntime({sourceSha,ticketId:'ticket',lifecycle:'prerequisites',env:{},awsRun:rejectExternalAccess,ghRun:rejectExternalAccess}),/explicit prerequisite-only/);
  });
+
+
+test('durable registration selector rejects missing, substituted and cross-release authority without registration',async()=>{
+ const f=await createPublicRegistrationFixture({descendantCompletedRegistration:true});
+ try{
+  const sourceSha=f.completedRegistration.preparation.sourceSha,ticketId='current-release',priorCalls=f.snapshot().registrationApplyCalls;
+  const query={store:f.coordinatorStore,sourceSha,ticketId};
+  await assert.rejects(()=>readDurableCompletedRegistration(query),/Missing predecessor/);
+  const release=await seedDurableRegistration(f.coordinatorStore,f.completedRegistration);
+  assert.deepEqual(await readDurableCompletedRegistration(query),f.completedRegistration);
+  await assert.rejects(()=>readDurableCompletedRegistration({...query,ticketId:'wrong-ticket'}),/Missing predecessor/);
+  await assert.rejects(()=>readDurableCompletedRegistration({...query,sourceSha:'f'.repeat(40)}),/Missing predecessor/);
+  await assert.rejects(()=>readDurableCompletedRegistration({...query,store:{...f.coordinatorStore,readStep:()=>null}}),/Missing completed/);
+  for(const change of [x=>({...x,sourceSha:'f'.repeat(40)}),x=>({...x,releaseId:'f'.repeat(64)}),x=>({...x,name:'publication:result'})]){
+   await assert.rejects(()=>readDurableCompletedRegistration({...query,store:{...f.coordinatorStore,readStep:(...args)=>change(f.coordinatorStore.readStep(...args))}}));
+  }
+  await assert.rejects(()=>readDurableCompletedRegistration({...query,store:{...f.coordinatorStore,getArtifact:hash=>({...f.coordinatorStore.getArtifact(hash),tampered:true})}}),/substitution/);
+  const record=f.coordinatorStore.readStep(release.releaseId,'registration:result');
+  const incomplete=structuredClone(f.completedRegistration.result);delete incomplete.definitions[Object.keys(incomplete.definitions)[0]];
+  const incompleteHash=brokerDigest(incomplete);
+  await assert.rejects(()=>readDurableCompletedRegistration({...query,store:{...f.coordinatorStore,
+   readStep:()=>({...record,result:incompleteHash}),getArtifact:hash=>hash===incompleteHash?incomplete:f.coordinatorStore.getArtifact(hash)}}),/Incomplete predecessor/);
+  assert.equal(release.sourceSha,sourceSha);assert.equal(f.snapshot().registrationApplyCalls,priorCalls);
+ }finally{f.dispose();}
+});
+
+test('hosted durable selection authenticates signature/native receipt and binds the predecessor across retries',async()=>{
+ const f=await createPublicRegistrationFixture({descendantCompletedRegistration:true});
+ try{
+  await seedDurableRegistration(f.coordinatorStore,f.completedRegistration);
+  const sourceSha=f.source,predecessor=f.completedRegistration.preparation.sourceSha;
+  const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+   GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp'};
+  const options={sourceSha,ticketId:'current-release',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',env,
+   awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>f.coordinatorStore,verifyAuthorization:f.checker.verify,
+   imageReader:()=>({sourceSha,completedRegistrationSourceSha:predecessor}),readReceipt:()=>f.completedRegistration.result,imageImpact:()=>({imageReuseCompatible:true,newImagesRequired:false})};
+  const runtime=createHostedReleaseRuntime(options),release={sourceSha,releaseId:'b'.repeat(64)};
+  assert.deepEqual(await runtime.findCompletedRegistration(release),f.completedRegistration);
+  await assert.rejects(()=>createHostedReleaseRuntime({...options,verifyAuthorization:()=>false}).findCompletedRegistration(release));
+  await assert.rejects(()=>createHostedReleaseRuntime({...options,readReceipt:()=>({...f.completedRegistration.result,sourceSha:'f'.repeat(40)})}).findCompletedRegistration(release));
+  await assert.rejects(()=>createHostedReleaseRuntime({...options,imageImpact:()=>({imageReuseCompatible:false,newImagesRequired:true})}).findCompletedRegistration(release),/incompatible/);
+  const artifacts=await runtime.resolveArtifacts();
+  assert.equal(artifacts.completedRegistrationSourceSha,predecessor);
+  await assert.rejects(()=>runtime.authenticateArtifacts(release,{...artifacts,completedRegistrationSourceSha:'f'.repeat(40)}));
+ }finally{f.dispose();}
+});
