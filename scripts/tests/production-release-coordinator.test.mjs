@@ -890,3 +890,20 @@ test('hosted durable selection authenticates signature/native receipt and binds 
   await assert.rejects(()=>runtime.authenticateArtifacts(release,{...artifacts,completedRegistrationSourceSha:'f'.repeat(40)}));
  }finally{f.dispose();}
 });
+
+
+test('public schema2 cross-source adoption keeps IAM predecessor separate and never re-registers completed definitions',async()=>{
+ const original=await createPublicRegistrationFixture({normalPredecessor:true,completedRegistration:true});
+ const entry=structuredClone(original.completedRegistration),verifyOriginal=original.checker.verify;original.dispose();
+ const current=await createPublicRegistrationFixture({ordinaryCompletedRegistration:entry});
+ try{
+  const verifyCurrent=current.checker.verify;current.checker.verify=authorization=>authorization.preparationSha256===brokerDigest(entry.preparation)?verifyOriginal(authorization):verifyCurrent(authorization);
+  const before=current.snapshot();assert.equal(entry.preparation.schemaVersion,2);assert.notEqual(current.source,entry.preparation.sourceSha);
+  const adopted=await current.run({...current.initialRequest,predecessorReceiptRecovery:undefined,operation:'prepare-registration-adoption',prerequisiteChain:{registration:entry}});
+  assert.equal(adopted.status,'REGISTERED_OUTPUTS_ADOPTED_NONTERMINAL');assert.equal(adopted.sourceSha,current.source);
+  assert.deepEqual(adopted.prerequisiteChain.registration.result,entry.result);
+  assert.deepEqual(adopted.prerequisiteChain.registration.preparation.prerequisites.taskMap,entry.preparation.prerequisites.taskMap);
+  assert.deepEqual(adopted.prerequisiteChain.registration.result.taskMap,entry.result.taskMap);
+  const after=current.snapshot();assert.equal(after.registeredTaskDefinitionCalls,before.registeredTaskDefinitionCalls);assert.equal(after.policyDeletes,0);assert.equal(after.policyCreates,0);assert.equal(after.aliasCalls,0);assert.equal(after.refreshCalls,0);
+ }finally{current.dispose();}
+});

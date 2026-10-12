@@ -84,6 +84,15 @@ export async function authenticatePreparedPrepublicationPredecessor({ operation,
     'Live policy/alias predecessor differs from the original signed registration preparation');
   return { registrationPredecessor: predecessor, prerequisites };
 }
+// Registration completion and IAM convergence authenticate different maps.
+export function readSchema2RegistrationAdoptionPrerequisites(preparation,registeredTaskMap,{readPolicy,readPrerequisites}) {
+ assert.equal(preparation.schemaVersion,2);assert.equal(preparation.purpose,TASK_REGISTRATION);
+ const predecessor=canonicalJson(readPolicy())===canonicalJson(preparation.prerequisites.policy);
+ const observed=readPrerequisites({authenticatedTaskMap:predecessor?preparation.prerequisites.taskMap:registeredTaskMap,
+  expectedPredecessor:{alias:preparation.alias,taskMap:preparation.prerequisites.taskMap}});
+ if(predecessor)assert.equal(brokerDigest(observed),brokerDigest(preparation.prerequisites),'Registration policy predecessor changed');
+ return observed;
+}
 export function authenticateRetainedRegistrationPredecessor(address, definition, observed) {
   const state = { ...definition.desired, arn: definition.arn, revision: definition.revision };
   const authenticated = authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired, state, observed, receipt: definition });
@@ -1145,8 +1154,11 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         return authenticated.prerequisites;
       }
       equal(await adapter.readCheckout(), checkout);
-      return readStagedBrokerPrerequisites(runAws, { authenticatedTaskMap,
-        expectedPredecessor: { alias: entry.preparation.alias, taskMap: entry.preparation.prerequisites.taskMap } });
+      if(entry.preparation.schemaVersion===2)return readSchema2RegistrationAdoptionPrerequisites(entry.preparation,authenticatedTaskMap,{
+        readPolicy:()=>readBrokerPolicyInventory(runAws).policy,
+        readPrerequisites:options=>readStagedBrokerPrerequisites(runAws,options)});
+      return readStagedBrokerPrerequisites(runAws,{authenticatedTaskMap,
+        expectedPredecessor:{alias:entry.preparation.alias,taskMap:entry.preparation.prerequisites.taskMap}});
     },
     readStateIdentity: async () => readStageBTerraformStateIdentity(runAws),
     getAlias,

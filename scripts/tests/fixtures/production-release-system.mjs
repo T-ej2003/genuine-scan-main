@@ -1,6 +1,7 @@
 // Shared authenticated Stage-B predecessor fixture. No network transports are provided here.
 import { STAGE_B, canonicalJson } from '../../aws/production-green-stage-b-contract.mjs';
-import { BROKER_PUBLICATION, assertBrokerPreparation, brokerDigest, createTerminalPolicySuccessorAdoption } from '../../aws/stage-b-staged-broker-contract.mjs';
+import { BROKER_PUBLICATION, assertBrokerPreparation, brokerDigest,brokerPrerequisiteIdentity, createTerminalPolicySuccessorAdoption } from '../../aws/stage-b-staged-broker-contract.mjs';
+import {readSchema2RegistrationAdoptionPrerequisites} from '../../aws/stage-b-staged-broker-executor.mjs';
 import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, BROKER_POLICY_PRUNING, TASK_REGISTRATION_ADDRESSES, deriveBrokerPolicy } from '../../aws/stage-b-release-prerequisites.mjs';
 import { STAGE_B_TERRAFORM_BACKEND } from '../../aws/stage-b-terraform-backend-contract.mjs';
 import { preparation, authorization, prerequisites, sourceSha, oldSha, state, now, alias } from './staged-broker-runtime.mjs';
@@ -141,16 +142,16 @@ import { tfFn, tfAlias, change, envelope, configuration } from './staged-broker-
 
 // Public production operations and cryptographic authorization verification, with
 // injected offline read/write transports. Package installation is cache-only.
-export async function createPublicRegistrationFixture({completedRegistration=false,currentCompletedRegistration=false,descendantCompletedRegistration=false,normalPredecessor=false,privateDirectory}={}) {
+export async function createPublicRegistrationFixture({completedRegistration=false,currentCompletedRegistration=false,descendantCompletedRegistration=false,normalPredecessor=false,ordinaryCompletedRegistration,privateDirectory}={}) {
  const networkGuards=[mock.method(net.Socket.prototype,'connect',rejectExternalAccess),mock.method(tls,'connect',rejectExternalAccess),mock.method(globalThis,'fetch',rejectExternalAccess)];
  const restoreNetwork=()=>networkGuards.forEach(fn=>fn.mock.restore());
  let fixtureNow = new Date('2026-10-08T12:00:00.000Z');
- const x=prepublicationPredecessorFixture(normalPredecessor?1:3), directory=privateDirectory||fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-public-evidence-'));
- const current=currentCompletedRegistration||descendantCompletedRegistration?JSON.parse(fs.readFileSync(new URL('../../../documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json',import.meta.url))):null;
+ const x=prepublicationPredecessorFixture(normalPredecessor||ordinaryCompletedRegistration?1:3), directory=privateDirectory||fs.mkdtempSync(path.join(os.tmpdir(),'stage-b-public-evidence-'));
+ const current=ordinaryCompletedRegistration|| (currentCompletedRegistration||descendantCompletedRegistration?JSON.parse(fs.readFileSync(new URL('../../../documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json',import.meta.url))):null);
  if(current){
-  x.f.release={sourceSha:descendantCompletedRegistration?'c'.repeat(40):current.preparation.sourceSha,treeSha256:current.preparation.treeSha256};
-  x.proof=clone(current.preparation.registrationPredecessor);x.policy=clone(current.preparation.registrationPolicyPredecessor);
-  x.ownership=clone(x.policy.receiptBoundAdoption.ownership);x.registrationTaskMap=clone(x.proof.registrationTaskMap);x.aliasRuntimeTaskMap=clone(x.proof.aliasRuntimeTaskMap);
+  x.f.release={sourceSha:descendantCompletedRegistration||ordinaryCompletedRegistration?'c'.repeat(40):current.preparation.sourceSha,treeSha256:current.preparation.treeSha256};
+  if(current.preparation.schemaVersion===3){x.proof=clone(current.preparation.registrationPredecessor);x.policy=clone(current.preparation.registrationPolicyPredecessor);
+  x.ownership=clone(x.policy.receiptBoundAdoption.ownership);x.registrationTaskMap=clone(x.proof.registrationTaskMap);x.aliasRuntimeTaskMap=clone(x.proof.aliasRuntimeTaskMap);}
   fixtureNow=new Date(Math.max(fixtureNow.getTime(),Date.parse(current.result.authorizedAt)+60*60*1000));
  }
  if(privateDirectory){assert.ok(path.isAbsolute(privateDirectory)&&(privateDirectory.startsWith(os.tmpdir()+'/')||privateDirectory.startsWith('/tmp/mscqr-production-release/')));fs.mkdirSync(directory,{recursive:true,mode:0o700});}
@@ -251,7 +252,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
   const maker='arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test-maker',checkerArn='arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/test-checker';
   const {privateKey,publicKey}=generateKeyPairSync('rsa',{modulusLength:2048});
   const keyOptions={padding:constants.RSA_PKCS1_PSS_PADDING,saltLength:32};
-  const originalPublicKey=current?createPublicKey({key:Buffer.from(current.publicKey,'base64'),format:'der',type:'spki'}):null;
+  const originalPublicKey=current?.publicKey?createPublicKey({key:Buffer.from(current.publicKey,'base64'),format:'der',type:'spki'}):null;
   const kms={caller:async()=>({Arn:checkerArn}),
    sign:async bytes=>cryptoSign('sha256',bytes,{key:privateKey,...keyOptions}).toString('base64'),
    verify:async auth=>cryptoVerify('sha256',brokerAuthorizationMessage(auth),{key:current&&brokerDigest(auth)===CURRENT_REGISTRATION_OPERATION?originalPublicKey:publicKey,...keyOptions},Buffer.from(auth.signature.signatureBase64,'base64'))};
@@ -299,12 +300,16 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
   const closedFunction=()=>({...clone(fn.change.before),version:'13',qualified_arn:STAGE_B.brokerFunctionArn+':13',code_sha256:packageCode,source_code_hash:packageCode,environment:[{variables:clone(publishedConfiguration)}]});
   const closedAlias=()=>({...clone(tfAlias),function_version:'13'});
   const taskNoops=()=>tasks.map(c=>change(c.address,clone(states[c.address]),clone(states[c.address])));
-  if(descendantCompletedRegistration){
+  if(descendantCompletedRegistration||ordinaryCompletedRegistration){
    deps.readRegistrationAdoptionPrerequisites=async entry=>{
     assert.deepEqual(entry,{preparation:current.preparation,authorization:current.authorization,result:current.result});
     await assertBrokerAuthorization(entry.authorization,entry.preparation,{verify:kms.verify,now:new Date(entry.result.authorizedAt)});
-    await authenticateHistoricalPolicy(entry.preparation.registrationPolicyPredecessor);
+    if(entry.preparation.schemaVersion===3)await authenticateHistoricalPolicy(entry.preparation.registrationPolicyPredecessor);
     for(const [address,definition] of Object.entries(entry.result.definitions))assert.equal(states[address].arn,definition.arn);
+    if(entry.preparation.schemaVersion===2)return readSchema2RegistrationAdoptionPrerequisites(entry.preparation,entry.result.taskMap,{
+     readPolicy:()=>clone(livePolicy),readPrerequisites:options=>{
+      assert.deepEqual(options.expectedPredecessor,{alias:entry.preparation.alias,taskMap:entry.preparation.prerequisites.taskMap});
+      return brokerPrerequisiteIdentity({...clone(historicalPrerequisites),policyVersion,policy:clone(livePolicy),taskMap:options.authenticatedTaskMap});}});
     return {...clone(historicalPrerequisites),policyVersion,policy:clone(livePolicy),taskMap:clone(historicalPrerequisites.taskMap)};
    };
    deps.adoptRegistration=async(entry,plan)=>adoptRegisteredOutputs(entry,{sourceSha:source,treeSha256:tree},plan,

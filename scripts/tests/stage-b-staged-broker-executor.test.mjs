@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -283,6 +283,21 @@ function prerequisiteReader(drift = null, liveTaskMap, { liveAlias = alias, pred
     return JSON.stringify(result);
   };
 }
+test('schema2 adoption preserves signed IAM predecessor until completed registration policy converges',()=>{
+ const p=preparation();p.schemaVersion=2;p.purpose='STAGE_B_TASK_REGISTRATION';
+ const registeredMap=Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([key,arn])=>[key,arn.replace(/:\d+$/,':99')]));
+ const before=prerequisiteReader();
+ assert.throws(()=>readStagedBrokerPrerequisites(before,{authenticatedTaskMap:registeredMap,expectedPredecessor:{alias:p.alias,taskMap:p.prerequisites.taskMap}}),/task revisions differ/);
+ const observed=readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>p.prerequisites.policy,readPrerequisites:options=>readStagedBrokerPrerequisites(prerequisiteReader(),options)});
+ assert.deepEqual(observed,p.prerequisites);
+ const converged=deriveBrokerPolicy(p.prerequisites.policy,registeredMap);
+ assert.deepEqual(readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>converged,readPrerequisites:options=>readStagedBrokerPrerequisites(prerequisiteReader(null,registeredMap),options)}).taskMap,registeredMap);
+ const unrelated=Object.fromEntries(Object.entries(registeredMap).map(([key,arn])=>[key,arn.replace(':99',':98')]));
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>deriveBrokerPolicy(p.prerequisites.policy,unrelated),readPrerequisites:options=>readStagedBrokerPrerequisites(prerequisiteReader(null,unrelated),options)}),/task revisions differ/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>p.prerequisites.policy,readPrerequisites:options=>readStagedBrokerPrerequisites(prerequisiteReader(null,undefined,{liveAlias:{...alias,RevisionId:'changed'}}),options)}),/RevisionId/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>p.prerequisites.policy,readPrerequisites:()=>({...p.prerequisites,policyVersion:'v99'})}),/predecessor changed/);
+});
+
 test('complete stable traffic census authenticates the canonical prerequisite', () => {
   assert.deepEqual(readStagedBrokerPrerequisites(prerequisiteReader()), preparation().prerequisites);
 });
