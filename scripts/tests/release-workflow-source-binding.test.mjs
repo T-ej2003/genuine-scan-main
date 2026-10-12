@@ -98,7 +98,7 @@ test("Release Train resolves an exact dispatch ref and uses source-bound dispatc
   assert.match(train, /environment: production/);
   assert.match(train, /uses: \.\/\.github\/actions\/converge-stage-b-prerequisites/);
   assert.match(coordinatorAction, /role-session-name: release-\$\{\{ github\.run_id \}\}/);
-  assert.match(coordinatorAction, /AWS_CREDENTIAL_EXPIRATION: \$\{\{ steps\.credentials\.outputs\.aws-expiration \}\}/);
+  assert.match(coordinatorAction, /AWS_CREDENTIAL_EXPIRATION: \$\{\{ fromJSON\(steps\.credentials\.outputs\.aws-expiration\) \}\}/);
   assert.match(coordinatorAction, /unset-current-credentials: true/);
   assert.match(coordinatorAction, /status=WAITING_FOR_APPROVAL/);
   assert.equal((train.match(/uses: \.\/\.github\/actions\/converge-stage-b-prerequisites/g)||[]).length,7);

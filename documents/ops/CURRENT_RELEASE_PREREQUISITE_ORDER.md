@@ -55,3 +55,20 @@ identifier alone is not authorization. Resume prerequisite-only Release Train on
 after this binding is verified, with fresh protected approval and the required
 per-operation authorizations. Preserve v13, historical CAS/closure, state serial122
 and inventory8; never retry the failed startup run as a substitute for new bindings.
+
+## Hosted session expiration binding
+
+The coordinator composite decodes the AWS action's JSON-serialized expiration
+with `fromJSON` before passing it to the strict session validator. The timestamp,
+credential lifetime and authorization checks are unchanged. Refreshing credentials
+without decoding the action output cannot resolve the quoted-timestamp failure.
+
+After merge, authenticate the new protected-main source, canonical image reuse
+and a legitimately issued or formally re-scoped current-source CHG ticket before
+resuming the durable coordinator. Adopt all 12 completed current-release task
+registrations through their authenticated receipts. Authenticate pruning ownership
+and native intent; renew expired approvals through the existing protected workflow.
+Preserve historical CAS, broker closure and Terraform reconciliation.
+
+Recommendation: test third-party action output encoding at its composition boundary
+while keeping persisted session evidence and validators strict.

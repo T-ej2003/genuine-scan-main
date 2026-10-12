@@ -22,7 +22,7 @@ runs:
       id: converge
       shell: bash
       env:
-        AWS_CREDENTIAL_EXPIRATION: ${{ steps.credentials.outputs.aws-expiration }}
+        AWS_CREDENTIAL_EXPIRATION: ${{ fromJSON(steps.credentials.outputs.aws-expiration) }}
       run: |
         set -euo pipefail
         for attempt in $(seq 1 75); do

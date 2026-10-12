@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import fs from 'node:fs';
+import yaml from 'js-yaml';
 import { writerSession, writerIssuance, writerAccessKeyId } from './fixtures/broker-writer-session.mjs';
 import { authenticateBrokerSessionIssuance, proveBrokerWriterUnusable, readBrokerRecoveryAwsClock, createBrokerWriterSessionBoundary,createHostedBrokerWriterSessionBoundary, readBrokerSessionIssuance } from '../aws/stage-b-broker-writer-session.mjs';
 const owner = { policyArn: 'exact-policy', owner: 'owner-1', generation: 1, writerSession };
@@ -164,4 +166,25 @@ test('hosted writer pins OIDC credentials and requires exact completed run plus 
   assert.equal((await resumed.prove(owner)).session.workflowRunAttempt,'1');
   response.head_sha='f'.repeat(40);await assert.rejects(()=>boundary.prove(owner));
   assert.throws(()=>boundary.proveAliasCas({}),/lacks authenticated native execution evidence/);
+});
+
+
+test('hosted composite decodes the AWS action JSON Date output without loosening session validation',()=>{
+  const action=yaml.load(fs.readFileSync('.github/actions/converge-stage-b-prerequisites/action.yml','utf8'));
+  const step=action.runs.steps.find(value=>value.id==='converge');
+  assert.equal(step.env.AWS_CREDENTIAL_EXPIRATION,'${{ fromJSON(steps.credentials.outputs.aws-expiration) }}');
+  const env={PATH:process.env.PATH,HOME:'/test',GITHUB_ACTIONS:'true',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+    GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_EVENT_NAME:'workflow_dispatch',
+    GITHUB_RUN_ATTEMPT:'2',GITHUB_RUN_ID:'38188081814',GITHUB_SHA:'a'.repeat(40),AWS_ACCESS_KEY_ID:writerAccessKeyId,
+    AWS_SECRET_ACCESS_KEY:'fixture-only',AWS_SESSION_TOKEN:'fixture-only'};
+  const pin=expiration=>createHostedBrokerWriterSessionBoundary({env:{...env,AWS_CREDENTIAL_EXPIRATION:expiration},
+    now:()=>new Date('2026-10-12T01:05:13.568Z'),
+    exec:()=>JSON.stringify({Account:'368992683803',Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/release-38188081814',
+      UserId:'AROAABCDEFGHIJKLMNOP:release-38188081814'})}).pin();
+  const output=JSON.stringify('2026-10-12T02:02:05.000Z');
+  assert.throws(()=>pin(output),/Invalid AWS session timestamp/);
+  assert.equal(pin(JSON.parse(output)).session.expiresAt,'2026-10-12T02:02:05.000Z');
+  for(const output of ['invalid-json','"not-a-timestamp"','"2026-10-12T01:05:13.568Z"','"2026-10-12T01:00:00.000Z"','null','123']){
+    assert.throws(()=>pin(JSON.parse(output)));
+  }
 });
