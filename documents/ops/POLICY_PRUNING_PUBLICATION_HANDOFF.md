@@ -41,3 +41,19 @@ No further Release Train run was dispatched while investigating this defect.
 
 Recommendation: preserve the signed predecessor chain through every handoff;
 never remove its completed-operation evidence to satisfy a narrower comparison.
+
+## Later protected-main continuation at full IAM capacity
+
+After the completed convergence, live IAM again contains five policy versions,
+with v15 default. A new protected-main release must not delete another version
+solely because that inventory is full. When the registered task map already
+matches the live policy, the coordinator now prepares and validates a read-only
+policy plan first. It records an immutable pruning-skip observation only if the
+plan has no policy mutation. The subsequent policy preparation must also be a
+matching no-op before it is persisted or sent for approval. Before a pending
+policy approval is used after a restart, it rechecks the inventory and the
+stable preparation identity against a fresh no-op plan. Any changed plan or
+inventory stops continuation. A genuine policy update retains the existing
+capacity-pruning and protected-approval path.
+The policy phase still needs a fresh source-bound approval; this exception
+never authorizes an IAM write or reuses the older approval.

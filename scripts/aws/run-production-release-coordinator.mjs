@@ -21,7 +21,7 @@ import {createBrokerPolicyOwnershipClient} from './stage-b-broker-policy-ownersh
 import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertRegistrationHandoff,assertPolicyPruningHandoff} from './stage-b-staged-broker-contract.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import {readStagedBrokerReceipt,stagedBrokerSourceReservation} from './stage-b-staged-broker-executor.mjs';
-import {authenticateReceiptBoundRegisteredDefinition,TASK_REGISTRATION_ADDRESSES} from './stage-b-release-prerequisites.mjs';
+import {authenticateReceiptBoundRegisteredDefinition,deriveBrokerPolicy,TASK_REGISTRATION_ADDRESSES} from './stage-b-release-prerequisites.mjs';
 import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
@@ -223,7 +223,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    }else exact(readReceipt({run:awsRun,id:brokerDigest(authorization),status:receipts[name],
     directory:context.inputs.directory,allowPolicyNoWrite:name==='pruning'||name==='policy'}),result);
   },
-  authenticatePolicyRetention:async()=>{
+  authenticatePolicyRetention:async(_context,chain)=>{
    const owner=createBrokerPolicyOwnershipClient({run:awsRun}).read();
    assert.ok(owner?.status==='RELEASED'&&owner.terminal?.outcome==='SUCCEEDED','Active policy owner requires recovery before retention');
    const live=readBrokerPolicyInventory(awsRun),versions=live.versions;
@@ -238,7 +238,9 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    });
    const nonDefault=inventory.filter(v=>!v.isDefault).sort((a,b)=>Date.parse(b.createDate)-Date.parse(a.createDate));
    const protectedVersionIds=[live.version,...nonDefault.slice(0,1).map(v=>v.versionId)];
-   return {inventory,protectedVersionIds,obsoleteVersionIds:nonDefault.slice(1).map(v=>v.versionId)};
+   const noOpPolicyCandidate=chain?.registration&&brokerDigest(deriveBrokerPolicy(live.policy,chain.registration.result.taskMap))===brokerDigest(live.policy);
+   return {inventory,protectedVersionIds,obsoleteVersionIds:nonDefault.slice(1).map(v=>v.versionId),
+    ...(inventory.length===5?{noOpPolicyCandidate:Boolean(noOpPolicyCandidate)}:{})};
   },
   obtainAuthorization:(context,phase,prepared,reference)=>obtainReleaseTransitionAuthorization(context,phase,prepared,reference,
    {token:env.GH_TOKEN,run:ghRun,attempts:120}),
