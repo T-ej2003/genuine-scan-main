@@ -3,8 +3,11 @@ import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import test from "node:test";
+import os from "node:os";
+import path from "node:path";
+import {historicalRuntimeFixture} from "./fixtures/historical-runtime.mjs";
 import yaml from "js-yaml";
-import { assertNormalReleaseAuthorizationTransport, assertNormalReleaseGateInputs } from "../aws/production-release-dispatch-contract.mjs";
+import { assertNormalReleaseAuthorizationTransport, assertNormalReleaseGateInputs,packReleaseEvidenceTransport,unpackReleaseEvidenceTransport,runCli } from "../aws/production-release-dispatch-contract.mjs";
 import { assertReleaseTrainNormalDispatchContract } from "../aws/production-release-oidc-contract.mjs";
 import { verifyProductionReleaseImageAuthorization } from "../aws/verify-production-release-image-authorization.mjs";
 import { verifyCoordinatedWebRelease } from "../aws/verify-production-web-release-authorization.mjs";
@@ -68,4 +71,31 @@ test("web-impacting normal release requires source-bound web transport and activ
   const tampered = structuredClone(webImpactFixture.authorization); tampered.imageReuseEvidence.webPublicationRequired = false;
   const tamperedBytes = Buffer.from(JSON.stringify(tampered));
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: tamperedBytes, expectedSha256: crypto.createHash("sha256").update(tamperedBytes).digest("hex"), webPublicationRequired: false }), /canonical source-bound envelope/);
+});
+
+
+test('existing release transport binds durable registration source and rejects malformed or substituted references',()=>{
+ const authorizationJson=bytes.toString(),authorizationSha256=digest,completedRegistrationSourceSha='a'.repeat(40);
+ const packed=packReleaseEvidenceTransport({authorizationJson,authorizationSha256,completedRegistrationSourceSha});
+ const decoded=unpackReleaseEvidenceTransport(packed);
+ assert.equal(decoded.completedRegistrationSourceSha,completedRegistrationSourceSha);
+ assert.equal(decoded.authorizationJson,authorizationJson);assert.equal(decoded.authorizationSha256,digest);
+ assert.deepEqual(packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256}),packed);
+ assert.throws(()=>packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256,completedRegistrationSourceSha:'b'.repeat(40)}),/substitution/);
+ const historicalRuntimeJson=JSON.stringify(historicalRuntimeFixture().evidence),historicalRuntimeSha256=crypto.createHash('sha256').update(historicalRuntimeJson).digest('hex');
+ const combined=packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256,historicalRuntimeJson,historicalRuntimeSha256});
+ const combinedDecoded=unpackReleaseEvidenceTransport(combined);
+ assert.equal(combinedDecoded.authorizationJson,authorizationJson);assert.equal(combinedDecoded.historicalRuntimeJson,historicalRuntimeJson);assert.equal(combinedDecoded.completedRegistrationSourceSha,completedRegistrationSourceSha);
+ const directory=fs.mkdtempSync(path.join(os.tmpdir(),'mscqr-durable-transport-test-'));
+ try{const file=path.join(directory,'authorization.json');fs.writeFileSync(file,packed.json,{mode:0o600});
+  assert.equal(runCli(['--source-sha',sourceSha,'--authorization',file,'--authorization-sha256',packed.sha256]).sourceSha,sourceSha);
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+
+ assert.deepEqual(packReleaseEvidenceTransport({authorizationJson,authorizationSha256}),{json:authorizationJson,sha256:digest});
+ assert.throws(()=>unpackReleaseEvidenceTransport({...packed,json:packed.json.replace(completedRegistrationSourceSha,'b'.repeat(40))}),/checksum/);
+ for(const reference of ['',null,{},'main','a'.repeat(39)])assert.throws(()=>packReleaseEvidenceTransport({authorizationJson,authorizationSha256,completedRegistrationSourceSha:reference}));
+ for(const change of [v=>{delete v.completedRegistrationSourceSha;},v=>{v.extra=true;},v=>{v.schemaVersion=1;},v=>{v.completedRegistrationSourceSha='main';},v=>{v.imageAuthorizationSha256='0'.repeat(64);}]){
+  const value=JSON.parse(packed.json);change(value);const json=JSON.stringify(value);
+  assert.throws(()=>unpackReleaseEvidenceTransport({json,sha256:crypto.createHash('sha256').update(json).digest('hex')}));
+ }
 });

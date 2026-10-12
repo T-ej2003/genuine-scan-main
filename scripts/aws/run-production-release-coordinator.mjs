@@ -21,7 +21,7 @@ import {createBrokerPolicyOwnershipClient} from './stage-b-broker-policy-ownersh
 import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertRegistrationHandoff,assertPolicyPruningHandoff} from './stage-b-staged-broker-contract.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import {readStagedBrokerReceipt,stagedBrokerSourceReservation} from './stage-b-staged-broker-executor.mjs';
-import {authenticateReceiptBoundRegisteredDefinition} from './stage-b-release-prerequisites.mjs';
+import {authenticateReceiptBoundRegisteredDefinition,TASK_REGISTRATION_ADDRESSES} from './stage-b-release-prerequisites.mjs';
 import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
@@ -33,6 +33,29 @@ const phaseFiles=directory=>({package:path.join(directory,'broker-package.zip'),
  tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(directory,'terraform','terraform.tfstate')});
 const shell=(command,args,options={})=>execFileSync(command,args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe'],...options});
 
+// Resolve immutable coordinator authority, never a caller-supplied local file.
+export async function readDurableCompletedRegistration({store,sourceSha,ticketId}) {
+ assert.match(sourceSha||'',/^[a-f0-9]{40}$/);
+ const start=await store.readStart({sourceSha,ticketId});assert.ok(start,'Missing predecessor coordinator start');
+ assert.deepEqual(Object.keys(start).sort(),['baseline','release']);
+ const get=async reference=>{assert.match(reference||'',/^[a-f0-9]{64}$/);const value=await store.getArtifact(reference);assert.equal(brokerDigest(value),reference,'Predecessor artifact substitution');return value;};
+ const release=await get(start.release),{releaseId,...identity}=release;
+ assert.equal(brokerDigest(identity),releaseId);assert.equal(release.sourceSha,sourceSha);assert.equal(release.ticketId,ticketId);
+ assert.equal(brokerDigest(await get(start.baseline)),release.baselineSha256);
+ const record=await store.readStep(releaseId,'registration:result');assert.ok(record,'Missing completed predecessor registration');
+ assert.equal(record.releaseId,releaseId);assert.equal(record.sourceSha,sourceSha);assert.equal(record.name,'registration:result');
+ const prepared=await get(record.prepared),authorization=await get(record.authorization),result=await get(record.result);
+ const entry={preparation:prepared.preparation,authorization,result};
+ assertRegistrationHandoff(entry,{sourceSha,treeSha256:entry.preparation.treeSha256});
+ assert.equal(result.status,'REGISTERED_NONTERMINAL');assert.equal(result.savedPlanSha256,entry.preparation.savedPlanSha256);
+ assert.deepEqual(Object.keys(result.definitions).sort(),TASK_REGISTRATION_ADDRESSES.slice().sort(),'Incomplete predecessor registration');
+ if(authorization.schemaVersion===2){
+  assert.equal(authorization.release.releaseId,releaseId);assert.equal(authorization.release.phase,'registration');
+  assert.equal(authorization.release.preparationReference,brokerDigest(prepared));
+ }
+ return entry;
+}
+
 // All business writes remain inside runStagedBrokerRequest. This adapter only
 // creates authenticated inputs and selects the next public operation.
 export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJson,imageTransportSha256,
@@ -43,6 +66,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  imageReader=authenticateHostedStageBImages,gateReader=readReleaseGateEvidence,
  materialize=materializeStageBPrerequisiteFiles,refresh=runRefreshOnly,
  createStore=createReleaseCoordinatorStore,verifyAuthorization,readReceipt=readStagedBrokerReceipt,
+ imageImpact=deriveStageBImageImpactReport,
  completedRegistrationPath=path.join(root,'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json')}={}) {
  if(lifecycle==='prerequisites')assert.equal(env.RELEASE_PREREQUISITES_ONLY,'true','Prerequisite gates require explicit prerequisite-only execution');
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
@@ -124,8 +148,17 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   hydratePreparation:(context,_phase,prepared)=>hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,
    files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root}),
   findCompletedRegistration:async(release)=>{
-   const entry=JSON.parse(fs.readFileSync(completedRegistrationPath));
-   const impact=deriveStageBImageImpactReport({imageReleaseSha:entry.preparation.sourceSha,toolingSha:release.sourceSha});
+   const {completedRegistrationSourceSha}=imageArtifacts();
+   const entry=completedRegistrationSourceSha
+    ? await readDurableCompletedRegistration({store,sourceSha:completedRegistrationSourceSha,ticketId})
+    : JSON.parse(fs.readFileSync(completedRegistrationPath));
+   const impact=imageImpact({imageReleaseSha:entry.preparation.sourceSha,toolingSha:release.sourceSha});
+   if(completedRegistrationSourceSha){
+    assert.ok(impact.imageReuseCompatible&&impact.newImagesRequired===false,'Predecessor registration is incompatible with current source');
+    await assertBrokerAuthorization(entry.authorization,entry.preparation,{verify,now:new Date(entry.result.authorizedAt)});
+    const directory=prepareDirectory(release,'registration');
+    exact(readReceipt({run:awsRun,id:brokerDigest(entry.authorization),status:'TASK_REGISTERED',directory}),entry.result);
+   }
    return impact.imageReuseCompatible&&impact.newImagesRequired===false?entry:null;
   },
   authenticateRegistration:async(release,entry,inputs,{predecessorAdvanced=false}={})=>{

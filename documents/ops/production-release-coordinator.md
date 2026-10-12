@@ -294,3 +294,55 @@ local normal-activation convergence passes its explicit `--admin-profile` runner
 for both evidence reads and policy execution. Neither path inherits ambient
 credentials or falls back to another credential source. Legacy GitHub-only
 receipt authentication remains compatible without AWS hydration.
+
+## Durable registration adoption across protected-main updates
+
+The existing release evidence transport can include `completedRegistrationSourceSha`.
+For this continuation it is `2c2d63eaea623c0d9d55c98a949d0a47186fdd2e`.
+The schema2 wrapper preserves the exact signed image authorization and its checksum.
+It selects encrypted coordinator START and registration-result records under that
+source and the same operator-issued ticket, never a local file or arbitrary receipt
+body. Missing, substituted, incomplete or image-incompatible authority fails closed;
+explicit selection never falls back to new registration.
+
+The reader authenticates hashes, source/ticket/release/operation bindings, original
+authorization and native TASK_REGISTERED receipt. Existing prepare-registration-adoption
+verifies all twelve definitions, immutable images, live ECS and current Terraform
+state. Historical preparation/authorization/results stay immutable; the current-source
+adoption is separate. The reference is hash-bound in ARTIFACTS_RESOLVED and checked
+on every restart. Workflow, RLS package, IAM and production approvals are unchanged.
+
+After merge, fetch exact protected main, authenticate image reuse and obtain fresh
+current-source image authorization plus an issued or explicitly re-scoped CHG ticket.
+Preserve serial123, alias13 and completed historical CAS/closure. Verify no concurrent
+Release Train. Prepare private mode0600 inputs using the existing packer:
+
+```js
+const transport = packReleaseEvidenceTransport({
+  authorizationJson, // exact fresh authenticated current-source envelope bytes
+  authorizationSha256, // SHA256 of those exact bytes
+  completedRegistrationSourceSha: '2c2d63eaea623c0d9d55c98a949d0a47186fdd2e'
+});
+const inputs = {
+  git_ref: 'main', target_sha: authenticatedMainSha, ticket_id: authenticatedTicketId,
+  prerequisites_only: 'true', release_lifecycle: 'authenticated-initial-overlap',
+  rotation_id: 'rotation-20260913011819-98b062c4',
+  normal_image_authorization_json: transport.json,
+  normal_image_authorization_sha256: transport.sha256
+};
+```
+
+Dispatch once after all bindings authenticate:
+
+```sh
+GITHUB_REPOSITORY=T-ej2003/genuine-scan-main GH_TOKEN="$(gh auth token)" \
+  node scripts/github/dispatch-source-bound-workflow.mjs \
+  --workflow release-train.yml --ref main --target-sha "$AUTHENTICATED_MAIN_SHA" \
+  --inputs-file "$PRIVATE_RELEASE_INPUTS_FILE"
+```
+
+The template is not authorization. Adopt the twelve registrations without replay;
+authenticate pruning ownership/native history and renew expired preparation/approval
+through existing protected workflows. Rotation, RLS and deployment gates remain
+mandatory. No raw state goes in the transport. Recommendation: select immutable
+durable authority explicitly instead of inferring completion from revision numbers.
