@@ -337,6 +337,7 @@ export async function runReleaseCoordinator(request, runtime) {
   adopted:Boolean(adoptedRegistration),prepared:registrationResult?await get(registrationResult.prepared):registrationPrepared?await get(registrationPrepared.result):null});
  let chain;
  const context = {release, artifacts, gates, store, inputs:initialInputs};
+ const stablePolicyPreparation=({savedPlanSha256,logicalPlanSha256,...identity})=>identity;
  const assertReleaseApproval=(phase,prepared,authorization,round=authorization.release?.authorizationRound)=>{
   if(authorization.schemaVersion===2)assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase,
    preparationReference:brokerDigest(prepared),authorizationRound:round},'Authorization substituted release/phase identity');
@@ -383,8 +384,7 @@ export async function runReleaseCoordinator(request, runtime) {
       assert.deepEqual(observed,retained,'Unpruned inventory changed before policy convergence');
       const plan=await runtime.runStageOperation({...inputs,operation:'prepare-policy',prerequisiteChain:chain});
       assert.deepEqual(plan.mutationAddresses,[],'Full-capacity policy plan is no longer a no-op');
-      const stable=preparation=>{const {savedPlanSha256,logicalPlanSha256,...identity}=preparation;return identity;};
-      assert.deepEqual(stable(plan.preparation),stable(retention.noOpPolicyPreparation),'No-op policy preparation changed');
+      assert.deepEqual(stablePolicyPreparation(plan.preparation),stablePolicyPreparation(retention.noOpPolicyPreparation),'No-op policy preparation changed');
      }else assert.deepEqual(observed,retention,'Unpruned inventory changed before policy convergence');
     }
     continue;
@@ -411,6 +411,13 @@ export async function runReleaseCoordinator(request, runtime) {
     }
    }
   }
+  const skipRecord=name==='policy'?await readStep('pruning:skipped'):null;
+  const noOpPolicyPreparation=skipRecord?(await get(skipRecord.result)).noOpPolicyPreparation:null;
+  const assertNoOpPolicyPreparation=value=>{
+   if(!noOpPolicyPreparation)return;
+   assert.deepEqual(value.mutationAddresses,[],'Full-capacity policy preparation is no longer a no-op');
+   assert.deepEqual(stablePolicyPreparation(value.preparation),stablePolicyPreparation(noOpPolicyPreparation),'Full-capacity policy preparation changed');
+  };
   let prepared, authorization, result;
   if (done) {
    prepared = await get(done.prepared); authorization = await get(done.authorization); result = await get(done.result);
@@ -427,11 +434,13 @@ export async function runReleaseCoordinator(request, runtime) {
     if(name==='closure')return runtime.capturePreparation(context,name,{...packages.cutover.prepared,preparation:prepareBrokerStateRefresh({
      preparation:packages.cutover.prepared.preparation,authorization:packages.cutover.authorization,casResult:packages.cutover.result})});
     const value = await runtime.runStageOperation(prepareRequest);
+    assertNoOpPolicyPreparation(value);
     return runtime.capturePreparation(context,name,value);
    });
    assert.ok(prepared?.preparation, `Expected ${name} preparation`);
    assert.equal(prepared.preparation.sourceSha, release.sourceSha, 'Preparation changed release source');
    await runtime.hydratePreparation(context,name,prepared);
+   assertNoOpPolicyPreparation(prepared);
    const preparedDigest = await put(prepared);
    for(let round=0;;round++){
     assert.ok(round<20,'Repeated no-write or expired approvals require a new governed release');
