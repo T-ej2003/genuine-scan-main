@@ -284,6 +284,12 @@ test('hosted capacity reader authenticates the five live versions and selects v9
  const retention=await runtime.authenticatePolicyRetention();
  assert.equal(selectReleasePolicyDeletion(retention),'v9');
  assert.equal(retention.inventory.filter(version=>version.isDefault)[0].versionId,'v13');
+ const taskMap=fixture.registration.result.taskMap;
+ assert.equal((await runtime.authenticatePolicyRetention(null,{registration:{result:{taskMap}}})).noOpPolicyCandidate,true);
+ const changedMap={...taskMap,[Object.keys(taskMap)[0]]:Object.values(taskMap)[0].replace(/:[1-9][0-9]*$/,':999')};
+ assert.equal((await runtime.authenticatePolicyRetention(null,{registration:{result:{taskMap:changedMap}}})).noOpPolicyCandidate,false);
+ versions.splice(versions.findIndex(version=>version.VersionId==='v9'),1);
+ assert.equal(Object.hasOwn(await runtime.authenticatePolicyRetention(null,{registration:{result:{taskMap}}}),'noOpPolicyCandidate'),false);
 });
 
 test('runner replacement hydrates exact public preparation material and rejects substituted members before writing',async()=>{
@@ -491,14 +497,14 @@ async function seedDurableRegistration(store,entry,ticketId='current-release'){
  return release;
 }
 
-for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
+for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
  const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
   ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
- const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:lostResponse==='adopt-current-registration',descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
+ const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:['adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy'].includes(lostResponse),descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
   ...(hostedClosureRelease?{privateDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'cutover')}:{})});
  if(lostResponse==='no-prune-policy-lost')f.changeLiveInventory(xs=>xs.filter(v=>v.VersionId!=='v9'));
- const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls;
- const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
+ const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls,priorApplyCalls=f.snapshot().registrationApplyCalls;
+ const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy';const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
  const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
@@ -534,10 +540,12 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    const {predecessorReceiptRecovery,...inputs}=f.initialRequest;return inputs;
   },
   capturePreparation:async(context,name,prepared)=>{
+   if(lostResponse==='full-capacity-noop-policy'&&name==='policy')return prepared;
    const materializationSha256=await captureReleasePhaseMaterial({prepared,files:f.files,store:f.coordinatorStore,repositoryRoot:process.cwd()});
    return {...prepared,materializationSha256};
   },
   hydratePreparation:async(context,name,prepared)=>{
+   if(lostResponse==='full-capacity-noop-policy'&&name==='policy')return;
    await hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,files:f.files,planPath:prepared.planPath,store:f.coordinatorStore,repositoryRoot:process.cwd()});
   },
   findCompletedRegistration:async release=>{
@@ -564,7 +572,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
     }else assert.equal(f.snapshot().registeredTaskDefinitionCalls,12);
    }else{assert.equal(entry.preparation.sourceSha,release.sourceSha);await f.authenticateRegistration(entry);}
   },
-  runStageOperation:async request=>{calls.push(request.operation);if(lostResponse==='proved-no-policy-write'){if(request.operation==='prune'&&!interrupted){interrupted=true;throw new Error('Lost completed mutation response');}if(request.operation==='recover-policy')return {status:'RECOVERED_NO_WRITE'};}if(drift&&!interrupted&&request.operation===(lostResponse==='alias-drift'?'cutover':'prune')){interrupted=true;if(lostResponse==='inventory-drift')f.changeLiveInventory(xs=>xs.map(v=>v.VersionId==='v10'?{...v,VersionId:'v99'}:v));if(lostResponse==='default-drift')f.changeLiveDefault('v12');if(lostResponse==='ownership-drift')f.changeOwnership(owner=>({...owner,identity:{...owner.identity,operationIdentity:'0'.repeat(64)}}));if(lostResponse==='alias-drift')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));}const result=await f.run(request);
+  runStageOperation:async request=>{calls.push(request.operation);if(['full-capacity-noop-policy','full-capacity-change-policy'].includes(lostResponse)&&request.operation==='prepare-policy')return {preparation:{sourceSha:f.source,state:f.snapshot().liveState,policyNoOp:true},mutationAddresses:noOpPolicyPlan?[]:['aws_iam_policy.broker'],planPath:path.join(f.initialRequest.directory,'noop-policy.tfplan')};if(lostResponse==='proved-no-policy-write'){if(request.operation==='prune'&&!interrupted){interrupted=true;throw new Error('Lost completed mutation response');}if(request.operation==='recover-policy')return {status:'RECOVERED_NO_WRITE'};}if(drift&&!interrupted&&request.operation===(lostResponse==='alias-drift'?'cutover':'prune')){interrupted=true;if(lostResponse==='inventory-drift')f.changeLiveInventory(xs=>xs.map(v=>v.VersionId==='v10'?{...v,VersionId:'v99'}:v));if(lostResponse==='default-drift')f.changeLiveDefault('v12');if(lostResponse==='ownership-drift')f.changeOwnership(owner=>({...owner,identity:{...owner.identity,operationIdentity:'0'.repeat(64)}}));if(lostResponse==='alias-drift')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));}const result=await f.run(request);
    if(request.operation==='cutover'&&lostResponse==='cutover-expired-before-closure')f.advanceClock(31*60*1000);
    if(request.operation==='cutover'&&lostResponse==='closure-alias-changed')f.changeLiveAlias(alias=>({...alias,RevisionId:'unapproved-revision'}));
    if(request.operation==='cutover'&&lostResponse==='closure-cas-substituted')return {...result,alias:{...result.alias,RevisionId:'substituted-revision'}};
@@ -596,8 +604,9 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    assert.ok(f.snapshot().receipts.some(r=>r[1]==='STAGED_BROKER_TERMINAL_HANDOFF'));
    return packages.closure.result;
   },
-  authenticatePolicyRetention:async()=>({inventory:f.snapshot().policySnapshot.versions.map(v=>({versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(Date.UTC(2026,8,['v9','v10','v11','v12','v13'].indexOf(v.VersionId)+1)).toISOString(),documentSha256:brokerDigest(f.fixture.policy.terminal.policy)})),protectedVersionIds:['v12','v13'],obsoleteVersionIds:['v9','v10','v11']}),
+  authenticatePolicyRetention:async()=>({inventory:f.snapshot().policySnapshot.versions.map(v=>({versionId:v.VersionId,isDefault:v.IsDefaultVersion,createDate:new Date(Date.UTC(2026,8,['v9','v10','v11','v12','v13'].indexOf(v.VersionId)+1)).toISOString(),documentSha256:brokerDigest(f.fixture.policy.terminal.policy)})),protectedVersionIds:['v12','v13'],obsoleteVersionIds:['v9','v10','v11'],...(['full-capacity-noop-policy','full-capacity-change-policy'].includes(lostResponse)?{noOpPolicyCandidate:noOpPolicyEvidence}:{})}),
   obtainAuthorization:async(context,phase,prepared,digest)=>{
+   if((lostResponse==='full-capacity-noop-policy'&&phase==='policy'||lostResponse==='full-capacity-change-policy'&&phase==='pruning'))return {status:'WAITING_FOR_APPROVAL',runId:'700',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};
    assert.equal(brokerDigest(prepared),digest);
    const cutover=phase==='closure'?steps.get(`${context.release.releaseId}/cutover:result`):null;
    const predecessor=cutover?{cutoverPreparation:f.coordinatorStore.getArtifact(cutover.prepared).preparation,
@@ -658,6 +667,29 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
  };
  try {
   const request={sourceSha:f.source,ticketId:'current-release'};
+  if(lostResponse==='full-capacity-change-policy'){
+   const waiting=await runReleaseCoordinator(request,runtime);
+   assert.equal(waiting.status,'WAITING_FOR_APPROVAL');assert.equal(waiting.phase,'pruning');
+   assert.ok(![...steps.keys()].some(key=>key.endsWith('/pruning:skipped')));
+   assert.equal(f.snapshot().registrationApplyCalls,priorApplyCalls);
+   assert.equal(f.snapshot().policyDeletes,0);assert.equal(f.snapshot().policyCreates,0);
+   return;
+  }
+  if(lostResponse==='full-capacity-noop-policy'){
+   for(let attempt=0;attempt<2;attempt++){
+    const waiting=await runReleaseCoordinator(request,runtime);
+    assert.equal(waiting.status,'WAITING_FOR_APPROVAL');assert.equal(waiting.phase,'policy');
+    assert.equal(f.snapshot().policyDeletes,0);assert.equal(f.snapshot().policyCreates,0);
+    assert.equal(f.snapshot().registrationApplyCalls,priorApplyCalls);
+   }
+   assert.ok([...steps.keys()].some(key=>key.endsWith('/pruning:skipped')));
+   noOpPolicyPlan=false;
+   await assert.rejects(()=>runReleaseCoordinator(request,runtime),/no longer a no-op/);
+   noOpPolicyPlan=true;noOpPolicyEvidence=false;
+   await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Unpruned inventory changed/);
+   assert.equal(f.snapshot().policyDeletes,0);assert.equal(f.snapshot().policyCreates,0);
+   return;
+  }
   if(drift){await assert.rejects(()=>runReleaseCoordinator(request,runtime));const before=f.snapshot();assert.equal(before.registrationApplyCalls,1);assert.equal(before.policyDeletes,lostResponse==='alias-drift'?1:0);assert.equal(before.policyCreates,lostResponse==='alias-drift'?1:0);assert.equal(before.aliasCalls,0);await assert.rejects(()=>runReleaseCoordinator(request,runtime));const after=f.snapshot();for(const count of ['registrationApplyCalls','policyDeletes','policyCreates','publicationCalls','aliasCalls'])assert.equal(after[count],before[count]);return;}
   if(['closure-alias-changed','closure-cas-substituted'].includes(lostResponse)){
    await assert.rejects(()=>runReleaseCoordinator(request,runtime));

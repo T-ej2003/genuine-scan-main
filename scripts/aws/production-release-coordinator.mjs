@@ -373,9 +373,20 @@ export async function runReleaseCoordinator(request, runtime) {
     assert.equal(done,null,'Pruning cannot be both skipped and completed');
     assert.equal(savedPreparation,null,'Pruning cannot be both skipped and prepared');
     const retention=await get(skipped.result);
-    assert.equal(retention.inventory.length,4,'Only four-version capacity may skip pruning');
+    assert.ok(retention.inventory.length===4||retention.inventory.length===5&&retention.noOpPolicyCandidate===true&&retention.noOpPolicyPreparation,
+     'Full policy capacity may skip pruning only for an authenticated no-op policy plan');
     const policyAttempted=(await Promise.all(Array.from({length:20},(_,round)=>readStep(`policy:attempt:${round}`)))).some(Boolean);
-    if (!policyAttempted) assert.deepEqual(await runtime.authenticatePolicyRetention(context,chain),retention,'Unpruned inventory changed before policy convergence');
+    if (!policyAttempted) {
+     const observed=await runtime.authenticatePolicyRetention(context,chain);
+     if(retention.noOpPolicyPreparation){
+      const {noOpPolicyPreparation,...retained}=retention;
+      assert.deepEqual(observed,retained,'Unpruned inventory changed before policy convergence');
+      const plan=await runtime.runStageOperation({...inputs,operation:'prepare-policy',prerequisiteChain:chain});
+      assert.deepEqual(plan.mutationAddresses,[],'Full-capacity policy plan is no longer a no-op');
+      const stable=preparation=>{const {savedPlanSha256,logicalPlanSha256,...identity}=preparation;return identity;};
+      assert.deepEqual(stable(plan.preparation),stable(retention.noOpPolicyPreparation),'No-op policy preparation changed');
+     }else assert.deepEqual(observed,retention,'Unpruned inventory changed before policy convergence');
+    }
     continue;
    }
    if (!done) {
@@ -386,6 +397,15 @@ export async function runReleaseCoordinator(request, runtime) {
       assert.equal(retention.inventory.length,4,'Policy capacity changed outside the supported predecessor');
       await record('pruning:skipped',{result:await put(retention)});
       continue;
+     }
+     if(retention.noOpPolicyCandidate===true){
+      const plan=await runtime.runStageOperation({...inputs,operation:'prepare-policy',prerequisiteChain:chain});
+      assert.ok(Array.isArray(plan.mutationAddresses),'Malformed full-capacity policy plan');
+      if(plan.mutationAddresses.length===0){
+       assert.ok(plan.preparation,'Missing no-op policy preparation');
+       await record('pruning:skipped',{result:await put({...retention,noOpPolicyPreparation:plan.preparation})});
+       continue;
+      }
      }
      context.versionId = selectReleasePolicyDeletion(retention);
     }

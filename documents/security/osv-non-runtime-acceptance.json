@@ -7,12 +7,12 @@
       "affectedVersion": "3.0.3",
       "advisory": "GHSA-vfj7-8cjw-p6xm",
       "cve": "CVE-2026-93687",
-      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11 for the shared closure GitHub verifier binding: only the read-only verifier dependency, explicit hosted workflow-token bindings and mocked consumer regression tests change. Frontend source, dependency locks, runtime packaging and build patterns are unchanged; canonical browser closure and runtime packaging were independently revalidated against the retained unfiltered hosted OSV report.",
+      "rationale": "Tailwind 3 build dependency. Vulnerable braces execution observed only during trusted production compilation using repository-controlled content globs. No execution in backend, worker, Nginx runtime or inspected browser artifact. Production users cannot control the patterns supplied to braces. Reviewed 2026-10-11 for the shared closure GitHub verifier binding: only the read-only verifier dependency, explicit hosted workflow-token bindings and mocked consumer regression tests change. Frontend source, dependency locks, runtime packaging and build patterns are unchanged; canonical browser closure and runtime packaging were independently revalidated against the retained unfiltered hosted OSV report. Reviewed 2026-10-12 for full-capacity IAM no-op continuation: the change affects only coordinator planning, evidence checks, tests and operations documentation. The lockfiles, frontend source/build patterns and runtime packaging are unchanged; the unfiltered OSV scan still reports only the existing dev-only braces advisory, and a canonical browser build excludes braces.",
       "owner": "@T-ej2003",
       "createdAt": "2026-10-03",
       "expiresOn": "2026-11-02",
       "reachability": {
-        "inputsSha256": "3119cb7b83a7141b832d32b3d5e89e000082e968192d098ec2db010c1ec4d950",
+        "inputsSha256": "7ab1d038b54fddfc19045c7461c5f338ce1e3a91d888c9f41571499952297731",
         "execution": {
           "backend": "NO",
           "worker": "NO",
