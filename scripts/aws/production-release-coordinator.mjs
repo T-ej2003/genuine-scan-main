@@ -36,7 +36,7 @@ export function authenticateReleaseGateRuns(release,evidence) {
  for(const {run} of entries){
   assert.ok(run,'Missing exact-source required gate');
   assert.equal(run.repository?.full_name,'T-ej2003/genuine-scan-main');assert.equal(run.head_repository?.full_name,'T-ej2003/genuine-scan-main');
-  assert.equal(String(run.run_attempt),'1','Gate attempt identity changed');
+  assert.ok(Number.isSafeInteger(run.run_attempt)&&run.run_attempt>=1,'Gate attempt identity invalid');
   if(evidence.lifecycle==='prerequisites')assert.equal(run.head_branch,'main','Prerequisite gate must execute on main');
  }
  assert.equal(evaluateGateState(entries).ok,true,'Required exact-source gates are not successful');

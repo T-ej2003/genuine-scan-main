@@ -73,10 +73,20 @@ test('hosted image resolver carries the exact source-bound transport to the cano
 
 test('gate authentication uses the canonical required-workflow contract and exact child identities',()=>{
  const release={sourceSha};assert.equal(authenticateReleaseGateRuns(release,gateFixture(sourceSha)).length,5);
- for(const field of ['head_sha','path','workflow_id','conclusion','repository','run_attempt']){
+ const retried=gateFixture(sourceSha);
+ retried.workflowPayloads['deployment-audit.yml'].runs[0].run_attempt=2;
+ assert.equal(authenticateReleaseGateRuns(release,retried).length,5);
+ retried.workflowPayloads['deployment-audit.yml'].runs[0].conclusion='failure';
+ assert.throws(()=>authenticateReleaseGateRuns(release,retried),/Required exact-source gates are not successful/);
+ for(const field of ['head_sha','path','workflow_id','conclusion','repository']){
   const evidence=gateFixture(sourceSha),run=evidence.workflowPayloads['deployment-audit.yml'].runs[0];
-  run[field]=field==='repository'?{full_name:'attacker/repo'}:field==='run_attempt'?2:'wrong';
+  run[field]=field==='repository'?{full_name:'attacker/repo'}:'wrong';
   assert.throws(()=>authenticateReleaseGateRuns(release,evidence));
+ }
+ for(const attempt of [0,-1,1.5,'2',null]){
+  const evidence=gateFixture(sourceSha);
+  evidence.workflowPayloads['deployment-audit.yml'].runs[0].run_attempt=attempt;
+  assert.throws(()=>authenticateReleaseGateRuns(release,evidence),/Gate attempt identity invalid/);
  }
  const missing=gateFixture(sourceSha);delete missing.workflowPayloads['secret-scan.yml'];assert.throws(()=>authenticateReleaseGateRuns(release,missing));
 });
