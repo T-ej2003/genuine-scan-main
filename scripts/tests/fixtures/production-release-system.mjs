@@ -142,7 +142,7 @@ import { tfFn, tfAlias, change, envelope, configuration } from './staged-broker-
 
 // Public production operations and cryptographic authorization verification, with
 // injected offline read/write transports. Package installation is cache-only.
-export async function createPublicRegistrationFixture({completedRegistration=false,currentCompletedRegistration=false,descendantCompletedRegistration=false,normalPredecessor=false,ordinaryCompletedRegistration,privateDirectory}={}) {
+export async function createPublicRegistrationFixture({completedRegistration=false,currentCompletedRegistration=false,descendantCompletedRegistration=false,normalPredecessor=false,ordinaryCompletedRegistration,privateDirectory,brokerPackageDirectory}={}) {
  const networkGuards=[mock.method(net.Socket.prototype,'connect',rejectExternalAccess),mock.method(tls,'connect',rejectExternalAccess),mock.method(globalThis,'fetch',rejectExternalAccess)];
  const restoreNetwork=()=>networkGuards.forEach(fn=>fn.mock.restore());
  let fixtureNow = new Date('2026-10-08T12:00:00.000Z');
@@ -171,7 +171,8 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
 `,{mode:0o700});
  process.env.PATH=directory+path.delimiter+oldPath;
  try {
-  const archive=path.join(directory,'broker-package.zip');
+  if(brokerPackageDirectory){assert.ok(privateDirectory&&brokerPackageDirectory.startsWith('/tmp/mscqr-production-release/'));fs.mkdirSync(brokerPackageDirectory,{recursive:true,mode:0o700});}
+  const archive=path.join(brokerPackageDirectory||directory,'broker-package.zip');
   await packageStageBBroker({outputPath:archive,toolingSha:source,toolingTreeSha256:tree,repositoryRoot:process.cwd(),npmArgs:['ci','--offline','--omit=dev','--ignore-scripts','--no-audit','--no-fund']});
   fs.mkdirSync(path.join(directory,'terraform'),{mode:0o700});
   const files={package:archive,packageManifest:archive+'.manifest.json',tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(directory,'terraform','terraform.tfstate')};

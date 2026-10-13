@@ -132,6 +132,21 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   authenticateGates:async(release,evidence)=>{assert.equal(evidence.lifecycle,lifecycle,'Gate lifecycle substitution');return authenticateReleaseGateRuns(release,evidence);},
   materializeInputs:async(release,artifacts,{phase,prepared,adopted=false})=>{
    const directory=prepareDirectory(release,phase),terraformDataDir=path.join(directory,'terraform'),files=phaseFiles(directory);
+   if(['cutover','closure'].includes(phase)&&(!prepared||prepared.brokerPackagePath)){
+    const published=phaseFiles(phaseDirectory(release.releaseId,'publication'));
+    if(prepared)assert.equal(prepared.brokerPackagePath,published.package,'Prepared cutover package path changed');
+    files.package=published.package;files.packageManifest=published.packageManifest;
+    if(phase==='cutover'&&!prepared){
+     const record=await store.readStep(release.releaseId,'publication:result');
+     assert.ok(record,'Cutover requires completed broker publication');
+     assert.equal(record.sourceSha,release.sourceSha,'Publication source changed');
+     assert.equal(record.releaseId,release.releaseId,'Publication release changed');
+     assert.equal(record.name,'publication:result','Publication step changed');
+     const publication=await store.getArtifact(record.prepared);
+     assert.equal(brokerDigest(fs.readFileSync(files.package)),publication.preparation.packageSha256,
+      'Cutover package differs from authenticated publication');
+    }
+   }
    if(adopted){assert.equal(phase,'registration');assert.equal(prepared,null);
     return {files,directory,terraformDataDir};}
    if(prepared){
@@ -147,7 +162,8 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    if(current)assert.equal(sha256(current),artifacts.authorizationRawSha256,'Existing image authorization changed');
    else writeStageBPrivateFileAtomic({filePath:authorizationFile,bytes:Buffer.from(artifacts.authorizationJson),repositoryRoot:root,label:'Release image authorization'});
    const produced=await materialize({sourceSha:release.sourceSha,imageAuthorizationPath:authorizationFile,
-    imageAuthorizationSha256:artifacts.authorizationRawSha256,outputDirectory:directory,run:awsRun});
+    imageAuthorizationSha256:artifacts.authorizationRawSha256,outputDirectory:directory,
+    ...(phase==='cutover'?{existingBrokerPackagePath:files.package}:{}),run:awsRun});
    const backendConfig=path.join(directory,'backend.hcl');generateStageBTerraformBackendConfig({outputPath:backendConfig});
    shell('terraform',[`-chdir=${terraformRoot}`,'init',`-backend-config=${backendConfig}`,'-input=false','-lockfile=readonly','-no-color'],
     {env:{...env,TF_DATA_DIR:terraformDataDir,TF_WORKSPACE:'default'}});
@@ -170,8 +186,10 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
     ? {registrationTransactionId:predecessor.registrationTransactionId,policyTransactionId:predecessor.policyTransactionId}:undefined;
    return {files,directory,terraformDataDir,planningOptions,...(predecessorReceiptRecovery?{predecessorReceiptRecovery}:{})};
   },
-  capturePreparation:(context,_phase,prepared)=>captureReleasePhaseMaterial({prepared,files:context.inputs.files,store,repositoryRoot:root})
-   .then(materializationSha256=>({...prepared,materializationSha256})),
+  capturePreparation:(context,phase,prepared)=>captureReleasePhaseMaterial({prepared,files:context.inputs.files,store,repositoryRoot:root})
+   .then(materializationSha256=>({...prepared,materializationSha256,
+    ...(['cutover','closure'].includes(phase)&&context.inputs.files.package===phaseFiles(phaseDirectory(context.release.releaseId,'publication')).package
+     ?{brokerPackagePath:context.inputs.files.package}:{})})),
   hydratePreparation:(context,_phase,prepared)=>hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,
    files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root}),
   findCompletedRegistration:async(release)=>{

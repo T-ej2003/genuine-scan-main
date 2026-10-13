@@ -93,7 +93,14 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  assert.match(prepared.materializationSha256||'',/^[a-f0-9]{64}$/);
  assert.equal(path.dirname(prepared.planPath),directory,'Saved plan escaped its immutable phase directory');
  assert.match(path.basename(prepared.planPath),/^[a-z0-9-]+\.(tfplan|json)$/);
- const terraformDataDir=path.join(directory,'terraform'),files={package:path.join(directory,'broker-package.zip'),packageManifest:path.join(directory,'broker-package.zip.manifest.json'),tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(terraformDataDir,'terraform.tfstate')};
+ const canonicalPackage=path.join(directory,'broker-package.zip');
+ const publishedPackage=path.join(HOSTED_RELEASE_ROOT,releaseId,'publication','broker-package.zip');
+ const packagePath=prepared.brokerPackagePath===undefined?canonicalPackage:prepared.brokerPackagePath;
+ if(prepared.brokerPackagePath!==undefined){
+  assert.ok(['cutover','closure'].includes(phase),'Published package path is only valid for cutover and closure');
+  assert.equal(packagePath,publishedPackage,'Prepared broker package path differs from this release publication');
+ }
+ const terraformDataDir=path.join(directory,'terraform'),files={package:packagePath,packageManifest:`${packagePath}.manifest.json`,tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(terraformDataDir,'terraform.tfstate')};
  await hydrateMaterial({reference:prepared.materializationSha256,prepared,files,planPath:prepared.planPath,store,repositoryRoot:root});
  let predecessor={};
  if(phase==='closure'){
