@@ -98,6 +98,15 @@ test('hosted release adopts an independently authenticated terminal broker closu
  assert.equal(first.closureSha256,brokerDigest(terminal));assert.equal(steps.has('BROKER_CLOSURE_CANDIDATE'),true);
  assert.equal(steps.has('registration:prepared'),false);assert.equal(steps.has('cutover:result'),false);
  assert.deepEqual(await invoke(),first);assert.equal(checks,2);
+ runtime.gateLifecycle='strict';
+ const strictInvoke=()=>runHostedReleaseCoordinator({...request,imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',lifecycle:'strict',completedBrokerClosureSourceSha:closure.sourceSha},
+  {runtimeFactory:()=>runtime});
+ const strict=await strictInvoke();assert.equal(strict.status,'PREREQUISITES_CONVERGED');
+ assert.equal(steps.has('GATES_PASSED'),true);assert.equal(steps.has('PREREQUISITES_CONVERGED'),true);
+ assert.deepEqual(await strictInvoke(),strict);
+ assert.equal(steps.has('registration:prepared'),false);assert.equal(steps.has('cutover:result'),false);
+ runtime.gateLifecycle='prerequisites';
  const saved=structuredClone(steps.get('BROKER_CLOSURE_CANDIDATE'));
  artifacts.set(saved.result,{...closure,closureSha256:'f'.repeat(64)});
  await assert.rejects(invoke,/Release artifact substitution/);

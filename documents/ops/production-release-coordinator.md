@@ -132,6 +132,28 @@ or an existing coordinator mutation phase fails closed. An absent locator keeps
 the ordinary phase sequence unchanged. This route does not replace Stage B
 approval, rotation, Release Gate or application deployment authorization.
 
+The pre-merge read-only rehearsal on 2026-10-13 exercised the public hosted
+coordinator with a mocked durable store in both prerequisite-only and strict
+gate lifecycles. Restart reauthenticated the saved closure candidate; neither
+route entered registration, IAM, publication, alias CAS or Terraform execution.
+The full coordinator suite passed 97 tests, Stage B closure 360 tests, downstream
+approval/Release Gate/initial-overlap contracts 58 tests, and deployment
+eligibility/receipt/CAS/restart contracts 70 tests. The downstream workflow
+fixture now supplies its actual checked-out `DEPLOY_SHA`, matching the hosted
+job's input contract. These are non-production fixture tests, not production
+approvals or deployment receipts.
+
+Independent read-only production readback found reviewed alias v14 and
+Terraform lineage `4e438e59-8b8b-194d-030c-5ede0c26344a`, serial 126.
+The signed terminal broker closure and all twelve ECS registrations were
+authenticated separately. After merge, reauthenticate these live identities,
+the current-source image authorization and ticket scope. The prerequisite-only
+dispatch can then adopt closure; Stage B approval and rotation remain separate
+governed transitions. A later strict Release Train dispatch requires its own
+exact-source gates and production approval before Release Gate or application
+deployment. No protected approval, Release Gate outcome, deployed image, RLS
+convergence, or Startex acceptance is established by this rehearsal.
+
 Fresh schema-3 registration remains distinct from historical receipt-bound policy
 provenance. Historical alias runtime, current IAM predecessor and fresh successor
 maps remain distinct until their authorized lifecycle transitions converge them.
