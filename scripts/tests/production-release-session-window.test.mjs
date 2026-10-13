@@ -8,6 +8,12 @@ import yaml from 'js-yaml';
 
 const action = yaml.load(fs.readFileSync('.github/actions/converge-stage-b-prerequisites/action.yml', 'utf8'));
 const train = yaml.load(fs.readFileSync('.github/workflows/release-train.yml', 'utf8'));
+const quality = yaml.load(fs.readFileSync('.github/workflows/quality-gate.yml', 'utf8'));
+
+test('required governed Stage B CI executes the OIDC renewal regression', () => {
+  const step = quality.jobs['stage-b-deployment-closure'].steps.find(value => value.name === 'Test governed current-release prerequisite ordering');
+  assert.match(step.run, /node --test [^\n]*scripts\/tests\/production-release-session-window\.test\.mjs/);
+});
 
 test('OIDC window renews before another coordinator call and rejects invalid timestamps', () => {
   const step = action.runs.steps.find(value => value.id === 'converge');

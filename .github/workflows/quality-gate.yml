@@ -230,7 +230,7 @@ jobs:
 
       - name: Test governed current-release prerequisite ordering
         run: |
-          node --test scripts/tests/release-prerequisite-order.test.mjs scripts/tests/authenticated-initial-overlap-release-routing.test.mjs scripts/tests/check-required-workflow-gates.test.mjs
+          node --test scripts/tests/release-prerequisite-order.test.mjs scripts/tests/authenticated-initial-overlap-release-routing.test.mjs scripts/tests/check-required-workflow-gates.test.mjs scripts/tests/production-release-session-window.test.mjs
           node --test --test-name-pattern='lost response: prerequisites-only|^prerequisite CI' scripts/tests/production-release-coordinator.test.mjs
 
       - name: Record Stage B image-impact evidence availability
