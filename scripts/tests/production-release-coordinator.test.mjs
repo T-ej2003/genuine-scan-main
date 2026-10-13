@@ -312,7 +312,9 @@ test('hosted cutover reuses the authenticated publication ZIP path and preserves
   assert.equal(seen,1);
   const saved={planPath:path.join(cutover,'saved.tfplan'),brokerPackagePath:packagePath};
   assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:saved})).files.package,packagePath);
+  assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'closure',prepared:saved})).files.package,packagePath);
   assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:{planPath:saved.planPath}})).files.package,path.join(cutover,'broker-package.zip'));
+  assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'closure',prepared:{planPath:saved.planPath}})).files.package,path.join(cutover,'broker-package.zip'));
   await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:{...saved,brokerPackagePath:'/tmp/substituted.zip'}}),/Prepared cutover package path changed/);
  }finally{fs.rmSync(directory,{recursive:true,force:true});}
 });

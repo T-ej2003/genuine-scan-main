@@ -132,11 +132,11 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   authenticateGates:async(release,evidence)=>{assert.equal(evidence.lifecycle,lifecycle,'Gate lifecycle substitution');return authenticateReleaseGateRuns(release,evidence);},
   materializeInputs:async(release,artifacts,{phase,prepared,adopted=false})=>{
    const directory=prepareDirectory(release,phase),terraformDataDir=path.join(directory,'terraform'),files=phaseFiles(directory);
-   if(phase==='cutover'&&(!prepared||prepared.brokerPackagePath)){
+   if(['cutover','closure'].includes(phase)&&(!prepared||prepared.brokerPackagePath)){
     const published=phaseFiles(phaseDirectory(release.releaseId,'publication'));
     if(prepared)assert.equal(prepared.brokerPackagePath,published.package,'Prepared cutover package path changed');
     files.package=published.package;files.packageManifest=published.packageManifest;
-    if(!prepared){
+    if(phase==='cutover'&&!prepared){
      const record=await store.readStep(release.releaseId,'publication:result');
      assert.ok(record,'Cutover requires completed broker publication');
      assert.equal(record.sourceSha,release.sourceSha,'Publication source changed');
@@ -188,7 +188,8 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   },
   capturePreparation:(context,phase,prepared)=>captureReleasePhaseMaterial({prepared,files:context.inputs.files,store,repositoryRoot:root})
    .then(materializationSha256=>({...prepared,materializationSha256,
-    ...(phase==='cutover'?{brokerPackagePath:context.inputs.files.package}:{})})),
+    ...(['cutover','closure'].includes(phase)&&context.inputs.files.package===phaseFiles(phaseDirectory(context.release.releaseId,'publication')).package
+     ?{brokerPackagePath:context.inputs.files.package}:{})})),
   hydratePreparation:(context,_phase,prepared)=>hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,
    files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root}),
   findCompletedRegistration:async(release)=>{
