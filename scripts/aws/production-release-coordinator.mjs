@@ -8,7 +8,6 @@ import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
-export {createReleaseCoordinatorStore};
 import {ensureStageBPrivateDirectory,assertStageBPrivateFile,writeStageBPrivateFileAtomic} from './stage-b-artifact-contract.mjs';
 import {stagedBrokerArtifactSet} from './stage-b-staged-broker-executor.mjs';
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
@@ -19,7 +18,17 @@ import {unpackReleaseEvidenceTransport} from './production-release-dispatch-cont
 import {verifyProductionReleaseImageAuthorization} from './verify-production-release-image-authorization.mjs';
 import {verifyImageEvidenceSignature} from './production-green-stage-b-image-evidence.mjs';
 import {parseAuthenticatedStateBytes,stageAStateSemanticSha256} from './generate-production-green-stage-a-prerequisites.mjs';
+export {createReleaseCoordinatorStore};
 export const HOSTED_RELEASE_ROOT='/tmp/mscqr-production-release';
+
+// The release ID separates a successor operation from the ordinary Release
+// Train START while retaining the same change ticket and immutable history.
+export function successorReleaseStartKey({sourceSha,ticketId,releaseId}) {
+ assert.match(sourceSha||'',/^[a-f0-9]{40}$/);
+ assert.match(ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+ assert.match(releaseId||'',/^[a-f0-9]{64}$/);
+ return {sourceSha,ticketId,releaseId};
+}
 
 export function authenticateReleaseGateRuns(release,evidence) {
  assert.equal(evidence.sourceSha,release.sourceSha,'Gate source substitution');

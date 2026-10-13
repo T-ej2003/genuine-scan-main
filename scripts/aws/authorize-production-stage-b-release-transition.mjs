@@ -7,7 +7,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {authenticateFailedReleaseTransitionAttempt,createReleaseCoordinatorStore,hydrateReleasePhaseMaterial,HOSTED_RELEASE_ROOT,
- releaseTransitionDispatchInputs} from './production-release-coordinator.mjs';
+ releaseTransitionDispatchInputs,successorReleaseStartKey} from './production-release-coordinator.mjs';
 import {brokerDigest,brokerExecutionCheckout,prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
 import {PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
@@ -29,7 +29,9 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  assert.equal(env.RELEASE_ID,releaseId);assert.equal(env.RELEASE_PHASE,phase);assert.equal(env.RELEASE_PREPARATION_REFERENCE,preparationReference);assert.equal(env.RELEASE_AUTHORIZATION_ROUND,String(authorizationRound));
  const directory=path.join(HOSTED_RELEASE_ROOT,releaseId,phase==='closure'?'cutover':phase);
  ensureStageBPrivateDirectory({directory,repositoryRoot:root,create:true});
- const store=createStore({run,directory,repositoryRoot:root}),start=store.readStart({sourceSha,ticketId});assert.ok(start,'Missing governed release start');
+ const store=createStore({run,directory,repositoryRoot:root});
+ const start=store.readStart(successorReleaseStartKey({sourceSha,ticketId,releaseId}))||store.readStart({sourceSha,ticketId});
+ assert.ok(start,'Missing governed release start');
  const release=store.getArtifact(start.release),{releaseId:originalId,...identity}=release;
  assert.equal(originalId,releaseId);assert.equal(identity.ticketId,ticketId);assert.equal(identity.sourceSha,sourceSha);assert.equal(brokerDigest(identity),releaseId);
  const successor=Boolean(start.recovery);
