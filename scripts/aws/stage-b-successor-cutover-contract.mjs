@@ -28,13 +28,25 @@ function normalizeRepresentation(state) {
   return copy;
 }
 
-// Only the reviewed v13 publication snapshots and their exact instance set may use this recovery allowance.
-const reviewedPublicationLifecycle = Object.freeze({
+// Only these exact reviewed publication snapshots may omit Terraform's propagated lifecycle markers.
+const reviewedPublicationLifecycles = Object.freeze([Object.freeze({
   historicalStateSha256: '747d0e50cf0a4ace40bce60bd75e997be9631539fd38af0381afe043c49da3d4',
   currentStateSha256: 'fd34c9d740a9d1335d2b54bc892fc99b210f793bd7379cf9cd7681b382d20c96',
   publicationResultSha256: 'dfd1382bc16d3c786b64b1f7a7c0465d860c13cf9b4301309e409a95e655ff5b',
   removedInstancesSha256: '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec',
-});
+}), Object.freeze({
+  historicalStateSha256: 'f57ed870a744639d4a51744d614fcf57db17c37c03ffdf43f847d8046fc93daa',
+  currentStateSha256: '7a26d89ef35427227eb76f31c0a581974a3bc71e4a0b52c668193cc4392cc8ce',
+  publicationResultSha256: 'e71190e02451ccd687b449104eca344eba69282c0b841cdf2d291bafcb0940dc',
+  removedInstancesSha256: '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec',
+})]);
+
+export function reviewedPublicationLifecycleFor(historicalStateSha256, currentStateSha256, publicationResultSha256) {
+  return reviewedPublicationLifecycles.find(reviewed =>
+    reviewed.historicalStateSha256 === historicalStateSha256 &&
+    reviewed.currentStateSha256 === currentStateSha256 &&
+    reviewed.publicationResultSha256 === publicationResultSha256) || null;
+}
 
 export function reconcileReviewedLifecycleMetadata(before, after, rawCurrent, expectedInstancesSha256) {
   const removed = [];
@@ -74,10 +86,9 @@ export function authenticateSuccessorStateHistory({ historicalBytes, currentByte
   assert.equal(after.qualified_arn, publicationResult.target.versionArn, 'Current Terraform broker ARN differs from publication');
   const allowedBrokerFields = new Set(['version', 'code_sha256', 'source_code_hash', 'source_code_size', 'environment', 'filename', 'last_modified', 'qualified_arn', 'qualified_invoke_arn']);
   const normalizedBefore = normalizeRepresentation(historical), normalizedAfter = normalizeRepresentation(current);
-  if (sha256(historicalBytes) === reviewedPublicationLifecycle.historicalStateSha256 &&
-      sha256(currentBytes) === reviewedPublicationLifecycle.currentStateSha256 &&
-      brokerDigest(publicationResult) === reviewedPublicationLifecycle.publicationResultSha256)
-    reconcileReviewedLifecycleMetadata(normalizedBefore, normalizedAfter, current, reviewedPublicationLifecycle.removedInstancesSha256);
+  const reviewedLifecycle = reviewedPublicationLifecycleFor(sha256(historicalBytes), sha256(currentBytes), brokerDigest(publicationResult));
+  if (reviewedLifecycle)
+    reconcileReviewedLifecycleMetadata(normalizedBefore, normalizedAfter, current, reviewedLifecycle.removedInstancesSha256);
   const oldAttributes = brokerInstance(normalizedBefore), newAttributes = brokerInstance(normalizedAfter);
   for (const field of allowedBrokerFields) { delete oldAttributes[field]; delete newAttributes[field]; }
   const brokerCheck = state => (state.check_results || []).find(item => item.object_kind === 'resource' && item.config_addr === BROKER_FUNCTION);
