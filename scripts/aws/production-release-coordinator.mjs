@@ -145,8 +145,9 @@ export async function captureReleasePhaseMaterial({prepared,files,store,reposito
  const p=prepared.preparation;assertBrokerPreparation(p);assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p,p.successorReconciliation?p.sourceSha:undefined),p.artifactSetSha256);
  const successorFiles=p.successorReconciliation?Object.fromEntries(['historicalStatePath','currentStatePath','bindingReportPath','imageEvidencePath','imageSignaturePath']
   .map(name=>[name,p.successorReconciliation[name]])):{};
+ const outputFiles=p.outputReconciliation?{bindingReportPath:p.outputReconciliation.bindingReportPath,refreshReportPath:p.outputReconciliation.refreshReportPath}:{};
  const stageAFiles=successorStageAFiles(p,files);
- const materialFiles={...files,plan:prepared.planPath,...successorFiles,...stageAFiles};
+ const materialFiles={...files,plan:prepared.planPath,...successorFiles,...outputFiles,...stageAFiles};
  assert.equal(new Set(Object.values(materialFiles)).size,Object.keys(materialFiles).length,'Phase material paths overlap');
  if(p.successorReconciliation){
   for(const filePath of [successorFiles.bindingReportPath,...Object.values(stageAFiles)])
@@ -161,6 +162,7 @@ export async function captureReleasePhaseMaterial({prepared,files,store,reposito
   const artifact={kind:'PRODUCTION_RELEASE_BINARY',sha256:brokerDigest(bytes),base64:bytes.toString('base64')},reference=brokerDigest(artifact);
   if(name==='plan')assert.equal(artifact.sha256,p.savedPlanSha256);
   if(name in successorFiles)assert.equal(artifact.sha256,p.successorReconciliation[name.replace(/Path$/,'Sha256')],`Successor ${name} changed before capture`);
+  if(name in outputFiles)assert.equal(artifact.sha256,p.outputReconciliation[name.replace(/Path$/,'Sha256')],`Output reconciliation ${name} changed before capture`);
   await store.putArtifact(reference,artifact);members[name]={sha256:artifact.sha256,reference};
  }
  const capsule={kind:'PRODUCTION_RELEASE_PHASE_MATERIAL',sourceSha:p.sourceSha,preparationSha256:brokerDigest(p),members};
@@ -175,8 +177,9 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
  assert.deepEqual(Object.keys(files).sort(),['backendMetadata','package','packageManifest','tfvars']);
  const successorFiles=p.successorReconciliation?Object.fromEntries(['historicalStatePath','currentStatePath','bindingReportPath','imageEvidencePath','imageSignaturePath']
   .map(name=>[name,p.successorReconciliation[name]])):{};
+ const outputFiles=p.outputReconciliation?{bindingReportPath:p.outputReconciliation.bindingReportPath,refreshReportPath:p.outputReconciliation.refreshReportPath}:{};
  const stageAFiles=successorStageAFiles(p,files);
- const materialFiles={...files,plan:planPath,...successorFiles,...stageAFiles};
+ const materialFiles={...files,plan:planPath,...successorFiles,...outputFiles,...stageAFiles};
  assert.equal(new Set(Object.values(materialFiles)).size,Object.keys(materialFiles).length,'Phase material paths overlap');
  assert.deepEqual(Object.keys(capsule.members).sort(),Object.keys(materialFiles).sort());
  const contents={};
@@ -191,6 +194,7 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
  assert.equal(brokerDigest(Object.fromEntries(Object.keys(files).map(name=>[name,brokerDigest(contents[name])]))),p.artifactSetSha256);
  assert.equal(brokerDigest(contents.plan),p.savedPlanSha256);
  for(const name of Object.keys(successorFiles))assert.equal(brokerDigest(contents[name]),p.successorReconciliation[name.replace(/Path$/,'Sha256')],`Successor ${name} differs from preparation`);
+ for(const name of Object.keys(outputFiles))assert.equal(brokerDigest(contents[name]),p.outputReconciliation[name.replace(/Path$/,'Sha256')],`Output reconciliation ${name} differs from preparation`);
  if(p.successorReconciliation)assertSuccessorStageABinding(contents.bindingReportPath,stageAFiles,contents.stageAInput,contents.stageAStateBackup);
  // Validate the complete content binding before writing even one local member.
  for(const [name,filePath] of Object.entries(materialFiles)){

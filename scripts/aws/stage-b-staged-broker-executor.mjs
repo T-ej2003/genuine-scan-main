@@ -244,6 +244,15 @@ export function stagedBrokerArtifactSet(files, root, preparation, historicalSour
   return brokerDigest(hashes);
 }
 
+export function assertBrokerOutputTransition(files, root, cutover, publication, binding) {
+  assert.equal(brokerDigest(publication), cutover.publication.preparationSha256);
+  assert.equal(brokerDigest(fs.readFileSync(files.package)), publication.packageSha256);
+  assert.equal(stagedBrokerArtifactSet(files, root, cutover), cutover.artifactSetSha256);
+  equal({ lineage: binding.stateLineage, serial: binding.stateSerial, stateSha256: binding.stateBackupSha256 }, cutover.state);
+  assert.equal(cutover.state.lineage, publication.state.lineage);
+  assert.ok(cutover.state.serial > publication.state.serial);
+}
+
 export function assertAuthenticatedHistoricalBrokerPrerequisiteSource(options) {
   assert.deepEqual(Object.keys(options).sort(), ['currentCheckout', 'isAncestor', 'phase', 'preparation', 'preparationSha256']);
   const { preparation, preparationSha256, currentCheckout, isAncestor, phase } = options;
@@ -1037,18 +1046,15 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       const evidence = p.outputReconciliation; assertBrokerOutputReconciliation(evidence, p);
       const source = readStagedBrokerSourceAuthority({ run: runAws, sourceSha: p.sourceSha, directory });
       await adapter.authenticatePublicationResult(p.publication, p.publication.authorizationSha256);
-      assert.equal(stagedBrokerArtifactSet(files, root, source.preparation), source.preparation.artifactSetSha256);
       const binding = assertStageBTfvarsBinding({ tfvarsPath: files.tfvars, bindingReportPath: evidence.bindingReportPath,
         bindingReportSha256: evidence.bindingReportSha256, expectedToolingSha: p.sourceSha, expectedToolingTreeSha256: p.treeSha256 });
-      equal({ lineage: binding.stateLineage, serial: binding.stateSerial, stateSha256: binding.stateBackupSha256 }, source.preparation.state);
+      assertBrokerOutputTransition(files, root, p, source.preparation, binding);
       const report = assertStageBRefreshEvidence({ refreshReportPath: evidence.refreshReportPath, refreshReportSha256: evidence.refreshReportSha256,
         bindingReport: binding, bindingReportSha256: evidence.bindingReportSha256, expectedToolingSha: p.sourceSha,
-        expectedToolingTreeSha256: p.treeSha256, expectedStateSha256: source.preparation.state.stateSha256,
+        expectedToolingTreeSha256: p.treeSha256, expectedStateSha256: p.state.stateSha256,
         expectedBackendMetadataSha256: brokerDigest(fs.readFileSync(files.backendMetadata)), expectedTerraformDataDir: terraformDataDir });
       assert.equal(report.status, 'REVIEWED_OUTPUT_RECONCILIATION');
       equal(evidence.outputChanges, report.outputChanges.map(({ name, before, after }) => ({ name, before, after })));
-      assert.equal(p.state.lineage, source.preparation.state.lineage);
-      assert.ok(p.state.serial > source.preparation.state.serial);
     },
     createSuccessorReconciliation: async (p, paths) => {
       assert.deepEqual(Object.keys(paths).sort(), ['bindingReportPath', 'currentStatePath', 'historicalStatePath', 'imageEvidencePath', 'imageSignaturePath']);

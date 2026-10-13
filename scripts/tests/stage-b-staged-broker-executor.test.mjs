@@ -10,7 +10,8 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, assertBrokerOutputTransition, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
+import { captureReleasePhaseMaterial, hydrateReleasePhaseMaterial } from '../aws/production-release-coordinator.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -105,6 +106,66 @@ async function reserve(r) {
   await r.adapter.reserve(id, { purpose: r.p.purpose, nonce: r.auth.nonce, preparationSha256: brokerDigest(r.p) });
   await r.adapter.record(id, 'CUTOVER_INTENT', { predecessor: r.p.alias, target: r.p.target, authorizedAt: new Date().toISOString() });
 }
+test('post-publication output reconciliation binds new state inputs without relabeling the published artifact set', async () => {
+  const r = await native();
+  const publication = JSON.parse(r.objects.get(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)))).preparation;
+  const originalTfvars = fs.readFileSync(files.tfvars);
+  const originalPackage = fs.readFileSync(files.package);
+  try {
+    fs.writeFileSync(files.tfvars, 'state-bound cutover inputs after publication', { mode: 0o600 });
+    r.p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, r.p);
+    r.p.state = { ...publication.state, serial: publication.state.serial + 1, stateSha256: '1'.repeat(64) };
+    const binding = { stateLineage: r.p.state.lineage, stateSerial: r.p.state.serial, stateBackupSha256: r.p.state.stateSha256 };
+    assert.notEqual(r.p.artifactSetSha256, publication.artifactSetSha256);
+    assert.doesNotThrow(() => assertBrokerOutputTransition(files, root, r.p, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, artifactSetSha256: publication.artifactSetSha256 }, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, publication: { ...r.p.publication, preparationSha256: '0'.repeat(64) } }, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, { ...publication, packageSha256: '0'.repeat(64) }, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, publication, { ...binding, stateSerial: publication.state.serial }));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, state: publication.state }, publication, { ...binding, stateSerial: publication.state.serial, stateBackupSha256: publication.state.stateSha256 }));
+    fs.writeFileSync(files.package, Buffer.from('substituted package'));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, publication, binding));
+  } finally {
+    fs.writeFileSync(files.tfvars, originalTfvars);
+    fs.writeFileSync(files.package, originalPackage);
+  }
+});
+test('hosted runner restart restores exact output-reconciliation reports before cutover', async () => {
+  const r = await native(), directory = path.dirname(files.tfvars);
+  const bindingReportPath = path.join(directory, 'output-binding.json');
+  const refreshReportPath = path.join(directory, 'output-refresh.json');
+  const bindingBytes = Buffer.from('{"binding":"authenticated"}');
+  const refreshBytes = Buffer.from('{"refresh":"authenticated"}');
+  fs.writeFileSync(bindingReportPath, bindingBytes, { mode: 0o600 });
+  fs.writeFileSync(refreshReportPath, refreshBytes, { mode: 0o600 });
+  r.p.savedPlanSha256 = brokerDigest(r.binary);
+  r.p.outputReconciliation = {
+    sourceSha: r.p.sourceSha, publicationResultSha256: brokerDigest(r.p.publication),
+    targetSha256: brokerDigest(r.p.target), state: r.p.state,
+    bindingReportPath, bindingReportSha256: brokerDigest(bindingBytes),
+    refreshReportPath, refreshReportSha256: brokerDigest(refreshBytes),
+    outputChanges: [{ name: 'broker_binding', before: 'old', after: 'new' }]
+  };
+  const prepared = { preparation: r.p, planPath: path.join(directory, 'saved-CUTOVER.tfplan') };
+  const artifacts = new Map();
+  const store = { putArtifact: async (key, value) => { artifacts.set(key, structuredClone(value)); },
+    getArtifact: async key => structuredClone(artifacts.get(key)) };
+  try {
+    const reference = await captureReleasePhaseMaterial({ prepared, files, store, repositoryRoot: root });
+    const capsule = artifacts.get(reference);
+    assert.ok(capsule.members.bindingReportPath && capsule.members.refreshReportPath);
+    fs.rmSync(bindingReportPath); fs.rmSync(refreshReportPath);
+    await hydrateReleasePhaseMaterial({ reference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root });
+    assert.deepEqual(fs.readFileSync(bindingReportPath), bindingBytes);
+    assert.deepEqual(fs.readFileSync(refreshReportPath), refreshBytes);
+    assert.equal(fs.statSync(bindingReportPath).mode & 0o777, 0o600);
+    const tampered = structuredClone(capsule); tampered.members.refreshReportPath.sha256 = '0'.repeat(64);
+    const tamperedReference = brokerDigest(tampered); artifacts.set(tamperedReference, tampered);
+    await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: tamperedReference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root }));
+  } finally {
+    fs.rmSync(bindingReportPath, { force: true }); fs.rmSync(refreshReportPath, { force: true });
+  }
+});
 test('native reservation resumes only exact pre-intent bytes',async()=>{
  const r=await native('CUTOVER'),id=brokerDigest(r.auth),value={purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)};
  await r.adapter.reserve(id,value);
