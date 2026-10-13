@@ -280,7 +280,42 @@ import {brokerAuthorizationMessage} from '../aws/stage-b-staged-broker-authoriza
 import {readBrokerProtectedEnvironmentApproval,readBrokerProtectedEnvironmentAuthorization,verifyBrokerProtectedEnvironmentAuthorization} from '../aws/stage-b-staged-broker-authorization.mjs';
 import {PRODUCTION_ENVIRONMENT_APPROVAL,createProductionEnvironmentApprovalEvidence} from '../aws/production-github-environment-approval.mjs';
 import JSZip from 'jszip';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+
+test('hosted cutover reuses the authenticated publication ZIP path and preserves saved preparations',async()=>{
+ const releaseId=createHash('sha256').update(randomUUID()).digest('hex'),directory=path.join(HOSTED_RELEASE_ROOT,releaseId),publication=path.join(directory,'publication'),cutover=path.join(directory,'cutover');
+ const packagePath=path.join(publication,'broker-package.zip'),bytes=Buffer.from('published broker fixture');
+ fs.mkdirSync(publication,{recursive:true,mode:0o700});fs.mkdirSync(path.join(cutover,'terraform'),{recursive:true,mode:0o700});
+ fs.writeFileSync(packagePath,bytes,{mode:0o600});fs.writeFileSync(`${packagePath}.manifest.json`,'{}',{mode:0o600});
+ fs.writeFileSync(path.join(cutover,'terraform','terraform.tfstate'),'{}',{mode:0o600});
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'2',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp'};
+ const record={releaseId,sourceSha,name:'publication:result',prepared:'e'.repeat(64)};
+ const preparation={preparation:{packageSha256:brokerDigest(bytes)}};
+ let savedRecord=record,seen=0;
+ const runtime=createHostedReleaseRuntime({sourceSha,ticketId:'CHG-test',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,
+  createStore:()=>({readStep:async()=>savedRecord,getArtifact:async()=>preparation}),verifyAuthorization:async()=>true,
+  materialize:()=>{seen++;throw new Error('MATERIALIZER_REACHED');}});
+ const release={releaseId,sourceSha},authorizationJson='{}',artifacts={authorizationJson,authorizationRawSha256:createHash('sha256').update(authorizationJson).digest('hex')};
+ try{
+  await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:null}),/MATERIALIZER_REACHED/);
+  assert.equal(seen,1);
+  savedRecord=null;
+  await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:null}),/Cutover requires completed broker publication/);
+  savedRecord={...record,sourceSha:'f'.repeat(40)};
+  await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:null}),/Publication source changed/);
+  savedRecord=record;
+  fs.writeFileSync(packagePath,'substituted',{mode:0o600});
+  await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:null}),/Cutover package differs from authenticated publication/);
+  assert.equal(seen,1);
+  const saved={planPath:path.join(cutover,'saved.tfplan'),brokerPackagePath:packagePath};
+  assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:saved})).files.package,packagePath);
+  assert.equal((await runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:{planPath:saved.planPath}})).files.package,path.join(cutover,'broker-package.zip'));
+  await assert.rejects(()=>runtime.materializeInputs(release,artifacts,{phase:'cutover',prepared:{...saved,brokerPackagePath:'/tmp/substituted.zip'}}),/Prepared cutover package path changed/);
+ }finally{fs.rmSync(directory,{recursive:true,force:true});}
+});
 import {readZipCentralDirectory} from '../aws/package-production-green-stage-b-broker.mjs';
 import {adoptRegisteredOutputs} from '../aws/stage-b-release-prerequisites.mjs';
 import {authorizeReleaseTransition} from '../aws/authorize-production-stage-b-release-transition.mjs';

@@ -8,7 +8,7 @@ import test from "node:test";
 import JSZip from "jszip";
 import { generateStageAPrerequisites, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
-import { produceStageBPrerequisiteBundle } from "../aws/produce-production-green-stage-b-prerequisite-bundle.mjs";
+import { materializeStageBPrerequisiteFiles, produceStageBPrerequisiteBundle } from "../aws/produce-production-green-stage-b-prerequisite-bundle.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
@@ -49,6 +49,33 @@ test("one producer bundle authenticates realistic payloads and private relocatio
   assert.equal(fs.statSync(materialized.privateRoot).mode & 0o777, 0o700); assert.equal(fs.statSync(materialized.paths["broker-package"]).mode & 0o777, 0o600);
   const runtime = writeStageBRuntimeMaterialization({ prerequisite: materialized });
   assert.equal(runtime.materialization.relocatableFields.length, 4); assert.equal(path.basename(runtime.runtimeTfvarsPath), "stage-b.tfvars"); assert.match(fs.readFileSync(runtime.runtimeTfvarsPath, "utf8"), /consumer/); assert.throws(() => writeStageBRuntimeMaterialization({ prerequisite: materialized, outputDirectory: "/tmp/caller-chosen" }));
+});
+
+test("cutover input materialization keeps the published broker path without repackaging", async () => {
+  const f = await fixture(); const outputDirectory = path.join(f.directory, "cutover");
+  const authorizationPath = path.join(f.directory, "image-authorization.json");
+  const authorizationBytes = Buffer.from(`${JSON.stringify({ imageEvidence: { publicationIdentity: { imageReleaseSha: sourceSha }, workflowRunId: "456", canonicalArtifactSha256: "c".repeat(64) }, imageEvidenceSignature: {} })}\n`);
+  fs.writeFileSync(authorizationPath, authorizationBytes, { mode: 0o600 });
+  const readOnlyRun = args => {
+    if (args[0] === "s3api" && args[1] === "get-object") {
+      fs.copyFileSync(f.statePath, args[args.indexOf("--expected-bucket-owner") + 2]); return "{}";
+    }
+    return run(args);
+  };
+  let generatedPath;
+  const options = { sourceSha, imageAuthorizationPath: authorizationPath,
+    imageAuthorizationSha256: crypto.createHash("sha256").update(authorizationBytes).digest("hex"), outputDirectory,
+    existingBrokerPackagePath: f.broker.package.path, run: readOnlyRun, deriveToolingTree: () => toolingTreeSha256,
+    verifyAuthorization: () => true, verifyImageEvidence: () => true,
+    packageBroker: () => assert.fail("Completed publication must not be repackaged"),
+    generateTfvars: ({ brokerPackagePath }) => { generatedPath = brokerPackagePath; } };
+  const original = fs.readFileSync(f.broker.package.path);
+  const result = await materializeStageBPrerequisiteFiles(options);
+  assert.equal(result.brokerPackagePath, f.broker.package.path);
+  assert.equal(generatedPath, f.broker.package.path);
+  assert.deepEqual(fs.readFileSync(f.broker.package.path), original);
+  fs.rmSync(f.broker.manifest.path);
+  await assert.rejects(() => materializeStageBPrerequisiteFiles({ ...options, outputDirectory: path.join(f.directory, "missing-manifest") }), /Published broker package/);
 });
 
 test("different preparation and execution roots preserve semantic relocation identity", async () => {
