@@ -107,6 +107,31 @@ establish which writer performed it.
 
 ## Evidence and recovery contract
 
+### Adopting an independently completed broker closure
+
+If a separately governed successor operation finishes publication, alias CAS and
+Terraform reconciliation while Release Train is paused, dispatch Release Train
+with `completed_broker_closure_source_sha` set to that operation's **original
+release SHA**. This is an evidence locator, not authorization. The hosted
+coordinator reads the immutable terminal handoff and uses the existing signed
+closure verifier to authenticate the original publication, both protected
+approvals, live Lambda alias/version, IAM prerequisites, Terraform state and
+the current protected-main tooling ancestry. It also authenticates the
+completed registration receipt, all 12 live ECS definitions and the exact task
+map shared by the closure. It checks all 12 registered task bindings in the
+exact authenticated Terraform state bytes. The current release retains its own source, image
+authorization, change ticket, component baseline and required CI gates.
+
+Only then does the coordinator persist `BROKER_CLOSURE_CANDIDATE` and its normal
+terminal prerequisite summary in the encrypted evidence store. These are new
+write-once audit records, not broker, IAM, ECS or Terraform operations. It does
+not enter registration, pruning, policy,
+publication, cutover or closure execution. A restart reauthenticates the saved
+candidate against live state; a different source input, changed receipt, drift,
+or an existing coordinator mutation phase fails closed. An absent locator keeps
+the ordinary phase sequence unchanged. This route does not replace Stage B
+approval, rotation, Release Gate or application deployment authorization.
+
 Fresh schema-3 registration remains distinct from historical receipt-bound policy
 provenance. Historical alias runtime, current IAM predecessor and fresh successor
 maps remain distinct until their authorized lifecycle transitions converge them.
