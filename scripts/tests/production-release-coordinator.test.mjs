@@ -322,6 +322,43 @@ import {readZipCentralDirectory} from '../aws/package-production-green-stage-b-b
 import {adoptRegisteredOutputs} from '../aws/stage-b-release-prerequisites.mjs';
 import {authorizeReleaseTransition} from '../aws/authorize-production-stage-b-release-transition.mjs';
 
+test('approval runner binds published package paths and rejects substitution while preserving legacy cutover',async()=>{
+ const source=prepublicationPredecessorFixture().f.release.sourceSha;
+ const release=createReleaseIdentity({sourceSha:source,ticketId:'current-release',baseline,changedFiles:[]});
+ const directory=path.join(HOSTED_RELEASE_ROOT,release.releaseId,'cutover');
+ const published=path.join(HOSTED_RELEASE_ROOT,release.releaseId,'publication','broker-package.zip');
+ fs.mkdirSync(directory,{recursive:true,mode:0o700});
+ const f=await createPublicRegistrationFixture({privateDirectory:directory});
+ try{
+  const original=await f.run({...f.initialRequest,operation:'prepare-registration'}),store=f.coordinatorStore;
+  const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+   GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
+   GITHUB_RUN_ID:'700',GITHUB_SHA:source,RUNNER_TEMP:'/tmp',RELEASE_ID:release.releaseId,RELEASE_PHASE:'cutover',RELEASE_AUTHORIZATION_ROUND:'0'};
+  store.putArtifact(brokerDigest(release),release);
+  store.writeStart({sourceSha:source,ticketId:release.ticketId},{release:brokerDigest(release),baseline:brokerDigest(baseline)});
+  const request={sourceSha:source,ticketId:release.ticketId,releaseId:release.releaseId,phase:'cutover',authorizationRound:0,
+   output:path.join(directory,'authorization.json')};
+  let hydrated,record;
+  const dependencies={env,run:rejectExternalAccess,createStore:()=>({readStart:store.readStart.bind(store),getArtifact:store.getArtifact.bind(store),
+   readStep:(_id,name)=>name==='cutover:prepared'?record:null}),hydrateMaterial:async ({files})=>{
+   hydrated=files;throw new Error('HYDRATION_BOUNDARY');}};
+  const attempt=async marker=>{
+   const prepared={...original,materializationSha256:'a'.repeat(64),...(marker===undefined?{}:{brokerPackagePath:marker})};
+   const reference=brokerDigest(prepared);store.putArtifact(reference,prepared);
+   record={releaseId:release.releaseId,sourceSha:source,name:'cutover:prepared',result:reference};
+   env.RELEASE_PREPARATION_REFERENCE=reference;request.preparationReference=reference;
+   hydrated=undefined;return authorizeReleaseTransition(request,dependencies);
+  };
+  await assert.rejects(()=>attempt(published),/HYDRATION_BOUNDARY/);
+  assert.equal(hydrated.package,published);assert.equal(hydrated.packageManifest,`${published}.manifest.json`);
+  for(const marker of ['/tmp/substituted.zip',path.join(HOSTED_RELEASE_ROOT,'f'.repeat(64),'publication','broker-package.zip'),null]){
+   await assert.rejects(()=>attempt(marker),/Prepared broker package path differs/);assert.equal(hydrated,undefined);
+  }
+  await assert.rejects(()=>attempt(undefined),/HYDRATION_BOUNDARY/);
+  assert.equal(hydrated.package,path.join(directory,'broker-package.zip'));
+ }finally{f.dispose();fs.rmSync(path.join(HOSTED_RELEASE_ROOT,release.releaseId),{recursive:true,force:true});}
+});
+
 function hostedApprovalTransport(sourceSha,now,runId){
  const repository=PRODUCTION_ENVIRONMENT_APPROVAL.repository;
  const environment={id:7,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]};
@@ -641,7 +678,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
  const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
   ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
  const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:['adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy','full-capacity-second-plan-change'].includes(lostResponse),descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
-  ...(hostedClosureRelease?{privateDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'cutover')}:{})});
+  ...(hostedClosureRelease?{privateDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'cutover'),brokerPackageDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'publication')}:{})});
  if(lostResponse==='no-prune-policy-lost')f.changeLiveInventory(xs=>xs.filter(v=>v.VersionId!=='v9'));
  const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls,priorApplyCalls=f.snapshot().registrationApplyCalls;
  const steps=new Map(),calls=[],materializedPruningPhases=new Set();let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy',noOpPolicyIdentityChanged=false,policyPlanCalls=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
@@ -686,7 +723,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   capturePreparation:async(context,name,prepared)=>{
    if(lostResponse==='full-capacity-noop-policy'&&name==='policy')return prepared;
    const materializationSha256=await captureReleasePhaseMaterial({prepared,files:f.files,store:f.coordinatorStore,repositoryRoot:process.cwd()});
-   return {...prepared,materializationSha256};
+   return {...prepared,materializationSha256,...(hostedClosureRelease&&['cutover','closure'].includes(name)?{brokerPackagePath:f.files.package}:{})};
   },
   hydratePreparation:async(context,name,prepared)=>{
    if(lostResponse==='full-capacity-noop-policy'&&name==='policy')return;
@@ -776,9 +813,14 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
     const transport=hostedApprovalTransport(f.source,f.now,context.pendingApproval?Number(context.pendingApproval.runId):900+hostedVerifiers.size);
     const operation={registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'}[phase];
     const approvalContext={releaseId:context.release.releaseId,phase,preparationReference:digest,authorizationRound:context.authorizationRound};
-    const authorization=lostResponse===null&&phase==='closure'
+    const authorization=lostResponse===null&&['cutover','closure'].includes(phase)
      ?await (async()=>{
-      const output=path.join(HOSTED_RELEASE_ROOT,context.release.releaseId,'closure','authorization.json');
+      for(const file of [f.files.package,f.files.packageManifest,f.files.tfvars,f.files.backendMetadata,prepared.planPath]){
+       assert.ok(file.startsWith(path.join(HOSTED_RELEASE_ROOT,context.release.releaseId)+path.sep));
+       fs.rmSync(file);
+      }
+      assert.equal(fs.existsSync(f.files.package),false,'Approval must hydrate the published ZIP on a fresh runner');
+      const output=path.join(HOSTED_RELEASE_ROOT,context.release.releaseId,phase,'authorization.json');
       fs.mkdirSync(path.dirname(output),{recursive:true,mode:0o700});
       const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
        GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
@@ -786,7 +828,12 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
        RELEASE_PHASE:phase,RELEASE_PREPARATION_REFERENCE:digest,RELEASE_AUTHORIZATION_ROUND:String(context.authorizationRound)};
       const signed=await authorizeReleaseTransition({sourceSha:f.source,ticketId:context.release.ticketId,...approvalContext,output},
        {env,run:rejectExternalAccess,createStore:()=>f.coordinatorStore,
-        runRequest:r=>f.run(r,{readProtectedApproval:async()=>({approval:transport.approval,release:approvalContext})})});
+        runRequest:r=>{
+         assert.equal(r.files.package,f.files.package);
+         assert.equal(fs.existsSync(r.files.package),true,'Approval hydrated the publication ZIP');
+         if(phase==='closure')assert.equal(f.snapshot().aliasCalls,1,'Closure follows the completed CAS');
+         return f.run(r,{readProtectedApproval:async()=>({approval:transport.approval,release:approvalContext})});
+        }});
       assert.equal(signed.authorizationPath,output);return JSON.parse(fs.readFileSync(output,'utf8'));
      })()
      :await f.run({operation,preparation:prepared.preparation,planPath:prepared.planPath,...predecessor},
