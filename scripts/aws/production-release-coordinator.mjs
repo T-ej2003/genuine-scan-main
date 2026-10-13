@@ -344,6 +344,30 @@ export async function runReleaseCoordinator(request, runtime) {
  });
  await runtime.authenticateGates(release, gates);
  const completedRegistration = await once('REGISTRATION_CANDIDATE', () => runtime.findCompletedRegistration(release));
+ // A separately governed successor may have completed the exact broker
+ // publication, alias CAS and state reconciliation while this release waited.
+ // Adopt only its authenticated terminal proof; never enter the mutation phases.
+ const savedClosure = await readStep('BROKER_CLOSURE_CANDIDATE');
+ const completedClosure = savedClosure ? await get(savedClosure.result)
+  : await runtime.findCompletedBrokerClosure?.(release, completedRegistration);
+ if (completedClosure) {
+  assert.ok(completedRegistration, 'Completed broker closure requires the authenticated registration');
+  assert.equal(await readStep('REGISTRATION_ADOPTED'),null,'Broker closure adoption cannot mix registration attempts');
+  assert.equal(await readStep('pruning:skipped'),null,'Broker closure adoption cannot mix pruning history');
+  for (const [name] of transitions) {
+   for (const suffix of ['prepared', 'result'])
+    assert.equal(await readStep(`${name}:${suffix}`), null, 'Broker closure adoption cannot mix coordinator mutations');
+  }
+  const closure = await runtime.authenticateCompletedBrokerClosure(release, completedRegistration, completedClosure);
+  assert.equal(brokerDigest(closure),completedClosure.terminalSha256,'Authenticated broker handoff differs from saved candidate');
+  if (!savedClosure) await record('BROKER_CLOSURE_CANDIDATE', {result: await put(completedClosure)});
+  const result={status:'PREREQUISITES_CONVERGED',releaseId:release.releaseId,sourceSha:release.sourceSha,
+   registrationTransactionId:completedRegistration.result.authorizationSha256,
+   closureSha256:await put(closure),artifactsSha256:await put(artifacts),gatesSha256:await put(gates)};
+  assert.deepEqual(await once(runtime.gateLifecycle==='prerequisites'?'PREREQUISITE_PREPARATION_CONVERGED':'PREREQUISITES_CONVERGED',
+   async()=>result),result,'Terminal prerequisite closure changed');
+  return result;
+ }
  const adoptedRegistration=completedRegistration&&await readStep('REGISTRATION_ADOPTED');
  const registrationResult=await readStep('registration:result'),registrationPrepared=await readStep('registration:prepared');
  const {predecessorReceiptRecovery, ...initialInputs} = await runtime.materializeInputs(release, artifacts,{phase:'registration',chain:null,

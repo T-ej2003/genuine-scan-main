@@ -16,6 +16,10 @@ on:
         description: "Externally issued production release ticket bound to the prerequisite coordinator."
         required: true
         type: string
+      completed_broker_closure_source_sha:
+        description: "Optional original release SHA of an independently authenticated completed broker closure; no broker or Terraform write."
+        required: false
+        type: string
       prerequisites_only:
         description: "Prepare governed current-main broker/image prerequisites only; never dispatch Release Gate. Rotation eligibility remains mandatory for subsequent deployment."
         required: false
@@ -294,6 +298,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
       RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
+      COMPLETED_BROKER_CLOSURE_SOURCE_SHA: ${{ inputs.completed_broker_closure_source_sha }}
       RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
       RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}

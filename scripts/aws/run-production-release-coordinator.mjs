@@ -12,7 +12,7 @@ import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.m
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
 import {materializeStageBPrerequisiteFiles} from './produce-production-green-stage-b-prerequisite-bundle.mjs';
 import {generateStageBTerraformBackendConfig} from './generate-production-green-stage-b-backend-config.mjs';
-import {ensureStageBTerraformBackendMetadataPrivate} from './stage-b-terraform-backend-contract.mjs';
+import {ensureStageBTerraformBackendMetadataPrivate,writeStageBTerraformStateBackup} from './stage-b-terraform-backend-contract.mjs';
 import {ensureStageBPrivateDirectory,writeStageBPrivateFileAtomic} from './stage-b-artifact-contract.mjs';
 import {runRefreshOnly} from '../refresh-production-green-stage-b.mjs';
 import {runStagedBrokerRequest} from './run-stage-b-staged-broker.mjs';
@@ -20,9 +20,11 @@ import {readBrokerPolicyInventory} from './stage-b-staged-broker-observations.mj
 import {createBrokerPolicyOwnershipClient} from './stage-b-broker-policy-ownership.mjs';
 import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertRegistrationHandoff,assertPolicyPruningHandoff} from './stage-b-staged-broker-contract.mjs';
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
-import {readStagedBrokerReceipt,stagedBrokerSourceReservation} from './stage-b-staged-broker-executor.mjs';
+import {readStagedBrokerReceipt,stagedBrokerSourceReservation,assertReceiptBoundGitAncestry} from './stage-b-staged-broker-executor.mjs';
+import {readStagedBrokerClosure,assertStagedBrokerProof} from './stage-b-staged-broker-closure.mjs';
+import {readStageBProtectedMainCheckout} from './stage-b-deployment-identity.mjs';
 import {authenticateReceiptBoundRegisteredDefinition,deriveBrokerPolicy,TASK_REGISTRATION_ADDRESSES} from './stage-b-release-prerequisites.mjs';
-import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
+import {deriveStageBImageImpactReport,deriveStageBToolingInputTreeSha256} from './validate-stage-b-image-reuse.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const terraformRoot=path.join(root,'infra/aws/terraform/production-green-stage-b');
@@ -32,6 +34,21 @@ const phaseDirectory=(releaseId,phase)=>path.join(HOSTED_RELEASE_ROOT,releaseId,
 const phaseFiles=directory=>({package:path.join(directory,'broker-package.zip'),packageManifest:path.join(directory,'broker-package.zip.manifest.json'),
  tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(directory,'terraform','terraform.tfstate')});
 const shell=(command,args,options={})=>execFileSync(command,args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe'],...options});
+
+export function registeredTaskStateFromBytes(bytes,expected,addresses){
+ const state=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+ assert.equal(sha256(bytes),expected.stateSha256,'Registered task Terraform state changed');
+ assert.equal(state.lineage,expected.lineage);assert.equal(state.serial,expected.serial);assert.equal(state.version,4);
+ return Object.fromEntries(addresses.map(address=>{
+  const match=/^(\w+)\.(\w+)(?:\["([^"]+)"\])?$/.exec(address);assert.ok(match);
+  const [,type,name,index]=match;
+  const resources=state.resources.filter(r=>!r.module&&r.mode==='managed'&&r.type===type&&r.name===name);
+  assert.equal(resources.length,1,`Terraform task resource differs: ${address}`);
+  const instances=resources[0].instances.filter(i=>i.deposed===undefined&&i.index_key===index);
+  assert.equal(instances.length,1,`Terraform task instance differs: ${address}`);
+  return [address,instances[0].attributes];
+ }));
+}
 
 // Resolve immutable coordinator authority, never a caller-supplied local file.
 export async function readDurableCompletedRegistration({store,sourceSha,ticketId}) {
@@ -59,13 +76,14 @@ export async function readDurableCompletedRegistration({store,sourceSha,ticketId
 // All business writes remain inside runStagedBrokerRequest. This adapter only
 // creates authenticated inputs and selects the next public operation.
 export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJson,imageTransportSha256,
- requiredGateRunIdsJson,lifecycle='strict',env=process.env,
+ requiredGateRunIdsJson,lifecycle='strict',completedBrokerClosureSourceSha,env=process.env,
  awsRun=createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env}),
  ghRun=(args,options)=>execFileSync('gh',args,{encoding:'utf8',maxBuffer:8*1024*1024,...options}),
  runStageOperation=runStagedBrokerRequest,sourceReader=readHostedReleaseSource,
  imageReader=authenticateHostedStageBImages,gateReader=readReleaseGateEvidence,
  materialize=materializeStageBPrerequisiteFiles,refresh=runRefreshOnly,
  createStore=createReleaseCoordinatorStore,verifyAuthorization,readReceipt=readStagedBrokerReceipt,
+ readClosure=readStagedBrokerClosure,protectedCheckout=readStageBProtectedMainCheckout,
  imageImpact=deriveStageBImageImpactReport,
  completedRegistrationPath=path.join(root,'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json')}={}) {
  if(lifecycle==='prerequisites')assert.equal(env.RELEASE_PREREQUISITES_ONLY,'true','Prerequisite gates require explicit prerequisite-only execution');
@@ -74,6 +92,8 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  assert.equal(env.GITHUB_WORKFLOW_REF,`${env.GITHUB_REPOSITORY}/.github/workflows/release-train.yml@refs/heads/main`);
  assert.match(env.GITHUB_RUN_ATTEMPT||'',/^[1-9][0-9]*$/);assert.equal(env.GITHUB_SHA,sourceSha);
  assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.match(ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+ const completedClosureSourceSha=completedBrokerClosureSourceSha??env.COMPLETED_BROKER_CLOSURE_SOURCE_SHA;
+ if(completedClosureSourceSha!==undefined&&completedClosureSourceSha!=='')assert.match(completedClosureSourceSha,/^[a-f0-9]{40}$/);
  assert.ok(path.isAbsolute(env.RUNNER_TEMP||''));assert.ok(/^\d+$/.test(env.GITHUB_RUN_ID||''));
  assert.equal(typeof awsRun,'function');assert.equal(typeof ghRun,'function');
  ensureStageBPrivateDirectory({directory:HOSTED_RELEASE_ROOT,repositoryRoot:root,create:true});
@@ -88,9 +108,16 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   ensureStageBPrivateDirectory({directory:path.join(directory,'terraform'),repositoryRoot:root,create:true});
   return directory;
  };
+ const registeredState=(expected,addresses)=>{
+  const directory=fs.mkdtempSync(path.join(HOSTED_RELEASE_ROOT,'.adoption-state-'));fs.chmodSync(directory,0o700);
+  try{
+   const file=path.join(directory,'terraform.tfstate');writeStageBTerraformStateBackup({run:awsRun,output:file});
+   return registeredTaskStateFromBytes(fs.readFileSync(file),expected,addresses);
+  }finally{fs.rmSync(directory,{recursive:true,force:true});}
+ };
  const githubJson=async endpoint=>JSON.parse(ghRun(['api',`repos/${env.GITHUB_REPOSITORY}${endpoint}`],{encoding:'utf8'}));
  const receipts={registration:'TASK_REGISTERED',pruning:'BROKER_POLICY_PRUNED',policy:'BROKER_POLICY_CONVERGED',publication:'PUBLISHED',cutover:'CUTOVER_COMMITTED_STATE_PENDING'};
- return {
+ const runtime={
   gateLifecycle:lifecycle,
   store,
   authenticateSource:async(source,frozen)=>{
@@ -161,14 +188,52 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    }
    return impact.imageReuseCompatible&&impact.newImagesRequired===false?entry:null;
   },
-  authenticateRegistration:async(release,entry,inputs,{predecessorAdvanced=false}={})=>{
+  findCompletedBrokerClosure:async(release,registration)=>{
+   if(!completedClosureSourceSha)return null;
+   assert.ok(registration,'Broker closure adoption requires a completed registration');
+   const terminal=readReceipt({run:awsRun,id:stagedBrokerSourceReservation(completedClosureSourceSha),
+    status:'STAGED_BROKER_TERMINAL_HANDOFF',directory:HOSTED_RELEASE_ROOT});
+   return {sourceSha:completedClosureSourceSha,terminalSha256:brokerDigest(terminal),
+    closureSha256:brokerDigest(terminal.record),registrationTransactionId:registration.result.authorizationSha256};
+  },
+  authenticateCompletedBrokerClosure:async(release,registration,candidate)=>{
+   assert.deepEqual(Object.keys(candidate).sort(),['closureSha256','registrationTransactionId','sourceSha','terminalSha256']);
+   assert.match(candidate.sourceSha,/^[a-f0-9]{40}$/);
+   if(completedClosureSourceSha)assert.equal(candidate.sourceSha,completedClosureSourceSha,'Broker closure source substituted');
+   assert.equal(candidate.registrationTransactionId,registration.result.authorizationSha256);
+   assertReceiptBoundGitAncestry({historicalSourceSha:registration.preparation.sourceSha,
+    consumerSourceSha:candidate.sourceSha,cwd:root});
+   const proof=await readClosure({sourceSha:candidate.sourceSha,run:awsRun,readCheckout:()=>{
+    const checkout=protectedCheckout({cwd:root,fetchOriginMain:true,
+     expectedSourceSha:release.sourceSha,requireCanonicalRepository:true});
+    return {sourceSha:checkout.currentHead,treeSha256:deriveStageBToolingInputTreeSha256(checkout.currentHead)};
+   }});
+   assert.ok(proof,'Completed broker closure source is absent');
+   assertStagedBrokerProof(proof,candidate.sourceSha);
+   assertReceiptBoundGitAncestry({historicalSourceSha:proof.tooling.sourceSha,
+    consumerSourceSha:release.sourceSha,cwd:root});
+   assert.equal(proof.evidenceSha256,candidate.closureSha256,'Broker closure proof changed');
+   const terminal=readReceipt({run:awsRun,id:stagedBrokerSourceReservation(candidate.sourceSha),
+    status:'STAGED_BROKER_TERMINAL_HANDOFF',directory:HOSTED_RELEASE_ROOT});
+   assert.equal(brokerDigest(terminal),candidate.terminalSha256,'Broker terminal receipt changed');
+   assert.equal(brokerDigest(terminal.record),proof.evidenceSha256);
+   assert.equal(terminal.record.alias.FunctionVersion,terminal.preparation.target.version);
+   exact(terminal.preparation.prerequisites.taskMap,registration.result.taskMap);
+   const stateByAddress=registeredState(terminal.record.stateAfter,Object.keys(registration.result.definitions));
+   await runtime.authenticateRegistration({sourceSha:registration.preparation.sourceSha},registration,
+    {directory:HOSTED_RELEASE_ROOT},{predecessorAdvanced:true,stateByAddress});
+   await proof.revalidate();
+   return terminal;
+  },
+  authenticateRegistration:async(release,entry,inputs,{predecessorAdvanced=false,stateByAddress}={})=>{
    assertRegistrationHandoff(entry,{sourceSha:release.sourceSha,treeSha256:entry.adoption?.release?.treeSha256||entry.preparation.treeSha256});
    await assertBrokerAuthorization(entry.authorization,entry.preparation,{verify,now:new Date(entry.result.authorizedAt)});
    const id=brokerDigest(entry.authorization);
    exact(readReceipt({run:awsRun,id,status:'TASK_REGISTERED',directory:inputs.directory}),entry.result);
    for(const [address,definition] of Object.entries(entry.result.definitions)){
     const observed=JSON.parse(awsRun(['ecs','describe-task-definition','--task-definition',definition.arn,'--include','TAGS','--output','json','--no-cli-pager']));
-    const state={...definition.desired,arn:definition.arn,revision:definition.revision};
+    const state=stateByAddress?stateByAddress[address]:{...definition.desired,arn:definition.arn,revision:definition.revision};
+    assert.ok(state,`Missing Terraform task binding: ${address}`);
     exact(authenticateReceiptBoundRegisteredDefinition({address,desired:definition.desired,state,
      observed:{...observed.taskDefinition,tags:observed.tags},receipt:definition}),definition);
    }
@@ -254,18 +319,19 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    return terminal;
   },
  };
+ return runtime;
 }
 
-export async function runHostedReleaseCoordinator({sourceSha,ticketId,imageTransportJson,imageTransportSha256,requiredGateRunIdsJson,lifecycle='strict'},options={}){
+export async function runHostedReleaseCoordinator({sourceSha,ticketId,imageTransportJson,imageTransportSha256,requiredGateRunIdsJson,lifecycle='strict',completedBrokerClosureSourceSha},options={}){
  const {runtimeFactory=createHostedReleaseRuntime,...runtimeOptions}=options;
- const runtime=runtimeFactory({sourceSha,ticketId,imageTransportJson,imageTransportSha256,requiredGateRunIdsJson,lifecycle,...runtimeOptions});
+ const runtime=runtimeFactory({sourceSha,ticketId,imageTransportJson,imageTransportSha256,requiredGateRunIdsJson,lifecycle,completedBrokerClosureSourceSha,...runtimeOptions});
  return runReleaseCoordinator({sourceSha,ticketId},runtime);
 }
 
 export function hostedReleaseTrainRequest(env=process.env){
  return {sourceSha:env.TARGET_SHA,ticketId:env.RELEASE_TICKET_ID,imageTransportJson:env.NORMAL_IMAGE_AUTHORIZATION_JSON,
   imageTransportSha256:env.NORMAL_IMAGE_AUTHORIZATION_SHA256,requiredGateRunIdsJson:env.REQUIRED_GATE_RUN_IDS_JSON,
-  lifecycle:env.RELEASE_LIFECYCLE};
+  lifecycle:env.RELEASE_LIFECYCLE,completedBrokerClosureSourceSha:env.COMPLETED_BROKER_CLOSURE_SOURCE_SHA};
 }
 
 if(process.argv[1]===fileURLToPath(import.meta.url)){

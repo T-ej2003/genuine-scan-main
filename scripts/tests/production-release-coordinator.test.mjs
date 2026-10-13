@@ -5,7 +5,8 @@ import { brokerDigest, assertRegistrationHandoff, assertBrokerAuthorization, ass
 import { createReleaseIdentity, selectReleasePolicyDeletion, createReleaseCoordinatorStore, authenticateReleaseGateRuns,captureReleasePhaseMaterial,hydrateReleasePhaseMaterial,releaseTransitionDispatchInputs,obtainReleaseTransitionAuthorization,readHostedReleaseSource,authenticateHostedStageBImages,HOSTED_RELEASE_ROOT } from '../aws/production-release-coordinator.mjs';
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
 import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.mjs';
-import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration} from '../aws/run-production-release-coordinator.mjs';
+import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration,registeredTaskStateFromBytes} from '../aws/run-production-release-coordinator.mjs';
+import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-reuse.mjs';
 
 function gateFixture(sourceSha,lifecycle='strict'){
  const files=requiredWorkflowFiles(lifecycle),workflowPayloads={},expectedWorkflowRunIds={};
@@ -69,6 +70,98 @@ test('hosted image resolver carries the exact source-bound transport to the cano
  assert.equal(durable.completedRegistrationSourceSha,'b'.repeat(40));assert.equal(durable.authorizationRawSha256,transportSha256);
  assert.throws(()=>authenticateHostedStageBImages({sourceSha,transportJson:authorizationJson,transportSha256:'0'.repeat(64),run:rejectExternalAccess,
   verifyAuthorization:()=>{assert.fail('Changed transport cannot reach verifier');}}));
+});
+
+test('hosted release adopts an independently authenticated terminal broker closure without replaying mutations',async()=>{
+ const artifacts=new Map(),steps=new Map();let start,checks=0;
+ const store={putArtifact:async(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,structuredClone(value));},
+  getArtifact:async id=>structuredClone(artifacts.get(id)),readStart:async()=>start||null,
+  writeStart:async(_request,value)=>{assert.equal(start,undefined);start=structuredClone(value);},
+  readStep:async(_id,name)=>steps.get(name)||null,
+  writeStep:async value=>{assert.equal(steps.has(value.name),false);steps.set(value.name,structuredClone(value));}};
+ const registration={preparation:{sourceSha:'a'.repeat(40)},result:{authorizationSha256:'b'.repeat(64)}};
+ const terminal={kind:'STAGED_BROKER_TERMINAL_HANDOFF',sourceSha:'c'.repeat(40)};
+ const closure={sourceSha:terminal.sourceSha,terminalSha256:brokerDigest(terminal),closureSha256:'e'.repeat(64),
+  registrationTransactionId:registration.result.authorizationSha256};
+ const runtime={store,gateLifecycle:'prerequisites',authenticateSource:async()=>({baseline,changedFiles:[]}),
+  resolveArtifacts:async()=>({sourceSha}),authenticateArtifacts:async()=>{},resolveGates:async()=>({sourceSha}),
+  authenticateGates:async()=>{},findCompletedRegistration:async()=>registration,
+  findCompletedBrokerClosure:async()=>closure,authenticateCompletedBrokerClosure:async(_release,entry,candidate)=>{
+   checks++;assert.deepEqual(entry,registration);assert.deepEqual(candidate,closure);return terminal;},
+  materializeInputs:async()=>assert.fail('Terminal adoption must not create a new Terraform plan'),
+  runStageOperation:async()=>assert.fail('Terminal adoption must not replay broker or IAM writes')};
+ const request={sourceSha,ticketId:'CHG-20261011-001'};
+ const invoke=()=>runHostedReleaseCoordinator({...request,imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',lifecycle:'prerequisites',completedBrokerClosureSourceSha:closure.sourceSha},
+  {runtimeFactory:()=>runtime});
+ const first=await invoke();assert.equal(first.status,'PREREQUISITES_CONVERGED');
+ assert.equal(first.closureSha256,brokerDigest(terminal));assert.equal(steps.has('BROKER_CLOSURE_CANDIDATE'),true);
+ assert.equal(steps.has('registration:prepared'),false);assert.equal(steps.has('cutover:result'),false);
+ assert.deepEqual(await invoke(),first);assert.equal(checks,2);
+ runtime.gateLifecycle='strict';
+ const strictInvoke=()=>runHostedReleaseCoordinator({...request,imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',lifecycle:'strict',completedBrokerClosureSourceSha:closure.sourceSha},
+  {runtimeFactory:()=>runtime});
+ const strict=await strictInvoke();assert.equal(strict.status,'PREREQUISITES_CONVERGED');
+ assert.equal(steps.has('GATES_PASSED'),true);assert.equal(steps.has('PREREQUISITES_CONVERGED'),true);
+ assert.deepEqual(await strictInvoke(),strict);
+ assert.equal(steps.has('registration:prepared'),false);assert.equal(steps.has('cutover:result'),false);
+ runtime.gateLifecycle='prerequisites';
+ const saved=structuredClone(steps.get('BROKER_CLOSURE_CANDIDATE'));
+ artifacts.set(saved.result,{...closure,closureSha256:'f'.repeat(64)});
+ await assert.rejects(invoke,/Release artifact substitution/);
+ artifacts.set(saved.result,closure);
+ steps.set('registration:prepared',{releaseId:first.releaseId,sourceSha,name:'registration:prepared',result:brokerDigest(closure)});
+ await assert.rejects(invoke,/cannot mix coordinator mutations/);
+});
+
+test('hosted closure adoption source is explicit and malformed source fails before AWS access',()=>{
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp'};
+ assert.throws(()=>createHostedReleaseRuntime({sourceSha,ticketId:'CHG-20261011-001',imageTransportJson:'fixture',
+  imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',completedBrokerClosureSourceSha:'wrong',env,
+  awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>({})}));
+ const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
+ assert.match(workflow,/completed_broker_closure_source_sha:/);
+ assert.match(workflow,/COMPLETED_BROKER_CLOSURE_SOURCE_SHA: \$\{\{ inputs\.completed_broker_closure_source_sha \}\}/);
+ assert.equal(hostedReleaseTrainRequest({COMPLETED_BROKER_CLOSURE_SOURCE_SHA:'c'.repeat(40)}).completedBrokerClosureSourceSha,'c'.repeat(40));
+});
+
+test('hosted closure reader callback authenticates current checkout and tooling tree',async()=>{
+ const current='e4e7819443bd80964a72cf8099008a6cb054be3f';
+ const historical='528c5e733b950d4987345d633702cb2c83a66ff8';
+ const registrationSource='2c2d63eaea623c0d9d55c98a949d0a47186fdd2e';
+ const tree=deriveStageBToolingInputTreeSha256(current),sentinel=new Error('Closure reader reached after checkout authentication');
+ let checkoutCalls=0;
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:current,RUNNER_TEMP:'/tmp'};
+ const runtime=createHostedReleaseRuntime({sourceSha:current,ticketId:'CHG-20261011-001',imageTransportJson:'fixture',
+  imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',completedBrokerClosureSourceSha:historical,
+  env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>({}),
+  protectedCheckout:options=>{checkoutCalls++;assert.equal(options.expectedSourceSha,current);
+   assert.equal(options.requireCanonicalRepository,true);return {currentHead:current,originMainHead:current};},
+  readClosure:async({sourceSha,readCheckout})=>{assert.equal(sourceSha,historical);
+   assert.deepEqual(readCheckout(),{sourceSha:current,treeSha256:tree});throw sentinel;}});
+ const registration={preparation:{sourceSha:registrationSource},result:{authorizationSha256:'a'.repeat(64)}};
+ const candidate={sourceSha:historical,terminalSha256:'b'.repeat(64),closureSha256:'c'.repeat(64),
+  registrationTransactionId:registration.result.authorizationSha256};
+ await assert.rejects(()=>runtime.authenticateCompletedBrokerClosure({sourceSha:current},registration,candidate),error=>error===sentinel);
+ assert.equal(checkoutCalls,1);
+});
+
+test('completed registration adoption reads exact Terraform task bindings from the authenticated state bytes',()=>{
+ const address='aws_ecs_task_definition.backend',lineage='4e438e59-8b8b-194d-030c-5ede0c26344a';
+ const state={version:4,lineage,serial:126,resources:[{mode:'managed',type:'aws_ecs_task_definition',name:'backend',
+  instances:[{attributes:{arn:'arn:aws:ecs:eu-west-2:368992683803:task-definition/example:29',revision:29}}]}]};
+ const bytes=Buffer.from(JSON.stringify(state)),expected={lineage,serial:126,stateSha256:createHash('sha256').update(bytes).digest('hex')};
+ assert.equal(registeredTaskStateFromBytes(bytes,expected,[address])[address].revision,29);
+ assert.throws(()=>registeredTaskStateFromBytes(bytes,{...expected,stateSha256:'0'.repeat(64)},[address]),/state changed/);
+ assert.throws(()=>registeredTaskStateFromBytes(bytes,{...expected,serial:125},[address]));
+ assert.throws(()=>registeredTaskStateFromBytes(bytes,expected,['aws_ecs_task_definition.worker']),/resource differs/);
+ const duplicate=Buffer.from(JSON.stringify({...state,resources:[state.resources[0],state.resources[0]]}));
+ assert.throws(()=>registeredTaskStateFromBytes(duplicate,{...expected,stateSha256:createHash('sha256').update(duplicate).digest('hex')},[address]),/resource differs/);
 });
 
 test('gate authentication uses the canonical required-workflow contract and exact child identities',()=>{

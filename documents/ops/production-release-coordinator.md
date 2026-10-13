@@ -107,6 +107,53 @@ establish which writer performed it.
 
 ## Evidence and recovery contract
 
+### Adopting an independently completed broker closure
+
+If a separately governed successor operation finishes publication, alias CAS and
+Terraform reconciliation while Release Train is paused, dispatch Release Train
+with `completed_broker_closure_source_sha` set to that operation's **original
+release SHA**. This is an evidence locator, not authorization. The hosted
+coordinator reads the immutable terminal handoff and uses the existing signed
+closure verifier to authenticate the original publication, both protected
+approvals, live Lambda alias/version, IAM prerequisites, Terraform state and
+the current protected-main tooling ancestry. It also authenticates the
+completed registration receipt, all 12 live ECS definitions and the exact task
+map shared by the closure. It checks all 12 registered task bindings in the
+exact authenticated Terraform state bytes. The current release retains its own source, image
+authorization, change ticket, component baseline and required CI gates.
+
+Only then does the coordinator persist `BROKER_CLOSURE_CANDIDATE` and its normal
+terminal prerequisite summary in the encrypted evidence store. These are new
+write-once audit records, not broker, IAM, ECS or Terraform operations. It does
+not enter registration, pruning, policy,
+publication, cutover or closure execution. A restart reauthenticates the saved
+candidate against live state; a different source input, changed receipt, drift,
+or an existing coordinator mutation phase fails closed. An absent locator keeps
+the ordinary phase sequence unchanged. This route does not replace Stage B
+approval, rotation, Release Gate or application deployment authorization.
+
+The pre-merge read-only rehearsal on 2026-10-13 exercised the public hosted
+coordinator with a mocked durable store in both prerequisite-only and strict
+gate lifecycles. Restart reauthenticated the saved closure candidate; neither
+route entered registration, IAM, publication, alias CAS or Terraform execution.
+The full coordinator suite passed 97 tests, Stage B closure 360 tests, downstream
+approval/Release Gate/initial-overlap contracts 58 tests, and deployment
+eligibility/receipt/CAS/restart contracts 70 tests. The downstream workflow
+fixture now supplies its actual checked-out `DEPLOY_SHA`, matching the hosted
+job's input contract. These are non-production fixture tests, not production
+approvals or deployment receipts.
+
+Independent read-only production readback found reviewed alias v14 and
+Terraform lineage `4e438e59-8b8b-194d-030c-5ede0c26344a`, serial 126.
+The signed terminal broker closure and all twelve ECS registrations were
+authenticated separately. After merge, reauthenticate these live identities,
+the current-source image authorization and ticket scope. The prerequisite-only
+dispatch can then adopt closure; Stage B approval and rotation remain separate
+governed transitions. A later strict Release Train dispatch requires its own
+exact-source gates and production approval before Release Gate or application
+deployment. No protected approval, Release Gate outcome, deployed image, RLS
+convergence, or Startex acceptance is established by this rehearsal.
+
 Fresh schema-3 registration remains distinct from historical receipt-bound policy
 provenance. Historical alias runtime, current IAM predecessor and fresh successor
 maps remain distinct until their authorized lifecycle transitions converge them.

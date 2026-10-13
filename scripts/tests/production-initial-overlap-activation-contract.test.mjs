@@ -458,6 +458,7 @@ else if (!responses[key]) process.exit(8); else process.stdout.write(JSON.string
         HOME: process.env.HOME,
         RUNNER_TEMP: target,
         GITHUB_ENV: githubEnv,
+        DEPLOY_SHA: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
         SOURCE_SHA: sourceSha,
         ROTATION_ID: rotationId,
         ROTATION_STATE_JSON: persistedBytes.toString("utf8"),
