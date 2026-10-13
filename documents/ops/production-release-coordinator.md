@@ -271,6 +271,15 @@ release without selecting a Stage-B phase. A recovered held writer is bound to
 the exact previous GitHub run attempt and its expired AWS session; a later
 attempt cannot impersonate that writer.
 
+Each composite invocation checks the actual OIDC expiration before starting
+another coordinator call. With 30 minutes or less remaining, it reports
+`RENEW_SESSION` and the next existing composite invocation assumes the same
+release-deployer role afresh. A newly issued session that already lacks this
+window fails closed. This handoff does not authorize any phase: the next call
+reauthenticates the immutable release journal, saved preparation, and any
+operation-specific protected approval before a native write. If all seven
+windows are used, rerun the failed Release Train job from durable state.
+
 The hosted coordinator is used for a Release Train target equal to current
 protected `main`. Existing explicit historical `release-*` and `v*` tag
 dispatches retain the prior Release Gate route after exact source/ancestry

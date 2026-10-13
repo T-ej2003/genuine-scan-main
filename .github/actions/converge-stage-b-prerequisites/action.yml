@@ -26,6 +26,16 @@ runs:
       run: |
         set -euo pipefail
         for attempt in $(seq 1 75); do
+          session_status="$(node -e 'const expiry=Date.parse(process.env.AWS_CREDENTIAL_EXPIRATION); if(!Number.isFinite(expiry)) throw Error("Invalid AWS session timestamp"); process.stdout.write(expiry-Date.now()>30*60*1000?"READY":"RENEW_SESSION")')"
+          if [ "$session_status" = RENEW_SESSION ]; then
+            if [ "$attempt" -eq 1 ]; then
+              echo '::error::Fresh AWS session is too short for a release coordinator operation.'
+              exit 1
+            fi
+            echo 'status=RENEW_SESSION' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          test "$session_status" = READY
           result="$(node scripts/aws/run-production-release-coordinator.mjs)"
           status="$(node -e 'const v=JSON.parse(process.argv[1]); if(!["WAITING_FOR_APPROVAL","PREREQUISITES_CONVERGED"].includes(v.status)) process.exit(2); process.stdout.write(v.status)' "$result")"
           if [ "$status" = PREREQUISITES_CONVERGED ]; then

@@ -340,19 +340,19 @@ jobs:
         if: needs.gates.outputs.target_ref == 'main' && steps.converge_1.outputs.status != 'PREREQUISITES_CONVERGED'
       - uses: ./.github/actions/converge-stage-b-prerequisites
         id: converge_3
-        if: needs.gates.outputs.target_ref == 'main' && steps.converge_2.outputs.status == 'WAITING_FOR_APPROVAL'
+        if: needs.gates.outputs.target_ref == 'main' && (steps.converge_2.outputs.status == 'WAITING_FOR_APPROVAL' || steps.converge_2.outputs.status == 'RENEW_SESSION')
       - uses: ./.github/actions/converge-stage-b-prerequisites
         id: converge_4
-        if: needs.gates.outputs.target_ref == 'main' && steps.converge_3.outputs.status == 'WAITING_FOR_APPROVAL'
+        if: needs.gates.outputs.target_ref == 'main' && (steps.converge_3.outputs.status == 'WAITING_FOR_APPROVAL' || steps.converge_3.outputs.status == 'RENEW_SESSION')
       - uses: ./.github/actions/converge-stage-b-prerequisites
         id: converge_5
-        if: needs.gates.outputs.target_ref == 'main' && steps.converge_4.outputs.status == 'WAITING_FOR_APPROVAL'
+        if: needs.gates.outputs.target_ref == 'main' && (steps.converge_4.outputs.status == 'WAITING_FOR_APPROVAL' || steps.converge_4.outputs.status == 'RENEW_SESSION')
       - uses: ./.github/actions/converge-stage-b-prerequisites
         id: converge_6
-        if: needs.gates.outputs.target_ref == 'main' && steps.converge_5.outputs.status == 'WAITING_FOR_APPROVAL'
+        if: needs.gates.outputs.target_ref == 'main' && (steps.converge_5.outputs.status == 'WAITING_FOR_APPROVAL' || steps.converge_5.outputs.status == 'RENEW_SESSION')
       - uses: ./.github/actions/converge-stage-b-prerequisites
         id: converge_7
-        if: needs.gates.outputs.target_ref == 'main' && steps.converge_6.outputs.status == 'WAITING_FOR_APPROVAL'
+        if: needs.gates.outputs.target_ref == 'main' && (steps.converge_6.outputs.status == 'WAITING_FOR_APPROVAL' || steps.converge_6.outputs.status == 'RENEW_SESSION')
       - name: Require authenticated prerequisite closure
         if: needs.gates.outputs.target_ref == 'main'
         env:
