@@ -11,6 +11,7 @@ import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, assertBrokerOutputTransition, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
+import { captureReleasePhaseMaterial, hydrateReleasePhaseMaterial } from '../aws/production-release-coordinator.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -127,6 +128,42 @@ test('post-publication output reconciliation binds new state inputs without rela
   } finally {
     fs.writeFileSync(files.tfvars, originalTfvars);
     fs.writeFileSync(files.package, originalPackage);
+  }
+});
+test('hosted runner restart restores exact output-reconciliation reports before cutover', async () => {
+  const r = await native(), directory = path.dirname(files.tfvars);
+  const bindingReportPath = path.join(directory, 'output-binding.json');
+  const refreshReportPath = path.join(directory, 'output-refresh.json');
+  const bindingBytes = Buffer.from('{"binding":"authenticated"}');
+  const refreshBytes = Buffer.from('{"refresh":"authenticated"}');
+  fs.writeFileSync(bindingReportPath, bindingBytes, { mode: 0o600 });
+  fs.writeFileSync(refreshReportPath, refreshBytes, { mode: 0o600 });
+  r.p.savedPlanSha256 = brokerDigest(r.binary);
+  r.p.outputReconciliation = {
+    sourceSha: r.p.sourceSha, publicationResultSha256: brokerDigest(r.p.publication),
+    targetSha256: brokerDigest(r.p.target), state: r.p.state,
+    bindingReportPath, bindingReportSha256: brokerDigest(bindingBytes),
+    refreshReportPath, refreshReportSha256: brokerDigest(refreshBytes),
+    outputChanges: [{ name: 'broker_binding', before: 'old', after: 'new' }]
+  };
+  const prepared = { preparation: r.p, planPath: path.join(directory, 'saved-CUTOVER.tfplan') };
+  const artifacts = new Map();
+  const store = { putArtifact: async (key, value) => { artifacts.set(key, structuredClone(value)); },
+    getArtifact: async key => structuredClone(artifacts.get(key)) };
+  try {
+    const reference = await captureReleasePhaseMaterial({ prepared, files, store, repositoryRoot: root });
+    const capsule = artifacts.get(reference);
+    assert.ok(capsule.members.bindingReportPath && capsule.members.refreshReportPath);
+    fs.rmSync(bindingReportPath); fs.rmSync(refreshReportPath);
+    await hydrateReleasePhaseMaterial({ reference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root });
+    assert.deepEqual(fs.readFileSync(bindingReportPath), bindingBytes);
+    assert.deepEqual(fs.readFileSync(refreshReportPath), refreshBytes);
+    assert.equal(fs.statSync(bindingReportPath).mode & 0o777, 0o600);
+    const tampered = structuredClone(capsule); tampered.members.refreshReportPath.sha256 = '0'.repeat(64);
+    const tamperedReference = brokerDigest(tampered); artifacts.set(tamperedReference, tampered);
+    await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: tamperedReference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root }));
+  } finally {
+    fs.rmSync(bindingReportPath, { force: true }); fs.rmSync(refreshReportPath, { force: true });
   }
 });
 test('native reservation resumes only exact pre-intent bytes',async()=>{
