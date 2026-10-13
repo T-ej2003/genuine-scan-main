@@ -4,7 +4,7 @@ import {assertBrokerPreparation,brokerDigest} from '../aws/stage-b-staged-broker
 import {runSuccessorReleaseCoordinator,assertSuccessorRecoveryRequest} from '../aws/production-successor-release-coordinator.mjs';
 import {runHostedSuccessorReleaseCoordinator} from '../aws/run-production-successor-release-coordinator.mjs';
 import {authorizeReleaseTransition} from '../aws/authorize-production-stage-b-release-transition.mjs';
-import {HOSTED_RELEASE_ROOT} from '../aws/production-release-coordinator.mjs';
+import {HOSTED_RELEASE_ROOT,successorReleaseStartKey} from '../aws/production-release-coordinator.mjs';
 import {authenticateFailedReleaseTransitionAttempt,releaseTransitionDispatchInputs} from '../aws/production-release-coordinator.mjs';
 import {PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
 import fs from 'node:fs';
@@ -145,8 +145,63 @@ async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeRespo
      phase,preparationReference,authorizationRound:context.authorizationRound}}};},
   classifyNativeAttempt:async(_context,phase)=>phase==='cutover'&&nativeCutover?'RECOVER':'PRE_NATIVE',
   authenticateCompletedTransition:async()=>{},authenticateClosure:async()=>({status:'CLOSED',sourceSha:A})};
- return {runtime,reference,store,steps,counts,releaseId,advanceClock:ms=>{clock+=ms;}};
+ return {runtime,reference,store,starts,steps,counts,releaseId,advanceClock:ms=>{clock+=ms;}};
 }
+
+test('hosted successor keeps an ordinary START for the same source and ticket immutable',async()=>{
+ const f=await fixture(),legacyKey={sourceSha:A,ticketId:request.ticketId};
+ const ordinary={baseline:'1'.repeat(64),release:'2'.repeat(64)};
+ f.store.writeStart(legacyKey,ordinary);
+ const result=await runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime});
+ assert.equal(result.status,'BROKER_CLOSURE_COMPLETE');
+ assert.deepEqual(f.store.readStart(legacyKey),ordinary);
+ const scoped=f.store.readStart(successorReleaseStartKey({...legacyKey,releaseId:f.releaseId}));
+ assert.equal(scoped.recovery,f.reference);
+ assert.equal(f.store.getArtifact(scoped.release).releaseId,f.releaseId);
+ assert.equal(f.counts.publication,0);assert.equal(f.counts.cutover,1);
+ assert.equal((await runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime})).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(f.counts.cutover,1);
+});
+
+test('legacy successor START remains readable without creating a replacement',async()=>{
+ const f=await fixture(),legacyKey={sourceSha:A,ticketId:request.ticketId};
+ const identity={schemaVersion:2,sourceSha:A,ticketId:request.ticketId,recoveryReference:f.reference,toolingSha:C};
+ const release={...identity,releaseId:f.releaseId};
+ f.store.putArtifact(brokerDigest(release),release);
+ f.store.writeStart(legacyKey,{release:brokerDigest(release),recovery:f.reference});
+ assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(f.store.readStart(successorReleaseStartKey({...legacyKey,releaseId:f.releaseId})),null);
+});
+
+test('protected authorization selects the exact successor START beside an ordinary release',async()=>{
+ const f=await fixture({approval:'WAITING_FOR_APPROVAL'}),key={sourceSha:A,ticketId:request.ticketId};
+ const ordinary={baseline:'1'.repeat(64),release:'2'.repeat(64)};
+ f.store.writeStart(key,ordinary);
+ const capture=f.runtime.capturePreparation;
+ f.runtime.capturePreparation=(context,phase,value)=>capture(context,phase,{...value,
+  planPath:path.join(HOSTED_RELEASE_ROOT,f.releaseId,phase,'plan.tfplan')});
+ const pending=await runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime});
+ assert.equal(pending.status,'WAITING_FOR_APPROVAL');
+ const prepared=f.steps.get(`${f.releaseId}/cutover:prepared`).result;
+ const output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'cutover','authorization.json');
+ const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+  GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:C,RUNNER_TEMP:'/tmp',RELEASE_ID:f.releaseId,
+  RELEASE_PHASE:'cutover',RELEASE_PREPARATION_REFERENCE:prepared,RELEASE_AUTHORIZATION_ROUND:'0'};
+ try{
+  ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
+  const args={sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,phase:'cutover',
+   preparationReference:prepared,authorizationRound:0,output};
+  const dependencies={env,createStore:()=>f.store,hydrateMaterial:async()=>{},run:()=>assert.fail('No AWS call'),
+   runRequest:async value=>({schemaVersion:2,preparationSha256:brokerDigest(value.preparation),
+    protectedEnvironmentApprovalEvidence:{workflowRunId:'700'}})};
+  const authorized=await authorizeReleaseTransition(args,dependencies);
+  assert.match(authorized.authorizationSha256,/^[a-f0-9]{64}$/);
+  assert.deepEqual(f.store.readStart(key),ordinary);
+  await assert.rejects(()=>authorizeReleaseTransition({...args,releaseId:'f'.repeat(64)},
+   {...dependencies,env:{...env,RELEASE_ID:'f'.repeat(64)}}));
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true});}
+});
 
 test('hosted successor coordinator records preparation and governs cutover then closure without replaying prerequisites',async()=>{
  const f=await fixture(),execute=()=>runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},

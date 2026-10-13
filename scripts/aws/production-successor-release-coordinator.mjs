@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {brokerDigest,brokerExecutionCheckout,prepareBrokerStateRefresh} from './stage-b-staged-broker-contract.mjs';
-import {releaseTransitionDispatchInputs} from './production-release-coordinator.mjs';
+import {releaseTransitionDispatchInputs,successorReleaseStartKey} from './production-release-coordinator.mjs';
 
 const sha=/^[a-f0-9]{40}$/,digest=/^[a-f0-9]{64}$/;
 
@@ -31,10 +31,11 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
  const identity={schemaVersion:2,sourceSha:request.releaseSourceSha,ticketId:request.ticketId,
   recoveryReference,toolingSha:request.recoveryToolingSha};
  const release={...identity,releaseId:brokerDigest(identity)};
- const startKey={sourceSha:release.sourceSha,ticketId:release.ticketId};
+ const startKey=successorReleaseStartKey(release);
  const put=async value=>{const id=brokerDigest(value);await store.putArtifact(id,value);return id;};
  const get=async id=>{assert.match(id||'',digest);const value=await store.getArtifact(id);assert.equal(brokerDigest(value),id);return value;};
- const start=await store.readStart(startKey);
+ const legacy=await store.readStart({sourceSha:release.sourceSha,ticketId:release.ticketId});
+ const start=await store.readStart(startKey)||(legacy?.recovery===recoveryReference?legacy:null);
  if(start){assert.deepEqual(Object.keys(start).sort(),['recovery','release']);assert.equal(start.recovery,recoveryReference);
   assert.deepEqual(await get(start.release),release);}
  else await store.writeStart(startKey,{release:await put(release),recovery:recoveryReference});
