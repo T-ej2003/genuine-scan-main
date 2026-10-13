@@ -514,7 +514,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   ...(hostedClosureRelease?{privateDirectory:path.join(HOSTED_RELEASE_ROOT,hostedClosureRelease.releaseId,'cutover')}:{})});
  if(lostResponse==='no-prune-policy-lost')f.changeLiveInventory(xs=>xs.filter(v=>v.VersionId!=='v9'));
  const priorRegistrationCalls=f.snapshot().registeredTaskDefinitionCalls,priorApplyCalls=f.snapshot().registrationApplyCalls;
- const steps=new Map(),calls=[];let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy',noOpPolicyIdentityChanged=false,policyPlanCalls=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
+ const steps=new Map(),calls=[],materializedPruningPhases=new Set();let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy',noOpPolicyIdentityChanged=false,policyPlanCalls=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
  const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
@@ -546,6 +546,10 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   materializeInputs:async(release,artifacts,{phase,prepared})=>{
    assert.equal(release.sourceSha,f.source);assert.equal(artifacts.sourceSha,f.source);
    if(prepared)assert.equal(prepared.preparation.sourceSha,release.sourceSha);
+   if(lostResponse==='full-capacity-noop-policy'&&phase.startsWith('pruning')){
+    assert.ok(!materializedPruningPhases.has(phase),'Stage A input would be overwritten on approval polling');
+    materializedPruningPhases.add(phase);
+   }
    if(phase==='registration')return f.initialRequest;
    const {predecessorReceiptRecovery,...inputs}=f.initialRequest;return inputs;
   },

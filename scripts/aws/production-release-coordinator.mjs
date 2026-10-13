@@ -4,7 +4,7 @@ import { assertProductionComponentDeploymentState } from './production-component
 import { classifyProductionChanges } from './production-deployment-classification.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
@@ -362,15 +362,17 @@ export async function runReleaseCoordinator(request, runtime) {
   }
   const done = await readStep(`${name}:result`);
   const savedPreparation=await readStep(`${name}:prepared`);
+  const skippedPruning=name==='pruning'?await readStep('pruning:skipped'):null;
+  // Skipped pruning has no saved preparation; each live no-op recheck needs write-once private inputs.
   // An earlier Terraform transition advances serial/bindings. Build fresh
   // planning material only for a new preparation; hydrate immutable captured
   // material when resuming an existing preparation/attempt.
-  const inputs=name==='registration'?initialInputs:await runtime.materializeInputs(release,artifacts,{phase:name,chain,
+  const inputs=name==='registration'?initialInputs:await runtime.materializeInputs(release,artifacts,{phase:skippedPruning?`pruning-recheck-${randomUUID()}`:name,chain,
    prepared:done?await get(done.prepared):savedPreparation?await get(savedPreparation.result):name==='closure'?packages.cutover.prepared:null});
   assert.equal(inputs.predecessorReceiptRecovery,undefined,'Historical predecessor selection belongs only to registration preparation');
   context.inputs=inputs;
   if (name === 'pruning') {
-   const skipped = await readStep('pruning:skipped');
+   const skipped = skippedPruning;
    if (skipped) {
     assert.equal(done,null,'Pruning cannot be both skipped and completed');
     assert.equal(savedPreparation,null,'Pruning cannot be both skipped and prepared');

@@ -222,6 +222,10 @@ mutation tooling. The release classification treats only the coordinator's
 reviewed composite action path as security infrastructure. A four-version
 predecessor records a durable no-pruning decision, so a later policy creation
 cannot cause restart to insert a pruning mutation out of order.
+While policy approval is pending, each read-only check of a skipped pruning
+phase materializes fresh private inputs. The durable no-pruning decision and
+policy preparation remain unchanged; the check still compares live policy
+inventory and the no-op plan before any policy write.
 
 The release ID binds the ticket as well as the source, deployed baseline and
 classification. Completed phase results are reauthenticated against their
