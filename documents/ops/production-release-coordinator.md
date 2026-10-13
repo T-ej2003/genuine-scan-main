@@ -55,6 +55,13 @@ internal phases:
    state-only closure.
 10. Authenticate and persist terminal prerequisite closure.
 
+Publication may advance Terraform state before cutover preparation. When its
+outputs change, the output-reconciliation verifier authenticates the original
+publication preparation and package identity, then checks the newly prepared
+cutover artifact set against its own hash. The original artifact-set hash remains
+bound to the immutable publication receipt; it is not substituted for the
+current-state cutover inputs. A completed publication is adopted on restart.
+
 Human interaction is limited to deliberate production authorization. Successful
 workflow dispatch or HTTP health alone does not establish deployment success.
 An approval child that times out without approval consumes its exact round. The

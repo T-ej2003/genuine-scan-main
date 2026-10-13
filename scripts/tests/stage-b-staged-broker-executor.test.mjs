@@ -10,7 +10,7 @@ import { writerSession } from './fixtures/broker-writer-session.mjs';
 import { proveBrokerWriterUnusable } from '../aws/stage-b-broker-writer-session.mjs';
 import { preparation, authorization, configuration, ready, sourceSha, alias } from './fixtures/staged-broker-runtime.mjs';
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
-import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
+import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, assertBrokerOutputTransition, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -105,6 +105,30 @@ async function reserve(r) {
   await r.adapter.reserve(id, { purpose: r.p.purpose, nonce: r.auth.nonce, preparationSha256: brokerDigest(r.p) });
   await r.adapter.record(id, 'CUTOVER_INTENT', { predecessor: r.p.alias, target: r.p.target, authorizedAt: new Date().toISOString() });
 }
+test('post-publication output reconciliation binds new state inputs without relabeling the published artifact set', async () => {
+  const r = await native();
+  const publication = JSON.parse(r.objects.get(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)))).preparation;
+  const originalTfvars = fs.readFileSync(files.tfvars);
+  const originalPackage = fs.readFileSync(files.package);
+  try {
+    fs.writeFileSync(files.tfvars, 'state-bound cutover inputs after publication', { mode: 0o600 });
+    r.p.artifactSetSha256 = stagedBrokerArtifactSet(files, root, r.p);
+    r.p.state = { ...publication.state, serial: publication.state.serial + 1, stateSha256: '1'.repeat(64) };
+    const binding = { stateLineage: r.p.state.lineage, stateSerial: r.p.state.serial, stateBackupSha256: r.p.state.stateSha256 };
+    assert.notEqual(r.p.artifactSetSha256, publication.artifactSetSha256);
+    assert.doesNotThrow(() => assertBrokerOutputTransition(files, root, r.p, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, artifactSetSha256: publication.artifactSetSha256 }, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, publication: { ...r.p.publication, preparationSha256: '0'.repeat(64) } }, publication, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, { ...publication, packageSha256: '0'.repeat(64) }, binding));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, publication, { ...binding, stateSerial: publication.state.serial }));
+    assert.throws(() => assertBrokerOutputTransition(files, root, { ...r.p, state: publication.state }, publication, { ...binding, stateSerial: publication.state.serial, stateBackupSha256: publication.state.stateSha256 }));
+    fs.writeFileSync(files.package, Buffer.from('substituted package'));
+    assert.throws(() => assertBrokerOutputTransition(files, root, r.p, publication, binding));
+  } finally {
+    fs.writeFileSync(files.tfvars, originalTfvars);
+    fs.writeFileSync(files.package, originalPackage);
+  }
+});
 test('native reservation resumes only exact pre-intent bytes',async()=>{
  const r=await native('CUTOVER'),id=brokerDigest(r.auth),value={purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)};
  await r.adapter.reserve(id,value);
