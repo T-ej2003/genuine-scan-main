@@ -32,7 +32,8 @@ runs:
               echo '::error::Fresh AWS session is too short for a release coordinator operation.'
               exit 1
             fi
-            echo 'status=RENEW_SESSION' >> "$GITHUB_OUTPUT"
+            echo '::notice::Renewing AWS session before the next release coordinator call.'
+            echo 'status=WAITING_FOR_APPROVAL' >> "$GITHUB_OUTPUT"
             exit 0
           fi
           test "$session_status" = READY

@@ -60,7 +60,7 @@ esac
       assert.equal(result.status, 0, result.stderr);
       return fs.readFileSync(output, 'utf8').trim();
     };
-    assert.equal(run('ROLL'), 'status=RENEW_SESSION');
+    assert.equal(run('ROLL'), 'status=WAITING_FOR_APPROVAL');
     assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 1);
     assert.equal(run('COMPLETE'), 'status=PREREQUISITES_CONVERGED');
     assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 2);
@@ -74,7 +74,6 @@ esac
     for (let n = 3; n <= 7; n++) {
       const continuation = steps.find(value => value.id === `converge_${n}`);
       assert.match(continuation.if, /WAITING_FOR_APPROVAL/);
-      assert.match(continuation.if, /RENEW_SESSION/);
     }
     assert.ok(action.runs.steps.findIndex(value => value.id === 'credentials') < action.runs.steps.findIndex(value => value.id === 'converge'));
   } finally { fs.rmSync(dir, {recursive:true, force:true}); }

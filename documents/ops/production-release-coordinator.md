@@ -273,7 +273,7 @@ attempt cannot impersonate that writer.
 
 Each composite invocation checks the actual OIDC expiration before starting
 another coordinator call. With 30 minutes or less remaining, it reports
-`RENEW_SESSION` and the next existing composite invocation assumes the same
+the existing waiting status and the next composite invocation assumes the same
 release-deployer role afresh. A newly issued session that already lacks this
 window fails closed. This handoff does not authorize any phase: the next call
 reauthenticates the immutable release journal, saved preparation, and any
