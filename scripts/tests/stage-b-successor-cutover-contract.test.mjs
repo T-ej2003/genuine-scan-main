@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition, reconcileReviewedLifecycleMetadata } from '../aws/stage-b-successor-cutover-contract.mjs';
+import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition, reconcileReviewedLifecycleMetadata, reviewedPublicationLifecycleFor } from '../aws/stage-b-successor-cutover-contract.mjs';
 import { brokerDigest } from '../aws/stage-b-staged-broker-contract.mjs';
 import { STAGE_B } from '../aws/production-green-stage-b-contract.mjs';
 
@@ -35,6 +35,23 @@ const fixture = () => {
   return { before, after, historicalBytes, currentBytes, publicationPreparation, publicationResult, currentIdentity };
 };
 const checkHistory = f => authenticateSuccessorStateHistory(f);
+
+test('v14 lifecycle allowance requires the exact historical state, live state, and publication receipt', () => {
+  const historical = 'f57ed870a744639d4a51744d614fcf57db17c37c03ffdf43f847d8046fc93daa';
+  const current = '7a26d89ef35427227eb76f31c0a581974a3bc71e4a0b52c668193cc4392cc8ce';
+  const publication = 'e71190e02451ccd687b449104eca344eba69282c0b841cdf2d291bafcb0940dc';
+  const reviewed = reviewedPublicationLifecycleFor(historical, current, publication);
+  assert.equal(reviewed?.removedInstancesSha256, '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec');
+  for (const field of ['historical', 'current', 'publication']) {
+    const identity = { historical, current, publication }; identity[field] = '0'.repeat(64);
+    assert.equal(reviewedPublicationLifecycleFor(identity.historical, identity.current, identity.publication), null);
+  }
+  assert.equal(reviewedPublicationLifecycleFor(
+    '747d0e50cf0a4ace40bce60bd75e997be9631539fd38af0381afe043c49da3d4',
+    'fd34c9d740a9d1335d2b54bc892fc99b210f793bd7379cf9cd7681b382d20c96',
+    'dfd1382bc16d3c786b64b1f7a7c0465d860c13cf9b4301309e409a95e655ff5b')?.removedInstancesSha256,
+  reviewed.removedInstancesSha256);
+});
 
 test('publication may clear only historical propagated lifecycle metadata on unchanged dependencies', () => {
   const f = fixture();
