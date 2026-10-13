@@ -1,0 +1,5 @@
+# Skipped-pruning approval polling reachability review
+
+The Release Train coordinator now materializes each read-only recheck of a durable skipped-pruning decision in a distinct private runner directory. The policy inventory and no-op plan comparison remain required before a policy write. This change touches only the coordinator, its mocked regression, the operations note, and this review.
+
+The authenticated Deployment Audit artifact from protected-main run `38320331111` contains an unfiltered OSV report with one finding: dev-only `braces@3.0.3` (`GHSA-vfj7-8cjw-p6xm`). Its canonical browser closure contains 204 packages and excludes braces. The frontend source, build patterns, dependency lockfiles, and runtime packaging have not changed from that run. The reviewed executable/build-input SHA-256 for this branch is `6cc0bf15de0b70b7bdcd477af63debea55092f18ae695aee5196e60bedd76b32`. The existing acceptance scope, owner, and `2026-11-02` expiry remain unchanged. The exact-head hosted audit must independently rerun the scan and browser closure.
