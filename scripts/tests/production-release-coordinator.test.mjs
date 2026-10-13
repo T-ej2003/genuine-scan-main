@@ -6,6 +6,7 @@ import { createReleaseIdentity, selectReleasePolicyDeletion, createReleaseCoordi
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
 import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.mjs';
 import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration,registeredTaskStateFromBytes} from '../aws/run-production-release-coordinator.mjs';
+import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-reuse.mjs';
 
 function gateFixture(sourceSha,lifecycle='strict'){
  const files=requiredWorkflowFiles(lifecycle),workflowPayloads={},expectedWorkflowRunIds={};
@@ -116,6 +117,29 @@ test('hosted closure adoption source is explicit and malformed source fails befo
  assert.match(workflow,/completed_broker_closure_source_sha:/);
  assert.match(workflow,/COMPLETED_BROKER_CLOSURE_SOURCE_SHA: \$\{\{ inputs\.completed_broker_closure_source_sha \}\}/);
  assert.equal(hostedReleaseTrainRequest({COMPLETED_BROKER_CLOSURE_SOURCE_SHA:'c'.repeat(40)}).completedBrokerClosureSourceSha,'c'.repeat(40));
+});
+
+test('hosted closure reader callback authenticates current checkout and tooling tree',async()=>{
+ const current='e4e7819443bd80964a72cf8099008a6cb054be3f';
+ const historical='528c5e733b950d4987345d633702cb2c83a66ff8';
+ const registrationSource='2c2d63eaea623c0d9d55c98a949d0a47186fdd2e';
+ const tree=deriveStageBToolingInputTreeSha256(current),sentinel=new Error('Closure reader reached after checkout authentication');
+ let checkoutCalls=0;
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:current,RUNNER_TEMP:'/tmp'};
+ const runtime=createHostedReleaseRuntime({sourceSha:current,ticketId:'CHG-20261011-001',imageTransportJson:'fixture',
+  imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',completedBrokerClosureSourceSha:historical,
+  env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>({}),
+  protectedCheckout:options=>{checkoutCalls++;assert.equal(options.expectedSourceSha,current);
+   assert.equal(options.requireCanonicalRepository,true);return {currentHead:current,originMainHead:current};},
+  readClosure:async({sourceSha,readCheckout})=>{assert.equal(sourceSha,historical);
+   assert.deepEqual(readCheckout(),{sourceSha:current,treeSha256:tree});throw sentinel;}});
+ const registration={preparation:{sourceSha:registrationSource},result:{authorizationSha256:'a'.repeat(64)}};
+ const candidate={sourceSha:historical,terminalSha256:'b'.repeat(64),closureSha256:'c'.repeat(64),
+  registrationTransactionId:registration.result.authorizationSha256};
+ await assert.rejects(()=>runtime.authenticateCompletedBrokerClosure({sourceSha:current},registration,candidate),error=>error===sentinel);
+ assert.equal(checkoutCalls,1);
 });
 
 test('completed registration adoption reads exact Terraform task bindings from the authenticated state bytes',()=>{

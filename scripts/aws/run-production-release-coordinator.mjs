@@ -22,8 +22,9 @@ import {brokerDigest,assertBrokerAuthorization,assertBrokerClosurePlan,assertReg
 import {createBrokerKmsAuthorizationBoundary} from './stage-b-staged-broker-authorization.mjs';
 import {readStagedBrokerReceipt,stagedBrokerSourceReservation,assertReceiptBoundGitAncestry} from './stage-b-staged-broker-executor.mjs';
 import {readStagedBrokerClosure,assertStagedBrokerProof} from './stage-b-staged-broker-closure.mjs';
+import {readStageBProtectedMainCheckout} from './stage-b-deployment-identity.mjs';
 import {authenticateReceiptBoundRegisteredDefinition,deriveBrokerPolicy,TASK_REGISTRATION_ADDRESSES} from './stage-b-release-prerequisites.mjs';
-import {deriveStageBImageImpactReport} from './validate-stage-b-image-reuse.mjs';
+import {deriveStageBImageImpactReport,deriveStageBToolingInputTreeSha256} from './validate-stage-b-image-reuse.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const terraformRoot=path.join(root,'infra/aws/terraform/production-green-stage-b');
@@ -82,7 +83,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  imageReader=authenticateHostedStageBImages,gateReader=readReleaseGateEvidence,
  materialize=materializeStageBPrerequisiteFiles,refresh=runRefreshOnly,
  createStore=createReleaseCoordinatorStore,verifyAuthorization,readReceipt=readStagedBrokerReceipt,
- readClosure=readStagedBrokerClosure,
+ readClosure=readStagedBrokerClosure,protectedCheckout=readStageBProtectedMainCheckout,
  imageImpact=deriveStageBImageImpactReport,
  completedRegistrationPath=path.join(root,'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json')}={}) {
  if(lifecycle==='prerequisites')assert.equal(env.RELEASE_PREREQUISITES_ONLY,'true','Prerequisite gates require explicit prerequisite-only execution');
@@ -203,13 +204,14 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    assertReceiptBoundGitAncestry({historicalSourceSha:registration.preparation.sourceSha,
     consumerSourceSha:candidate.sourceSha,cwd:root});
    const proof=await readClosure({sourceSha:candidate.sourceSha,run:awsRun,readCheckout:()=>{
-    const checkout=readStageBProtectedMainCheckout({cwd:root,fetchOriginMain:true,
+    const checkout=protectedCheckout({cwd:root,fetchOriginMain:true,
      expectedSourceSha:release.sourceSha,requireCanonicalRepository:true});
     return {sourceSha:checkout.currentHead,treeSha256:deriveStageBToolingInputTreeSha256(checkout.currentHead)};
    }});
    assert.ok(proof,'Completed broker closure source is absent');
    assertStagedBrokerProof(proof,candidate.sourceSha);
-   assert.equal(proof.tooling.sourceSha,release.sourceSha,'Broker closure tooling differs from release');
+   assertReceiptBoundGitAncestry({historicalSourceSha:proof.tooling.sourceSha,
+    consumerSourceSha:release.sourceSha,cwd:root});
    assert.equal(proof.evidenceSha256,candidate.closureSha256,'Broker closure proof changed');
    const terminal=readReceipt({run:awsRun,id:stagedBrokerSourceReservation(candidate.sourceSha),
     status:'STAGED_BROKER_TERMINAL_HANDOFF',directory:HOSTED_RELEASE_ROOT});
