@@ -35,6 +35,38 @@ test('expired genuine closure authority plus unchanged live state authenticates 
  assert.equal(proof.status,'PRE_NATIVE_ABORTED');assert.equal(proof.authorization,brokerDigest(f.authorization));
  assert.equal(f.read.length,4);assert.deepEqual([...f.steps],before);
 });
+test('expired authorization without a native attempt requires its retirement and unchanged live state',async()=>{
+ const f=await fixture();f.steps.delete('closure:attempt:1');
+ await assert.rejects(()=>authenticatePreNativeClosureAbort(f.input),/attempt is required/);
+ f.input.allowMissingAttempt=true;
+ await assert.rejects(()=>authenticatePreNativeClosureAbort(f.input));
+ f.steps.set('closure:retired:1',{releaseId:f.input.releaseId,sourceSha:f.input.sourceSha,name:'closure:retired:1',
+  prepared:brokerDigest(f.input.prepared),reason:'AUTHORIZATION_EXPIRED'});
+ const before=structuredClone([...f.steps]),proof=await authenticatePreNativeClosureAbort(f.input);
+ assert.equal(proof.status,'PRE_NATIVE_ABORTED');assert.equal(Object.hasOwn(proof,'attemptSha256'),false);
+ assert.deepEqual([...f.steps],before);assert.equal(f.read.length,4);
+ f.input.readState=()=>({...f.input.prepared.preparation.state,serial:999});
+ await assert.rejects(()=>authenticatePreNativeClosureAbort(f.input),/state changed/);
+});
+for(const [name,change] of [
+ ['wrong retirement source',f=>f.steps.get('closure:retired:1').sourceSha='f'.repeat(40)],
+ ['wrong retirement preparation',f=>f.steps.get('closure:retired:1').prepared='f'.repeat(64)],
+ ['wrong retirement round',f=>f.steps.get('closure:retired:1').name='closure:retired:2'],
+ ['missing retirement',f=>f.steps.delete('closure:retired:1')],
+ ['wrong retirement reason',f=>f.steps.get('closure:retired:1').reason='PRE_NATIVE_ABORTED'],
+ ['extra retirement field',f=>f.steps.get('closure:retired:1').runId='701'],
+ ['failed approval marker',f=>f.steps.set('closure:approval-failed:1',{})],
+ ['timeout marker',f=>f.steps.set('closure:approval-timeout:1',{})],
+ ['missing signed authorization',f=>f.steps.delete('closure:authorized:1')],
+ ['invalid KMS authorization proof',f=>f.input.verify=async()=>false],
+ ['cross-round signed authorization',f=>f.authorization.release.authorizationRound=2],
+ ['cross-release signed authorization',f=>f.authorization.release.releaseId='f'.repeat(64)],
+ ])test(`no-attempt retirement rejects ${name}`,async()=>{
+ const f=await fixture();f.steps.delete('closure:attempt:1');f.input.allowMissingAttempt=true;
+ f.steps.set('closure:retired:1',{releaseId:f.input.releaseId,sourceSha:f.input.sourceSha,name:'closure:retired:1',
+  prepared:brokerDigest(f.input.prepared),reason:'AUTHORIZATION_EXPIRED'});
+ change(f);await assert.rejects(()=>authenticatePreNativeClosureAbort(f.input));
+});
 for(const [name,change] of [
  ['unexpired authority',f=>f.input.now=new Date(f.authorization.issuedAt)],
  ['invalid approval',f=>f.input.verify=async()=>false],

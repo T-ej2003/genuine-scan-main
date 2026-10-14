@@ -8,18 +8,27 @@ import {STAGE_B} from './production-green-stage-b-contract.mjs';
 // Absence is only corroboration: expired authenticated authority and unchanged live state are also required.
 export async function authenticatePreNativeClosureAbort({store,releaseId,sourceSha,release,round,prepared,currentTooling,casResult,
  run,directory,verify,readReceipt=readStagedBrokerReceipt,readState=()=>readStageBTerraformStateIdentity(run),
- readAlias=()=>normalizeBrokerAlias(JSON.parse(run(['lambda','get-alias','--function-name',STAGE_B.brokerFunctionArn,
+ allowMissingAttempt=false,readAlias=()=>normalizeBrokerAlias(JSON.parse(run(['lambda','get-alias','--function-name',STAGE_B.brokerFunctionArn,
  '--name','reviewed','--output','json','--no-cli-pager']))),now=new Date()}) {
  const reference=brokerDigest(prepared),attempt=store.readStep(releaseId,`closure:attempt:${round}`);
  assert.equal(prepared.preparation.sourceSha,sourceSha);assert.equal(prepared.preparation.purpose,BROKER_STATE_REFRESH);
  assert.equal(prepared.preparation.cutover.resultSha256,brokerDigest(casResult));
  const signed=store.readStep(releaseId,`closure:authorized:${round}`);
- for(const [record,name] of [[attempt,`closure:attempt:${round}`],[signed,`closure:authorized:${round}`]]){
+ assert.ok(attempt||allowMissingAttempt,'Historical closure attempt is required');
+ if(!attempt){const retired=store.readStep(releaseId,`closure:retired:${round}`);
+  assert.deepEqual(Object.keys(retired||{}).sort(),['name','prepared','reason','releaseId','sourceSha']);
+  assert.equal(retired?.releaseId,releaseId);assert.equal(retired?.sourceSha,sourceSha);
+  assert.equal(retired?.name,`closure:retired:${round}`);assert.equal(retired?.prepared,reference);
+  assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');
+  assert.equal(store.readStep(releaseId,`closure:approval-failed:${round}`),null);
+  assert.equal(store.readStep(releaseId,`closure:approval-timeout:${round}`),null);}
+ const records=attempt?[[attempt,`closure:attempt:${round}`],[signed,`closure:authorized:${round}`]]:[[signed,`closure:authorized:${round}`]];
+ for(const [record,name] of records){
   assert.ok(record,'Historical closure attempt and authorization are required');
   assert.equal(record.releaseId,releaseId);assert.equal(record.sourceSha,sourceSha);assert.equal(record.name,name);
   assert.equal(record.prepared,reference);
  }
- assert.equal(attempt.authorization,signed.authorization);
+ if(attempt)assert.equal(attempt.authorization,signed.authorization);
  const authorization=store.getArtifact(signed.authorization);assert.equal(brokerDigest(authorization),signed.authorization);
  assert.deepEqual(authorization.release,{releaseId,phase:'closure',preparationReference:reference,authorizationRound:round});
  await assertBrokerAuthorization(authorization,prepared.preparation,{verify,now:new Date(authorization.issuedAt)});
@@ -51,5 +60,5 @@ export async function authenticatePreNativeClosureAbort({store,releaseId,sourceS
  assert.equal(brokerDigest(alias),brokerDigest(casResult.alias),'Completed CAS alias changed');
  assert.equal(alias.FunctionVersion,prepared.preparation.target.version);
  return {status:'PRE_NATIVE_ABORTED',releaseId,sourceSha,round,prepared:reference,
-  attemptSha256:brokerDigest(attempt),authorization:signed.authorization,currentTooling,state,alias,absent};
+  ...(attempt?{attemptSha256:brokerDigest(attempt)}:{}),authorization:signed.authorization,currentTooling,state,alias,absent};
 }

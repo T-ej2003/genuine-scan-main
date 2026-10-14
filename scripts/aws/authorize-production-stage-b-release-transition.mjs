@@ -43,16 +43,17 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
  const assertSuccessorRoundActive=()=>{if(successor){
   assert.equal(store.readStep(releaseId,`${phase}:retired:${authorizationRound}`),null,'Successor preparation was retired');
   assert.equal(store.readStep(releaseId,`${phase}:approval-timeout:${authorizationRound}`),null,'Successor approval timed out');
+  assert.equal(store.readStep(releaseId,`${phase}:approval-failed:${authorizationRound}`),null,'Successor approval failed');
  }};
  assertSuccessorRoundActive();
  const pending=store.readStep(releaseId,`${phase}:pending:${authorizationRound}`);
  if(pending){assert.equal(pending.prepared,preparationReference);assert.equal(pending.runId,env.GITHUB_RUN_ID);}
  const prepared=store.getArtifact(preparationReference);assert.equal(prepared.preparation.sourceSha,sourceSha);
  assert.equal(env.GITHUB_SHA,brokerExecutionCheckout(prepared.preparation).sourceSha,'Authorization workflow differs from authenticated preparation tooling');
- if(successor&&phase==='closure'&&prepared.preparation.closureContinuation){
-  const continuation=prepared.preparation.closureContinuation;assert.ok(continuation,'Closure continuation identity is required');
-  assert.equal(continuation.releaseId,releaseId);assert.equal(continuation.recoveryReference,start.recovery);
-  assert.equal(continuation.releaseSourceSha,sourceSha);assert.equal(continuation.currentTooling.sourceSha,env.GITHUB_SHA);
+ if(successor&&phase==='closure'){
+  const continuation=prepared.preparation.closureContinuation;
+  if(continuation){assert.equal(continuation.releaseId,releaseId);assert.equal(continuation.recoveryReference,start.recovery);
+   assert.equal(continuation.releaseSourceSha,sourceSha);assert.equal(continuation.currentTooling.sourceSha,env.GITHUB_SHA);}
   for(let round=0;round<authorizationRound;round++){
    const old=store.readStep(releaseId,round?`closure:prepared:${round}`:'closure:prepared');
    if(!old){assert.equal(round,0,'Earlier continuation preparation is missing');continue;}
@@ -60,24 +61,37 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
    assert.equal(old.name,round?`closure:prepared:${round}`:'closure:prepared');
    const oldPrepared=store.getArtifact(old.result),retired=store.readStep(releaseId,`closure:retired:${round}`);
    assert.equal(brokerDigest(oldPrepared),old.result);
-   const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);
-   assert.equal((retired||timedOut)?.prepared,old.result,'Earlier closure round remains active');
-   const oldAttempt=store.readStep(releaseId,`closure:attempt:${round}`);
-   if(oldAttempt){
+   const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`),failedRound=store.readStep(releaseId,`closure:approval-failed:${round}`);
+   if(failedRound){
+    assert.equal(timedOut,null);
+    if(retired)assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');
+    assert.equal(failedRound.releaseId,releaseId);assert.equal(failedRound.sourceSha,sourceSha);
+    assert.equal(failedRound.name,`closure:approval-failed:${round}`);
+    assert.ok(['failure','cancelled'].includes(failedRound.conclusion));
+   }
+   assert.ok(retired||timedOut||failedRound,'Earlier closure round remains active');
+   for(const marker of [retired,timedOut,failedRound])if(marker)assert.equal(marker.prepared,old.result);
+   const oldAttempt=store.readStep(releaseId,`closure:attempt:${round}`),oldSigned=store.readStep(releaseId,`closure:authorized:${round}`);
+   if(oldAttempt||oldSigned){
+    assert.equal(failedRound,null,'A failed approval cannot have a native attempt');
     assert.ok(['PRE_NATIVE_ABORTED','AUTHORIZATION_EXPIRED'].includes(retired?.reason),'Historical attempted round requires authenticated retirement');
+    if(!oldAttempt)assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');
     if(retired.reason==='PRE_NATIVE_ABORTED')assert.ok(retired.preNativeAbort);
     const cutover=store.readStep(releaseId,'cutover:result');
     const proof=await authenticateAbort({store,releaseId,release,sourceSha,round,prepared:oldPrepared,
-     currentTooling:retired.reason==='PRE_NATIVE_ABORTED'?retired.preNativeAbort.currentTooling:continuation.currentTooling,casResult:store.getArtifact(cutover.result),run,directory,
-     verify:createBrokerKmsAuthorizationBoundary({run,githubRun:ghRun}).verify});
+     currentTooling:retired.reason==='PRE_NATIVE_ABORTED'?retired.preNativeAbort.currentTooling:continuation?.currentTooling||brokerExecutionCheckout(prepared.preparation),casResult:store.getArtifact(cutover.result),run,directory,
+     verify:createBrokerKmsAuthorizationBoundary({run,githubRun:ghRun}).verify,allowMissingAttempt:!oldAttempt});
     if(retired.reason==='PRE_NATIVE_ABORTED')assert.deepEqual(proof,retired.preNativeAbort,'Historical pre-native abort proof differs');
-   }else assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null);
+   }
    const cutover=store.readStep(releaseId,'cutover:result');
    assert.equal(brokerDigest(oldPrepared.preparation),brokerDigest(prepareBrokerStateRefresh({preparation:store.getArtifact(cutover.prepared).preparation,
     authorization:store.getArtifact(cutover.authorization),casResult:store.getArtifact(cutover.result),
     ...(oldPrepared.preparation.closureContinuation?{closureContinuation:oldPrepared.preparation.closureContinuation}:{})})));
    const pendingOld=store.readStep(releaseId,`closure:pending:${round}`),dispatchOld=store.readStep(releaseId,`closure:dispatch:${round}`);
-   if(dispatchOld&&!oldAttempt){
+   if(timedOut&&pendingOld)assert.equal(timedOut.runId,pendingOld.runId);
+   if(failedRound){assert.ok(pendingOld,'Failed closure round lacks its child');assert.ok(dispatchOld,'Failed closure round lacks its dispatch');
+    assert.equal(pendingOld.prepared,old.result);assert.equal(pendingOld.runId,failedRound.runId);}
+   if(dispatchOld&&!oldAttempt&&!oldSigned){
     assert.ok(pendingOld||timedOut);assert.equal((pendingOld||timedOut).prepared,old.result);
     const oldIdentity=dispatchOld.dispatch.identity,toolingSha=brokerExecutionCheckout(oldPrepared.preparation).sourceSha;
     assert.deepEqual(oldIdentity.inputs,releaseTransitionDispatchInputs({release,authorizationRound:round},'closure',old.result,oldPrepared.preparation));
@@ -87,7 +101,9 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
     const failed=authenticateFailedReleaseTransitionAttempt({run:ghRun,runId:(pendingOld||timedOut).runId,toolingSha,
      workflowId:oldIdentity.workflowId,beforeRunIds:dispatchOld.dispatch.beforeRunIds});
     if(retired?.runId)assert.equal(retired.runId,failed.runId);
-   }else if(!oldAttempt)assert.equal(pendingOld,null);
+    if(timedOut)assert.equal(failed.conclusion,'timed_out','Earlier timeout marker differs from GitHub conclusion');
+    if(failedRound){assert.equal(failedRound.runId,failed.runId);assert.equal(failedRound.conclusion,failed.conclusion);}
+   }else if(!oldAttempt&&!oldSigned)assert.equal(pendingOld,null);
   }
  }
  assert.match(prepared.materializationSha256||'',/^[a-f0-9]{64}$/);

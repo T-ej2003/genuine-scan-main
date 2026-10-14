@@ -7,6 +7,7 @@ import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPRO
 import {brokerDigest,prepareBrokerStateRefresh} from '../aws/stage-b-staged-broker-contract.mjs';
 import {STAGE_B_TERRAFORM_BACKEND_CONFIG} from '../aws/stage-b-terraform-backend-contract.mjs';
 import {createHostedSuccessorRuntime} from '../aws/run-production-successor-release-coordinator.mjs';
+import {runSuccessorReleaseCoordinator} from '../aws/production-successor-release-coordinator.mjs';
 import {HOSTED_RELEASE_ROOT,releaseTransitionDispatchInputs} from '../aws/production-release-coordinator.mjs';
 import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-reuse.mjs';
 import {ROOT_ATTESTATION_KEY_ALIAS_ARN,ROOT_ATTESTATION_SIGNING_ALGORITHM} from '../aws/production-root-attestation-key.mjs';
@@ -29,9 +30,16 @@ test('hosted successor materializer consumes immutable import reference and orig
  ]}));
  const imageBytes=Buffer.from(JSON.stringify({imageReleaseSha:'9'.repeat(40),workflowRunId:'123',canonicalArtifactSha256:'1'.repeat(64)}));
  const signatureBytes=Buffer.from(JSON.stringify({signed:true}));
- const artifacts=new Map(),steps=new Map();const store={putArtifact:(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,value);},
+ const artifacts=new Map(),steps=new Map(),starts=new Map();let crashAfter;
+ const store={putArtifact:(id,value)=>{assert.equal(brokerDigest(value),id);artifacts.set(id,value);},
   getArtifact:id=>{assert.ok(artifacts.has(id));return structuredClone(artifacts.get(id));},
-  readStep:(id,name)=>steps.get(`${id}/${name}`)||null};
+  readStep:(id,name)=>steps.get(`${id}/${name}`)||null,
+  writeStep:value=>{const key=`${value.releaseId}/${value.name}`,old=steps.get(key);
+   if(old)assert.deepEqual(old,value);else steps.set(key,structuredClone(value));
+   if(crashAfter===value.name){crashAfter=null;throw new Error(`Process stopped after ${value.name}`);}},
+  readStart:key=>starts.get(JSON.stringify(key))||null,
+  writeStart:(key,value)=>{const id=JSON.stringify(key),old=starts.get(id);
+   if(old)assert.deepEqual(old,value);else starts.set(id,structuredClone(value));}};
  const put=value=>{const ref=brokerDigest(value);store.putArtifact(ref,value);return ref;};
  const historicalReference=put(binary(historicalBytes)),imageEvidenceReference=put(binary(imageBytes)),
   imageSignatureReference=put(binary(signatureBytes));
@@ -140,7 +148,7 @@ test('hosted successor materializer consumes immutable import reference and orig
   const cutoverPrepared={preparation:cutoverPreparation,planPath:path.join(HOSTED_RELEASE_ROOT,continuationReleaseId,'cutover','cutover.tfplan'),
    materializationSha256:'8'.repeat(64)};
   const cutoverPreparedRef=put(cutoverPrepared),cutoverAuthorizationRef=put(cutoverAuthorization),casResultRef=put(casResult);
-  steps.set(`${continuationReleaseId}/cutover:result`,{sourceSha:A,releaseId:continuationReleaseId,prepared:cutoverPreparedRef,
+  steps.set(`${continuationReleaseId}/cutover:result`,{sourceSha:A,releaseId:continuationReleaseId,name:'cutover:result',prepared:cutoverPreparedRef,
    authorization:cutoverAuthorizationRef,result:casResultRef});
   const oldClosure={...cutoverPrepared,preparation:prepareBrokerStateRefresh({preparation:cutoverPreparation,authorization:cutoverAuthorization,casResult})};
   const oldClosureRef=put(oldClosure),dispatchInputs=releaseTransitionDispatchInputs({release,authorizationRound:0},'closure',oldClosureRef,oldClosure.preparation);
@@ -188,13 +196,73 @@ test('hosted successor materializer consumes immutable import reference and orig
    nativeStatus=status;await assert.rejects(()=>runtime.authenticateRequest(request),/requires native recovery/);
   }
   nativeStatus=undefined;
-  steps.delete(`${continuationReleaseId}/closure:attempt:1`);steps.delete(`${continuationReleaseId}/closure:authorized:1`);
+  steps.delete(`${continuationReleaseId}/closure:attempt:1`);
+  const expiredRetirement={releaseId:continuationReleaseId,sourceSha:A,name:'closure:retired:1',
+   prepared:continuedRef,reason:'AUTHORIZATION_EXPIRED'};
+  steps.set(`${continuationReleaseId}/closure:retired:1`,expiredRetirement);
+  const expired=await runtime.authenticateRequest(request);
+  assert.equal(expired.round,2);assert.equal(expired.preNativeAbort.status,'PRE_NATIVE_ABORTED');
+  assert.equal(Object.hasOwn(expired.preNativeAbort,'attemptSha256'),false);
+  assert.equal(expired.preNativeAbort.authorization,brokerDigest(oldAuthorization));
+  assert.deepEqual(steps.get(`${continuationReleaseId}/closure:retired:1`),expiredRetirement);
+  await assert.rejects(()=>runtime.authenticateRequest({...request,ticketId:'DIFFERENT-TICKET'}));
+  const wrongRound={releaseId:continuationReleaseId,sourceSha:A,name:'closure:prepared:3',result:continuedRef};
+  steps.set(`${continuationReleaseId}/closure:prepared:3`,wrongRound);
+  await assert.rejects(()=>runtime.authenticateRequest(request),/missing round/);
+  steps.delete(`${continuationReleaseId}/closure:prepared:3`);
+  const signedKey=`${continuationReleaseId}/closure:authorized:1`,signed=steps.get(signedKey);
+  for(const [name,change] of [
+   ['reason',()=>{expiredRetirement.reason='PRE_NATIVE_ABORTED';return ()=>expiredRetirement.reason='AUTHORIZATION_EXPIRED';}],
+   ['preparation',()=>{expiredRetirement.prepared='f'.repeat(64);return ()=>expiredRetirement.prepared=continuedRef;}],
+   ['authorization',()=>{steps.delete(signedKey);return ()=>steps.set(signedKey,signed);}],
+   ['native uncertainty',()=>{nativeStatus='STATE_REFRESH_UNKNOWN';return ()=>nativeStatus=undefined;}],
+   ['state drift',()=>{liveState={...continued.preparation.state,serial:999};return ()=>liveState=continued.preparation.state;}],
+   ['alias drift',()=>{liveAlias={...casResult.alias,RevisionId:'wrong'};return ()=>liveAlias=casResult.alias;}],
+  ]){const restore=change();await assert.rejects(()=>runtime.authenticateRequest(request),undefined,name);restore();}
+  steps.delete(`${continuationReleaseId}/closure:retired:1`);
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+  steps.set(`${continuationReleaseId}/closure:retired:1`,expiredRetirement);
+  steps.delete(signedKey);expiredRetirement.reason='UNKNOWN';
+  await assert.rejects(()=>runtime.authenticateRequest(request));
+  steps.set(signedKey,signed);expiredRetirement.reason='AUTHORIZATION_EXPIRED';
+
+  let closureWrites=0,approvalCalls=0;
+  assert.equal(put(request),recoveryReference);
+  steps.set(`${continuationReleaseId}/cutover:prepared`,{releaseId:continuationReleaseId,sourceSha:A,
+   name:'cutover:prepared',result:oldRef});
+  const resume=()=>runSuccessorReleaseCoordinator({recoveryReference},
+   {...runtime,now:()=>Date.now(),materializeInputs:async()=>({files:{},directory:'/tmp',terraformDataDir:'/tmp'}),
+    hydratePreparation:async()=>{},authenticateAuthorization:async()=>{},authenticateCompletedTransition:async()=>{},
+    capturePreparation:async(_context,_phase,value)=>value,
+    obtainAuthorization:async(context,phase,prepared,reference)=>{
+     approvalCalls++;assert.equal(phase,'closure');assert.equal(context.authorizationRound,2);
+     const issued=new Date();const approval=createProductionEnvironmentApprovalEvidence({environmentConfig:{id:7,name:'production',
+      can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,
+       reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]},repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,
+      environment:'production',sourceSha:E,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+      eventName:'workflow_dispatch',workflowRunId:'702',workflowRunAttempt:'1',executionActor:'operator',observedAt:issued.toISOString(),
+      actualApproval:{state:'approved',environmentId:7,environmentName:'production',userId:1,userLogin:'operator'}});
+     return {status:'AUTHORIZED',authorization:createBrokerProtectedEnvironmentAuthorization(prepared.preparation,{approval,now:issued,
+      release:{releaseId:continuationReleaseId,phase,preparationReference:reference,authorizationRound:2}})};},
+    classifyNativeAttempt:async()=> 'PRE_NATIVE',
+    runStageOperation:async input=>{assert.equal(input.operation,'reconcile');closureWrites++;
+     return {status:'RECONCILED_PENDING_RELEASE_CAS',preparationSha256:brokerDigest(input.preparation),
+      authorizationSha256:brokerDigest(input.authorization)};},
+    authenticateClosure:async()=>({status:'CLOSED',sourceSha:A})});
+  for(const boundary of ['closure:prepared:2','closure:authorized:2']){
+   crashAfter=boundary;await assert.rejects(resume,new RegExp(`Process stopped after ${boundary}`));
+   assert.equal(closureWrites,0,'No native refresh before signed authorization survives restart');
+   assert.deepEqual(steps.get(`${continuationReleaseId}/closure:retired:1`),expiredRetirement);
+  }
+  assert.equal((await resume()).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal(closureWrites,1);assert.equal(approvalCalls,1);
+  assert.ok(steps.get(`${continuationReleaseId}/closure:result`));
+  assert.equal((await resume()).status,'BROKER_CLOSURE_COMPLETE');assert.equal(closureWrites,1);
 
   const forged=structuredClone(continued);forged.preparation.closureContinuation.currentTooling.treeSha256='0'.repeat(64);
   steps.set(`${continuationReleaseId}/closure:prepared:1`,{...savedRound,result:put(forged)});
   await assert.rejects(()=>runtime.authenticateRequest(request));
   steps.set(`${continuationReleaseId}/closure:prepared:1`,savedRound);
-  steps.set(`${continuationReleaseId}/closure:result`,{prepared:continuedRef});
   assert.deepEqual(await runtime.authenticateRequest(request),{currentTooling:advanced.currentTooling,completed:true});
   env.GITHUB_SHA=C;
   // Earlier tooling must not authenticate closure executed by D.

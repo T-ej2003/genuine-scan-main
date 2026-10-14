@@ -499,7 +499,7 @@ test('hosted authorization producer uses actual protected approval and rejects u
  let reads=0;
  const fetchImpl=async url=>{const prefix=`https://api.github.com/repos/${repository}/`;assert.ok(url.startsWith(prefix));const suffix=url.slice(prefix.length);assert.ok(Object.hasOwn(responses,suffix),'Unexpected external access');reads++;return {ok:true,json:async()=>responses[suffix]};};
  const value=await readBrokerProtectedEnvironmentApproval({sourceSha,env,now,fetchImpl});assert.equal(value.approval.actualApproval.userLogin,'operator');assert.equal(value.release.releaseId,env.RELEASE_ID);assert.equal(reads,2);
- for(const [field,bad] of [['GITHUB_WORKFLOW_REF',PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef],['GITHUB_SHA','a'.repeat(40)],['GITHUB_RUN_ATTEMPT','2']]){
+ for(const [field,bad] of [['GITHUB_WORKFLOW_REF',PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef],['GITHUB_WORKFLOW_REF',`${repository}/.github/workflows/quality-gate.yml@refs/heads/codex/recover-failed-release-approval`],['GITHUB_SHA','a'.repeat(40)],['GITHUB_RUN_ATTEMPT','2']]){
   await assert.rejects(()=>readBrokerProtectedEnvironmentApproval({sourceSha,env:{...env,[field]:bad},now,fetchImpl}));assert.equal(reads,2);
  }
  environment.protection_rules[0].prevent_self_review=true;
@@ -674,7 +674,7 @@ async function seedDurableRegistration(store,entry,ticketId='current-release'){
  return release;
 }
 
-for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy','full-capacity-second-plan-change','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
+for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy','full-capacity-second-plan-change','adopt-descendant-registration','hosted-runner-replacement','proved-no-policy-write','no-prune-policy-lost','github-approval','approval-boundary','approval-timed-out','approval-failed','approval-journal-timeout','approval-record-response-lost','authorization-response-lost','approval-expired-before-consumption','source-advance','register','prune','converge-policy','publish','cutover','reconcile','cutover-expired-before-closure','closure-alias-changed','closure-cas-substituted','expired-register','expired-prune','expired-converge-policy','expired-publish','pre-intent-register','post-intent-register','reservation-register','pre-intent-prune','owner-prune','post-intent-prune','pre-intent-converge-policy','owner-converge-policy','post-intent-converge-policy','pre-intent-publish','post-intent-publish','reservation-publish','pre-intent-cutover','expired-pre-intent-reconcile','post-intent-cutover','reservation-cutover','pre-intent-reconcile','post-intent-reconcile','inventory-drift','default-drift','ownership-drift','alias-drift']) test(`one public coordinator entry closes full-capacity prerequisites; lost response: ${lostResponse}`, async () => {
  const hostedClosureRelease=lostResponse===null?createReleaseIdentity({sourceSha:prepublicationPredecessorFixture().f.release.sourceSha,
   ticketId:'current-release',baseline,changedFiles:['backend/src/services/qrService.ts']}):null;
  const f=await createPublicRegistrationFixture({completedRegistration:lostResponse==='adopt-registration',currentCompletedRegistration:['adopt-current-registration','full-capacity-noop-policy','full-capacity-change-policy','full-capacity-second-plan-change'].includes(lostResponse),descendantCompletedRegistration:['adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse),normalPredecessor:lostResponse==='normal-predecessor',
@@ -684,7 +684,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
  const steps=new Map(),calls=[],materializedPruningPhases=new Set();let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy',noOpPolicyIdentityChanged=false,policyPlanCalls=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
- const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
+ const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-failed','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
  if(hostedApproval)f.checker.verify=a=>a.schemaVersion===2?hostedVerifiers.get(a.nonce)?.(a)||false:priorVerify(a);
  const runtime={
   store:{...f.coordinatorStore,
@@ -809,6 +809,11 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
     assert.equal(context.pendingApproval.runId,'700');assert.equal(context.pendingApproval.prepared,digest);
     if(lostResponse==='approval-timed-out')return {status:'APPROVAL_TIMED_OUT',runId:'700'};
    }
+   if(lostResponse==='approval-failed'&&phase==='publication'&&context.authorizationRound===0){
+    if(!context.pendingApproval)return {status:'WAITING_FOR_APPROVAL',runId:'700',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};
+    assert.equal(context.pendingApproval.runId,'700');assert.equal(context.pendingApproval.prepared,digest);
+    return {status:'APPROVAL_FAILED',runId:'700',conclusion:'failure'};
+   }
    if(hostedApproval){
     const transport=hostedApprovalTransport(f.source,f.now,context.pendingApproval?Number(context.pendingApproval.runId):900+hostedVerifiers.size);
     const operation={registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'}[phase];
@@ -900,6 +905,12 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    return;
   }
   if(['approval-boundary','approval-timed-out'].includes(lostResponse)){const waiting=await runReleaseCoordinator(request,runtime);assert.equal(waiting.status,'WAITING_FOR_APPROVAL');assert.equal(waiting.runId,'700');assert.equal(f.snapshot().registrationApplyCalls,0);}
+  if(lostResponse==='approval-failed'){
+   const waiting=await runReleaseCoordinator(request,runtime);
+   assert.equal(waiting.status,'WAITING_FOR_APPROVAL');assert.equal(waiting.phase,'publication');assert.equal(waiting.runId,'700');
+   assert.equal(f.snapshot().publicationCalls,0);
+   assert.ok(steps.has(`${waiting.releaseId}/policy:result`));
+  }
   if(lostResponse==='approval-journal-timeout')await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost approval child response/);
   const nativeOperation=lostResponse?.replace(/^(expired-)?(pre|post)-intent-|^(reservation|owner)-/,'');
   if(lostResponse?.includes('pre-intent-'))f.injectNativeFault({kind:'checkout',operation:nativeOperation});
@@ -918,7 +929,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
    if(lostResponse.startsWith('expired-'))f.advanceClock(31*60*1000);
   }
   else if(lostResponse?.startsWith('reservation-'))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Injected reservation-only failure/);
-  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
+  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','source-advance','github-approval','approval-boundary','approval-timed-out','approval-failed','approval-journal-timeout','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))await assert.rejects(()=>runReleaseCoordinator(request,runtime),/Lost completed mutation response/);
   if(lostResponse==='hosted-runner-replacement'){
    const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
    for(const binding of ['needs: gates','TARGET_SHA: ${{ needs.gates.outputs.target_sha }}',
@@ -977,7 +988,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   if(lostResponse==='hosted-runner-replacement')expected.splice(expected.indexOf('prune')+1,0,'recover-policy');
   else if(lostResponse==='proved-no-policy-write')expected.splice(expected.indexOf('prune')+1,0,'prune');
   else if(lostResponse?.includes('pre-intent-')||lostResponse?.startsWith('reservation-'))expected.splice(expected.indexOf(nativeOperation)+1,0,nativeOperation);
-  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover',reconcile:'recover-reconciliation'}[lostOperation]);
+  else if(lostResponse&&!['prerequisites-only','prerequisites-only-overlap','normal-predecessor','adopt-registration','adopt-current-registration','adopt-descendant-registration','proved-no-policy-write','authorization-response-lost','source-advance','github-approval','approval-boundary','approval-timed-out','approval-failed','approval-journal-timeout','approval-record-response-lost','approval-expired-before-consumption','cutover-expired-before-closure'].includes(lostResponse))expected.splice(expected.indexOf(lostOperation)+1,0,{register:'recover-registration',prune:'recover-policy','converge-policy':'recover-policy',publish:'recover-publication',cutover:'recover-cutover',reconcile:'recover-reconciliation'}[lostOperation]);
   assert.deepEqual(calls,expected);
   if(['pre-intent-register','expired-pre-intent-register','reservation-register'].includes(lostResponse))assert.equal(calls.filter(call=>call==='recover-registration').length,0);
   if(lostResponse==='expired-pre-intent-register')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:authorized:1')));
@@ -987,6 +998,16 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   if(['adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement'].includes(lostResponse)){assert.equal(result.registrationTransactionId,CURRENT_REGISTRATION_OPERATION);assert.equal(f.snapshot().registeredTaskDefinitionCalls-priorRegistrationCalls,0);}
   if(['approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost'].includes(lostResponse))assert.equal(approvalDispatches,1);
   if(lostResponse==='approval-timed-out')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:approval-timeout:0')));
+  if(lostResponse==='approval-failed'){
+   assert.equal([...steps.keys()].filter(key=>key.endsWith('/publication:approval-failed:0')).length,1);
+   assert.equal(steps.has(`${result.releaseId}/publication:authorized:0`),false);
+   const replacement=steps.get(`${result.releaseId}/publication:authorized:1`);
+   assert.ok(replacement);
+   const approval=f.coordinatorStore.getArtifact(replacement.authorization);
+   assert.deepEqual(approval.release,{releaseId:result.releaseId,phase:'publication',
+    preparationReference:replacement.prepared,authorizationRound:1});
+   assert.equal(f.snapshot().publicationCalls,1);
+  }
   if(lostResponse==='approval-journal-timeout'){
    assert.ok(steps.has(`${result.releaseId}/registration:dispatch:0`));
    assert.ok(steps.has(`${result.releaseId}/registration:approval-timeout:0`));
@@ -1022,13 +1043,17 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
 test('governed approval dispatch resumes its exact child at the human boundary without a second POST',async()=>{
  const release={sourceSha,releaseId:'b'.repeat(64),ticketId:'current-release'},prepared={preparation:{sourceSha}},reference=brokerDigest(prepared);
  const workflow='authorize-production-stage-b-release-transition.yml',repository='T-ej2003/genuine-scan-main';
- let recorded,posts=0,reads=0,lose=true;
+ let recorded,posts=0,reads=0,lose=true,artifacts=[],artifactOutage;
  const child={id:701,workflow_id:8,path:`.github/workflows/${workflow}`,head_sha:sourceSha,head_branch:'main',event:'workflow_dispatch',run_attempt:1,status:'waiting',repository:{full_name:repository},head_repository:{full_name:repository}};
  const store={readStep:async()=>recorded||null,writeStep:async value=>{assert.equal(recorded,undefined);recorded=structuredClone(value);}};
  const run=args=>{
   const suffix=args[1].slice(`repos/${repository}/`.length);
   if(suffix==='branches/main')return JSON.stringify({protected:true,commit:{sha:sourceSha}});
   if(suffix==='actions/runs/701')return JSON.stringify(child);
+  if(suffix==='actions/runs/701/artifacts'){
+   if(artifactOutage)throw new Error(`GitHub artifact HTTP ${artifactOutage}`);
+   return JSON.stringify([{artifacts}]);
+  }
   if(suffix==='actions/runs/701/pending_deployments')return JSON.stringify([{environment:{id:9,name:'production'}}]);
   throw new Error('Unexpected approval read '+suffix);
  };
@@ -1052,9 +1077,61 @@ test('governed approval dispatch resumes its exact child at the human boundary w
   {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
  assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
   {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
- child.conclusion='failure';await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),/Exact approval child failed/);assert.equal(posts,1);
+ child.conclusion='failure';
+ for(const code of [500,503]){artifactOutage=code;
+  await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),new RegExp(`HTTP ${code}`));
+  assert.equal(posts,1);
+ }
+ artifactOutage=undefined;
+ assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
+  {status:'APPROVAL_FAILED',runId:'701',conclusion:'failure'});assert.equal(posts,1);
+ artifacts=[{name:'production-stage-b-release-transition-authorization',workflow_run:{id:701}}];
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),/Failed approval attempt produced an authorization artifact/);
+ artifacts=[];
+ child.run_attempt=2;await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps));
+ child.run_attempt=1;
  child.head_sha='f'.repeat(40);await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps));assert.equal(posts,1);
  await assert.rejects(()=>obtainReleaseTransitionAuthorization(context,'pruning',prepared,reference,deps));assert.equal(posts,1);
+});
+
+for(const conclusion of ['failure','cancelled'])test(`newly dispatched approval child ${conclusion} is authenticated from its durable journal`,async()=>{
+ const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
+ const release={sourceSha,releaseId:'b'.repeat(64),ticketId:'current-release'};
+ const prepared={preparation:{sourceSha}},reference=brokerDigest(prepared);
+ const child={id:702,workflow_id:8,path:`.github/workflows/${workflow}`,head_sha:sourceSha,head_branch:'main',
+  event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion,repository:{full_name:repository},head_repository:{full_name:repository}};
+ let recorded,posts=0;
+ const store={readStep:async()=>recorded||null,writeStep:async value=>{assert.equal(recorded,undefined);recorded=structuredClone(value);}};
+ const run=args=>{const suffix=args[1].slice(`repos/${repository}/`.length);
+  if(suffix==='branches/main')return JSON.stringify({protected:true,commit:{sha:sourceSha}});
+  if(suffix==='actions/runs/702')return JSON.stringify(child);
+  if(suffix==='actions/runs/702/artifacts')return JSON.stringify([{artifacts:[]}]);
+  throw new Error('Unexpected approval read '+suffix);
+ };
+ const fetchImpl=async(url,options)=>{
+  let body;
+  if(url.endsWith(`/workflows/${workflow}`))body={id:8,path:child.path};
+  else if(url.includes('/runs?'))body={total_count:0,workflow_runs:[]};
+  else if(options?.method==='POST'){posts++;body={workflow_run_id:702};}
+  else if(url.endsWith('/actions/runs/702'))body=child;
+  else throw new Error('Unexpected dispatch API '+url);
+  return new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+ };
+ const context={release,authorizationRound:0,store};
+ const deps={token:'fixture-only',run,fetchImpl,sleep:rejectExternalAccess,attempts:1};
+ const failed={status:'APPROVAL_FAILED',runId:'702',conclusion};
+ assert.deepEqual(await obtainReleaseTransitionAuthorization(context,'publication',prepared,reference,deps),failed);
+ assert.equal(posts,1);assert.deepEqual(recorded.dispatch.identity.inputs,
+  releaseTransitionDispatchInputs(context,'publication',reference,prepared.preparation));
+ const pending={runId:'702',prepared:reference};
+ assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),failed);
+ assert.equal(posts,1);
+ const original=structuredClone(recorded);
+ recorded.dispatch.identity.inputs.ticket_id='wrong-ticket';
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),/Expected values to be strictly deep-equal/);
+ recorded=undefined;
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),/Failed approval lacks an authenticated dispatch/);
+ recorded=original;assert.equal(posts,1);
 });
 
 test('successor approval dispatch executes from protected descendant without relabeling the release',async()=>{

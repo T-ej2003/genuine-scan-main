@@ -95,8 +95,12 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
  const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
  const api=suffix=>JSON.parse(run(['api',`repos/${repository}/${suffix}`],{encoding:'utf8',maxBuffer:8*1024*1024}));
  const name=`${phase}:dispatch:${authorizationRound}`;
- const prior=await store.readStep(release.releaseId,name);
- if(prior){assert.equal(prior.releaseId,release.releaseId);assert.equal(prior.sourceSha,release.sourceSha);assert.equal(prior.name,name);}
+ const readDispatch=async()=>{
+  const record=await store.readStep(release.releaseId,name);
+  if(record){assert.equal(record.releaseId,release.releaseId);assert.equal(record.sourceSha,release.sourceSha);assert.equal(record.name,name);}
+  return record;
+ };
+ const prior=await readDispatch();
  let workflowRunId=pendingApproval?.runId;
  if(pendingApproval){assert.equal(pendingApproval.prepared,preparationReference);assert.match(String(workflowRunId),/^[1-9][0-9]*$/);}
  if(!workflowRunId){
@@ -112,6 +116,17 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
   assert.equal(child.repository?.full_name,repository);assert.equal(child.head_repository?.full_name,repository);
   if(child.status==='completed'){
    if(child.conclusion==='timed_out')return {status:'APPROVAL_TIMED_OUT',runId:String(workflowRunId)};
+   if(['failure','cancelled'].includes(child.conclusion)){
+    const dispatch=(await readDispatch())?.dispatch,identity=dispatch?.identity;
+    assert.ok(identity,'Failed approval lacks an authenticated dispatch');
+    assert.equal(identity.repository,repository);assert.equal(identity.workflow,workflow);
+    assert.equal(identity.workflowPath,`.github/workflows/${workflow}`);assert.equal(identity.ref,'main');
+    assert.equal(identity.targetSha,executionSourceSha);
+    assert.deepEqual(identity.inputs,inputs);
+    const failed=authenticateFailedReleaseTransitionAttempt({run,runId:workflowRunId,toolingSha:executionSourceSha,
+     workflowId:identity.workflowId,beforeRunIds:dispatch.beforeRunIds});
+    return {status:'APPROVAL_FAILED',runId:failed.runId,conclusion:failed.conclusion};
+   }
    assert.equal(child.conclusion,'success','Exact approval child failed');
    const {authorization}=await readBrokerProtectedEnvironmentAuthorization({workflowRunId,sourceSha:release.sourceSha,workflowSourceSha:executionSourceSha,run});
    await assertReleaseTransitionApproval(authorization);
@@ -486,6 +501,18 @@ export async function runReleaseCoordinator(request, runtime) {
    for(let round=0;;round++){
     assert.ok(round<20,'Repeated no-write or expired approvals require a new governed release');
     const attempt=await readStep(`${name}:attempt:${round}`);
+    const failed=await readStep(`${name}:approval-failed:${round}`);
+    if(failed){
+     assert.equal(await readStep(`${name}:approval-timeout:${round}`),null);
+     assert.equal(attempt,null);assert.equal(await readStep(`${name}:authorized:${round}`),null);
+     assert.equal(failed.prepared,preparedDigest);
+     const pending=await readStep(`${name}:pending:${round}`);
+     assert.ok(pending,'Failed approval lacks its recorded child');
+     assert.equal(pending.prepared,preparedDigest);assert.equal(failed.runId,pending.runId);
+     const checked=await runtime.obtainAuthorization({...context,authorizationRound:round,pendingApproval:pending},name,prepared,preparedDigest);
+     assert.deepEqual(checked,{status:'APPROVAL_FAILED',runId:failed.runId,conclusion:failed.conclusion});
+     continue;
+    }
     const authenticatedDispatch=async()=>{
      const journal=await readStep(`${name}:dispatch:${round}`),identity=journal?.dispatch?.identity;
      assert.ok(identity,'Timed-out approval lacks an authenticated dispatch');
@@ -524,6 +551,19 @@ export async function runReleaseCoordinator(request, runtime) {
        if(pendingApproval)assert.equal(String(approval.runId),pendingApproval.runId,'Timed-out child differs from the recorded approval');
        else await authenticatedDispatch();
        await record(`${name}:approval-timeout:${round}`,{prepared:preparedDigest,runId:String(approval.runId)});
+       continue;
+      }
+      if(approval.status==='APPROVAL_FAILED'){
+       assert.equal(attempt,null);
+       assert.ok(['failure','cancelled'].includes(approval.conclusion));
+       assert.match(String(approval.runId),/^[1-9][0-9]*$/);
+       if(pendingApproval)assert.equal(String(approval.runId),pendingApproval.runId,'Failed child differs from the recorded approval');
+       else{
+        await authenticatedDispatch();
+        await record(`${name}:pending:${round}`,{prepared:preparedDigest,runId:String(approval.runId),
+         runUrl:`https://github.com/T-ej2003/genuine-scan-main/actions/runs/${approval.runId}`});
+       }
+       await record(`${name}:approval-failed:${round}`,{prepared:preparedDigest,runId:String(approval.runId),conclusion:approval.conclusion});
        continue;
       }
       if(approval.status==='WAITING_FOR_APPROVAL'){

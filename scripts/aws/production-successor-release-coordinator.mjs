@@ -77,16 +77,19 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       if(old){
        const oldReference=old.result;
        const oldAttempt=await read(`closure:attempt:${previousRound}`);
-       if(oldAttempt){
+       if(oldAttempt||continuation.preNativeAbort){
         const proof=continuation.preNativeAbort;assert.equal(proof?.status,'PRE_NATIVE_ABORTED');
         assert.equal(proof.releaseId,release.releaseId);assert.equal(proof.sourceSha,release.sourceSha);
         assert.equal(proof.round,previousRound);assert.equal(proof.prepared,oldReference);
-        assert.equal(proof.attemptSha256,brokerDigest(oldAttempt));
+        if(oldAttempt)assert.equal(proof.attemptSha256,brokerDigest(oldAttempt));
+        else assert.equal(Object.hasOwn(proof,'attemptSha256'),false);
         assert.equal(proof.authorization,(await read(`closure:authorized:${previousRound}`))?.authorization);
         assert.deepEqual(proof.currentTooling,continuation.currentTooling);
        }else assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
        const retired=await read(`closure:retired:${previousRound}`);
-       if(retired)assert.equal(retired.prepared,oldReference);
+       if(retired){assert.equal(retired.prepared,oldReference);
+        if(continuation.preNativeAbort&&!oldAttempt)assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');
+        if(!continuation.preNativeAbort&&!oldAttempt)assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');}
        else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:continuation.preNativeAbort?'PRE_NATIVE_ABORTED':'TOOLING_ADVANCED_AFTER_CAS',
         ...(continuation.preNativeAbort?{preNativeAbort:continuation.preNativeAbort}:{}),
         ...(continuation.supersededAuthorization?{runId:continuation.supersededAuthorization.runId}: {})});
@@ -129,11 +132,24 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
     }
     const preparedReference=brokerDigest(prepared);
     const attempt=await read(`${phase}:attempt:${round}`);
+    const failed=await read(`${phase}:approval-failed:${round}`);
+    const authenticateFailed=async()=>{
+     assert.equal(attempt,null);assert.equal(await read(`${phase}:authorized:${round}`),null);
+     assert.equal(failed.prepared,preparedReference);
+     const pending=await read(`${phase}:pending:${round}`);
+     assert.ok(pending,'Failed approval lacks its recorded child');
+     assert.equal(pending.prepared,preparedReference);assert.equal(failed.runId,pending.runId);
+     const checked=await runtime.obtainAuthorization({release,store,inputs,authorizationRound:round,pendingApproval:pending},phase,prepared,preparedReference);
+     assert.deepEqual(checked,{status:'APPROVAL_FAILED',runId:failed.runId,conclusion:failed.conclusion});
+    };
     const retired=await read(`${phase}:retired:${round}`);
     if(retired){assert.equal(retired.prepared,preparedReference);
+     if(failed){assert.equal(phase,'closure');assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');
+      assert.equal(await read(`${phase}:approval-timeout:${round}`),null);await authenticateFailed();}
      if(attempt){const signed=await read(`${phase}:authorized:${round}`);assert.equal(signed?.prepared,preparedReference);
       assert.equal(await runtime.classifyNativeAttempt({release,inputs},phase,prepared,await get(signed.authorization)),'PRE_NATIVE');}
      continue;}
+    if(failed){assert.equal(await read(`${phase}:approval-timeout:${round}`),null);await authenticateFailed();continue;}
     const evidenceExpired=()=>phase==='cutover'&&Date.parse(prepared.preparation.successorReconciliation?.expiresAt||'')<=now();
     if(evidenceExpired()&&!attempt){await write(`${phase}:retired:${round}`,{prepared:preparedReference,reason:'EVIDENCE_EXPIRED'});continue;}
     const authenticatedDispatch=async()=>{
@@ -164,6 +180,18 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       if(pending)assert.equal(String(approval.runId),pending.runId);
       else await authenticatedDispatch();
       await write(`${phase}:approval-timeout:${round}`,{prepared:preparedReference,runId:String(approval.runId)});
+      continue;
+     }
+     if(approval.status==='APPROVAL_FAILED'){
+      assert.ok(['failure','cancelled'].includes(approval.conclusion));
+      assert.match(String(approval.runId),/^[1-9][0-9]*$/);
+      if(pending)assert.equal(String(approval.runId),pending.runId,'Failed child differs from the recorded approval');
+      else{
+       await authenticatedDispatch();
+       await write(`${phase}:pending:${round}`,{prepared:preparedReference,runId:String(approval.runId),
+        runUrl:`https://github.com/T-ej2003/genuine-scan-main/actions/runs/${approval.runId}`});
+      }
+      await write(`${phase}:approval-failed:${round}`,{prepared:preparedReference,runId:String(approval.runId),conclusion:approval.conclusion});
       continue;
      }
      if(approval.status==='WAITING_FOR_APPROVAL'){
