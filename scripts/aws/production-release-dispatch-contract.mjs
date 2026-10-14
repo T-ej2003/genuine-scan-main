@@ -12,23 +12,26 @@ const SHA256 = /^[a-f0-9]{64}$/;
 
 // Existing release transport carries two independently authenticated proofs.
 // Wrapping changes only the transport checksum, never either signed artifact.
-export function packReleaseEvidenceTransport({ authorizationJson, authorizationSha256, historicalRuntimeJson, historicalRuntimeSha256, completedRegistrationSourceSha }) {
+export function packReleaseEvidenceTransport({ authorizationJson, authorizationSha256, historicalRuntimeJson, historicalRuntimeSha256, completedRegistrationSourceSha, completedRegistrationTicketId }) {
   if (Object.hasOwn(JSON.parse(authorizationJson), 'imageAuthorizationJson')) {
     const prior=unpackReleaseEvidenceTransport({json:authorizationJson,sha256:authorizationSha256});
-    for(const [name,value] of Object.entries({historicalRuntimeJson,historicalRuntimeSha256,completedRegistrationSourceSha})) {
+    for(const [name,value] of Object.entries({historicalRuntimeJson,historicalRuntimeSha256,completedRegistrationSourceSha,completedRegistrationTicketId})) {
       if(value!==undefined && prior[name]!==undefined && value!==prior[name]) throw new Error('Release evidence reference substitution');
     }
     return packReleaseEvidenceTransport({...prior,
       ...(historicalRuntimeJson || historicalRuntimeSha256 ? {historicalRuntimeJson,historicalRuntimeSha256} : {}),
-      ...(completedRegistrationSourceSha!==undefined ? {completedRegistrationSourceSha} : {})});
+      ...(completedRegistrationSourceSha!==undefined ? {completedRegistrationSourceSha} : {}),
+      ...(completedRegistrationTicketId!==undefined ? {completedRegistrationTicketId} : {})});
   }
   if (completedRegistrationSourceSha !== undefined && (typeof completedRegistrationSourceSha !== 'string' || !SHA.test(completedRegistrationSourceSha))) throw new Error('Completed registration source must be an exact SHA.');
+  if (completedRegistrationTicketId !== undefined && (!completedRegistrationSourceSha || typeof completedRegistrationTicketId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(completedRegistrationTicketId))) throw new Error('Completed registration ticket requires an exact source and valid ticket.');
   if (!historicalRuntimeJson && !historicalRuntimeSha256 && !completedRegistrationSourceSha) return { json: authorizationJson, sha256: authorizationSha256 };
   if (historicalRuntimeJson || historicalRuntimeSha256) readHistoricalRuntimeTransport({ bytes: Buffer.from(historicalRuntimeJson || ""), expectedSha256: historicalRuntimeSha256 });
   if (crypto.createHash("sha256").update(authorizationJson).digest("hex") !== authorizationSha256) throw new Error("Image transport checksum changed");
   const json = JSON.stringify({ schemaVersion: completedRegistrationSourceSha ? 2 : 1, imageAuthorizationJson: authorizationJson, imageAuthorizationSha256: authorizationSha256,
     ...(historicalRuntimeJson || historicalRuntimeSha256 ? {historicalRuntimeJson,historicalRuntimeSha256} : {}),
-    ...(completedRegistrationSourceSha ? {completedRegistrationSourceSha} : {}) });
+    ...(completedRegistrationSourceSha ? {completedRegistrationSourceSha} : {}),
+    ...(completedRegistrationTicketId ? {completedRegistrationTicketId} : {}) });
   return { json, sha256: crypto.createHash("sha256").update(json).digest("hex") };
 }
 
@@ -38,11 +41,11 @@ export function unpackReleaseEvidenceTransport({ json, sha256 }) {
   if (!Object.hasOwn(value, "imageAuthorizationJson")) return { authorizationJson: json, authorizationSha256: sha256 };
   const successor=value.schemaVersion===2;
   const historical=Object.hasOwn(value,'historicalRuntimeJson') || Object.hasOwn(value,'historicalRuntimeSha256');
-  const keys=['imageAuthorizationJson','imageAuthorizationSha256','schemaVersion',...(!successor || historical ? ['historicalRuntimeJson','historicalRuntimeSha256'] : []),...(successor ? ['completedRegistrationSourceSha'] : [])].sort();
+  const keys=['imageAuthorizationJson','imageAuthorizationSha256','schemaVersion',...(!successor || historical ? ['historicalRuntimeJson','historicalRuntimeSha256'] : []),...(successor ? ['completedRegistrationSourceSha'] : []),...(Object.hasOwn(value,'completedRegistrationTicketId') ? ['completedRegistrationTicketId'] : [])].sort();
   if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(keys)) throw new Error("Release transport envelope malformed");
   if (value.schemaVersion !== 1 && !successor) throw new Error("Release transport schema invalid");
-  packReleaseEvidenceTransport({ authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256, ...(successor ? {completedRegistrationSourceSha:value.completedRegistrationSourceSha} : {}) });
-  return { authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256, ...(successor ? {completedRegistrationSourceSha:value.completedRegistrationSourceSha} : {}) };
+  packReleaseEvidenceTransport({ authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256, ...(successor ? {completedRegistrationSourceSha:value.completedRegistrationSourceSha} : {}), ...(Object.hasOwn(value,'completedRegistrationTicketId') ? {completedRegistrationTicketId:value.completedRegistrationTicketId} : {}) });
+  return { authorizationJson: value.imageAuthorizationJson, authorizationSha256: value.imageAuthorizationSha256, historicalRuntimeJson: value.historicalRuntimeJson, historicalRuntimeSha256: value.historicalRuntimeSha256, ...(successor ? {completedRegistrationSourceSha:value.completedRegistrationSourceSha} : {}), ...(Object.hasOwn(value,'completedRegistrationTicketId') ? {completedRegistrationTicketId:value.completedRegistrationTicketId} : {}) };
 }
 
 function parseBoundWebAuthorization({ sourceSha, authorizationBytes, expectedSha256, required }) {

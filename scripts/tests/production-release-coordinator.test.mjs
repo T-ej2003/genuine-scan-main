@@ -64,10 +64,10 @@ test('hosted image resolver carries the exact source-bound transport to the cano
   verifyAuthorization:({authorization,sourceSha:actual})=>{verified++;assert.equal(actual,sourceSha);assert.deepEqual(authorization,JSON.parse(authorizationJson));
    return Object.fromEntries(['backend','worker','rls-executor','rls-canary'].map(name=>[name,`example@sha256:${'a'.repeat(64)}`]));}});
  assert.equal(verified,1);assert.equal(evidence.authorizationRawSha256,transportSha256);assert.equal(evidence.sourceSha,sourceSha);
- const packed=packReleaseEvidenceTransport({authorizationJson,authorizationSha256:transportSha256,completedRegistrationSourceSha:'b'.repeat(40)});
+ const packed=packReleaseEvidenceTransport({authorizationJson,authorizationSha256:transportSha256,completedRegistrationSourceSha:'b'.repeat(40),completedRegistrationTicketId:'CHG-20261011-001'});
  const durable=authenticateHostedStageBImages({sourceSha,transportJson:packed.json,transportSha256:packed.sha256,run:rejectExternalAccess,
   verifyAuthorization:()=>Object.fromEntries(['backend','worker','rls-executor','rls-canary'].map(name=>[name,'fixture-ref']))});
- assert.equal(durable.completedRegistrationSourceSha,'b'.repeat(40));assert.equal(durable.authorizationRawSha256,transportSha256);
+ assert.equal(durable.completedRegistrationSourceSha,'b'.repeat(40));assert.equal(durable.completedRegistrationTicketId,'CHG-20261011-001');assert.equal(durable.authorizationRawSha256,transportSha256);
  assert.throws(()=>authenticateHostedStageBImages({sourceSha,transportJson:authorizationJson,transportSha256:'0'.repeat(64),run:rejectExternalAccess,
   verifyAuthorization:()=>{assert.fail('Changed transport cannot reach verifier');}}));
 });
@@ -1140,6 +1140,49 @@ test('hosted durable selection authenticates signature/native receipt and binds 
   const artifacts=await runtime.resolveArtifacts();
   assert.equal(artifacts.completedRegistrationSourceSha,predecessor);
   await assert.rejects(()=>runtime.authenticateArtifacts(release,{...artifacts,completedRegistrationSourceSha:'f'.repeat(40)}));
+ }finally{f.dispose();}
+});
+
+test('cross-ticket durable adoption preserves predecessor authority and rejects wrong ticket without registration',async()=>{
+ const f=await createPublicRegistrationFixture({descendantCompletedRegistration:true});
+ try{
+  const oldTicket='CHG-20261011-001',newTicket='CHG20261013-001';
+  await seedDurableRegistration(f.coordinatorStore,f.completedRegistration,oldTicket);
+  const sourceSha=f.source,predecessor=f.completedRegistration.preparation.sourceSha;
+  const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+   GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp'};
+  const options={sourceSha,ticketId:newTicket,imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',env,
+   awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>f.coordinatorStore,verifyAuthorization:f.checker.verify,
+   readReceipt:()=>f.completedRegistration.result,imageImpact:()=>({imageReuseCompatible:true,newImagesRequired:false})};
+  const imageReader=()=>({sourceSha,completedRegistrationSourceSha:predecessor,completedRegistrationTicketId:oldTicket});
+  const runtime=createHostedReleaseRuntime({...options,imageReader}),release={sourceSha,releaseId:'b'.repeat(64)},before=f.snapshot();
+  assert.deepEqual(await runtime.findCompletedRegistration(release),f.completedRegistration);
+  await assert.rejects(()=>createHostedReleaseRuntime({...options,imageReader:()=>({sourceSha,completedRegistrationSourceSha:predecessor})}).findCompletedRegistration(release),/Missing predecessor/);
+  await assert.rejects(()=>createHostedReleaseRuntime({...options,imageReader:()=>({sourceSha,completedRegistrationSourceSha:predecessor,completedRegistrationTicketId:'CHG-wrong'})}).findCompletedRegistration(release),/Missing predecessor/);
+  assert.equal(f.snapshot().registrationApplyCalls,before.registrationApplyCalls);
+  const staleRelease=createReleaseIdentity({sourceSha,ticketId:oldTicket,baseline,changedFiles:[]});
+  const put=async value=>{const hash=brokerDigest(value);await f.coordinatorStore.putArtifact(hash,value);return hash;};
+  await f.coordinatorStore.writeStart({sourceSha,ticketId:oldTicket},{release:await put(staleRelease),baseline:await put(baseline)});
+  const staleArtifacts={sourceSha,completedRegistrationSourceSha:'a'.repeat(40)};
+  await f.coordinatorStore.writeStep({releaseId:staleRelease.releaseId,sourceSha,name:'ARTIFACTS_RESOLVED',result:await put(staleArtifacts)});
+  runtime.gateLifecycle='prerequisites';runtime.authenticateSource=async()=>({baseline,changedFiles:[]});
+  runtime.resolveGates=async()=>({sourceSha});runtime.authenticateGates=async()=>{};
+  const terminal={kind:'STAGED_BROKER_TERMINAL_HANDOFF',sourceSha};
+  runtime.findCompletedBrokerClosure=async(_release,registration)=>{
+   assert.deepEqual(registration,f.completedRegistration);
+   return {sourceSha,terminalSha256:brokerDigest(terminal),closureSha256:'c'.repeat(64),registrationTransactionId:registration.result.authorizationSha256};
+  };
+  runtime.authenticateCompletedBrokerClosure=async()=>terminal;
+  runtime.materializeInputs=async()=>assert.fail('Completed closure must not start a mutation phase');
+  runtime.runStageOperation=async()=>assert.fail('Completed production operation must not replay');
+  const request={sourceSha,ticketId:newTicket,imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+   requiredGateRunIdsJson:'{}',lifecycle:'prerequisites',completedBrokerClosureSourceSha:sourceSha};
+  const invoke=()=>runHostedReleaseCoordinator(request,{runtimeFactory:()=>runtime});
+  await assert.rejects(()=>runHostedReleaseCoordinator({...request,ticketId:oldTicket},{runtimeFactory:()=>runtime}));
+  const result=await invoke();assert.equal(result.status,'PREREQUISITES_CONVERGED');
+  assert.deepEqual(await invoke(),result);
+  assert.deepEqual(await f.coordinatorStore.getArtifact((await f.coordinatorStore.readStep(staleRelease.releaseId,'ARTIFACTS_RESOLVED')).result),staleArtifacts);
+  assert.equal(f.snapshot().registrationApplyCalls,before.registrationApplyCalls);
  }finally{f.dispose();}
 });
 

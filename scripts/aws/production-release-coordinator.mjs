@@ -253,7 +253,8 @@ export function authenticateHostedStageBImages({sourceSha,transportJson,transpor
  assert.deepEqual(Object.keys(refs).sort(),['backend','rls-canary','rls-executor','worker']);
  return {sourceSha,authorization,authorizationJson:transport.authorizationJson,refs,authorizationRawSha256:transport.authorizationSha256,
   transportSha256,historicalRuntimeTransportSha256:transport.historicalRuntimeSha256||null,
-  ...(transport.completedRegistrationSourceSha?{completedRegistrationSourceSha:transport.completedRegistrationSourceSha}:{})};
+  ...(transport.completedRegistrationSourceSha?{completedRegistrationSourceSha:transport.completedRegistrationSourceSha}:{}),
+  ...(transport.completedRegistrationTicketId?{completedRegistrationTicketId:transport.completedRegistrationTicketId}:{})};
 }
 
 // Eligibility comes from authenticated retention/transaction evidence, not version numbering.
