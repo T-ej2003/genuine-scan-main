@@ -503,6 +503,7 @@ export async function runReleaseCoordinator(request, runtime) {
     const attempt=await readStep(`${name}:attempt:${round}`);
     const failed=await readStep(`${name}:approval-failed:${round}`);
     if(failed){
+     assert.equal(await readStep(`${name}:approval-timeout:${round}`),null);
      assert.equal(attempt,null);assert.equal(await readStep(`${name}:authorized:${round}`),null);
      assert.equal(failed.prepared,preparedDigest);
      const pending=await readStep(`${name}:pending:${round}`);

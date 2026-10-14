@@ -1043,14 +1043,17 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
 test('governed approval dispatch resumes its exact child at the human boundary without a second POST',async()=>{
  const release={sourceSha,releaseId:'b'.repeat(64),ticketId:'current-release'},prepared={preparation:{sourceSha}},reference=brokerDigest(prepared);
  const workflow='authorize-production-stage-b-release-transition.yml',repository='T-ej2003/genuine-scan-main';
- let recorded,posts=0,reads=0,lose=true,artifacts=[];
+ let recorded,posts=0,reads=0,lose=true,artifacts=[],artifactOutage;
  const child={id:701,workflow_id:8,path:`.github/workflows/${workflow}`,head_sha:sourceSha,head_branch:'main',event:'workflow_dispatch',run_attempt:1,status:'waiting',repository:{full_name:repository},head_repository:{full_name:repository}};
  const store={readStep:async()=>recorded||null,writeStep:async value=>{assert.equal(recorded,undefined);recorded=structuredClone(value);}};
  const run=args=>{
   const suffix=args[1].slice(`repos/${repository}/`.length);
   if(suffix==='branches/main')return JSON.stringify({protected:true,commit:{sha:sourceSha}});
   if(suffix==='actions/runs/701')return JSON.stringify(child);
-  if(suffix==='actions/runs/701/artifacts')return JSON.stringify([{artifacts}]);
+  if(suffix==='actions/runs/701/artifacts'){
+   if(artifactOutage)throw new Error(`GitHub artifact HTTP ${artifactOutage}`);
+   return JSON.stringify([{artifacts}]);
+  }
   if(suffix==='actions/runs/701/pending_deployments')return JSON.stringify([{environment:{id:9,name:'production'}}]);
   throw new Error('Unexpected approval read '+suffix);
  };
@@ -1074,7 +1077,13 @@ test('governed approval dispatch resumes its exact child at the human boundary w
   {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
  assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
   {status:'APPROVAL_TIMED_OUT',runId:'701'});assert.equal(posts,1);
- child.conclusion='failure';assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
+ child.conclusion='failure';
+ for(const code of [500,503]){artifactOutage=code;
+  await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),new RegExp(`HTTP ${code}`));
+  assert.equal(posts,1);
+ }
+ artifactOutage=undefined;
+ assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),
   {status:'APPROVAL_FAILED',runId:'701',conclusion:'failure'});assert.equal(posts,1);
  artifacts=[{name:'production-stage-b-release-transition-authorization',workflow_run:{id:701}}];
  await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps),/Failed approval attempt produced an authorization artifact/);

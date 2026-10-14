@@ -22,6 +22,8 @@ test('protected authorization installs dependencies and selects the direct produ
  const authorize=workflow.indexOf('node scripts/aws/authorize-production-stage-b-release-transition.mjs');
  assert.ok(install>0&&authorize>install);
  assert.match(workflow,/^    env:\n(?:      [^\n]*\n)*      TF_WORKSPACE: default$/m);
+ const quality=fs.readFileSync(new URL('../../.github/workflows/quality-gate.yml',import.meta.url),'utf8');
+ assert.match(quality,/node --test scripts\/tests\/production-successor-release-coordinator\.test\.mjs/);
 });
 test('hosted cutover and closure setup creates every private authorization directory',()=>{
  const workflow=yaml.load(fs.readFileSync(new URL('../../.github/workflows/authorize-production-stage-b-release-transition.yml',import.meta.url),'utf8'));
@@ -302,6 +304,46 @@ test('successor reauthenticates a failed prior round before replacing its child'
  assert.equal(checked,1);assert.equal(f.counts.cutover,1);
 });
 
+test('successor restart after durable failed-round write does not redispatch or replay cutover',async()=>{
+ const f=await fixture(),original=f.runtime.obtainAuthorization,write=f.store.writeStep;
+ let lost=true,dispatches=0;
+ f.store.writeStep=value=>{write(value);if(value.name==='cutover:approval-failed:0'&&lost){lost=false;throw new Error('Lost failed-round write response');}};
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  if(phase!=='cutover'||context.authorizationRound!==0)return original(context,phase,prepared,reference);
+  if(!context.pendingApproval){dispatches++;f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'cutover:dispatch:0',dispatch:{
+   identity:{repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+    workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',ref:'main',targetSha:C,
+    inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)}}});}
+  return {status:'APPROVAL_FAILED',runId:'700',conclusion:'failure'};
+ };
+ const execute=()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ await assert.rejects(execute,/Lost failed-round write response/);
+ assert.equal(f.steps.get(`${f.releaseId}/cutover:approval-failed:0`).runId,'700');
+ assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(dispatches,1);assert.equal(f.counts.cutover,1);assert.equal(f.counts.publication,0);
+});
+
+test('consecutive failed successor approvals preserve each round and stop at the retry bound',async()=>{
+ for(const failCount of [2,20]){
+  const f=await fixture(),original=f.runtime.obtainAuthorization;
+  f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+   if(phase!=='cutover'||context.authorizationRound>=failCount)return original(context,phase,prepared,reference);
+   const round=context.authorizationRound,runId=String(700+round);
+   if(!context.pendingApproval)f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:`cutover:dispatch:${round}`,dispatch:{identity:{
+    repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+    workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',ref:'main',targetSha:C,
+    inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)}}});
+   return {status:'APPROVAL_FAILED',runId,conclusion:'failure'};
+  };
+  const execute=()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+  if(failCount===20)await assert.rejects(execute,/Repeated expired successor approvals require a new governed operation/);
+  else assert.equal((await execute()).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal([...f.steps.keys()].filter(key=>/\/cutover:approval-failed:\d+$/.test(key)).length,failCount);
+  assert.equal(f.counts.cutover,failCount===20?0:1);
+  assert.equal(f.counts.publication,0);assert.equal(f.counts.policy,0);
+ }
+});
+
 test('timed-out approval retains still-valid preparation in the next authorization round',async()=>{
  const f=await fixture({approval:'APPROVAL_TIMED_OUT_STILL_VALID'});
  await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
@@ -505,6 +547,75 @@ test('post-CAS tooling continuation retires the failed historical approval and c
  }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true});}
 });
 
+test('protected closure authorizer accepts only an authenticated failed predecessor round',async()=>{
+ const f=await fixture(),capture=f.runtime.capturePreparation,original=f.runtime.obtainAuthorization;
+ f.runtime.authenticateRequest=async()=>({currentTooling:{sourceSha:D,treeSha256:'d'.repeat(64)},round:1,previousRound:0});
+ f.runtime.capturePreparation=(context,phase,value)=>capture(context,phase,{...value,
+  planPath:path.join(HOSTED_RELEASE_ROOT,f.releaseId,phase==='closure'?'cutover':phase,'reconcile.tfplan')});
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  if(phase!=='closure')return original(context,phase,prepared,reference);
+  if(context.authorizationRound===1){
+   if(!context.pendingApproval)f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'closure:dispatch:1',dispatch:{
+    identity:{repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+     workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',workflowId:77,ref:'main',targetSha:D,
+     inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)},beforeRunIds:['700']}});
+   return {status:'APPROVAL_FAILED',runId:'701',conclusion:'failure'};
+  }
+  return {status:'WAITING_FOR_APPROVAL',runId:'702',runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/702'};
+ };
+ const pending=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(pending.phase,'closure');assert.equal(pending.authorizationRound,2);
+ assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,0);
+ const failed=f.steps.get(`${f.releaseId}/closure:approval-failed:1`),saved=f.steps.get(`${f.releaseId}/closure:prepared:2`);
+ assert.equal(failed.runId,'701');assert.equal(failed.conclusion,'failure');assert.ok(saved);
+ const output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'closure','authorization.json');
+ const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+  GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
+  GITHUB_RUN_ID:'702',GITHUB_SHA:D,RUNNER_TEMP:'/tmp',RELEASE_ID:f.releaseId,RELEASE_PHASE:'closure',
+  RELEASE_PREPARATION_REFERENCE:saved.result,RELEASE_AUTHORIZATION_ROUND:'2'};
+ let conclusion='failure',dryRun=true;
+ const authenticate=()=>authorizeReleaseTransition({sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,phase:'closure',
+  preparationReference:saved.result,authorizationRound:2,output},{env,createStore:()=>f.store,hydrateMaterial:async()=>{},
+  run:()=>assert.fail('Authorization fixture must not access AWS'),ghRun:args=>{
+   if(args[1].endsWith('/actions/runs/701'))return JSON.stringify({id:701,workflow_id:77,repository:{full_name:'T-ej2003/genuine-scan-main'},
+    head_repository:{full_name:'T-ej2003/genuine-scan-main'},head_sha:D,head_branch:'main',
+    path:'.github/workflows/authorize-production-stage-b-release-transition.yml',event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion});
+   if(args[1].endsWith('/artifacts'))return JSON.stringify([{artifacts:[]}]);
+   assert.fail(`Unexpected GitHub read ${args.join(' ')}`);
+  },runRequest:async value=>{
+   if(dryRun)throw new Error('Authenticated predecessor reached authorization');
+   return {schemaVersion:2,preparationSha256:brokerDigest(value.preparation),
+    protectedEnvironmentApprovalEvidence:{workflowRunId:'702'}};
+  }});
+ try{
+  ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
+  await assert.rejects(authenticate,/Authenticated predecessor reached authorization/);
+  const earlier=f.steps.get(`${f.releaseId}/closure:prepared:1`);
+  f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'closure:retired:1',prepared:earlier.result,
+   reason:'TOOLING_ADVANCED_AFTER_CAS',runId:'701'});
+  assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).authorizationRound,2);
+  await assert.rejects(authenticate,/Authenticated predecessor reached authorization/);
+  const retired=f.steps.get(`${f.releaseId}/closure:retired:1`);
+  retired.reason='AUTHORIZATION_EXPIRED';await assert.rejects(authenticate);retired.reason='TOOLING_ADVANCED_AFTER_CAS';
+  failed.prepared='f'.repeat(64);await assert.rejects(authenticate);failed.prepared=earlier.result;
+  const timeoutKey=`${f.releaseId}/closure:approval-timeout:1`;
+  f.steps.set(timeoutKey,{releaseId:f.releaseId,sourceSha:A,name:'closure:approval-timeout:1',prepared:earlier.result,runId:'701'});
+  await assert.rejects(authenticate);await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime));
+  f.steps.delete(timeoutKey);
+  const failedKey=`${f.releaseId}/closure:approval-failed:1`;
+  f.steps.delete(failedKey);f.steps.set(timeoutKey,{releaseId:f.releaseId,sourceSha:A,name:'closure:approval-timeout:1',prepared:earlier.result,runId:'701'});
+  await assert.rejects(authenticate,/timeout marker differs/);
+  f.steps.get(timeoutKey).runId='999';await assert.rejects(authenticate);f.steps.get(timeoutKey).runId='701';
+  f.steps.delete(timeoutKey);f.steps.set(failedKey,failed);
+  conclusion='success';await assert.rejects(authenticate);conclusion='failure';
+  failed.runId='999';await assert.rejects(authenticate);failed.runId='701';
+  const dispatchKey=`${f.releaseId}/closure:dispatch:1`,dispatch=f.steps.get(dispatchKey);
+  f.steps.delete(dispatchKey);await assert.rejects(authenticate,/lacks its dispatch/);f.steps.set(dispatchKey,dispatch);
+  dryRun=false;assert.match((await authenticate()).authorizationSha256,/^[a-f0-9]{64}$/);
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true});}
+ assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,0);
+});
+
 test('same-tooling closure timeout advances an exact preparation round without replaying CAS',async()=>{
  const f=await fixture(),original=f.runtime.obtainAuthorization;
  f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
@@ -520,6 +631,75 @@ test('same-tooling closure timeout advances an exact preparation round without r
  assert.equal((await runHostedSuccessorReleaseCoordinator({recoveryReference:f.reference},{runtimeFactory:()=>f.runtime})).status,'BROKER_CLOSURE_COMPLETE');
  assert.equal(f.steps.get(`${f.releaseId}/closure:authorized:1`).prepared,f.steps.get(`${f.releaseId}/closure:prepared:1`).result);
  assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,1);
+});
+
+test('same-tooling protected closure authorizer authenticates a failed predecessor round',async()=>{
+ const f=await fixture(),capture=f.runtime.capturePreparation,original=f.runtime.obtainAuthorization;
+ f.runtime.capturePreparation=(context,phase,value)=>capture(context,phase,{...value,
+  planPath:path.join(HOSTED_RELEASE_ROOT,f.releaseId,phase==='closure'?'cutover':phase,'reconcile.tfplan')});
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  if(phase==='closure'&&context.authorizationRound===0){
+   if(!context.pendingApproval)f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'closure:dispatch:0',dispatch:{
+    identity:{repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+     workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',workflowId:77,ref:'main',targetSha:C,
+     inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)},beforeRunIds:['699']}});
+   return {status:'APPROVAL_FAILED',runId:'700',conclusion:'cancelled'};
+  }
+  return phase==='closure'?{status:'WAITING_FOR_APPROVAL',runId:'701',
+   runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/701'}:original(context,phase,prepared,reference);
+ };
+ const pending=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(pending.authorizationRound,1);assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,0);
+ const saved=f.steps.get(`${f.releaseId}/closure:prepared:1`),output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'closure','authorization.json');
+ const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+  GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
+  GITHUB_RUN_ID:'701',GITHUB_SHA:C,RUNNER_TEMP:'/tmp',RELEASE_ID:f.releaseId,RELEASE_PHASE:'closure',
+  RELEASE_PREPARATION_REFERENCE:saved.result,RELEASE_AUTHORIZATION_ROUND:'1'};
+ try{
+  ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
+  await assert.rejects(()=>authorizeReleaseTransition({sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,
+   phase:'closure',preparationReference:saved.result,authorizationRound:1,output},{env,createStore:()=>f.store,
+   hydrateMaterial:async()=>{},run:()=>assert.fail('Unexpected AWS read'),ghRun:args=>{
+    if(args[1].endsWith('/actions/runs/700'))return JSON.stringify({id:700,workflow_id:77,
+     repository:{full_name:'T-ej2003/genuine-scan-main'},head_repository:{full_name:'T-ej2003/genuine-scan-main'},
+     head_sha:C,head_branch:'main',path:'.github/workflows/authorize-production-stage-b-release-transition.yml',
+     event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion:'cancelled'});
+    if(args[1].endsWith('/artifacts'))return JSON.stringify([{artifacts:[]}]);
+    assert.fail(`Unexpected GitHub read ${args.join(' ')}`);
+   },runRequest:async()=>{throw new Error('Authenticated same-tooling predecessor reached authorization');}}),
+   /Authenticated same-tooling predecessor reached authorization/);
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true});}
+});
+
+test('protected closure authorizer requires pre-native proof for an expired signed round',async()=>{
+ const f=await fixture(),capture=f.runtime.capturePreparation,original=f.runtime.obtainAuthorization;
+ f.runtime.capturePreparation=(context,phase,value)=>capture(context,phase,{...value,
+  planPath:path.join(HOSTED_RELEASE_ROOT,f.releaseId,phase==='closure'?'cutover':phase,'reconcile.tfplan')});
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  if(phase==='closure'&&context.authorizationRound===0)return {status:'AUTHORIZED',authorization:{schemaVersion:2,
+   issuedAt:new Date(Date.now()-60_000).toISOString(),expiresAt:new Date(Date.now()-1000).toISOString(),
+   release:{releaseId:f.releaseId,phase,preparationReference:reference,authorizationRound:0}}};
+  return phase==='closure'?{status:'WAITING_FOR_APPROVAL',runId:'701',
+   runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/701'}:original(context,phase,prepared,reference);
+ };
+ const pending=await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
+ assert.equal(pending.authorizationRound,1);assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,0);
+ const saved=f.steps.get(`${f.releaseId}/closure:prepared:1`),output=path.join(HOSTED_RELEASE_ROOT,f.releaseId,'closure','authorization.json');
+ const env={GITHUB_ACTIONS:'true',GITHUB_WORKFLOW_REF:PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef,
+  GITHUB_REPOSITORY:PRODUCTION_ENVIRONMENT_APPROVAL.repository,GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_RUN_ATTEMPT:'1',
+  GITHUB_RUN_ID:'701',GITHUB_SHA:C,RUNNER_TEMP:'/tmp',RELEASE_ID:f.releaseId,RELEASE_PHASE:'closure',
+  RELEASE_PREPARATION_REFERENCE:saved.result,RELEASE_AUTHORIZATION_ROUND:'1'};
+ let authenticated=0;
+ try{
+  ensureStageBPrivateDirectory({directory:path.dirname(output),repositoryRoot:process.cwd(),create:true});
+  await assert.rejects(()=>authorizeReleaseTransition({sourceSha:A,ticketId:request.ticketId,releaseId:f.releaseId,
+   phase:'closure',preparationReference:saved.result,authorizationRound:1,output},{env,createStore:()=>f.store,
+   hydrateMaterial:async()=>{},run:()=>assert.fail('Unexpected AWS read'),ghRun:()=>assert.fail('Unexpected GitHub read'),
+   authenticateAbort:async input=>{authenticated++;assert.equal(input.allowMissingAttempt,true);return {status:'PRE_NATIVE_ABORTED'};},
+   runRequest:async()=>{throw new Error('Expired signed predecessor reached authorization');}}),
+   /Expired signed predecessor reached authorization/);
+  assert.equal(authenticated,1);
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,f.releaseId),{recursive:true,force:true});}
 });
 
 test('hosted C to D to E rounds preserve preparations, reject stale authorization and adopt closure',async()=>{

@@ -129,13 +129,8 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
     }
     const preparedReference=brokerDigest(prepared);
     const attempt=await read(`${phase}:attempt:${round}`);
-    const retired=await read(`${phase}:retired:${round}`);
-    if(retired){assert.equal(retired.prepared,preparedReference);
-     if(attempt){const signed=await read(`${phase}:authorized:${round}`);assert.equal(signed?.prepared,preparedReference);
-      assert.equal(await runtime.classifyNativeAttempt({release,inputs},phase,prepared,await get(signed.authorization)),'PRE_NATIVE');}
-     continue;}
     const failed=await read(`${phase}:approval-failed:${round}`);
-    if(failed){
+    const authenticateFailed=async()=>{
      assert.equal(attempt,null);assert.equal(await read(`${phase}:authorized:${round}`),null);
      assert.equal(failed.prepared,preparedReference);
      const pending=await read(`${phase}:pending:${round}`);
@@ -143,8 +138,15 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
      assert.equal(pending.prepared,preparedReference);assert.equal(failed.runId,pending.runId);
      const checked=await runtime.obtainAuthorization({release,store,inputs,authorizationRound:round,pendingApproval:pending},phase,prepared,preparedReference);
      assert.deepEqual(checked,{status:'APPROVAL_FAILED',runId:failed.runId,conclusion:failed.conclusion});
-     continue;
-    }
+    };
+    const retired=await read(`${phase}:retired:${round}`);
+    if(retired){assert.equal(retired.prepared,preparedReference);
+     if(failed){assert.equal(phase,'closure');assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');
+      assert.equal(await read(`${phase}:approval-timeout:${round}`),null);await authenticateFailed();}
+     if(attempt){const signed=await read(`${phase}:authorized:${round}`);assert.equal(signed?.prepared,preparedReference);
+      assert.equal(await runtime.classifyNativeAttempt({release,inputs},phase,prepared,await get(signed.authorization)),'PRE_NATIVE');}
+     continue;}
+    if(failed){assert.equal(await read(`${phase}:approval-timeout:${round}`),null);await authenticateFailed();continue;}
     const evidenceExpired=()=>phase==='cutover'&&Date.parse(prepared.preparation.successorReconciliation?.expiresAt||'')<=now();
     if(evidenceExpired()&&!attempt){await write(`${phase}:retired:${round}`,{prepared:preparedReference,reason:'EVIDENCE_EXPIRED'});continue;}
     const authenticatedDispatch=async()=>{

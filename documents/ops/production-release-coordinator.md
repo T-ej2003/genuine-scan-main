@@ -75,6 +75,50 @@ pending marker, the exact journal-recovered child may still consume its timed-ou
 round. The child must match the release, phase, preparation and round; a new
 approval child is dispatched only for the next round.
 
+### Approval-child recovery contract
+
+Both the regular and successor coordinators use the same source-bound dispatch
+journal. It is written before the GitHub dispatch POST; an interrupted POST is
+reconciled against that journal and the exact workflow run, never retried as a
+second POST. `WAITING_FOR_APPROVAL` records `phase:pending:round` and retains the
+round. `AUTHORIZED` records `phase:authorized:round` only after the protected
+approval artifact and release binding authenticate. A `timed_out` child produces
+`APPROVAL_TIMED_OUT` and `phase:approval-timeout:round`; a failed or cancelled
+child produces `APPROVAL_FAILED` and `phase:approval-failed:round`. Neither
+terminal status carries authorization. The coordinators authenticate the
+original dispatch and GitHub run, preserve its pending record, then advance to
+a new immutable round. A restart reauthenticates the terminal child before
+advancing. The protected closure authorizer accepts a prior failed round only
+when its journal, child identity, terminal conclusion and lack of authorization
+artifact agree. A rejected deployment follows the child's authenticated
+failure conclusion. API/dispatch errors before a terminal child is proven
+remain unresolved; no replacement is issued. Unknown statuses and mismatched
+rounds fail closed. Approval renewal does not renew an expired native mutation
+authorization or repeat a completed broker, IAM, ECS or Terraform write.
+If a signed closure authorization expires before native intent, the next round
+requires the original approval, its expiry and retirement, absent native and
+uncertain-execution receipts, unchanged live Terraform state, and the completed
+CAS alias readback. This applies to both same-tooling and newer-tooling closure.
+
+| Observed outcome | Producer and durable state | Restart and replacement |
+| --- | --- | --- |
+| `AUTHORIZED` | Protected child emits one authenticated artifact; coordinator writes `phase:authorized:round`. | Reauthenticate the artifact and exact release/phase/preparation/round; no replacement. |
+| `WAITING_FOR_APPROVAL` | Shared GitHub reader sees the production deployment gate; coordinator writes `phase:pending:round`. | Poll the same run ID, never dispatch again. |
+| `APPROVAL_TIMED_OUT` | Completed child has GitHub conclusion `timed_out`; coordinator writes `phase:approval-timeout:round`. | Authenticate the saved dispatch/run and use a fresh round. |
+| `APPROVAL_FAILED` | Completed child has GitHub conclusion `failure` or `cancelled`; coordinator writes `phase:approval-failed:round` and the exact pending child. | Reauthenticate terminal run, no authorization artifact, source/workflow/ticket/preparation binding, then use a fresh round. |
+| Cancelled or rejected approval | GitHub reports a terminal `cancelled` or `failure` child; this is `APPROVAL_FAILED`, not a separate coordinator status. | Same failed-round checks; no authorization is inferred from operator intent. |
+| Dispatch/API failure | The shared dispatcher throws; a journal may precede an uncertain POST, but there is no terminal coordinator marker. | Probe the exact journaled child without another POST. If its existence cannot be proven, stop; do not manufacture a replacement. |
+
+The Release Train regular coordinator adopts completed registration/IAM/broker
+receipts and writes `PREREQUISITES_CONVERGED` only after authenticated Stage B
+closure. The successor coordinator starts from a signed publication and never
+enters registration, IAM or publication; it writes broker closure after the
+authorized cutover and state-only reconciliation. In full-release mode,
+`release-train.yml` requires terminal prerequisite closure before dispatching
+`release-gate.yml`. Prerequisite-only mode deliberately stops at closure.
+Release Gate separately verifies rotation, image authority and database/RLS
+requirements before backend/frontend activation and live health checks.
+
 ## Hosted authorization
 
 The operator selected the repository's existing GitHub protected-environment
