@@ -999,8 +999,13 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
   if(['approval-boundary','approval-timed-out','approval-journal-timeout','approval-record-response-lost'].includes(lostResponse))assert.equal(approvalDispatches,1);
   if(lostResponse==='approval-timed-out')assert.ok([...steps.keys()].some(key=>key.endsWith('registration:approval-timeout:0')));
   if(lostResponse==='approval-failed'){
-   assert.ok(steps.has(`${result.releaseId}/publication:approval-failed:0`));
-   assert.ok(steps.has(`${result.releaseId}/publication:authorized:1`));
+   assert.equal([...steps.keys()].filter(key=>key.endsWith('/publication:approval-failed:0')).length,1);
+   assert.equal(steps.has(`${result.releaseId}/publication:authorized:0`),false);
+   const replacement=steps.get(`${result.releaseId}/publication:authorized:1`);
+   assert.ok(replacement);
+   const approval=f.coordinatorStore.getArtifact(replacement.authorization);
+   assert.deepEqual(approval.release,{releaseId:result.releaseId,phase:'publication',
+    preparationReference:replacement.prepared,authorizationRound:1});
    assert.equal(f.snapshot().publicationCalls,1);
   }
   if(lostResponse==='approval-journal-timeout'){
@@ -1078,6 +1083,46 @@ test('governed approval dispatch resumes its exact child at the human boundary w
  child.run_attempt=1;
  child.head_sha='f'.repeat(40);await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'pruning',prepared,reference,deps));assert.equal(posts,1);
  await assert.rejects(()=>obtainReleaseTransitionAuthorization(context,'pruning',prepared,reference,deps));assert.equal(posts,1);
+});
+
+for(const conclusion of ['failure','cancelled'])test(`newly dispatched approval child ${conclusion} is authenticated from its durable journal`,async()=>{
+ const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
+ const release={sourceSha,releaseId:'b'.repeat(64),ticketId:'current-release'};
+ const prepared={preparation:{sourceSha}},reference=brokerDigest(prepared);
+ const child={id:702,workflow_id:8,path:`.github/workflows/${workflow}`,head_sha:sourceSha,head_branch:'main',
+  event:'workflow_dispatch',run_attempt:1,status:'completed',conclusion,repository:{full_name:repository},head_repository:{full_name:repository}};
+ let recorded,posts=0;
+ const store={readStep:async()=>recorded||null,writeStep:async value=>{assert.equal(recorded,undefined);recorded=structuredClone(value);}};
+ const run=args=>{const suffix=args[1].slice(`repos/${repository}/`.length);
+  if(suffix==='branches/main')return JSON.stringify({protected:true,commit:{sha:sourceSha}});
+  if(suffix==='actions/runs/702')return JSON.stringify(child);
+  if(suffix==='actions/runs/702/artifacts')return JSON.stringify([{artifacts:[]}]);
+  throw new Error('Unexpected approval read '+suffix);
+ };
+ const fetchImpl=async(url,options)=>{
+  let body;
+  if(url.endsWith(`/workflows/${workflow}`))body={id:8,path:child.path};
+  else if(url.includes('/runs?'))body={total_count:0,workflow_runs:[]};
+  else if(options?.method==='POST'){posts++;body={workflow_run_id:702};}
+  else if(url.endsWith('/actions/runs/702'))body=child;
+  else throw new Error('Unexpected dispatch API '+url);
+  return new Response(JSON.stringify(body),{status:200,headers:{'content-type':'application/json'}});
+ };
+ const context={release,authorizationRound:0,store};
+ const deps={token:'fixture-only',run,fetchImpl,sleep:rejectExternalAccess,attempts:1};
+ const failed={status:'APPROVAL_FAILED',runId:'702',conclusion};
+ assert.deepEqual(await obtainReleaseTransitionAuthorization(context,'publication',prepared,reference,deps),failed);
+ assert.equal(posts,1);assert.deepEqual(recorded.dispatch.identity.inputs,
+  releaseTransitionDispatchInputs(context,'publication',reference,prepared.preparation));
+ const pending={runId:'702',prepared:reference};
+ assert.deepEqual(await obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),failed);
+ assert.equal(posts,1);
+ const original=structuredClone(recorded);
+ recorded.dispatch.identity.inputs.ticket_id='wrong-ticket';
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),/Expected values to be strictly deep-equal/);
+ recorded=undefined;
+ await assert.rejects(()=>obtainReleaseTransitionAuthorization({...context,pendingApproval:pending},'publication',prepared,reference,deps),/Failed approval lacks an authenticated dispatch/);
+ recorded=original;assert.equal(posts,1);
 });
 
 test('successor approval dispatch executes from protected descendant without relabeling the release',async()=>{

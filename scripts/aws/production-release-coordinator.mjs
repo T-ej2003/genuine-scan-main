@@ -95,8 +95,12 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
  const repository='T-ej2003/genuine-scan-main',workflow='authorize-production-stage-b-release-transition.yml';
  const api=suffix=>JSON.parse(run(['api',`repos/${repository}/${suffix}`],{encoding:'utf8',maxBuffer:8*1024*1024}));
  const name=`${phase}:dispatch:${authorizationRound}`;
- const prior=await store.readStep(release.releaseId,name);
- if(prior){assert.equal(prior.releaseId,release.releaseId);assert.equal(prior.sourceSha,release.sourceSha);assert.equal(prior.name,name);}
+ const readDispatch=async()=>{
+  const record=await store.readStep(release.releaseId,name);
+  if(record){assert.equal(record.releaseId,release.releaseId);assert.equal(record.sourceSha,release.sourceSha);assert.equal(record.name,name);}
+  return record;
+ };
+ const prior=await readDispatch();
  let workflowRunId=pendingApproval?.runId;
  if(pendingApproval){assert.equal(pendingApproval.prepared,preparationReference);assert.match(String(workflowRunId),/^[1-9][0-9]*$/);}
  if(!workflowRunId){
@@ -113,7 +117,7 @@ export async function obtainReleaseTransitionAuthorization(context,phase,prepare
   if(child.status==='completed'){
    if(child.conclusion==='timed_out')return {status:'APPROVAL_TIMED_OUT',runId:String(workflowRunId)};
    if(['failure','cancelled'].includes(child.conclusion)){
-    const dispatch=prior?.dispatch,identity=dispatch?.identity;
+    const dispatch=(await readDispatch())?.dispatch,identity=dispatch?.identity;
     assert.ok(identity,'Failed approval lacks an authenticated dispatch');
     assert.equal(identity.repository,repository);assert.equal(identity.workflow,workflow);
     assert.equal(identity.workflowPath,`.github/workflows/${workflow}`);assert.equal(identity.ref,'main');
