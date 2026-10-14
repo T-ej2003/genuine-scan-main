@@ -68,6 +68,11 @@ test('terminal proof authenticates a distinct state-refresh authorization bound 
   r.handoff.closure.authorization.preparationSha256 = '0'.repeat(64);
   await assert.rejects(() => authenticateStagedBrokerClosure({ sourceSha, deps: r.deps }));
 });
+test('historical closure cannot be inferred from a non-contiguous authenticated successor', async () => {
+  const r = await terminal(), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
+  await assert.rejects(() => authenticateStagedBrokerClosure({ sourceSha, deps: r.deps,
+    successor: { proof, terminal: r.handoff } }), /Historical closure is not the successor predecessor/);
+});
 test('verified four-phase closure requires a real component-state CAS readback', async () => {
   const r = await terminal(), proof = await authenticateStagedBrokerClosure({ sourceSha, deps: r.deps });
   assertStagedBrokerProof(proof, sourceSha);

@@ -21,7 +21,7 @@ const equal = (a, b, message) => assert.equal(brokerDigest(a), brokerDigest(b), 
 // Authenticated phase history is discovered through the same conditional S3
 // reservation namespace. An omitted CLI/environment transport cannot hide an
 // incomplete staged transaction. Only explicit NoSuchKey means no transaction.
-export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
+export async function authenticateStagedBrokerClosure({ sourceSha, deps, successor }) {
   const source = await deps.readSource(sourceSha);
   if (source === null) return null;
   const pub = source.preparation, pubAuth = source.authorization;
@@ -74,6 +74,16 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
     equal(await deps.readCheckout(), tooling, 'Continuation checkout changed during authentication');
     await deps.authenticateHistoricalTooling(effectivePreparation, historicalTooling);
     await deps.authenticateContinuationTooling(effectivePreparation, tooling);
+    if (successor) {
+      assertVerifiedBrokerProof(successor.proof, successor.terminal.preparation.sourceSha);
+      await successor.proof.revalidate();
+      assert.equal(brokerDigest(successor.terminal), successor.proof.terminalSha256, 'Successor terminal handoff changed');
+      assert.equal(brokerDigest(successor.terminal.record), successor.proof.evidenceSha256, 'Successor closure proof changed');
+      equal(record.alias, successor.terminal.preparation.alias, 'Historical closure is not the successor predecessor');
+      equal(p.prerequisites.taskMap, successor.terminal.preparation.prerequisites.taskMap, 'Historical closure task map changed');
+      assertReceiptBoundGitAncestry({ historicalSourceSha: sourceSha, consumerSourceSha: successor.proof.sourceSha, cwd: path.resolve(fileURLToPath(new URL('../..', import.meta.url))) });
+      return;
+    }
     equal(await deps.readStateIdentity(), record.stateAfter, 'Reconciled Terraform state changed');
     equal(await deps.getAlias(), cas.alias, 'Terminal alias changed');
     equal(brokerTargetIdentity(await deps.getVersion(p.target.version), p.packageSha256), p.target);
@@ -82,12 +92,20 @@ export async function authenticateStagedBrokerClosure({ sourceSha, deps }) {
     equal(await deps.readStateIdentity(), record.stateAfter);
   };
   await revalidate();
-  const proof = Object.freeze({ sourceSha, historicalTooling, tooling, evidenceSha256: brokerDigest(record), revalidate,
+  const proof = Object.freeze({ sourceSha, historicalTooling, tooling, evidenceSha256: brokerDigest(record), terminalSha256: brokerDigest(handoff), ...(successor ? { historical: true } : {}), revalidate,
     authenticateExecutionSource: executionSourceSha => deps.authenticateHistoricalExecutionSource(effectivePreparation, tooling, executionSourceSha) });
   verified.add(proof); return proof;
 }
-export function assertStagedBrokerProof(proof, sourceSha) {
+function assertVerifiedBrokerProof(proof, sourceSha) {
   assert.equal(verified.has(proof), true, 'Raw/unsigned broker closure is not authority'); assert.equal(proof.sourceSha, sourceSha);
+}
+export function assertStagedBrokerProof(proof, sourceSha) {
+  assertVerifiedBrokerProof(proof, sourceSha);
+  assert.equal(proof.historical, undefined, 'Historical closure is not live broker authority');
+}
+export function assertHistoricalStagedBrokerProof(proof, sourceSha) {
+  assertVerifiedBrokerProof(proof, sourceSha);
+  assert.equal(proof.historical, true, 'Historical closure proof is required');
 }
 export function assertStagedBrokerTerminal(proof, { client, result, previousGeneration }) {
   assertStagedBrokerProof(proof, result.state.components.security.sourceSha);
@@ -167,7 +185,7 @@ export function createStagedBrokerClosureReader({ run, readCheckout, directory, 
     },
   };
 }
-export async function readStagedBrokerClosure({ sourceSha, run, readCheckout }) {
+export async function readStagedBrokerClosure({ sourceSha, run, readCheckout, successor }) {
   const deps = {};
   for (const name of ['verifyAuthorization', 'readCheckout', 'readSource', 'readReceipt', 'readStateIdentity', 'getAlias', 'getVersion', 'readPrerequisites', 'authenticateState', 'authenticateHistoricalTooling', 'authenticateContinuationTooling']) deps[name] = async (...args) => {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'mscqr-broker-closure-')); fs.chmodSync(directory, 0o700);
@@ -179,5 +197,5 @@ export async function readStagedBrokerClosure({ sourceSha, run, readCheckout }) 
     try { return createStagedBrokerClosureReader({ run, readCheckout, directory }).authenticateHistoricalExecutionSource(...args); }
     finally { fs.rmSync(directory, { recursive: true }); }
   };
-  return authenticateStagedBrokerClosure({ sourceSha, deps });
+  return authenticateStagedBrokerClosure({ sourceSha, deps, successor });
 }
