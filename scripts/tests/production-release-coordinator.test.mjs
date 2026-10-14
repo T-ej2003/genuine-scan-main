@@ -499,7 +499,7 @@ test('hosted authorization producer uses actual protected approval and rejects u
  let reads=0;
  const fetchImpl=async url=>{const prefix=`https://api.github.com/repos/${repository}/`;assert.ok(url.startsWith(prefix));const suffix=url.slice(prefix.length);assert.ok(Object.hasOwn(responses,suffix),'Unexpected external access');reads++;return {ok:true,json:async()=>responses[suffix]};};
  const value=await readBrokerProtectedEnvironmentApproval({sourceSha,env,now,fetchImpl});assert.equal(value.approval.actualApproval.userLogin,'operator');assert.equal(value.release.releaseId,env.RELEASE_ID);assert.equal(reads,2);
- for(const [field,bad] of [['GITHUB_WORKFLOW_REF',PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef],['GITHUB_SHA','a'.repeat(40)],['GITHUB_RUN_ATTEMPT','2']]){
+ for(const [field,bad] of [['GITHUB_WORKFLOW_REF',PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef],['GITHUB_WORKFLOW_REF',`${repository}/.github/workflows/quality-gate.yml@refs/heads/codex/recover-failed-release-approval`],['GITHUB_SHA','a'.repeat(40)],['GITHUB_RUN_ATTEMPT','2']]){
   await assert.rejects(()=>readBrokerProtectedEnvironmentApproval({sourceSha,env:{...env,[field]:bad},now,fetchImpl}));assert.equal(reads,2);
  }
  environment.protection_rules[0].prevent_self_review=true;
@@ -684,7 +684,7 @@ for(const lostResponse of [null,'prerequisites-only','prerequisites-only-overlap
  const steps=new Map(),calls=[],materializedPruningPhases=new Set();let interrupted=false,approvalDispatches=0,noOpPolicyEvidence=true,noOpPolicyPlan=lostResponse!=='full-capacity-change-policy',noOpPolicyIdentityChanged=false,policyPlanCalls=0;const lostOperation=lostResponse==='hosted-runner-replacement'?'prune':lostResponse==='no-prune-policy-lost'?'converge-policy':lostResponse?.replace(/^expired-/,'');const drift=lostResponse?.endsWith('-drift');
  const copy=value=>JSON.parse(JSON.stringify(value));
  const hostedVerifiers=new Map(),priorVerify=f.checker.verify;
- const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
+ const hostedApproval=lostResponse===null||lostResponse?.startsWith('prerequisites-only')||['github-approval','approval-boundary','approval-failed','approval-record-response-lost','adopt-current-registration','adopt-descendant-registration','hosted-runner-replacement','approval-expired-before-consumption'].includes(lostResponse);
  if(hostedApproval)f.checker.verify=a=>a.schemaVersion===2?hostedVerifiers.get(a.nonce)?.(a)||false:priorVerify(a);
  const runtime={
   store:{...f.coordinatorStore,
