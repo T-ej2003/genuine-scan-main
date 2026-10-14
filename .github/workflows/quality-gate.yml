@@ -231,7 +231,8 @@ jobs:
       - name: Test governed current-release prerequisite ordering
         run: |
           node --test scripts/tests/release-prerequisite-order.test.mjs scripts/tests/authenticated-initial-overlap-release-routing.test.mjs scripts/tests/check-required-workflow-gates.test.mjs scripts/tests/production-release-session-window.test.mjs
-          node --test --test-name-pattern='lost response: prerequisites-only|^prerequisite CI|hosted cutover reuses|approval runner binds published package paths|one public coordinator entry closes full-capacity prerequisites; lost response: null' scripts/tests/production-release-coordinator.test.mjs
+          node --test --test-name-pattern='lost response: prerequisites-only|^prerequisite CI|hosted cutover reuses|approval runner binds published package paths|one public coordinator entry closes full-capacity prerequisites; lost response: null|cross-ticket durable adoption' scripts/tests/production-release-coordinator.test.mjs
+          node --test --test-name-pattern='existing release transport binds durable registration source' scripts/tests/production-release-dispatch-contract.test.mjs
           node --test --test-name-pattern='cutover input materialization' scripts/tests/stage-b-prerequisite-bundle.test.mjs
 
       - name: Record Stage B image-impact evidence availability

@@ -82,6 +82,12 @@ test('existing release transport binds durable registration source and rejects m
  assert.equal(decoded.authorizationJson,authorizationJson);assert.equal(decoded.authorizationSha256,digest);
  assert.deepEqual(packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256}),packed);
  assert.throws(()=>packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256,completedRegistrationSourceSha:'b'.repeat(40)}),/substitution/);
+ const crossTicket=packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256,completedRegistrationTicketId:'CHG-20261011-001'});
+ assert.equal(unpackReleaseEvidenceTransport(crossTicket).completedRegistrationTicketId,'CHG-20261011-001');
+ assert.deepEqual(packReleaseEvidenceTransport({authorizationJson:crossTicket.json,authorizationSha256:crossTicket.sha256}),crossTicket);
+ assert.throws(()=>packReleaseEvidenceTransport({authorizationJson:crossTicket.json,authorizationSha256:crossTicket.sha256,completedRegistrationTicketId:'CHG20261013-001'}),/substitution/);
+ assert.throws(()=>packReleaseEvidenceTransport({authorizationJson,authorizationSha256,completedRegistrationTicketId:'CHG-20261011-001'}),/requires an exact source/);
+ for(const ticket of ['',null,{},'bad ticket'])assert.throws(()=>packReleaseEvidenceTransport({authorizationJson,authorizationSha256,completedRegistrationSourceSha,completedRegistrationTicketId:ticket}));
  const historicalRuntimeJson=JSON.stringify(historicalRuntimeFixture().evidence),historicalRuntimeSha256=crypto.createHash('sha256').update(historicalRuntimeJson).digest('hex');
  const combined=packReleaseEvidenceTransport({authorizationJson:packed.json,authorizationSha256:packed.sha256,historicalRuntimeJson,historicalRuntimeSha256});
  const combinedDecoded=unpackReleaseEvidenceTransport(combined);
@@ -93,6 +99,7 @@ test('existing release transport binds durable registration source and rejects m
 
  assert.deepEqual(packReleaseEvidenceTransport({authorizationJson,authorizationSha256}),{json:authorizationJson,sha256:digest});
  assert.throws(()=>unpackReleaseEvidenceTransport({...packed,json:packed.json.replace(completedRegistrationSourceSha,'b'.repeat(40))}),/checksum/);
+ assert.throws(()=>unpackReleaseEvidenceTransport({...crossTicket,json:crossTicket.json.replace('CHG-20261011-001','CHG20261013-001')}),/checksum/);
  for(const reference of ['',null,{},'main','a'.repeat(39)])assert.throws(()=>packReleaseEvidenceTransport({authorizationJson,authorizationSha256,completedRegistrationSourceSha:reference}));
  for(const change of [v=>{delete v.completedRegistrationSourceSha;},v=>{v.extra=true;},v=>{v.schemaVersion=1;},v=>{v.completedRegistrationSourceSha='main';},v=>{v.imageAuthorizationSha256='0'.repeat(64);}]){
   const value=JSON.parse(packed.json);change(value);const json=JSON.stringify(value);

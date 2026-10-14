@@ -193,9 +193,9 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   hydratePreparation:(context,_phase,prepared)=>hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,
    files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root}),
   findCompletedRegistration:async(release)=>{
-   const {completedRegistrationSourceSha}=imageArtifacts();
+   const {completedRegistrationSourceSha,completedRegistrationTicketId}=imageArtifacts();
    const entry=completedRegistrationSourceSha
-    ? await readDurableCompletedRegistration({store,sourceSha:completedRegistrationSourceSha,ticketId})
+    ? await readDurableCompletedRegistration({store,sourceSha:completedRegistrationSourceSha,ticketId:completedRegistrationTicketId||ticketId})
     : JSON.parse(fs.readFileSync(completedRegistrationPath));
    const impact=imageImpact({imageReleaseSha:entry.preparation.sourceSha,toolingSha:release.sourceSha});
    if(completedRegistrationSourceSha){

@@ -382,6 +382,17 @@ state. Historical preparation/authorization/results stay immutable; the current-
 adoption is separate. The reference is hash-bound in ARTIFACTS_RESOLVED and checked
 on every restart. Workflow, RLS package, IAM and production approvals are unchanged.
 
+If a current-source START already saved a different registration reference, do not
+replace its immutable `ARTIFACTS_RESOLVED` record. An independently issued new CHG
+ticket creates a new release identity. When the authenticated registration was made
+under an older ticket, include both `completedRegistrationSourceSha` and
+`completedRegistrationTicketId` in the checksum-bound evidence transport. The reader
+loads that exact old source/ticket START and registration result, verifies the
+original authorization and receipt, then checks image reuse and live task/state
+bindings against the new release. Omission retains same-ticket behavior; invalid or
+substituted tickets fail closed. New protected approvals remain separate. Preserve
+the older START, completed broker closure and all receipts.
+
 After merge, fetch exact protected main, authenticate image reuse and obtain fresh
 current-source image authorization plus an issued or explicitly re-scoped CHG ticket.
 Preserve serial123, alias13 and completed historical CAS/closure. Verify no concurrent
