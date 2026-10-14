@@ -386,6 +386,24 @@ test('schema2 adoption accepts only a completed successor of the signed alias an
    prerequisiteReader(null,registeredMap,{liveAlias:{...successorAlias,RevisionId:'unproven'}}),input)}),/unproven/);
 });
 
+test('schema2 adoption follows the authenticated v14 to v15 to v16 closure chain',()=>{
+ const p=preparation();p.schemaVersion=2;p.purpose='STAGE_B_TASK_REGISTRATION';
+ p.alias={...p.alias,FunctionVersion:'14',RevisionId:'registered-v14'};
+ const registeredMap=Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([key,arn])=>[key,arn.replace(/:\d+$/,':99')]));
+ const v15={...p.alias,FunctionVersion:'15',RevisionId:'closed-v15'};
+ const v16={...v15,FunctionVersion:'16',RevisionId:'closed-v16'};
+ const first={preparation:{alias:p.alias,prerequisites:{taskMap:registeredMap},target:{version:'15'}},record:{alias:v15}};
+ const second={preparation:{alias:v15,prerequisites:{taskMap:registeredMap},target:{version:'16'}},record:{alias:v16}};
+ const options={readPolicy:()=>deriveBrokerPolicy(p.prerequisites.policy,registeredMap),
+  readPrerequisites:input=>readStagedBrokerPrerequisites(prerequisiteReader(null,registeredMap,{liveAlias:v16,predecessorTaskMap:registeredMap}),input),
+  authenticatedSuccessors:[first,second]};
+ assert.deepEqual(readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,options).taskMap,registeredMap);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{...options,authenticatedSuccessors:[second]}),/signed registration predecessor/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{...options,authenticatedSuccessors:[first,{...second,preparation:{...second.preparation,alias:{...v15,RevisionId:'tampered'}}}]}),/signed registration predecessor/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{...options,authenticatedSuccessors:[first,{...second,preparation:{...second.preparation,prerequisites:{taskMap:p.prerequisites.taskMap}}}]}),/completed registrations/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{...options,authenticatedSuccessors:[first,second],authenticatedSuccessor:second}),/Ambiguous/);
+});
+
 test('complete stable traffic census authenticates the canonical prerequisite', () => {
   assert.deepEqual(readStagedBrokerPrerequisites(prerequisiteReader()), preparation().prerequisites);
 });
