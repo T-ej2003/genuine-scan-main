@@ -209,6 +209,8 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageRele
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
     stageAPlanPath: evidence.stageAPlan,
+    endpointSecurityGroupId: "sg-04d5bf116755ba412",
+    runtimeSecurityGroupId: "sg-0db971332ae625441",
     stageBTfvarsPath: evidence.stageBTfvarsPath,
     stageBTfvarsBindingReportPath: evidence.stageBTfvarsBindingReportPath,
     stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
@@ -279,6 +281,22 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("saved-plan runtime rejects missing Stage-A security-group inputs before MFA readiness", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    for (const [name, endpointSecurityGroupId, runtimeSecurityGroupId] of [
+      ["neither", undefined, undefined], ["missing-runtime", input.endpointSecurityGroupId, undefined],
+      ["missing-endpoint", undefined, input.runtimeSecurityGroupId], ["same", input.endpointSecurityGroupId, input.endpointSecurityGroupId],
+    ]) {
+      const result = prepareProductionCutoverRuntime({ ...input, endpointSecurityGroupId, runtimeSecurityGroupId, outputDirectory: path.join(directory, name) });
+      assert.equal(result.readyToConsumeMfa, false);
+      assert.match(result.blockers.join("; "), /Stage-A security-group inputs are invalid/);
+      assert.equal(existsSync(path.join(directory, name, "rotation-config.json")), false);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("native completed broker recovery preserves release identity through rotation bootstrap", async () => {
@@ -1187,6 +1205,8 @@ test("post-apply recovery binds historical provenance separately from current St
     Object.assign(binding, { stateBackupSha256: createHash("sha256").update(currentBytes).digest("hex"), stateLineage: currentStageB.lineage, stateSerial: currentStageB.serial });
     writeFileSync(input.stageBTfvarsBindingReportPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 });
     delete input.stageAPlanPath;
+    delete input.endpointSecurityGroupId;
+    delete input.runtimeSecurityGroupId;
     Object.assign(input, { stageARecoveryEvidenceFile, stageAStatePath, stageAHandoffPath, stageBStatePath, currentStageBStatePath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(input.stageBTfvarsBindingReportPath)).digest("hex") });
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true);

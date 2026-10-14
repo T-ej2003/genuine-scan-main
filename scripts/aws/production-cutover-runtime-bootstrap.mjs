@@ -392,7 +392,8 @@ export function prepareProductionCutoverRuntime({
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
-    if ((endpointSecurityGroupId || runtimeSecurityGroupId) && (!stageAPlanPath || !/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId)) throw new Error("Stage-A security-group inputs are invalid.");
+    if ((stageAPlanPath && (!/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId))
+        || (!stageAPlanPath && (endpointSecurityGroupId || runtimeSecurityGroupId))) throw new Error("Stage-A security-group inputs are invalid.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
     if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath || !currentStageBStatePath)) throw new Error("Stage-A recovery requires historical provenance and the authenticated current Stage-B state.");
     for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Historical Stage-B state"], [currentStageBStatePath, "Current Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
