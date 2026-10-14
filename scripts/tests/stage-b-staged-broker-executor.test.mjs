@@ -359,6 +359,25 @@ test('schema2 adoption preserves signed IAM predecessor until completed registra
  assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{readPolicy:()=>p.prerequisites.policy,readPrerequisites:()=>({...p.prerequisites,policyVersion:'v99'})}),/predecessor changed/);
 });
 
+test('schema2 adoption accepts only a completed successor of the signed alias and registered map',()=>{
+ const p=preparation();p.schemaVersion=2;p.purpose='STAGE_B_TASK_REGISTRATION';
+ const registeredMap=Object.fromEntries(Object.entries(p.prerequisites.taskMap).map(([key,arn])=>[key,arn.replace(/:\d+$/,':99')]));
+ const successorAlias={...p.alias,FunctionVersion:String(Number(p.alias.FunctionVersion)+1),RevisionId:'successor-revision'};
+ const successor={preparation:{alias:p.alias,prerequisites:{taskMap:registeredMap},target:{version:successorAlias.FunctionVersion}},record:{alias:successorAlias}};
+ const converged=deriveBrokerPolicy(p.prerequisites.policy,registeredMap);
+ const options={readPolicy:()=>converged,readPrerequisites:input=>readStagedBrokerPrerequisites(
+  prerequisiteReader(null,registeredMap,{liveAlias:successorAlias,predecessorTaskMap:registeredMap}),input),authenticatedSuccessor:successor};
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{...options,authenticatedSuccessor:undefined}),/successor-revision/);
+ assert.deepEqual(readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,options).taskMap,registeredMap);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{
+  ...options,authenticatedSuccessor:{...successor,preparation:{...successor.preparation,alias:{...p.alias,RevisionId:'tampered'}}}}),/signed registration predecessor/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{
+  ...options,authenticatedSuccessor:{...successor,preparation:{...successor.preparation,prerequisites:{taskMap:p.prerequisites.taskMap}}}}),/completed registrations/);
+ assert.throws(()=>readSchema2RegistrationAdoptionPrerequisites(p,registeredMap,{
+  ...options,readPrerequisites:input=>readStagedBrokerPrerequisites(
+   prerequisiteReader(null,registeredMap,{liveAlias:{...successorAlias,RevisionId:'unproven'}}),input)}),/unproven/);
+});
+
 test('complete stable traffic census authenticates the canonical prerequisite', () => {
   assert.deepEqual(readStagedBrokerPrerequisites(prerequisiteReader()), preparation().prerequisites);
 });

@@ -122,6 +122,16 @@ map shared by the closure. It checks all 12 registered task bindings in the
 exact authenticated Terraform state bytes. The current release retains its own source, image
 authorization, change ticket, component baseline and required CI gates.
 
+When a later release reuses a schema-2 registration receipt after an independently
+governed broker closure, the registration preparation's alias is a historical
+predecessor. The adoption reader accepts a newer live alias only after the
+canonical closure verifier authenticates its immutable terminal receipt, live
+Lambda and Terraform state, and protected tooling ancestry. The closure must
+start from the registration preparation's exact alias and carry its completed
+task map. This permits the later release to prepare a new source-bound broker
+publication; it does not adopt the old broker as authorization for the new
+source or repeat any completed registration or broker operation.
+
 Only then does the coordinator persist `BROKER_CLOSURE_CANDIDATE` and its normal
 terminal prerequisite summary in the encrypted evidence store. These are new
 write-once audit records, not broker, IAM, ECS or Terraform operations. It does
