@@ -12,7 +12,7 @@ import { assertStageBTfvarsBinding } from './generate-production-green-stage-b-t
 import { assertImageEvidence, assertImageEvidenceReuseBridge, verifyImageEvidenceSignature, imageEvidenceSha256 } from './production-green-stage-b-image-evidence.mjs';
 import { authenticateSuccessorStateHistory, deriveSuccessorOutputTransition } from './stage-b-successor-cutover-contract.mjs';
 import { assertStageBRefreshEvidence } from './stage-b-refresh-contract.mjs';
-import { createStagedBrokerClosureReader } from './stage-b-staged-broker-closure.mjs';
+import { createStagedBrokerClosureReader, readStagedBrokerClosure, assertStagedBrokerProof } from './stage-b-staged-broker-closure.mjs';
 import { authenticateBrokerRecoveryApproval } from './stage-b-staged-broker.mjs';
 import { createBrokerKmsAuthorizationBoundary } from './stage-b-staged-broker-authorization.mjs';
 import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, productionGithubExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from './production-credential-source-contract.mjs';
@@ -85,11 +85,17 @@ export async function authenticatePreparedPrepublicationPredecessor({ operation,
   return { registrationPredecessor: predecessor, prerequisites };
 }
 // Registration completion and IAM convergence authenticate different maps.
-export function readSchema2RegistrationAdoptionPrerequisites(preparation,registeredTaskMap,{readPolicy,readPrerequisites}) {
+export function readSchema2RegistrationAdoptionPrerequisites(preparation,registeredTaskMap,{readPolicy,readPrerequisites,authenticatedSuccessor}) {
  assert.equal(preparation.schemaVersion,2);assert.equal(preparation.purpose,TASK_REGISTRATION);
+ if(authenticatedSuccessor){
+  assert.equal(brokerDigest(authenticatedSuccessor.preparation.alias),brokerDigest(preparation.alias),'Successor did not follow the signed registration predecessor');
+  assert.equal(brokerDigest(authenticatedSuccessor.preparation.prerequisites.taskMap),brokerDigest(registeredTaskMap),'Successor task map differs from completed registrations');
+  equal(authenticatedSuccessor.record.alias.FunctionVersion,authenticatedSuccessor.preparation.target.version);
+ }
  const predecessor=canonicalJson(readPolicy())===canonicalJson(preparation.prerequisites.policy);
  const observed=readPrerequisites({authenticatedTaskMap:predecessor?preparation.prerequisites.taskMap:registeredTaskMap,
-  expectedPredecessor:{alias:preparation.alias,taskMap:preparation.prerequisites.taskMap}});
+  expectedPredecessor:{alias:authenticatedSuccessor?.record.alias||preparation.alias,
+   taskMap:authenticatedSuccessor?.preparation.prerequisites.taskMap||preparation.prerequisites.taskMap}});
  if(predecessor)assert.equal(brokerDigest(observed),brokerDigest(preparation.prerequisites),'Registration policy predecessor changed');
  return observed;
 }
@@ -1172,9 +1178,23 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         return authenticated.prerequisites;
       }
       equal(await adapter.readCheckout(), checkout);
-      if(entry.preparation.schemaVersion===2)return readSchema2RegistrationAdoptionPrerequisites(entry.preparation,authenticatedTaskMap,{
+      if(entry.preparation.schemaVersion===2){
+        const liveAlias=await getAlias();let authenticatedSuccessor;
+        if(brokerDigest(liveAlias)!==brokerDigest(entry.preparation.alias)){
+          const configuration=await adapter.getVersion(liveAlias.FunctionVersion);
+          const sourceSha=JSON.parse(configuration.Environment?.Variables?.BROKER_APPROVAL_EXPECTED_JSON||'null')?.releaseSha;
+          assert.match(sourceSha||'',/^[a-f0-9]{40}$/,'Advanced alias lacks an exact broker release source');
+          const proof=await readStagedBrokerClosure({sourceSha,run:runAws,readCheckout:()=>adapter.readCheckout()});
+          assertStagedBrokerProof(proof,sourceSha);
+          authenticatedSuccessor=readReceipt(stagedBrokerSourceReservation(sourceSha),'STAGED_BROKER_TERMINAL_HANDOFF');
+          assert.equal(brokerDigest(authenticatedSuccessor.record),proof.evidenceSha256,'Advanced alias closure receipt changed');
+          assert.equal(brokerDigest(authenticatedSuccessor.record.alias),brokerDigest(liveAlias),'Advanced alias differs from authenticated closure');
+          await proof.revalidate();
+        }
+        return readSchema2RegistrationAdoptionPrerequisites(entry.preparation,authenticatedTaskMap,{
         readPolicy:()=>readBrokerPolicyInventory(runAws).policy,
-        readPrerequisites:options=>readStagedBrokerPrerequisites(runAws,options)});
+        readPrerequisites:options=>readStagedBrokerPrerequisites(runAws,options),authenticatedSuccessor});
+      }
       return readStagedBrokerPrerequisites(runAws,{authenticatedTaskMap,
         expectedPredecessor:{alias:entry.preparation.alias,taskMap:entry.preparation.prerequisites.taskMap}});
     },
