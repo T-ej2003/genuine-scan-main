@@ -63,7 +63,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false } = {}) {
     objects.set(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_SOURCE', sourceSha, preparation:source, authorization:pubAuth })));
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
-  let mode = 'success', currentAlias = phase === 'RECONCILIATION' ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
+  let mode = 'success', currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
   let currentShow;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
@@ -71,7 +71,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false } = {}) {
     if (command === 'terraform') {
       if (args.includes('show')) return JSON.stringify(args.at(-1) === '-json' && currentShow ? currentShow : capturedPlans.get(args.at(-1)) || plan);
       if (args.includes('plan')) {
-        assert.equal(phase, 'RECONCILIATION');
+        assert.ok(['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase));
         const file = args.find(a => a.startsWith('-out=')).slice(5);
         let body;
         if (args.includes('-refresh-only')) { body = structuredClone(refreshPlan); if (omitRefreshChanges) delete body.resource_changes; }
@@ -307,6 +307,14 @@ test('native reconciliation applies only validated refresh saved plan, then capt
   assert.equal(plans.length,2); assert.ok(plans[0].args.includes('-refresh-only')); assert.ok(!plans[1].args.includes('-refresh-only'));
   assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length,1);
   assert.equal(r.calls.filter(c => c.args[1] === 'update-alias').length,0);
+});
+test('native reconciliation recovery captures the post-refresh no-op without replaying Terraform or alias CAS', async () => {
+  const r = await native('RECONCILIATION_RECOVERY');
+  const closure = await r.adapter.captureNormalPlan();
+  assertBrokerClosurePlan(closure.plan, r.p);
+  assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('plan')).length, 1);
+  assert.equal(r.calls.filter(c => c.command === 'terraform' && c.args.includes('apply')).length, 0);
+  assert.equal(r.calls.filter(c => c.args[1] === 'update-alias').length, 0);
 });
 
 // Mutations happen after the first traffic census, immediately before its final
