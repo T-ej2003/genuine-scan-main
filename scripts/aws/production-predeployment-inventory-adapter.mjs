@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { registerPreDeploymentInventoryTaskDefinition } from "./production-predeployment-inventory-task.mjs";
 import { canonicalBackendDatabaseSecretReference } from "./production-overlap-task-definition.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-predeployment-inventory:[1-9][0-9]*$/;
@@ -60,9 +61,25 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
   return {
     async run({ rotationId } = {}) {
       if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "")) throw new Error("Pre-deployment inventory rotation identity is invalid.");
+      const completedPath = path.join(path.dirname(config.rotationStateFile || ""), "inventory-completed-adoption-evidence.json");
+      if (config.completedInventoryAdoptionRequired === true && !existsSync(completedPath)) throw new Error("Completed inventory adoption proof is required before broker invocation.");
+      if (existsSync(completedPath) && !config.inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires its exact existing task definition.");
       const registered = await getRegisteredTaskDefinition();
       const taskDefinitionArn = registered.taskDefinitionArn;
       if (!ARN.test(taskDefinitionArn || "")) throw new Error("Pre-deployment inventory registration returned an unreviewed task definition.");
+      if (existsSync(completedPath)) {
+        const evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: completedPath, label: "Completed inventory adoption evidence" }).bytes);
+        const temporary = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-verify-"));
+        const messageFile = path.join(temporary, "message");
+        try {
+          const payload = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256 }, ({ keyId, message, signature }) => {
+            writeFileSync(messageFile, message, { mode: 0o600 });
+            return parseJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+          });
+          if (payload.taskDefinitionArn !== taskDefinitionArn) throw new Error("Completed inventory adoption task definition changed.");
+          return { inventory: payload.inventory, taskArn: payload.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${payload.taskArn}`, evidenceSha256: payload.inventorySha256, mutationCount: 0 };
+        } finally { rmSync(temporary, { recursive: true, force: true }); }
+      }
       const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-broker-"));
       const outputPath = path.join(directory, "broker-response.json");
       try {

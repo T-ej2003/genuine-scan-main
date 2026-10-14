@@ -1,0 +1,71 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import { createHash } from "node:crypto";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { authenticateCompletedInventoryAdoptionEvidence, buildCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import { preDeploymentOperationKey, createPreDeploymentOperationIdentity } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+
+const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
+const read = (argv, name) => {
+  const index = argv.indexOf(`--${name}`);
+  if (index < 0 || !argv[index + 1] || argv[index + 1].startsWith("--")) throw new Error(`--${name} is required.`);
+  return argv[index + 1];
+};
+const hash = value => createHash("sha256").update(value).digest("hex");
+const fromAws = item => Object.fromEntries(Object.entries(item || {}).map(([key, value]) => [key, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
+
+export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign } = {}) {
+  const originalPath = path.resolve(read(argv, "original-config"));
+  const originalHash = read(argv, "original-config-sha256");
+  const continuationPath = path.resolve(read(argv, "continuation-config"));
+  const continuationHash = read(argv, "continuation-config-sha256");
+  const originalConfig = readBoundStageBPrivateJson({ filePath: originalPath, expectedSha256: originalHash, repositoryRoot: root, label: "Completed inventory original runtime config" });
+  const continuationConfig = readBoundStageBPrivateJson({ filePath: continuationPath, expectedSha256: continuationHash, repositoryRoot: root, label: "Completed inventory continuation runtime config" });
+  const manifest = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(path.dirname(continuationPath), "cutover-runtime-manifest.json"), repositoryRoot: root, label: "Cutover runtime manifest" }).bytes);
+  if (continuationConfig.rotationConfigFile !== continuationPath || path.dirname(continuationConfig.rotationStateFile || "") !== path.dirname(continuationPath) || continuationConfig.completedInventoryAdoptionRequired !== true || manifest.runtimeConfigSha256 !== continuationHash || manifest.readyToConsumeMfa !== true) throw new Error("Continuation runtime is not the prepared self-bound adoption config.");
+  const recoveryPath = path.resolve(read(argv, "original-recovery-evidence"));
+  const recoveryEvidence = readBoundStageBPrivateJson({ filePath: recoveryPath, expectedSha256: read(argv, "original-recovery-evidence-sha256"), repositoryRoot: root, label: "Original absent-claim recovery" });
+  const approval = readBoundStageBPrivateJson({ filePath: path.resolve(read(argv, "original-approval")), expectedSha256: read(argv, "original-approval-sha256"), repositoryRoot: root, label: "Original Stage B approval" });
+  const identity = createPreDeploymentOperationIdentity({ approvalId: originalConfig.inventoryApprovalId, releaseSha: originalConfig.sourceSha, imageReleaseSha: originalConfig.imageReleaseSha, rotationId: originalConfig.rotationId, taskDefinitionArn: originalConfig.inventoryTaskDefinitionArn, imageDigest: originalConfig.overlapTaskInput.backendImage });
+  const claim = fromAws(json(runRead, ["dynamodb", "get-item", "--table-name", STAGE_B.replayTable, "--consistent-read", "--key", JSON.stringify({ approvalMode: { S: preDeploymentOperationKey(identity) } })]).Item);
+  if (!Object.keys(claim).length) throw new Error("Completed inventory replay claim is absent.");
+  const task = json(runRead, ["ecs", "describe-tasks", "--cluster", STAGE_B.clusterArn, "--tasks", claim.taskArn, "--include", "TAGS"]).tasks?.[0];
+  const definition = json(runRead, ["ecs", "describe-task-definition", "--task-definition", identity.taskDefinitionArn, "--include", "TAGS"]);
+  const stream = `predeployment-inventory/inventory/${claim.taskArn?.split("/").pop()}`;
+  const logs = json(runRead, ["logs", "get-log-events", "--log-group-name", STAGE_B.inventoryLogGroupName, "--log-stream-name", stream, "--start-from-head"]);
+  if (logs.nextBackwardToken === undefined || !Array.isArray(logs.events) || logs.events.length !== 1) throw new Error("Completed inventory log readback is incomplete or ambiguous.");
+  const readIdentity = json(runRead, ["sts", "get-caller-identity"]);
+  const signerIdentity = json(runSign, ["sts", "get-caller-identity"]);
+  if (readIdentity.Arn !== `arn:aws:iam::${STAGE_B.account}:root` || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(signerIdentity.Arn || "")) throw new Error("Completed inventory adoption reader or signer identity is invalid.");
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-"));
+  fs.chmodSync(temporary, 0o700);
+  const messageFile = path.join(temporary, "message");
+  const message = value => { fs.writeFileSync(messageFile, value, { mode: 0o600 }); return `fileb://${messageFile}`; };
+  try {
+    const verifySignature = ({ keyId, message: bytes, signature }) => json(runRead, ["kms", "verify", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+    const sign = ({ keyId, message: bytes }) => json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
+    const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
+    if (fs.existsSync(outputPath)) {
+      const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
+      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash }, verifySignature);
+      if (payload.replayRowSha256 !== hash(canonicalJson(claim)) || payload.taskArn !== task?.taskArn
+          || payload.inventorySha256 !== hash(JSON.stringify(JSON.parse(logs.events[0].message)))) throw new Error("Persisted inventory adoption differs from current readbacks.");
+      return { outputPath, expiresAt: payload.expiresAt, operationKey: payload.operationKey, reused: true };
+    }
+    const evidence = await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign });
+    ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root });
+    writeStageBPrivateFileExclusive({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`), repositoryRoot: root, label: "Completed inventory adoption evidence" });
+    return { outputPath, expiresAt: evidence.payload.expiresAt, operationKey: evidence.payload.operationKey };
+  } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const runRead = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-root" });
+  const runSign = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
+  console.log(JSON.stringify(await prepareCompletedInventoryAdoption({ argv: process.argv.slice(2), runRead, runSign })));
+}

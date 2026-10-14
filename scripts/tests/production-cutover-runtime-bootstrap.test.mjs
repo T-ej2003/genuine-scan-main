@@ -251,7 +251,7 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
   const repositoryRoot = process.cwd();
   const directory = fsTemp();
   try {
-    const result = prepareProductionCutoverRuntime(fullInput(directory, repositoryRoot));
+    const result = prepareProductionCutoverRuntime({ ...fullInput(directory, repositoryRoot), endpointSecurityGroupId: "sg-04d5bf116755ba412", runtimeSecurityGroupId: "sg-0db971332ae625441", adoptCompletedInventory: true, inventoryTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:9" });
     assert.equal(result.readyToConsumeMfa, true);
     assert.equal(result.protectedMainSha, sourceSha);
     assert.equal(existsSync(result.configPath), true);
@@ -264,6 +264,10 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.equal(result.config.qr.previousKeyVersion, "qr-v1");
     assert.match(result.config.stageARoot, /production-green-stage-a$/);
     assert.match(result.config.stageAPlanSha256, /^[a-f0-9]{64}$/);
+    assert.equal(result.config.endpointSecurityGroupId, "sg-04d5bf116755ba412");
+    assert.equal(result.config.runtimeSecurityGroupId, "sg-0db971332ae625441");
+    assert.equal(result.config.rotationConfigFile, result.configPath);
+    assert.equal(result.config.completedInventoryAdoptionRequired, true);
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
     assert.equal(result.config.bootstrapProfile, "mscqr-production-bootstrap-operator");
     assert.equal(result.config.verifierProfile, "mscqr-production-ecs-exec-verifier");
@@ -326,7 +330,7 @@ test("public descendant preflight preserves original contracts through approval 
       symlinkSync(path.join(originalCwd, 'node_modules'), path.join(checkout, 'node_modules'), 'dir');
       symlinkSync(path.join(originalCwd, 'backend/node_modules'), path.join(checkout, 'backend/node_modules'), 'dir');
       const changed = execFileSync('git', ['diff', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
+      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs', 'scripts/aws/production-completed-inventory-adoption.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
       writeFileSync(path.join(checkout, 'documents/security/rls-program/generated/checksums.json'), JSON.stringify({ sourceContractSha256: 'f'.repeat(64), migrationSetDigest: 'f'.repeat(64) }));
       execFileSync('git', ['add', '.'], { cwd: checkout }); execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling with different release contracts'], { cwd: checkout, stdio: 'pipe' });
       const origin = path.join(directory, 'origin.git');
