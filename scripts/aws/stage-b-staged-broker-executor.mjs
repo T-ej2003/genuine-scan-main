@@ -534,7 +534,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     mutationAttempted = true;
   };
   const capture = (kind, flags) => {
-    assert.ok(['ADOPTION', 'PREPARATION', 'RECONCILIATION', 'CLOSURE', 'POLICY', 'POLICY_RECOVERY'].includes(phase));
+    assert.ok(['ADOPTION', 'PREPARATION', 'RECONCILIATION', 'RECONCILIATION_RECOVERY', 'CLOSURE', 'POLICY', 'POLICY_RECOVERY'].includes(phase));
     const file = path.join(directory, `${kind}-${randomUUID()}.tfplan`);
     terraform(['plan', ...flags, `-var-file=${files.tfvars}`, '-input=false', phase === 'ADOPTION' ? '-lock=false' : '-lock=true', `-out=${file}`]);
     fs.chmodSync(file, 0o600); const bytes = fs.readFileSync(file), plan = JSON.parse(terraform(['show', '-json', file]));
