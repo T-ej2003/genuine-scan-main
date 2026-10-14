@@ -77,16 +77,19 @@ export async function runSuccessorReleaseCoordinator({recoveryReference},runtime
       if(old){
        const oldReference=old.result;
        const oldAttempt=await read(`closure:attempt:${previousRound}`);
-       if(oldAttempt){
+       if(oldAttempt||continuation.preNativeAbort){
         const proof=continuation.preNativeAbort;assert.equal(proof?.status,'PRE_NATIVE_ABORTED');
         assert.equal(proof.releaseId,release.releaseId);assert.equal(proof.sourceSha,release.sourceSha);
         assert.equal(proof.round,previousRound);assert.equal(proof.prepared,oldReference);
-        assert.equal(proof.attemptSha256,brokerDigest(oldAttempt));
+        if(oldAttempt)assert.equal(proof.attemptSha256,brokerDigest(oldAttempt));
+        else assert.equal(Object.hasOwn(proof,'attemptSha256'),false);
         assert.equal(proof.authorization,(await read(`closure:authorized:${previousRound}`))?.authorization);
         assert.deepEqual(proof.currentTooling,continuation.currentTooling);
        }else assert.equal(await read(`closure:authorized:${previousRound}`),null,'Historical closure authorization cannot be replaced');
        const retired=await read(`closure:retired:${previousRound}`);
-       if(retired)assert.equal(retired.prepared,oldReference);
+       if(retired){assert.equal(retired.prepared,oldReference);
+        if(continuation.preNativeAbort&&!oldAttempt)assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');
+        if(!continuation.preNativeAbort&&!oldAttempt)assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');}
        else await write(`closure:retired:${previousRound}`,{prepared:oldReference,reason:continuation.preNativeAbort?'PRE_NATIVE_ABORTED':'TOOLING_ADVANCED_AFTER_CAS',
         ...(continuation.preNativeAbort?{preNativeAbort:continuation.preNativeAbort}:{}),
         ...(continuation.supersededAuthorization?{runId:continuation.supersededAuthorization.runId}: {})});

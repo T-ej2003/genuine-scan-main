@@ -163,10 +163,15 @@ export function createHostedSuccessorRuntime({env=process.env,
     let supersededAuthorization,preNativeAbort;
     if(latest){
      const {round,record,prepared}=latest;
-     if(store.readStep(releaseId,`closure:attempt:${round}`))preNativeAbort=await authenticatePreNativeClosureAbort({
+     const attempted=store.readStep(releaseId,`closure:attempt:${round}`),signed=store.readStep(releaseId,`closure:authorized:${round}`),
+      retired=store.readStep(releaseId,`closure:retired:${round}`);
+     if(retired?.reason==='AUTHORIZATION_EXPIRED')assert.ok(signed,'Expired closure retirement requires its signed authorization');
+     if(retired&&!signed&&!attempted){assert.equal(retired.reason,'TOOLING_ADVANCED_AFTER_CAS');
+      assert.equal(retired.releaseId,releaseId);assert.equal(retired.sourceSha,request.releaseSourceSha);
+      assert.equal(retired.name,`closure:retired:${round}`);assert.equal(retired.prepared,record.result);}
+     if(attempted||signed)preNativeAbort=await authenticatePreNativeClosureAbort({
       store,releaseId,release,sourceSha:request.releaseSourceSha,round,prepared,currentTooling,casResult,run:awsRun,
-      directory:HOSTED_RELEASE_ROOT,verify:verifier,readReceipt,readState,readAlias});
-     else assert.equal(store.readStep(releaseId,`closure:authorized:${round}`),null,'Existing closure authorization cannot be rebound');
+      directory:HOSTED_RELEASE_ROOT,verify:verifier,readReceipt,readState,readAlias,allowMissingAttempt:!attempted});
      const pending=store.readStep(releaseId,`closure:pending:${round}`),dispatch=store.readStep(releaseId,`closure:dispatch:${round}`);
      if(dispatch&&!preNativeAbort){
       const timedOut=store.readStep(releaseId,`closure:approval-timeout:${round}`);

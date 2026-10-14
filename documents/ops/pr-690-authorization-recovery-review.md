@@ -55,6 +55,19 @@ Unknown statuses fail closed. The detailed record and replacement rules are in
    is insufficient.
 6. A timeout marker with a mismatched pending run or GitHub conclusion is
    rejected. Failed and timeout markers cannot authorize the same round.
+7. The hosted successor reader rejected a signed closure round retired for
+   `AUTHORIZATION_EXPIRED` before native intent was written. The coordinator
+   itself can stop after that retirement and before the next preparation. The
+   reader and next-round writer now consume the existing pre-native proof only
+   when the immutable signed authorization, exact retirement identity, expired
+   authority, absent native receipts, unchanged Terraform state and completed
+   CAS alias all authenticate. An orphan retirement or missing signature fails
+   closed. The existing record is not rewritten.
+8. A second pass found that an unsigned closure round with an unrecognized
+   retirement reason could be treated as an ordinary tooling advance. Both the
+   hosted reader and coordinator now require the exact
+   `TOOLING_ADVANCED_AFTER_CAS` reason for that branch; signed pre-native
+   retirements remain on their separate authenticated path.
 
 ## Regression map
 
@@ -67,6 +80,36 @@ Unknown statuses fail closed. The detailed record and replacement rules are in
 | P | Protected authorizer and pre-native tests reject wrong run, source, preparation, malformed markers, native intent/uncertainty, changed state and alias, and unauthorized artifacts. |
 | S | Release Train and Release Gate contract tests verify terminal prerequisite handoff and independent gate requirements. |
 
+The real hosted `authenticateRequest` now reads a round-1 `authorized` plus
+`AUTHORIZATION_EXPIRED` retirement with no attempt. A real successor coordinator
+entrypoint then writes round-2 preparation and authorization. Injected process
+stops immediately after each write resume against the same durable store;
+closure runs once, CAS does not rerun, and completed closure is adopted on the
+next invocation. The fixture rejects wrong ticket, missing round, forged
+retirement fields, absent signature, native uncertainty, state drift and alias
+drift. KMS and GitHub calls are deterministic mocks; live production approval
+and native writes are not exercised.
+
+## Durable-write audit
+
+The successor's ordinary path writes START, then cutover and closure
+`prepared`, `authorized`, `attempt`, and `result`. The fault matrix stops after
+START, every content-addressed artifact put, and each of these eight step
+writes; restarts finish without duplicate CAS or reconciliation. Its retirement
+path stops after `closure:retired:0` and
+resumes with the prior authority unchanged. The hosted test covers the
+cross-tooling `closure:retired:1` boundary and both following writes. Existing
+successor tests cover `pending`, `approval-timeout`, `approval-failed`,
+dispatch-journal loss, consecutive failed rounds, and native cutover recovery.
+The regular coordinator's public-entry lost-response matrix covers START,
+phase preparations and authorizations, pre/post native intent for ECS, IAM,
+publication, cutover and reconciliation, durable completion, and restart
+without replay. Artifact puts are content-addressed and write-once; a saved
+artifact without its referencing step is not authority. Native execution
+uncertainty continues to require native receipt authentication and fails closed
+when unprovable. This is a write-boundary audit with deterministic fixtures,
+not a production fault-injection run.
+
 The required governed Stage B Quality Gate job executes the successor and
 pre-native verifier suites. The regular coordinator's targeted recovery tests
 are already selected in that job. No test supplies live approval or authorizes
@@ -75,12 +118,17 @@ and runtime acceptance.
 
 ## Local proof before push
 
-The regular coordinator suite passed 103/103. The successor plus pre-native
-suite passed 55/55. Relevant Stage B closure/bundle/session/gate integration
-passed 57/57, Release Train/Release Gate routing passed 26/26, and OSV policy
-tests passed 159/159. Workflow YAML validation passed 98 files. Unfiltered
-OSV Scanner 2.6.0 reported only the existing dev-only `braces@3.0.3`
-advisory; the canonical browser build transformed 3,993 modules, found 204
-browser packages, excluded `braces`, and passed the runtime gate. The
-time-bounded acceptance scope, owner and expiry are unchanged. Hosted required
+The preceding counts describe the earlier PR head. For this revision, the
+successor, hosted-reader and pre-native suites passed 71/71, the OSV policy
+suite 159/159, and the exact-tree unfiltered scanner found only build-only
+`braces@3.0.3`. A canonical browser build excluded it from 204 browser
+packages and the OSV runtime gate passed. The complete regular coordinator
+suite passed 103/103; its exact required-CI selection passed 11/11. Stage B
+private evidence and dispatch integration passed 24/24, source/gate routing
+passed 21/21, and all 98 workflow YAML files parsed with the hosted regression
+included in the required Stage B job. A separate backend-health Release Gate
+test file (unchanged by this PR) failed two standalone environment assumptions:
+an unset `DEPLOY_SHA`, then a checkout-status expectation and isolated lifecycle
+subprocess. The Stage B Release Gate contract tests in that combined run passed;
+the backend-health failures are not claimed green or fixed here. Hosted required
 CI and exact-head Codex review remain separate post-push checks.

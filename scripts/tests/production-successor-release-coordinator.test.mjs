@@ -150,6 +150,67 @@ async function fixture({approval='AUTHORIZED',lostResponse=false,lostNativeRespo
  return {runtime,reference,store,starts,steps,counts,releaseId,advanceClock:ms=>{clock+=ms;}};
 }
 
+test('successor restarts after every ordinary durable step write without repeating completed operations',async()=>{
+ const baseline=await fixture(),writes=[],originalWrite=baseline.store.writeStep;
+ baseline.store.writeStep=value=>{writes.push(value.name);return originalWrite(value);};
+ assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:baseline.reference},baseline.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+ assert.deepEqual(writes,['cutover:prepared','cutover:authorized:0','cutover:attempt:0','cutover:result',
+  'closure:prepared','closure:authorized:0','closure:attempt:0','closure:result']);
+ for(const name of writes){
+  const f=await fixture(),write=f.store.writeStep;let interrupted=false;
+  f.store.writeStep=value=>{write(value);if(!interrupted&&value.name===name){interrupted=true;throw new Error('Process stopped after durable write');}};
+  await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/Process stopped after durable write/);
+  assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE',name);
+  assert.equal(f.counts.cutover,1,`${name} must not replay alias CAS`);
+  assert.equal(f.counts.closure,1,`${name} must not replay reconciliation`);
+ }
+});
+
+test('successor restart after signed closure retirement preserves authority and skips CAS',async()=>{
+ const f=await fixture(),authorize=f.runtime.obtainAuthorization,write=f.store.writeStep;
+ let interrupted=false;
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  const result=await authorize(context,phase,prepared,reference);
+  if(phase==='closure'&&context.authorizationRound===0)result.authorization.expiresAt=new Date(0).toISOString();
+  return result;
+ };
+ f.store.writeStep=value=>{write(value);
+  if(!interrupted&&value.name==='closure:retired:0'){interrupted=true;throw new Error('Process stopped after expired retirement');}};
+ await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/Process stopped after expired retirement/);
+ const retired=structuredClone(f.steps.get(`${f.releaseId}/closure:retired:0`));
+ assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');assert.equal(f.steps.has(`${f.releaseId}/closure:attempt:0`),false);
+ assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+ assert.deepEqual(f.steps.get(`${f.releaseId}/closure:retired:0`),retired);
+ assert.ok(f.steps.get(`${f.releaseId}/closure:authorized:1`));
+ assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,1);
+});
+
+test('successor restarts after START and content-addressed artifact writes',async()=>{
+ const make=async()=>{const f=await fixture(),operate=f.runtime.runStageOperation,classify=f.runtime.classifyNativeAttempt;
+  let nativeClosure;
+  f.runtime.runStageOperation=async input=>{
+   if(input.operation==='recover-reconciliation'){assert.ok(nativeClosure);return nativeClosure;}
+   const result=await operate(input);if(input.operation==='reconcile')nativeClosure=result;return result;};
+  f.runtime.classifyNativeAttempt=(context,phase,...rest)=>phase==='closure'&&nativeClosure?'RECOVER':classify(context,phase,...rest);
+  return f;};
+ const baseline=await make(),put=baseline.store.putArtifact;let count=0;
+ baseline.store.putArtifact=(...args)=>{count++;return put(...args);};
+ await runSuccessorReleaseCoordinator({recoveryReference:baseline.reference},baseline.runtime);
+ assert.ok(count>=5);
+ for(let stop=1;stop<=count;stop++){
+  const f=await make(),write=f.store.putArtifact;let writes=0,interrupted=false;
+  f.store.putArtifact=(...args)=>{write(...args);if(++writes===stop&&!interrupted){interrupted=true;throw new Error('Process stopped after artifact write');}};
+  await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/Process stopped after artifact write/);
+  assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,1);
+ }
+ const f=await make(),writeStart=f.store.writeStart;let interrupted=false;
+ f.store.writeStart=(...args)=>{writeStart(...args);if(!interrupted){interrupted=true;throw new Error('Process stopped after START');}};
+ await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/Process stopped after START/);
+ assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(f.counts.cutover,1);assert.equal(f.counts.closure,1);
+});
+
 test('hosted successor keeps an ordinary START for the same source and ticket immutable',async()=>{
  const f=await fixture(),legacyKey={sourceSha:A,ticketId:request.ticketId};
  const ordinary={baseline:'1'.repeat(64),release:'2'.repeat(64)};

@@ -15,7 +15,13 @@ export async function authenticatePreNativeClosureAbort({store,releaseId,sourceS
  assert.equal(prepared.preparation.cutover.resultSha256,brokerDigest(casResult));
  const signed=store.readStep(releaseId,`closure:authorized:${round}`);
  assert.ok(attempt||allowMissingAttempt,'Historical closure attempt is required');
- if(!attempt)assert.equal(store.readStep(releaseId,`closure:retired:${round}`)?.reason,'AUTHORIZATION_EXPIRED');
+ if(!attempt){const retired=store.readStep(releaseId,`closure:retired:${round}`);
+  assert.deepEqual(Object.keys(retired||{}).sort(),['name','prepared','reason','releaseId','sourceSha']);
+  assert.equal(retired?.releaseId,releaseId);assert.equal(retired?.sourceSha,sourceSha);
+  assert.equal(retired?.name,`closure:retired:${round}`);assert.equal(retired?.prepared,reference);
+  assert.equal(retired.reason,'AUTHORIZATION_EXPIRED');
+  assert.equal(store.readStep(releaseId,`closure:approval-failed:${round}`),null);
+  assert.equal(store.readStep(releaseId,`closure:approval-timeout:${round}`),null);}
  const records=attempt?[[attempt,`closure:attempt:${round}`],[signed,`closure:authorized:${round}`]]:[[signed,`closure:authorized:${round}`]];
  for(const [record,name] of records){
   assert.ok(record,'Historical closure attempt and authorization are required');
