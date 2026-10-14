@@ -244,6 +244,64 @@ test('timed-out protected child records round zero and authorizes a fresh round 
  assert.equal(f.counts.cutover,1);
 });
 
+for(const [label,conclusion,waiting] of [['immediately failed','failure',false],['immediately cancelled','cancelled',false],['previously dispatched','failure',true]])
+ test(`successor retires ${label} approval child without replay`,async()=>{
+  const f=await fixture(),original=f.runtime.obtainAuthorization;
+  let dispatches=0;
+  f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+   if(phase!=='cutover'||context.authorizationRound!==0)return original(context,phase,prepared,reference);
+   if(!context.pendingApproval){
+    dispatches++;
+    f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'cutover:dispatch:0',dispatch:{identity:{
+     repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+     workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',ref:'main',targetSha:C,
+     inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)}}});
+    if(waiting)return {status:'WAITING_FOR_APPROVAL',runId:'700',
+     runUrl:'https://github.com/T-ej2003/genuine-scan-main/actions/runs/700'};
+   }
+   return {status:'APPROVAL_FAILED',runId:'700',conclusion};
+  };
+  if(waiting)assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'WAITING_FOR_APPROVAL');
+  assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal(f.steps.get(`${f.releaseId}/cutover:approval-failed:0`).conclusion,conclusion);
+  assert.equal(f.steps.get(`${f.releaseId}/cutover:pending:0`).runId,'700');
+  assert.ok(f.steps.has(`${f.releaseId}/cutover:authorized:1`));
+  assert.equal(f.steps.has(`${f.releaseId}/cutover:authorized:0`),false);
+  assert.equal([...f.steps.keys()].filter(key=>key.endsWith('/cutover:approval-failed:0')).length,1);
+  assert.equal(dispatches,1);assert.equal(f.counts.cutover,1);
+  assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+  assert.equal(dispatches,1);assert.equal(f.counts.cutover,1);
+ });
+
+test('successor fails closed when an immediately failed approval lacks an authenticated dispatch journal',async()=>{
+ const f=await fixture();
+ f.runtime.obtainAuthorization=async()=>({status:'APPROVAL_FAILED',runId:'700',conclusion:'failure'});
+ await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/approval lacks authenticated dispatch/);
+ assert.equal(f.steps.has(`${f.releaseId}/cutover:approval-failed:0`),false);
+ assert.equal(f.counts.cutover,0);
+});
+
+test('successor reauthenticates a failed prior round before replacing its child',async()=>{
+ const f=await fixture(),original=f.runtime.obtainAuthorization;
+ let firstReplacement=true,checked=0;
+ f.runtime.obtainAuthorization=async(context,phase,prepared,reference)=>{
+  if(phase==='cutover'&&context.authorizationRound===0){
+   if(context.pendingApproval){checked++;return {status:'APPROVAL_FAILED',runId:'700',conclusion:'failure'};}
+   f.store.writeStep({releaseId:f.releaseId,sourceSha:A,name:'cutover:dispatch:0',dispatch:{identity:{
+    repository:'T-ej2003/genuine-scan-main',workflow:'authorize-production-stage-b-release-transition.yml',
+    workflowPath:'.github/workflows/authorize-production-stage-b-release-transition.yml',ref:'main',targetSha:C,
+    inputs:releaseTransitionDispatchInputs(context,phase,reference,prepared.preparation)}}});
+   return {status:'APPROVAL_FAILED',runId:'700',conclusion:'failure'};
+  }
+  if(phase==='cutover'&&context.authorizationRound===1&&firstReplacement){firstReplacement=false;throw new Error('Lost replacement dispatch');}
+  return original(context,phase,prepared,reference);
+ };
+ await assert.rejects(()=>runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime),/Lost replacement dispatch/);
+ assert.equal(f.steps.get(`${f.releaseId}/cutover:approval-failed:0`).runId,'700');
+ assert.equal((await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime)).status,'BROKER_CLOSURE_COMPLETE');
+ assert.equal(checked,1);assert.equal(f.counts.cutover,1);
+});
+
 test('timed-out approval retains still-valid preparation in the next authorization round',async()=>{
  const f=await fixture({approval:'APPROVAL_TIMED_OUT_STILL_VALID'});
  await runSuccessorReleaseCoordinator({recoveryReference:f.reference},f.runtime);
