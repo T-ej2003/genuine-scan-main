@@ -68,6 +68,21 @@ test('v15 publication lifecycle is bound to exact serial-128/129 states and immu
   }
 });
 
+test('v18 publication lifecycle requires exact serial-136/137 states and immutable receipt', () => {
+  const identity = {
+    historical: '64a84a25dcfc7a11cc0396fec48bfc5b9e70e778520a4906a0b4921c959f7825',
+    current: '45816ae26583b6d2b2ae7e0eea01918d7d90e3bbfa76165185889be76c41a08a',
+    publication: 'b79b8165efca63ac53415df99597432a234c270524deecf5d65c78a08e9628b8',
+  };
+  const reviewed = value => reviewedPublicationLifecycleFor(value.historical, value.current, value.publication);
+  assert.equal(reviewed(identity)?.removedInstancesSha256,
+    '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec');
+  for (const field of Object.keys(identity)) {
+    const changed = { ...identity, [field]: '0'.repeat(64) };
+    assert.equal(reviewed(changed), null);
+  }
+});
+
 test('publication may clear only historical propagated lifecycle metadata on unchanged dependencies', () => {
   const f = fixture();
   f.before.resources[1].instances[0].create_before_destroy = true;
