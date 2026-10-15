@@ -257,9 +257,14 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
   if(fs.existsSync(filePath)){assertStageBPrivateFile({filePath,repositoryRoot,label:`Release ${name}`});assert.equal(brokerDigest(fs.readFileSync(filePath)),brokerDigest(contents[name]),'Existing material differs');}
   else writeStageBPrivateFileAtomic({filePath,bytes:contents[name],repositoryRoot,label:`Release ${name}`});
  }
- // Legacy phase capsules omit Stage A files; regenerate only when the captured binding proves identical bytes.
- if(p.outputReconciliation&&!p.successorReconciliation)restoreBoundStageAInputs({bindingBytes:contents.bindingReportPath,
-  files,preparation:p,repositoryRoot,run});
+ // Legacy output bindings have no Stage A contract; current schema and partial Stage A bindings require full restoration.
+ if(p.outputReconciliation&&!p.successorReconciliation){
+  const binding=JSON.parse(contents.bindingReportPath);
+  assert.ok(binding&&typeof binding==='object'&&!Array.isArray(binding),'Invalid output binding');
+  if(binding.schemaVersion!==undefined)assert.ok(Number.isInteger(binding.schemaVersion)&&binding.schemaVersion>=1,'Invalid output binding schema');
+  if(binding.schemaVersion>=2||Object.keys(binding).some(name=>name.startsWith('stageA')))
+   restoreBoundStageAInputs({bindingBytes:contents.bindingReportPath,files,preparation:p,repositoryRoot,run});
+ }
  assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p,p.successorReconciliation?p.sourceSha:undefined),p.artifactSetSha256);
  return {...prepared,planPath};
 }
