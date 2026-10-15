@@ -373,8 +373,11 @@ test("public descendant preflight preserves original contracts through approval 
     let input = fullInput(directory, checkout, release, imagesSource);
     input.rotationBindings = { ...bindings, sourceSha: release };
     input.sourceSha = release; input.git = gitFixture(tooling.sourceSha);
-    const publishedPackage = await packageStageBBroker({ outputPath: path.join(directory, 'broker.zip'), toolingSha: release, toolingTreeSha256: deriveStageBToolingInputTreeSha256(release), repositoryRoot: checkout });
-    assert.equal(git(['diff', release, 'HEAD', '--', 'infra/aws/terraform/lambda/production-rls-approval-broker', 'infra/aws/terraform/production-green-stage-b/broker']), '');
+    const historicalSource = path.join(directory, 'historical-broker-source');
+    mkdirSync(historicalSource);
+    const historicalPaths = ['infra/aws/terraform/lambda/production-rls-approval-broker', 'infra/aws/terraform/production-green-stage-b/broker/deployment-contract.json', 'documents/ops/iam/MSCQRProductionGreenStageBBrokerPackageManifest-v1.schema.json', 'scripts/aws/production-green-stage-b-contract.mjs'];
+    execFileSync('tar', ['-xf', '-', '-C', historicalSource], { input: execFileSync('git', ['archive', '--format=tar', release, '--', ...historicalPaths], { cwd: checkout }) });
+    const publishedPackage = await packageStageBBroker({ outputPath: path.join(directory, 'broker.zip'), toolingSha: release, toolingTreeSha256: deriveStageBToolingInputTreeSha256(release), repositoryRoot: historicalSource, sourceDirectory: path.join(historicalSource, historicalPaths[0]) });
     const variables = resolvedBrokerEnvironment();
     variables.BROKER_IMAGE_RELEASE_SHA = imagesSource;
     variables.BROKER_APPROVAL_EXPECTED_JSON = JSON.stringify({ ...JSON.parse(variables.BROKER_APPROVAL_EXPECTED_JSON), releaseSha: release, sourceContractSha256: contracts.sourceContractSha256, migrationSetDigest: contracts.migrationSetDigest, packageChecksumSha256: contracts.packageChecksumSha256 });

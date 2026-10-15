@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { assertAbsentInventoryRecoveryPayload, assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
-import { canonicalJson, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, validateStageBApproval } from "./production-green-stage-b-contract.mjs";
+import { assertAbsentInventoryRecoveryPayload, assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createPreDeploymentOperationIdentity, inventoryCompletionKey, preDeploymentOperationIdentitySha256, preDeploymentOperationKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, validateStageBApproval } from "./production-green-stage-b-contract.mjs";
 import { assertPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAGS } from "./production-predeployment-inventory-task.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
@@ -9,13 +9,13 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const PURPOSE = "adopt-completed-predeployment-inventory";
 
 export function assertCompletedInventoryAdoptionPayload(payload, { config, configSha256, now = new Date() } = {}) {
-  const fields = ["schemaVersion", "purpose", "sourceSha", "imageReleaseSha", "rotationId", "approvalId", "taskDefinitionArn", "imageDigest", "originalConfigSha256", "continuationConfigSha256", "operationKey", "operationIdentitySha256", "replayRowSha256", "taskArn", "inventorySha256", "inventory", "issuedAt", "expiresAt"];
-  if (!payload || Object.keys(payload).sort().join(",") !== fields.sort().join(",") || payload.schemaVersion !== 1 || payload.purpose !== PURPOSE
+  const fields = ["schemaVersion", "purpose", "sourceSha", "imageReleaseSha", "rotationId", "approvalId", "taskDefinitionArn", "imageDigest", "originalConfigSha256", "continuationConfigSha256", "operationKey", "operationIdentitySha256", payload?.schemaVersion === 2 ? "completionReceiptSha256" : "replayRowSha256", "taskArn", "inventorySha256", "inventory", "issuedAt", "expiresAt"];
+  if (!payload || Object.keys(payload).sort().join(",") !== fields.sort().join(",") || ![1, 2].includes(payload.schemaVersion) || payload.purpose !== PURPOSE
       || !config || config.completedInventoryAdoptionRequired !== true || payload.sourceSha !== config.sourceSha || payload.imageReleaseSha !== config.imageReleaseSha
       || payload.rotationId !== config.rotationId || payload.approvalId !== config.inventoryApprovalId
       || payload.taskDefinitionArn !== config.inventoryTaskDefinitionArn || payload.imageDigest !== config.overlapTaskInput?.backendImage
       || payload.continuationConfigSha256 !== configSha256 || !SHA256.test(payload.originalConfigSha256 || "")
-      || !SHA256.test(payload.replayRowSha256 || "") || !SHA256.test(payload.operationIdentitySha256 || "")
+      || !SHA256.test((payload.schemaVersion === 2 ? payload.completionReceiptSha256 : payload.replayRowSha256) || "") || !SHA256.test(payload.operationIdentitySha256 || "")
       || !SHA256.test(payload.inventorySha256 || "") || !Number.isFinite(Date.parse(payload.issuedAt))
       || !Number.isFinite(Date.parse(payload.expiresAt)) || Date.parse(payload.expiresAt) <= now.getTime()
       || Date.parse(payload.issuedAt) > now.getTime() + 300_000 || Date.parse(payload.expiresAt) - Date.parse(payload.issuedAt) > 1_800_000) {
@@ -25,6 +25,46 @@ export function assertCompletedInventoryAdoptionPayload(payload, { config, confi
   if (payload.operationKey !== preDeploymentOperationKey(identity) || payload.operationIdentitySha256 !== preDeploymentOperationIdentitySha256(identity) || payload.inventorySha256 !== hash(JSON.stringify(payload.inventory)) || !/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/.test(payload.taskArn || "")) throw new Error("Completed inventory adoption operation or result changed.");
   assertPreDeploymentInventoryResult(payload.inventory);
   return payload;
+}
+
+export async function authenticateFreshInventoryCompletionReceipt(row, { config, verifySignature, now = new Date() }) {
+  const fields = ["approvalMode", "operationKey", "operationIdentitySha256", "predecessorOperationKey", "recoveryEvidenceSha256", "approvalNonce", "approvalContractSha256", "signedApproval", "sourceSha", "imageReleaseSha", "rotationId", "taskDefinitionArn", "imageDigest", "taskArn", "inventoryJson", "inventorySha256", "completedAt"];
+  if (!row || Object.keys(row).sort().join(",") !== fields.sort().join(",") || !config?.completedInventoryAdoptionRequired
+      || !Number.isFinite(Date.parse(row.completedAt)) || Date.parse(row.completedAt) > now.getTime() + 300_000 || row.predecessorOperationKey !== COMPLETED_INVENTORY_PREDECESSOR.operationKey
+      || row.recoveryEvidenceSha256 !== COMPLETED_INVENTORY_PREDECESSOR.recoveryEvidenceSha256
+      || row.sourceSha !== config.sourceSha || row.imageReleaseSha !== config.imageReleaseSha || row.rotationId !== config.rotationId
+      || row.taskDefinitionArn !== config.inventoryTaskDefinitionArn || row.imageDigest !== config.overlapTaskInput?.backendImage
+      || !/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/.test(row.taskArn || "")) throw new Error("Durable inventory completion identity is invalid.");
+  const approval = await validateStageBApproval(row.signedApproval, { releaseSha: row.sourceSha, images: { backendImageDigest: row.imageDigest } }, { now: new Date(row.completedAt), verifySignature });
+  if (approval.approval.ticketId !== config.ticket || Date.parse(approval.approval.issuedAt) > Date.parse(row.completedAt)) throw new Error("Durable inventory completion ticket or authorization timing differs.");
+  const identity = createPreDeploymentOperationIdentity({ approvalId: approval.approval.approvalId, releaseSha: row.sourceSha, imageReleaseSha: row.imageReleaseSha, rotationId: row.rotationId, taskDefinitionArn: row.taskDefinitionArn, imageDigest: row.imageDigest });
+  if (approval.approval.approvalId !== config.inventoryApprovalId || row.approvalMode !== inventoryCompletionKey(row.operationKey) || row.operationKey !== preDeploymentOperationKey(identity)
+      || row.operationIdentitySha256 !== preDeploymentOperationIdentitySha256(identity) || row.approvalNonce !== approval.approval.nonce
+      || row.approvalContractSha256 !== approval.approvalContractSha256 || row.sourceSha === COMPLETED_INVENTORY_PREDECESSOR.sourceSha) throw new Error("Durable inventory completion approval differs.");
+  const inventory = assertPreDeploymentInventoryResult(JSON.parse(row.inventoryJson));
+  if (row.inventoryJson !== canonicalJson(inventory) || row.inventorySha256 !== hash(row.inventoryJson)) throw new Error("Durable inventory completion result changed.");
+  return { inventory, identity, receiptSha256: digest(row) };
+}
+
+export async function buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256, continuationConfig, continuationConfigSha256, completionReceipt, now = new Date(), verifySignature, sign }) {
+  if (!SHA256.test(originalConfigSha256 || "") || !SHA256.test(continuationConfigSha256 || "")
+      || canonicalJson(originalConfig?.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR)
+      || originalConfig.sourceSha !== continuationConfig?.sourceSha || originalConfig.rotationId !== continuationConfig.rotationId || originalConfig.ticket !== continuationConfig.ticket
+      || originalConfig.imageReleaseSha !== continuationConfig.imageReleaseSha || originalConfig.inventoryApprovalId !== continuationConfig.inventoryApprovalId
+      || originalConfig.inventoryTaskDefinitionArn !== continuationConfig.inventoryTaskDefinitionArn
+      || originalConfig.overlapTaskInput?.backendImage !== continuationConfig.overlapTaskInput?.backendImage) throw new Error("Fresh inventory adoption config lineage differs.");
+  const { inventory, identity, receiptSha256 } = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: continuationConfig, verifySignature });
+  if (identity.approvalId !== originalConfig.inventoryApprovalId) throw new Error("Fresh inventory approval ID differs.");
+  const payload = { schemaVersion: 2, purpose: PURPOSE, sourceSha: identity.releaseSha, imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId,
+    approvalId: identity.approvalId, taskDefinitionArn: identity.taskDefinitionArn, imageDigest: identity.imageDigest, originalConfigSha256,
+    continuationConfigSha256, operationKey: preDeploymentOperationKey(identity), operationIdentitySha256: preDeploymentOperationIdentitySha256(identity),
+    completionReceiptSha256: receiptSha256, taskArn: completionReceipt.taskArn, inventorySha256: hash(JSON.stringify(inventory)), inventory,
+    issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 1_800_000).toISOString() };
+  assertCompletedInventoryAdoptionPayload(payload, { config: continuationConfig, configSha256: continuationConfigSha256, now });
+  const signatureBase64 = await sign({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)) });
+  const evidence = { payload, signatureBase64 };
+  await authenticateCompletedInventoryAdoptionEvidence(evidence, { config: continuationConfig, configSha256: continuationConfigSha256, now }, verifySignature);
+  return evidence;
 }
 
 export async function authenticateCompletedInventoryAdoptionEvidence(evidence, expected, verifySignature) {

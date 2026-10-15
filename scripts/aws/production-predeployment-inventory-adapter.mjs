@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import os from "node:os";
 import path from "node:path";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { registerPreDeploymentInventoryTaskDefinition } from "./production-predeployment-inventory-task.mjs";
 import { canonicalBackendDatabaseSecretReference } from "./production-overlap-task-definition.mjs";
 import { authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
@@ -61,6 +61,8 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
   return {
     async run({ rotationId } = {}) {
       if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "")) throw new Error("Pre-deployment inventory rotation identity is invalid.");
+      if (config.newInventoryAfterCompleted && (canonicalJson(config.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR)
+          || config.inventoryFailedPredecessor || config.completedInventoryAdoptionRequired || config.sourceSha === COMPLETED_INVENTORY_PREDECESSOR.sourceSha)) throw new Error("Fresh inventory runtime binding is invalid.");
       const completedPath = path.join(path.dirname(config.rotationStateFile || ""), "inventory-completed-adoption-evidence.json");
       if (config.completedInventoryAdoptionRequired === true && !existsSync(completedPath)) throw new Error("Completed inventory adoption proof is required before broker invocation.");
       if (existsSync(completedPath) && !config.inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires its exact existing task definition.");
@@ -101,6 +103,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
           taskDefinitionArn,
           ...(absentClaimRecovery ? { absentClaimRecovery } : {}),
           ...(config.inventoryFailedPredecessor ? { failedPredecessor: config.inventoryFailedPredecessor } : {}),
+          ...(config.newInventoryAfterCompleted ? { newInventoryAfterCompleted: config.newInventoryAfterCompleted } : {}),
         };
         const invocation = parseJson(run, ["lambda", "invoke", "--function-name", STAGE_B.brokerAliasArn, "--invocation-type", "RequestResponse", "--cli-binary-format", "raw-in-base64-out", "--cli-read-timeout", String(PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS), "--payload", JSON.stringify(brokerRequest), outputPath]);
         if (invocation.FunctionError) throw new Error("Pre-deployment inventory broker returned a function error.");

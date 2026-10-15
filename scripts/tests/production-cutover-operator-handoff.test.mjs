@@ -8,6 +8,7 @@ import test from "node:test";
 import { assertProductionCutoverOperatorConfig, buildProductionCutoverChildEnvironment, parseProductionCutoverOperatorArgs, runProductionCutoverOperator as runOperator } from "../aws/run-production-cutover-operator.mjs";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
+import { COMPLETED_INVENTORY_PREDECESSOR } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
@@ -41,6 +42,17 @@ test("operator authenticates both runtime config reads before MFA", async () => 
     const adoption = [...valid]; adoption[5] = adoptionSha;
     await assert.rejects(() => runOperator({ argv: adoption, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { prompts++; return values.MSCQR_VERIFIER_MFA_SERIAL; } }), /adoption proof is required before MFA/);
     delete config.completedInventoryAdoptionRequired;
+    config.newInventoryAfterCompleted = COMPLETED_INVENTORY_PREDECESSOR;
+    const freshSha = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: freshSha, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const fresh = [...valid]; fresh[5] = freshSha;
+    assert.equal(assertProductionCutoverOperatorConfig(parseProductionCutoverOperatorArgs(fresh)).newInventoryAfterCompleted.operationKey, COMPLETED_INVENTORY_PREDECESSOR.operationKey);
+    config.newInventoryAfterCompleted = { ...COMPLETED_INVENTORY_PREDECESSOR, operationKey: "forged" };
+    const forgedSha = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: forgedSha, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const forged = [...valid]; forged[5] = forgedSha;
+    await assert.rejects(() => runOperator({ argv: forged, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { prompts++; return values.MSCQR_VERIFIER_MFA_SERIAL; } }), /Fresh inventory binding is invalid before MFA/);
+    delete config.newInventoryAfterCompleted;
     config.rotationConfigFile = path.join(directory, "old-config.json");
     const changed = write();
     writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: changed, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });

@@ -6,6 +6,7 @@ import { promptProductionHiddenInput } from "../security/production-interactive-
 import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { assertCompletedInventoryAdoptionPayload } from "./production-completed-inventory-adoption.mjs";
+import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
 import { existsSync } from "node:fs";
 
 const SHA1 = /^[a-f0-9]{40}$/;
@@ -58,6 +59,8 @@ export function assertProductionCutoverOperatorConfig(runtime, { repositoryRoot 
       || config.rotationId !== runtime["--rotation-id"] || (config.stageAPlanPath && (!config.endpointSecurityGroupId || !config.runtimeSecurityGroupId))) {
     throw new Error("Production cutover runtime configuration is not bound to its prepared artifact.");
   }
+  if (config.newInventoryAfterCompleted && (canonicalJson(config.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR)
+      || config.inventoryFailedPredecessor || config.completedInventoryAdoptionRequired || config.sourceSha === COMPLETED_INVENTORY_PREDECESSOR.sourceSha)) throw new Error("Fresh inventory binding is invalid before MFA.");
   const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
   if (config.completedInventoryAdoptionRequired === true && !existsSync(adoptionFile)) throw new Error("Completed inventory adoption proof is required before MFA.");
   if (existsSync(adoptionFile)) {
