@@ -1,0 +1,7 @@
+# Rotation no-op plan reachability review
+
+The changed executable inputs are the protected cutover operator, its Terraform/IAM adapter, private-file owner check, and regression tests. They perform read-only Terraform planning, S3 state and IAM policy readbacks before verifier MFA; an exact IAM no-op skips Terraform apply. No dependency lock, application image input, frontend build pattern, backend runtime, worker runtime, or Nginx runtime changed.
+
+An unfiltered OSV Scanner 2.6.0 scan of both lockfiles found only the existing `braces@3.0.3` advisory `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687` (report SHA-256 `2e349adb205c6cde362bdfb6fe8781f64349ece473f74ad2fa9a27e4d40adb85`). It remains a development-only root lockfile dependency and is absent from the backend lockfile. Canonical runtime packaging passed. The production browser build transformed 3,993 modules into 96 chunks, enumerated 204 packages, and contained no `braces@3.0.3`. Production users cannot control the repository's build patterns. The reviewed executable/build-input digest is `873dd281148e00842ffe59c3663a8d16baf014416131928aa5e87d1f91fa4332`.
+
+The existing acceptance scope, owner, vulnerability, no-runtime conclusion, and exclusive 2026-11-02 expiry remain unchanged. The acceptance fingerprint was updated only after the unfiltered scan, runtime packaging check, and canonical browser closure completed. The scan report and closure summary are retained privately at `/private/tmp/mscqr-rotation-noop-review/`.

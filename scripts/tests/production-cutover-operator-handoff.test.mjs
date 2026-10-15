@@ -14,7 +14,7 @@ const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
 const argv = ["--mode", "prepare-overlap", "--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
 const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
-const runProductionCutoverOperator = options => runOperator({ validateConfig: () => {}, ...options });
+const runProductionCutoverOperator = options => runOperator({ validateConfig: () => {}, preflightRotation: () => {}, ...options });
 
 test("operator authenticates both runtime config reads before MFA", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-operator-config-"));
@@ -76,6 +76,17 @@ test("operator handoff refuses non-interactive execution before prompting or spa
   let prompts = 0;
   let spawns = 0;
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: false }, stdout: { isTTY: true }, prompt: async () => { prompts += 1; return "unexpected"; }, spawnChild: () => { spawns += 1; } }), /interactive trusted terminal/);
+  assert.equal(prompts, 0);
+  assert.equal(spawns, 0);
+});
+
+test("rotation Terraform preflight runs before verifier MFA and fails closed", async () => {
+  let prompts = 0;
+  let spawns = 0;
+  const config = { rotationTerraformPlanFile: "/private/runtime/rotation-infrastructure.tfplan" };
+  await assert.rejects(() => runOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, validateConfig: () => config,
+    preflightRotation: ({ config: supplied, runtime }) => { assert.equal(supplied, config); assert.equal(runtime["--source-sha"], sourceSha); throw new Error("Terraform plan checksum changed before MFA."); },
+    prompt: async () => { prompts += 1; return values.MSCQR_VERIFIER_MFA_SERIAL; }, spawnChild: () => { spawns += 1; } }), /checksum changed before MFA/);
   assert.equal(prompts, 0);
   assert.equal(spawns, 0);
 });

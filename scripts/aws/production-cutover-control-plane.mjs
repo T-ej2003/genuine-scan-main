@@ -9,7 +9,8 @@ import { produceRuntimeRotationInventory } from "../security/production-runtime-
 import { produceOnboardingEvidence } from "../security/produce-production-onboarding-evidence.mjs";
 import { validateOnboardingContract } from "../security/production-onboarding-contract.mjs";
 import { assertImageEvidence, imageEvidenceSha256 } from "./production-green-stage-b-image-evidence.mjs";
-import { STAGE_B, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, canonicalJson, canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { assertCanonicalImageImpactEvidence, imageAuthorizationSha256, IMAGE_AUTHORIZATION_PATHS } from "./production-image-authorization.mjs";
 import { assertCheckerChainStructuralEvidence } from "./production-checker-chain-contract.mjs";
 import { assertRootDropEvidence } from "./production-root-drop-evidence.mjs";
@@ -89,21 +90,27 @@ export function renderRotationTerraformInput(inputs) {
 }
 
 export function assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings } = {}) {
-  buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
+  const expected = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
   if (!plan || !Array.isArray(plan.resource_changes)) throw new Error("Rotation infrastructure plan is malformed.");
   const changes = plan.resource_changes.map((entry) => {
     if (!entry || typeof entry.address !== "string" || !entry.change || !Array.isArray(entry.change.actions) || entry.change.actions.length === 0 || !entry.change.actions.every((action) => typeof action === "string")) throw new Error("Rotation infrastructure plan contains malformed resource actions.");
     return entry;
   });
   const target = changes.find(({ address }) => address === 'aws_iam_role_policy.execution["backend"]');
-  if (!target || JSON.stringify(target.change.actions) !== JSON.stringify(["update"])) throw new Error("Rotation infrastructure plan must update only the reviewed backend execution-role policy.");
+  if (!target || ![["update"], ["no-op"]].some((actions) => canonicalJson(target.change.actions) === canonicalJson(actions))) throw new Error("Rotation infrastructure plan must update or preserve the reviewed backend execution-role policy.");
   if (changes.some(({ address, change }) => address !== 'aws_iam_role_policy.execution["backend"]' && change.actions.some((action) => !["no-op", "read"].includes(action)))) throw new Error("Rotation infrastructure plan contains an unreviewed mutation.");
+  if (target.change.actions[0] === "no-op") {
+    if (plan.variables?.production_rotation_enabled?.value !== true
+      || canonicalJson(plan.variables?.production_rotation_secret_value_from?.value) !== canonicalJson(expected.production_rotation_secret_value_from)
+      || canonicalJson(normalizeIamPolicyDocument(target.change.before?.policy)) !== canonicalJson(normalizeIamPolicyDocument(target.change.after?.policy))) throw new Error("Rotation infrastructure no-op plan does not match the exact reviewed bindings and policy.");
+  }
   return { valid: true, target: target.address, actions: target.change.actions };
 }
 
 export function assertRotationInfrastructureConverged(result, { sourceSha, rotationId, secretBindings } = {}) {
   const expected = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
-  if (result?.converged !== true || result.rotationEnabled !== true || result.sourceSha !== sourceSha || result.rotationId !== rotationId || result.applyCount !== 1) throw new Error("Rotation infrastructure did not converge exactly once before overlap registration.");
+  if (result?.converged !== true || result.rotationEnabled !== true || result.sourceSha !== sourceSha || result.rotationId !== rotationId
+    || !(result.applyCount === 1 || (result.applyCount === 0 && result.alreadyConverged === true && result.mutationCount === 0))) throw new Error("Rotation infrastructure did not converge or authenticate an exact no-op before overlap registration.");
   const expectedArns = new Set(Object.values(expected.production_rotation_secret_value_from).map(baseSecretArn));
   const actualArns = new Set((result.overlapSecretSet || []).map(baseSecretArn));
   const authorizedArns = new Set((result.authorizedOverlapSecretSet || []).map(baseSecretArn));

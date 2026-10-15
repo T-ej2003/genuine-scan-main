@@ -22,7 +22,7 @@ import { persistOverlapReadinessEvidence } from "./produce-production-overlap-re
 import { readAndAssertReadyForOverlapDeployment } from "./production-overlap-readiness-contract.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH } from "./production-artifact-signing-bootstrap.mjs";
 import { assertStageBCanonicalTfvarsFile } from "./generate-production-green-stage-b-tfvars.mjs";
-import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, ensureStageBPrivateFile, readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { assertRotationInfrastructurePlan, buildRotationTerraformInputs, renderRotationTerraformInput } from "./production-cutover-control-plane.mjs";
 import { createLiveCheckerChainAssertionAdapter } from "./production-checker-chain-contract.mjs";
 import { assertStageAStateContract, parseAuthenticatedStateBytes } from "./generate-production-green-stage-a-prerequisites.mjs";
@@ -177,36 +177,70 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
   if (!config?.stageBTfvarsPath || !config.stageBTfvarsBindingReportPath || !config.stageBTfvarsBindingReportSha256 || !config.rotationTerraformInputFile || !config.rotationTerraformPlanFile || !config.stageBTerraformDataDir) throw new Error("Canonical rotation Terraform inputs are required.");
   const terraformEnv = { ...credentialEnvironment({ credentialSource, profile: releaseProfile }), TF_DATA_DIR: config.stageBTerraformDataDir, TF_WORKSPACE: "default" };
   const terraform = (args, encoding = "utf8") => run("terraform", [`-chdir=${root}`, ...args], { cwd: process.cwd(), env: terraformEnv, encoding, stdio: ["ignore", "pipe", "pipe"] });
+  const readLiveState = () => {
+    const bytes = Buffer.from(run("aws", ["s3", "cp", STAGE_B_STATE_URI, "-"], { cwd: process.cwd(), env: terraformEnv, encoding: "buffer", stdio: ["ignore", "pipe", "pipe"] }));
+    const state = parseAuthenticatedStateBytes(bytes);
+    if (state.lineage !== "4e438e59-8b8b-194d-030c-5ede0c26344a" || !Number.isInteger(state.serial)) throw new Error("Rotation Terraform state lineage or serial is invalid.");
+    const digest = sha256(bytes);
+    if (config.currentStageBStateSha256 && digest !== config.currentStageBStateSha256) throw new Error("Terraform state changed after authenticated rotation preparation.");
+    return digest;
+  };
+  const planAndClassify = ({ sourceSha, rotationId, secretBindings }) => {
+    assertStageBArtifactPath({ artifactPath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+    if (lstatSync(config.rotationTerraformPlanFile, { throwIfNoEntry: false })) readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+    const stateSha256 = readLiveState();
+    const tfvars = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars" });
+    const report = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsBindingReportPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars binding report" });
+    const rotationInput = readStageBPrivateFileBytes({ filePath: config.rotationTerraformInputFile, repositoryRoot: process.cwd(), label: "Rotation Terraform input" });
+    ensureStageBPrivateDirectory({ directory: config.stageBTerraformDataDir, repositoryRoot: process.cwd(), create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
+    if (report.sha256 !== config.stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report changed before rotation infrastructure convergence.");
+    if (rotationInput.sha256 !== config.rotationTerraformInputSha256) throw new Error("Rotation Terraform input changed before convergence.");
+    assertStageBCanonicalTfvarsFile({ tfvarsPath: tfvars.path, bindingReport: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(report.bytes)), tfvarsBytes: tfvars.bytes });
+    const rotationInputs = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
+    if (new TextDecoder("utf-8", { fatal: true }).decode(rotationInput.bytes) !== renderRotationTerraformInput(rotationInputs)) throw new Error("Rotation Terraform input does not match the post-prepare overlap bindings.");
+    const target = ROTATION_EXECUTION_POLICY_ADDRESS;
+    terraform(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
+    terraform(["plan", "-input=false", "-refresh=true", "-var-file", config.stageBTfvarsPath, "-var-file", config.rotationTerraformInputFile, "-target", target, "-out", config.rotationTerraformPlanFile, "-no-color"]);
+    ensureStageBPrivateFile({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), normalize: true, label: "Rotation Terraform plan" });
+    const savedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+    const plan = JSON.parse(terraform(["show", "-json", config.rotationTerraformPlanFile]));
+    const classified = assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings });
+    const revalidatedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
+    if (revalidatedPlan.sha256 !== savedPlan.sha256) throw new Error("Rotation Terraform plan changed after classification.");
+    if (readLiveState() !== stateSha256) throw new Error("Terraform state changed during rotation planning.");
+    const alreadyConverged = classified.actions[0] === "no-op";
+    const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
+    let document;
+    try { document = normalizeIamPolicyDocument(policy.PolicyVersion?.Document || policy.PolicyDocument, "Backend execution-role policy document"); } catch { throw new Error("Backend execution-role policy is not readable after rotation convergence."); }
+    const plannedPolicy = plan.resource_changes.find(({ address }) => address === target).change;
+    const expectedPolicy = normalizeIamPolicyDocument(plannedPolicy.after.policy);
+    if (canonicalJson(document) !== canonicalJson(normalizeIamPolicyDocument(plannedPolicy.before.policy))) throw new Error("Live backend execution-role policy differs from the authenticated plan before convergence.");
+    if (readLiveState() !== stateSha256) throw new Error("Terraform state changed during rotation policy verification.");
+    return { rotationInputs, rotationInput, savedPlan, document, expectedPolicy, target, alreadyConverged };
+  };
   return {
+    preflight: ({ sourceSha, rotationId, secretBindings }) => {
+      const { alreadyConverged, savedPlan } = planAndClassify({ sourceSha, rotationId, secretBindings });
+      return { alreadyConverged, planSha256: savedPlan.sha256 };
+    },
     async run({ sourceSha, rotationId, secretBindings }) {
-      const tfvars = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars" });
-      const report = readStageBPrivateFileBytes({ filePath: config.stageBTfvarsBindingReportPath, repositoryRoot: process.cwd(), label: "Canonical Stage B tfvars binding report" });
-      const rotationInput = readStageBPrivateFileBytes({ filePath: config.rotationTerraformInputFile, repositoryRoot: process.cwd(), label: "Rotation Terraform input" });
-      ensureStageBPrivateDirectory({ directory: config.stageBTerraformDataDir, repositoryRoot: process.cwd(), create: false, normalize: true, label: "Canonical Stage B Terraform data directory" });
-      if (report.sha256 !== config.stageBTfvarsBindingReportSha256) throw new Error("Canonical Stage B tfvars binding report changed before rotation infrastructure convergence.");
-      if (rotationInput.sha256 !== config.rotationTerraformInputSha256) throw new Error("Rotation Terraform input changed before convergence.");
-      assertStageBCanonicalTfvarsFile({ tfvarsPath: tfvars.path, bindingReport: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(report.bytes)), tfvarsBytes: tfvars.bytes });
-      const rotationInputs = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId });
-      if (new TextDecoder("utf-8", { fatal: true }).decode(rotationInput.bytes) !== renderRotationTerraformInput(rotationInputs)) throw new Error("Rotation Terraform input does not match the post-prepare overlap bindings.");
-      assertStageBArtifactPath({ artifactPath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan", allowExisting: false });
-      const target = ROTATION_EXECUTION_POLICY_ADDRESS;
-      terraform(["init", "-upgrade=false", "-input=false", "-lockfile=readonly", "-no-color"]);
-      terraform(["plan", "-input=false", "-refresh=true", "-var-file", config.stageBTfvarsPath, "-var-file", config.rotationTerraformInputFile, "-target", target, "-out", config.rotationTerraformPlanFile, "-no-color"]);
-      const savedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
-      const plan = JSON.parse(terraform(["show", "-json", config.rotationTerraformPlanFile]));
-      assertRotationInfrastructurePlan(plan, { sourceSha, rotationId, secretBindings });
-      const revalidatedPlan = readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" });
-      if (revalidatedPlan.sha256 !== savedPlan.sha256) throw new Error("Rotation Terraform plan changed after classification.");
-      terraform(["apply", "-input=false", "-no-color", config.rotationTerraformPlanFile]);
-      const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
-      let document;
-      try { document = normalizeIamPolicyDocument(policy.PolicyVersion?.Document || policy.PolicyDocument, "Backend execution-role policy document"); } catch { throw new Error("Backend execution-role policy is not readable after rotation convergence."); }
+      const { rotationInputs, rotationInput, savedPlan, document: plannedDocument, expectedPolicy, target, alreadyConverged } = planAndClassify({ sourceSha, rotationId, secretBindings });
+      let document = plannedDocument;
+      if (!alreadyConverged) {
+        if (readStageBPrivateFileBytes({ filePath: config.rotationTerraformPlanFile, repositoryRoot: process.cwd(), label: "Rotation Terraform plan" }).sha256 !== savedPlan.sha256) throw new Error("Rotation Terraform plan changed before apply.");
+        terraform(["apply", "-input=false", "-no-color", config.rotationTerraformPlanFile]);
+      }
+      if (!alreadyConverged) {
+        const policy = parseJson((args) => run("aws", args, { cwd: process.cwd(), env: terraformEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), ["iam", "get-role-policy", "--role-name", ROTATION_EXECUTION_ROLE, "--policy-name", "stage-b-exact-image-logs-and-secrets"]);
+        document = normalizeIamPolicyDocument(policy.PolicyVersion?.Document || policy.PolicyDocument);
+        if (canonicalJson(document) !== canonicalJson(expectedPolicy)) throw new Error("Live backend execution-role policy differs from the applied plan.");
+      }
       const overlapSecretSet = Object.values(rotationInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$/, ""));
       const authorizedSecretSet = [...new Set((document.Statement || []).filter((statement) => statement?.Effect === "Allow" && (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("secretsmanager:GetSecretValue")).flatMap((statement) => Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).filter(Boolean))];
       const authorizedOverlapSecretSet = overlapSecretSet.filter((arn) => authorizedSecretSet.includes(arn));
       if (authorizedOverlapSecretSet.length !== overlapSecretSet.length) throw new Error("Backend execution role is missing a required rotation secret permission.");
       const unrelatedSecretAccess = authorizedOverlapSecretSet.length !== new Set(overlapSecretSet).size;
-      return { valid: true, converged: true, rotationEnabled: true, sourceSha, rotationId, applyCount: 1, overlapSecretSet, authorizedOverlapSecretSet, unrelatedSecretAccess, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256: sha256(Buffer.from(JSON.stringify({ sourceSha, rotationId, overlapSecretSet, authorizedOverlapSecretSet }))), mutationCount: 1, mutationPayload: { target, rotationInputSha256: rotationInput.sha256, planSha256: savedPlan.sha256 } };
+      return { valid: true, converged: true, rotationEnabled: true, sourceSha, rotationId, applyCount: alreadyConverged ? 0 : 1, ...(alreadyConverged ? { alreadyConverged: true } : {}), overlapSecretSet, authorizedOverlapSecretSet, unrelatedSecretAccess, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256: sha256(Buffer.from(JSON.stringify({ sourceSha, rotationId, overlapSecretSet, authorizedOverlapSecretSet }))), mutationCount: alreadyConverged ? 0 : 1, mutationPayload: { target, rotationInputSha256: rotationInput.sha256, planSha256: savedPlan.sha256 } };
     },
   };
 }
