@@ -45,6 +45,12 @@ const reviewedPublicationLifecycles = Object.freeze([Object.freeze({
   currentStateSha256: 'ed3ee15901c57e3245f5e1309ffc910d758ca7dd77a5858fd0a4fb46cb60af5c',
   publicationResultSha256: '0f8b8fffb7626bb9350ea5677aed2d8f6a6c29fb714771cfcccaf3e1c71f59a9',
   removedInstancesSha256: '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec',
+}), Object.freeze({
+  // Authenticated v18 publication, Terraform serial 136 -> 137; only the same 22 lifecycle markers disappeared.
+  historicalStateSha256: '64a84a25dcfc7a11cc0396fec48bfc5b9e70e778520a4906a0b4921c959f7825',
+  currentStateSha256: '45816ae26583b6d2b2ae7e0eea01918d7d90e3bbfa76165185889be76c41a08a',
+  publicationResultSha256: 'b79b8165efca63ac53415df99597432a234c270524deecf5d65c78a08e9628b8',
+  removedInstancesSha256: '4be4950798e3ec041f9a312563f3d46e05728fdd9f611148526df9f7780c04ec',
 })]);
 
 export function reviewedPublicationLifecycleFor(historicalStateSha256, currentStateSha256, publicationResultSha256) {
