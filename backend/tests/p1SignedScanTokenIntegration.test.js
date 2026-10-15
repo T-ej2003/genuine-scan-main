@@ -170,7 +170,13 @@ const assertSafePublicScanFailure = (response) => {
     assert.strictEqual(suspicious.payload.data.publicStatus, "review_needed");
     assert.strictEqual(suspicious.payload.data.riskSignalStatus, "needs_brand_review");
     assert.strictEqual(suspicious.payload.data.classification, undefined, "public scan response must not expose raw classification");
-    expectPublicResponseSafe(suspicious.payload);
+    const sessionStartToken = suspicious.payload.data.sessionStartToken;
+    assert.match(sessionStartToken, /^[A-Za-z0-9_-]{43}$/);
+    // The expected public random token can contain a forbidden diagnostic substring by chance.
+    const tokenWithSqlBytes = `${"A".repeat(20)}SQL${"B".repeat(20)}`;
+    expectPublicResponseSafe({ data: { sessionStartToken: tokenWithSqlBytes } }, { allowedStrings: [tokenWithSqlBytes] });
+    expectPublicResponseSafe(suspicious.payload, { allowedStrings: [sessionStartToken] });
+    assert.throws(() => expectPublicResponseSafe({ error: "SQL query failed" }, { allowedStrings: [sessionStartToken] }), /Forbidden public string/);
     assertSafePublicPayload(suspicious);
   });
 
