@@ -191,7 +191,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
     ...(['cutover','closure'].includes(phase)&&context.inputs.files.package===phaseFiles(phaseDirectory(context.release.releaseId,'publication')).package
      ?{brokerPackagePath:context.inputs.files.package}:{})})),
   hydratePreparation:(context,_phase,prepared)=>hydrateReleasePhaseMaterial({reference:prepared.materializationSha256,prepared,
-   files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root}),
+   files:context.inputs.files,planPath:prepared.planPath,store,repositoryRoot:root,run:awsRun}),
   findCompletedRegistration:async(release)=>{
    const {completedRegistrationSourceSha,completedRegistrationTicketId}=imageArtifacts();
    const entry=completedRegistrationSourceSha

@@ -117,7 +117,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
   assert.equal(packagePath,publishedPackage,'Prepared broker package path differs from this release publication');
  }
  const terraformDataDir=path.join(directory,'terraform'),files={package:packagePath,packageManifest:`${packagePath}.manifest.json`,tfvars:path.join(directory,'stage-b.tfvars'),backendMetadata:path.join(terraformDataDir,'terraform.tfstate')};
- await hydrateMaterial({reference:prepared.materializationSha256,prepared,files,planPath:prepared.planPath,store,repositoryRoot:root});
+ await hydrateMaterial({reference:prepared.materializationSha256,prepared,files,planPath:prepared.planPath,store,repositoryRoot:root,run});
  let predecessor={};
  if(phase==='closure'){
   const cutover=store.readStep(releaseId,'cutover:result');assert.ok(cutover,'Closure requires completed cutover');

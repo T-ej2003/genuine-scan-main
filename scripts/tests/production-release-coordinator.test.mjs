@@ -340,7 +340,8 @@ test('approval runner binds published package paths and rejects substitution whi
    output:path.join(directory,'authorization.json')};
   let hydrated,record;
   const dependencies={env,run:rejectExternalAccess,createStore:()=>({readStart:store.readStart.bind(store),getArtifact:store.getArtifact.bind(store),
-   readStep:(_id,name)=>name==='cutover:prepared'?record:null}),hydrateMaterial:async ({files})=>{
+   readStep:(_id,name)=>name==='cutover:prepared'?record:null}),hydrateMaterial:async ({files,run})=>{
+   assert.equal(run,rejectExternalAccess);
    hydrated=files;throw new Error('HYDRATION_BOUNDARY');}};
   const attempt=async marker=>{
    const prepared={...original,materializationSha256:'a'.repeat(64),...(marker===undefined?{}:{brokerPackagePath:marker})};

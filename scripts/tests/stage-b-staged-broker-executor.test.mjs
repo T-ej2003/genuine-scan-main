@@ -12,6 +12,9 @@ import { preparation, authorization, configuration, ready, sourceSha, alias } fr
 import { brokerDigest, brokerTargetIdentity, brokerStateReservation, assertBrokerClosurePlan } from '../aws/stage-b-staged-broker-contract.mjs';
 import { createStagedBrokerExecutor, assertRegistrationRecoveryReadCommand, stagedBrokerArtifactSet, assertBrokerOutputTransition, readStagedBrokerSourceAuthority, stagedBrokerSourceReservation, assertAuthenticatedHistoricalBrokerPrerequisiteSource, assertReceiptBoundHistoricalSourceAncestry, assertReceiptBoundGitAncestry, assertReceiptBoundPrerequisiteAncestry, verifyReceiptBoundRegistrationImageImpact, readVersionedStageBReceiptObject, materializeHistoricalTerraformConfiguration, initializeHistoricalTerraform, RECEIPT_BOUND_AUTHENTICATION_PHASES, assertReceiptBoundAuthenticationPhase, assertReceiptBoundPolicyTerraformState, assertReceiptBoundHistoricalToolingTree, registrationRecoverySourceBindings, authenticateRetainedRegistrationPredecessor,readSchema2RegistrationAdoptionPrerequisites } from '../aws/stage-b-staged-broker-executor.mjs';
 import { captureReleasePhaseMaterial, hydrateReleasePhaseMaterial } from '../aws/production-release-coordinator.mjs';
+import { generateStageAPrerequisites, stageAStateSemanticSha256, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_OBJECT } from '../aws/generate-production-green-stage-a-prerequisites.mjs';
+import { productionStageAState } from './fixtures/production-stage-a-state.mjs';
+import { STAGE_B } from '../aws/production-green-stage-b-contract.mjs';
 import { runStagedBrokerRequest } from '../aws/run-stage-b-staged-broker.mjs';
 import { packageStageBBroker } from '../aws/package-production-green-stage-b-broker.mjs';
 import { STAGE_B_TERRAFORM_BACKEND, STAGE_B_TERRAFORM_BACKEND_CONFIG, stageBApplyAttemptS3Key, stageBAttemptStepS3ObjectKey } from '../aws/stage-b-terraform-backend-contract.mjs';
@@ -158,12 +161,80 @@ test('hosted runner restart restores exact output-reconciliation reports before 
     await hydrateReleasePhaseMaterial({ reference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root });
     assert.deepEqual(fs.readFileSync(bindingReportPath), bindingBytes);
     assert.deepEqual(fs.readFileSync(refreshReportPath), refreshBytes);
+    await hydrateReleasePhaseMaterial({ reference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root });
     assert.equal(fs.statSync(bindingReportPath).mode & 0o777, 0o600);
     const tampered = structuredClone(capsule); tampered.members.refreshReportPath.sha256 = '0'.repeat(64);
     const tamperedReference = brokerDigest(tampered); artifacts.set(tamperedReference, tampered);
     await assert.rejects(() => hydrateReleasePhaseMaterial({ reference: tamperedReference, prepared, files, planPath: prepared.planPath, store, repositoryRoot: root }));
   } finally {
     fs.rmSync(bindingReportPath, { force: true }); fs.rmSync(refreshReportPath, { force: true });
+  }
+});
+test('Stage A-bound output restart restores only captured inputs and fails closed on incomplete evidence', async () => {
+  const r = await native(), directory = path.dirname(files.tfvars);
+  const input = path.join(directory, 'stage-a-input.json'), state = path.join(directory, 'stage-a-state-backup.json');
+  const bindingReportPath = path.join(directory, 'stage-a-output-binding.json'), refreshReportPath = path.join(directory, 'stage-a-output-refresh.json');
+  const stateBytes = Buffer.from(JSON.stringify(productionStageAState({ serial: STAGE_A_MINIMUM_STATE_SERIAL })));
+  fs.writeFileSync(state, stateBytes, { mode: 0o600 });
+  let reads = 0;
+  const run = args => {
+    if(args[0] === 's3api' && args[1] === 'get-object'){
+      reads++;assert.equal(args[args.indexOf('--key')+1], STAGE_A_STATE_OBJECT);
+      fs.writeFileSync(args[args.indexOf('--expected-bucket-owner')+2], stateBytes, { mode: 0o600 });return '{}';
+    }
+    if(args[1] === 'describe-subnets')return JSON.stringify({ Subnets: STAGE_B.privateSubnetIds.map((SubnetId,index)=>({ SubnetId,VpcId:'vpc-0123456789abcdef0',State:'available',MapPublicIpOnLaunch:false,AvailabilityZone:`eu-west-2${index?'b':'a'}`,CidrBlock:`10.0.${index}.0/24` })) });
+    if(args[1] === 'describe-route-tables')return JSON.stringify({ RouteTables:[{ RouteTableId:'rtb-12345678',VpcId:'vpc-0123456789abcdef0',Associations:[{ Main:true }],Routes:[{ DestinationCidrBlock:'0.0.0.0/0',NatGatewayId:'nat-12345678' }] }] });
+    if(args[1] === 'describe-security-groups')return JSON.stringify({ SecurityGroups:[STAGE_B.databaseSecurityGroupId,STAGE_B.executorSecurityGroupId].map(GroupId=>({ GroupId,VpcId:'vpc-0123456789abcdef0' })) });
+    if(args[1] === 'describe-clusters')return JSON.stringify({ clusters:[{ clusterArn:STAGE_B.clusterArn,status:'ACTIVE' }] });
+    if(args[1] === 'describe-db-instances')return JSON.stringify({ DBInstances:[{ DBInstanceStatus:'available',DBSubnetGroup:{ Subnets:STAGE_B.privateSubnetIds.map(SubnetIdentifier=>({ SubnetIdentifier })) } }] });
+    assert.fail(`Unexpected AWS command ${args.join(' ')}`);
+  };
+  try{
+    generateStageAPrerequisites({ stateBackup:state,stateObject:STAGE_A_STATE_OBJECT,toolingSha:r.p.sourceSha,
+      toolingTreeSha256:r.p.treeSha256,outputPath:input,phase:'POST_APPLY',run });
+    const inputBytes=fs.readFileSync(input);
+    const binding={ schemaVersion:2,stageAInputPath:input,stageAInputSha256:brokerDigest(inputBytes),stageAStateBackupPath:state,
+      stageAStateBackupSha256:stageAStateSemanticSha256(JSON.parse(stateBytes)),toolingSha:r.p.sourceSha,toolingTreeSha256:r.p.treeSha256 };
+    const bindingBytes=Buffer.from(JSON.stringify(binding)),refreshBytes=Buffer.from('{"refresh":"authenticated"}');
+    fs.writeFileSync(bindingReportPath,bindingBytes,{ mode:0o600 });fs.writeFileSync(refreshReportPath,refreshBytes,{ mode:0o600 });
+    r.p.savedPlanSha256=brokerDigest(r.binary);
+    r.p.outputReconciliation={ sourceSha:r.p.sourceSha,publicationResultSha256:brokerDigest(r.p.publication),
+      targetSha256:brokerDigest(r.p.target),state:r.p.state,bindingReportPath,bindingReportSha256:brokerDigest(bindingBytes),
+      refreshReportPath,refreshReportSha256:brokerDigest(refreshBytes),outputChanges:[{ name:'broker_binding',before:'old',after:'new' }] };
+    const prepared={ preparation:r.p,planPath:path.join(directory,'saved-CUTOVER.tfplan') },artifacts=new Map();
+    const store={ putArtifact:async(key,value)=>{artifacts.set(key,structuredClone(value));},getArtifact:async key=>structuredClone(artifacts.get(key)) };
+    const reference=await captureReleasePhaseMaterial({ prepared,files,store,repositoryRoot:root });
+    fs.rmSync(input);fs.rmSync(state);fs.rmSync(bindingReportPath);fs.rmSync(refreshReportPath);
+    const options={ reference,prepared,files,planPath:prepared.planPath,store,repositoryRoot:root };
+    await assert.rejects(()=>hydrateReleasePhaseMaterial(options),/credentialed Stage A evidence reader/);
+    assert.equal(fs.existsSync(input),false);assert.equal(fs.existsSync(state),false);
+    await hydrateReleasePhaseMaterial({ ...options,run });
+    assert.deepEqual(fs.readFileSync(input),inputBytes);assert.deepEqual(fs.readFileSync(state),stateBytes);
+    assert.equal(reads,1);
+    await hydrateReleasePhaseMaterial({ ...options,run:()=>assert.fail('Repeat restart must not reread AWS') });
+    assert.equal(reads,1);
+    fs.appendFileSync(input,'tampered');
+    await assert.rejects(()=>hydrateReleasePhaseMaterial({ ...options,run }),/Stage A input differs/);
+    fs.writeFileSync(input,inputBytes,{ mode:0o600 });
+    await assert.rejects(()=>hydrateReleasePhaseMaterial({ ...options,
+      prepared:{ ...prepared,preparation:{ ...r.p,sourceSha:'f'.repeat(40) } },run }));
+    fs.rmSync(input);fs.rmSync(state);
+    const incomplete={ ...binding };delete incomplete.stageAInputSha256;
+    const incompleteBytes=Buffer.from(JSON.stringify(incomplete));
+    fs.writeFileSync(bindingReportPath,incompleteBytes,{ mode:0o600 });
+    r.p.outputReconciliation.bindingReportSha256=brokerDigest(incompleteBytes);
+    const incompleteReference=await captureReleasePhaseMaterial({ prepared,files,store,repositoryRoot:root });
+    await assert.rejects(()=>hydrateReleasePhaseMaterial({ ...options,reference:incompleteReference,run }),/Stage A input differs/);
+    assert.equal(fs.existsSync(input),false);assert.equal(fs.existsSync(state),false);
+    const stripped={ schemaVersion:2,toolingSha:r.p.sourceSha,toolingTreeSha256:r.p.treeSha256 };
+    const strippedBytes=Buffer.from(JSON.stringify(stripped));fs.writeFileSync(bindingReportPath,strippedBytes,{ mode:0o600 });
+    r.p.outputReconciliation.bindingReportSha256=brokerDigest(strippedBytes);
+    const strippedReference=await captureReleasePhaseMaterial({ prepared,files,store,repositoryRoot:root });
+    await assert.rejects(()=>hydrateReleasePhaseMaterial({ ...options,reference:strippedReference,run }));
+    assert.equal(fs.existsSync(input),false);assert.equal(fs.existsSync(state),false);
+    assert.equal(r.calls.filter(call=>['update-alias','apply','publish-version'].includes(call.args[1])).length,0);
+  }finally{
+    for(const file of [input,state,bindingReportPath,refreshReportPath])fs.rmSync(file,{ force:true });
   }
 });
 test('native reservation resumes only exact pre-intent bytes',async()=>{

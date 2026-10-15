@@ -17,7 +17,9 @@ import {createProductionComponentDeploymentStateClient} from './production-compo
 import {unpackReleaseEvidenceTransport} from './production-release-dispatch-contract.mjs';
 import {verifyProductionReleaseImageAuthorization} from './verify-production-release-image-authorization.mjs';
 import {verifyImageEvidenceSignature} from './production-green-stage-b-image-evidence.mjs';
-import {parseAuthenticatedStateBytes,stageAStateSemanticSha256} from './generate-production-green-stage-a-prerequisites.mjs';
+import {generateStageAPrerequisites,parseAuthenticatedStateBytes,stageAStateSemanticSha256,STAGE_A_STATE_OBJECT} from './generate-production-green-stage-a-prerequisites.mjs';
+import {STAGE_B_TERRAFORM_BACKEND} from './stage-b-terraform-backend-contract.mjs';
+import {STAGE_B} from './production-green-stage-b-contract.mjs';
 export {createReleaseCoordinatorStore};
 export const HOSTED_RELEASE_ROOT='/tmp/mscqr-production-release';
 
@@ -163,6 +165,35 @@ function assertSuccessorStageABinding(bindingBytes,stageAFiles,inputBytes,stateB
  assert.equal(binding.stageAStateSerial,state.serial);
 }
 
+export function restoreBoundStageAInputs({bindingBytes,files,preparation,repositoryRoot,run}) {
+ const binding=JSON.parse(bindingBytes),directory=path.dirname(files.tfvars);
+ const input=path.join(directory,'stage-a-input.json'),state=path.join(directory,'stage-a-state-backup.json');
+ assert.equal(binding.stageAInputPath,input);assert.equal(binding.stageAStateBackupPath,state);
+ assert.equal(binding.toolingSha,preparation.sourceSha);assert.equal(binding.toolingTreeSha256,preparation.treeSha256);
+ if(!fs.existsSync(input)||!fs.existsSync(state)){
+  assert.equal(typeof run,'function','Missing credentialed Stage A evidence reader');
+  const temporary=fs.mkdtempSync(path.join(directory,'.stage-a-restore-'));fs.chmodSync(temporary,0o700);
+  try{
+   const stateCopy=path.join(temporary,'state.json'),inputCopy=path.join(temporary,'input.json');
+   run(['s3api','get-object','--bucket',STAGE_B_TERRAFORM_BACKEND.bucketName,'--key',STAGE_A_STATE_OBJECT,
+    '--expected-bucket-owner',STAGE_B.account,stateCopy,'--region',STAGE_B_TERRAFORM_BACKEND.region,'--no-cli-pager']);
+   fs.chmodSync(stateCopy,0o600);
+   generateStageAPrerequisites({stateBackup:stateCopy,stateObject:STAGE_A_STATE_OBJECT,toolingSha:preparation.sourceSha,
+    toolingTreeSha256:preparation.treeSha256,outputPath:inputCopy,phase:'POST_APPLY',run});
+   assert.equal(brokerDigest(fs.readFileSync(inputCopy)),binding.stageAInputSha256,'Stage A input differs from captured binding');
+   assert.equal(stageAStateSemanticSha256(parseAuthenticatedStateBytes(fs.readFileSync(stateCopy))),
+    binding.stageAStateBackupSha256,'Stage A state differs from captured binding');
+   for(const [target,source] of [[input,inputCopy],[state,stateCopy]])
+    if(!fs.existsSync(target))writeStageBPrivateFileAtomic({filePath:target,bytes:fs.readFileSync(source),repositoryRoot,label:'Release Stage A prerequisite'});
+  }finally{fs.rmSync(temporary,{recursive:true,force:true});}
+ }
+ assertStageBPrivateFile({filePath:input,repositoryRoot,label:'Stage A prerequisite input'});
+ assertStageBPrivateFile({filePath:state,repositoryRoot,label:'Stage A state backup'});
+ assert.equal(brokerDigest(fs.readFileSync(input)),binding.stageAInputSha256,'Stage A input differs from captured binding');
+ assert.equal(stageAStateSemanticSha256(parseAuthenticatedStateBytes(fs.readFileSync(state))),
+  binding.stageAStateBackupSha256,'Stage A state differs from captured binding');
+}
+
 // Saved plans and package bytes survive runner replacement. Paths are supplied
 // by the trusted runtime; external artifacts cannot choose filesystem targets.
 export async function captureReleasePhaseMaterial({prepared,files,store,repositoryRoot}) {
@@ -193,7 +224,7 @@ export async function captureReleasePhaseMaterial({prepared,files,store,reposito
  const reference=brokerDigest(capsule);await store.putArtifact(reference,capsule);return reference;
 }
 
-export async function hydrateReleasePhaseMaterial({reference,prepared,files,planPath,store,repositoryRoot}) {
+export async function hydrateReleasePhaseMaterial({reference,prepared,files,planPath,store,repositoryRoot,run}) {
  const capsule=await store.getArtifact(reference),p=prepared.preparation;
  assertBrokerPreparation(p);
  assert.equal(brokerDigest(capsule),reference);assert.deepEqual(Object.keys(capsule).sort(),['kind','members','preparationSha256','sourceSha']);
@@ -225,6 +256,14 @@ export async function hydrateReleasePhaseMaterial({reference,prepared,files,plan
   ensureStageBPrivateDirectory({directory:path.dirname(filePath),repositoryRoot,create:true});
   if(fs.existsSync(filePath)){assertStageBPrivateFile({filePath,repositoryRoot,label:`Release ${name}`});assert.equal(brokerDigest(fs.readFileSync(filePath)),brokerDigest(contents[name]),'Existing material differs');}
   else writeStageBPrivateFileAtomic({filePath,bytes:contents[name],repositoryRoot,label:`Release ${name}`});
+ }
+ // Legacy output bindings have no Stage A contract; current schema and partial Stage A bindings require full restoration.
+ if(p.outputReconciliation&&!p.successorReconciliation){
+  const binding=JSON.parse(contents.bindingReportPath);
+  assert.ok(binding&&typeof binding==='object'&&!Array.isArray(binding),'Invalid output binding');
+  if(binding.schemaVersion!==undefined)assert.ok(Number.isInteger(binding.schemaVersion)&&binding.schemaVersion>=1,'Invalid output binding schema');
+  if(binding.schemaVersion>=2||Object.keys(binding).some(name=>name.startsWith('stageA')))
+   restoreBoundStageAInputs({bindingBytes:contents.bindingReportPath,files,preparation:p,repositoryRoot,run});
  }
  assert.equal(stagedBrokerArtifactSet(files,repositoryRoot,p,p.successorReconciliation?p.sourceSha:undefined),p.artifactSetSha256);
  return {...prepared,planPath};
