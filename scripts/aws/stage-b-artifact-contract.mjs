@@ -58,6 +58,7 @@ export function ensureStageBPrivateFile({ filePath, repositoryRoot, normalize = 
   const resolved = assertOutsideRepository(filePath, repositoryRoot, label, fsOps);
   let stat = fsOps.lstatSync(resolved, { throwIfNoEntry: false });
   if (!stat || !stat.isFile() || stat.isSymbolicLink()) throw new Error(`${label} must be a regular non-symlink file.`);
+  assertOwner(stat, label);
   if (normalize && mode(stat) !== STAGE_B_PRIVATE_FILE_MODE) {
     fsOps.chmodSync(resolved, STAGE_B_PRIVATE_FILE_MODE);
     stat = fsOps.lstatSync(resolved);

@@ -709,6 +709,26 @@ test("prepare-overlap persists and authenticates readiness without reaching depl
   }
 });
 
+test("prepare-overlap reaches readiness with an authenticated infrastructure no-op and no apply mutation", async (t) => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "prepare-overlap-noop-"));
+  const readinessFile = path.join(directory, "readiness.json");
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const input = fixtureInput({ mode: PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP });
+  input.rotationInfrastructure = { run: async ({ sourceSha: currentSourceSha, rotationId: currentRotationId, secretBindings }) => {
+    const overlapSecretSet = Object.values(secretBindings).filter((value) => typeof value === "string" && value.startsWith("arn:aws:secretsmanager:")).map((value) => value.replace(/:value::$|:value::.*$/u, ""));
+    return { valid: true, converged: true, rotationEnabled: true, sourceSha: currentSourceSha, rotationId: currentRotationId, applyCount: 0, alreadyConverged: true, mutationCount: 0, overlapSecretSet, authorizedOverlapSecretSet: overlapSecretSet, unrelatedSecretAccess: false, evidenceRef: "terraform:rotation-infrastructure", evidenceSha256 };
+  } };
+  input.readiness = {
+    persist: async (evidence) => persistOverlapReadinessEvidence({ outputPath: readinessFile, evidence }),
+    authenticate: async ({ sourceSha: expectedSourceSha, rotationId: expectedRotationId, rotationStateSha256: expectedStateSha256, evidenceSha256: expectedEvidenceSha256 }) => readAndAssertReadyForOverlapDeployment({ filePath: readinessFile, evidenceSha256: expectedEvidenceSha256, sourceSha: expectedSourceSha, rotationId: expectedRotationId, rotationStateSha256: expectedStateSha256 }),
+  };
+  input.deployOverlap.run = async () => { throw new Error("prepare-overlap reached deployment"); };
+  const result = await runProductionCutoverControlPlane(input);
+  assert.equal(result.results.rotationInfrastructure.applyCount, 0);
+  assert.equal(result.mutationSequence.some(({ name }) => name === "M5_ROTATION_INFRA_CONVERGENCE"), false);
+  assert.ok(result.readinessSha256);
+});
+
 test("alternate readiness producer cannot substitute a different operation checkout", async () => {
   const input = fixtureInput({ mode: PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP });
   input.operationExecutionSourceSha = "c".repeat(40);
