@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
 import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey, preDeploymentReplayItem, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
-import { PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, buildCompletedInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
+import { prepareCompletedInventoryAdoption } from "../aws/prepare-completed-inventory-adoption.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageReleaseSha = "9".repeat(40);
@@ -74,6 +78,104 @@ const brokerApproval = {
   taskDefinitionTemplateHashes: Object.fromEntries(STAGE_B_TASK_TEMPLATE_KEYS.map((key) => [key, "f".repeat(64)])),
 };
 const brokerDefinition = () => ({ ...buildPreDeploymentInventoryTaskDefinition({ backendImage: image, releaseSha: imageReleaseSha, databaseUrl: config.inventoryDatabaseUrlArn, rotationInventoryOperation: config.inventoryOperation, inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition, taskDefinitionArn: brokerTaskDefinitionArn, status: "ACTIVE", enableFaultInjection: false });
+
+test("completed inventory producer authenticates historical claim, signed approval, task and bounded output", async () => {
+  const rotationId = "rotation-20260913011819-98b062c4";
+  const originalConfigSha256 = "7".repeat(64), continuationConfigSha256 = "8".repeat(64);
+  const originalConfig = { sourceSha, imageReleaseSha, rotationId, inventoryApprovalId: approvalId, inventoryTaskDefinitionArn: brokerTaskDefinitionArn, inventoryDatabaseSecretArn: config.inventoryDatabaseUrlArn, inventoryTaskRoleArn: brokerConfig.inventoryTaskRoleArn, inventoryExecutionRoleArn: brokerConfig.inventoryExecutionRoleArn, inventoryLogGroupName: config.inventoryLogGroupName, rotationInventoryOperation: config.inventoryOperation, overlapTaskInput: { backendImage: image } };
+  const continuationConfig = { ...structuredClone(originalConfig), completedInventoryAdoptionRequired: true };
+  const identity = createPreDeploymentOperationIdentity({ approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image });
+  const recoveryEvidence = { payload: { schemaVersion: 1, purpose: "recover-exact-absent-inventory-predecessor", sourceSha, imageReleaseSha, rotationId, configSha256: originalConfigSha256, originalConfigSha256: "74a3e281f707684629e3865ae657c88d2b124d7cec8080e855ca120244c79c5b", originalAuthorizationSha256: "1".repeat(64), taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/fa5ad8eb6aa9443cad6ec600bfa8e82c", runTaskEventId: "59663555-3ade-490c-8880-b1ec8af0857a", stopTaskEventId: "56033bd5-383f-4ed1-8655-fa67dcbe78d6", logEventsSha256: "2".repeat(64), successfulInventoryOutputAbsent: true, rotationStateAbsent: true, verifiedOverlapAbsent: true, issuedAt: "2026-07-29T11:58:00.000Z", expiresAt: "2026-07-29T12:13:00.000Z" }, signatureBase64: "AA==" };
+  const replayRow = Object.fromEntries(Object.entries(preDeploymentReplayItem({ ...identity, operationKey: preDeploymentOperationKey(identity), nonce: brokerApproval.nonce, expiresAt: brokerApproval.expiresAt })).map(([key, value]) => [key, value.S ?? Number(value.N)]));
+  Object.assign(replayRow, { launchState: "succeeded", taskArn: brokerTaskArn, predecessorOperationKey: preDeploymentOperationKey(PRESERVED_INVENTORY_PREDECESSOR), recoveryEvidenceSha256: createHash("sha256").update(canonicalJson(recoveryEvidence)).digest("hex") });
+  const task = { taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, clusterArn: STAGE_B.clusterArn, lastStatus: "STOPPED", stopCode: "EssentialContainerExited", startedAt: "2026-07-29T12:00:00.000Z", stoppedAt: "2026-07-29T12:02:00.000Z", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: rotationId }], containers: [{ name: "inventory", image, exitCode: 0 }] };
+  const inputs = { originalConfig, originalConfigSha256, continuationConfig, continuationConfigSha256, approval: brokerApproval, recoveryEvidence, replayRow, task, taskDefinition: { ...brokerDefinition(), tags: brokerTags }, logEvents: [{ message: JSON.stringify(inventory) }], now: new Date("2026-07-29T12:05:00.000Z"), verifySignature: async () => true, sign: async () => "AA==" };
+  const evidence = await buildCompletedInventoryAdoptionEvidence(inputs);
+  assert.equal(evidence.payload.inventorySha256, createHash("sha256").update(JSON.stringify(inventory)).digest("hex"));
+  assert.equal((await authenticateCompletedInventoryAdoptionEvidence(evidence, { config: continuationConfig, configSha256: continuationConfigSha256, now: inputs.now }, async () => true)).taskArn, brokerTaskArn);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, replayRow: { ...replayRow, launchState: "launched" } }), /predecessor recovery is unauthenticated/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, replayRow: { ...replayRow, releaseSha: "b".repeat(40) } }), /identity differs/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, replayRow: { ...replayRow, rotationId: "rotation-other" } }), /identity differs/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, replayRow: { ...replayRow, recoveryEvidenceSha256: "0".repeat(64) } }), /predecessor recovery is unauthenticated/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, continuationConfig: { ...continuationConfig, overlapTaskInput: { backendImage: image.replace("backend", "worker") } } }), /config lineage differs/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, approval: { ...brokerApproval, expiresAt: "2026-07-29T11:59:00.000Z" } }), /expired|lifetime|approval/i);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, task: { ...task, containers: [{ ...task.containers[0], exitCode: 1 }] } }), /task differs/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, task: { ...task, stoppedAt: "2026-07-29T11:59:00.000Z" } }), /timing is invalid/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, logEvents: [] }), /ambiguous/);
+  await assert.rejects(() => buildCompletedInventoryAdoptionEvidence({ ...inputs, verifySignature: async () => false }), /signature verification failed|predecessor recovery/);
+
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-adoption-producer-"));
+  chmodSync(directory, 0o700);
+  const originalPath = path.join(directory, "original.json"), continuationPath = path.join(directory, "rotation-config.json");
+  const recoveryPath = path.join(directory, "recovery.json"), approvalPath = path.join(directory, "approval.json");
+  const save = (file, value) => { const bytes = Buffer.from(`${JSON.stringify(value)}\n`); writeFileSync(file, bytes, { mode: 0o600 }); return createHash("sha256").update(bytes).digest("hex"); };
+  try {
+    const originalHash = save(originalPath, originalConfig);
+    const continuation = { ...continuationConfig, rotationConfigFile: continuationPath, rotationStateFile: path.join(directory, "rotation-state.json") };
+    const continuationHash = save(continuationPath, continuation);
+    save(path.join(directory, "cutover-runtime-manifest.json"), { runtimeConfigSha256: continuationHash, readyToConsumeMfa: true });
+    const recovery = { ...recoveryEvidence, payload: { ...recoveryEvidence.payload, configSha256: originalHash } };
+    const recoveryHash = save(recoveryPath, recovery);
+    const approvalHash = save(approvalPath, brokerApproval);
+    const claim = { ...replayRow, recoveryEvidenceSha256: createHash("sha256").update(canonicalJson(recovery)).digest("hex") };
+    const marshal = Object.fromEntries(Object.entries(claim).map(([key, value]) => [key, typeof value === "number" ? { N: String(value) } : { S: value }]));
+    let signs = 0;
+    const response = args => {
+      if (args[0] === "dynamodb" && args[1] === "get-item") return { Item: marshal };
+      if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [task] };
+      if (args[0] === "ecs" && args[1] === "describe-task-definition") return { taskDefinition: brokerDefinition(), tags: brokerTags };
+      if (args[0] === "logs" && args[1] === "get-log-events") return { nextBackwardToken: "token", events: [{ message: JSON.stringify(inventory) }] };
+      if (args[0] === "kms" && args[1] === "verify") return { SignatureValid: true };
+      if (args[0] === "kms" && args[1] === "sign") { signs++; return { Signature: "AA==" }; }
+      if (args[0] === "sts" && args[1] === "get-caller-identity") return { Arn: "arn:aws:iam::368992683803:root" };
+      throw new Error(`Unexpected AWS call ${args[0]} ${args[1]}`);
+    };
+    const argv = ["--original-config", originalPath, "--original-config-sha256", originalHash, "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash, "--original-recovery-evidence", recoveryPath, "--original-recovery-evidence-sha256", recoveryHash, "--original-approval", approvalPath, "--original-approval-sha256", approvalHash];
+    const runRead = args => JSON.stringify(response(args));
+    const runSign = args => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/fixture" }) : JSON.stringify(response(args));
+    const first = await prepareCompletedInventoryAdoption({ argv, runRead, runSign });
+    const second = await prepareCompletedInventoryAdoption({ argv, runRead, runSign });
+    assert.equal(first.outputPath, second.outputPath);
+    assert.equal(second.reused, true);
+    assert.equal(signs, 1);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("completed inventory adoption reuses the exact result and never invokes broker or RunTask", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-completed-inventory-"));
+  chmodSync(directory, 0o700);
+  const configSha256 = "8".repeat(64);
+  const rotationId = "rotation-20260913011819-98b062c4";
+  const runtime = { ...config, sourceSha, imageReleaseSha, rotationId, completedInventoryAdoptionRequired: true, inventoryTaskDefinitionArn: brokerTaskDefinitionArn, inventoryDatabaseSecretArn: config.inventoryDatabaseUrlArn, inventoryTaskRoleArn: brokerConfig.inventoryTaskRoleArn, inventoryExecutionRoleArn: brokerConfig.inventoryExecutionRoleArn, rotationStateFile: path.join(directory, "rotation-state.json"), overlapTaskInput: { ...config.overlapTaskInput, backendImage: image } };
+  const identity = createPreDeploymentOperationIdentity({ approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image });
+  const payload = { schemaVersion: 1, purpose: "adopt-completed-predeployment-inventory", sourceSha, imageReleaseSha, rotationId, approvalId, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image, originalConfigSha256: "7".repeat(64), continuationConfigSha256: configSha256, operationKey: preDeploymentOperationKey(identity), operationIdentitySha256: preDeploymentOperationIdentitySha256(identity), replayRowSha256: "6".repeat(64), taskArn: brokerTaskArn, inventorySha256: createHash("sha256").update(JSON.stringify(inventory)).digest("hex"), inventory, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900_000).toISOString() };
+  const file = path.join(directory, "inventory-completed-adoption-evidence.json");
+  writeFileSync(file, JSON.stringify({ payload, signatureBase64: "AA==" }), { mode: 0o600 });
+  const calls = [];
+  const run = args => {
+    calls.push(args[0] + " " + args[1]);
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: brokerDefinition(), tags: brokerTags });
+    if (args[0] === "kms" && args[1] === "verify") return JSON.stringify({ SignatureValid: true });
+    throw new Error(`Unexpected AWS operation ${args[0]} ${args[1]}`);
+  };
+  try {
+    const adapter = createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest: image, config: runtime, runtimeConfigSha256: configSha256 });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await adapter.run({ rotationId });
+      assert.deepEqual(result.inventory, inventory);
+      assert.equal(result.mutationCount, 0);
+      assert.equal(result.taskArn, brokerTaskArn);
+    }
+    assert.deepEqual(calls, ["ecs describe-task-definition", "kms verify", "kms verify"]);
+    await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence({ payload: { ...payload, sourceSha: "b".repeat(40) }, signatureBase64: "AA==" }, { config: runtime, configSha256 }, async () => true), /identity or lifetime/);
+    await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence({ payload: { ...payload, rotationId: "rotation-other" }, signatureBase64: "AA==" }, { config: runtime, configSha256 }, async () => true), /identity or lifetime/);
+    await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence({ payload, signatureBase64: "AA==" }, { config: runtime, configSha256 }, async () => false), /signature is invalid/);
+    await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence({ payload: { ...payload, expiresAt: "2020-01-01T00:00:00Z" }, signatureBase64: "AA==" }, { config: runtime, configSha256 }, async () => true), /identity or lifetime/);
+    unlinkSync(file);
+    await assert.rejects(() => adapter.run({ rotationId }), /adoption proof is required/);
+    assert.deepEqual(calls, ["ecs describe-task-definition", "kms verify", "kms verify"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("broker runtime derives inventory configuration without duplicating it in Lambda environment", () => {
   const env = {

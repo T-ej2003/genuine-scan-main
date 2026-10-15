@@ -209,6 +209,8 @@ function fullInput(directory, repositoryRoot, expectedSha = sourceSha, imageRele
     artifactBindingFile: evidence.artifactBinding,
     rootDropEvidenceFile: evidence.rootDrop,
     stageAPlanPath: evidence.stageAPlan,
+    endpointSecurityGroupId: "sg-04d5bf116755ba412",
+    runtimeSecurityGroupId: "sg-0db971332ae625441",
     stageBTfvarsPath: evidence.stageBTfvarsPath,
     stageBTfvarsBindingReportPath: evidence.stageBTfvarsBindingReportPath,
     stageBTfvarsBindingReportSha256: evidence.stageBTfvarsBindingReportSha256,
@@ -251,7 +253,7 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
   const repositoryRoot = process.cwd();
   const directory = fsTemp();
   try {
-    const result = prepareProductionCutoverRuntime(fullInput(directory, repositoryRoot));
+    const result = prepareProductionCutoverRuntime({ ...fullInput(directory, repositoryRoot), endpointSecurityGroupId: "sg-04d5bf116755ba412", runtimeSecurityGroupId: "sg-0db971332ae625441", adoptCompletedInventory: true, inventoryTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:9" });
     assert.equal(result.readyToConsumeMfa, true);
     assert.equal(result.protectedMainSha, sourceSha);
     assert.equal(existsSync(result.configPath), true);
@@ -264,6 +266,10 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     assert.equal(result.config.qr.previousKeyVersion, "qr-v1");
     assert.match(result.config.stageARoot, /production-green-stage-a$/);
     assert.match(result.config.stageAPlanSha256, /^[a-f0-9]{64}$/);
+    assert.equal(result.config.endpointSecurityGroupId, "sg-04d5bf116755ba412");
+    assert.equal(result.config.runtimeSecurityGroupId, "sg-0db971332ae625441");
+    assert.equal(result.config.rotationConfigFile, result.configPath);
+    assert.equal(result.config.completedInventoryAdoptionRequired, true);
     assert.equal(result.config.expectedRoleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
     assert.equal(result.config.bootstrapProfile, "mscqr-production-bootstrap-operator");
     assert.equal(result.config.verifierProfile, "mscqr-production-ecs-exec-verifier");
@@ -275,6 +281,22 @@ test("REAL_BOOTSTRAP_TO_CONSTRUCTOR generates config without future state or fix
     rmSync(path.join(repositoryRoot, "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("saved-plan runtime rejects missing Stage-A security-group inputs before MFA readiness", () => {
+  const directory = fsTemp();
+  try {
+    const input = fullInput(directory, process.cwd());
+    for (const [name, endpointSecurityGroupId, runtimeSecurityGroupId] of [
+      ["neither", undefined, undefined], ["missing-runtime", input.endpointSecurityGroupId, undefined],
+      ["missing-endpoint", undefined, input.runtimeSecurityGroupId], ["same", input.endpointSecurityGroupId, input.endpointSecurityGroupId],
+    ]) {
+      const result = prepareProductionCutoverRuntime({ ...input, endpointSecurityGroupId, runtimeSecurityGroupId, outputDirectory: path.join(directory, name) });
+      assert.equal(result.readyToConsumeMfa, false);
+      assert.match(result.blockers.join("; "), /Stage-A security-group inputs are invalid/);
+      assert.equal(existsSync(path.join(directory, name, "rotation-config.json")), false);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("native completed broker recovery preserves release identity through rotation bootstrap", async () => {
@@ -326,7 +348,7 @@ test("public descendant preflight preserves original contracts through approval 
       symlinkSync(path.join(originalCwd, 'node_modules'), path.join(checkout, 'node_modules'), 'dir');
       symlinkSync(path.join(originalCwd, 'backend/node_modules'), path.join(checkout, 'backend/node_modules'), 'dir');
       const changed = execFileSync('git', ['diff', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
+      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs', 'scripts/aws/production-completed-inventory-adoption.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
       writeFileSync(path.join(checkout, 'documents/security/rls-program/generated/checksums.json'), JSON.stringify({ sourceContractSha256: 'f'.repeat(64), migrationSetDigest: 'f'.repeat(64) }));
       execFileSync('git', ['add', '.'], { cwd: checkout }); execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling with different release contracts'], { cwd: checkout, stdio: 'pipe' });
       const origin = path.join(directory, 'origin.git');
@@ -1183,6 +1205,8 @@ test("post-apply recovery binds historical provenance separately from current St
     Object.assign(binding, { stateBackupSha256: createHash("sha256").update(currentBytes).digest("hex"), stateLineage: currentStageB.lineage, stateSerial: currentStageB.serial });
     writeFileSync(input.stageBTfvarsBindingReportPath, `${JSON.stringify(binding)}\n`, { mode: 0o600 });
     delete input.stageAPlanPath;
+    delete input.endpointSecurityGroupId;
+    delete input.runtimeSecurityGroupId;
     Object.assign(input, { stageARecoveryEvidenceFile, stageAStatePath, stageAHandoffPath, stageBStatePath, currentStageBStatePath, stageBTfvarsBindingReportSha256: createHash("sha256").update(readFileSync(input.stageBTfvarsBindingReportPath)).digest("hex") });
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, true);

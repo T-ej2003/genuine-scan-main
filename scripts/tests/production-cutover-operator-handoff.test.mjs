@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { buildProductionCutoverChildEnvironment, parseProductionCutoverOperatorArgs, runProductionCutoverOperator } from "../aws/run-production-cutover-operator.mjs";
+import { assertProductionCutoverOperatorConfig, buildProductionCutoverChildEnvironment, parseProductionCutoverOperatorArgs, runProductionCutoverOperator as runOperator } from "../aws/run-production-cutover-operator.mjs";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 
@@ -9,6 +13,43 @@ const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
 const argv = ["--mode", "prepare-overlap", "--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
 const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
+const runProductionCutoverOperator = options => runOperator({ validateConfig: () => {}, ...options });
+
+test("operator authenticates both runtime config reads before MFA", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-operator-config-"));
+  chmodSync(directory, 0o700);
+  const file = path.join(directory, "rotation-config.json");
+  const manifestFile = path.join(directory, "cutover-runtime-manifest.json");
+  const config = { sourceSha, rotationId: argv.at(-1), rotationConfigFile: file, rotationStateFile: path.join(directory, "rotation-state.json"), stageAPlanPath: "/private/stage-a.tfplan", endpointSecurityGroupId: "sg-04d5bf116755ba412", runtimeSecurityGroupId: "sg-0db971332ae625441" };
+  const write = () => { writeFileSync(file, `${JSON.stringify(config)}\n`, { mode: 0o600 }); return createHash("sha256").update(`${JSON.stringify(config)}\n`).digest("hex"); };
+  try {
+    const sha = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: sha, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const valid = [...argv]; valid[3] = file; valid[5] = sha;
+    const runtime = parseProductionCutoverOperatorArgs(valid);
+    assert.equal(assertProductionCutoverOperatorConfig(runtime).rotationConfigFile, file);
+    let prompts = 0;
+    config.rotationStateFile = "/private/other/rotation-state.json";
+    const wrongStateSha = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: wrongStateSha, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const wrongState = [...valid]; wrongState[5] = wrongStateSha;
+    await assert.rejects(() => runOperator({ argv: wrongState, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { prompts++; return values.MSCQR_VERIFIER_MFA_SERIAL; } }), /not bound to its prepared artifact/);
+    config.rotationStateFile = path.join(directory, "rotation-state.json");
+    config.completedInventoryAdoptionRequired = true;
+    const adoptionSha = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: adoptionSha, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const adoption = [...valid]; adoption[5] = adoptionSha;
+    await assert.rejects(() => runOperator({ argv: adoption, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { prompts++; return values.MSCQR_VERIFIER_MFA_SERIAL; } }), /adoption proof is required before MFA/);
+    delete config.completedInventoryAdoptionRequired;
+    config.rotationConfigFile = path.join(directory, "old-config.json");
+    const changed = write();
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: changed, readyToConsumeMfa: true, releaseSourceSha: sourceSha }), { mode: 0o600 });
+    const wrong = [...valid]; wrong[5] = changed;
+    await assert.rejects(() => runOperator({ argv: wrong, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => { prompts++; return values.MSCQR_VERIFIER_MFA_SERIAL; }, spawnChild: () => { throw new Error("child must not start"); } }), /not bound to its prepared artifact/);
+    assert.equal(prompts, 0);
+    assert.throws(() => assertProductionCutoverOperatorConfig(runtime), /changed after runtime preparation/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 const inputFor = (prompt) => values[prompt.includes("verifier MFA serial") ? "MSCQR_VERIFIER_MFA_SERIAL" : prompt.includes("administrator email") ? "MSCQR_ONBOARDING_EMAIL" : prompt.includes("administrator password") ? "MSCQR_ONBOARDING_PASSWORD" : prompt.includes("tenant-canary email") ? "MSCQR_CANARY_ORDINARY_EMAIL" : "MSCQR_CANARY_ORDINARY_PASSWORD"];
 

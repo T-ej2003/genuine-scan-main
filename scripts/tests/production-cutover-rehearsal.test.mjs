@@ -13,6 +13,9 @@ import { ECS_EXEC_OPERATOR_REQUIRED, ECS_EXEC_OPERATOR_FORBIDDEN, buildEcsExecOp
 import { buildOnboardingEvidenceFingerprint, runStrictOnboardingProbes, STRICT_ONBOARDING_CHECKS } from "../security/production-strict-onboarding.mjs";
 import { ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { createProductionPreDeploymentInventoryAdapter } from "../aws/production-predeployment-inventory-adapter.mjs";
+import { buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAGS } from "../aws/production-predeployment-inventory-task.mjs";
+import { canonicalBackendDatabaseSecretReference } from "../aws/production-overlap-task-definition.mjs";
+import { createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_TARGET_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
@@ -785,6 +788,37 @@ test("the real predeployment adapter feeds the same cutover spine before deploym
   assert.deepEqual(order, ["PREDEPLOY_INVENTORY", "ROTATION_PREPARE", "ROTATION_INFRA", "TASK_REGISTER", "UPDATE_SERVICE", "STABILIZATION", "POSTDEPLOY", "ECS_EXEC", "ONBOARDING", "ROTATION_CLOSE"]);
   assert.equal(result.readyForOnboarding, true);
   assert.equal(result.mutationSequence.filter(({ name }) => name === "M6_ECS_UPDATE_SERVICE").length, 1);
+});
+
+test("signed completed inventory feeds rotation preparation and readiness without broker replay", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-adopted-cutover-"));
+  const input = fixtureInput();
+  const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:22";
+  const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/inventory-22";
+  const imageReleaseSha = input.imageAuthorization.imageReleaseSha;
+  const approvalId = stageBApprovalIdForReleaseSha(sourceSha);
+  const identity = createPreDeploymentOperationIdentity({ approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId, taskDefinitionArn, imageDigest });
+  const configSha256 = "f".repeat(64);
+  const config = { sourceSha, imageReleaseSha, rotationId, inventoryApprovalId: approvalId, inventoryTaskDefinitionArn: taskDefinitionArn, completedInventoryAdoptionRequired: true, rotationStateFile: path.join(directory, "rotation-state.json"), overlapTaskInput: { backendImage: imageDigest }, rotationInventoryOperation: "rotation-inventory-v1", inventoryLogGroupName: "/ecs/mscqr-production/rls-green-backend" };
+  const payload = { schemaVersion: 1, purpose: "adopt-completed-predeployment-inventory", sourceSha, imageReleaseSha, rotationId, approvalId, taskDefinitionArn, imageDigest, originalConfigSha256: "a".repeat(64), continuationConfigSha256: configSha256, operationKey: preDeploymentOperationKey(identity), operationIdentitySha256: preDeploymentOperationIdentitySha256(identity), replayRowSha256: "b".repeat(64), taskArn, inventorySha256: createHash("sha256").update(JSON.stringify(inventory)).digest("hex"), inventory, issuedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900_000).toISOString() };
+  const definition = buildPreDeploymentInventoryTaskDefinition({ backendImage: imageDigest, releaseSha: imageReleaseSha, databaseUrl: canonicalBackendDatabaseSecretReference(), rotationInventoryOperation: "rotation-inventory-v1", inventoryLogGroup: config.inventoryLogGroupName }).taskDefinition;
+  writeFileSync(path.join(directory, "inventory-completed-adoption-evidence.json"), JSON.stringify({ payload, signatureBase64: "AA==" }), { mode: 0o600 });
+  const calls = [];
+  const adapter = createProductionPreDeploymentInventoryAdapter({ sourceSha, imageReleaseSha, imageDigest, config, runtimeConfigSha256: configSha256, run: args => {
+    calls.push(`${args[0]} ${args[1]}`);
+    if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: { ...definition, taskDefinitionArn, status: "ACTIVE" }, tags: PREDEPLOYMENT_INVENTORY_TAGS });
+    if (args[0] === "kms" && args[1] === "verify") return JSON.stringify({ SignatureValid: true });
+    throw new Error("Completed inventory must not invoke broker or register a task.");
+  } });
+  input.preDeploymentInventory = { execute: ({ rotationId: selected }) => adapter.run({ rotationId: selected }) };
+  try {
+    const result = await runProductionCutoverControlPlane(input);
+    assert.equal(result.results.preDeploymentInventory.mutationCount, 0);
+    assert.equal(result.results.rotationPrepare.prepared, true);
+    assert.ok(result.results.readiness);
+    assert.equal(result.readyForOnboarding, true);
+    assert.deepEqual(calls, ["ecs describe-task-definition", "kms verify"]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("missing rotation infrastructure convergence fails before task registration or ECS update", async () => {

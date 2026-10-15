@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
+import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { assertCompletedInventoryAdoptionPayload } from "./production-completed-inventory-adoption.mjs";
+import { existsSync } from "node:fs";
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -42,10 +46,33 @@ export function buildProductionCutoverChildEnvironment({ parentEnvironment = pro
   return environment;
 }
 
-export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
+export function assertProductionCutoverOperatorConfig(runtime, { repositoryRoot = process.cwd() } = {}) {
+  const configPath = path.resolve(runtime["--config"]);
+  const hash = runtime["--config-sha256"];
+  const config = readBoundStageBPrivateJson({ filePath: configPath, expectedSha256: hash, repositoryRoot, label: "Production cutover runtime config" });
+  const manifestFile = path.join(path.dirname(configPath), "cutover-runtime-manifest.json");
+  const manifest = JSON.parse(readStageBPrivateFileBytes({ filePath: manifestFile, repositoryRoot, label: "Cutover runtime manifest" }).bytes);
+  if (config.rotationConfigFile !== configPath || path.dirname(config.rotationStateFile || "") !== path.dirname(configPath)
+      || manifest.runtimeConfigSha256 !== hash || manifest.readyToConsumeMfa !== true
+      || manifest.releaseSourceSha !== runtime["--source-sha"] || config.sourceSha !== runtime["--source-sha"]
+      || config.rotationId !== runtime["--rotation-id"] || (config.stageAPlanPath && (!config.endpointSecurityGroupId || !config.runtimeSecurityGroupId))) {
+    throw new Error("Production cutover runtime configuration is not bound to its prepared artifact.");
+  }
+  const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
+  if (config.completedInventoryAdoptionRequired === true && !existsSync(adoptionFile)) throw new Error("Completed inventory adoption proof is required before MFA.");
+  if (existsSync(adoptionFile)) {
+    if (!config.inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption lacks the exact task definition.");
+    const evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: adoptionFile, repositoryRoot, label: "Completed inventory adoption evidence" }).bytes);
+    assertCompletedInventoryAdoptionPayload(evidence.payload, { config, configSha256: hash });
+  }
+  return config;
+}
+
+export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
+  validateConfig(runtime, { repositoryRoot: cwd });
   const requiredInputs = inputsForMode(runtime["--mode"]);
   const inputs = {};
   let childEnvironment;

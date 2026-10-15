@@ -280,6 +280,8 @@ export function prepareProductionCutoverRuntime({
   rootDropEvidenceFile,
   temporaryKmsCapabilityFile,
   stageAPlanPath,
+  endpointSecurityGroupId,
+  runtimeSecurityGroupId,
   stageARecoveryEvidenceFile,
   stageAStatePath,
   stageAHandoffPath,
@@ -291,6 +293,7 @@ export function prepareProductionCutoverRuntime({
   qrVersionResolution,
   inventoryApprovalId,
   inventoryTaskDefinitionArn,
+  adoptCompletedInventory = false,
   onboardingPaths,
   stageBTfvarsPath,
   stageBTfvarsBindingReportPath,
@@ -305,6 +308,7 @@ export function prepareProductionCutoverRuntime({
   proveSourceAdvance,
 } = {}) {
   if (inventoryTaskDefinitionArn !== undefined) assertPreDeploymentInventoryTaskDefinitionArn(inventoryTaskDefinitionArn);
+  if (adoptCompletedInventory && !inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires the existing task definition.");
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
   assertFutureArtifactsAbsent(paths, repositoryRoot);
@@ -388,6 +392,8 @@ export function prepareProductionCutoverRuntime({
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
     const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
+    if ((stageAPlanPath && (!/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId))
+        || (!stageAPlanPath && (endpointSecurityGroupId || runtimeSecurityGroupId))) throw new Error("Stage-A security-group inputs are invalid.");
     const stageARecovery = stageARecoveryEvidenceFile ? readInputFile(stageARecoveryEvidenceFile, repositoryRoot, "Stage-A recovery evidence") : null;
     if (stageARecovery && (!stageAStatePath || !stageAHandoffPath || !stageBStatePath || !currentStageBStatePath)) throw new Error("Stage-A recovery requires historical provenance and the authenticated current Stage-B state.");
     for (const [filePath, label] of [[stageAStatePath, "Stage-A state"], [stageAHandoffPath, "Stage-A handoff"], [stageBStatePath, "Historical Stage-B state"], [currentStageBStatePath, "Current Stage-B state"]]) if (stageARecovery) ensureStageBPrivateFile({ filePath, repositoryRoot, label });
@@ -482,6 +488,7 @@ export function prepareProductionCutoverRuntime({
       stageARoot: path.resolve("infra/aws/terraform/production-green-stage-a"),
       stageAPlanPath: stageAPlanPath ? path.resolve(stageAPlanPath) : null,
       stageAPlanSha256: stageAPlan?.sha256 || null,
+      ...(endpointSecurityGroupId ? { endpointSecurityGroupId, runtimeSecurityGroupId } : {}),
       stageARecoveryEvidenceFile: stageARecovery?.path || null,
       stageARecoveryEvidenceSha256: stageARecovery?.sha256 || null,
       stageARecoveryMode: stageARecovery?.value?.mode || null,
@@ -499,6 +506,7 @@ export function prepareProductionCutoverRuntime({
       inventoryApprovalId,
       ...(rotationBindings.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId ? { inventoryFailedPredecessor: PRESERVED_INVENTORY_PREDECESSOR } : {}),
       ...(inventoryTaskDefinitionArn === undefined ? {} : { inventoryTaskDefinitionArn }),
+      ...(adoptCompletedInventory ? { completedInventoryAdoptionRequired: true } : {}),
       inventoryDatabaseSecretArn: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom,
       inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
@@ -601,6 +609,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
+    "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
     "broker-recovery", "broker-recovery-sha256",
   ]);
