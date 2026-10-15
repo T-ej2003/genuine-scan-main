@@ -597,7 +597,8 @@ export function createPreDeploymentInventoryHandler({ config, executingBrokerVer
       if (!fresh) await runWithinDeadline("completion recording", () => recordPreDeploymentCompleted({ ...replay, taskArn }), requestDeadlineMs);
       return { status: "completed", operation: PREDEPLOYMENT_INVENTORY_OPERATION, taskArn, taskDefinitionArn: event.taskDefinitionArn, sourceSha: event.sourceSha, rotationId: event.rotationId, inventory };
     } catch (error) {
-      if (taskArn && !cleanupAttempted) await stopTaskBounded().catch(() => {});
+      // A fresh RunTask client token resolves to the same task on retry; stopping it here would make recovery impossible.
+      if (!fresh && taskArn && !cleanupAttempted) await stopTaskBounded().catch(() => {});
       if (launchMayHaveOccurred && !uncertaintyRecorded) {
         await runWithinDeadline("launch uncertainty record", () => markPreDeploymentLaunchUncertain({ ...replay, ...(taskArn ? { taskArn } : {}) }), requestDeadlineMs).catch(() => {});
       }

@@ -992,3 +992,55 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     assert.equal(proof.payload.completionReceiptSha256, authenticated.receiptSha256);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+test("fresh inventory preserves its ECS task across interrupted launch, polling, logs and receipt writes", async () => {
+  const rotationId = PRESERVED_INVENTORY_PREDECESSOR.rotationId;
+  const signedApproval = JSON.stringify({ ...brokerApproval, issuedAt: "2026-10-15T06:00:00.000Z", expiresAt: "2026-10-15T07:00:00.000Z", nonce: "abcdef12-1234-1234-1234-123456789abc" });
+  const event = { operation: "production-predeployment-rotation-inventory", approvalId, sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, newInventoryAfterCompleted: COMPLETED_INVENTORY_PREDECESSOR };
+  for (const failure of ["lost-run-response", "task-start", "poll", "running", "logs", "completion-write", "terminal-failure", "identity-mismatch"]) {
+    let nowMs = Date.parse("2026-10-15T06:10:00.000Z"), reserved = false, first = true, stops = 0, completions = 0, runs = 0, uncertain = 0, polls = 0;
+    const tokens = new Set();
+    const makeHandler = () => createPreDeploymentInventoryHandler({
+      config: brokerConfig, executingBrokerVersion: "1", readApproval: async () => signedApproval, verifySignature: async () => true,
+      claimFreshInventoryOperation: async () => { if (reserved) throw new Error("ConditionalCheckFailed"); reserved = true; },
+      resumeFreshInventoryOperation: async value => {
+        const transaction = resumeFreshInventoryTransaction({ table: STAGE_B.replayTable, ...value });
+        assert.match(transaction.TransactItems[2].Update.ConditionExpression, /recoveryDeadline > :now/);
+        if (nowMs < Date.parse("2026-10-15T06:13:00.000Z") || nowMs >= Date.parse("2026-10-15T06:30:00.000Z")) throw new Error("ConditionalCheckFailed");
+      },
+      recordPreDeploymentTaskStarted: async ({ allowIdempotent }) => { assert.equal(allowIdempotent, true); if (first && failure === "task-start") throw new Error("recording unavailable"); },
+      recordFreshInventoryCompleted: async () => { if (first && failure === "completion-write") throw new Error("receipt store unavailable"); completions++; },
+      markPreDeploymentLaunchUncertain: async () => { uncertain++; },
+      describeTaskDefinition: async () => ({ taskDefinition: brokerDefinition(), tags: brokerTags }),
+      runTask: async request => { runs++; tokens.add(request.clientToken); if (first && failure === "lost-run-response") throw new Error("RunTask response lost"); return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+      describeTasks: async () => {
+        polls++;
+        if (first && ["poll", "running"].includes(failure)) throw new Error("DescribeTasks unavailable");
+        return { tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: failure === "running" && polls === 2 ? "RUNNING" : "STOPPED",
+          tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: failure === "identity-mismatch" ? "f".repeat(40) : sourceSha }, { key: "RotationId", value: rotationId }],
+          containers: [{ name: "inventory", exitCode: failure === "terminal-failure" ? 1 : 0 }] }] };
+      },
+      describeLogStreams: async () => ({ logStreams: [{ logStreamName: `predeployment-inventory/inventory/${brokerTaskArn.split("/").at(-1)}` }] }),
+      getLogEvents: async () => { if (first && failure === "logs") throw new Error("CloudWatch unavailable"); return { events: [{ message: JSON.stringify(inventory) }] }; },
+      stopTask: async () => { stops++; }, now: () => new Date(nowMs), monotonicNow: () => 0, sleep: async () => {},
+    });
+    await assert.rejects(makeHandler()(event), undefined, failure);
+    assert.equal(stops, 0, `${failure}: transient or terminal failure stopped the immutable task`);
+    assert.equal(completions, 0, `${failure}: completion was fabricated`);
+    await assert.rejects(makeHandler()(event), /ConditionalCheckFailed/, `${failure}: concurrent retry passed the fence`);
+    nowMs += 181_000; first = false;
+    if (["terminal-failure", "identity-mismatch"].includes(failure)) {
+      await assert.rejects(makeHandler()(event), /did not exit successfully|identity or tags changed/);
+      assert.equal(stops, 0);
+      assert.equal(completions, 0);
+    } else {
+      assert.equal((await makeHandler()(event)).status, "completed", failure);
+      assert.equal(stops, 1);
+      assert.equal(completions, 1);
+    }
+    assert.equal(tokens.size, 1, `${failure}: retry used a different ECS idempotency token`);
+    assert.ok(runs <= 2 && uncertain <= 2, `${failure}: retry duplicated an operation`);
+    nowMs = Date.parse("2026-10-15T06:31:00.000Z");
+    await assert.rejects(makeHandler()(event), /ConditionalCheckFailed/, `${failure}: expired ECS idempotency window was reused`);
+  }
+});
