@@ -10,6 +10,7 @@ import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR } from "./production-gre
 import { existsSync } from "node:fs";
 import { createProductionRotationInfrastructureAdapter } from "./production-cutover-production-adapters.mjs";
 import { rotationBindingsToPostPrepareTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -73,17 +74,18 @@ export function assertProductionCutoverOperatorConfig(runtime, { repositoryRoot 
   return config;
 }
 
-export function preflightProductionCutoverRotation({ config, runtime }) {
+export function preflightProductionCutoverRotation({ config, runtime, cwd = process.cwd() }) {
   const secretBindings = { ...config.overlapTaskInput.secretBindings, ...rotationBindingsToPostPrepareTaskBindings(config) };
-  return createProductionRotationInfrastructureAdapter({ config, releaseProfile: config.releaseProfile }).preflight({ sourceSha: runtime["--source-sha"], rotationId: runtime["--rotation-id"], secretBindings });
+  return createProductionRotationInfrastructureAdapter({ config, releaseProfile: config.releaseProfile, repositoryRoot: cwd }).preflight({ sourceSha: runtime["--source-sha"], rotationId: runtime["--rotation-id"], secretBindings });
 }
 
-export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
+export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, authenticateCheckout = readStageBProtectedMainCheckout, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
   const config = validateConfig(runtime, { repositoryRoot: cwd });
-  preflightRotation({ config, runtime });
+  authenticateCheckout({ cwd, expectedSourceSha: config.recoveryTooling?.sourceSha || runtime["--source-sha"], requireCanonicalRepository: true });
+  preflightRotation({ config, runtime, cwd });
   const requiredInputs = inputsForMode(runtime["--mode"]);
   const inputs = {};
   let childEnvironment;

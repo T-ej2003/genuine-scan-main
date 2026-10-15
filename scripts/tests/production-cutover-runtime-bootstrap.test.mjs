@@ -176,7 +176,7 @@ function evidenceFiles(directory, repositoryRoot, expectedSha = sourceSha, image
   const tfvarsBytes = Buffer.from("production_rotation_enabled = false\n");
   const stageBTfvarsPath = path.join(directory, "stage-b.tfvars");
   writeFileSync(stageBTfvarsPath, tfvarsBytes, { mode: 0o600 }); chmodSync(stageBTfvarsPath, 0o600);
-  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex") });
+  const stageBTfvarsBindingReportPath = file("stage-b.tfvars.binding.json", { schemaVersion: 2, tfvarsSchemaVersion: 1, tfvarsFormat: "hcl", tfvarsFileName: "stage-b.tfvars", tfvarsExtension: ".tfvars", generator: "scripts/aws/generate-production-green-stage-b-tfvars.mjs", tfvarsSha256: createHash("sha256").update(tfvarsBytes).digest("hex"), stateBackupSha256: createHash("sha256").update('{"lineage":"4e438e59-8b8b-194d-030c-5ede0c26344a","serial":140}').digest("hex"), stateLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", stateSerial: 140 });
   const stageBTerraformDataDir = path.join(directory, "terraform-data");
   mkdirSync(stageBTerraformDataDir, { mode: 0o700 }); chmodSync(stageBTerraformDataDir, 0o700);
   const artifactBinding = artifactSigningRuntimeBindingPath(expectedSha);
@@ -1028,6 +1028,8 @@ test("rotation infrastructure adopts an exact no-op plan without Terraform apply
 test("rotation infrastructure update applies one exact private plan and verifies live policy", async () => {
   const directory = fsTemp();
   try {
+    const checkout = path.join(directory, "authenticated-checkout");
+    mkdirSync(checkout);
     const result = prepareProductionCutoverRuntime(fullInput(directory, process.cwd()));
     const artifactBindings = Object.fromEntries(Object.entries(result.config.overlapTaskInput.secretBindings).filter(([name]) => name.startsWith("ARTIFACT_SIGN_")));
     const secretBindings = { ...rotationBindingsToPostPrepareTaskBindings(bindings), ...artifactBindings };
@@ -1036,7 +1038,9 @@ test("rotation infrastructure update applies one exact private plan and verifies
     const previousPolicy = { Version: "2012-10-17", Statement: [] };
     const plan = { resource_changes: [{ address: 'aws_iam_role_policy.execution["backend"]', change: { actions: ["update"], before: { policy: JSON.stringify(previousPolicy) }, after: { policy: JSON.stringify(policy) } } }] };
     let applyCalls = 0;
-    const run = (command, args) => {
+    const run = (command, args, options) => {
+      assert.equal(options.cwd, checkout);
+      if (command === "terraform") assert.equal(args[0], `-chdir=${path.join(checkout, "infra/aws/terraform/production-green-stage-b")}`);
       if (command === "aws" && args.includes("s3")) return Buffer.from('{"lineage":"4e438e59-8b8b-194d-030c-5ede0c26344a","serial":140}');
       if (command === "aws") return JSON.stringify({ PolicyDocument: applyCalls ? policy : previousPolicy });
       if (args.includes("plan")) { writeFileSync(result.config.rotationTerraformPlanFile, "update-plan", { mode: 0o644 }); return ""; }
@@ -1044,7 +1048,7 @@ test("rotation infrastructure update applies one exact private plan and verifies
       if (args.includes("apply")) { assert.equal(statSync(result.config.rotationTerraformPlanFile).mode & 0o777, 0o600); applyCalls += 1; }
       return "";
     };
-    const adapter = createProductionRotationInfrastructureAdapter({ run, releaseProfile: "fixture", config: result.config });
+    const adapter = createProductionRotationInfrastructureAdapter({ run, releaseProfile: "fixture", repositoryRoot: checkout, config: result.config });
     assert.equal(adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }).alreadyConverged, false);
     assert.equal(applyCalls, 0);
     const converged = await adapter.run({ sourceSha, rotationId: result.config.rotationId, secretBindings });
@@ -1064,9 +1068,10 @@ test("rotation infrastructure rejects state drift and policy mismatch without ap
     const policy = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "secretsmanager:GetSecretValue", Resource: Object.values(inputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$|:value::.*$/u, "")) }] };
     const plan = { variables: { production_rotation_enabled: { value: true }, production_rotation_secret_value_from: { value: inputs.production_rotation_secret_value_from } }, resource_changes: [{ address: 'aws_iam_role_policy.execution["backend"]', change: { actions: ["no-op"], before: { policy: JSON.stringify(policy) }, after: { policy: JSON.stringify(policy) } } }] };
     let stateReads = 0;
+    let stateVariant = "serial-drift";
     let applyCalls = 0;
     const run = (command, args) => {
-      if (command === "aws" && args.includes("s3")) return Buffer.from(JSON.stringify({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: ++stateReads === 1 ? 140 : 141 }));
+      if (command === "aws" && args.includes("s3")) return Buffer.from(JSON.stringify({ lineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", serial: stateVariant === "serial-drift" && ++stateReads > 1 ? 141 : 140, ...(stateVariant === "hash-drift" ? { unexpected: true } : {}) }));
       if (command === "aws") return JSON.stringify({ PolicyDocument: policy });
       if (args.includes("plan")) { writeFileSync(result.config.rotationTerraformPlanFile, "reviewed-plan", { mode: 0o644 }); return ""; }
       if (args.includes("show")) return JSON.stringify(plan);
@@ -1074,11 +1079,22 @@ test("rotation infrastructure rejects state drift and policy mismatch without ap
       return "";
     };
     const adapter = createProductionRotationInfrastructureAdapter({ run, releaseProfile: "fixture", config: result.config });
-    assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }), /state changed during rotation planning/);
+    assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }), /state lineage or serial is invalid/);
     assert.equal(applyCalls, 0);
+    stateVariant = "hash-drift";
+    assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }), /state changed after authenticated rotation preparation/);
+    assert.equal(applyCalls, 0);
+    stateVariant = "stable";
     stateReads = 0;
     plan.resource_changes[0].change.after.policy = JSON.stringify({ ...policy, Statement: [] });
     assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }), /exact reviewed bindings and policy/);
+    assert.equal(applyCalls, 0);
+    const report = JSON.parse(readFileSync(result.config.stageBTfvarsBindingReportPath, "utf8"));
+    delete report.stateBackupSha256;
+    const reportBytes = Buffer.from(`${JSON.stringify(report)}\n`);
+    writeFileSync(result.config.stageBTfvarsBindingReportPath, reportBytes, { mode: 0o600 });
+    result.config.stageBTfvarsBindingReportSha256 = createHash("sha256").update(reportBytes).digest("hex");
+    assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings }), /state is not bound to authenticated preparation/);
     assert.equal(applyCalls, 0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
@@ -1092,6 +1108,10 @@ test("rotation infrastructure rejects a substituted plan destination before Terr
     const artifactBindings = Object.fromEntries(Object.entries(result.config.overlapTaskInput.secretBindings).filter(([name]) => name.startsWith("ARTIFACT_SIGN_")));
     const adapter = createProductionRotationInfrastructureAdapter({ run: () => { terraformCalls += 1; }, releaseProfile: "fixture", config: result.config });
     await assert.rejects(() => adapter.run({ sourceSha, rotationId: result.config.rotationId, secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(bindings), ...artifactBindings } }), /must not be a symlink/);
+    assert.equal(terraformCalls, 0);
+    rmSync(result.config.rotationTerraformPlanFile);
+    chmodSync(path.dirname(result.config.rotationTerraformPlanFile), 0o755);
+    assert.throws(() => adapter.preflight({ sourceSha, rotationId: result.config.rotationId, secretBindings: { ...rotationBindingsToPostPrepareTaskBindings(bindings), ...artifactBindings } }), /mode 0700/);
     assert.equal(terraformCalls, 0);
   } finally {
     rmSync(directory, { recursive: true, force: true });

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,12 +10,83 @@ import { assertProductionCutoverOperatorConfig, buildProductionCutoverChildEnvir
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { COMPLETED_INVENTORY_PREDECESSOR } from "../aws/production-green-stage-b-contract.mjs";
+import { readStageBProtectedMainCheckout } from "../aws/stage-b-deployment-identity.mjs";
 
 const sourceSha = "a".repeat(40);
 const configSha = "b".repeat(64);
 const argv = ["--mode", "prepare-overlap", "--config", "/private/runtime/rotation-config.json", "--config-sha256", configSha, "--source-sha", sourceSha, "--rotation-id", "rotation-20260826060632-b15b3f51"];
 const values = Object.freeze({ MSCQR_VERIFIER_MFA_SERIAL: ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, MSCQR_ONBOARDING_EMAIL: "administration@example.invalid", MSCQR_ONBOARDING_PASSWORD: "fixture-admin-value", MSCQR_CANARY_ORDINARY_EMAIL: "canary@example.invalid", MSCQR_CANARY_ORDINARY_PASSWORD: "fixture-canary-value" });
-const runProductionCutoverOperator = options => runOperator({ validateConfig: () => {}, preflightRotation: () => {}, ...options });
+const runProductionCutoverOperator = options => runOperator({ validateConfig: () => ({}), authenticateCheckout: () => {}, preflightRotation: () => {}, ...options });
+
+test("operator authenticates a clean canonical checkout before Terraform or MFA", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-operator-checkout-"));
+  const checkout = path.join(directory, "checkout");
+  const runtimeDirectory = path.join(directory, "runtime");
+  mkdirSync(checkout);
+  mkdirSync(runtimeDirectory, { mode: 0o700 });
+  const git = args => execFileSync("git", args, { cwd: checkout, encoding: "utf8" }).trim();
+  git(["init", "-q"]);
+  git(["config", "user.email", "operator-test@example.invalid"]);
+  git(["config", "user.name", "Operator Test"]);
+  writeFileSync(path.join(checkout, "tracked.txt"), "clean\n");
+  git(["add", "tracked.txt"]);
+  git(["commit", "-qm", "protected source"]);
+  const head = git(["rev-parse", "HEAD"]);
+  git(["remote", "add", "origin", "https://github.com/T-ej2003/genuine-scan-main.git"]);
+  git(["update-ref", "refs/remotes/origin/main", head]);
+  git(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+  const configFile = path.join(runtimeDirectory, "rotation-config.json");
+  const manifestFile = path.join(runtimeDirectory, "cutover-runtime-manifest.json");
+  const rotationId = "rotation-20260913011819-98b062c4";
+  const config = { sourceSha: head, rotationId, rotationConfigFile: configFile, rotationStateFile: path.join(runtimeDirectory, "rotation-state.json") };
+  const writeConfig = () => {
+    const bytes = Buffer.from(`${JSON.stringify(config)}\n`);
+    writeFileSync(configFile, bytes, { mode: 0o600 });
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    writeFileSync(manifestFile, JSON.stringify({ runtimeConfigSha256: digest, readyToConsumeMfa: true, releaseSourceSha: head }), { mode: 0o600 });
+    return ["--mode", "prepare-overlap", "--config", configFile, "--config-sha256", digest, "--source-sha", head, "--rotation-id", rotationId];
+  };
+  const authenticateCheckout = options => readStageBProtectedMainCheckout({ ...options, run: args => args[0] === "fetch" ? "" : args[0] === "rev-parse" && args[1] === "FETCH_HEAD" ? git(["rev-parse", "refs/remotes/origin/main"]) : git(args) });
+  let planning = 0;
+  let prompts = 0;
+  let children = 0;
+  const invoke = (args = writeConfig()) => runOperator({ argv: args, cwd: checkout, stdin: { isTTY: true }, stdout: { isTTY: true }, authenticateCheckout,
+    preflightRotation: ({ cwd }) => { assert.equal(cwd, checkout); planning++; }, prompt: async () => { prompts++; return ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN; }, spawnChild: childThatExits({ capture: () => { children++; } }) });
+  try {
+    assert.equal((await invoke()).exitCode, 0);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    const invalidConfig = writeConfig();
+    invalidConfig[5] = "0".repeat(64);
+    await assert.rejects(invoke(invalidConfig), /changed after runtime preparation/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    writeFileSync(path.join(checkout, "tracked.txt"), "dirty\n");
+    await assert.rejects(invoke(), /tracked modifications/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    git(["checkout", "--", "tracked.txt"]);
+    writeFileSync(path.join(checkout, "untracked.txt"), "untracked\n");
+    await assert.rejects(invoke(), /untracked file/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    rmSync(path.join(checkout, "untracked.txt"));
+    git(["remote", "set-url", "origin", "https://example.invalid/other.git"]);
+    await assert.rejects(invoke(), /canonical production repository/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    git(["remote", "set-url", "origin", "https://github.com/T-ej2003/genuine-scan-main.git"]);
+    config.recoveryTooling = { sourceSha: "f".repeat(40) };
+    await assert.rejects(invoke(), /Requested source SHA/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    delete config.recoveryTooling;
+    writeFileSync(path.join(checkout, "tracked.txt"), "successor\n");
+    git(["add", "tracked.txt"]);
+    git(["commit", "-qm", "main advances"]);
+    git(["update-ref", "refs/remotes/origin/main", git(["rev-parse", "HEAD"])]);
+    await assert.rejects(invoke(), /Requested source SHA/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+    const wrong = writeConfig();
+    wrong[7] = "0".repeat(40);
+    await assert.rejects(invoke(wrong), /not bound to its prepared artifact/);
+    assert.deepEqual([planning, prompts, children], [1, 1, 1]);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("operator authenticates both runtime config reads before MFA", async () => {
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-operator-config-"));
@@ -85,6 +157,7 @@ test("rotation Terraform preflight runs before verifier MFA and fails closed", a
   let spawns = 0;
   const config = { rotationTerraformPlanFile: "/private/runtime/rotation-infrastructure.tfplan" };
   await assert.rejects(() => runOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, validateConfig: () => config,
+    authenticateCheckout: () => {},
     preflightRotation: ({ config: supplied, runtime }) => { assert.equal(supplied, config); assert.equal(runtime["--source-sha"], sourceSha); throw new Error("Terraform plan checksum changed before MFA."); },
     prompt: async () => { prompts += 1; return values.MSCQR_VERIFIER_MFA_SERIAL; }, spawnChild: () => { spawns += 1; } }), /checksum changed before MFA/);
   assert.equal(prompts, 0);
