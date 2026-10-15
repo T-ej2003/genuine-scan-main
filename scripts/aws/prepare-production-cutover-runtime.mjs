@@ -14,6 +14,7 @@ import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs
 const args = parseBootstrapArgs(process.argv.slice(2));
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
 if (args.has("adopt-completed-inventory") && args.get("adopt-completed-inventory") !== "true") throw new Error("Completed inventory adoption flag must be true.");
+if (args.has("new-inventory-after-completed") && args.get("new-inventory-after-completed") !== "true") throw new Error("Fresh inventory flag must be true.");
 if (args.has("broker-recovery") !== args.has("broker-recovery-sha256")) throw new Error("Broker recovery requires its exact transport digest.");
 const brokerRecoveryApproval = args.has("broker-recovery") ? await readBrokerRecoveryApproval({ filePath: required("broker-recovery"), expectedSha256: required("broker-recovery-sha256") }) : undefined;
 const outputDirectory = args.get("output-directory") || path.join(os.homedir(), ".mscqr", "production-cutover", Date.now().toString(36));
@@ -135,6 +136,7 @@ const result = prepareProductionCutoverRuntime({
   inventoryApprovalId: args.get("inventory-approval-id"),
   inventoryTaskDefinitionArn: args.get("inventory-task-definition-arn"),
   adoptCompletedInventory: args.get("adopt-completed-inventory") === "true",
+  newInventoryAfterCompleted: args.get("new-inventory-after-completed") === "true",
   onboardingPaths,
   stageBTfvarsPath: required("stage-b-tfvars"),
   stageBTfvarsBindingReportPath: required("stage-b-tfvars-binding-report"),

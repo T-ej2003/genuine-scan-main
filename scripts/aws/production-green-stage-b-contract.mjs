@@ -203,6 +203,12 @@ export const PRESERVED_INVENTORY_PREDECESSOR = Object.freeze({
   taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:3",
   imageDigest: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:3cbf8683f4072db322e4d09be9783e1804353fbc50a5b55020988665d2e3ef6e",
 });
+// The expired successful successor remains immutable; a fresh operation has a new release identity.
+export const COMPLETED_INVENTORY_PREDECESSOR = Object.freeze({
+  sourceSha: "ccf30139819c006236a4edc22b92bdd10ee627c3",
+  operationKey: "production-predeployment-rotation-inventory#7d0312ba6f88e50b93921e67d9c86990d1f2b5b927f7c8ae72c26f86b915df13",
+  recoveryEvidenceSha256: "4bd8fef0fe7630747e61f034ac696179e0a020dc1fcc0611255c7ff21a554689",
+});
 export const STAGE_B_MODES = Object.freeze([
   "full-rls-capability-preflight", "full-rls-admin-bootstrap", "full-rls-role-provision",
   "full-rls-role-verify", "full-rls-admin-ownership", "full-rls-runtime-policy",

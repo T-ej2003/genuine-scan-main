@@ -1,4 +1,4 @@
-import { PRESERVED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
+import { COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, rmSync } from "node:fs";
@@ -294,6 +294,7 @@ export function prepareProductionCutoverRuntime({
   inventoryApprovalId,
   inventoryTaskDefinitionArn,
   adoptCompletedInventory = false,
+  newInventoryAfterCompleted = false,
   onboardingPaths,
   stageBTfvarsPath,
   stageBTfvarsBindingReportPath,
@@ -309,6 +310,7 @@ export function prepareProductionCutoverRuntime({
 } = {}) {
   if (inventoryTaskDefinitionArn !== undefined) assertPreDeploymentInventoryTaskDefinitionArn(inventoryTaskDefinitionArn);
   if (adoptCompletedInventory && !inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires the existing task definition.");
+  if (newInventoryAfterCompleted && (adoptCompletedInventory || !inventoryTaskDefinitionArn || rotationBindings?.rotationId !== PRESERVED_INVENTORY_PREDECESSOR.rotationId)) throw new Error("Fresh inventory requires the exact rotation and existing task definition.");
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
   assertFutureArtifactsAbsent(paths, repositoryRoot);
@@ -504,7 +506,8 @@ export function prepareProductionCutoverRuntime({
       backendImageDigest,
       expectedCurrentTaskDefinitionArn: taskDefinition?.taskDefinitionArn,
       inventoryApprovalId,
-      ...(rotationBindings.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId ? { inventoryFailedPredecessor: PRESERVED_INVENTORY_PREDECESSOR } : {}),
+      ...(newInventoryAfterCompleted ? { newInventoryAfterCompleted: COMPLETED_INVENTORY_PREDECESSOR }
+        : rotationBindings.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId && !adoptCompletedInventory ? { inventoryFailedPredecessor: PRESERVED_INVENTORY_PREDECESSOR } : {}),
       ...(inventoryTaskDefinitionArn === undefined ? {} : { inventoryTaskDefinitionArn }),
       ...(adoptCompletedInventory ? { completedInventoryAdoptionRequired: true } : {}),
       inventoryDatabaseSecretArn: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom,
@@ -609,7 +612,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
-    "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory",
+    "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory", "new-inventory-after-completed",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
     "broker-recovery", "broker-recovery-sha256",
   ]);

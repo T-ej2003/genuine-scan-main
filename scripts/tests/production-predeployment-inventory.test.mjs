@@ -5,11 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createProductionPreDeploymentInventoryAdapter, PREDEPLOYMENT_BROKER_CALLER_READ_TIMEOUT_SECONDS, PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS } from "../aws/production-predeployment-inventory-adapter.mjs";
-import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, preDeploymentOperationIdentitySha256, preDeploymentOperationKey, preDeploymentReplayItem, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
+import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, completedInventoryTransaction, createBrokerRuntimeConfig, createPreDeploymentInventoryHandler, createPreDeploymentOperationIdentity, freshInventoryRecoveryTransaction, inventoryCompletionKey, preDeploymentOperationIdentitySha256, preDeploymentOperationKey, preDeploymentReplayItem, resumeFreshInventoryTransaction, validatePreDeploymentInventoryConfiguration, PREDEPLOYMENT_INVENTORY_LAMBDA_TIMEOUT_SECONDS, PREDEPLOYMENT_INVENTORY_OPERATION_DEADLINE_MS, PREDEPLOYMENT_INVENTORY_CLEANUP_MARGIN_MS, PREDEPLOYMENT_INVENTORY_TOTAL_REQUEST_BUDGET_MS } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
-import { canonicalJson, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
-import { authenticateCompletedInventoryAdoptionEvidence, buildCompletedInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
+import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
 import { prepareCompletedInventoryAdoption } from "../aws/prepare-completed-inventory-adoption.mjs";
 
 const sourceSha = "a".repeat(40);
@@ -871,4 +871,176 @@ test("canonical absent-claim producer serializes a config-bound proof consumed b
     await adapter.run({ rotationId: old.rotationId });assert.deepEqual(received.absentClaimRecovery, certificate);
     fs.writeFileSync(cfg.readinessEvidenceFile, "{}", { mode: 0o600 });await assert.rejects(adapter.run({ rotationId: old.rotationId }));
   } finally { process.chdir(previous);fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("fresh signed inventory reserves one new operation and retains an atomic completion after claim expiry", async () => {
+  const rotationId = PRESERVED_INVENTORY_PREDECESSOR.rotationId;
+  const currentApproval = { ...brokerApproval, issuedAt: "2026-10-15T06:00:00.000Z", expiresAt: "2026-10-15T07:00:00.000Z", nonce: "abcdef12-1234-1234-1234-123456789abc" };
+  const signedApproval = JSON.stringify(currentApproval);
+  const identity = createPreDeploymentOperationIdentity({ approvalId, releaseSha: sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, imageDigest: image });
+  const operationKey = preDeploymentOperationKey(identity);
+  const replay = { ...identity, operationKey, nonce: currentApproval.nonce, expiresAt: currentApproval.expiresAt };
+  const claimTx = freshInventoryRecoveryTransaction({ table: STAGE_B.replayTable, successor: replay, predecessor: COMPLETED_INVENTORY_PREDECESSOR, now: new Date("2026-10-15T06:10:00.000Z") });
+  assert.equal(claimTx.TransactItems.length, 4);
+  assert.equal(claimTx.TransactItems[0].ConditionCheck.ExpressionAttributeValues[":old"].S, COMPLETED_INVENTORY_PREDECESSOR.operationKey);
+  assert.equal(claimTx.TransactItems[1].ConditionCheck.ConditionExpression, "attribute_not_exists(approvalMode)");
+  assert.equal(claimTx.TransactItems[2].Put.Item.expiresAt, undefined);
+  assert.equal(claimTx.TransactItems[2].Put.Item.recoveryDeadline.N, String(Math.floor(Date.parse("2026-10-15T06:10:00.000Z") / 1000) + 1_200));
+  assert.notEqual(operationKey, COMPLETED_INVENTORY_PREDECESSOR.operationKey);
+  assert.throws(() => freshInventoryRecoveryTransaction({ table: STAGE_B.replayTable, successor: { ...replay, releaseSha: COMPLETED_INVENTORY_PREDECESSOR.sourceSha }, predecessor: COMPLETED_INVENTORY_PREDECESSOR }), /independently identified/);
+  assert.throws(() => freshInventoryRecoveryTransaction({ table: STAGE_B.replayTable, successor: replay, predecessor: { ...COMPLETED_INVENTORY_PREDECESSOR, recoveryEvidenceSha256: "0".repeat(64) } }), /independently identified/);
+  assert.throws(() => freshInventoryRecoveryTransaction({ table: STAGE_B.replayTable, successor: { ...replay, rotationId: "rotation-wrong" }, predecessor: COMPLETED_INVENTORY_PREDECESSOR }), /independently identified/);
+  const restart = resumeFreshInventoryTransaction({ table: STAGE_B.replayTable, successor: replay, predecessor: COMPLETED_INVENTORY_PREDECESSOR, now: new Date("2026-10-15T06:13:00.000Z") });
+  assert.match(restart.TransactItems[2].Update.ConditionExpression, /restartAfter <= :now AND recoveryDeadline > :now/);
+  assert.match(restart.TransactItems[3].ConditionCheck.ConditionExpression, /attribute_not_exists\(taskArns\)/);
+
+  let claimed = false, launches = 0, stops = 0, completions = 0;
+  let durableReceipt;
+  const handler = createPreDeploymentInventoryHandler({
+    config: brokerConfig, executingBrokerVersion: "1", readApproval: async () => signedApproval, verifySignature: async () => true,
+    claimFreshInventoryOperation: async value => { if (claimed) throw new Error("ConditionalCheckFailed"); claimed = true; assert.deepEqual(value.successor, replay); },
+    resumeFreshInventoryOperation: async () => { throw new Error("ConditionalCheckFailed"); },
+    recordFreshInventoryCompleted: async value => { completions++; const tx = completedInventoryTransaction({ table: STAGE_B.replayTable, ...value }); durableReceipt = Object.fromEntries(Object.entries(tx.TransactItems[1].Put.Item).map(([key, item]) => [key, item.S])); },
+    recordPreDeploymentTaskStarted: async () => {}, markPreDeploymentLaunchUncertain: async () => {},
+    describeTaskDefinition: async () => ({ taskDefinition: brokerDefinition(), tags: brokerTags }),
+    runTask: async () => { launches++; return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+    describeTasks: async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: rotationId }], containers: [{ name: "inventory", exitCode: 0 }] }] }),
+    describeLogStreams: async () => ({ logStreams: [{ logStreamName: `predeployment-inventory/inventory/${brokerTaskArn.split("/").at(-1)}` }] }),
+    getLogEvents: async () => ({ events: [{ message: JSON.stringify(inventory) }] }),
+    stopTask: async () => { stops++; }, now: () => new Date("2026-10-15T06:10:00.000Z"), monotonicNow: () => 0,
+  });
+  const event = { operation: "production-predeployment-rotation-inventory", approvalId, sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, newInventoryAfterCompleted: COMPLETED_INVENTORY_PREDECESSOR };
+  const [first, second] = await Promise.allSettled([handler(event), handler(event)]);
+  assert.equal([first, second].filter(value => value.status === "fulfilled").length, 1);
+  assert.equal(launches, 1); assert.equal(stops, 1); assert.equal(completions, 1);
+  assert.equal(durableReceipt.approvalMode, inventoryCompletionKey(operationKey));
+  assert.equal(durableReceipt.expiresAt, undefined);
+  await assert.rejects(handler(event), /ConditionalCheckFailed/);
+  assert.equal(launches, 1);
+  await assert.rejects(handler({ ...event, sourceSha: COMPLETED_INVENTORY_PREDECESSOR.sourceSha }), /signed release|authorization|approval/i);
+  await assert.rejects(handler({ ...event, newInventoryAfterCompleted: { ...COMPLETED_INVENTORY_PREDECESSOR, operationKey: "forged" } }), /binding is invalid/);
+
+  const continuationConfig = { sourceSha, imageReleaseSha, rotationId, ticket: currentApproval.ticketId, inventoryApprovalId: approvalId, inventoryTaskDefinitionArn: brokerTaskDefinitionArn, overlapTaskInput: { backendImage: image }, completedInventoryAdoptionRequired: true };
+  const originalConfig = { ...continuationConfig, completedInventoryAdoptionRequired: false, newInventoryAfterCompleted: COMPLETED_INVENTORY_PREDECESSOR };
+  const authenticated = await authenticateFreshInventoryCompletionReceipt(durableReceipt, { config: continuationConfig, verifySignature: async () => true });
+  assert.equal(authenticated.identity.releaseSha, sourceSha);
+  const evidence = await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: "7".repeat(64), continuationConfig, continuationConfigSha256: "8".repeat(64), completionReceipt: durableReceipt, now: new Date("2026-11-16T10:00:00.000Z"), verifySignature: async () => true, sign: async () => "AA==" });
+  assert.equal(evidence.payload.schemaVersion, 2);
+  assert.equal((await authenticateCompletedInventoryAdoptionEvidence(evidence, { config: continuationConfig, configSha256: "8".repeat(64), now: new Date("2026-11-16T10:00:00.000Z") }, async () => true)).taskArn, brokerTaskArn);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt({ ...durableReceipt, inventorySha256: "0".repeat(64) }, { config: continuationConfig, verifySignature: async () => true }), /result changed/);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt({ ...durableReceipt, sourceSha: "f".repeat(40) }, { config: continuationConfig, verifySignature: async () => true }), /identity is invalid/);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt({ ...durableReceipt, signedApproval: JSON.stringify({ ...currentApproval, expiresAt: "2026-10-15T06:05:00Z" }) }, { config: continuationConfig, verifySignature: async () => true }), /expired/);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt(durableReceipt, { config: { ...continuationConfig, ticket: "CHG-WRONG" }, verifySignature: async () => true }), /ticket/);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt(durableReceipt, { config: continuationConfig, verifySignature: async () => false }), /signature verification failed/);
+  await assert.rejects(authenticateFreshInventoryCompletionReceipt({ ...durableReceipt, predecessorOperationKey: "forged" }, { config: continuationConfig, verifySignature: async () => true }), /identity is invalid/);
+
+  for (const interruptedAt of ["reservation", "task-start", "completion-response"]) {
+    let reserved = false, persistedCompletion, simulatedTime = Date.parse("2026-10-15T06:10:00.000Z"), first = true;
+    const clientTokens = new Set();
+    const interrupted = createPreDeploymentInventoryHandler({
+      config: brokerConfig, executingBrokerVersion: "1", readApproval: async () => signedApproval, verifySignature: async () => true,
+      claimFreshInventoryOperation: async () => { if (reserved) throw new Error("ConditionalCheckFailed"); reserved = true; if (interruptedAt === "reservation") throw new Error("lost reservation response"); },
+      resumeFreshInventoryOperation: async value => {
+        const tx = resumeFreshInventoryTransaction({ table: STAGE_B.replayTable, ...value });
+        assert.match(tx.TransactItems[2].Update.ConditionExpression, /restartAfter <= :now/);
+        if (simulatedTime < Date.parse("2026-10-15T06:13:00.000Z") || persistedCompletion) throw new Error("ConditionalCheckFailed");
+      },
+      recordPreDeploymentTaskStarted: async value => { assert.equal(value.allowIdempotent, true); if (interruptedAt === "task-start" && first) throw new Error("lost task-start response"); },
+      recordFreshInventoryCompleted: async value => { persistedCompletion = Object.fromEntries(Object.entries(completedInventoryTransaction({ table: STAGE_B.replayTable, ...value }).TransactItems[1].Put.Item).map(([key, item]) => [key, item.S])); if (interruptedAt === "completion-response" && first) throw new Error("lost completion response"); },
+      markPreDeploymentLaunchUncertain: async () => {}, describeTaskDefinition: async () => ({ taskDefinition: brokerDefinition(), tags: brokerTags }),
+      runTask: async request => { assert.match(request.clientToken, /^[a-f0-9]{36}$/); clientTokens.add(request.clientToken); return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+      describeTasks: async () => ({ tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: "STOPPED", tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: sourceSha }, { key: "RotationId", value: rotationId }], containers: [{ name: "inventory", exitCode: 0 }] }] }),
+      describeLogStreams: async () => ({ logStreams: [{ logStreamName: `predeployment-inventory/inventory/${brokerTaskArn.split("/").at(-1)}` }] }),
+      getLogEvents: async () => ({ events: [{ message: JSON.stringify(inventory) }] }), stopTask: async () => {},
+      now: () => new Date(simulatedTime), monotonicNow: () => 0,
+    });
+    await assert.rejects(interrupted(event), interruptedAt === "reservation" ? /ConditionalCheckFailed/ : /lost .* response/);
+    await assert.rejects(interrupted(event), /ConditionalCheckFailed/);
+    simulatedTime += 180_000; first = false;
+    if (interruptedAt !== "completion-response") assert.equal((await interrupted(event)).status, "completed");
+    else await assert.rejects(interrupted(event), /ConditionalCheckFailed/);
+    assert.ok(clientTokens.size <= 1);
+    if (interruptedAt === "completion-response") assert.equal((await authenticateFreshInventoryCompletionReceipt(persistedCompletion, { config: continuationConfig, verifySignature: async () => true })).identity.releaseSha, sourceSha);
+  }
+
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-fresh-inventory-restart-"));
+  chmodSync(directory, 0o700);
+  const save = (file, value) => { const bytes = Buffer.from(`${JSON.stringify(value)}\n`); writeFileSync(file, bytes, { mode: 0o600 }); return createHash("sha256").update(bytes).digest("hex"); };
+  try {
+    const originalPath = path.join(directory, "original.json"), continuationPath = path.join(directory, "rotation-config.json");
+    const originalHash = save(originalPath, originalConfig);
+    const continuation = { ...continuationConfig, rotationConfigFile: continuationPath, rotationStateFile: path.join(directory, "rotation-state.json") };
+    const continuationHash = save(continuationPath, continuation);
+    save(path.join(directory, "cutover-runtime-manifest.json"), { runtimeConfigSha256: continuationHash, readyToConsumeMfa: true });
+    const row = Object.fromEntries(Object.entries(durableReceipt).map(([key, value]) => [key, { S: value }]));
+    const calls = [];
+    const readAws = args => {
+      calls.push(args[0] + " " + args[1]);
+      if (args[0] === "dynamodb" && args[1] === "get-item") return JSON.stringify({ Item: row });
+      if (args[0] === "sts" && args[1] === "get-caller-identity") return JSON.stringify({ Arn: `arn:aws:iam::${STAGE_B.account}:root` });
+      if (args[0] === "kms" && args[1] === "verify") return JSON.stringify({ SignatureValid: true });
+      throw new Error(`Unexpected adoption call ${args[0]} ${args[1]}`);
+    };
+    let signs = 0;
+    const signAws = args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/fixture` }) : (signs++, JSON.stringify({ Signature: "AA==" }));
+    const argv = ["--original-config", originalPath, "--original-config-sha256", originalHash, "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash];
+    const produced = await prepareCompletedInventoryAdoption({ argv, runRead: readAws, runSign: signAws });
+    const resumed = await prepareCompletedInventoryAdoption({ argv, runRead: readAws, runSign: signAws });
+    assert.equal(produced.outputPath, resumed.outputPath); assert.equal(resumed.reused, true); assert.equal(signs, 1);
+    assert.ok(!calls.some(call => call.startsWith("ecs ") || call.startsWith("lambda ")));
+    const proof = JSON.parse(readFileSync(produced.outputPath));
+    assert.equal(proof.payload.completionReceiptSha256, authenticated.receiptSha256);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("fresh inventory preserves its ECS task across interrupted launch, polling, logs and receipt writes", async () => {
+  const rotationId = PRESERVED_INVENTORY_PREDECESSOR.rotationId;
+  const signedApproval = JSON.stringify({ ...brokerApproval, issuedAt: "2026-10-15T06:00:00.000Z", expiresAt: "2026-10-15T07:00:00.000Z", nonce: "abcdef12-1234-1234-1234-123456789abc" });
+  const event = { operation: "production-predeployment-rotation-inventory", approvalId, sourceSha, imageReleaseSha, rotationId, taskDefinitionArn: brokerTaskDefinitionArn, newInventoryAfterCompleted: COMPLETED_INVENTORY_PREDECESSOR };
+  for (const failure of ["lost-run-response", "task-start", "poll", "running", "logs", "completion-write", "terminal-failure", "identity-mismatch"]) {
+    let nowMs = Date.parse("2026-10-15T06:10:00.000Z"), reserved = false, first = true, stops = 0, completions = 0, runs = 0, uncertain = 0, polls = 0;
+    const tokens = new Set();
+    const makeHandler = () => createPreDeploymentInventoryHandler({
+      config: brokerConfig, executingBrokerVersion: "1", readApproval: async () => signedApproval, verifySignature: async () => true,
+      claimFreshInventoryOperation: async () => { if (reserved) throw new Error("ConditionalCheckFailed"); reserved = true; },
+      resumeFreshInventoryOperation: async value => {
+        const transaction = resumeFreshInventoryTransaction({ table: STAGE_B.replayTable, ...value });
+        assert.match(transaction.TransactItems[2].Update.ConditionExpression, /recoveryDeadline > :now/);
+        if (nowMs < Date.parse("2026-10-15T06:13:00.000Z") || nowMs >= Date.parse("2026-10-15T06:30:00.000Z")) throw new Error("ConditionalCheckFailed");
+      },
+      recordPreDeploymentTaskStarted: async ({ allowIdempotent }) => { assert.equal(allowIdempotent, true); if (first && failure === "task-start") throw new Error("recording unavailable"); },
+      recordFreshInventoryCompleted: async () => { if (first && failure === "completion-write") throw new Error("receipt store unavailable"); completions++; },
+      markPreDeploymentLaunchUncertain: async () => { uncertain++; },
+      describeTaskDefinition: async () => ({ taskDefinition: brokerDefinition(), tags: brokerTags }),
+      runTask: async request => { runs++; tokens.add(request.clientToken); if (first && failure === "lost-run-response") throw new Error("RunTask response lost"); return { failures: [], tasks: [{ taskArn: brokerTaskArn }] }; },
+      describeTasks: async () => {
+        polls++;
+        if (first && ["poll", "running"].includes(failure)) throw new Error("DescribeTasks unavailable");
+        return { tasks: [{ taskArn: brokerTaskArn, taskDefinitionArn: brokerTaskDefinitionArn, lastStatus: failure === "running" && polls === 2 ? "RUNNING" : "STOPPED",
+          tags: [{ key: "MSCQRPreDeploymentInventory", value: "rotation-inventory" }, { key: "ReleaseSha", value: failure === "identity-mismatch" ? "f".repeat(40) : sourceSha }, { key: "RotationId", value: rotationId }],
+          containers: [{ name: "inventory", exitCode: failure === "terminal-failure" ? 1 : 0 }] }] };
+      },
+      describeLogStreams: async () => ({ logStreams: [{ logStreamName: `predeployment-inventory/inventory/${brokerTaskArn.split("/").at(-1)}` }] }),
+      getLogEvents: async () => { if (first && failure === "logs") throw new Error("CloudWatch unavailable"); return { events: [{ message: JSON.stringify(inventory) }] }; },
+      stopTask: async () => { stops++; }, now: () => new Date(nowMs), monotonicNow: () => 0, sleep: async () => {},
+    });
+    await assert.rejects(makeHandler()(event), undefined, failure);
+    assert.equal(stops, 0, `${failure}: transient or terminal failure stopped the immutable task`);
+    assert.equal(completions, 0, `${failure}: completion was fabricated`);
+    await assert.rejects(makeHandler()(event), /ConditionalCheckFailed/, `${failure}: concurrent retry passed the fence`);
+    nowMs += 181_000; first = false;
+    if (["terminal-failure", "identity-mismatch"].includes(failure)) {
+      await assert.rejects(makeHandler()(event), /did not exit successfully|identity or tags changed/);
+      assert.equal(stops, 0);
+      assert.equal(completions, 0);
+    } else {
+      assert.equal((await makeHandler()(event)).status, "completed", failure);
+      assert.equal(stops, 1);
+      assert.equal(completions, 1);
+    }
+    assert.equal(tokens.size, 1, `${failure}: retry used a different ECS idempotency token`);
+    assert.ok(runs <= 2 && uncertain <= 2, `${failure}: retry duplicated an operation`);
+    nowMs = Date.parse("2026-10-15T06:31:00.000Z");
+    await assert.rejects(makeHandler()(event), /ConditionalCheckFailed/, `${failure}: expired ECS idempotency window was reused`);
+  }
 });
