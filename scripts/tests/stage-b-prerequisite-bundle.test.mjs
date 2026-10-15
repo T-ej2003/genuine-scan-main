@@ -13,6 +13,7 @@ import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND_CONFIG } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { runStageBStateReconciliation } from "../aws/reconcile-production-green-stage-b-state.mjs";
+import { restoreBoundStageAInputs } from "../aws/production-release-coordinator.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "../aws/validate-stage-b-image-reuse.mjs";
 import { assertStageBPrerequisiteBundle, createStageBPrerequisiteBundle, materializeStageBPrerequisites, writeStageBRuntimeMaterialization, STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW } from "../aws/stage-b-prerequisite-bundle.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -40,6 +41,37 @@ async function fixture() {
 }
 
 test.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+test("cutover input materialization restores omitted Stage A inputs without changing immutable evidence", async () => {
+  const f = await fixture();
+  const stateBytes = fs.readFileSync(f.statePath), inputBytes = fs.readFileSync(f.stageAInputPath);
+  const stateTarget = path.join(f.directory, "stage-a-state-backup.json");
+  const binding = { stageAInputPath: f.stageAInputPath, stageAStateBackupPath: stateTarget,
+    toolingSha: sourceSha, toolingTreeSha256, stageAInputSha256: crypto.createHash("sha256").update(inputBytes).digest("hex"),
+    stageAStateBackupSha256: stageAStateSemanticSha256(JSON.parse(stateBytes)) };
+  const files = { tfvars: f.tfvarsPath }, preparation = { sourceSha, treeSha256: toolingTreeSha256 };
+  fs.rmSync(f.stageAInputPath);
+  let reads = 0;
+  const readOnlyRun = (args) => {
+    if (args[0] === "s3api" && args[1] === "get-object") {
+      reads++; fs.writeFileSync(args[args.indexOf("--expected-bucket-owner") + 2], stateBytes, { mode: 0o600 }); return "";
+    }
+    return run(args);
+  };
+  const restore = (evidence = binding, awsRun = readOnlyRun) => restoreBoundStageAInputs({ bindingBytes: Buffer.from(JSON.stringify(evidence)),
+    files, preparation, repositoryRoot, run: awsRun });
+  assert.throws(() => restore({ ...binding, stageAInputSha256: "0".repeat(64) }), /Stage A input differs/);
+  assert.equal(fs.existsSync(f.stageAInputPath), false); assert.equal(fs.existsSync(stateTarget), false);
+  assert.throws(() => restore(binding, null), /credentialed Stage A evidence reader/);
+  restore();
+  assert.deepEqual(fs.readFileSync(f.stageAInputPath), inputBytes);
+  assert.deepEqual(fs.readFileSync(stateTarget), stateBytes);
+  assert.equal(reads, 2);
+  restore(binding, () => assert.fail("Completed hydration must not reread AWS"));
+  assert.throws(() => restore({ ...binding, stageAStateBackupPath: f.statePath }), /strictly equal/);
+  fs.appendFileSync(f.stageAInputPath, "tampered");
+  assert.throws(() => restore(), /Stage A input differs/);
+});
 
 test("one producer bundle authenticates realistic payloads and private relocation", async () => {
   const first = await fixture();

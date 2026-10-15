@@ -1,0 +1,5 @@
+# Cutover Stage A hydration reachability review
+
+The changed executable inputs are the governed release coordinator, its protected cutover authorization runner and their tests. The correction reads the existing Stage A state through the release deployer's current AWS credential source, regenerates the canonical prerequisite input and compares both to the captured binding before approval. It adds no dependency, frontend code, build glob, runtime package or attacker-controlled build input.
+
+An unfiltered OSV Scanner 2.6.0 scan of both lockfiles found only the existing development-only `braces@3.0.3` advisory `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. The canonical production browser build transformed 3,993 modules, enumerated 204 packages and contained no braces package. Backend, worker and Nginx packaging contracts were rechecked by the runtime gate. The reviewed executable/build-input digest is `ca72206d77b62c5d396601b0de32dcbd0af71ee9d7befd45247cc8cad88bcb4b`; the OSV runtime gate passed. The existing acceptance owner, scope, no-runtime conclusion and exclusive 2026-11-02 expiry are unchanged.
