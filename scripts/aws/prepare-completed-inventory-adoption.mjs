@@ -21,7 +21,7 @@ const read = (argv, name) => {
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fromAws = item => Object.fromEntries(Object.entries(item || {}).map(([key, value]) => [key, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
 
-export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign } = {}) {
+export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
   const originalPath = path.resolve(read(argv, "original-config"));
   const originalHash = read(argv, "original-config-sha256");
   const continuationPath = path.resolve(read(argv, "continuation-config"));
@@ -33,10 +33,13 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
   const fresh = canonicalJson(originalConfig.newInventoryAfterCompleted) === canonicalJson(COMPLETED_INVENTORY_PREDECESSOR);
   const crossSource = originalConfig.sourceSha !== continuationConfig.sourceSha;
   if (crossSource && (!fresh || continuationConfig.completedInventoryPredecessorSourceSha !== originalConfig.sourceSha)) throw new Error("Cross-source inventory adoption requires the exact durable predecessor.");
-  if (crossSource) readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: continuationConfig.sourceSha, requireCanonicalRepository: true });
-  const proveDescendant = ({ ancestorSha, descendantSha }) => {
+  const toolingSha = continuationConfig.recoveryTooling?.sourceSha || continuationConfig.sourceSha;
+  if (crossSource && (manifest.releaseSourceSha !== continuationConfig.sourceSha || manifest.protectedMainSha !== toolingSha
+      || (continuationConfig.recoveryTooling && continuationConfig.recoveryTooling.releaseSourceSha !== continuationConfig.sourceSha))) throw new Error("Cross-source inventory runtime tooling or release identity changed.");
+  if (crossSource) authenticateCheckout({ cwd: root, expectedSourceSha: toolingSha, requireCanonicalRepository: true });
+  const proveDescendant = proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
-  };
+  });
   if (crossSource && !proveDescendant({ ancestorSha: originalConfig.sourceSha, descendantSha: continuationConfig.sourceSha })) throw new Error("Inventory successor source ancestry is invalid.");
   const currentApproval = crossSource ? readBoundStageBPrivateJson({ filePath: path.resolve(read(argv, "current-approval")), expectedSha256: read(argv, "current-approval-sha256"), repositoryRoot: root, label: "Current-source Stage B approval" }) : null;
   const receiptReader = crossSource ? runSign : runRead;
@@ -66,7 +69,7 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {
       const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
-      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant }, verifySignature);
+      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now }, verifySignature);
       if (fresh) {
         const authenticated = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: crossSource ? originalConfig : continuationConfig, verifySignature });
         if (payload.completionReceiptSha256 !== authenticated.receiptSha256 || payload.taskArn !== completionReceipt.taskArn) throw new Error("Persisted inventory adoption differs from durable completion.");
@@ -75,7 +78,7 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
       return { outputPath, expiresAt: payload.expiresAt, operationKey: payload.operationKey, reused: true };
     }
     const evidence = fresh
-      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt, currentApproval, proveDescendant, verifySignature, sign })
+      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt, currentApproval, proveDescendant, verifySignature, sign, now })
       : await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign });
     ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root });
     writeStageBPrivateFileExclusive({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`), repositoryRoot: root, label: "Completed inventory adoption evidence" });

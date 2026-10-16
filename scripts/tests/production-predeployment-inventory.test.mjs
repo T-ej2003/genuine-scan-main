@@ -1085,6 +1085,52 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     const proof = JSON.parse(readFileSync(produced.outputPath));
     assert.equal(proof.payload.completionReceiptSha256, authenticated.receiptSha256);
   } finally { rmSync(directory, { recursive: true, force: true }); }
+  const futureDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-future-inventory-adoption-"));
+  chmodSync(futureDirectory, 0o700);
+  try {
+    const toolingSha = "d".repeat(40);
+    const saveFuture = (name, value) => {
+      const file = path.join(futureDirectory, name);
+      const bytes = Buffer.from(`${JSON.stringify(value)}\n`);
+      writeFileSync(file, bytes, { mode: 0o600 });
+      return { file, sha256: createHash("sha256").update(bytes).digest("hex") };
+    };
+    const original = saveFuture("original.json", originalConfig);
+    const continuationPath = path.join(futureDirectory, "continuation.json");
+    const futureConfig = { ...successorConfig, recoveryTooling: { sourceSha: toolingSha, releaseSourceSha: successorSha },
+      rotationConfigFile: continuationPath, rotationStateFile: path.join(futureDirectory, "state.json") };
+    const continuation = saveFuture("continuation.json", futureConfig);
+    saveFuture("cutover-runtime-manifest.json", { runtimeConfigSha256: continuation.sha256, readyToConsumeMfa: true,
+      releaseSourceSha: successorSha, protectedMainSha: toolingSha });
+    const approval = saveFuture("approval.json", successorApproval);
+    const argv = ["--original-config", original.file, "--original-config-sha256", original.sha256,
+      "--continuation-config", continuation.file, "--continuation-config-sha256", continuation.sha256,
+      "--current-approval", approval.file, "--current-approval-sha256", approval.sha256];
+    const receiptItem = Object.fromEntries(Object.entries(durableReceipt).map(([key, value]) => [key, { S: value }]));
+    const calls = [], checkoutShas = [];
+    const readAws = args => { calls.push(args); if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/fixture` }); throw new Error("Unexpected reader call"); };
+    const signAws = args => {
+      calls.push(args);
+      if (args[0] === "dynamodb") return JSON.stringify({ Item: receiptItem });
+      if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/fixture` });
+      if (args[0] === "kms" && args[1] === "verify") return JSON.stringify({ SignatureValid: true });
+      if (args[0] === "kms" && args[1] === "sign") return JSON.stringify({ Signature: "AA==" });
+      throw new Error("Unexpected signer call");
+    };
+    const options = { argv, root: process.cwd(), runRead: readAws, runSign: signAws,
+      authenticateCheckout: ({ expectedSourceSha }) => checkoutShas.push(expectedSourceSha),
+      proveSourceAdvance: ancestry, now: new Date("2026-11-16T10:00:00.000Z") };
+    const produced = await prepareCompletedInventoryAdoption(options);
+    const resumed = await prepareCompletedInventoryAdoption(options);
+    assert.equal(resumed.reused, true);
+    assert.deepEqual(checkoutShas, [toolingSha, toolingSha]);
+    assert.equal(JSON.parse(readFileSync(produced.outputPath)).payload.continuationSourceSha, successorSha);
+    assert.ok(!calls.some(args => ["ecs", "lambda"].includes(args[0])));
+    saveFuture("cutover-runtime-manifest.json", { runtimeConfigSha256: continuation.sha256, readyToConsumeMfa: true,
+      releaseSourceSha: successorSha, protectedMainSha: successorSha });
+    await assert.rejects(prepareCompletedInventoryAdoption(options), /tooling or release identity/);
+    assert.equal(checkoutShas.length, 2);
+  } finally { rmSync(futureDirectory, { recursive: true, force: true }); }
 });
 
 test("fresh inventory preserves its ECS task across interrupted launch, polling, logs and receipt writes", async () => {
