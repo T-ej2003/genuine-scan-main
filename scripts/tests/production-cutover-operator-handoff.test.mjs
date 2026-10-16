@@ -135,6 +135,21 @@ test("operator authenticates both runtime config reads before MFA", async () => 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test("cross-source successor is authenticated before Terraform planning or MFA", async () => {
+  const sequence = [];
+  const options = { argv, stdin: { isTTY: true }, stdout: { isTTY: true },
+    validateConfig: () => ({ rotationSuccessor: { predecessorSourceSha: "c".repeat(40) }, releaseProfile: "mscqr-production-release-deployer" }),
+    authenticateCheckout: () => sequence.push("checkout"), authenticateInventory: () => sequence.push("inventory"),
+    authenticateSuccessor: () => { sequence.push("successor"); throw new Error("successor signature invalid"); },
+    preflightRotation: () => sequence.push("terraform"), prompt: async () => { sequence.push("MFA"); return values.MSCQR_VERIFIER_MFA_SERIAL; },
+    spawnChild: () => { sequence.push("child"); return childThatExits()(); } };
+  await assert.rejects(runOperator(options), /successor signature invalid/);
+  assert.deepEqual(sequence, ["checkout", "inventory", "successor"]);
+  const result = await runOperator({ ...options, authenticateSuccessor: () => sequence.push("successor-ok") });
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(sequence.slice(3), ["checkout", "inventory", "successor-ok", "terraform", "MFA", "child"]);
+});
+
 const inputFor = (prompt) => values[prompt.includes("verifier MFA serial") ? "MSCQR_VERIFIER_MFA_SERIAL" : prompt.includes("administrator email") ? "MSCQR_ONBOARDING_EMAIL" : prompt.includes("administrator password") ? "MSCQR_ONBOARDING_PASSWORD" : prompt.includes("tenant-canary email") ? "MSCQR_CANARY_ORDINARY_EMAIL" : "MSCQR_CANARY_ORDINARY_PASSWORD"];
 
 const childThatExits = ({ code = 0, signal = null, capture } = {}) => (file, args, options) => {

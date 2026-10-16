@@ -11,7 +11,10 @@ import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from ".
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
 import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
 import { prepareCompletedInventoryAdoption } from "../aws/prepare-completed-inventory-adoption.mjs";
-import { authenticateRotationSuccessor, signRotationSuccessor } from "../aws/production-rotation-successor.mjs";
+import { prepareProductionRotationSuccessor } from "../aws/prepare-production-rotation-successor.mjs";
+import { authenticatePreparedRotationSuccessor, authenticateRotationSuccessor, signRotationSuccessor } from "../aws/production-rotation-successor.mjs";
+import { validateRuntimeProof } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageReleaseSha = "9".repeat(40);
@@ -936,9 +939,9 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
   assert.equal(successor.payload.schemaVersion, 3);
   assert.equal(successor.payload.operationKey, operationKey);
   assert.equal((await authenticateCompletedInventoryAdoptionEvidence(successor, { config: successorConfig, configSha256: "8".repeat(64), now: new Date("2026-11-16T10:00:00.000Z"), proveDescendant: ancestry }, async () => true)).sourceSha, sourceSha);
-  const predecessorState = { stateVersion: 4, rotationId, sourceSha, overlapDeploymentSha: sourceSha, phase: "overlap-deploy-required", inventoryEvidenceSha256: successor.payload.inventorySha256 };
-  const successorRotationConfig = { ...successorConfig, rotationSuccessor: { predecessorSourceSha: sourceSha, predecessorStateSha256: "5".repeat(64), predecessorFixtureSha256: "6".repeat(64), inventoryEvidenceSha256: successor.payload.inventorySha256 } };
-  const transition = { config: successorRotationConfig, configSha256: "8".repeat(64), predecessorState, predecessorStateSha256: "5".repeat(64), predecessorFixtureSha256: "6".repeat(64), inventoryEvidence: successor, proveDescendant: ancestry, verifySignature: async () => true, now: new Date("2026-11-16T10:00:00.000Z") };
+  const predecessorState = { stateVersion: 4, rotationId, sourceSha, overlapDeploymentSha: sourceSha, phase: "overlap-deploy-required", minimumGraceSeconds: 2592000, inventoryEvidenceSha256: successor.payload.inventorySha256 };
+  const successorRotationConfig = { ...successorConfig, rotationSuccessor: { predecessorSourceSha: sourceSha, predecessorConfigSha256: "7".repeat(64), predecessorStateSha256: "5".repeat(64), predecessorFixtureSha256: "6".repeat(64), inventoryEvidenceSha256: successor.payload.inventorySha256 } };
+  const transition = { config: successorRotationConfig, configSha256: "8".repeat(64), predecessorState, predecessorStateSha256: "5".repeat(64), predecessorFixtureSha256: "6".repeat(64), predecessorStatusSha256: "4".repeat(64), inventoryEvidence: successor, proveDescendant: ancestry, verifySignature: async () => true, now: new Date("2026-11-16T10:00:00.000Z") };
   const signedRotation = await signRotationSuccessor({ ...transition, sign: async () => "AA==" });
   await assert.doesNotReject(authenticateRotationSuccessor({ ...transition, ...signedRotation, fixtureSha256: "6".repeat(64) }));
   await assert.rejects(authenticateRotationSuccessor({ ...transition, ...signedRotation, fixtureSha256: "7".repeat(64) }), /fixture lineage/);
@@ -946,6 +949,65 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
   await assert.rejects(authenticateRotationSuccessor({ ...transition, ...signedRotation, proveDescendant: () => false, fixtureSha256: "6".repeat(64) }), /source or fixture lineage/);
   await assert.rejects(authenticateRotationSuccessor({ ...transition, ...signedRotation, verifySignature: async () => false, fixtureSha256: "6".repeat(64) }), /signature|approval/);
   await assert.rejects(authenticateRotationSuccessor({ ...transition, ...signedRotation, now: new Date("2026-11-16T10:31:00.000Z"), fixtureSha256: "6".repeat(64) }), /expired|lifetime/);
+  {
+  const fs = await import("node:fs");
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-successor-test-"));
+  chmodSync(directory, 0o700);
+  try {
+    const repository = path.join(directory, "checkout"); fs.mkdirSync(repository);
+    const originalConfigFile = path.join(directory, "original-config.json"), originalStateFile = path.join(directory, "original-state.json"), originalFixtureFile = path.join(directory, "original-fixture.json");
+    const continuation = path.join(directory, "continuation"); fs.mkdirSync(continuation, { mode: 0o700 });
+    const original = { ...originalConfig, rotationStateFile: originalStateFile, rotationFixtureFile: originalFixtureFile };
+    const predecessorBytes = Buffer.from(`${JSON.stringify(original)}\n`);
+    const stateBytes = Buffer.from(`${JSON.stringify(predecessorState)}\n`);
+    const fixtureBytes = Buffer.from('{"fixture":"preserved"}\n');
+    for (const [file, bytes] of [[originalConfigFile, predecessorBytes], [originalStateFile, stateBytes], [originalFixtureFile, fixtureBytes]]) writeFileSync(file, bytes, { mode: 0o600 });
+    const configFile = path.join(continuation, "rotation-config.json"), stateFile = path.join(continuation, "rotation-state.json"), fixtureFile = path.join(continuation, "rotation-fixture.json");
+    const nextConfig = { ...successorConfig, rotationConfigFile: configFile, rotationStateFile: stateFile, rotationFixtureFile: fixtureFile, overlapRuntimeProofFile: path.join(continuation, "overlap-runtime-proof.json"), minimumGraceSeconds: 2592000, releaseProfile: "mscqr-production-release-deployer",
+      rotationSuccessor: { predecessorSourceSha: sourceSha, predecessorConfigFile: originalConfigFile, predecessorConfigSha256: createHash("sha256").update(predecessorBytes).digest("hex"), predecessorStateFile: originalStateFile, predecessorStateSha256: createHash("sha256").update(stateBytes).digest("hex"), predecessorFixtureFile: originalFixtureFile, predecessorFixtureSha256: createHash("sha256").update(fixtureBytes).digest("hex"), inventoryEvidenceSha256: successor.payload.inventorySha256 } };
+    const configBytes = Buffer.from(`${JSON.stringify(nextConfig)}\n`), configHash = createHash("sha256").update(configBytes).digest("hex");
+    writeFileSync(configFile, configBytes, { mode: 0o600 });
+    writeFileSync(path.join(continuation, "cutover-runtime-manifest.json"), JSON.stringify({ runtimeConfigSha256: configHash, readyToConsumeMfa: true, releaseSourceSha: successorSha, protectedMainSha: successorSha }), { mode: 0o600 });
+    const inventoryAdoption = await buildFreshInventoryAdoptionEvidence({ originalConfig: original, originalConfigSha256: nextConfig.rotationSuccessor.predecessorConfigSha256, continuationConfig: nextConfig, continuationConfigSha256: configHash, completionReceipt: durableReceipt, currentApproval: successorApproval, proveDescendant: ancestry, now: new Date("2026-11-16T10:00:00.000Z"), verifySignature: async () => true, sign: async () => "AA==" });
+    writeFileSync(path.join(continuation, "inventory-completed-adoption-evidence.json"), JSON.stringify(inventoryAdoption), { mode: 0o600 });
+    let signed = 0, planned = 0;
+    const options = { argv: ["--config", configFile, "--config-sha256", configHash], root: repository, now: new Date("2026-11-16T10:00:00.000Z"),
+      authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry,
+      preflight: () => { planned++; }, statusRun: () => `${JSON.stringify({ mode: "status", phase: "overlap-deploy-required", records: { jwt: { versionId: "v1" } } })}\n`,
+      readAws: args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/test` } : { SignatureValid: true }),
+      signAws: args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/test` } : (signed++, { Signature: "AA==" })) };
+    const first = await prepareProductionRotationSuccessor(options);
+    const second = await prepareProductionRotationSuccessor(options);
+    assert.equal(first.successorStateSha256, second.successorStateSha256);
+    assert.equal(JSON.parse(readFileSync(stateFile)).sourceSha, successorSha);
+    assert.deepEqual(readFileSync(originalStateFile), stateBytes);
+    assert.deepEqual(readFileSync(fixtureFile), fixtureBytes);
+    assert.deepEqual([signed, planned], [1, 2]);
+    const reader = { config: nextConfig, configSha256: configHash, repositoryRoot: repository, runAws: options.readAws, statusRun: options.statusRun, proveSourceAdvance: ancestry, now: options.now };
+    assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.sourceSha, successorSha);
+    await assert.rejects(authenticatePreparedRotationSuccessor({ ...reader, proveSourceAdvance: () => false }), /source or fixture lineage/);
+    const prepared = JSON.parse(readFileSync(stateFile));
+    const observedAt = "2026-11-16T09:59:00.000Z";
+    const runtimeProof = validateRuntimeProof({ proof: { rotationId, phase: "overlap", deploymentSha: successorSha, runtimeInvocationRef: "https://example.test/runtime-overlap", observedAt,
+      jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true,
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: imageReleaseSha, expectedReleaseGitSha: imageReleaseSha, healthObservedAt: observedAt },
+      config: nextConfig, phase: "overlap", expectedDeploymentSha: successorSha, clock: () => options.now.getTime() });
+    writeFileSync(nextConfig.overlapRuntimeProofFile, `${JSON.stringify(runtimeProof)}\n`, { mode: 0o600 });
+    const preparedStateSha256 = createHash("sha256").update(`${JSON.stringify(prepared, null, 2)}\n`).digest("hex");
+    const verifiedBase = { ...prepared, phase: "overlap-ready", overlapRuntime: runtimeProof, overlapReadyAt: observedAt,
+      cleanupEligibleAt: deriveProductionRotationCleanupEligibleAt(observedAt, 2592000), verification: { preparedStateSha256, runtimeInvocationRef: runtimeProof.runtimeInvocationRef } };
+    writeFileSync(stateFile, `${JSON.stringify(verifiedBase, null, 2)}\n`, { mode: 0o600 });
+    assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.phase, "overlap-ready");
+    const verified = { ...verifiedBase, phase: "verified", verifiedAt: "2026-11-16T10:00:00.000Z", verification: { ...verifiedBase.verification,
+      jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, serviceHealthy: true } };
+    writeFileSync(stateFile, `${JSON.stringify(verified, null, 2)}\n`, { mode: 0o600 });
+    assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.phase, "verified");
+    writeFileSync(stateFile, '{}\n', { mode: 0o600 });
+    await assert.rejects(prepareProductionRotationSuccessor(options), /conflicts with signed successor/);
+    await assert.rejects(authenticatePreparedRotationSuccessor(reader), /state differs/);
+    await assert.rejects(prepareProductionRotationSuccessor({ ...options, now: new Date("2026-11-16T10:31:00.000Z") }), /expired|lifetime/);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+  }
   await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence(successor, { config: successorConfig, configSha256: "8".repeat(64), now: new Date("2026-11-16T10:00:00.000Z"), proveDescendant: () => false }, async () => true), /ancestry/);
   await assert.rejects(() => authenticateCompletedInventoryAdoptionEvidence({ ...successor, payload: { ...successor.payload, continuationSourceSha: "d".repeat(40) } }, { config: successorConfig, configSha256: "8".repeat(64), now: new Date("2026-11-16T10:00:00.000Z"), proveDescendant: ancestry }, async () => true), /identity or lifetime/);
   await assert.rejects(authenticateFreshInventoryCompletionReceipt({ ...durableReceipt, inventorySha256: "0".repeat(64) }, { config: continuationConfig, verifySignature: async () => true }), /result changed/);

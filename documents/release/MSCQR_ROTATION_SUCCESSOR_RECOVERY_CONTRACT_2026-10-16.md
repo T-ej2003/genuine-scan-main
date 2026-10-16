@@ -1,0 +1,25 @@
+# Rotation successor recovery contract
+
+This change continues the existing rotation from its protected historical source without editing the original state, fixture, manifest, inventory receipt, or AWS reservation. It does not authorize a production run. The historical prepared source is `0e98970b536a2414324fd64776bc7e32acf604cd`; a future protected descendant is selected through the normal source-bound Stage B preparation. No application image input changes in this correction.
+
+## Evidence and execution
+
+The runtime builder requires the exact historical config, state, and fixture paths and SHA-256 values. It checks the historical source, rotation, phase, inventory hash, and protected ancestry before producing a current-source config. The independent checker signs a successor envelope covering both sources, the ticket, rotation, current config hash, historical byte hashes, live Secrets Manager slot/version status, the signed current-source inventory-adoption evidence, and the derived successor state hash. The producer writes the envelope, successor state, and fixture into a new private directory. Existing files must match byte for byte on restart. The historical files remain unchanged.
+
+The operator checks out clean protected main and authenticates the successor, inventory receipt, and Terraform preflight before requesting MFA. The actual cutover runner checks the same successor again. Inventory adoption uses the original permanent completion receipt and current source-bound approval; it returns the original result without invoking the broker or ECS RunTask. Rotation preparation runs the existing backend coordinator against the successor state; an already prepared rotation returns without Secrets Manager writes. The overlap registration uses an immutable S3 operation journal and an ECS creation-time operation tag. A completed or lost-response registration is adopted only after a full ECS definition/tag readback. If the result remains ambiguous, the operation fails closed rather than registering another revision.
+
+After the controlled overlap deployment, the successor reader accepts only the backend coordinator's authenticated `overlap-ready` and `verified` transitions, bound to the exact prepared-state hash and runtime proof. The ordinary readiness and Release Gate source checks remain in force. A successful prerequisite run, this document, or a signed successor by itself is not deployment approval.
+
+## Recovery and limits
+
+The current-source inventory-adoption approval expires after 30 minutes. A restart after that expiry must obtain fresh governed authorization before unfinished production work; an old signature is not treated as a live approval. If an ECS registration was dispatched but no matching definition or authenticated completion can be read, the journal deliberately blocks another registration under the same operation identity. ECS RegisterTaskDefinition has no client token, so this boundary requires explicit governed reconciliation rather than guessing that a timed-out request failed. A concurrent invocation can win the conditional journal write only once.
+
+The independent checker needs the narrowly scoped DynamoDB completion-receipt `GetItem` permission introduced by this change. That IAM change must be applied through the existing protected authorization path before the successor producer can authenticate the historical inventory. The read-only database verifier remains a separate prerequisite, and the bounded hosted diagnostic may identify a failure stage without exposing secret material.
+
+## Post-merge operator sequence
+
+1. Verify the new protected-main SHA, required CI, change-ticket scope, immutable application image reuse, live Terraform/IAM/Secrets Manager/ECS state, and preserved evidence checksums.
+2. Obtain fresh source-bound inventory-adoption and rotation authorization. Build the current-source runtime config with the exact historical config/state/fixture hashes; persist private files outside temporary directories.
+3. Run the successor producer and the corrected operator preflight. Do not enter MFA until the checkout, configuration, evidence, and Terraform plan pass.
+4. Resume only unfinished overlap work. Authenticate durable readiness, run the governed final-mode Release Train and Release Gate, verify database/RLS compatibility, then deploy the existing images through protected workflows.
+5. Verify running image digests, ECS/ALB health, authentication, QR business paths, tenant isolation, and unexpected 5xx before declaring production ready.

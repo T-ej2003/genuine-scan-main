@@ -1,5 +1,7 @@
 # MSCQR 8c verifier and rotation successor investigation
 
+This records the pre-implementation investigation. The subsequent implementation and remaining governed recovery steps are documented in [the rotation successor recovery contract](MSCQR_ROTATION_SUCCESSOR_RECOVERY_CONTRACT_2026-10-16.md).
+
 Protected application source: `8c743d43911a0fee7edd2943dd76c47f3cebf778`. The existing completion history is preserved in the separate recovery directory; this document does not authorize or record a production mutation.
 
 ## Verifier preparation

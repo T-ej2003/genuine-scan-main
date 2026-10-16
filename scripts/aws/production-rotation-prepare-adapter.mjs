@@ -78,6 +78,8 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
       }
       assertCoordinatorOutput(stateFile, repositoryRoot, "Persisted rotation state");
       assertCoordinatorOutput(fixtureFile, repositoryRoot, "Persisted rotation fixture");
+      const beforeState = lstatSync(stateFile, { throwIfNoEntry: false }) ? readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" }).sha256 : null;
+      const beforeFixture = lstatSync(fixtureFile, { throwIfNoEntry: false }) ? readStageBPrivateFileBytes({ filePath: fixtureFile, repositoryRoot, label: "Persisted rotation fixture" }).sha256 : null;
       const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-inventory-"));
       const inventoryFile = path.join(temporaryDirectory, "inventory.json");
       try {
@@ -108,7 +110,7 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
           evidenceRef: `rotation-state:${persistedRotationId}`,
           evidenceSha256: createHash("sha256").update(`${persistedRotationId}:${rotationStateSha256}:${persistedFixture.sha256}:${inventory.evidenceSha256}`).digest("hex"),
           overlapSecretBindings: rotationBindingsToPostPrepareTaskBindings(config),
-          mutationCount: 1,
+          mutationCount: beforeState === persistedState.sha256 && beforeFixture === persistedFixture.sha256 ? 0 : 1,
         };
       } finally {
         rmSync(temporaryDirectory, { recursive: true, force: true });

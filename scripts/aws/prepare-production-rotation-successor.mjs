@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { authenticateRotationSuccessor, signRotationSuccessor } from "./production-rotation-successor.mjs";
+import { authenticateRotationSuccessor, readOriginalRotationStatus, signRotationSuccessor } from "./production-rotation-successor.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
-import { createProductionAwsCommandRunner, createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { preflightProductionCutoverRotation } from "./run-production-cutover-operator.mjs";
 
@@ -20,11 +20,14 @@ const arg = (argv, name) => {
   return argv[index + 1];
 };
 
-export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, statusRun = execFileSync, preflight = preflightProductionCutoverRotation } = {}) {
+export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, statusRun = execFileSync, preflight = preflightProductionCutoverRotation, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
   const configPath = path.resolve(arg(argv, "config"));
   const configSha256 = arg(argv, "config-sha256");
   const config = readBoundStageBPrivateJson({ filePath: configPath, expectedSha256: configSha256, repositoryRoot: root, label: "Successor rotation config" });
-  readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: config.recoveryTooling?.sourceSha || config.sourceSha, requireCanonicalRepository: true });
+  authenticateCheckout({ cwd: root, expectedSourceSha: config.recoveryTooling?.sourceSha || config.sourceSha, requireCanonicalRepository: true });
+  const manifest = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(path.dirname(configPath), "cutover-runtime-manifest.json"), repositoryRoot: root, label: "Cutover runtime manifest" }).bytes);
+  if (manifest.runtimeConfigSha256 !== configSha256 || manifest.readyToConsumeMfa !== true
+      || manifest.releaseSourceSha !== config.sourceSha || manifest.protectedMainSha !== (config.recoveryTooling?.sourceSha || config.sourceSha)) throw new Error("Rotation successor runtime manifest is not source-bound.");
   const predecessor = config.rotationSuccessor;
   if (!predecessor || config.rotationConfigFile !== configPath || config.completedInventoryAdoptionRequired !== true
       || path.dirname(config.rotationStateFile || "") !== path.dirname(configPath)) throw new Error("Rotation successor runtime is incomplete.");
@@ -34,22 +37,18 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
   if (originalFixture.sha256 !== predecessor.predecessorFixtureSha256 || originalConfig.sourceSha !== predecessor.predecessorSourceSha
       || originalConfig.rotationId !== config.rotationId || originalConfig.rotationStateFile !== predecessor.predecessorStateFile
       || originalConfig.rotationFixtureFile !== predecessor.predecessorFixtureFile || originalState.sourceSha !== originalConfig.sourceSha) throw new Error("Historical rotation material is not bound to the original config.");
-  const proveDescendant = ({ ancestorSha, descendantSha }) => {
+  const proveDescendant = proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
-  };
+  });
   if (!proveDescendant({ ancestorSha: originalConfig.sourceSha, descendantSha: config.sourceSha })) throw new Error("Rotation successor is not protected-main ancestry.");
   const runtime = { "--config": configPath, "--config-sha256": configSha256, "--source-sha": config.sourceSha, "--rotation-id": config.rotationId };
-  preflight({ config, runtime, cwd: root });
   const releaseRun = readAws || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile });
   const checkerRun = signAws || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-checker-mfa" });
   const releaseIdentity = json(releaseRun, ["sts", "get-caller-identity"]);
   const checkerIdentity = json(checkerRun, ["sts", "get-caller-identity"]);
   if (!new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/`).test(releaseIdentity.Arn || "")
       || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(checkerIdentity.Arn || "")) throw new Error("Rotation successor requires separate release and checker identities.");
-  const statusEnvironment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile });
-  const status = String(statusRun(process.execPath, ["backend/scripts/security/rotate-production-signing-material.mjs", "--status", "--config", predecessor.predecessorConfigFile, "--config-sha256", predecessor.predecessorConfigSha256, "--state-file", predecessor.predecessorStateFile], { cwd: root, env: statusEnvironment, encoding: "utf8" })).trim().split("\n").at(-1);
-  const result = JSON.parse(status);
-  if (result.mode !== "status" || result.phase !== "overlap-deploy-required" || !result.records || typeof result.records !== "object") throw new Error("Historical rotation is not live and prepared for overlap.");
+  const predecessorStatusSha256 = readOriginalRotationStatus({ config, repositoryRoot: root, execute: statusRun });
   const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
   const inventoryEvidence = JSON.parse(readStageBPrivateFileBytes({ filePath: adoptionFile, repositoryRoot: root, label: "Current inventory adoption" }).bytes);
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-successor-"));
@@ -62,19 +61,24 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
     const evidenceFile = path.join(path.dirname(configPath), "rotation-successor-evidence.json");
     let evidence;
     let state;
-    if (fs.existsSync(evidenceFile)) {
+    const existingEvidence = fs.existsSync(evidenceFile);
+    if (existingEvidence) {
       evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: evidenceFile, repositoryRoot: root, label: "Rotation successor evidence" }).bytes);
       state = { ...originalState, sourceSha: config.sourceSha, overlapDeploymentSha: config.sourceSha, successorProvenance: evidence };
     } else {
-      ({ evidence, state } = await signRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, inventoryEvidence, proveDescendant, verifySignature, sign }));
+      ({ evidence, state } = await signRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, inventoryEvidence, proveDescendant, verifySignature, sign, now }));
+    }
+    await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
+    preflight({ config, runtime, cwd: root });
+    if (!existingEvidence) {
       try { writeStageBPrivateFileExclusive({ filePath: evidenceFile, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: root, label: "Rotation successor evidence" }); }
       catch (error) {
         if (!fs.existsSync(evidenceFile)) throw error;
         evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: evidenceFile, repositoryRoot: root, label: "Rotation successor evidence" }).bytes);
         state = { ...originalState, sourceSha: config.sourceSha, overlapDeploymentSha: config.sourceSha, successorProvenance: evidence };
+        await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
       }
     }
-    await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature });
     for (const [filePath, bytes, label] of [
       [config.rotationStateFile, Buffer.from(`${JSON.stringify(state, null, 2)}\n`), "Successor rotation state"],
       [config.rotationFixtureFile, originalFixture.bytes, "Successor rotation fixture"],
