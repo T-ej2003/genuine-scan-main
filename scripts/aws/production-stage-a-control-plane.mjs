@@ -74,6 +74,7 @@ export const STAGE_A_CHECKER_PUBLICATION_POLICY = Object.freeze({
   kmsResource: STAGE_B.approvalKmsKeyArn,
   publishAction: "secretsmanager:PutSecretValue",
   publishResource: STAGE_B.approvalSecretArn,
+  inventoryReceiptTableArn: "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay",
 });
 export const STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY = Object.freeze({
   address: "aws_s3_bucket_policy.production_artifacts",
@@ -339,8 +340,16 @@ const STAGE_A_CHECKER_PUBLICATION_DESIRED = Object.freeze({
       Action: STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction,
       Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource,
     },
+    {
+      Sid: "ReadCompletedInventoryReceipts",
+      Effect: "Allow",
+      Action: "dynamodb:GetItem",
+      Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.inventoryReceiptTableArn,
+      Condition: { "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+    },
   ],
 });
+const STAGE_A_CHECKER_PUBLICATION_BEFORE_RECEIPT = Object.freeze({ ...STAGE_A_CHECKER_PUBLICATION_DESIRED, Statement: STAGE_A_CHECKER_PUBLICATION_DESIRED.Statement.slice(0, -1) });
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const stable = (value) => value && typeof value === "object" && !Array.isArray(value)
   ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])]))
@@ -736,7 +745,7 @@ function assertStageACheckerPublicationPolicyChange(entry) {
   const afterPolicy = decodePolicyDocument(after.policy, "Stage A checker publication desired policy");
   const expectedAfter = stablePolicyJson(afterPolicy) === stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_DESIRED);
   if (!expectedAfter) throw new Error("Stage A checker publication policy desired semantics are not exact.");
-  if (exactActions(change.actions, ["update"]) && stablePolicyJson(beforePolicy) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_PREDECESSOR)) {
+  if (exactActions(change.actions, ["update"]) && ![STAGE_A_CHECKER_PUBLICATION_PREDECESSOR, STAGE_A_CHECKER_PUBLICATION_BEFORE_RECEIPT].some(policy => stablePolicyJson(beforePolicy) === stablePolicyJson(policy))) {
     throw new Error("Stage A checker publication policy predecessor semantics are not the reviewed state.");
   }
   if (exactActions(change.actions, ["no-op"]) && stablePolicyJson(beforePolicy) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_DESIRED)) {

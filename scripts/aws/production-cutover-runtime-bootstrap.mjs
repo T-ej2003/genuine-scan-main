@@ -294,6 +294,13 @@ export function prepareProductionCutoverRuntime({
   inventoryApprovalId,
   inventoryTaskDefinitionArn,
   adoptCompletedInventory = false,
+  adoptCompletedInventoryFromSourceSha,
+  rotationSuccessorOriginalConfigFile,
+  rotationSuccessorOriginalConfigSha256,
+  rotationSuccessorStateFile,
+  rotationSuccessorStateSha256,
+  rotationSuccessorFixtureFile,
+  rotationSuccessorFixtureSha256,
   newInventoryAfterCompleted = false,
   onboardingPaths,
   stageBTfvarsPath,
@@ -310,6 +317,9 @@ export function prepareProductionCutoverRuntime({
 } = {}) {
   if (inventoryTaskDefinitionArn !== undefined) assertPreDeploymentInventoryTaskDefinitionArn(inventoryTaskDefinitionArn);
   if (adoptCompletedInventory && !inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires the existing task definition.");
+  if (adoptCompletedInventoryFromSourceSha !== undefined && (!adoptCompletedInventory || !SHA40.test(adoptCompletedInventoryFromSourceSha))) throw new Error("Cross-source inventory predecessor is invalid.");
+  const successorFiles = [rotationSuccessorOriginalConfigFile, rotationSuccessorOriginalConfigSha256, rotationSuccessorStateFile, rotationSuccessorStateSha256, rotationSuccessorFixtureFile, rotationSuccessorFixtureSha256];
+  if (adoptCompletedInventoryFromSourceSha && successorFiles.some(value => !value) || !adoptCompletedInventoryFromSourceSha && successorFiles.some(Boolean)) throw new Error("Rotation successor requires complete authenticated predecessor files.");
   if (newInventoryAfterCompleted && (adoptCompletedInventory || !inventoryTaskDefinitionArn || rotationBindings?.rotationId !== PRESERVED_INVENTORY_PREDECESSOR.rotationId)) throw new Error("Fresh inventory requires the exact rotation and existing task definition.");
   const directory = ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot, create: true, normalize: true, label: "Production cutover runtime directory" });
   const paths = phasePaths(directory);
@@ -330,6 +340,8 @@ export function prepareProductionCutoverRuntime({
       if (sourceSha && sourceSha !== discoveredSha) throw new Error("Caller-supplied source SHA does not match protected main.");
       protectedSha = discoveredSha;
     }
+    if (adoptCompletedInventoryFromSourceSha && (adoptCompletedInventoryFromSourceSha === protectedSha
+        || proveSourceAdvance?.({ ancestorSha: adoptCompletedInventoryFromSourceSha, descendantSha: protectedSha }) !== true)) throw new Error("Cross-source inventory predecessor is not authenticated protected-main ancestry.");
   } catch (error) { blockers.push(error.message); }
   let config;
   let staticBindings;
@@ -345,6 +357,21 @@ export function prepareProductionCutoverRuntime({
     if (!rotationBindings) throw new Error("rotation secret binding manifest is required; current/previous/pending JWT/QR bindings are not derivable from the legacy live task.");
     const rotationId = requestedRotationId || rotationBindings.rotationId;
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
+    let rotationSuccessor;
+    if (rotationSuccessorStateFile) {
+      const originalConfig = readInputFile(rotationSuccessorOriginalConfigFile, repositoryRoot, "Original rotation config");
+      const originalState = readInputFile(rotationSuccessorStateFile, repositoryRoot, "Original rotation state");
+      const originalFixture = readStageBPrivateFileBytes({ filePath: rotationSuccessorFixtureFile, repositoryRoot, label: "Original rotation fixture" });
+      if (originalConfig.sha256 !== rotationSuccessorOriginalConfigSha256 || originalState.sha256 !== rotationSuccessorStateSha256
+          || originalFixture.sha256 !== rotationSuccessorFixtureSha256 || originalConfig.value.sourceSha !== adoptCompletedInventoryFromSourceSha
+          || originalConfig.value.rotationId !== rotationId || originalState.value.sourceSha !== adoptCompletedInventoryFromSourceSha
+          || originalState.value.rotationId !== rotationId || originalState.value.phase !== "overlap-deploy-required") throw new Error("Original rotation successor artifacts are not the authenticated predecessor.");
+      rotationSuccessor = { predecessorSourceSha: adoptCompletedInventoryFromSourceSha,
+        predecessorConfigFile: originalConfig.path, predecessorConfigSha256: originalConfig.sha256,
+        predecessorStateFile: originalState.path, predecessorStateSha256: originalState.sha256,
+        predecessorFixtureFile: originalFixture.path, predecessorFixtureSha256: originalFixture.sha256,
+        inventoryEvidenceSha256: originalState.value.inventoryEvidenceSha256 };
+    }
     if (!imageAuthorization?.filePath) throw new Error("image authorization evidence file is required.");
     const preparedImageAuthorization = readInputFile(imageAuthorization.filePath, repositoryRoot, "Image authorization evidence");
     const suppliedImageAuthorization = { ...imageAuthorization }; delete suppliedImageAuthorization.filePath;
@@ -510,6 +537,8 @@ export function prepareProductionCutoverRuntime({
         : rotationBindings.rotationId === PRESERVED_INVENTORY_PREDECESSOR.rotationId && !adoptCompletedInventory ? { inventoryFailedPredecessor: PRESERVED_INVENTORY_PREDECESSOR } : {}),
       ...(inventoryTaskDefinitionArn === undefined ? {} : { inventoryTaskDefinitionArn }),
       ...(adoptCompletedInventory ? { completedInventoryAdoptionRequired: true } : {}),
+      ...(adoptCompletedInventoryFromSourceSha ? { completedInventoryPredecessorSourceSha: adoptCompletedInventoryFromSourceSha } : {}),
+      ...(rotationSuccessor ? { rotationSuccessor } : {}),
       inventoryDatabaseSecretArn: overlapTaskInput.containerDefinitions.find(({ name }) => name === "backend")?.secrets?.find(({ name }) => name === "DATABASE_URL")?.valueFrom,
       inventoryTaskRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
       inventoryExecutionRoleArn: "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
@@ -612,7 +641,7 @@ export function parseBootstrapArgs(argv) {
     "output-directory", "ticket", "approved-by", "approver-role", "reason", "verification-ref",
     "minimum-grace-seconds", "rotation-bindings", "rotation-supersession-evidence", "rebaseline-authorization-run-id", "rebaseline-authorization-run-attempt", "recovery-envelope", "original-rebaseline-preparation", "image-authorization", "iam-evidence", "iam-evidence-signature", "release-preflight-evidence", "release-preflight-attestation", "release-preflight-attestation-signature",
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
-    "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory", "new-inventory-after-completed",
+    "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory", "adopt-completed-inventory-from-source-sha", "rotation-successor-original-config", "rotation-successor-original-config-sha256", "rotation-successor-state", "rotation-successor-state-sha256", "rotation-successor-fixture", "rotation-successor-fixture-sha256", "new-inventory-after-completed",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
     "broker-recovery", "broker-recovery-sha256",
   ]);

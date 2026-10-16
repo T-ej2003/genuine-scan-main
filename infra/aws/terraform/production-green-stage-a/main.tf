@@ -303,7 +303,8 @@ resource "aws_iam_role_policy" "checker" {
   role = aws_iam_role.checker.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "SignExactStageBApproval", Effect = "Allow", Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = aws_kms_key.approval.arn },
-    { Sid = "PublishExactStageBApproval", Effect = "Allow", Action = "secretsmanager:PutSecretValue", Resource = aws_secretsmanager_secret.approval.arn }
+    { Sid = "PublishExactStageBApproval", Effect = "Allow", Action = "secretsmanager:PutSecretValue", Resource = aws_secretsmanager_secret.approval.arn },
+    { Sid = "ReadCompletedInventoryReceipts", Effect = "Allow", Action = "dynamodb:GetItem", Resource = "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay", Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } }
   ] })
 }
 

@@ -11,7 +11,7 @@ import { resolveStageASubnetRouteTable } from "./generate-production-green-stage
 // every account resource is clean. Source evolution must review this mapping.
 export async function collectAppOnlyNetworkDatabaseRuntime({ aws, service, repositoryRoot }) {
   const source = fs.readFileSync(path.join(repositoryRoot, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8");
-  assert.equal(canonicalSha256(source), "38680791e89ebd5ab5e661dc79ae7da2abe202c047b87c1ad4634650022c5575", "Stage-A runtime source mapping is unreviewed");
+  assert.equal(canonicalSha256(source), "18b71a50b1b2a08abda703d6ced50ea7e0704e912dfecfb439395b17b15ff002", "Stage-A runtime source mapping is unreviewed");
   const network = service.networkConfiguration?.awsvpcConfiguration;
   assert.equal(network?.assignPublicIp, "DISABLED");
   assert.deepEqual([...network.subnets].sort(), [...STAGE_B.privateSubnetIds].sort());
@@ -146,23 +146,30 @@ export function assertAppOnlyRuntimeSimulations(dependencies, simulations) {
   return true;
 }
 
-export async function collectAppOnlyRuntimeCompatibility({ identity, candidate, predecessor, readLive, aws, repositoryRoot, now = Date.now }) {
+export async function collectAppOnlyRuntimeCompatibility({ identity, candidate, predecessor, readLive, aws, repositoryRoot, now = Date.now, onStage = () => {} }) {
+  onStage("RUNTIME_ECS");
   const before = await readLive();
   assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(before));
   assert.equal(identity.predecessorTaskDefinition, predecessor.taskDefinitionArn);
   assert.equal(identity.predecessorBackendDigest, predecessor.backendDigest);
   assertAppOnlyCandidate(before.definition, candidate, identity.candidateDigest);
+  onStage("RUNTIME_REQUIREMENTS");
   const requirements = assertAppOnlyRuntimeRequirements({ definition: before.definition, service: before.service, repositoryRoot });
+  onStage("RUNTIME_IDENTITY");
   const caller = await aws(["sts", "get-caller-identity"]); assert.equal(caller.Account, APP_ONLY.account);
+  onStage("RUNTIME_NETWORK_DATABASE");
   const networkDatabase = await collectAppOnlyNetworkDatabaseRuntime({ aws, service: before.service, repositoryRoot });
   const readKmsKey = async (arn) => ({ metadata: (await aws(["kms", "describe-key", "--key-id", arn])).KeyMetadata,
     policy: (await aws(["kms", "get-key-policy", "--key-id", arn, "--policy-name", "default"])).Policy });
+  onStage("RUNTIME_RESOURCE_METADATA");
   const resourceMetadata = await collectRuntimeResourceMetadata(candidate, aws, { readKmsKey });
   const dependencies = addEncryptionDependencies(candidate, deriveEcsRuntimeDependencies(candidate), resourceMetadata);
   // Stage-B has exact inline log resources, not the legacy AWS-managed
   // Resource:"*" grant. Source/live policy equality is checked independently.
+  onStage("RUNTIME_IAM_SIMULATION");
   const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: "exact-dependency" });
   assertAppOnlyRuntimeSimulations(dependencies, simulations);
+  onStage("RUNTIME_FINAL_CAS");
   assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(await readLive()));
   assert.deepEqual(await collectAppOnlyNetworkDatabaseRuntime({ aws, service: before.service, repositoryRoot }), networkDatabase, "Network/database changed during compatibility collection");
   const body = { schemaVersion: 1, kind: "APP_ONLY_RUNTIME_COMPATIBILITY", identity, generatedAt: new Date(now()).toISOString(),

@@ -24,7 +24,7 @@ if (PREDEPLOYMENT_BROKER_CALLER_TIMEOUT_HEADROOM_SECONDS <= 0
 
 const parseJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 
-export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest, config, runtimeConfigSha256 } = {}) {
+export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, imageReleaseSha, imageDigest, config, runtimeConfigSha256, proveDescendant } = {}) {
   if (typeof run !== "function" || !SHA.test(sourceSha || "") || !SHA.test(imageReleaseSha || "") || !config || !STAGE_B.brokerAliasArn) throw new Error("Pre-deployment inventory adapter configuration is required.");
   const inventorySecretArn = config.inventoryDatabaseSecretArn || config.overlapTaskInput?.databaseUrlSecretArn || canonicalBackendDatabaseSecretReference();
   const taskInput = {
@@ -74,7 +74,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
         const temporary = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-verify-"));
         const messageFile = path.join(temporary, "message");
         try {
-          const payload = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256 }, ({ keyId, message, signature }) => {
+          const payload = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256, proveDescendant }, ({ keyId, message, signature }) => {
             writeFileSync(messageFile, message, { mode: 0o600 });
             return parseJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
           });

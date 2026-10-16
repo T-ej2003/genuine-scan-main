@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import jwt from "jsonwebtoken";
+import { deriveRotationSuccessorState } from "../../scripts/aws/production-rotation-successor.mjs";
 import { assertIdentity, cleanup, loadConfig, prepare, readCurrentState, validateRuntimeProof, verify } from "../scripts/security/rotate-production-signing-material.mjs";
 import {
   productionSupersessionEvidenceIdentity,
@@ -552,6 +553,27 @@ test("legacy overlap-deployed state resumes without regenerating material", asyn
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("real rotation coordinator adopts a source successor without replaying secret writes", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-successor-coordinator-"));
+  try {
+    const sm = fakeSecrets(initialSecrets().initial);
+    const originalConfig = { ...baseConfig, overlapDeploymentSha: baseConfig.sourceSha };
+    await prepare(contextFor(directory, originalConfig, sm));
+    const original = JSON.parse(readFileSync(path.join(directory, "state.json"), "utf8"));
+    const nextSource = "c".repeat(40);
+    const config = { ...originalConfig, sourceSha: nextSource, overlapDeploymentSha: nextSource,
+      completedInventoryPredecessorSourceSha: baseConfig.sourceSha,
+      rotationSuccessor: { predecessorSourceSha: baseConfig.sourceSha, predecessorStateSha256: "5".repeat(64),
+        predecessorFixtureSha256: "6".repeat(64), inventoryEvidenceSha256: original.inventoryEvidenceSha256 } };
+    const adopted = deriveRotationSuccessorState({ predecessorState: original, predecessorStateSha256: "5".repeat(64), config });
+    writeFileSync(path.join(directory, "state.json"), `${JSON.stringify(adopted)}\n`, { mode: 0o600 });
+    const resumed = fakeSecrets(Object.fromEntries(sm.values));
+    await prepare(contextFor(directory, config, resumed));
+    assert.equal(resumed.putCount, 0);
+    assert.equal(readCurrentState(contextFor(directory, config, resumed)).sourceSha, nextSource);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("prepare resumes after QR private pending write crash and derives its public pair", async () => {

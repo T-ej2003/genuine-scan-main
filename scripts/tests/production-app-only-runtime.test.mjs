@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { assertAppOnlyRuntimeRequirements, collectAppOnlyNetworkDatabaseRuntime, assertAppOnlyRuntimeSimulations } from "../aws/production-app-only-runtime.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -118,6 +120,17 @@ test("runtime network/database proof is read-only and independent of Terraform s
   assert.deepEqual(f.calls.map((c) => c.slice(0, 2)), [["ec2", "describe-subnets"], ["ec2", "describe-route-tables"],
     ["ec2", "describe-security-groups"], ["rds", "describe-db-instances"], ["rds", "describe-db-parameters"], ["kms", "describe-key"]]);
   assert.ok(!f.calls.find((c) => c[1] === "describe-db-parameters").includes("--source"), "Effective system defaults must not be filtered out");
+});
+
+test("unreviewed Stage-A source changes fail before runtime AWS reads", async () => {
+  const repositoryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-source-"));
+  try {
+    const directory = path.join(repositoryRoot, "infra/aws/terraform/production-green-stage-a");
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "main.tf"), `${fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8")}\n# unreviewed change\n`);
+    await assert.rejects(collectAppOnlyNetworkDatabaseRuntime({ ...networkFixture().input, repositoryRoot,
+      aws: () => { throw new Error("AWS must not be called"); } }), /Stage-A runtime source mapping is unreviewed/);
+  } finally { fs.rmSync(repositoryRoot, { recursive: true, force: true }); }
 });
 
 test("network/database proof rejects missing, public, foreign, pending, unencrypted or TLS-disabled resources", async () => {

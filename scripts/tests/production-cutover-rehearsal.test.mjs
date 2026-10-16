@@ -45,7 +45,7 @@ const checkerPolicyChange = (actions = ["create"], after = {}) => ({
 });
 const checkerPublicationPolicy = ({ predecessor = false, extraStatement = false, kmsAction = STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, publishResource = STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource, publishAction = STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction, condition = undefined } = {}) => {
   if (predecessor) return { Version: "2012-10-17", Statement: [{ Action: [...STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction], Effect: "Allow", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }] };
-  const statements = [{ Sid: "SignExactStageBApproval", Effect: "Allow", Action: [...kmsAction], Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }, { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: publishAction, Resource: publishResource, ...(condition ? { Condition: condition } : {}) }];
+  const statements = [{ Sid: "SignExactStageBApproval", Effect: "Allow", Action: [...kmsAction], Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource }, { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: publishAction, Resource: publishResource, ...(condition ? { Condition: condition } : {}) }, { Sid: "ReadCompletedInventoryReceipts", Effect: "Allow", Action: "dynamodb:GetItem", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.inventoryReceiptTableArn, Condition: { "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } } }];
   if (extraStatement) statements.push({ Sid: "Unexpected", Effect: "Allow", Action: "secretsmanager:DeleteSecret", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource });
   return { Version: "2012-10-17", Statement: statements };
 };
@@ -379,7 +379,7 @@ test("Stage A admits only the exact checker publication policy transition", () =
   assert.equal(assertStageAPlan(exact, inputs).changes, 1);
   const reordered = checkerPublicationPolicy();
   reordered.Statement.reverse();
-  reordered.Statement[1].Action.reverse();
+  reordered.Statement.find(statement => statement.Sid === "SignExactStageBApproval").Action.reverse();
   assert.doesNotThrow(() => assertStageAPlan(stageAPlan({ actions: ["no-op"], checkerActions: ["no-op"], checkerPublication: checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: reordered }) }), inputs));
   for (const checkerPublication of [
     checkerPublicationChange({ actions: ["update"], beforePolicy: checkerPublicationPolicy({ predecessor: true }), afterPolicy: checkerPublicationPolicy({ publishResource: "*" }) }),

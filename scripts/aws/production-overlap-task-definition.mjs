@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
@@ -26,6 +26,7 @@ const ROTATION_BINDING_SHAPES = Object.freeze({
 });
 const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ROTATION_INVENTORY_OPERATION"]);
 export const OVERLAP_TASK_MARKER = Object.freeze({ key: "MSCQRExecTarget", value: "production-backend" });
+export const OVERLAP_OPERATION_TAG = "MSCQROverlapOperation";
 export const OVERLAP_TASK_TEMPLATE_PATH = "infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json";
 
 export function canonicalBackendDatabaseSecretReference() {
@@ -76,21 +77,59 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
   return { taskDefinition: definition, tags: [OVERLAP_TASK_MARKER] };
 }
 
-export async function registerOverlapTaskDefinition({ input, register, describe = null }) {
+export async function registerOverlapTaskDefinition({ input, register, describe = null, list = null, journal = null, sourceSha, rotationId }) {
   if (typeof register !== "function") throw new Error("Overlap task registration adapter is required.");
   const payload = buildOverlapTaskDefinition(input);
-  const response = await register(payload);
-  const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
-  if (!ARN.test(arn || "")) throw new Error("Overlap registration did not return the exact reviewed task-definition ARN.");
-  if (describe) {
+  const operationId = journal ? createHash("sha256").update(canonicalJson({ sourceSha, rotationId, payload })).digest("hex") : null;
+  if (journal && (!SHA.test(sourceSha || "") || !/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "")
+      || typeof describe !== "function" || typeof list !== "function"
+      || typeof journal.readOperation !== "function" || typeof journal.writeOperation !== "function")) throw new Error("Durable overlap registration boundary is incomplete.");
+  if (journal) payload.tags.push({ key: OVERLAP_OPERATION_TAG, value: operationId });
+  const intent = operationId && { sourceSha, rotationId, operationId, payloadSha256: createHash("sha256").update(canonicalJson(payload)).digest("hex") };
+  if (journal) {
+    const previous = await journal.readOperation(operationId, "INTENT");
+    if (previous && canonicalJson(previous) !== canonicalJson(intent)) throw new Error("Overlap registration intent conflicts with durable history.");
+    if (!previous) await journal.writeOperation(operationId, "INTENT", intent);
+  }
+  const verify = async arn => {
+    if (!ARN.test(arn || "")) throw new Error("Overlap registration did not return the exact reviewed task-definition ARN.");
+    if (!describe) return;
     const registered = await describe(arn);
     if (registered?.taskDefinitionArn !== arn || registered?.family !== FAMILY || registered?.status !== "ACTIVE") throw new Error("Registered overlap task definition did not converge to the reviewed payload.");
     assertEcsTaskDefinitionReadback({ definition: registered, taskDefinitionArn: arn, expected: payload.taskDefinition, label: "Registered overlap task definition" });
     if (!Array.isArray(registered.tags) || !registered.tags.some(({ key, value }) => key === OVERLAP_TASK_MARKER.key && value === OVERLAP_TASK_MARKER.value)) throw new Error("Registered overlap task definition is missing the creation-time execution marker.");
+    if (journal && !registered.tags.some(({ key, value }) => key === OVERLAP_OPERATION_TAG && value === operationId)) throw new Error("Registered overlap task definition is not bound to the durable operation.");
     const registeredBackend = registered.containerDefinitions?.find(({ name }) => name === "backend");
     if (registeredBackend && registeredBackend.image !== payload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend")?.image) throw new Error("Registered overlap image differs from the authorized immutable digest.");
+  };
+  const result = (arn, mutationCount) => ({ ...payload, valid: true, evidenceRef: arn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: arn, mutationCount });
+  if (journal) {
+    const completed = await journal.readOperation(operationId, "COMPLETED");
+    if (completed) {
+      if (canonicalJson(completed.intent) !== canonicalJson(intent)) throw new Error("Overlap registration completion conflicts with durable intent.");
+      await verify(completed.taskDefinitionArn);
+      return result(completed.taskDefinitionArn, 0);
+    }
+    const matching = [];
+    for (const arn of await list(FAMILY)) {
+      if (!ARN.test(arn || "")) throw new Error("Overlap task census contains an invalid ARN.");
+      const candidate = await describe(arn);
+      if (candidate?.tags?.some(({ key, value }) => key === OVERLAP_OPERATION_TAG && value === operationId)) matching.push(arn);
+    }
+    if (matching.length > 1) throw new Error("Overlap operation produced multiple task-definition revisions.");
+    if (matching.length === 1) {
+      await verify(matching[0]);
+      await journal.writeOperation(operationId, "COMPLETED", { intent, taskDefinitionArn: matching[0] });
+      return result(matching[0], 0);
+    }
+    if (await journal.readOperation(operationId, "DISPATCH")) throw new Error("Overlap registration outcome remains ambiguous; another revision is forbidden.");
+    if (await journal.writeOperation(operationId, "DISPATCH", intent) !== true) throw new Error("Overlap registration was already dispatched; another revision is forbidden.");
   }
-  return { ...payload, valid: true, evidenceRef: arn, evidenceSha256: createHash("sha256").update(JSON.stringify(payload)).digest("hex"), taskDefinitionArn: arn };
+  const response = await register(payload);
+  const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
+  await verify(arn);
+  if (journal) await journal.writeOperation(operationId, "COMPLETED", { intent, taskDefinitionArn: arn });
+  return result(arn, 1);
 }
 
 export function createAwsOverlapTaskRegistrationAdapter({ run }) {

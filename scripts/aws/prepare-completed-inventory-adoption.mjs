@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +10,7 @@ import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } fr
 import { ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { preDeploymentOperationKey, createPreDeploymentOperationIdentity, inventoryCompletionKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const read = (argv, name) => {
@@ -19,7 +21,7 @@ const read = (argv, name) => {
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fromAws = item => Object.fromEntries(Object.entries(item || {}).map(([key, value]) => [key, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
 
-export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign } = {}) {
+export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
   const originalPath = path.resolve(read(argv, "original-config"));
   const originalHash = read(argv, "original-config-sha256");
   const continuationPath = path.resolve(read(argv, "continuation-config"));
@@ -29,42 +31,54 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
   const manifest = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(path.dirname(continuationPath), "cutover-runtime-manifest.json"), repositoryRoot: root, label: "Cutover runtime manifest" }).bytes);
   if (continuationConfig.rotationConfigFile !== continuationPath || path.dirname(continuationConfig.rotationStateFile || "") !== path.dirname(continuationPath) || continuationConfig.completedInventoryAdoptionRequired !== true || manifest.runtimeConfigSha256 !== continuationHash || manifest.readyToConsumeMfa !== true) throw new Error("Continuation runtime is not the prepared self-bound adoption config.");
   const fresh = canonicalJson(originalConfig.newInventoryAfterCompleted) === canonicalJson(COMPLETED_INVENTORY_PREDECESSOR);
+  const crossSource = originalConfig.sourceSha !== continuationConfig.sourceSha;
+  if (crossSource && (!fresh || continuationConfig.completedInventoryPredecessorSourceSha !== originalConfig.sourceSha)) throw new Error("Cross-source inventory adoption requires the exact durable predecessor.");
+  const toolingSha = continuationConfig.recoveryTooling?.sourceSha || continuationConfig.sourceSha;
+  if (crossSource && (manifest.releaseSourceSha !== continuationConfig.sourceSha || manifest.protectedMainSha !== toolingSha
+      || (continuationConfig.recoveryTooling && continuationConfig.recoveryTooling.releaseSourceSha !== continuationConfig.sourceSha))) throw new Error("Cross-source inventory runtime tooling or release identity changed.");
+  if (crossSource) authenticateCheckout({ cwd: root, expectedSourceSha: toolingSha, requireCanonicalRepository: true });
+  const proveDescendant = proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
+    try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
+  });
+  if (crossSource && !proveDescendant({ ancestorSha: originalConfig.sourceSha, descendantSha: continuationConfig.sourceSha })) throw new Error("Inventory successor source ancestry is invalid.");
+  const currentApproval = crossSource ? readBoundStageBPrivateJson({ filePath: path.resolve(read(argv, "current-approval")), expectedSha256: read(argv, "current-approval-sha256"), repositoryRoot: root, label: "Current-source Stage B approval" }) : null;
+  const receiptReader = crossSource ? runSign : runRead;
   if (originalConfig.newInventoryAfterCompleted && !fresh) throw new Error("Fresh inventory predecessor marker is invalid.");
   const recoveryEvidence = fresh ? null : readBoundStageBPrivateJson({ filePath: path.resolve(read(argv, "original-recovery-evidence")), expectedSha256: read(argv, "original-recovery-evidence-sha256"), repositoryRoot: root, label: "Original absent-claim recovery" });
   const approval = fresh ? null : readBoundStageBPrivateJson({ filePath: path.resolve(read(argv, "original-approval")), expectedSha256: read(argv, "original-approval-sha256"), repositoryRoot: root, label: "Original Stage B approval" });
   const identity = createPreDeploymentOperationIdentity({ approvalId: originalConfig.inventoryApprovalId, releaseSha: originalConfig.sourceSha, imageReleaseSha: originalConfig.imageReleaseSha, rotationId: originalConfig.rotationId, taskDefinitionArn: originalConfig.inventoryTaskDefinitionArn, imageDigest: originalConfig.overlapTaskInput.backendImage });
   const claim = fresh ? null : fromAws(json(runRead, ["dynamodb", "get-item", "--table-name", STAGE_B.replayTable, "--consistent-read", "--key", JSON.stringify({ approvalMode: { S: preDeploymentOperationKey(identity) } })]).Item);
   if (!fresh && !Object.keys(claim).length) throw new Error("Completed inventory replay claim is absent.");
-  const completionReceipt = fresh ? fromAws(json(runRead, ["dynamodb", "get-item", "--table-name", STAGE_B.replayTable, "--consistent-read", "--key", JSON.stringify({ approvalMode: { S: inventoryCompletionKey(preDeploymentOperationKey(identity)) } })]).Item) : null;
+  const completionReceipt = fresh ? fromAws(json(receiptReader, ["dynamodb", "get-item", "--table-name", STAGE_B.replayTable, "--consistent-read", "--key", JSON.stringify({ approvalMode: { S: inventoryCompletionKey(preDeploymentOperationKey(identity)) } })]).Item) : null;
   if (fresh && !Object.keys(completionReceipt).length) throw new Error("Durable inventory completion receipt is absent.");
   const task = fresh ? null : json(runRead, ["ecs", "describe-tasks", "--cluster", STAGE_B.clusterArn, "--tasks", claim.taskArn, "--include", "TAGS"]).tasks?.[0];
   const definition = fresh ? null : json(runRead, ["ecs", "describe-task-definition", "--task-definition", identity.taskDefinitionArn, "--include", "TAGS"]);
   const stream = fresh ? null : `predeployment-inventory/inventory/${claim.taskArn?.split("/").pop()}`;
   const logs = fresh ? null : json(runRead, ["logs", "get-log-events", "--log-group-name", STAGE_B.inventoryLogGroupName, "--log-stream-name", stream, "--start-from-head"]);
   if (!fresh && (logs.nextBackwardToken === undefined || !Array.isArray(logs.events) || logs.events.length !== 1)) throw new Error("Completed inventory log readback is incomplete or ambiguous.");
-  const readIdentity = json(runRead, ["sts", "get-caller-identity"]);
+  const readIdentity = json(receiptReader, ["sts", "get-caller-identity"]);
   const signerIdentity = json(runSign, ["sts", "get-caller-identity"]);
-  if (readIdentity.Arn !== `arn:aws:iam::${STAGE_B.account}:root` || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(signerIdentity.Arn || "")) throw new Error("Completed inventory adoption reader or signer identity is invalid.");
+  if (readIdentity.Arn !== (crossSource ? signerIdentity.Arn : `arn:aws:iam::${STAGE_B.account}:root`) || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(signerIdentity.Arn || "")) throw new Error("Completed inventory adoption reader or signer identity is invalid.");
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-"));
   fs.chmodSync(temporary, 0o700);
   const messageFile = path.join(temporary, "message");
   const message = value => { fs.writeFileSync(messageFile, value, { mode: 0o600 }); return `fileb://${messageFile}`; };
   try {
-    const verifySignature = ({ keyId, message: bytes, signature }) => json(runRead, ["kms", "verify", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+    const verifySignature = ({ keyId, message: bytes, signature }) => json(receiptReader, ["kms", "verify", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
     const sign = ({ keyId, message: bytes }) => json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {
       const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
-      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash }, verifySignature);
+      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now }, verifySignature);
       if (fresh) {
-        const authenticated = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: continuationConfig, verifySignature });
+        const authenticated = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: crossSource ? originalConfig : continuationConfig, verifySignature });
         if (payload.completionReceiptSha256 !== authenticated.receiptSha256 || payload.taskArn !== completionReceipt.taskArn) throw new Error("Persisted inventory adoption differs from durable completion.");
       } else if (payload.replayRowSha256 !== hash(canonicalJson(claim)) || payload.taskArn !== task?.taskArn
           || payload.inventorySha256 !== hash(JSON.stringify(JSON.parse(logs.events[0].message)))) throw new Error("Persisted inventory adoption differs from current readbacks.");
       return { outputPath, expiresAt: payload.expiresAt, operationKey: payload.operationKey, reused: true };
     }
     const evidence = fresh
-      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt, verifySignature, sign })
+      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt, currentApproval, proveDescendant, verifySignature, sign, now })
       : await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign });
     ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root });
     writeStageBPrivateFileExclusive({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`), repositoryRoot: root, label: "Completed inventory adoption evidence" });

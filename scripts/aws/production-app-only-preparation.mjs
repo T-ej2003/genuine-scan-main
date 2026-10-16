@@ -18,7 +18,7 @@ import { assertProtectedCheckout } from "./prepare-production-initial-activation
 // accepted from the caller. Only compact authenticated artifact references enter;
 // IAM/runtime observations are collected afresh under the preparation identity.
 export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDigest, publicationReference,
-  authorizationReference, requirementsReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner() }) {
+  authorizationReference, requirementsReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner(), onStage = () => {} }) {
   assert.equal(typeof run, "function"); assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.equal(requirementsReference.sourceSha, sourceSha);
   const source = () => {
@@ -26,29 +26,39 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
     const main = JSON.parse(githubRun("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"]));
     assert.equal(main.name, "main"); assert.equal(main.protected, true); assert.equal(main.commit?.sha, sourceSha);
   };
-  source();
+  onStage("SOURCE"); source();
   const aws = (args) => {
     const value = run([...args, "--output", "json", "--no-cli-pager"]);
     return typeof value === "string" ? JSON.parse(value) : value;
   };
   const readers = createAppOnlyEcsReaders(run);
+  onStage("ECS_PREDECESSOR");
   const live = readers.readLive(), predecessor = captureAppOnlyPredecessor(live);
+  onStage("IMAGE_AUTHORIZATION");
   const images = authenticateAppOnlyImages({ sourceSha, candidateDigest, publicationReference, authorizationReference, repositoryRoot, run, githubRun });
+  onStage("VERIFIER_IMAGE");
   const verifierImage = authenticateProtectedMainBackendImage({ sourceSha, response: aws(["ecr", "describe-images", "--registry-id", APP_ONLY.account,
     "--region", APP_ONLY.region, "--repository-name", "mscqr-backend", "--image-ids", `imageTag=${sourceSha}-backend-only`]) });
+  onStage("REQUIREMENTS");
   const requirementArtifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
   const requirements = assertAppOnlyRequirements(JSON.parse(requirementArtifact.bytes), { sourceSha, candidateSourceSha: images.candidateSourceSha, repositoryRoot });
   const identity = { sourceSha, candidateSourceSha: images.candidateSourceSha, candidateDigest,
     account: APP_ONLY.account, region: APP_ONLY.region, clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn,
     predecessorTaskDefinition: predecessor.taskDefinitionArn, predecessorBackendDigest: predecessor.backendDigest };
+  onStage("BACKEND_IAM");
   const iam = collectAppOnlyLiveIamCompatibility({ repositoryRoot, identity, run });
   const candidate = buildAppOnlyCandidate(live.definition, candidateDigest);
-  const runtime = await collectAppOnlyRuntimeCompatibility({ identity, candidate, predecessor, readLive: readers.readLive, aws, repositoryRoot });
+  onStage("RUNTIME");
+  const runtime = await collectAppOnlyRuntimeCompatibility({ identity, candidate, predecessor, readLive: readers.readLive, aws, repositoryRoot, onStage });
+  onStage("DATABASE_SECRET_METADATA");
   const secret = aws(["secretsmanager", "describe-secret", "--secret-id", APP_ONLY_VERIFIER.databaseSecretName]);
   assert.equal(secret.Name, APP_ONLY_VERIFIER.databaseSecretName); assert.equal(secret.DeletedDate, undefined);
   assert.match(secret.ARN || "", new RegExp(`^arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:${APP_ONLY_VERIFIER.databaseSecretName}-[A-Za-z0-9]{6}$`));
+  onStage("VERIFIER_IAM");
   const verifierIam = collectAppOnlyVerifierIamCompatibility({ repositoryRoot, identity, databaseSecretArn: secret.ARN, run });
+  onStage("FINAL_CAS");
   assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(readers.readLive())); source();
+  onStage("PREPARATION_BINDING");
   const preparation = prepareAppOnlyVerifier({ sourceSha, live, images, verifierImage, iam, verifierIam, runtime, requirements, repositoryRoot, databaseSecretArn: secret.ARN });
   return { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation,
     images, verifierImage, iam, verifierIam, runtime, requirements, requirementsReference: structuredClone(requirementsReference) };

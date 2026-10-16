@@ -393,7 +393,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
     if (typeof rotationPrepare.revalidate !== "function") throw new Error("Live prepared rotation revalidation is required before ECS registration.");
     results.rebaselinePreRegistration = await rotationPrepare.revalidate({ rotationId, rotationStateSha256 });
   }
-  const task = await registerOverlapTaskDefinition(runtimeOverlapTask);
+  const task = await registerOverlapTaskDefinition({ ...runtimeOverlapTask, sourceSha, rotationId });
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
   results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
   results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true };
