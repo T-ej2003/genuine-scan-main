@@ -42,7 +42,7 @@ jobs:
     outputs:
       image_ref: ${{ steps.image.outputs.image_ref }}
       security_artifact_id: ${{ steps.security-publication.outputs.artifact-id }}
-      security_artifact_digest: ${{ steps.security-publication.outputs.artifact-digest }}
+      security_artifact_digest: ${{ steps.reference.outputs.digest }}
       publication_reference: ${{ steps.reference.outputs.value }}
     runs-on: ubuntu-latest
     environment: production-stage-b-image-publish
@@ -221,11 +221,13 @@ jobs:
           import crypto from 'node:crypto';
           import fs from 'node:fs';
           const file = `${process.env.RUNNER_TEMP}/production-green-backend-image.jsonl`;
+          const uploadedDigest = process.env.ARTIFACT_DIGEST;
           const reference = { workflowFile: '.github/workflows/production-green-backend-image-publish.yml', sourceSha: process.env.RELEASE_SHA,
             runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: process.env.ARTIFACT_ID,
-            artifactDigest: process.env.ARTIFACT_DIGEST, fileSha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
+            artifactDigest: uploadedDigest.startsWith('sha256:') ? uploadedDigest : `sha256:${uploadedDigest}`, fileSha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
           if (!/^[a-f0-9]{40}$/.test(reference.sourceSha) || !/^[1-9][0-9]*$/.test(reference.runId)
             || !/^[1-9][0-9]*$/.test(reference.runAttempt) || !/^[1-9][0-9]*$/.test(reference.artifactId)
             || !/^sha256:[a-f0-9]{64}$/.test(reference.artifactDigest)) throw new Error('Image publication reference is invalid.');
           console.log(`value=${JSON.stringify(reference)}`);
+          console.log(`digest=${reference.artifactDigest}`);
           NODE
