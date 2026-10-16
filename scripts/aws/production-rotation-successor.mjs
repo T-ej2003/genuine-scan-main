@@ -73,9 +73,15 @@ export async function authenticateRotationSuccessor({ config, configSha256, pred
     const proof = validateRuntimeProof({ proof: state.overlapRuntime, config, phase: "overlap", expectedDeploymentSha: config.sourceSha, clock: () => now.getTime(), historicalContinuity: state.qr?.historicalContinuity });
     if (!equal(proof, state.overlapRuntime) || state.overlapReadyAt !== proof.observedAt
         || state.cleanupEligibleAt !== deriveProductionRotationCleanupEligibleAt(state.overlapReadyAt, state.minimumGraceSeconds)
-        || state.verification.runtimeInvocationRef !== proof.runtimeInvocationRef
-        || (state.phase === "verified" && (!Number.isFinite(Date.parse(state.verifiedAt)) || Date.parse(state.verifiedAt) < Date.parse(proof.observedAt)
-          || !["jwtCurrentRuntimeVerify", "jwtPreviousRuntimeVerify", "jwtInvalidRuntimeRejected", "qrCurrentRuntimeVerify", "qrTamperMatchingKeyTest", "qrUnknownKeyRejected", "serviceHealthy"].every(key => state.verification[key] === true)))) throw new Error("Rotation successor runtime completion is invalid.");
+        || !equal(state.verification, state.phase === "overlap-ready"
+          ? { preparedStateSha256: state.verification.preparedStateSha256, runtimeInvocationRef: proof.runtimeInvocationRef }
+          : { preparedStateSha256: state.verification.preparedStateSha256, runtimeInvocationRef: proof.runtimeInvocationRef,
+            jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true,
+            qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: proof.qrPreviousRuntimeVerify,
+            historicalContinuity: proof.historicalContinuity, legacyQrKeypairUnrecoverable: proof.legacyQrKeypairUnrecoverable,
+            qrPreviousSlotAbsent: proof.qrPreviousSlotAbsent, qrTamperMatchingKeyTest: true,
+            qrUnknownKeyRejected: true, serviceHealthy: true })
+        || (state.phase === "verified" && (!Number.isFinite(Date.parse(state.verifiedAt)) || Date.parse(state.verifiedAt) < Date.parse(proof.observedAt) || Date.parse(state.verifiedAt) > now.getTime()))) throw new Error("Rotation successor runtime completion is invalid.");
   }
   return { state, evidence, predecessorStateSha256, predecessorFixtureSha256 };
 }
@@ -114,7 +120,8 @@ export async function authenticatePreparedRotationSuccessor({ config, configSha2
   const fixture = readStageBPrivateFileBytes({ filePath: config.rotationFixtureFile, repositoryRoot, label: "Successor rotation fixture" });
   const state = JSON.parse(readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot, label: "Successor rotation state" }).bytes);
   if (["overlap-ready", "verified"].includes(state.phase)) {
-    const proof = JSON.parse(readStageBPrivateFileBytes({ filePath: config.overlapRuntimeProofFile, repositoryRoot, label: "Overlap runtime proof" }).bytes);
+    const raw = JSON.parse(readStageBPrivateFileBytes({ filePath: config.overlapRuntimeProofFile, repositoryRoot, label: "Overlap runtime proof" }).bytes);
+    const proof = validateRuntimeProof({ proof: raw, config, phase: "overlap", expectedDeploymentSha: config.sourceSha, clock: () => now.getTime(), historicalContinuity: state.qr?.historicalContinuity });
     if (!equal(proof, state.overlapRuntime)) throw new Error("Rotation successor runtime proof changed after verification.");
   }
   const evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: path.join(path.dirname(config.rotationStateFile), "rotation-successor-evidence.json"), repositoryRoot, label: "Rotation successor evidence" }).bytes);

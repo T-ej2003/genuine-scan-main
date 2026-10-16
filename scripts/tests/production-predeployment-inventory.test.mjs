@@ -988,20 +988,31 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     await assert.rejects(authenticatePreparedRotationSuccessor({ ...reader, proveSourceAdvance: () => false }), /source or fixture lineage/);
     const prepared = JSON.parse(readFileSync(stateFile));
     const observedAt = "2026-11-16T09:59:00.000Z";
-    const runtimeProof = validateRuntimeProof({ proof: { rotationId, phase: "overlap", deploymentSha: successorSha, runtimeInvocationRef: "https://example.test/runtime-overlap", observedAt,
+    const rawRuntimeProof = { rotationId, phase: "overlap", deploymentSha: successorSha, runtimeInvocationRef: "https://example.test/runtime-overlap", observedAt,
       jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true,
-      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: imageReleaseSha, expectedReleaseGitSha: imageReleaseSha, healthObservedAt: observedAt },
+      serviceHealthy: true, healthHttpStatus: 200, healthReleaseGitSha: imageReleaseSha, expectedReleaseGitSha: imageReleaseSha, healthObservedAt: observedAt };
+    const runtimeProof = validateRuntimeProof({ proof: rawRuntimeProof,
       config: nextConfig, phase: "overlap", expectedDeploymentSha: successorSha, clock: () => options.now.getTime() });
-    writeFileSync(nextConfig.overlapRuntimeProofFile, `${JSON.stringify(runtimeProof)}\n`, { mode: 0o600 });
+    writeFileSync(nextConfig.overlapRuntimeProofFile, `${JSON.stringify(rawRuntimeProof)}\n`, { mode: 0o600 });
     const preparedStateSha256 = createHash("sha256").update(`${JSON.stringify(prepared, null, 2)}\n`).digest("hex");
     const verifiedBase = { ...prepared, phase: "overlap-ready", overlapRuntime: runtimeProof, overlapReadyAt: observedAt,
       cleanupEligibleAt: deriveProductionRotationCleanupEligibleAt(observedAt, 2592000), verification: { preparedStateSha256, runtimeInvocationRef: runtimeProof.runtimeInvocationRef } };
     writeFileSync(stateFile, `${JSON.stringify(verifiedBase, null, 2)}\n`, { mode: 0o600 });
     assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.phase, "overlap-ready");
     const verified = { ...verifiedBase, phase: "verified", verifiedAt: "2026-11-16T10:00:00.000Z", verification: { ...verifiedBase.verification,
-      jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, serviceHealthy: true } };
+      jwtCurrentRuntimeVerify: true, jwtPreviousRuntimeVerify: true, jwtInvalidRuntimeRejected: true, qrCurrentRuntimeVerify: true, qrPreviousRuntimeVerify: true,
+      historicalContinuity: runtimeProof.historicalContinuity, legacyQrKeypairUnrecoverable: runtimeProof.legacyQrKeypairUnrecoverable,
+      qrPreviousSlotAbsent: runtimeProof.qrPreviousSlotAbsent, qrTamperMatchingKeyTest: true, qrUnknownKeyRejected: true, serviceHealthy: true } };
     writeFileSync(stateFile, `${JSON.stringify(verified, null, 2)}\n`, { mode: 0o600 });
     assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.phase, "verified");
+    writeFileSync(stateFile, `${JSON.stringify({ ...verified, verification: { ...verified.verification, qrPreviousRuntimeVerify: false } }, null, 2)}\n`, { mode: 0o600 });
+    await assert.rejects(authenticatePreparedRotationSuccessor(reader), /runtime completion is invalid/);
+    writeFileSync(stateFile, `${JSON.stringify({ ...verified, verifiedAt: "2026-11-16T10:01:00.000Z" }, null, 2)}\n`, { mode: 0o600 });
+    await assert.rejects(authenticatePreparedRotationSuccessor(reader), /runtime completion is invalid/);
+    writeFileSync(stateFile, `${JSON.stringify(verified, null, 2)}\n`, { mode: 0o600 });
+    writeFileSync(nextConfig.overlapRuntimeProofFile, `${JSON.stringify({ ...rawRuntimeProof, serviceHealthy: false })}\n`, { mode: 0o600 });
+    await assert.rejects(authenticatePreparedRotationSuccessor(reader), /health is invalid/);
+    writeFileSync(nextConfig.overlapRuntimeProofFile, `${JSON.stringify(rawRuntimeProof)}\n`, { mode: 0o600 });
     writeFileSync(stateFile, '{}\n', { mode: 0o600 });
     await assert.rejects(prepareProductionRotationSuccessor(options), /conflicts with signed successor/);
     await assert.rejects(authenticatePreparedRotationSuccessor(reader), /state differs/);
