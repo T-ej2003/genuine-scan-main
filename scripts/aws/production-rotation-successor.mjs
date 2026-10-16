@@ -7,7 +7,6 @@ import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs"
 import { authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
-import { validateRuntimeProof } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -65,6 +64,7 @@ export async function authenticateRotationSuccessor({ config, configSha256, pred
       || !await verifySignature({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(expectedPayload)), signature: Buffer.from(evidence.signatureBase64, "base64") })) throw new Error("Rotation successor signature or immutable predecessor is invalid.");
   const prepared = { ...derived, successorProvenance: evidence };
   if (!equal(state, prepared)) {
+    const { validateRuntimeProof } = await import("../../backend/scripts/security/rotate-production-signing-material.mjs");
     if (!["overlap-ready", "verified"].includes(state?.phase) || !SHA256.test(state.verification?.preparedStateSha256 || "")
         || state.verification.preparedStateSha256 !== hash(Buffer.from(`${JSON.stringify(prepared, null, 2)}\n`))) throw new Error("Rotation successor state differs from its authenticated predecessor.");
     const unchanged = { ...state };
@@ -120,6 +120,7 @@ export async function authenticatePreparedRotationSuccessor({ config, configSha2
   const fixture = readStageBPrivateFileBytes({ filePath: config.rotationFixtureFile, repositoryRoot, label: "Successor rotation fixture" });
   const state = JSON.parse(readStageBPrivateFileBytes({ filePath: config.rotationStateFile, repositoryRoot, label: "Successor rotation state" }).bytes);
   if (["overlap-ready", "verified"].includes(state.phase)) {
+    const { validateRuntimeProof } = await import("../../backend/scripts/security/rotate-production-signing-material.mjs");
     const raw = JSON.parse(readStageBPrivateFileBytes({ filePath: config.overlapRuntimeProofFile, repositoryRoot, label: "Overlap runtime proof" }).bytes);
     const proof = validateRuntimeProof({ proof: raw, config, phase: "overlap", expectedDeploymentSha: config.sourceSha, clock: () => now.getTime(), historicalContinuity: state.qr?.historicalContinuity });
     if (!equal(proof, state.overlapRuntime)) throw new Error("Rotation successor runtime proof changed after verification.");
