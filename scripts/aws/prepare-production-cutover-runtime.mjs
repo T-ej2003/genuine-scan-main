@@ -136,6 +136,13 @@ const result = prepareProductionCutoverRuntime({
   inventoryApprovalId: args.get("inventory-approval-id"),
   inventoryTaskDefinitionArn: args.get("inventory-task-definition-arn"),
   adoptCompletedInventory: args.get("adopt-completed-inventory") === "true",
+  adoptCompletedInventoryFromSourceSha: args.get("adopt-completed-inventory-from-source-sha"),
+  rotationSuccessorOriginalConfigFile: args.get("rotation-successor-original-config"),
+  rotationSuccessorOriginalConfigSha256: args.get("rotation-successor-original-config-sha256"),
+  rotationSuccessorStateFile: args.get("rotation-successor-state"),
+  rotationSuccessorStateSha256: args.get("rotation-successor-state-sha256"),
+  rotationSuccessorFixtureFile: args.get("rotation-successor-fixture"),
+  rotationSuccessorFixtureSha256: args.get("rotation-successor-fixture-sha256"),
   newInventoryAfterCompleted: args.get("new-inventory-after-completed") === "true",
   onboardingPaths,
   stageBTfvarsPath: required("stage-b-tfvars"),
@@ -143,6 +150,7 @@ const result = prepareProductionCutoverRuntime({
   stageBTfvarsBindingReportSha256: required("stage-b-tfvars-binding-report-sha256"),
   stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
   ...composition,
+  proveSourceAdvance: proveRecoveryDescendant,
 });
 process.stdout.write(`${JSON.stringify({
   RUNTIME_DIRECTORY: result.runtimeDirectory,

@@ -5,10 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { createAwsArtifactSigningAdapter } from "./production-artifact-signing-secrets-adapter.mjs";
 import { createAwsOverlapTaskRegistrationAdapter } from "./production-overlap-task-definition.mjs";
+import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
 import { createTerraformStageAAdapter } from "./production-stage-a-control-plane.mjs";
 import { createProductionRuntimeInventoryAdapter } from "./production-runtime-inventory-adapter.mjs";
 import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
+import { authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
 import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
 import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
@@ -400,7 +402,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
     getVerifierSession: requireVerifierSession,
     expected: { expectedClusterArn: CLUSTER_ARN, expectedTaskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn, expectedImageDigest: config.backendImageDigest, serviceName: SERVICE, containerName: CONTAINER },
   });
-  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: commandRun, sourceSha, imageReleaseSha: config.imageReleaseSha, imageDigest: config.overlapTaskInput?.backendImage, config, runtimeConfigSha256 });
+  const preDeploymentInventory = createProductionPreDeploymentInventoryAdapter({ run: commandRun, sourceSha, imageReleaseSha: config.imageReleaseSha, imageDigest: config.overlapTaskInput?.backendImage, config, runtimeConfigSha256, proveDescendant: proveProtectedDescendant });
   return {
     iam: { report: readIamEvidence(), reconcile: async () => ({ mutationCount: 0 }) },
     imageAuthorizationValidation: { verifyImageEvidence: (options) => verifyImageEvidenceSignature({ ...options, run: (args) => commandRun(args) }) },
@@ -440,7 +442,16 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       : { adapter: stageA, endpointSecurityGroupId: config.endpointSecurityGroupId, runtimeSecurityGroupId: config.runtimeSecurityGroupId },
     artifactSigning: artifact,
     rebaseline,
-    overlapTask: { input: config.overlapTaskInput, register: overlapRegistration, describe: async (arn) => parseJson(commandRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition },
+    overlapTask: {
+      input: config.overlapTaskInput,
+      register: overlapRegistration,
+      describe: async (arn) => {
+        const value = parseJson(commandRun, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]);
+        return { ...value.taskDefinition, tags: value.tags };
+      },
+      list: async (family) => parseJson(commandRun, ["ecs", "list-task-definitions", "--family-prefix", family, "--status", "ACTIVE"]).taskDefinitionArns,
+      journal: createReleaseCoordinatorStore({ run: releaseRun, directory: path.dirname(config.rotationStateFile), repositoryRoot: process.cwd() }),
+    },
     preDeploymentInventory: { execute: async ({ rotationId: currentRotationId }) => preDeploymentInventory.run({ rotationId: currentRotationId }) },
     inventory: { execute: inventoryExecute, taskDefinitionArn: config.inventoryTaskDefinitionArn || config.expectedCurrentTaskDefinitionArn },
     rotationPrepare: createProductionRotationPrepareAdapter({
@@ -449,6 +460,7 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       configFile: config.rotationConfigFile,
       configSha256: runtimeConfigSha256,
       stateFile: config.rotationStateFile,
+      authenticateSuccessor: config.rotationSuccessor ? () => authenticatePreparedRotationSuccessor({ config, configSha256: runtimeConfigSha256, repositoryRoot: process.cwd(), runAws: commandRun }) : undefined,
       fixtureFile: config.rotationFixtureFile,
       runtimeProofFile: config.overlapRuntimeProofFile,
     }),

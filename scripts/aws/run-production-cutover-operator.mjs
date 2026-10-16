@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
+import os from "node:os";
 import { pathToFileURL } from "node:url";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { assertCompletedInventoryAdoptionPayload } from "./production-completed-inventory-adoption.mjs";
+import { assertCompletedInventoryAdoptionPayload, authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createProductionRotationInfrastructureAdapter } from "./production-cutover-production-adapters.mjs";
 import { rotationBindingsToPostPrepareTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -64,6 +68,7 @@ export function assertProductionCutoverOperatorConfig(runtime, { repositoryRoot 
   }
   if (config.newInventoryAfterCompleted && (canonicalJson(config.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR)
       || config.inventoryFailedPredecessor || config.completedInventoryAdoptionRequired || config.sourceSha === COMPLETED_INVENTORY_PREDECESSOR.sourceSha)) throw new Error("Fresh inventory binding is invalid before MFA.");
+  if (Boolean(config.completedInventoryPredecessorSourceSha) !== Boolean(config.rotationSuccessor)) throw new Error("Cross-source rotation successor binding is incomplete before MFA.");
   const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
   if (config.completedInventoryAdoptionRequired === true && !existsSync(adoptionFile)) throw new Error("Completed inventory adoption proof is required before MFA.");
   if (existsSync(adoptionFile)) {
@@ -79,12 +84,34 @@ export function preflightProductionCutoverRotation({ config, runtime, cwd = proc
   return createProductionRotationInfrastructureAdapter({ config, releaseProfile: config.releaseProfile, repositoryRoot: cwd }).preflight({ sourceSha: runtime["--source-sha"], rotationId: runtime["--rotation-id"], secretBindings });
 }
 
-export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, authenticateCheckout = readStageBProtectedMainCheckout, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
+export async function authenticateProductionInventoryAdoption({ config, runtime, cwd = process.cwd() }) {
+  if (config.completedInventoryAdoptionRequired !== true) return;
+  const filePath = path.join(path.dirname(path.resolve(runtime["--config"])), "inventory-completed-adoption-evidence.json");
+  const evidence = JSON.parse(readStageBPrivateFileBytes({ filePath, repositoryRoot: cwd, label: "Completed inventory adoption evidence" }).bytes);
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile });
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-verify-"));
+  const messageFile = path.join(directory, "message");
+  try {
+    await authenticateCompletedInventoryAdoptionEvidence(evidence, {
+      config, configSha256: runtime["--config-sha256"],
+      proveDescendant: ({ ancestorSha, descendantSha }) => {
+        try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd, stdio: "ignore" }); return true; } catch { return false; }
+      },
+    }, ({ keyId, message, signature }) => {
+      writeFileSync(messageFile, message, { mode: 0o600 });
+      return JSON.parse(run(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256", "--output", "json"])).SignatureValid === true;
+    });
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}
+
+export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, authenticateCheckout = readStageBProtectedMainCheckout, authenticateInventory = authenticateProductionInventoryAdoption, authenticateSuccessor = authenticatePreparedRotationSuccessor, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
   const config = validateConfig(runtime, { repositoryRoot: cwd });
   authenticateCheckout({ cwd, expectedSourceSha: config.recoveryTooling?.sourceSha || runtime["--source-sha"], requireCanonicalRepository: true });
+  await authenticateInventory({ config, runtime, cwd });
+  if (config.rotationSuccessor) await authenticateSuccessor({ config, configSha256: runtime["--config-sha256"], repositoryRoot: cwd, runAws: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile }) });
   preflightRotation({ config, runtime, cwd });
   const requiredInputs = inputsForMode(runtime["--mode"]);
   const inputs = {};

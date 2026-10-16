@@ -59,17 +59,19 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
  };
  const write=(kind,key,value)=>{
   const bytes=Buffer.from(canonicalJson({kind:`PRODUCTION_RELEASE_COORDINATOR_${kind}`,key,value}));
-  try {reserveStageBSharedApplyAttempt({artifactSetIdentity:id(kind,key),bytes,privateDirectory:directory,run});}
+  try {reserveStageBSharedApplyAttempt({artifactSetIdentity:id(kind,key),bytes,privateDirectory:directory,run});return true;}
   catch(error){
    // A lost create response or repeated content-addressed write is safe only
    // after exact readback. Neither condition authorizes an AWS business write.
-   const existing=read(kind,key);if(existing===undefined)throw error;assert.deepEqual(existing,value,'Immutable coordinator record conflict');
+   const existing=read(kind,key);if(existing===undefined)throw error;assert.deepEqual(existing,value,'Immutable coordinator record conflict');return false;
   }
  };
  return {
   readStart:request=>read('START',request)??null,writeStart:(request,value)=>write('START',request,value),
   readStep:(releaseId,name)=>read('STEP',{releaseId,name})??null,
   writeStep:value=>write('STEP',{releaseId:value.releaseId,name:value.name},value),
+  readOperation:(operationId,phase)=>read('OPERATION',{operationId,phase})??null,
+  writeOperation:(operationId,phase,value)=>write('OPERATION',{operationId,phase},value),
   putArtifact:(sha256,value)=>{assert.equal(brokerDigest(value),sha256);write('ARTIFACT',{sha256},value);},
   getArtifact:sha256=>{assert.match(sha256||'',/^[a-f0-9]{64}$/);const value=read('ARTIFACT',{sha256});assert.ok(value!==undefined,'Missing release artifact');assert.equal(brokerDigest(value),sha256);return value;},
  };

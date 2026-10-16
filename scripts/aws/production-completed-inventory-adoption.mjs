@@ -9,13 +9,16 @@ const SHA256 = /^[a-f0-9]{64}$/;
 const PURPOSE = "adopt-completed-predeployment-inventory";
 
 export function assertCompletedInventoryAdoptionPayload(payload, { config, configSha256, now = new Date() } = {}) {
-  const fields = ["schemaVersion", "purpose", "sourceSha", "imageReleaseSha", "rotationId", "approvalId", "taskDefinitionArn", "imageDigest", "originalConfigSha256", "continuationConfigSha256", "operationKey", "operationIdentitySha256", payload?.schemaVersion === 2 ? "completionReceiptSha256" : "replayRowSha256", "taskArn", "inventorySha256", "inventory", "issuedAt", "expiresAt"];
-  if (!payload || Object.keys(payload).sort().join(",") !== fields.sort().join(",") || ![1, 2].includes(payload.schemaVersion) || payload.purpose !== PURPOSE
-      || !config || config.completedInventoryAdoptionRequired !== true || payload.sourceSha !== config.sourceSha || payload.imageReleaseSha !== config.imageReleaseSha
-      || payload.rotationId !== config.rotationId || payload.approvalId !== config.inventoryApprovalId
+  const crossSource = payload?.schemaVersion === 3;
+  const fields = ["schemaVersion", "purpose", "sourceSha", "imageReleaseSha", "rotationId", "approvalId", "taskDefinitionArn", "imageDigest", "originalConfigSha256", "continuationConfigSha256", "operationKey", "operationIdentitySha256", payload?.schemaVersion >= 2 ? "completionReceiptSha256" : "replayRowSha256", "taskArn", "inventorySha256", "inventory", "issuedAt", "expiresAt", ...(crossSource ? ["continuationSourceSha", "currentApproval"] : [])];
+  if (!payload || Object.keys(payload).sort().join(",") !== fields.sort().join(",") || ![1, 2, 3].includes(payload.schemaVersion) || payload.purpose !== PURPOSE
+      || !config || config.completedInventoryAdoptionRequired !== true || payload.sourceSha !== (crossSource ? config.completedInventoryPredecessorSourceSha : config.sourceSha)
+      || (crossSource && (payload.continuationSourceSha !== config.sourceSha || payload.sourceSha === config.sourceSha || !payload.currentApproval))
+      || (!crossSource && config.completedInventoryPredecessorSourceSha !== undefined) || payload.imageReleaseSha !== config.imageReleaseSha
+      || payload.rotationId !== config.rotationId || (!crossSource && payload.approvalId !== config.inventoryApprovalId)
       || payload.taskDefinitionArn !== config.inventoryTaskDefinitionArn || payload.imageDigest !== config.overlapTaskInput?.backendImage
       || payload.continuationConfigSha256 !== configSha256 || !SHA256.test(payload.originalConfigSha256 || "")
-      || !SHA256.test((payload.schemaVersion === 2 ? payload.completionReceiptSha256 : payload.replayRowSha256) || "") || !SHA256.test(payload.operationIdentitySha256 || "")
+      || !SHA256.test((payload.schemaVersion >= 2 ? payload.completionReceiptSha256 : payload.replayRowSha256) || "") || !SHA256.test(payload.operationIdentitySha256 || "")
       || !SHA256.test(payload.inventorySha256 || "") || !Number.isFinite(Date.parse(payload.issuedAt))
       || !Number.isFinite(Date.parse(payload.expiresAt)) || Date.parse(payload.expiresAt) <= now.getTime()
       || Date.parse(payload.issuedAt) > now.getTime() + 300_000 || Date.parse(payload.expiresAt) - Date.parse(payload.issuedAt) > 1_800_000) {
@@ -29,7 +32,7 @@ export function assertCompletedInventoryAdoptionPayload(payload, { config, confi
 
 export async function authenticateFreshInventoryCompletionReceipt(row, { config, verifySignature, now = new Date() }) {
   const fields = ["approvalMode", "operationKey", "operationIdentitySha256", "predecessorOperationKey", "recoveryEvidenceSha256", "approvalNonce", "approvalContractSha256", "signedApproval", "sourceSha", "imageReleaseSha", "rotationId", "taskDefinitionArn", "imageDigest", "taskArn", "inventoryJson", "inventorySha256", "completedAt"];
-  if (!row || Object.keys(row).sort().join(",") !== fields.sort().join(",") || !config?.completedInventoryAdoptionRequired
+  if (!row || Object.keys(row).sort().join(",") !== fields.sort().join(",") || (!config?.completedInventoryAdoptionRequired && canonicalJson(config?.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR))
       || !Number.isFinite(Date.parse(row.completedAt)) || Date.parse(row.completedAt) > now.getTime() + 300_000 || row.predecessorOperationKey !== COMPLETED_INVENTORY_PREDECESSOR.operationKey
       || row.recoveryEvidenceSha256 !== COMPLETED_INVENTORY_PREDECESSOR.recoveryEvidenceSha256
       || row.sourceSha !== config.sourceSha || row.imageReleaseSha !== config.imageReleaseSha || row.rotationId !== config.rotationId
@@ -46,16 +49,21 @@ export async function authenticateFreshInventoryCompletionReceipt(row, { config,
   return { inventory, identity, receiptSha256: digest(row) };
 }
 
-export async function buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256, continuationConfig, continuationConfigSha256, completionReceipt, now = new Date(), verifySignature, sign }) {
+export async function buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256, continuationConfig, continuationConfigSha256, completionReceipt, currentApproval, proveDescendant, now = new Date(), verifySignature, sign }) {
+  const crossSource = originalConfig?.sourceSha !== continuationConfig?.sourceSha;
   if (!SHA256.test(originalConfigSha256 || "") || !SHA256.test(continuationConfigSha256 || "")
       || canonicalJson(originalConfig?.newInventoryAfterCompleted) !== canonicalJson(COMPLETED_INVENTORY_PREDECESSOR)
-      || originalConfig.sourceSha !== continuationConfig?.sourceSha || originalConfig.rotationId !== continuationConfig.rotationId || originalConfig.ticket !== continuationConfig.ticket
-      || originalConfig.imageReleaseSha !== continuationConfig.imageReleaseSha || originalConfig.inventoryApprovalId !== continuationConfig.inventoryApprovalId
+      || (crossSource ? continuationConfig?.completedInventoryPredecessorSourceSha !== originalConfig.sourceSha
+        || proveDescendant?.({ ancestorSha: originalConfig.sourceSha, descendantSha: continuationConfig?.sourceSha }) !== true
+        : continuationConfig?.completedInventoryPredecessorSourceSha !== undefined)
+      || originalConfig.rotationId !== continuationConfig.rotationId || originalConfig.ticket !== continuationConfig.ticket
+      || originalConfig.imageReleaseSha !== continuationConfig.imageReleaseSha || (!crossSource && originalConfig.inventoryApprovalId !== continuationConfig.inventoryApprovalId)
       || originalConfig.inventoryTaskDefinitionArn !== continuationConfig.inventoryTaskDefinitionArn
       || originalConfig.overlapTaskInput?.backendImage !== continuationConfig.overlapTaskInput?.backendImage) throw new Error("Fresh inventory adoption config lineage differs.");
-  const { inventory, identity, receiptSha256 } = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: continuationConfig, verifySignature });
+  const { inventory, identity, receiptSha256 } = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: originalConfig, verifySignature });
   if (identity.approvalId !== originalConfig.inventoryApprovalId) throw new Error("Fresh inventory approval ID differs.");
-  const payload = { schemaVersion: 2, purpose: PURPOSE, sourceSha: identity.releaseSha, imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId,
+  if (crossSource) await validateStageBApproval(currentApproval, { releaseSha: continuationConfig.sourceSha, ticketId: continuationConfig.ticket, approvalId: continuationConfig.inventoryApprovalId, images: { backendImageDigest: identity.imageDigest } }, { now, verifySignature });
+  const payload = { schemaVersion: crossSource ? 3 : 2, purpose: PURPOSE, sourceSha: identity.releaseSha, ...(crossSource ? { continuationSourceSha: continuationConfig.sourceSha, currentApproval } : {}), imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId,
     approvalId: identity.approvalId, taskDefinitionArn: identity.taskDefinitionArn, imageDigest: identity.imageDigest, originalConfigSha256,
     continuationConfigSha256, operationKey: preDeploymentOperationKey(identity), operationIdentitySha256: preDeploymentOperationIdentitySha256(identity),
     completionReceiptSha256: receiptSha256, taskArn: completionReceipt.taskArn, inventorySha256: hash(JSON.stringify(inventory)), inventory,
@@ -63,13 +71,17 @@ export async function buildFreshInventoryAdoptionEvidence({ originalConfig, orig
   assertCompletedInventoryAdoptionPayload(payload, { config: continuationConfig, configSha256: continuationConfigSha256, now });
   const signatureBase64 = await sign({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)) });
   const evidence = { payload, signatureBase64 };
-  await authenticateCompletedInventoryAdoptionEvidence(evidence, { config: continuationConfig, configSha256: continuationConfigSha256, now }, verifySignature);
+  await authenticateCompletedInventoryAdoptionEvidence(evidence, { config: continuationConfig, configSha256: continuationConfigSha256, now, proveDescendant }, verifySignature);
   return evidence;
 }
 
 export async function authenticateCompletedInventoryAdoptionEvidence(evidence, expected, verifySignature) {
   if (!evidence || Object.keys(evidence).sort().join(",") !== "payload,signatureBase64" || !/^[A-Za-z0-9+/]+={0,2}$/.test(evidence.signatureBase64 || "") || typeof verifySignature !== "function") throw new Error("Completed inventory adoption envelope is invalid.");
   const payload = assertCompletedInventoryAdoptionPayload(evidence.payload, expected);
+  if (payload.schemaVersion === 3) {
+    if (expected.proveDescendant?.({ ancestorSha: payload.sourceSha, descendantSha: payload.continuationSourceSha }) !== true) throw new Error("Completed inventory successor ancestry is not authenticated.");
+    await validateStageBApproval(payload.currentApproval, { releaseSha: payload.continuationSourceSha, ticketId: expected.config.ticket, approvalId: expected.config.inventoryApprovalId, images: { backendImageDigest: payload.imageDigest } }, { now: expected.now || new Date(), verifySignature });
+  }
   if (!await verifySignature({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)), signature: Buffer.from(evidence.signatureBase64, "base64") })) throw new Error("Completed inventory adoption signature is invalid.");
   return payload;
 }

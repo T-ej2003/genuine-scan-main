@@ -27,7 +27,7 @@ const lastJsonLine = (output) => {
  * secret/state transaction; this boundary supplies only aggregate inventory
  * evidence and returns redacted persisted-state metadata.
  */
-export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, runtimeProofFile, repositoryRoot = process.cwd() } = {}) {
+export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, runtimeProofFile, authenticateSuccessor, repositoryRoot = process.cwd() } = {}) {
   if (typeof run !== "function" || typeof coordinator !== "string" || !configFile || !stateFile || !fixtureFile) {
     throw new Error("Production rotation prepare adapter is incomplete.");
   }
@@ -35,6 +35,10 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
     async run({ execProof, rotationId, rotationStateSha256, rotationFixtureSha256 } = {}) {
       if (!runtimeProofFile || execProof?.valid !== true || !execProof.proof || !SHA256.test(rotationStateSha256 || "") || !SHA256.test(rotationFixtureSha256 || "")) throw new Error("Overlap coordinator verification inputs are incomplete.");
       const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if (config.rotationSuccessor) {
+        if (typeof authenticateSuccessor !== "function") throw new Error("Rotation successor authenticator is required.");
+        await authenticateSuccessor();
+      }
       if (config.rotationId !== rotationId) throw new Error("Overlap coordinator verification rotation changed.");
       const stateBefore = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" });
       const fixture = readStageBPrivateFileBytes({ filePath: fixtureFile, repositoryRoot, label: "Persisted rotation fixture" });
@@ -68,6 +72,10 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
       if (!inventory || typeof inventory !== "object" || !SHA256.test(inventory.evidenceSha256 || "")) throw new Error("Rotation prepare requires hash-bound bounded inventory evidence.");
       if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "")) throw new Error("Rotation prepare rotation ID is invalid.");
       const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if (config.rotationSuccessor) {
+        if (typeof authenticateSuccessor !== "function") throw new Error("Rotation successor authenticator is required.");
+        await authenticateSuccessor();
+      }
       assertCoordinatorOutput(stateFile, repositoryRoot, "Persisted rotation state");
       assertCoordinatorOutput(fixtureFile, repositoryRoot, "Persisted rotation fixture");
       const temporaryDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-inventory-"));
@@ -109,6 +117,10 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
     async revalidate({ rotationId, rotationStateSha256 } = {}) {
       if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "") || !SHA256.test(rotationStateSha256 || "")) throw new Error("Rotation post-prepare identity is invalid.");
       const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if (config.rotationSuccessor) {
+        if (typeof authenticateSuccessor !== "function") throw new Error("Rotation successor authenticator is required.");
+        await authenticateSuccessor();
+      }
       if (config.rotationId !== rotationId) throw new Error("Rotation post-prepare config identity changed.");
       const persistedState = readStageBPrivateFileBytes({ filePath: stateFile, repositoryRoot, label: "Persisted rotation state" });
       if (persistedState.sha256 !== rotationStateSha256) throw new Error("Persisted rotation state changed before ECS registration.");

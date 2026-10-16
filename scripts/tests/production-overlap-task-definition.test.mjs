@@ -35,3 +35,58 @@ test("overlap registration rejects an executable readback drift despite benign d
     describe: async () => ({ ...readback, tags: [OVERLAP_TASK_MARKER] }),
   }), /execution contract/);
 });
+
+const durableFixture = () => {
+  const entries = new Map();
+  const revisions = new Map();
+  let calls = 0;
+  const journal = {
+    readOperation: (id, phase) => entries.get(`${id}:${phase}`) || null,
+    writeOperation: (id, phase, value) => {
+      const key = `${id}:${phase}`;
+      if (entries.has(key)) {
+        assert.deepEqual(entries.get(key), value);
+        return false;
+      }
+      entries.set(key, structuredClone(value));
+      return true;
+    },
+  };
+  const options = {
+    input, sourceSha, rotationId: "rotation-test-1234", journal,
+    list: () => [...revisions.keys()],
+    describe: arn => revisions.get(arn),
+    register: async payload => {
+      calls += 1;
+      revisions.set(taskDefinitionArn, { ...awsReadback(payload.taskDefinition), tags: payload.tags });
+      return { taskDefinition: { taskDefinitionArn } };
+    },
+  };
+  return { entries, revisions, options, calls: () => calls };
+};
+
+test("durable overlap registration adopts a completed revision after a lost AWS response", async () => {
+  const fixture = durableFixture();
+  fixture.options.register = async payload => {
+    fixture.revisions.set(taskDefinitionArn, { ...awsReadback(payload.taskDefinition), tags: payload.tags });
+    throw new Error("AWS response lost");
+  };
+  await assert.rejects(() => registerOverlapTaskDefinition(fixture.options), /response lost/);
+  fixture.options.register = () => { throw new Error("duplicate registration"); };
+  const recovered = await registerOverlapTaskDefinition(fixture.options);
+  assert.equal(recovered.taskDefinitionArn, taskDefinitionArn);
+  assert.equal(recovered.mutationCount, 0);
+  assert.equal((await registerOverlapTaskDefinition(fixture.options)).mutationCount, 0);
+});
+
+test("durable overlap registration fails closed on ambiguous dispatch, conflicting readback, and concurrent attempts", async () => {
+  const fixture = durableFixture();
+  fixture.options.register = () => { throw new Error("AWS timeout"); };
+  await assert.rejects(() => registerOverlapTaskDefinition(fixture.options), /AWS timeout/);
+  await assert.rejects(() => registerOverlapTaskDefinition(fixture.options), /outcome remains ambiguous/);
+  const fresh = durableFixture();
+  const original = fresh.options.journal.writeOperation;
+  fresh.options.journal.writeOperation = (id, phase, value) => phase === "DISPATCH" ? (original(id, phase, value), false) : original(id, phase, value);
+  await assert.rejects(() => registerOverlapTaskDefinition(fresh.options), /already dispatched/);
+  assert.equal(fresh.calls(), 0);
+});
