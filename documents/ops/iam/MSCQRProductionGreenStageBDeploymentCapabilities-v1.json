@@ -4319,7 +4319,7 @@
         "sid": "PublishExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "635cd235350c75e3c4e155a69c8097e0b1226b473129c7eebc9b73baa56ce8ff"
+        "expectedPolicySha256": "1abd289805b64dd1f0502de570910585bc7864fb7e613477e356b74704d9dd7e"
       },
       "required": true,
       "mutation": true
@@ -22344,7 +22344,7 @@
         "sid": "SignExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "635cd235350c75e3c4e155a69c8097e0b1226b473129c7eebc9b73baa56ce8ff"
+        "expectedPolicySha256": "1abd289805b64dd1f0502de570910585bc7864fb7e613477e356b74704d9dd7e"
       },
       "required": true,
       "mutation": false
@@ -22402,7 +22402,7 @@
         "sid": "SignExactStageBApproval",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "635cd235350c75e3c4e155a69c8097e0b1226b473129c7eebc9b73baa56ce8ff"
+        "expectedPolicySha256": "1abd289805b64dd1f0502de570910585bc7864fb7e613477e356b74704d9dd7e"
       },
       "required": true,
       "mutation": true
