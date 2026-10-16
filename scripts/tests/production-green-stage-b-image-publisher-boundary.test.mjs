@@ -384,6 +384,29 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.doesNotMatch(text, /AWS_ROLE_TO_ASSUME|aws-actions\/configure-aws-credentials@v6[\s\S]*AWS_ACCESS_KEY_ID|ecs:(?:UpdateService|RunTask)|lambda:InvokeFunction|deploy-ecs-service|inputs\.(?:role|repository|services|platform)/i);
 });
 
+test("backend publication binds bare or prefixed upload-artifact digests to one canonical reference", () => {
+  const job = backendPublisher.jobs["publish-and-verify"];
+  const run = job.steps.find((step) => step.name === "Bind publication evidence to run, artifact, and image source").run;
+  const script = run.match(/node --input-type=module <<'NODE'[^\n]*\n([\s\S]*?)\nNODE/)?.[1];
+  assert.ok(script, "publication reference producer must be executable");
+  assert.equal(job.outputs.security_artifact_digest, "${{ steps.reference.outputs.digest }}");
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "backend-publication-reference-"));
+  try {
+    fs.writeFileSync(path.join(directory, "production-green-backend-image.jsonl"), "{}\n");
+    const digest = "a".repeat(64);
+    for (const input of [digest, `sha256:${digest}`]) {
+      const result = spawnSync("node", ["--input-type=module"], { input: script, encoding: "utf8", env: { ...process.env,
+        RUNNER_TEMP: directory, RELEASE_SHA: "b".repeat(40), GITHUB_RUN_ID: "12", GITHUB_RUN_ATTEMPT: "1", ARTIFACT_ID: "34", ARTIFACT_DIGEST: input } });
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(JSON.parse(result.stdout.split("\n").find((line) => line.startsWith("value=")).slice(6)).artifactDigest, `sha256:${digest}`);
+      assert.match(result.stdout, new RegExp(`digest=sha256:${digest}`));
+    }
+    const invalid = spawnSync("node", ["--input-type=module"], { input: script, encoding: "utf8", env: { ...process.env,
+      RUNNER_TEMP: directory, RELEASE_SHA: "b".repeat(40), GITHUB_RUN_ID: "12", GITHUB_RUN_ATTEMPT: "1", ARTIFACT_ID: "34", ARTIFACT_DIGEST: "bad" } });
+    assert.notEqual(invalid.status, 0);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("backend-only and Stage B publishers use disjoint immutable tag namespaces", () => {
   const backendPublish = backendPublisher.jobs["publish-and-verify"].steps.find((step) => step.name === "Publish fixed backend image and bind immutable digest").run;
   const stageBPublish = reusable.jobs["build-and-attest"].steps.find((step) => /Publish immutable backend/.test(step.name)).run;

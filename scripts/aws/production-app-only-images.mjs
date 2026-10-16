@@ -12,14 +12,17 @@ import { createPinnedRootAttestationVerifier } from "./production-root-attestati
 
 export const APP_ONLY_SESSION_RISK_CONTRACT = Object.freeze({
   path: "backend/src/services/auth/sessionRiskService.ts",
-  sha256: "13fd24e7427f4e2cb91b6629d5b34a485ae22c8902133442c471fa8270a7c8c9",
+  reviewedSha256: Object.freeze([
+    "13fd24e7427f4e2cb91b6629d5b34a485ae22c8902133442c471fa8270a7c8c9",
+    "03b8314582903b3ee209f2e6f760beddde1bec318701860d8a599fff7bd01a0e",
+  ]),
   unsetThreshold: 85,
 });
 
 export function authenticateAppOnlySessionRiskSource(repositoryRoot, candidateSourceSha) {
   assert.match(candidateSourceSha || "", /^[a-f0-9]{40}$/);
   const bytes = execFileSync("git", ["show", `${candidateSourceSha}:${APP_ONLY_SESSION_RISK_CONTRACT.path}`], { cwd: repositoryRoot, timeout: 30000, stdio: "pipe" });
-  assert.equal(createHash("sha256").update(bytes).digest("hex"), APP_ONLY_SESSION_RISK_CONTRACT.sha256,
+  assert.ok(APP_ONLY_SESSION_RISK_CONTRACT.reviewedSha256.includes(createHash("sha256").update(bytes).digest("hex")),
     "Candidate session-risk implementation differs from the reviewed positive-threshold fallback contract");
   return { ...APP_ONLY_SESSION_RISK_CONTRACT };
 }

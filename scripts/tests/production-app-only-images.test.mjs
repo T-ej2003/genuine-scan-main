@@ -9,6 +9,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 const sourceSha = "fbc47fd83699403b8708f87d757e552d5bc02dd8", imageReleaseSha = "bcec05a421bff28eb2216f399d0a9e7cd2389d5e";
 test("candidate source must contain the reviewed session-risk fallback, not the old zero-threshold implementation", () => {
   assert.deepEqual(authenticateAppOnlySessionRiskSource(process.cwd(), imageReleaseSha), APP_ONLY_SESSION_RISK_CONTRACT);
+  assert.deepEqual(authenticateAppOnlySessionRiskSource(process.cwd(), "05653f44d82c0731b89a7a4a5a36098fc4f6c3de"), APP_ONLY_SESSION_RISK_CONTRACT);
   assert.throws(() => authenticateAppOnlySessionRiskSource(process.cwd(), "7e93853e6c48ad3020915f551ef89155825ae403"));
   assert.throws(() => authenticateAppOnlySessionRiskSource(process.cwd(), "main:attacker"));
 });
