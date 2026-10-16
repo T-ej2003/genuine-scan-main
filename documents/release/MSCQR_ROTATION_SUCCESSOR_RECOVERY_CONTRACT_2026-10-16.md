@@ -16,10 +16,12 @@ The current-source inventory-adoption approval expires after 30 minutes. A resta
 
 The independent checker needs the narrowly scoped DynamoDB completion-receipt `GetItem` permission introduced by this change. That IAM change must be applied through the existing protected authorization path before the successor producer can authenticate the historical inventory. The read-only database verifier remains a separate prerequisite, and the bounded hosted diagnostic may identify a failure stage without exposing secret material.
 
+The app-only runtime verifier pins the full Stage A Terraform source as a reviewed mapping. The sole Stage A source diff in this PR is that checker `GetItem` grant, limited to the production replay table, the inventory-completion leading-key prefix, and `eu-west-2`. It does not change VPC, subnet, route, security-group, database, or runtime task wiring. The reviewed mapping hash therefore advances from `38680791e89ebd5ab5e661dc79ae7da2abe202c047b87c1ad4634650022c5575` to `18b71a50b1b2a08abda703d6ced50ea7e0704e912dfecfb439395b17b15ff002`; the verifier still rejects any further unreviewed Stage A source change before AWS reads.
+
 ## Post-merge operator sequence
 
 1. Verify the new protected-main SHA, required CI, change-ticket scope, current image-impact report and image authorization, live Terraform/IAM/Secrets Manager/ECS state, and preserved evidence checksums.
 2. Obtain fresh source-bound inventory-adoption and rotation authorization. Build the current-source runtime config with the exact historical config/state/fixture hashes; persist private files outside temporary directories.
 3. Run the successor producer and the corrected operator preflight. Do not enter MFA until the checkout, configuration, evidence, and Terraform plan pass.
-4. Resume only unfinished overlap work. Authenticate durable readiness, run the governed final-mode Release Train and Release Gate, verify database/RLS compatibility, then deploy the existing images through protected workflows.
+4. Resume only unfinished overlap work. Authenticate durable readiness, run the governed final-mode Release Train and Release Gate, verify database/RLS compatibility, then deploy images authorized by the new image-impact report through protected workflows.
 5. Verify running image digests, ECS/ALB health, authentication, QR business paths, tenant isolation, and unexpected 5xx before declaring production ready.

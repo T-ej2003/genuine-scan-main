@@ -11,7 +11,7 @@ import { resolveStageASubnetRouteTable } from "./generate-production-green-stage
 // every account resource is clean. Source evolution must review this mapping.
 export async function collectAppOnlyNetworkDatabaseRuntime({ aws, service, repositoryRoot }) {
   const source = fs.readFileSync(path.join(repositoryRoot, "infra/aws/terraform/production-green-stage-a/main.tf"), "utf8");
-  assert.equal(canonicalSha256(source), "38680791e89ebd5ab5e661dc79ae7da2abe202c047b87c1ad4634650022c5575", "Stage-A runtime source mapping is unreviewed");
+  assert.equal(canonicalSha256(source), "18b71a50b1b2a08abda703d6ced50ea7e0704e912dfecfb439395b17b15ff002", "Stage-A runtime source mapping is unreviewed");
   const network = service.networkConfiguration?.awsvpcConfiguration;
   assert.equal(network?.assignPublicIp, "DISABLED");
   assert.deepEqual([...network.subnets].sort(), [...STAGE_B.privateSubnetIds].sort());
