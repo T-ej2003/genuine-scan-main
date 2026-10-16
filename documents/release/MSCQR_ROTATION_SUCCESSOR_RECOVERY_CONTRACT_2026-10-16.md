@@ -1,6 +1,6 @@
 # Rotation successor recovery contract
 
-This change continues the existing rotation from its protected historical source without editing the original state, fixture, manifest, inventory receipt, or AWS reservation. It does not authorize a production run. The historical prepared source is `0e98970b536a2414324fd64776bc7e32acf604cd`; a future protected descendant is selected through the normal source-bound Stage B preparation. No application image input changes in this correction.
+This change continues the existing rotation from its protected historical source without editing the original state, fixture, manifest, inventory receipt, or AWS reservation. It does not authorize a production run. The historical prepared source is `0e98970b536a2414324fd64776bc7e32acf604cd`; a future protected descendant is selected through the normal source-bound Stage B preparation. The required checker receipt-read IAM permission changes an authoritative RLS source-contract input, so canonical generation refreshes the clean-room SQL package and its checksums. The image-impact classifier treats that generated package as image-affecting; post-merge image reuse must be decided from a new authenticated report, not assumed from this PR.
 
 ## Evidence and execution
 
@@ -18,7 +18,7 @@ The independent checker needs the narrowly scoped DynamoDB completion-receipt `G
 
 ## Post-merge operator sequence
 
-1. Verify the new protected-main SHA, required CI, change-ticket scope, immutable application image reuse, live Terraform/IAM/Secrets Manager/ECS state, and preserved evidence checksums.
+1. Verify the new protected-main SHA, required CI, change-ticket scope, current image-impact report and image authorization, live Terraform/IAM/Secrets Manager/ECS state, and preserved evidence checksums.
 2. Obtain fresh source-bound inventory-adoption and rotation authorization. Build the current-source runtime config with the exact historical config/state/fixture hashes; persist private files outside temporary directories.
 3. Run the successor producer and the corrected operator preflight. Do not enter MFA until the checkout, configuration, evidence, and Terraform plan pass.
 4. Resume only unfinished overlap work. Authenticate durable readiness, run the governed final-mode Release Train and Release Gate, verify database/RLS compatibility, then deploy the existing images through protected workflows.

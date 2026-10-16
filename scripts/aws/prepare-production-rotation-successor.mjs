@@ -20,7 +20,7 @@ const arg = (argv, name) => {
   return argv[index + 1];
 };
 
-export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, statusRun = execFileSync, preflight = preflightProductionCutoverRotation, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
+export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, createAwsRunner = createProductionAwsCommandRunner, statusRun = execFileSync, preflight = preflightProductionCutoverRotation, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
   const configPath = path.resolve(arg(argv, "config"));
   const configSha256 = arg(argv, "config-sha256");
   const config = readBoundStageBPrivateJson({ filePath: configPath, expectedSha256: configSha256, repositoryRoot: root, label: "Successor rotation config" });
@@ -42,8 +42,8 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
   });
   if (!proveDescendant({ ancestorSha: originalConfig.sourceSha, descendantSha: config.sourceSha })) throw new Error("Rotation successor is not protected-main ancestry.");
   const runtime = { "--config": configPath, "--config-sha256": configSha256, "--source-sha": config.sourceSha, "--rotation-id": config.rotationId };
-  const releaseRun = readAws || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile });
-  const checkerRun = signAws || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-checker-mfa" });
+  const releaseRun = readAws || createAwsRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile });
+  const checkerRun = signAws || createAwsRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
   const releaseIdentity = json(releaseRun, ["sts", "get-caller-identity"]);
   const checkerIdentity = json(checkerRun, ["sts", "get-caller-identity"]);
   if (!new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/`).test(releaseIdentity.Arn || "")

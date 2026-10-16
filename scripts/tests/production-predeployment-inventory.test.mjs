@@ -12,6 +12,7 @@ import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PRE
 import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
 import { prepareCompletedInventoryAdoption } from "../aws/prepare-completed-inventory-adoption.mjs";
 import { prepareProductionRotationSuccessor } from "../aws/prepare-production-rotation-successor.mjs";
+import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-credential-source-contract.mjs";
 import { authenticatePreparedRotationSuccessor, authenticateRotationSuccessor, signRotationSuccessor } from "../aws/production-rotation-successor.mjs";
 import { validateRuntimeProof } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
@@ -978,11 +979,21 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
       signAws: args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/test` } : (signed++, { Signature: "AA==" })) };
     const first = await prepareProductionRotationSuccessor(options);
     const second = await prepareProductionRotationSuccessor(options);
+    const checkerSources = [];
+    await prepareProductionRotationSuccessor({ ...options, signAws: undefined, createAwsRunner: selected => {
+      checkerSources.push(selected);
+      return options.signAws;
+    } });
+    assert.deepEqual(checkerSources, [{ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION }]);
+    await assert.rejects(prepareProductionRotationSuccessor({ ...options, signAws: undefined,
+      createAwsRunner: selected => createProductionAwsCommandRunner({ ...selected, env: {} }) }), /requires AWS_ACCESS_KEY_ID/);
+    await assert.rejects(prepareProductionRotationSuccessor({ ...options,
+      signAws: args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/wrong` }) : options.signAws(args) }), /separate release and checker identities/);
     assert.equal(first.successorStateSha256, second.successorStateSha256);
     assert.equal(JSON.parse(readFileSync(stateFile)).sourceSha, successorSha);
     assert.deepEqual(readFileSync(originalStateFile), stateBytes);
     assert.deepEqual(readFileSync(fixtureFile), fixtureBytes);
-    assert.deepEqual([signed, planned], [1, 2]);
+    assert.deepEqual([signed, planned], [1, 3]);
     const reader = { config: nextConfig, configSha256: configHash, repositoryRoot: repository, runAws: options.readAws, statusRun: options.statusRun, proveSourceAdvance: ancestry, now: options.now };
     assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.sourceSha, successorSha);
     await assert.rejects(authenticatePreparedRotationSuccessor({ ...reader, proveSourceAdvance: () => false }), /source or fixture lineage/);
