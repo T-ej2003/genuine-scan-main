@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-app-only-verifier.mjs";
+import { appOnlyVerifierFailureCode, observeAppOnlyVerifierAwsFailure, parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-app-only-verifier.mjs";
 import { parseAppOnlyVerifierExecutionArgs } from "../aws/run-production-app-only-verifier.mjs";
 import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs } from "../aws/run-production-app-only-deployment.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
@@ -111,6 +111,19 @@ test("verifier workflow previews exact preparation then separates protected prov
   assert.doesNotMatch(source, /app-only-deployer|release-gate|terraform apply|update-service|execute-command/);
   for (const phase of Object.values(workflow.jobs)) for (const step of phase.steps)
     if (step.run) assert.doesNotMatch(step.run, /\$\{\{\s*inputs\./);
+});
+
+test("verifier preparation failure codes expose only bounded stage and AWS operation", () => {
+  assert.equal(appOnlyVerifierFailureCode("RUNTIME_IAM_SIMULATION", "iam_simulate-principal-policy"),
+    "APP_ONLY_VERIFIER_RUNTIME_IAM_SIMULATION_iam_simulate-principal-policy");
+  assert.throws(() => appOnlyVerifierFailureCode("RUNTIME:secret"));
+  assert.throws(() => appOnlyVerifierFailureCode("RUNTIME", "iam_get-role --secret-id=leak"));
+  let failedOperation;
+  const run = observeAppOnlyVerifierAwsFailure(() => { throw new Error("sensitive connection string"); }, (value) => { failedOperation = value; });
+  assert.throws(() => run(["iam", "simulate-principal-policy", "--resource-arns", "secret-resource"]));
+  assert.equal(appOnlyVerifierFailureCode("RUNTIME_IAM_SIMULATION", failedOperation),
+    "APP_ONLY_VERIFIER_RUNTIME_IAM_SIMULATION_iam_simulate-principal-policy");
+  assert.ok(!appOnlyVerifierFailureCode("RUNTIME_IAM_SIMULATION", failedOperation).includes("secret"));
 });
 
 test("verifier preparation accepts compact authenticated identities only on exact protected workflow", () => {

@@ -13,6 +13,20 @@ import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs
 import { parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
+export function appOnlyVerifierFailureCode(stage, operation = "") {
+  assert.match(stage, /^[A-Z_]+$/);
+  assert.ok(!operation || /^[a-z-]+_[a-z-]+$/.test(operation));
+  return `APP_ONLY_VERIFIER_${stage}${operation ? `_${operation}` : ""}`;
+}
+export function observeAppOnlyVerifierAwsFailure(run, markFailure) {
+  return (args) => {
+    try { return run(args); } catch (error) {
+      const operation = `${args[0]}_${args[1]}`;
+      if (/^[a-z-]+_[a-z-]+$/.test(operation)) markFailure(operation);
+      throw error;
+    }
+  };
+}
 export function parseAppOnlyVerifierPreparationArgs(args, env = process.env) {
   const { values } = parseArgs({ args, strict: true, allowPositionals: false,
     options: Object.fromEntries(["source-sha", "candidate-digest", "publication-reference", "image-authorization-reference", "requirements-reference"].map((key) => [key, { type: "string" }])) });
@@ -27,23 +41,30 @@ export function parseAppOnlyVerifierPreparationArgs(args, env = process.env) {
 }
 
 async function main() {
-  const input = parseAppOnlyVerifierPreparationArgs(process.argv.slice(2));
-  // Reuse the canonical sanitized checker-session transport. Workflow OIDC
-  // provenance is required above; STS below pins the separate verifier role.
-  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,
-    exec: (command, args, options) => execFileSync(command, args, { ...options, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }) });
-  const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
-  assert.equal(caller.Account, APP_ONLY.account);
-  assert.match(caller.Arn || "", new RegExp(`^arn:aws:sts::${APP_ONLY.account}:assumed-role/${APP_ONLY_VERIFIER.roleName}/[^/]+$`));
-  const result = await collectAppOnlyVerifierPreparation({ ...input, repositoryRoot, run });
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-verifier-preparation-")); fs.chmodSync(directory, 0o700);
-  const output = writeStageBPrivateFileExclusive({ filePath: path.join(directory, "app-only-verifier-preparation.json"),
-    bytes: Buffer.from(`${JSON.stringify(result)}\n`), repositoryRoot });
-  process.stdout.write(`${JSON.stringify({ artifactPath: output.path, artifactSha256: output.sha256,
-    preparationSha256: result.preparation.preparationSha256, predecessorTaskDefinition: result.preparation.predecessor.taskDefinitionArn,
-    predecessorDigest: result.preparation.predecessor.backendDigest, candidateDigest: input.candidateDigest })}\n`);
+  let stage = "INPUT", failedOperation = "";
+  try {
+    const input = parseAppOnlyVerifierPreparationArgs(process.argv.slice(2));
+    // Workflow OIDC provenance is required above; STS below pins the separate verifier role.
+    const awsRun = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,
+      exec: (command, args, options) => execFileSync(command, args, { ...options, timeout: 30000, maxBuffer: 8 * 1024 * 1024 }) });
+    const run = observeAppOnlyVerifierAwsFailure(awsRun, (operation) => { failedOperation = operation; });
+    stage = "CALLER_IDENTITY";
+    const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
+    assert.equal(caller.Account, APP_ONLY.account);
+    assert.match(caller.Arn || "", new RegExp(`^arn:aws:sts::${APP_ONLY.account}:assumed-role/${APP_ONLY_VERIFIER.roleName}/[^/]+$`));
+    const result = await collectAppOnlyVerifierPreparation({ ...input, repositoryRoot, run, onStage: (value) => { stage = value; failedOperation = ""; } });
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-verifier-preparation-")); fs.chmodSync(directory, 0o700);
+    const output = writeStageBPrivateFileExclusive({ filePath: path.join(directory, "app-only-verifier-preparation.json"),
+      bytes: Buffer.from(`${JSON.stringify(result)}\n`), repositoryRoot });
+    process.stdout.write(`${JSON.stringify({ artifactPath: output.path, artifactSha256: output.sha256,
+      preparationSha256: result.preparation.preparationSha256, predecessorTaskDefinition: result.preparation.predecessor.taskDefinitionArn,
+      predecessorDigest: result.preparation.predecessor.backendDigest, candidateDigest: input.candidateDigest })}\n`);
+  } catch {
+    process.stderr.write(`${appOnlyVerifierFailureCode(stage, failedOperation)}: verifier preparation failed closed; no verifier was launched and no deployment authorized.\n`);
+    process.exitCode = 1;
+  }
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
-  main().catch(() => { process.stderr.write("App-only verifier preparation failed closed; no verifier was launched and no deployment authorized.\n"); process.exitCode = 1; });
+  await main();
 }
