@@ -34,10 +34,12 @@ test("hosted IAM mutation commands disable CLI retries while reads retain normal
 });
 
 function iam({ boundary = "old", inline = "old", versionIds = ["v1"], loseCreate = false,
-  losePut = false, rejectCreate = false, rejectPut = false, mutationError = "AccessDenied", roleOverride = {} } = {}) {
+  losePut = false, rejectCreate = false, rejectPut = false, mutationError = "AccessDenied", roleOverride = {}, truncatedVersions = false } = {}) {
   const state = { boundary, inline, versionIds: [...versionIds], calls: [], roleOverride };
   const run = (args) => {
     const op = args[1]; state.calls.push(op);
+    if (["list-policy-versions", "list-entities-for-policy", "list-attached-role-policies", "list-role-policies"].includes(op))
+      assert.ok(args.includes("--no-paginate"), `Explicit IsTruncated requires --no-paginate for ${op}`);
     const value = (old, current) => state.boundary === "old" ? old : current;
     const selectedInline = state.inline === "old" ? false : true;
     switch (op) {
@@ -47,7 +49,7 @@ function iam({ boundary = "old", inline = "old", versionIds = ["v1"], loseCreate
         PolicyName: "MSCQRProductionAppOnlyVerifierBoundary", Path: "/",
         DefaultVersionId: value("v1", state.versionIds.at(-1)), PermissionsBoundaryUsageCount: 1 } };
       case "list-policy-versions": return { Versions: state.versionIds.map((VersionId) => ({ VersionId,
-        IsDefaultVersion: VersionId === value("v1", state.versionIds.at(-1)) })), IsTruncated: false };
+        IsDefaultVersion: VersionId === value("v1", state.versionIds.at(-1)) })), IsTruncated: truncatedVersions };
       case "get-policy-version": return { PolicyVersion: { VersionId: value("v1", state.versionIds.at(-1)), IsDefaultVersion: true,
         Document: appOnlyVerifierBoundaryPolicy({ includeRotationSelectors: state.boundary !== "old" }) } };
       case "list-entities-for-policy": return { PolicyUsers: [], PolicyGroups: [], PolicyRoles: [{ RoleName: APP_ONLY_VERIFIER.roleName }], IsTruncated: false };
@@ -175,4 +177,5 @@ test("managed-version quota, foreign role and unreviewed boundary fail closed", 
   assert.throws(() => prepareAppOnlyBoundaryReconciliation({ sourceSha, run: full.run, now }), /version quota/);
   const foreign = iam({ roleOverride: { PermissionsBoundary: { PermissionsBoundaryArn: "arn:aws:iam::368992683803:policy/foreign" } } });
   assert.throws(() => readAppOnlyBoundaryState(foreign.run));
+  assert.throws(() => readAppOnlyBoundaryState(iam({ truncatedVersions: true }).run));
 });

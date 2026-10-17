@@ -52,7 +52,7 @@ export function readAppOnlyBoundaryState(run) {
   assert.equal(policy.PolicyName, "MSCQRProductionAppOnlyVerifierBoundary");
   assert.equal(policy.Path, "/");
   assert.match(policy.DefaultVersionId || "", /^v[1-9][0-9]*$/);
-  const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", policy.Arn]);
+  const versions = json(run, ["iam", "list-policy-versions", "--policy-arn", policy.Arn, "--no-paginate"]);
   assert.equal(versions.IsTruncated, false);
   assert.ok(Array.isArray(versions.Versions) && versions.Versions.length >= 1 && versions.Versions.length <= 5);
   assert.equal(versions.Versions.filter(({ IsDefaultVersion }) => IsDefaultVersion).length, 1);
@@ -61,7 +61,7 @@ export function readAppOnlyBoundaryState(run) {
   assert.equal(version?.VersionId, policy.DefaultVersionId); assert.equal(version.IsDefaultVersion, true);
   const boundarySha256 = policyHash(version.Document);
   assert.ok([oldBoundaryHash, desiredBoundaryHash].includes(boundarySha256), "Verifier boundary default is not a reviewed predecessor or target");
-  const entities = json(run, ["iam", "list-entities-for-policy", "--policy-arn", policy.Arn, "--policy-usage-filter", "PermissionsBoundary"]);
+  const entities = json(run, ["iam", "list-entities-for-policy", "--policy-arn", policy.Arn, "--policy-usage-filter", "PermissionsBoundary", "--no-paginate"]);
   assert.equal(entities.IsTruncated, false);
   assert.deepEqual(entities.PolicyUsers, []); assert.deepEqual(entities.PolicyGroups, []);
   assert.deepEqual(entities.PolicyRoles?.map(({ RoleName }) => RoleName), [APP_ONLY_VERIFIER.roleName]);
@@ -72,8 +72,8 @@ export function readAppOnlyBoundaryState(run) {
   assert.equal(role.PermissionsBoundary?.PermissionsBoundaryArn, policy.Arn);
   assert.equal(canonicalJson(normalizeIamPolicyDocument(role.AssumeRolePolicyDocument)), canonicalJson(appOnlyProductionOidcTrust(APP_ONLY_VERIFIER.roleName)));
   assert.ok(typeof role.RoleId === "string" && role.RoleId.length > 0);
-  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", role.RoleName]);
-  const names = json(run, ["iam", "list-role-policies", "--role-name", role.RoleName]);
+  const attached = json(run, ["iam", "list-attached-role-policies", "--role-name", role.RoleName, "--no-paginate"]);
+  const names = json(run, ["iam", "list-role-policies", "--role-name", role.RoleName, "--no-paginate"]);
   assert.equal(attached.IsTruncated, false); assert.deepEqual(attached.AttachedPolicies, []);
   assert.equal(names.IsTruncated, false); assert.deepEqual(names.PolicyNames, [APP_ONLY_PROVISIONING.inlinePolicyName]);
   const observed = json(run, ["iam", "get-role-policy", "--role-name", role.RoleName, "--policy-name", APP_ONLY_PROVISIONING.inlinePolicyName]);
