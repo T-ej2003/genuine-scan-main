@@ -12,6 +12,7 @@ const repository = "T-ej2003/genuine-scan-main";
 const contracts = Object.freeze({
   provisioning: { workflow: ".github/workflows/provision-production-app-only-deployer.yml", artifact: "production-app-only-permissions", file: "app-only-permissions.json" },
   bootstrapAuthorization: { workflow: ".github/workflows/authorize-production-app-only-bootstrap.yml", artifact: "production-app-only-bootstrap-authorization", file: "app-only-bootstrap-authorization.json" },
+  boundaryPreparation: { workflow: ".github/workflows/reconcile-production-app-only-verifier-boundary.yml", artifact: "app-only-boundary-preparation", file: "preparation.json" },
   publication: { workflow: ".github/workflows/production-green-stage-b-images.yml", artifact: "production-green-stage-b-images", file: "stage-b-images.jsonl" },
   imageAuthorization: { workflow: ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml", artifact: "production-green-stage-b-state-reconciliation-image-authorization", file: "image-authorization.json" },
   requirements: { workflow: ".github/workflows/produce-production-app-only-requirements.yml", artifact: "production-app-only-requirements", file: "app-only-requirements.json" },

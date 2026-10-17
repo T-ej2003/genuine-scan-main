@@ -193,11 +193,20 @@ const scopedAuthorizerPermissionsPredecessor = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/bootstrap-operator-policy-authorizer-permissions-policy.json`);
   return { ...desired, Statement: desired.Statement.map((statement) => statement.Sid === "ReadRegionalTaskDefinitionMetadata" ? { ...statement, Resource: [...historicalTaskDefinitionResources] } : statement) };
 };
-export const installationPermissionsPredecessor = () => {
+const appOnlyWriterSids = ["ReadExactAppOnlyVerifierBoundary", "VersionExactAppOnlyVerifierBoundary",
+  "ReadExactAppOnlyVerifierRole", "UpdateExactAppOnlyVerifierInline"];
+export const installationPermissionsPreviousCurrent = () => {
   const desired = sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`);
+  for (const sid of appOnlyWriterSids) if (desired.Statement.filter((statement) => statement.Sid === sid).length !== 1)
+    throw new Error("App-only boundary writer source is not exact.");
+  return { ...desired, Statement: desired.Statement.filter((statement) => !appOnlyWriterSids.includes(statement.Sid)) };
+};
+export const installationPermissionsPredecessor = () => {
+  const desired = installationPermissionsPreviousCurrent();
   const readOnlyAuthorizer = scopedAuthorizerPermissionsPredecessor();
   return { ...desired, Statement: [...desired.Statement, ...readOnlyAuthorizer.Statement.filter(({ Sid }) => Sid !== "IdentifyCurrentSession")] };
 };
+export const installationPermissionsPredecessors = () => [installationPermissionsPreviousCurrent(), installationPermissionsPredecessor()];
 export const bootstrapOperatorPolicyAuthorizerPermissionsPredecessor = () => {
   const scoped = scopedAuthorizerPermissionsPredecessor();
   return { ...scoped, Statement: scoped.Statement.map((statement) => statement.Sid === "ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization" ? { ...statement, Resource: [...MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES] } : statement) };
@@ -451,7 +460,7 @@ export function assertInstallationPlan(plan, { livePredecessor } = {}) {
       if (after.name !== POLICY_NAME || after.path !== "/" || after.description !== POLICY_DESCRIPTION || after.delay_after_policy_creation_in_ms !== null || canonicalJson(after.tags) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(EXPECTED_TAGS) || canonicalJson(policyValue(after.policy, "Installation plan permissions policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/permissions-policy.json`)) || !create && after.arn !== INSTALLATION.policyArn) throw new Error("Installation plan policy contract is not exact.");
       if (update) {
         const before = entry.change.before;
-        if (!before || before.arn !== INSTALLATION.policyArn || canonicalJson(policyValue(before.policy, "Installation plan predecessor permissions policy")) !== canonicalJson(installationPermissionsPredecessor()) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Installation plan policy update predecessor is not exact.");
+        if (!before || before.arn !== INSTALLATION.policyArn || !installationPermissionsPredecessors().some((document) => canonicalJson(policyValue(before.policy, "Installation plan predecessor permissions policy")) === canonicalJson(document)) || canonicalJson({ ...before, policy: after.policy }) !== canonicalJson(after)) throw new Error("Installation plan policy update predecessor is not exact.");
       }
     } else if (entry.address === "aws_iam_role.mixed_recovery") {
       if (after.name !== MIXED_RECOVERY_ROLE_NAME || after.path !== "/" || after.description !== MIXED_RECOVERY_ROLE_DESCRIPTION || after.force_detach_policies !== false || after.max_session_duration !== 3600 || !hasKnownNoPermissionsBoundary(after.permissions_boundary, entry.change.after_unknown?.permissions_boundary) || canonicalJson(after.tags) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(after.tags_all) !== canonicalJson(MIXED_RECOVERY_TAGS) || canonicalJson(policyValue(after.assume_role_policy, "Mixed recovery trust policy")) !== canonicalJson(sourceJson(`${INSTALLATION.terraformRoot}/mixed-recovery-trust-policy.json`)) || !create && after.arn !== INSTALLATION.mixedRecoveryRoleArn) throw new Error("Mixed recovery installation role contract is not exact.");

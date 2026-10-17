@@ -1885,7 +1885,11 @@
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_private_key-BcQFPO",
         "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/qr_sign_public_key-v7Xeex",
-        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs"
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/jwt-previous-6rQrqj",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-current-version-8fNOVE",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-previous-version-PDFul2",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/qr-public-previous-rLZwcX"
       ],
       "context": {
         "account": "368992683803",
@@ -1901,7 +1905,7 @@
         "sid": "CheckExactJsonSelectors",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -1938,7 +1942,7 @@
         "sid": "ListProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -1973,7 +1977,7 @@
         "sid": "PassExactTaskRoles",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2007,7 +2011,7 @@
         "sid": "ReadCallerIdentity",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2037,7 +2041,7 @@
         "sid": "ReadCanarySecretIdentity",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2067,7 +2071,7 @@
         "sid": "ReadDatabaseConfiguration",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2097,7 +2101,7 @@
         "sid": "ReadDatabaseTls",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2131,7 +2135,7 @@
         "sid": "ReadExactService",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2168,7 +2172,7 @@
         "sid": "ReadProductionTasks",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2199,7 +2203,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2230,7 +2234,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2261,7 +2265,7 @@
         "sid": "ReadPublishedImages",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2295,7 +2299,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2329,7 +2333,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2363,7 +2367,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2397,7 +2401,7 @@
         "sid": "ReadRegionalNetworkAndLogMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2431,7 +2435,7 @@
         "sid": "ReadRegionalTaskDefinitions",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2461,7 +2465,7 @@
         "sid": "ReadRuntimeEncryptionPolicy",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2491,7 +2495,7 @@
         "sid": "ReadRuntimeEncryptionPolicy",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2524,7 +2528,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2557,7 +2561,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2590,7 +2594,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2623,7 +2627,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2656,7 +2660,7 @@
         "sid": "ReadRuntimeIam",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2708,7 +2712,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2760,7 +2764,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2812,7 +2816,7 @@
         "sid": "ReadRuntimeSecretMetadata",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2846,7 +2850,7 @@
         "sid": "ReadSourceOwnedStorageKey",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -2880,7 +2884,7 @@
         "sid": "ReadVerifierOutput",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "e4fe1815e4a1d307c162b55b8c0c11e803bce641905d552625e4d1ddfbdb2231"
+        "expectedPolicySha256": "4473d49898728de8c2461f68b36921557d6c7dcda9ac011e518f5f47912d0aef"
       },
       "required": true,
       "mutation": false
@@ -4906,7 +4910,7 @@
         "sid": "CreateExactInitialActivationLifecyclePolicyVersion",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": true
@@ -4935,7 +4939,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -4964,7 +4968,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -4993,7 +4997,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -5022,7 +5026,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -5051,7 +5055,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -5080,7 +5084,7 @@
         "sid": "ReadExactInitialActivationLifecyclePolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -5109,7 +5113,7 @@
         "sid": "ReadExactInitialActivationReleaseRole",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -13980,7 +13984,7 @@
         "sid": "CreateExactProviderReadOnlyPolicyVersion",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": true
@@ -14009,7 +14013,7 @@
         "sid": "IdentifyCurrentSession",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14067,7 +14071,7 @@
         "sid": "ListExactProviderReadOnlyReconciliationJournal",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14096,7 +14100,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14154,7 +14158,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14212,7 +14216,7 @@
         "sid": "ReadExactProviderReadOnlyReconciliationJournal",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14241,7 +14245,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14299,7 +14303,7 @@
         "sid": "ReadExactProviderReadOnlyPolicy",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": false
@@ -14357,7 +14361,7 @@
         "sid": "PersistExactProviderReadOnlyReconciliationJournal",
         "livePolicyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionInitialActivationPolicyReconciler",
         "expectedVersion": "installed",
-        "expectedPolicySha256": "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313"
+        "expectedPolicySha256": "87816d6ce42aeee0d3c799bf932e217113a538a3652c00d6acfbb0911484cf7b"
       },
       "required": true,
       "mutation": true

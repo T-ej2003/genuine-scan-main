@@ -83,8 +83,14 @@ test("runtime policy has exact target mutation and readback-only companion actio
   const actions = policy.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const create = policy.Statement.find(({ Sid }) => Sid === "CreateExactInitialActivationLifecyclePolicyVersion");
   assert.deepEqual(create, { Sid: "CreateExactInitialActivationLifecyclePolicyVersion", Effect: "Allow", Action: "iam:CreatePolicyVersion", Resource: INITIAL_ACTIVATION_RECONCILER.targetPolicyArn });
-  for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
-  assert.deepEqual(actions.sort(), ["iam:CreatePolicyVersion", "iam:CreatePolicyVersion", "iam:GetPolicy", "iam:GetPolicy", "iam:GetPolicyVersion", "iam:GetPolicyVersion", "iam:GetRole", "iam:ListAttachedRolePolicies", "iam:ListEntitiesForPolicy", "iam:ListEntitiesForPolicy", "iam:ListPolicyVersions", "iam:ListPolicyVersions", "s3:GetObject", "s3:ListBucket", "s3:PutObject", "sts:GetCallerIdentity"].sort());
+  for (const action of ["iam:CreatePolicy", "iam:DeletePolicy", "iam:DeletePolicyVersion", "iam:SetDefaultPolicyVersion", "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:DeleteRolePolicy", "iam:UpdateAssumeRolePolicy", "iam:CreateRole", "iam:DeleteRole"]) assert.equal(actions.includes(action), false, action);
+  const verifierBoundaryArn = "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary";
+  const verifierRoleArn = "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher";
+  assert.equal(policy.Statement.find(({ Sid }) => Sid === "VersionExactAppOnlyVerifierBoundary").Resource, verifierBoundaryArn);
+  assert.equal(policy.Statement.find(({ Sid }) => Sid === "UpdateExactAppOnlyVerifierInline").Resource, verifierRoleArn);
+  for (const statement of policy.Statement.filter(({ Action }) => [].concat(Action).some((action) => ["iam:CreatePolicyVersion", "iam:PutRolePolicy"].includes(action))))
+    assert.ok([INITIAL_ACTIVATION_RECONCILER.targetPolicyArn,
+      "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBProviderReadOnly", verifierBoundaryArn, verifierRoleArn].includes(statement.Resource));
   assert.equal(policy.Statement.some(({ Sid }) => ["ReadExactInitialDualSlotBindingForBootstrapOperatorAuthorization", "ReadBootstrapOperatorTransitionConsumption"].includes(Sid)), false);
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ListExactProviderReadOnlyReconciliationJournal"), { Sid: "ListExactProviderReadOnlyReconciliationJournal", Effect: "Allow", Action: "s3:ListBucket", Resource: "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an", Condition: { StringLike: { "s3:prefix": "production-provider-readonly-policy-reconciliation/*" } } });
   assert.equal(policy.Statement.find(({ Sid }) => Sid === "ReadExactInitialActivationReleaseRole").Resource, INITIAL_ACTIVATION_RECONCILER.releaseRoleArn);

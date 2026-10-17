@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
-import { AUTHORIZER_POLICY_CONVERGENCE, DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
+import { AUTHORIZER_POLICY_CONVERGENCE, DUAL_POLICY_CONVERGENCE, EVIDENCE_READER_ADDRESSES, EVIDENCE_READER_EXPANSION_CHANGES, EVIDENCE_READER_EXPANSION_WITH_AUTHORIZER_POLICY_UPDATE, SIGNER_EVIDENCE_READER_POLICY_EXPANSION, SIGNER_AUTHORIZER_POLICY_EXPANSION, SIGNER_BOTH_POLICY_EXPANSION, INSTALLATION, INSTALLATION_BACKEND, assertInstallationAuthorization, assertInstallationAuthorizedPostState, assertInstallationInitializedBackendMetadata, assertInstallationPlan, assertInstallationPreparation, assertInstallationStateResources, bootstrapOperatorPolicyAuthorizerPermissionsPredecessor, bootstrapOperatorPolicyAuthorizerPermissionsPredecessors, classifyInstallationStatePullError, createInstallationAuthorization, createInstallationPreparation, evidenceReaderPermissionsPredecessor, installationPermissionsPredecessor, installationPermissionsPreviousCurrent, stateIdentity } from "../aws/production-initial-activation-reconciler-installation-contract.mjs";
 import { executeInstallation, runInstallCli } from "../aws/install-production-initial-activation-reconciler.mjs";
 import { discoverInstallationPredecessor, runPrepareCli } from "../aws/prepare-production-initial-activation-reconciler-installation.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_AUTHORIZER, BROKER_RECOVERY_SUCCESSOR_EVIDENCE_READER, INITIAL_ACTIVATION_RECONCILER, MIXED_RECOVERY_EXECUTOR } from "../aws/verify-production-initial-activation-policy-reconciler.mjs";
@@ -15,6 +15,14 @@ import { IAM_ROLE_INLINE_POLICY_LIMIT, INSTALLATION_BOOTSTRAP, assertBootstrapAu
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 
 const sourceSha = "a".repeat(40);
+test("installed reconciler permissions remain a byte-exact reviewed predecessor", () => {
+  const predecessor = `${JSON.stringify(installationPermissionsPreviousCurrent(), null, 2)}\n`;
+  assert.equal(crypto.createHash("sha256").update(predecessor).digest("hex"),
+    "e29d3adf15f6437e8e15dbb3e18fd68eb1869e083fa5125a47d0e25e3cc81313");
+  const desired = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/permissions-policy.json", "utf8"));
+  assert.deepEqual(desired.Statement.slice(0, installationPermissionsPreviousCurrent().Statement.length),
+    installationPermissionsPreviousCurrent().Statement);
+});
 const now = new Date("2026-09-05T12:00:00.000Z");
 const githubRun = (_command, args) => JSON.stringify(args[1].endsWith("/deployment-branch-policies") ? [{ total_count: 1, branch_policies: [{ id: 10, name: "main", type: "branch" }] }] : args[1].endsWith("/deployment_protection_rules") ? { total_count: 0, custom_deployment_protection_rules: [] } : args[1].endsWith("/secrets") ? { total_count: 0, secrets: [] } : { id: 9, name: "production-mixed-dual-slot-recovery", deployment_branch_policy: { protected_branches: false, custom_branch_policies: true }, protection_rules: [{ type: "branch_policy" }] });
 const bootstrapPreparation = (classification = "ABSENT", predecessorPolicySha256 = null) => createBootstrapPreparation({ sourceSha, predecessor: { classification, predecessorPolicySha256 } });

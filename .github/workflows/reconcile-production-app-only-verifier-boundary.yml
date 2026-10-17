@@ -1,0 +1,142 @@
+name: Reconcile exact app-only verifier boundary
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode: { description: Read-only preparation or authorized execution, required: true, type: choice, options: [prepare, execute] }
+      source_sha: { description: Exact protected-main SHA, required: true, type: string }
+      preparation_reference: { description: Authenticated preparation artifact reference, required: false, type: string }
+
+permissions: { contents: read, actions: read, deployments: read, id-token: write }
+concurrency: { group: production-deploy, cancel-in-progress: false }
+
+jobs:
+  review:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ inputs.source_sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate protected source and prior preparation before approval
+        env:
+          GH_TOKEN: '${{ github.token }}'
+          SOURCE_SHA: '${{ inputs.source_sha }}'
+          MODE: '${{ inputs.mode }}'
+          PREPARATION_REFERENCE: '${{ inputs.preparation_reference }}'
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
+          import { assertAppOnlyBoundaryPreparation } from './scripts/aws/production-app-only-boundary-reconciliation.mjs';
+          if (process.env.MODE === 'prepare') assert.equal(process.env.PREPARATION_REFERENCE, '');
+          else {
+            assert.equal(process.env.MODE, 'execute');
+            const reference = parseAppOnlyArtifactReference(process.env.PREPARATION_REFERENCE);
+            assert.equal(reference.sourceSha, process.env.SOURCE_SHA);
+            const artifact = downloadAppOnlyArtifact({ kind: 'boundaryPreparation', reference, repositoryRoot: process.cwd() });
+            const preparation = assertAppOnlyBoundaryPreparation(JSON.parse(artifact.bytes), { sourceSha: process.env.SOURCE_SHA });
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, JSON.stringify(preparation, null, 2) + '\n');
+          }
+          NODE
+  prepare:
+    if: inputs.mode == 'prepare'
+    needs: review
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ inputs.source_sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler
+          unset-current-credentials: true
+      - name: Read exact installed IAM predecessor
+        id: preparation
+        env: { GITHUB_TOKEN: '${{ github.token }}', SOURCE_SHA: '${{ inputs.source_sha }}' }
+        run: node scripts/aws/production-app-only-boundary-reconciliation.mjs prepare "$SOURCE_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-only-boundary-preparation
+          path: ${{ steps.preparation.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+  apply:
+    if: inputs.mode == 'execute'
+    needs: review
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ inputs.source_sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate immutable preparation artifact
+        id: preparation
+        env: { GITHUB_TOKEN: '${{ github.token }}', SOURCE_SHA: '${{ inputs.source_sha }}', PREPARATION_REFERENCE: '${{ inputs.preparation_reference }}' }
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
+          import { assertAppOnlyBoundaryPreparation } from './scripts/aws/production-app-only-boundary-reconciliation.mjs';
+          const reference = parseAppOnlyArtifactReference(process.env.PREPARATION_REFERENCE);
+          assert.equal(reference.sourceSha, process.env.SOURCE_SHA);
+          const artifact = downloadAppOnlyArtifact({ kind: 'boundaryPreparation', reference, repositoryRoot: process.cwd() });
+          assertAppOnlyBoundaryPreparation(JSON.parse(artifact.bytes), { sourceSha: process.env.SOURCE_SHA });
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `path=${artifact.path}\nsha256=${artifact.sha256}\n`);
+          NODE
+      - name: Authenticate operation-specific protected approval
+        id: approval
+        env: { SOURCE_SHA: '${{ inputs.source_sha }}', GITHUB_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/app-only-boundary-approval"; install -d -m 700 "$d"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$d/approval.json" --repository "$GITHUB_REPOSITORY" --environment production \
+            --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval > /dev/null
+          echo "path=$d/approval.json" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$d/approval.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler
+          unset-current-credentials: true
+      - name: Reconcile only the authenticated boundary and verifier inline policy
+        id: execution
+        env: { SOURCE_SHA: '${{ inputs.source_sha }}', GITHUB_TOKEN: '${{ github.token }}' }
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-app-only-boundary-reconciliation.mjs execute "$SOURCE_SHA" \
+            '${{ steps.preparation.outputs.path }}' '${{ steps.preparation.outputs.sha256 }}' \
+            '${{ steps.approval.outputs.path }}' '${{ steps.approval.outputs.sha256 }}'
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.execution.outputs.journal != ''
+        with:
+          name: app-only-boundary-reconciliation-journal
+          path: ${{ steps.execution.outputs.journal }}
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.execution.outputs.path != ''
+        with:
+          name: app-only-boundary-reconciliation-result
+          path: ${{ steps.execution.outputs.path }}
+          if-no-files-found: error
+          retention-days: 90
