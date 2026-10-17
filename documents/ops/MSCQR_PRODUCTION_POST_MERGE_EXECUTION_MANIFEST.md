@@ -4,6 +4,8 @@ This is an execution manifest, not authorization or a deployment receipt. The pr
 
 The six 2026-10-17 audit documents in `~/Library/Application Support/MSCQR/production-execution-audit-2026-10-17/` are the baseline. Protected workflow approval is operation-specific; an earlier approval or an approval for a different run does not authorize a later step. Resolve every reference by immutable run/attempt/artifact ID and hash before consuming it. The existing production-deploy concurrency group must remain non-cancelling.
 
+The verifier-boundary reconciler runs each IAM mutation with `AWS_MAX_ATTEMPTS=1`. After a lost response or retryable error, authenticate the append-only intent and live IAM version/role-policy readback; never repeat `CreatePolicyVersion` under the same preparation. A boundary-only result requires a fresh preparation and protected approval before the inline-policy write.
+
 | Stage | AUTHORIZED_PRINCIPAL | REQUIRED_APPROVAL | EXACT_INPUT | EXPECTED_OUTPUT | RESTART_CHECKPOINT | FAILURE_RECOVERY |
 |---|---|---|---|---|---|---|
 | Protected source and image reuse | Protected-main checkout; canonical image signer and image-authorization workflow | Ticket issuer extends CHG-20261014-001 to exact new SHA; protected image authorization | Full successor SHA, PR CI/review, predecessor `84b6b1a…`, canonical image-impact report, immutable backend/worker/executor/web digests | Signed successor-source image authorization or a proven image-affecting build requirement | Signed image artifact/run and ECR digest readback | Stop on unclassified image impact or changed digest; use the existing image-publication workflow only for a proven affected image. |

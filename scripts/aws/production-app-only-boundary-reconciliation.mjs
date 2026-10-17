@@ -24,6 +24,13 @@ const policyHash = (value) => canonicalSha256(canonicalizeStageAProductionArtifa
 const oldBoundaryHash = policyHash(appOnlyVerifierBoundaryPolicy({ includeRotationSelectors: false }));
 const desiredBoundary = appOnlyVerifierBoundaryPolicy();
 const desiredBoundaryHash = policyHash(desiredBoundary);
+const IAM_MUTATIONS = new Set(["create-policy-version", "set-default-policy-version", "put-role-policy"]);
+export function createAppOnlyBoundaryAwsRunner({ exec = execFileSync, env = process.env } = {}) {
+  return createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER,
+    env, exec: (file, args, execution) => exec(file, args, { ...execution,
+      env: args[0] === "iam" && IAM_MUTATIONS.has(args[1])
+        ? { ...execution.env, AWS_MAX_ATTEMPTS: "1" } : execution.env }) });
+}
 const json = (run, args) => {
   const value = run([...args, "--output", "json", "--no-cli-pager"]);
   return typeof value === "string" ? JSON.parse(value) : value;
@@ -211,7 +218,7 @@ async function main() {
     assert.equal(main.protected, true); assert.equal(main.commit?.sha, sourceSha);
   };
   source();
-  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_POLICY_RECONCILER,
+  const run = createAppOnlyBoundaryAwsRunner({
     exec: (command, args, options) => execFileSync(command, args, { ...options, timeout: 30000, maxBuffer: 4 * 1024 * 1024 }) });
   if (mode === "prepare") {
     assert.equal(preparationPath, undefined); assert.equal(approvalPath, undefined);

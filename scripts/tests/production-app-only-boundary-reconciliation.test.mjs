@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { APP_ONLY_PROVISIONING, APP_ONLY_VERIFIER, appOnlyProductionOidcTrust,
   appOnlyVerifierBoundaryPolicy, appOnlyVerifierLauncherPolicy } from "../aws/production-app-only-policy.mjs";
-import { APP_ONLY_BOUNDARY_RECONCILIATION, readAppOnlyBoundaryState, prepareAppOnlyBoundaryReconciliation,
+import { APP_ONLY_BOUNDARY_RECONCILIATION, createAppOnlyBoundaryAwsRunner, readAppOnlyBoundaryState, prepareAppOnlyBoundaryReconciliation,
   assertAppOnlyBoundaryPreparation, executeAppOnlyBoundaryReconciliation } from "../aws/production-app-only-boundary-reconciliation.mjs";
 import { createAppOnlyAuthorization } from "../aws/production-app-only-authorization.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -12,8 +12,29 @@ const sourceSha = "a".repeat(40), now = Date.parse("2026-10-17T00:00:00.000Z");
 const verifierArn = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:1`;
 const roleId = "AROAEXACTVERIFIER";
 
+test("hosted IAM mutation commands disable CLI retries while reads retain normal policy", () => {
+  const calls = [];
+  const run = createAppOnlyBoundaryAwsRunner({ env: {
+    AWS_ACCESS_KEY_ID: "test-key", AWS_SECRET_ACCESS_KEY: "test-secret", AWS_SESSION_TOKEN: "test-session",
+  }, exec: (_file, args, options) => {
+    calls.push({ operation: args[1], attempts: options.env.AWS_MAX_ATTEMPTS });
+    if (args[1] === "create-policy-version") throw new Error("HTTP 500 after commit");
+    return "{}";
+  } });
+  for (const operation of ["create-policy-version", "set-default-policy-version", "put-role-policy"])
+    if (operation === "create-policy-version") assert.throws(() => run(["iam", operation]), /HTTP 500/);
+    else run(["iam", operation]);
+  run(["iam", "get-policy"]);
+  assert.deepEqual(calls, [
+    { operation: "create-policy-version", attempts: "1" },
+    { operation: "set-default-policy-version", attempts: "1" },
+    { operation: "put-role-policy", attempts: "1" },
+    { operation: "get-policy", attempts: undefined },
+  ]);
+});
+
 function iam({ boundary = "old", inline = "old", versionIds = ["v1"], loseCreate = false,
-  losePut = false, rejectCreate = false, rejectPut = false, roleOverride = {} } = {}) {
+  losePut = false, rejectCreate = false, rejectPut = false, mutationError = "AccessDenied", roleOverride = {} } = {}) {
   const state = { boundary, inline, versionIds: [...versionIds], calls: [], roleOverride };
   const run = (args) => {
     const op = args[1]; state.calls.push(op);
@@ -38,7 +59,7 @@ function iam({ boundary = "old", inline = "old", versionIds = ["v1"], loseCreate
       case "get-role-policy": return { RoleName: APP_ONLY_VERIFIER.roleName, PolicyName: APP_ONLY_PROVISIONING.inlinePolicyName,
         PolicyDocument: appOnlyVerifierLauncherPolicy(verifierArn, { includeRotationSelectors: selectedInline }) };
       case "create-policy-version":
-        if (rejectCreate) throw new Error("AccessDenied");
+        if (rejectCreate) throw new Error(mutationError);
         assert.equal(args[args.indexOf("--policy-arn") + 1], APP_ONLY_BOUNDARY_RECONCILIATION.policyArn);
         assert.deepEqual(JSON.parse(args[args.indexOf("--policy-document") + 1]), appOnlyVerifierBoundaryPolicy());
         assert.ok(args.includes("--set-as-default"));
@@ -46,7 +67,7 @@ function iam({ boundary = "old", inline = "old", versionIds = ["v1"], loseCreate
         if (loseCreate) throw new Error("response lost");
         return { PolicyVersion: { VersionId: state.versionIds.at(-1) } };
       case "put-role-policy":
-        if (rejectPut) throw new Error("AccessDenied");
+        if (rejectPut) throw new Error(mutationError);
         assert.equal(args[args.indexOf("--role-name") + 1], APP_ONLY_VERIFIER.roleName);
         assert.deepEqual(JSON.parse(args[args.indexOf("--policy-document") + 1]), appOnlyVerifierLauncherPolicy(verifierArn));
         state.inline = "new";
@@ -126,12 +147,15 @@ test("expired, wrong-source, altered predecessor and changed IAM fail before wri
   assert.equal(aws.state.calls.includes("create-policy-version"), false);
 });
 
-test("failed or ambiguous mutation cannot retry automatically", async () => {
-  for (const options of [{ rejectCreate: true }, { boundary: "new", inline: "old", versionIds: ["v1", "v2"], rejectPut: true }]) {
-    const aws = iam(options), preparation = prepareAppOnlyBoundaryReconciliation({ sourceSha, run: aws.run, now });
-    await assert.rejects(executeAppOnlyBoundaryReconciliation({ ...approved(preparation), run: aws.run, sleep: () => {} }), /readback|outcome/);
-    assert.equal(aws.state.calls.filter((op) => op === "create-policy-version").length, options.rejectCreate ? 1 : 0);
-    assert.equal(aws.state.calls.filter((op) => op === "put-role-policy").length, options.rejectPut ? 1 : 0);
+test("retryable 5xx or failed network connection stops at authenticated readback", async () => {
+  for (const mutationError of ["HTTP 503", "connection reset after send"]) {
+    for (const options of [{ rejectCreate: true }, { boundary: "new", inline: "old", versionIds: ["v1", "v2"], rejectPut: true }]) {
+      options.mutationError = mutationError;
+      const aws = iam(options), preparation = prepareAppOnlyBoundaryReconciliation({ sourceSha, run: aws.run, now });
+      await assert.rejects(executeAppOnlyBoundaryReconciliation({ ...approved(preparation), run: aws.run, sleep: () => {} }), /readback|outcome/);
+      assert.equal(aws.state.calls.filter((op) => op === "create-policy-version").length, options.rejectCreate ? 1 : 0);
+      assert.equal(aws.state.calls.filter((op) => op === "put-role-policy").length, options.rejectPut ? 1 : 0);
+    }
   }
 });
 
