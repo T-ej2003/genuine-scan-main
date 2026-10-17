@@ -42,10 +42,10 @@ export function appOnlyRuntimeSecretArns(source = fs.readFileSync(stageBSource, 
 export const appOnlySecretMetadataResources = (...groups) => [...new Set(groups.flat())].sort();
 
 // Compatibility preparation authority, never attached to the app deployer.
-// Source-derived secret metadata is readable; only the five reviewed JSON
+// Source-derived secret metadata is readable; only the nine reviewed runtime
 // selectors need values. Neither application nor canary DB credentials are
 // readable by the launcher (ECS delivers the canary secret to its task).
-export function appOnlyCompatibilityReadPolicy() {
+export function appOnlyCompatibilityReadPolicy({ includeRotationSelectors = true } = {}) {
   const template = JSON.parse(fs.readFileSync(new URL("../../infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-candidate.json", import.meta.url), "utf8"));
   const secrets = template.containerDefinitions[0].secrets;
   const metadata = appOnlySecretMetadataResources(
@@ -53,8 +53,15 @@ export function appOnlyCompatibilityReadPolicy() {
   const selectorNames = ["AUTH_MFA_ENCRYPTION_KEY", "JWT_SECRET", "QR_SIGN_PRIVATE_KEY", "QR_SIGN_PUBLIC_KEY", "REDIS_URL"];
   const selected = secrets.filter(({ name }) => selectorNames.includes(name));
   assert.deepEqual(selected.map(({ name }) => name).sort(), [...selectorNames].sort());
+  const rotationSelectors = ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS"];
+  const rotationTemplate = JSON.parse(fs.readFileSync(new URL("../../infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json", import.meta.url), "utf8"));
+  assert.deepEqual(rotationTemplate.containerDefinitions[0].secrets.filter(({ name }) => rotationSelectors.includes(name)).map(({ name }) => name).sort(), [...rotationSelectors].sort());
+  const rotationResources = appOnlyRuntimeSecretArns().slice(0, 4);
+  for (const [index, suffix] of ["jwt-previous-", "qr-current-version-", "qr-previous-version-", "qr-public-previous-"].entries())
+    assert.ok(rotationResources[index].includes(`/rotation/${suffix}`), "Unreviewed rotation selector mapping");
   const prefix = `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:`;
-  const values = selected.map(({ valueFrom }) => parseEcsSecretsManagerReference(valueFrom).resource).sort();
+  const values = [...selected.map(({ valueFrom }) => parseEcsSecretsManagerReference(valueFrom).resource),
+    ...(includeRotationSelectors ? rotationResources : [])].sort();
   assert.ok(values.every((arn) => arn.startsWith(`${prefix}mscqr/prod/`) && !arn.includes("database")));
   return { Version: "2012-10-17", Statement: [
     ...appOnlyDeployerPolicy().Statement.filter(({ Sid }) => ["ReadExactService", "ReadRegionalTaskDefinitions", "ReadProductionTasks", "ListProductionTasks", "ReadCallerIdentity"].includes(Sid)),
@@ -105,10 +112,10 @@ export function appOnlyDeployerPolicy() {
   ] };
 }
 
-export function appOnlyVerifierLauncherPolicy(exactTaskDefinitionArn) {
+export function appOnlyVerifierLauncherPolicy(exactTaskDefinitionArn, options) {
   assert.match(exactTaskDefinitionArn || "", new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY_VERIFIER.family}:[1-9][0-9]*$`));
   return { Version: "2012-10-17", Statement: [
-    ...appOnlyCompatibilityReadPolicy().Statement,
+    ...appOnlyCompatibilityReadPolicy(options).Statement,
     allow("RunExactReadOnlyVerifier", "ecs:RunTask", exactTaskDefinitionArn, {
       StringEquals: { "aws:RequestedRegion": APP_ONLY.region, "ecs:enable-execute-command": "false" },
       ArnEquals: { "ecs:cluster": APP_ONLY.clusterArn },
@@ -175,8 +182,8 @@ export function appOnlyPermissionProvisionerPolicy() {
 
 // The launcher identity policy selects ONE revision. A reusable outer boundary
 // caps every future revision to this verifier family and its fixed task roles.
-export function appOnlyVerifierBoundaryPolicy() {
-  const policy = appOnlyVerifierLauncherPolicy(`${familyArn(APP_ONLY_VERIFIER.family).slice(0, -1)}1`);
+export function appOnlyVerifierBoundaryPolicy({ includeRotationSelectors = true } = {}) {
+  const policy = appOnlyVerifierLauncherPolicy(`${familyArn(APP_ONLY_VERIFIER.family).slice(0, -1)}1`, { includeRotationSelectors });
   for (const statement of policy.Statement) {
     if (statement.Sid === "RunExactReadOnlyVerifier") statement.Resource = familyArn(APP_ONLY_VERIFIER.family);
     // The exact identity policy retains these constraints. Their resources are
@@ -189,6 +196,16 @@ export function appOnlyVerifierBoundaryPolicy() {
     // boundary to retain exact scopes within IAM's 6144-character limit.
     delete statement.Sid;
   }
+  // These AWS actions use disjoint resource types. Combining them changes no
+  // effective grant and retains all exact ARNs within the managed-policy quota.
+  for (const rightAction of includeRotationSelectors ? ["ecs:DescribeTasks", "iam:GetRole", "ecr:DescribeImages",
+    "rds:DescribeDBInstances", "rds:DescribeDBParameters", "logs:GetLogEvents"] : []) {
+    const left = policy.Statement.find((statement) => [].concat(statement.Action).includes("ecs:DescribeServices"));
+    const right = policy.Statement.find((statement) => [].concat(statement.Action).includes(rightAction));
+    left.Action = [...new Set([].concat(left.Action, right.Action))];
+    left.Resource = [...new Set([].concat(left.Resource, right.Resource))];
+    policy.Statement.splice(policy.Statement.indexOf(right), 1);
+  }
   const merged = new Map();
   for (const statement of policy.Statement) {
     const key = canonicalJson({ Effect: statement.Effect, Resource: statement.Resource, Condition: statement.Condition });
@@ -196,7 +213,7 @@ export function appOnlyVerifierBoundaryPolicy() {
     else merged.get(key).Action = [...new Set([].concat(merged.get(key).Action, statement.Action))];
   }
   policy.Statement = [...merged.values()];
-  assert.ok(JSON.stringify(policy).length <= 6144, "Verifier boundary exceeds IAM managed-policy quota");
+  assert.ok(JSON.stringify(policy).length <= 6144, `Verifier boundary exceeds IAM managed-policy quota: ${JSON.stringify(policy).length}`);
   return policy;
 }
 

@@ -100,7 +100,7 @@ test("compatibility preparation cannot read DB credentials or mutate any product
   assert.ok(actions.every((action) => /:(?:Get|Describe|List|Simulate)/.test(action)));
   assert.ok(!actions.some((action) => /Decrypt|PassRole|RunTask|ExecuteCommand|Put|Update|Create|Delete|Sign/.test(action)));
   const values = policy.Statement.find((s) => s.Sid === "CheckExactJsonSelectors").Resource;
-  assert.equal(values.length, 5);
+  assert.equal(values.length, 9);
   assert.ok(values.every((arn) => arn.includes(":secret:mscqr/prod/") && !/[?*]/.test(arn) && !arn.includes("database")));
   const metadata = policy.Statement.find((s) => s.Sid === "ReadRuntimeSecretMetadata");
   const template = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-candidate.json", "utf8"));
@@ -115,13 +115,28 @@ test("compatibility preparation cannot read DB credentials or mutate any product
   assert.ok(!metadata.Action.includes("secretsmanager:GetSecretValue"));
   assert.deepEqual(metadata.Action.sort(), ["secretsmanager:DescribeSecret", "secretsmanager:GetResourcePolicy", "secretsmanager:ListSecretVersionIds"].sort());
   assert.ok(metadata.Resource.every((arn) => !arn.includes("*") && !arn.includes("?")));
-  assert.ok(runtimeSecrets.filter((arn) => !staticSecrets.includes(arn)).every((arn) => !values.includes(arn)));
+  assert.ok(runtimeSecrets.slice(4).filter((arn) => !staticSecrets.includes(arn)).every((arn) => !values.includes(arn)));
   const failedArn = runtimeSecrets.find((arn) => arn.includes("artifact-signing/public-key-current-"));
   assert.ok(metadata.Action.includes("secretsmanager:DescribeSecret") && metadata.Resource.includes(failedArn),
     "Generated reader policy must pass the exact previously denied DescribeSecret boundary");
   assert.ok(metadata.Resource.some((arn) => arn.includes("database-url/app-")));
   assert.ok(JSON.stringify(appOnlyVerifierBoundaryPolicy()).length <= 6144);
   assert.ok(JSON.stringify(appOnlyVerifierLauncherPolicy(verifierArn)).length <= 10240);
+});
+
+test("reviewed rotation selectors are present in both policy layers and unrelated secrets remain denied", () => {
+  const template = JSON.parse(fs.readFileSync("infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json", "utf8"));
+  const rotation = ["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS"];
+  assert.deepEqual(template.containerDefinitions[0].secrets.filter(({ name }) => rotation.includes(name)).map(({ name }) => name).sort(), [...rotation].sort());
+  const identity = appOnlyCompatibilityReadPolicy().Statement.find(({ Sid }) => Sid === "CheckExactJsonSelectors").Resource;
+  const boundary = appOnlyVerifierBoundaryPolicy().Statement.find(({ Action }) => Action === "secretsmanager:GetSecretValue").Resource;
+  const reviewed = appOnlyRuntimeSecretArns().slice(0, 4);
+  assert.deepEqual(identity, boundary);
+  assert.ok(reviewed.every((resource) => identity.includes(resource)));
+  assert.ok(!identity.some((resource) => resource.includes("database-url") || resource.includes("artifact-signing") || /[?*]/.test(resource)));
+  assert.ok(!boundary.includes(appOnlyRuntimeSecretArns().find((resource) => resource.includes("smtp-pass"))));
+  assert.ok(JSON.stringify(appOnlyVerifierBoundaryPolicy()).length <= 6144);
+  assert.equal(appOnlyCompatibilityReadPolicy({ includeRotationSelectors: false }).Statement.find(({ Sid }) => Sid === "CheckExactJsonSelectors").Resource.length, 5);
 });
 
 test("new principals require production approval plus exact role-specific reusable workflow claims", () => {

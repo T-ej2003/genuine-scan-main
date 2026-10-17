@@ -78,6 +78,41 @@
           "s3:x-amz-server-side-encryption": "AES256"
         }
       }
+    },
+    {
+      "Sid": "ReadExactAppOnlyVerifierBoundary",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:ListPolicyVersions",
+        "iam:ListEntitiesForPolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+    },
+    {
+      "Sid": "VersionExactAppOnlyVerifierBoundary",
+      "Effect": "Allow",
+      "Action": "iam:CreatePolicyVersion",
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionAppOnlyVerifierBoundary"
+    },
+    {
+      "Sid": "ReadExactAppOnlyVerifierRole",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListAttachedRolePolicies",
+        "iam:SimulatePrincipalPolicy"
+      ],
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
+    },
+    {
+      "Sid": "UpdateExactAppOnlyVerifierInline",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher"
     }
   ]
 }

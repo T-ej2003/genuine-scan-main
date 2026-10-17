@@ -81,7 +81,10 @@ export function observeAppOnlyProvisioning({ run, verifierArn }) {
       const priorArn = document.Statement?.find((s) => s.Sid === "RunExactReadOnlyVerifier")?.Resource;
       const expected = spec.arn === APP_ONLY.roleArn ? appOnlyDeployerPolicy()
         : priorArn === undefined ? appOnlyCompatibilityReadPolicy() : appOnlyVerifierLauncherPolicy(priorArn);
-      assert.equal(policyHash(document), policyHash(expected), "Unreviewed predecessor inline policy");
+      const predecessor = spec.arn === APP_ONLY.roleArn ? [] : [priorArn === undefined
+        ? appOnlyCompatibilityReadPolicy({ includeRotationSelectors: false })
+        : appOnlyVerifierLauncherPolicy(priorArn, { includeRotationSelectors: false })];
+      assert.ok([expected, ...predecessor].some((policy) => policyHash(document) === policyHash(policy)), "Unreviewed predecessor inline policy");
       result.policySha256 = policyHash(document);
     }
     return { ...result, roleId: role.RoleId, trustSha256: observedTrustSha256 };

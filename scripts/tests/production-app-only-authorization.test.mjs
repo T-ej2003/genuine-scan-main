@@ -11,6 +11,7 @@ function fixture(phase = "VERIFIER") {
     BOOTSTRAP: ["APP_ONLY_BOOTSTRAP_PREPARATION", PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyBootstrapWorkflowRef],
     VERIFIER: ["APP_ONLY_VERIFIER_PREPARATION", PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyVerifierWorkflowRef],
     PROVISION_DEPLOYER: ["APP_ONLY_PERMISSION_PREPARATION", PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyProvisioningWorkflowRef],
+    BOUNDARY: ["APP_ONLY_BOUNDARY_RECONCILIATION_PREPARATION", PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyBoundaryReconciliationWorkflowRef],
     DEPLOY: ["APP_ONLY_DEPLOYMENT_PREPARATION", PRODUCTION_ENVIRONMENT_APPROVAL.appOnlyDeploymentWorkflowRef],
   }[phase];
   const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_SHA: sourceSha,
@@ -29,7 +30,7 @@ function fixture(phase = "VERIFIER") {
 }
 
 test("each operation binds its exact subject to the actual protected production approval", () => {
-  for (const phase of ["BOOTSTRAP", "VERIFIER", "PROVISION_DEPLOYER", "DEPLOY"]) {
+  for (const phase of ["BOOTSTRAP", "BOUNDARY", "VERIFIER", "PROVISION_DEPLOYER", "DEPLOY"]) {
     const input = fixture(phase), authorization = createAppOnlyAuthorization(input);
     assert.equal(authorization.preparationSha256, input.preparation.preparationSha256);
     assert.equal(authorization.approvedBy, "reviewer");
