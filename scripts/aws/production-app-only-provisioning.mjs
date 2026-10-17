@@ -111,10 +111,11 @@ export function verifyAppOnlyEffectivePermissions({ run, verifierArn, predecesso
   const family = `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task-definition/${APP_ONLY.family}:`;
   assert.match(predecessorArn || "", new RegExp(`^${family}[1-9][0-9]*$`));
   const verifierRole = `arn:aws:iam::${APP_ONLY.account}:role/${APP_ONLY_VERIFIER.roleName}`;
+  // IAM simulation evaluates the unrelated KMS alias condition even for denied ECS probes.
   const context = (definition = `${family}2147483647`, cluster = APP_ONLY.clusterArn, passedTo = "ecs-tasks.amazonaws.com") => [
     ["aws:RequestedRegion", APP_ONLY.region, "string"], ["ecs:cluster", cluster, "string"],
     ["ecs:task-definition", definition, "string"], ["ecs:enable-execute-command", "false", "string"],
-    ["iam:PassedToService", passedTo, "string"],
+    ["iam:PassedToService", passedTo, "string"], ["kms:ResourceAliases", "alias/mscqr-unrelated-simulation-probe", "string"],
   ].map(([ContextKeyName, value, ContextKeyType]) => ({ ContextKeyName, ContextKeyValues: [value], ContextKeyType }));
   const cases = [
     ["candidate-family-activation", APP_ONLY.roleArn, "ecs:UpdateService", APP_ONLY.serviceArn, true, context()],
