@@ -135,9 +135,8 @@ function authenticateHistoricalVerifierInputs({ inputs, sourceSha, live, reposit
   const preparation = inputs.preparation;
   const verifier = authenticateAppOnlyVerifierInputs({ inputs, sourceSha, live, repositoryRoot,
     now: Date.parse(preparation.generatedAt) + 1 });
-  const response = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn,
-    "--include", "TAGS", "--output", "json", "--no-cli-pager"]));
-  const expected = assertRegisteredAppOnlyVerifier({ definition: { ...response.taskDefinition, tags: response.tags || [] },
+  const definition = createAppOnlyEcsReaders(run).readDefinition(taskDefinitionArn);
+  const expected = assertRegisteredAppOnlyVerifier({ definition,
     taskDefinitionArn, requirements: inputs.requirements, identity: preparation.identity,
     repositoryRoot, databaseSecretArn: preparation.databaseSecretArn });
   assert.equal(canonicalSha256(expected.definition), preparation.definitionSha256);
