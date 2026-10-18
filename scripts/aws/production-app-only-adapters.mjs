@@ -178,7 +178,9 @@ export async function executeAppOnlyVerifierTask({ run, taskDefinitionArn, clien
   const { verificationContractSha256 } = assertRegisteredAppOnlyVerifier({ ...verifier,
     definition: { ...readback.taskDefinition, tags: readback.tags || [] }, taskDefinitionArn });
   await authenticate();
-  let arn;
+  // A terminal write may succeed even if its response is lost. Never append a
+  // second terminal record: the recovery reader authenticates exactly three.
+  let arn, outcomeRecordAttempted = false;
   const record = async (status) => writeEvidence({ schemaVersion: 1, kind: "APP_ONLY_VERIFIER_EXECUTION",
     status, taskDefinitionArn, clientToken, verificationContractSha256, ...(arn ? { taskArn: arn } : {}) });
   await record("LAUNCH_INTENT");
@@ -200,11 +202,14 @@ export async function executeAppOnlyVerifierTask({ run, taskDefinitionArn, clien
         assert.equal(task.containers[0].imageDigest, verifier.identity.verifierImageDigest);
         if (task.containers[0].exitCode === 1 && onFailedTask) {
           await authenticate();
+          outcomeRecordAttempted = true;
+          await record("TASK_OUTCOME_REQUIRES_READBACK");
           await onFailedTask({ task, verificationContractSha256 });
           return { task, verificationContractSha256, failed: true };
         }
         assert.equal(task.containers[0].exitCode, 0, "Compatibility verifier failed");
         await authenticate(); // A changed predecessor cannot receive compatibility authority.
+        outcomeRecordAttempted = true;
         await record("TASK_SUCCEEDED_EVIDENCE_PENDING");
         return { task, verificationContractSha256 }; // Exact task output is authenticated separately below.
       }
@@ -212,7 +217,7 @@ export async function executeAppOnlyVerifierTask({ run, taskDefinitionArn, clien
     }
     throw new Error("Compatibility verifier completion timeout; do not relaunch an ambiguous task");
   } catch (cause) {
-    await record(arn ? "TASK_OUTCOME_REQUIRES_READBACK" : "LAUNCH_OUTCOME_UNCERTAIN");
+    if (!outcomeRecordAttempted) await record(arn ? "TASK_OUTCOME_REQUIRES_READBACK" : "LAUNCH_OUTCOME_UNCERTAIN");
     throw new Error("Compatibility verifier failed or timed out; preserve evidence and do not relaunch automatically", { cause });
   }
 }

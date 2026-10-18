@@ -171,8 +171,16 @@ test("verifier workflow previews exact preparation then separates protected prov
     && step.if === "always() && steps.recover.outputs.path != ''"));
   assert.ok(job.steps.some((step) => step.with?.name === "production-app-only-compatibility-failed"
     && step.if === "always() && steps.verify.outputs.failure_path != ''"));
+  const verifyIndex = job.steps.findIndex((step) => step.id === "verify");
+  const failureUploadIndex = job.steps.findIndex((step) => step.with?.name === "production-app-only-compatibility-failed");
+  const journalUploadIndex = job.steps.findIndex((step) => step.with?.name === "production-app-only-verifier-journals");
+  assert.ok(verifyIndex < failureUploadIndex && failureUploadIndex < journalUploadIndex);
+  assert.match(job.steps[journalUploadIndex].if, /^always\(\)/);
+  assert.doesNotMatch(job.steps[journalUploadIndex].if, /failure_path|production-app-only-compatibility-failed/);
+  assert.match(job.steps[journalUploadIndex].with.path, /steps\.verify\.outputs\.journal/);
   const verifierRunner = fs.readFileSync("scripts/aws/run-production-app-only-verifier.mjs", "utf8");
   assert.match(verifierRunner, /onFailedTask: async/);
+  assert.doesNotMatch(verifierRunner, /COMPATIBILITY_FAILED/);
   assert.match(verifierRunner, /output\("failure_path", file\.path\)/);
   assert.match(verifierRunner, /if \(execution\.failed\) \{ process\.exitCode = 1; return; \}/);
   assert.ok(job.steps.some((step) => step.with?.name?.includes("production-app-only-compatibility-recovered")));

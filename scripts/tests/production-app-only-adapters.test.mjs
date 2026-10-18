@@ -95,6 +95,11 @@ test("verifier adapters run once with exact request then bound completion to exa
   assert.equal(evidence[1].taskArn, taskArn);
   assert.deepEqual(calls.map((c) => c[1]), ["describe-task-definition", "run-task", "describe-tasks"]);
   assert.deepEqual(JSON.parse(calls[1][3]), request());
+  const interrupted = [];
+  await assert.rejects(executeAppOnlyVerifierTask({ ...authorization,
+    writeEvidence: async (value) => { interrupted.push(value); if (value.status === "TASK_SUCCEEDED_EVIDENCE_PENDING") throw new Error("Lost journal response"); },
+    run, verifier, taskDefinitionArn: verifierArn, clientToken: token, request: request() }), /do not relaunch/);
+  assert.deepEqual(interrupted.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED", "TASK_SUCCEEDED_EVIDENCE_PENDING"]);
 });
 test("confirmed exit-1 verifier captures bounded failure before returning without another task", async () => {
   const task = { taskArn, clusterArn: APP_ONLY.clusterArn, taskDefinitionArn: verifierArn, enableExecuteCommand: false,
@@ -108,13 +113,39 @@ test("confirmed exit-1 verifier captures bounded failure before returning withou
     onFailedTask: async (value) => captured.push(value) });
   assert.equal(result.failed, true); assert.equal(captured.length, 1); assert.equal(captured[0].task, task);
   assert.deepEqual(calls, ["describe-task-definition", "run-task", "describe-tasks"]);
-  assert.deepEqual(evidence.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED"]);
+  assert.deepEqual(evidence.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED", "TASK_OUTCOME_REQUIRES_READBACK"]);
+  const failedEvidence = []; let failedLaunches = 0;
   await assert.rejects(executeAppOnlyVerifierTask({ ...authorization, run: (args) => {
     if (args[1] === "describe-task-definition") return readback;
-    if (args[1] === "run-task") return { tasks: [{ taskArn }], failures: [] };
+    if (args[1] === "run-task") { failedLaunches++; return { tasks: [{ taskArn }], failures: [] }; }
     return { tasks: [task], failures: [] };
   }, verifier, taskDefinitionArn: verifierArn, clientToken: token, request: request(),
+  writeEvidence: async (value) => failedEvidence.push(value),
   onFailedTask: async () => { throw new Error("CloudWatch access denied"); } }), /do not relaunch/);
+  assert.equal(failedLaunches, 1);
+  assert.deepEqual(failedEvidence.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED", "TASK_OUTCOME_REQUIRES_READBACK"]);
+});
+test("failed diagnostic publication cannot append a fourth execution record or launch again", async () => {
+  const task = { taskArn, clusterArn: APP_ONLY.clusterArn, taskDefinitionArn: verifierArn, enableExecuteCommand: false,
+    lastStatus: "STOPPED", stopCode: "EssentialContainerExited", containers: [{ exitCode: 1,
+      name: "production-green-read-only-rls-canary", imageDigest: identity.verifierImageDigest }] };
+  for (const stage of ["diagnostic read", "artifact write", "GitHub output", "cleanup"]) {
+    const events = [], calls = [];
+    await assert.rejects(executeAppOnlyVerifierTask({ ...authorization, verifier, taskDefinitionArn: verifierArn,
+      clientToken: token, request: request(), writeEvidence: async (event) => events.push(event),
+      run: (args) => { calls.push(args[1]); return args[1] === "describe-task-definition" ? readback
+        : args[1] === "run-task" ? { tasks: [{ taskArn }], failures: [] } : { tasks: [task], failures: [] }; },
+      onFailedTask: async () => { throw new Error(`${stage} failed`); } }), /do not relaunch/);
+    assert.deepEqual(events.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED", "TASK_OUTCOME_REQUIRES_READBACK"]);
+    assert.deepEqual(calls, ["describe-task-definition", "run-task", "describe-tasks"]);
+  }
+  const events = [];
+  await assert.rejects(executeAppOnlyVerifierTask({ ...authorization, verifier, taskDefinitionArn: verifierArn,
+    clientToken: token, request: request(), run: (args) => args[1] === "describe-task-definition" ? readback
+      : args[1] === "run-task" ? { tasks: [{ taskArn }], failures: [] } : { tasks: [task], failures: [] },
+    writeEvidence: async (event) => { events.push(event); if (event.status === "TASK_OUTCOME_REQUIRES_READBACK") throw new Error("Lost journal write response"); },
+    onFailedTask: async () => assert.fail("Cannot read diagnostic before journal is durable") }), /do not relaunch/);
+  assert.deepEqual(events.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED", "TASK_OUTCOME_REQUIRES_READBACK"]);
 });
 test("verifier override rejected before RunTask", async () => {
   let calls = 0;

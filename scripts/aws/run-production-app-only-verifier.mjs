@@ -113,8 +113,6 @@ async function main() {
       const diagnostic = await waitForFailedAppOnlyVerifierDiagnostic({ run, authenticated: {
         task, stream, logGroup: APP_ONLY_VERIFIER.logGroup }, inputs });
       authenticate();
-      await journal.writeEvidence({ status: "COMPATIBILITY_FAILED", taskArn: task.taskArn,
-        diagnosticSha256: diagnostic.diagnosticSha256 });
       const body = { schemaVersion: 1, kind: "APP_ONLY_FAILED_COMPATIBILITY", sourceSha,
         workflowRunId: process.env.GITHUB_RUN_ID, workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT,
         taskArn: task.taskArn, taskDefinitionArn, verifierImageDigest: verifier.identity.verifierImageDigest,
