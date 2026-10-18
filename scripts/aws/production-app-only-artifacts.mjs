@@ -52,6 +52,20 @@ export function parseAppOnlyArtifactReference(text) {
   return value;
 }
 
+export function parseAppOnlyVerifierDiagnosticReference(text) {
+  assert.ok(typeof text === "string" && Buffer.byteLength(text) <= 2048, "Only compact verifier journal references are accepted");
+  const value = JSON.parse(text);
+  assert.deepEqual(Object.keys(value).sort(), ["sourceSha", "runId", "artifactId", "artifactDigest",
+    "registrationJournalSha256", "permissionJournalSha256", "executionJournalSha256", "taskArn"].sort());
+  assert.match(value.sourceSha || "", /^[a-f0-9]{40}$/);
+  for (const key of ["runId", "artifactId"]) assert.match(String(value[key]), /^[1-9][0-9]*$/);
+  for (const key of ["registrationJournalSha256", "permissionJournalSha256", "executionJournalSha256"])
+    assert.match(value[key] || "", /^[a-f0-9]{64}$/);
+  assert.match(value.artifactDigest || "", /^sha256:[a-f0-9]{64}$/);
+  assert.match(value.taskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+  return value;
+}
+
 // Private, append-only snapshots. Existing atomic publication fsyncs file and
 // directory; mutation adapters await this writer before calling AWS. Workflow
 // always-upload remains necessary for runner-loss durability.
@@ -167,13 +181,14 @@ export function downloadAppOnlyArtifact({ kind, reference, repositoryRoot, githu
 
 // The failed protected verifier run can publish two three-entry journals even
 // when its terminal result was never written. Their ZIP is read, never extracted.
-export function downloadAppOnlyVerifierJournals({ reference, githubRun = createProductionGithubCommandRunner() }) {
+export function downloadAppOnlyVerifierJournals({ reference, includeExecution = false, githubRun = createProductionGithubCommandRunner() }) {
   assert.deepEqual(Object.keys(reference || {}).sort(), ["sourceSha", "runId", "artifactId", "artifactDigest",
-    "registrationJournalSha256", "permissionJournalSha256"].sort());
+    "registrationJournalSha256", "permissionJournalSha256", ...(includeExecution ? ["executionJournalSha256", "taskArn"] : [])].sort());
   assert.match(reference.sourceSha || "", /^[a-f0-9]{40}$/);
   for (const key of ["runId", "artifactId"]) assert.match(String(reference[key]), /^[1-9][0-9]*$/);
-  for (const key of ["registrationJournalSha256", "permissionJournalSha256"])
+  for (const key of ["registrationJournalSha256", "permissionJournalSha256", ...(includeExecution ? ["executionJournalSha256"] : [])])
     assert.match(reference[key] || "", /^[a-f0-9]{64}$/);
+  if (includeExecution) assert.match(reference.taskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
   assert.match(reference.artifactDigest || "", /^sha256:[a-f0-9]{64}$/);
   const endpoint = `repos/${repository}/actions/runs/${reference.runId}`;
   const get = (url, flags = []) => JSON.parse(githubRun("gh", ["api", url, ...flags], { maxBuffer: 8 * 1024 * 1024 }));
@@ -201,7 +216,7 @@ export function downloadAppOnlyVerifierJournals({ reference, githubRun = createP
 b=sys.stdin.buffer.read(8388609)
 assert 0<len(b)<=8388608 and b[-22:-18]==b'PK\\x05\\x06'
 with zipfile.ZipFile(io.BytesIO(b)) as z:
- assert not z.comment and len(z.infolist())==6
+ assert not z.comment and len(z.infolist())==int(sys.argv[1])*3
  groups={}
  for m in z.infolist():
   assert re.fullmatch(r'mscqr-app-only-evidence-[A-Za-z0-9_-]+/00[123]\\.json',m.filename)
@@ -212,14 +227,21 @@ with zipfile.ZipFile(io.BytesIO(b)) as z:
   group=groups.setdefault(folder,{})
   assert filename not in group
   group[filename]=json.loads(z.read(m))
- assert len(groups)==2 and all(set(g)=={'001.json','002.json','003.json'} for g in groups.values())
+ assert len(groups)==int(sys.argv[1]) and all(set(g)=={'001.json','002.json','003.json'} for g in groups.values())
  sys.stdout.write(json.dumps([[g[f'{i:03d}.json'] for i in (1,2,3)] for g in groups.values()]))`;
-  const groups = JSON.parse(execFileSync("/usr/bin/python3", ["-c", reader], { input: archive, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }));
+  const groups = JSON.parse(execFileSync("/usr/bin/python3", ["-c", reader, includeExecution ? "3" : "2"], { input: archive, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }));
   const registration = groups.find((group) => group[0]?.event?.kind === "APP_ONLY_VERIFIER_REGISTRATION");
   const permission = groups.find((group) => group[0]?.event?.kind === "APP_ONLY_PERMISSION_RESULT");
+  const execution = includeExecution ? groups.find((group) => group[0]?.event?.kind === "APP_ONLY_VERIFIER_EXECUTION") : undefined;
   assert.ok(registration && permission && registration !== permission);
+  if (includeExecution) {
+    assert.ok(execution && execution !== registration && execution !== permission);
+    assert.equal(execution[2]?.evidenceSha256, reference.executionJournalSha256);
+    assert.equal(execution[1]?.event?.taskArn, reference.taskArn);
+    assert.equal(execution[2]?.event?.taskArn, reference.taskArn);
+  }
   assert.equal(registration[2]?.evidenceSha256, reference.registrationJournalSha256);
   assert.equal(permission[2]?.evidenceSha256, reference.permissionJournalSha256);
   assert.equal(get(endpoint).run_attempt, 1, "Verifier run changed during journal authentication");
-  return { registration, permission, run, artifact };
+  return { registration, permission, execution, run, artifact };
 }

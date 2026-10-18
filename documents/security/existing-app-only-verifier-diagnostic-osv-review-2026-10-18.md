@@ -1,0 +1,5 @@
+# OSV reachability review: existing verifier diagnostic recovery
+
+This change affects protected workflow dispatch, exact failed-run journal authentication, an ECS and CloudWatch read-only diagnostic path, tests, and an operations note. It does not change application source, package locks, Dockerfiles, production browser build patterns, or runtime packaging. The canonical browser closure on this tree has 3,993 modules and 204 packages; `braces@3.0.3` is absent. The backend lock also excludes braces.
+
+The retained unfiltered OSV Scanner report contains only `braces@3.0.3` / `GHSA-vfj7-8cjw-p6xm` from the frontend development dependency. Its source path was mapped to this checkout for the local canonical `check-osv-runtime.mjs` gate, which passed with one time-bounded non-runtime acceptance. Exact-head CI must rerun the unfiltered scanner and browser closure. The acceptance owner, expiry, advisory, scope, and attacker-input decision remain unchanged; only the reviewed executable-input fingerprint and review rationale advance.

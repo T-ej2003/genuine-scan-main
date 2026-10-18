@@ -15,6 +15,11 @@ name: Verify production app-only database compatibility
         required: false
         default: ''
         type: string
+      diagnostic_journal_reference:
+        description: Exact failed-task journal identity for read-only diagnostic recovery
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -30,3 +35,4 @@ jobs:
       source_sha: ${{ inputs.source_sha }}
       preparation_reference: ${{ inputs.preparation_reference }}
       recovery_journal_reference: ${{ inputs.recovery_journal_reference }}
+      diagnostic_journal_reference: ${{ inputs.diagnostic_journal_reference }}
