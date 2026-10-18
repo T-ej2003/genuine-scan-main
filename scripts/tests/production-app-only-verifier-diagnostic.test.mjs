@@ -125,9 +125,28 @@ test("fresh failed task waits for one bounded log event, but never retries acces
   const result = await waitForFailedAppOnlyVerifierDiagnostic({ run: delayed, authenticated, inputs: f.inputs,
     wait: async (ms) => { assert.equal(ms, 5000); waits++; } });
   assert.equal(result.verdict, "FAIL"); assert.equal(waits, 1);
+  let missingStreamReads = 0;
+  const pendingStream = diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events" && ++missingStreamReads === 1) {
+      const error = new Error("AWS command failed");
+      error.stderr = "An error occurred (ResourceNotFoundException) when calling the GetLogEvents operation: The specified log stream does not exist.";
+      throw error;
+    }
+    return f.options.run(args);
+  });
+  assert.equal((await waitForFailedAppOnlyVerifierDiagnostic({ run: pendingStream, authenticated, inputs: f.inputs,
+    wait: async () => { waits++; } })).verdict, "FAIL");
+  assert.equal(missingStreamReads, 3); assert.equal(waits, 2);
   await assert.rejects(waitForFailedAppOnlyVerifierDiagnostic({ run: diagnosticReadOnlyAws((args) => {
     if (args[1] === "get-log-events") throw new Error("AccessDenied"); return f.options.run(args);
   }), authenticated, inputs: f.inputs, wait: async () => { assert.fail("Denied reads cannot retry"); } }), /AccessDenied/);
+  await assert.rejects(waitForFailedAppOnlyVerifierDiagnostic({ run: diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events") {
+      const error = new Error("AWS command failed"); error.stderr = "An error occurred (AccessDeniedException) when calling the GetLogEvents operation:";
+      throw error;
+    }
+    return f.options.run(args);
+  }), authenticated, inputs: f.inputs, wait: async () => { assert.fail("Denied reads cannot retry"); } }), /AWS command failed/);
 });
 
 test("protected diagnostic mode is separate from registration and requires exact workflow identity", () => {

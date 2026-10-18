@@ -126,7 +126,9 @@ export async function waitForFailedAppOnlyVerifierDiagnostic({ run, authenticate
   for (let attempt = 0; attempt < attempts; attempt++) {
     try { return readFailedAppOnlyVerifierDiagnostic({ run, authenticated, inputs }); }
     catch (error) {
-      if (error?.message !== "Verifier diagnostic is absent" || attempt === attempts - 1) throw error;
+      const stderr = typeof error?.stderr === "string" ? error.stderr : error?.stderr?.toString?.("utf8") || "";
+      const streamPending = /An error occurred \(ResourceNotFoundException\) when calling the GetLogEvents operation:/.test(stderr);
+      if ((!streamPending && error?.message !== "Verifier diagnostic is absent") || attempt === attempts - 1) throw error;
       await wait(5000);
     }
   }
