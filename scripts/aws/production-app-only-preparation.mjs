@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { APP_ONLY, APP_ONLY_DOMAINS, assertAppOnlyEvidenceIdentity, captureAppOnlyPredecessor, assertAppOnlyCas,
   buildAppOnlyCandidate, appOnlyDefinitionSha256, assertAppOnlySessionRiskConfiguration } from "./production-app-only-contract.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { deriveAppOnlyImpact } from "./production-app-only-impact.mjs";
 import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
-import { buildAppOnlyVerifierCommand, buildAppOnlyVerifierDefinition, authenticateAppOnlyVerifierResult } from "./production-app-only-verifier-command.mjs";
+import { buildAppOnlyVerifierCommand, buildAppOnlyVerifierDefinition, authenticateAppOnlyVerifierResult, assertRegisteredAppOnlyVerifier } from "./production-app-only-verifier-command.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { createAppOnlyEcsReaders, readAppOnlyVerifierResult } from "./production-app-only-adapters.mjs";
 import { authenticateAppOnlyImages, authenticateProtectedMainBackendImage, APP_ONLY_SESSION_RISK_CONTRACT } from "./production-app-only-images.mjs";
@@ -64,19 +65,40 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
     images, verifierImage, iam, verifierIam, runtime, requirements, requirementsReference: structuredClone(requirementsReference) };
 }
 
-export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibilityReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner() }) {
-  assert.equal(compatibilityReference.sourceSha, sourceSha);
-  const artifact = downloadAppOnlyArtifact({ kind: "compatibility", reference: compatibilityReference, repositoryRoot, githubRun });
+export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibilityReference, compatibilityKind = "normal", authorizationReference,
+  requirementsReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner() }) {
+  assert.ok(["normal", "recovered"].includes(compatibilityKind));
+  const recovered = compatibilityKind === "recovered";
+  if (recovered) assertProtectedAncestor(compatibilityReference.sourceSha, sourceSha, repositoryRoot);
+  else assert.equal(compatibilityReference.sourceSha, sourceSha);
+  const artifact = downloadAppOnlyArtifact({ kind: recovered ? "recoveredCompatibility" : "compatibility",
+    reference: compatibilityReference, repositoryRoot, githubRun });
   const compatibility = JSON.parse(artifact.bytes);
   const { resultSha256, ...body } = compatibility;
   assert.equal(resultSha256, canonicalSha256(body));
-  assert.equal(body.schemaVersion, 1); assert.equal(body.kind, "APP_ONLY_VERIFIED_COMPATIBILITY"); assert.equal(body.sourceSha, sourceSha);
+  assert.equal(body.schemaVersion, 1);
+  assert.equal(body.kind, recovered ? "APP_ONLY_VERIFIED_COMPATIBILITY_RECOVERED" : "APP_ONLY_VERIFIED_COMPATIBILITY");
+  assert.equal(body.sourceSha, recovered ? body.inputs?.preparation?.sourceSha : sourceSha);
+  if (recovered) {
+    assert.equal(body.currentSourceSha, compatibilityReference.sourceSha);
+    assertProtectedAncestor(body.sourceSha, sourceSha, repositoryRoot);
+    const { resultSha256: recoverySha256, ...recovery } = body.recovery || {};
+    assert.equal(recoverySha256, canonicalSha256(recovery));
+    assert.equal(recovery.kind, "APP_ONLY_VERIFIER_REGISTRATION_RECOVERED");
+    assert.equal(recovery.sourceSha, body.sourceSha); assert.equal(recovery.currentSourceSha, body.currentSourceSha);
+    assert.equal(recovery.preparationSha256, body.inputs.preparation.preparationSha256);
+    assert.equal(recovery.taskDefinitionArn, body.taskDefinitionArn);
+    assert.match(body.approvalSha256 || "", /^[a-f0-9]{64}$/);
+  }
   const readers = createAppOnlyEcsReaders(run), live = readers.readLive();
-  const verifier = authenticateAppOnlyVerifierInputs({ inputs: body.inputs, sourceSha, live, repositoryRoot });
+  const verifier = recovered
+    ? authenticateHistoricalVerifierInputs({ inputs: body.inputs, sourceSha: body.sourceSha, live, repositoryRoot,
+      taskDefinitionArn: body.taskDefinitionArn, run })
+    : authenticateAppOnlyVerifierInputs({ inputs: body.inputs, sourceSha, live, repositoryRoot });
   const age = Date.now() - Date.parse(body.generatedAt);
   assert.ok(Number.isFinite(age) && age >= 0 && age <= APP_ONLY.maxEvidenceAgeMs, "Stale verifier execution artifact");
-  assert.equal(body.registration.taskDefinitionArn, body.taskDefinitionArn);
-  assert.equal(body.registration.preparationSha256, body.inputs.preparation.preparationSha256);
+  assert.equal((recovered ? body.recovery : body.registration).taskDefinitionArn, body.taskDefinitionArn);
+  assert.equal((recovered ? body.recovery : body.registration).preparationSha256, body.inputs.preparation.preparationSha256);
   assert.match(body.taskArn || "", new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task/${APP_ONLY.cluster}/[a-f0-9]{32}$`));
   const taskResponse = JSON.parse(run(["ecs", "describe-tasks", "--cluster", APP_ONLY.clusterArn, "--tasks", body.taskArn, "--output", "json", "--no-cli-pager"]));
   assert.equal((taskResponse.failures || []).length, 0); assert.equal(taskResponse.tasks?.length, 1);
@@ -84,8 +106,9 @@ export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibi
   const database = await readAppOnlyVerifierResult({ run, verifier, execution: { task, verificationContractSha256: body.inputs.preparation.verificationContractSha256 } });
   assert.deepEqual(database, body.database, "Verifier artifact no longer matches the exact observed task output");
   const fresh = await collectAppOnlyVerifierPreparation({ sourceSha, candidateDigest: body.inputs.images.candidateDigest,
-    publicationReference: body.inputs.images.publicationReference, authorizationReference: body.inputs.images.authorizationReference,
-    requirementsReference: body.inputs.requirementsReference, repositoryRoot, run, githubRun });
+    publicationReference: body.inputs.images.publicationReference,
+    authorizationReference: recovered ? authorizationReference : body.inputs.images.authorizationReference,
+    requirementsReference: recovered ? requirementsReference : body.inputs.requirementsReference, repositoryRoot, run, githubRun });
   assertAppOnlyCas(body.inputs.preparation.predecessor, fresh.preparation.predecessor);
   const current = readers.readLive(); assertAppOnlyCas(fresh.preparation.predecessor, captureAppOnlyPredecessor(current));
   const releaseMetadata = current.definition.containerDefinitions.find(({ name }) => name === APP_ONLY.container).environment?.filter(({ name }) => name === "RELEASE_GIT_SHA");
@@ -94,9 +117,31 @@ export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibi
   // Retained metadata can over-enumerate historical changes after image-only
   // deployments. It is never image provenance or an unchanged-domain waiver:
   // prepareAppOnlyDeployment requires positive CURRENT proof for all domains.
-  const preparation = prepareAppOnlyDeployment({ ...fresh, sourceSha, predecessorSourceSha, live: current, database, repositoryRoot });
+  const verifiedInputs = recovered ? body.inputs : undefined;
+  const preparation = prepareAppOnlyDeployment({ ...fresh, sourceSha, predecessorSourceSha, live: current, database,
+    verifiedInputs, repositoryRoot });
   return { schemaVersion: 1, kind: "APP_ONLY_DEPLOYMENT_INPUTS", preparation, inputs: fresh, database,
+    ...(recovered ? { verifiedInputs } : {}),
     compatibilityReference, verifierTaskArn: body.taskArn, verifierTaskDefinitionArn: body.taskDefinitionArn };
+}
+
+function assertProtectedAncestor(ancestor, sourceSha, repositoryRoot) {
+  assert.match(ancestor || "", /^[a-f0-9]{40}$/);
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  execFileSync("git", ["merge-base", "--is-ancestor", ancestor, sourceSha], { cwd: repositoryRoot, timeout: 10000 });
+}
+
+function authenticateHistoricalVerifierInputs({ inputs, sourceSha, live, repositoryRoot, taskDefinitionArn, run }) {
+  const preparation = inputs.preparation;
+  const verifier = authenticateAppOnlyVerifierInputs({ inputs, sourceSha, live, repositoryRoot,
+    now: Date.parse(preparation.generatedAt) + 1 });
+  const response = JSON.parse(run(["ecs", "describe-task-definition", "--task-definition", taskDefinitionArn,
+    "--include", "TAGS", "--output", "json", "--no-cli-pager"]));
+  const expected = assertRegisteredAppOnlyVerifier({ definition: { ...response.taskDefinition, tags: response.tags || [] },
+    taskDefinitionArn, requirements: inputs.requirements, identity: preparation.identity,
+    repositoryRoot, databaseSecretArn: preparation.databaseSecretArn });
+  assert.equal(canonicalSha256(expected.definition), preparation.definitionSha256);
+  return verifier;
 }
 
 // Internal producer closure, not a public JSON approval API. Every report must
@@ -177,9 +222,26 @@ export function authenticateAppOnlyVerifierInputs({ inputs, sourceSha, live, rep
 }
 
 export function prepareAppOnlyDeployment(input) {
-  const { sourceSha, predecessorSourceSha, live, images, iam, runtime, database, requirements, repositoryRoot, now = Date.now() } = input;
+  const { sourceSha, predecessorSourceSha, live, images, iam, runtime, database, requirements,
+    verifiedInputs, repositoryRoot, now = Date.now() } = input;
   const { predecessor, identity, verifierIdentity, verificationContractSha256, imageHash } = authenticatePreparationInputs(input);
-  authenticateAppOnlyVerifierResult({ message: JSON.stringify(database), identity: verifierIdentity,
+  if (verifiedInputs) {
+    const historical = verifiedInputs.preparation;
+    const { preparationSha256, ...historicalBody } = historical;
+    assert.equal(preparationSha256, canonicalSha256(historicalBody));
+    assertProtectedAncestor(historical.sourceSha, sourceSha, repositoryRoot);
+    assertAppOnlyRequirements(verifiedInputs.requirements, { sourceSha: historical.sourceSha,
+      candidateSourceSha: historical.identity.candidateSourceSha, repositoryRoot });
+    for (const key of ["candidateSourceSha", "candidateDigest", "account", "region", "clusterArn", "serviceArn",
+      "predecessorTaskDefinition", "predecessorBackendDigest", "databaseHostname"])
+      assert.equal(historical.identity[key], verifierIdentity[key], `Historical verifier ${key} changed`);
+    assertAppOnlyCas(historical.predecessor, predecessor);
+    for (const key of ["sourceContractSha256", "migrationSetDigest", "canonicalPackageChecksumsSha256", "objects"])
+      assert.deepEqual(verifiedInputs.requirements[key], requirements[key], `Historical database requirement ${key} changed`);
+    authenticateAppOnlyVerifierResult({ message: JSON.stringify(database), identity: historical.identity,
+      requirementsSha256: verifiedInputs.requirements.requirementsSha256,
+      verificationContractSha256: historical.verificationContractSha256, now });
+  } else authenticateAppOnlyVerifierResult({ message: JSON.stringify(database), identity: verifierIdentity,
     requirementsSha256: requirements.requirementsSha256, verificationContractSha256, now });
   const impact = deriveAppOnlyImpact({ repositoryRoot, liveSourceSha: predecessorSourceSha,
     candidateSourceSha: images.candidateSourceSha, protectedSourceSha: sourceSha });
@@ -196,7 +258,9 @@ export function prepareAppOnlyDeployment(input) {
     candidateDigest: images.candidateDigest, predecessor, candidateDefinitionSha256: appOnlyDefinitionSha256(candidate),
     identity, impact, domains, eligible: true, sessionRisk: assertAppOnlySessionRiskConfiguration(live.definition),
     evidence: { images: imageHash, iam: iam.evidenceSha256, runtime: runtime.evidenceSha256,
-      database: database.evidenceSha256, requirements: requirements.requirementsSha256, verificationContractSha256 } };
+      database: database.evidenceSha256, requirements: requirements.requirementsSha256,
+      verificationContractSha256: verifiedInputs?.preparation.verificationContractSha256 || verificationContractSha256 },
+    ...(verifiedInputs ? { databaseSourceSha: verifiedInputs.preparation.sourceSha } : {}) };
   return { ...body, preparationSha256: canonicalSha256(body) };
 }
 
@@ -204,9 +268,14 @@ export function prepareAppOnlyDeployment(input) {
 // the approved semantic closure rather than trusting its eligible boolean.
 export function authenticateAppOnlyDeploymentInputs({ inputs, sourceSha, live, repositoryRoot, now = Date.now() }) {
   assert.deepEqual(Object.keys(inputs).sort(), ["schemaVersion", "kind", "preparation", "inputs", "database",
-    "compatibilityReference", "verifierTaskArn", "verifierTaskDefinitionArn"].sort());
+    "compatibilityReference", "verifierTaskArn", "verifierTaskDefinitionArn",
+    ...(inputs.verifiedInputs ? ["verifiedInputs"] : [])].sort());
   assert.equal(inputs.schemaVersion, 1); assert.equal(inputs.kind, "APP_ONLY_DEPLOYMENT_INPUTS");
   const { preparationSha256, ...approved } = inputs.preparation;
+  if (inputs.verifiedInputs) {
+    assertProtectedAncestor(inputs.compatibilityReference.sourceSha, sourceSha, repositoryRoot);
+    assert.equal(inputs.verifiedInputs.preparation.sourceSha, approved.databaseSourceSha);
+  } else assert.equal(inputs.compatibilityReference.sourceSha, sourceSha);
   assert.equal(preparationSha256, canonicalSha256(approved));
   assert.equal(approved.sourceSha, sourceSha);
   const age = now - Date.parse(approved.generatedAt);
@@ -214,7 +283,7 @@ export function authenticateAppOnlyDeploymentInputs({ inputs, sourceSha, live, r
   authenticateAppOnlyVerifierInputs({ inputs: inputs.inputs, sourceSha, live, repositoryRoot, now });
   assertAppOnlyCas(approved.predecessor, captureAppOnlyPredecessor(live));
   const actual = prepareAppOnlyDeployment({ ...inputs.inputs, sourceSha, live, database: inputs.database,
-    predecessorSourceSha: approved.predecessorSourceSha, repositoryRoot, now });
+    verifiedInputs: inputs.verifiedInputs, predecessorSourceSha: approved.predecessorSourceSha, repositoryRoot, now });
   const { preparationSha256: recomputed, ...body } = actual; void recomputed;
   body.generatedAt = approved.generatedAt;
   assert.deepEqual(body, approved, "Deployment producer closure was substituted");

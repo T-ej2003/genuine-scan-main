@@ -5,9 +5,33 @@ import yaml from "js-yaml";
 import { appOnlyVerifierFailureCode, observeAppOnlyVerifierAwsFailure, parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-app-only-verifier.mjs";
 import { parseAppOnlyVerifierExecutionArgs } from "../aws/run-production-app-only-verifier.mjs";
 import { parseAppOnlyVerifierRecoveryArgs } from "../aws/run-production-app-only-verifier-recovery.mjs";
+import { parseAppOnlyDeploymentPreparationArgs } from "../aws/prepare-production-app-only-deployment.mjs";
 import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs } from "../aws/run-production-app-only-deployment.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_OIDC_WORKFLOWS, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+
+test("recovered verifier deployment handoff requires current-source authorization and requirements references", () => {
+  const current = "a".repeat(40), old = "b".repeat(40);
+  const reference = (sourceSha) => JSON.stringify({ sourceSha, runId: "1", runAttempt: "1", artifactId: "2",
+    artifactDigest: `sha256:${"c".repeat(64)}`, fileSha256: "d".repeat(64) });
+  const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main",
+    GITHUB_REF: "refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_SHA: current,
+    GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/prepare-production-app-only-deployment.yml@refs/heads/main" };
+  const base = ["--source-sha", current, "--compatibility-reference", reference(old),
+    "--compatibility-kind", "recovered"];
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(base, env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs([...base, "--authorization-reference", reference(current)], env));
+  const complete = [...base, "--authorization-reference", reference(current), "--requirements-reference", reference(current)];
+  assert.equal(parseAppOnlyDeploymentPreparationArgs(complete, env).compatibilityReference.sourceSha, old);
+  assert.equal(parseAppOnlyDeploymentPreparationArgs([...complete.slice(0, 2), "--compatibility-reference", reference(current),
+    ...complete.slice(4)], env).compatibilityKind, "recovered");
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs([...base, "--authorization-reference", reference(old),
+    "--requirements-reference", reference(current)], env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(["--source-sha", current,
+    "--compatibility-reference", reference(current), "--authorization-reference", reference(current)], env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(["--source-sha", current,
+    "--compatibility-reference", reference(old)], env));
+});
 
 test("OIDC workflow claims bind reviewed reusable code and preserve protected approval and concurrency", () => {
   for (const [role, names] of Object.entries(APP_ONLY_OIDC_WORKFLOWS)) for (const name of names) {

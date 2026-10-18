@@ -55,6 +55,53 @@ test("preparation transitively binds fresh live domain, image, requirements and 
   assert.equal(result.candidateDigest, input.images.candidateDigest);
 });
 
+test("deployment preparation adopts a freshly observed historical verifier only for identical current database requirements", () => {
+  const input = fixture(), historicalSourceSha = "eeff4c152c1254ededcd345f0604b4fa2efc515d";
+  const historicalRequirements = createAppOnlyRequirements({ repositoryRoot: input.repositoryRoot,
+    sourceSha: historicalSourceSha, candidateSourceSha: input.images.candidateSourceSha,
+    packageChecksums: { fixture: true }, catalogue: { routines: [{ schema: "app_auth", name: "fixed", arguments: "" }],
+      tables: [{ name: "Example" }], policies: [{ table: "Example", name: "isolation" }],
+      schemas: [{ name: "app_auth" }], roles: [{ name: "app" }] } });
+  const historicalIdentity = { ...input.database.identity, sourceSha: historicalSourceSha };
+  const { verificationContractSha256 } = buildAppOnlyVerifierCommand({ requirements: historicalRequirements,
+    identity: historicalIdentity, repositoryRoot: input.repositoryRoot });
+  const historicalBody = { ...input.database, identity: historicalIdentity,
+    requirementsSha256: historicalRequirements.requirementsSha256, verificationContractSha256 };
+  delete historicalBody.evidenceSha256;
+  input.database = signed(historicalBody);
+  const historicalPreparation = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_PREPARATION", sourceSha: historicalSourceSha,
+    identity: historicalIdentity, predecessor: prepareAppOnlyVerifier({ ...input,
+      databaseSecretArn: input.verifierIam.databaseSecretArn }).predecessor,
+    verificationContractSha256 };
+  const verifiedInputs = { preparation: { ...historicalPreparation,
+    preparationSha256: canonicalSha256(historicalPreparation) }, requirements: historicalRequirements };
+  const result = prepareAppOnlyDeployment({ ...input, verifiedInputs });
+  assert.equal(result.databaseSourceSha, historicalSourceSha);
+  assert.equal(result.evidence.database, input.database.evidenceSha256);
+  const currentInputs = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS",
+    preparation: prepareAppOnlyVerifier({ ...input, databaseSecretArn: input.verifierIam.databaseSecretArn }),
+    images: input.images, verifierImage: input.verifierImage, iam: input.iam, verifierIam: input.verifierIam,
+    runtime: input.runtime, requirements: input.requirements, requirementsReference: {} };
+  const deploymentInputs = { schemaVersion: 1, kind: "APP_ONLY_DEPLOYMENT_INPUTS", preparation: result,
+    inputs: currentInputs, database: input.database, verifiedInputs,
+    compatibilityReference: { sourceSha: input.sourceSha }, verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
+  const consumer = { inputs: deploymentInputs, sourceSha: input.sourceSha, live: input.live,
+    repositoryRoot: input.repositoryRoot, now: input.now + 1000 };
+  assert.deepEqual(authenticateAppOnlyDeploymentInputs(consumer), result);
+  const substituted = structuredClone(deploymentInputs);
+  substituted.verifiedInputs.preparation.sourceSha = "f".repeat(40);
+  assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...consumer, inputs: substituted }));
+  for (const change of [
+    (proof) => { proof.requirements.objects.tables[0].sha256 = "f".repeat(64); },
+    (proof) => { proof.preparation.identity.candidateDigest = `sha256:${"f".repeat(64)}`; },
+    (proof) => { proof.preparation.sourceSha = "f".repeat(40); },
+  ]) {
+    const proof = structuredClone(verifiedInputs); change(proof);
+    assert.throws(() => prepareAppOnlyDeployment({ ...input, verifiedInputs: proof }));
+  }
+  assert.throws(() => prepareAppOnlyDeployment({ ...input, verifiedInputs: undefined }), "Historical database output requires adoption");
+});
+
 test("verifier preparation binds exact task/network requirements without claiming database compatibility", () => {
   const input = fixture(); delete input.database;
   input.databaseSecretArn = `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:mscqr/production/rls-green/phase4/read-only-canary-database-url-ABC123`;
@@ -126,7 +173,8 @@ test(`deployment consumer preserves opaque ID and rejects substituted proof and 
     images: input.images, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime,
     verifierImage: input.verifierImage, requirements: input.requirements, requirementsReference: {} };
   const inputs = { schemaVersion: 1, kind: "APP_ONLY_DEPLOYMENT_INPUTS", preparation: prepareAppOnlyDeployment(input),
-    inputs: verifierInputs, database: input.database, compatibilityReference: {}, verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
+    inputs: verifierInputs, database: input.database, compatibilityReference: { sourceSha: input.sourceSha },
+    verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
   const context = { inputs, sourceSha: input.sourceSha, live: input.live, repositoryRoot: input.repositoryRoot, now: input.now + 1000 };
   assert.deepEqual(authenticateAppOnlyDeploymentInputs(context), inputs.preparation);
   assert.equal(authenticateAppOnlyDeploymentInputs({ ...context, inputs: JSON.parse(JSON.stringify(inputs)) }).predecessor.deploymentId, deploymentId);

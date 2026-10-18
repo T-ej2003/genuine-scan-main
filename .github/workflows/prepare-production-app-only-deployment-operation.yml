@@ -4,6 +4,9 @@ on:
     inputs:
       source_sha: { description: Exact protected-main SHA, required: true, type: string }
       compatibility_reference: { description: Exact compact successful verifier artifact identity JSON, required: true, type: string }
+      compatibility_kind: { description: normal or recovered verifier artifact contract, required: false, default: normal, type: string }
+      authorization_reference: { description: Current-source signed image authorization for recovered verifier evidence, required: false, type: string }
+      requirements_reference: { description: Current-source canonical database requirements for recovered verifier evidence, required: false, type: string }
 permissions: { contents: read, actions: read }
 jobs:
   prepare:
@@ -24,10 +27,16 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           COMPATIBILITY_REFERENCE: ${{ inputs.compatibility_reference }}
+          COMPATIBILITY_KIND: ${{ inputs.compatibility_kind }}
+          AUTHORIZATION_REFERENCE: ${{ inputs.authorization_reference }}
+          REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
         run: |
           node --input-type=module <<'NODE'
           import { parseAppOnlyDeploymentPreparationArgs } from './scripts/aws/prepare-production-app-only-deployment.mjs';
-          parseAppOnlyDeploymentPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--compatibility-reference',process.env.COMPATIBILITY_REFERENCE]);
+          parseAppOnlyDeploymentPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--compatibility-reference',process.env.COMPATIBILITY_REFERENCE,
+            '--compatibility-kind',process.env.COMPATIBILITY_KIND,
+            ...(process.env.AUTHORIZATION_REFERENCE ? ['--authorization-reference',process.env.AUTHORIZATION_REFERENCE] : []),
+            ...(process.env.REQUIREMENTS_REFERENCE ? ['--requirements-reference',process.env.REQUIREMENTS_REFERENCE] : [])]);
           NODE
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -39,10 +48,16 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           COMPATIBILITY_REFERENCE: ${{ inputs.compatibility_reference }}
+          COMPATIBILITY_KIND: ${{ inputs.compatibility_kind }}
+          AUTHORIZATION_REFERENCE: ${{ inputs.authorization_reference }}
+          REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          node scripts/aws/prepare-production-app-only-deployment.mjs --source-sha "$SOURCE_SHA" --compatibility-reference "$COMPATIBILITY_REFERENCE"
+          args=(--source-sha "$SOURCE_SHA" --compatibility-reference "$COMPATIBILITY_REFERENCE" --compatibility-kind "$COMPATIBILITY_KIND")
+          if [[ -n "$AUTHORIZATION_REFERENCE" ]]; then args+=(--authorization-reference "$AUTHORIZATION_REFERENCE"); fi
+          if [[ -n "$REQUIREMENTS_REFERENCE" ]]; then args+=(--requirements-reference "$REQUIREMENTS_REFERENCE"); fi
+          node scripts/aws/prepare-production-app-only-deployment.mjs "${args[@]}"
       - name: Switch to isolated provisioner for read-only permission preparation
         uses: aws-actions/configure-aws-credentials@v6
         with:

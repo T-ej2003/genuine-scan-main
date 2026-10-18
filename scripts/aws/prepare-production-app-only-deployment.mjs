@@ -15,14 +15,28 @@ import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 export function parseAppOnlyDeploymentPreparationArgs(args, env = process.env) {
   const { values } = parseArgs({ args, strict: true, allowPositionals: false,
-    options: { "source-sha": { type: "string" }, "compatibility-reference": { type: "string" } } });
+    options: { "source-sha": { type: "string" }, "compatibility-reference": { type: "string" },
+      "compatibility-kind": { type: "string" },
+      "authorization-reference": { type: "string" }, "requirements-reference": { type: "string" } } });
   assert.equal(env.GITHUB_ACTIONS, "true"); assert.equal(env.GITHUB_REPOSITORY, "T-ej2003/genuine-scan-main");
   assert.equal(env.GITHUB_REF, "refs/heads/main"); assert.equal(env.GITHUB_EVENT_NAME, "workflow_dispatch");
   assert.equal(env.GITHUB_WORKFLOW_REF, "T-ej2003/genuine-scan-main/.github/workflows/prepare-production-app-only-deployment.yml@refs/heads/main");
   assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.equal(values["source-sha"], env.GITHUB_SHA);
   const compatibilityReference = parseAppOnlyArtifactReference(values["compatibility-reference"]);
-  assert.equal(compatibilityReference.sourceSha, values["source-sha"]);
-  return { sourceSha: values["source-sha"], compatibilityReference };
+  const compatibilityKind = values["compatibility-kind"] || "normal";
+  assert.ok(["normal", "recovered"].includes(compatibilityKind));
+  const recovered = compatibilityKind === "recovered";
+  if (!recovered) assert.equal(compatibilityReference.sourceSha, values["source-sha"]);
+  assert.equal(Boolean(values["authorization-reference"]), recovered);
+  assert.equal(Boolean(values["requirements-reference"]), recovered);
+  const authorizationReference = recovered ? parseAppOnlyArtifactReference(values["authorization-reference"]) : undefined;
+  const requirementsReference = recovered ? parseAppOnlyArtifactReference(values["requirements-reference"]) : undefined;
+  if (recovered) {
+    assert.equal(authorizationReference.sourceSha, values["source-sha"]);
+    assert.equal(requirementsReference.sourceSha, values["source-sha"]);
+  }
+  return { sourceSha: values["source-sha"], compatibilityKind, compatibilityReference,
+    authorizationReference, requirementsReference };
 }
 async function main() {
   const input = parseAppOnlyDeploymentPreparationArgs(process.argv.slice(2));
