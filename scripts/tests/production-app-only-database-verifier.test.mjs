@@ -84,7 +84,10 @@ test("empty projection status and catalogue query errors produce bounded operati
   }
 });
 test("runtime reports a catalogue operation without emitting database exception text", async () => {
-  const env = { RLS_CANARY_DATABASE_URL: "postgresql://mscqr_prod_rls_canary_read:local-test@db.example/mscqr_production_rls_green_phase2?sslmode=require&application_name=mscqr-production-green-read-only-rls-canary",
+  const databaseUrl = new URL("postgresql://db.example/mscqr_production_rls_green_phase2?sslmode=require&application_name=mscqr-production-green-read-only-rls-canary");
+  databaseUrl.username = "mscqr_prod_rls_canary_read";
+  databaseUrl.password = "local-test";
+  const env = { RLS_CANARY_DATABASE_URL: databaseUrl.toString(),
     NODE_ENV: "production", PORT: "4000", RUN_DB_MIGRATIONS_ON_START: "false", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40),
     AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2",
     AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/local-test", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/local-test" };
