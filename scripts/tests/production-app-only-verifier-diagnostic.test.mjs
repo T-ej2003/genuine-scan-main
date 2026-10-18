@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "../aws/production-app-only-policy.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { buildAppOnlyVerifierDefinition } from "../aws/production-app-only-verifier-command.mjs";
+import { executeAppOnlyVerifierTask } from "../aws/production-app-only-adapters.mjs";
+import { createAppOnlyEvidenceWriter } from "../aws/production-app-only-artifacts.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { authenticateFailedAppOnlyVerifierTask, readFailedAppOnlyVerifierDiagnostic } from "../aws/production-app-only-verifier-diagnostic.mjs";
+import { authenticateFailedAppOnlyVerifierTask, readFailedAppOnlyVerifierDiagnostic,
+  waitForFailedAppOnlyVerifierDiagnostic } from "../aws/production-app-only-verifier-diagnostic.mjs";
 import { diagnosticReadOnlyAws, parseAppOnlyDiagnosticArgs } from "../aws/read-production-app-only-verifier-diagnostic.mjs";
 
 const sourceSha = "a".repeat(40), currentSourceSha = "b".repeat(40);
@@ -85,6 +90,38 @@ test("authenticated existing exit-1 task yields only its bounded catalogue code 
   assert.throws(() => diagnosticReadOnlyAws(() => "")(["ecs", "register-task-definition"]), /no AWS mutation/);
 });
 
+test("real failed-task writer leaves the exact three-record journal readable after publication failure", async () => {
+  const f = fixture(), preparation = f.inputs.preparation;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-verifier-journal-contract-"));
+  try {
+    const writer = createAppOnlyEvidenceWriter({ repositoryRoot: process.cwd(), sourceSha,
+      preparationSha256: preparation.preparationSha256, directory });
+    let launches = 0;
+    const run = (args) => args[1] === "run-task" ? (launches++, JSON.stringify({ tasks: [{ taskArn }], failures: [] })) : f.options.run(args);
+    const request = { cluster: APP_ONLY.clusterArn, taskDefinition: definitionArn, launchType: "FARGATE", count: 1,
+      enableExecuteCommand: false, clientToken: canonicalSha256({ sourceSha, preparationSha256: preparation.preparationSha256 }),
+      networkConfiguration: appOnlyVerifierNetwork() };
+    await assert.rejects(executeAppOnlyVerifierTask({ run, taskDefinitionArn: definitionArn, clientToken: request.clientToken,
+      request, verifier: { requirements: f.inputs.requirements, identity: preparation.identity,
+        repositoryRoot: process.cwd(), databaseSecretArn: preparation.databaseSecretArn },
+      authenticate: async () => {}, writeEvidence: writer.writeEvidence,
+      onFailedTask: async ({ task }) => {
+        const diagnostic = readFailedAppOnlyVerifierDiagnostic({ run: f.options.run,
+          authenticated: { task, stream: `app-only/production-green-read-only-rls-canary/${"c".repeat(32)}`,
+            logGroup: APP_ONLY_VERIFIER.logGroup }, inputs: f.inputs });
+        assert.equal(diagnostic.verdict, "FAIL");
+        throw new Error("Failure artifact publication failed after CloudWatch read");
+      } }), /do not relaunch/);
+    assert.equal(launches, 1);
+    assert.deepEqual(fs.readdirSync(directory), ["001.json", "002.json", "003.json"]);
+    const execution = [1, 2, 3].map((index) => JSON.parse(fs.readFileSync(path.join(directory,
+      `${String(index).padStart(3, "0")}.json`), "utf8")));
+    const authenticated = authenticateFailedAppOnlyVerifierTask({ ...f.options, execution });
+    assert.equal(authenticated.executionJournalSha256, execution[2].evidenceSha256);
+    assert.equal(readFailedAppOnlyVerifierDiagnostic({ run: f.options.run, authenticated, inputs: f.inputs }).verdict, "FAIL");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("wrong source, task, definition, image, exit code and malformed journals fail before log read", () => {
   for (const mutate of [
     (f) => { f.options.taskArn = f.options.taskArn.replace(/c{32}$/, "f".repeat(32)); },
@@ -95,11 +132,26 @@ test("wrong source, task, definition, image, exit code and malformed journals fa
     (f) => { f.task.taskDefinitionArn = definitionArn.replace(/:20$/, ":21"); },
     (f) => { f.task.containers[0].imageDigest = `sha256:${"f".repeat(64)}`; },
     (f) => { f.task.containers[0].exitCode = 0; },
+    (f) => { f.options.execution.push({ ...f.options.execution[2], sequence: 4 }); },
   ]) {
     const f = fixture(); mutate(f);
     assert.throws(() => authenticateFailedAppOnlyVerifierTask(f.options));
     assert.ok(f.calls.every(([, action]) => action !== "get-log-events"));
   }
+});
+
+test("expired ECS task and contradictory terminal journal fail closed", () => {
+  const expired = fixture();
+  const originalRun = expired.options.run;
+  expired.options.run = diagnosticReadOnlyAws((args) => args[1] === "describe-tasks"
+    ? JSON.stringify({ tasks: [], failures: [{ arn: taskArn, reason: "MISSING" }] }) : originalRun(args));
+  assert.throws(() => authenticateFailedAppOnlyVerifierTask(expired.options));
+  const conflicting = fixture();
+  const third = conflicting.options.execution[2];
+  const body = { ...third, event: { ...third.event, status: "COMPATIBILITY_VERIFIED" } };
+  delete body.evidenceSha256;
+  conflicting.options.execution[2] = { ...body, evidenceSha256: canonicalSha256(body) };
+  assert.throws(() => authenticateFailedAppOnlyVerifierTask(conflicting.options));
 });
 
 test("wrong stream, absent or extra output, secret-shaped fields and denied access fail closed", () => {
@@ -115,6 +167,37 @@ test("wrong stream, absent or extra output, secret-shaped fields and denied acce
   assert.throws(() => readFailedAppOnlyVerifierDiagnostic({ run: denied, authenticated, inputs: f.inputs }), /AccessDenied/);
   authenticated.stream += "-wrong";
   assert.throws(() => readFailedAppOnlyVerifierDiagnostic({ run: f.options.run, authenticated, inputs: f.inputs }));
+});
+test("fresh failed task waits for one bounded log event, but never retries access denial", async () => {
+  const f = fixture(), authenticated = authenticateFailedAppOnlyVerifierTask(f.options);
+  let reads = 0, waits = 0;
+  const delayed = diagnosticReadOnlyAws((args) => args[1] === "get-log-events" && ++reads === 1
+    ? JSON.stringify({ events: [], nextForwardToken: "end" }) : f.options.run(args));
+  const result = await waitForFailedAppOnlyVerifierDiagnostic({ run: delayed, authenticated, inputs: f.inputs,
+    wait: async (ms) => { assert.equal(ms, 5000); waits++; } });
+  assert.equal(result.verdict, "FAIL"); assert.equal(waits, 1);
+  let missingStreamReads = 0;
+  const pendingStream = diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events" && ++missingStreamReads === 1) {
+      const error = new Error("AWS command failed");
+      error.stderr = "An error occurred (ResourceNotFoundException) when calling the GetLogEvents operation: The specified log stream does not exist.";
+      throw error;
+    }
+    return f.options.run(args);
+  });
+  assert.equal((await waitForFailedAppOnlyVerifierDiagnostic({ run: pendingStream, authenticated, inputs: f.inputs,
+    wait: async () => { waits++; } })).verdict, "FAIL");
+  assert.equal(missingStreamReads, 3); assert.equal(waits, 2);
+  await assert.rejects(waitForFailedAppOnlyVerifierDiagnostic({ run: diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events") throw new Error("AccessDenied"); return f.options.run(args);
+  }), authenticated, inputs: f.inputs, wait: async () => { assert.fail("Denied reads cannot retry"); } }), /AccessDenied/);
+  await assert.rejects(waitForFailedAppOnlyVerifierDiagnostic({ run: diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events") {
+      const error = new Error("AWS command failed"); error.stderr = "An error occurred (AccessDeniedException) when calling the GetLogEvents operation:";
+      throw error;
+    }
+    return f.options.run(args);
+  }), authenticated, inputs: f.inputs, wait: async () => { assert.fail("Denied reads cannot retry"); } }), /AWS command failed/);
 });
 
 test("protected diagnostic mode is separate from registration and requires exact workflow identity", () => {

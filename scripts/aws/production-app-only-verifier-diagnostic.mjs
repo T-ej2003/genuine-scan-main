@@ -95,7 +95,8 @@ export function readFailedAppOnlyVerifierDiagnostic({ run, authenticated, inputs
     assert.ok(page < 2, "Verifier log pagination did not converge");
     nextToken = response.nextForwardToken;
   }
-  assert.equal(messages.length, 1, "Verifier diagnostic is absent");
+  if (messages.length === 0) throw new Error("Verifier diagnostic is absent");
+  assert.equal(messages.length, 1, "Verifier diagnostic is ambiguous");
   assert.ok(typeof messages[0] === "string" && Buffer.byteLength(messages[0]) <= 16384, "Verifier diagnostic is oversized");
   const value = JSON.parse(messages[0]);
   if (value.status === "APP_ONLY_DATABASE_VERIFICATION_FAILED") {
@@ -115,4 +116,20 @@ export function readFailedAppOnlyVerifierDiagnostic({ run, authenticated, inputs
   assert.ok(Object.values(value.domains).some((status) => status !== "COMPATIBLE"), "Exit 1 conflicts with compatible output");
   const { evidenceSha256, ...body } = value; assert.equal(evidenceSha256, canonicalSha256(body));
   return { verdict: "FAIL", phase: "COMPARISON", operation: null, domains: value.domains, diagnosticSha256: evidenceSha256 };
+}
+
+// ECS can report STOPPED before the awslogs driver delivers its single result.
+// Retry only an absent stream event; malformed output and access denials fail closed.
+export async function waitForFailedAppOnlyVerifierDiagnostic({ run, authenticated, inputs,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), attempts = 12 }) {
+  assert.ok(Number.isInteger(attempts) && attempts > 0 && attempts <= 12);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try { return readFailedAppOnlyVerifierDiagnostic({ run, authenticated, inputs }); }
+    catch (error) {
+      const stderr = typeof error?.stderr === "string" ? error.stderr : error?.stderr?.toString?.("utf8") || "";
+      const streamPending = /An error occurred \(ResourceNotFoundException\) when calling the GetLogEvents operation:/.test(stderr);
+      if ((!streamPending && error?.message !== "Verifier diagnostic is absent") || attempt === attempts - 1) throw error;
+      await wait(5000);
+    }
+  }
 }

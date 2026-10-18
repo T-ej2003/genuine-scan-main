@@ -15,6 +15,7 @@ import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact, createAppOnlyEv
 import { readBoundStageBPrivateJson, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { createAppOnlyAuthorization, assertAppOnlyAuthorization } from "./production-app-only-authorization.mjs";
 import { createAppOnlyEcsReaders, registerAppOnlyVerifier, executeAppOnlyVerifierTask, readAppOnlyVerifierResult } from "./production-app-only-adapters.mjs";
+import { waitForFailedAppOnlyVerifierDiagnostic } from "./production-app-only-verifier-diagnostic.mjs";
 import { prepareAppOnlyProvisioning, executeAppOnlyProvisioning, verifyAppOnlyEffectivePermissions } from "./production-app-only-provisioning.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -106,7 +107,22 @@ async function main() {
   const clientToken = canonicalSha256({ sourceSha, preparationSha256: preparation.preparationSha256 });
   const request = { cluster: APP_ONLY.clusterArn, taskDefinition: taskDefinitionArn, launchType: "FARGATE", count: 1,
     enableExecuteCommand: false, clientToken, networkConfiguration: appOnlyVerifierNetwork() };
-  const execution = await executeAppOnlyVerifierTask({ run, taskDefinitionArn, clientToken, request, verifier, authenticate, writeEvidence: journal.writeEvidence });
+  const execution = await executeAppOnlyVerifierTask({ run, taskDefinitionArn, clientToken, request, verifier, authenticate,
+    writeEvidence: journal.writeEvidence, onFailedTask: async ({ task, verificationContractSha256 }) => {
+      const stream = `app-only/production-green-read-only-rls-canary/${task.taskArn.split("/").at(-1)}`;
+      const diagnostic = await waitForFailedAppOnlyVerifierDiagnostic({ run, authenticated: {
+        task, stream, logGroup: APP_ONLY_VERIFIER.logGroup }, inputs });
+      authenticate();
+      const body = { schemaVersion: 1, kind: "APP_ONLY_FAILED_COMPATIBILITY", sourceSha,
+        workflowRunId: process.env.GITHUB_RUN_ID, workflowRunAttempt: process.env.GITHUB_RUN_ATTEMPT,
+        taskArn: task.taskArn, taskDefinitionArn, verifierImageDigest: verifier.identity.verifierImageDigest,
+        preparationSha256: preparation.preparationSha256, verificationContractSha256,
+        approvalSha256: approval.evidenceSha256, diagnostic };
+      const file = writeStageBPrivateFileExclusive({ filePath: path.join(directory, "app-only-compatibility-failed.json"),
+        repositoryRoot, bytes: Buffer.from(`${JSON.stringify({ ...body, resultSha256: canonicalSha256(body) })}\n`) });
+      output("failure_path", file.path); output("failure_sha256", file.sha256);
+    } });
+  if (execution.failed) { process.exitCode = 1; return; }
   const database = await readAppOnlyVerifierResult({ run, execution, verifier });
   authenticate(); assertAppOnlyCas(preparation.predecessor, captureAppOnlyPredecessor(readers.readLive()));
   await journal.writeEvidence({ status: "COMPATIBILITY_VERIFIED", taskArn: execution.task.taskArn, databaseEvidenceSha256: database.evidenceSha256 });
