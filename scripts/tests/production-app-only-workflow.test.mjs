@@ -169,6 +169,12 @@ test("verifier workflow previews exact preparation then separates protected prov
   assert.doesNotMatch(recover.run, /register-task-definition|put-role-policy/);
   assert.ok(job.steps.some((step) => step.with?.name === "production-app-only-verifier-registration-recovery"
     && step.if === "always() && steps.recover.outputs.path != ''"));
+  assert.ok(job.steps.some((step) => step.with?.name === "production-app-only-compatibility-failed"
+    && step.if === "always() && steps.verify.outputs.failure_path != ''"));
+  const verifierRunner = fs.readFileSync("scripts/aws/run-production-app-only-verifier.mjs", "utf8");
+  assert.match(verifierRunner, /onFailedTask: async/);
+  assert.match(verifierRunner, /output\("failure_path", file\.path\)/);
+  assert.match(verifierRunner, /if \(execution\.failed\) \{ process\.exitCode = 1; return; \}/);
   assert.ok(job.steps.some((step) => step.with?.name?.includes("production-app-only-compatibility-recovered")));
   const recoveryRunner = fs.readFileSync("scripts/aws/run-production-app-only-verifier-recovery.mjs", "utf8");
   const recoveryReader = fs.readFileSync("scripts/aws/production-app-only-verifier-recovery.mjs", "utf8");

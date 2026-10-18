@@ -170,7 +170,7 @@ export async function registerAppOnlyVerifier({ run, preparation, verifier, auth
 }
 
 export async function executeAppOnlyVerifierTask({ run, taskDefinitionArn, clientToken, request, verifier,
-  authenticate, writeEvidence, wait = sleep, now = Date.now }) {
+  authenticate, writeEvidence, onFailedTask, wait = sleep, now = Date.now }) {
   assertAppOnlyVerifierLaunch(request, { taskDefinitionArn, clientToken });
   assert.equal(typeof authenticate, "function"); assert.equal(typeof writeEvidence, "function");
   await authenticate(); // Fixed producer: protected source, approval, evidence freshness and ECS CAS.
@@ -195,9 +195,15 @@ export async function executeAppOnlyVerifierTask({ run, taskDefinitionArn, clien
       assert.equal(task.enableExecuteCommand, false);
       if (task.lastStatus === "STOPPED") {
         assert.equal(task.stopCode, "EssentialContainerExited");
-        assert.equal(task.containers?.length, 1); assert.equal(task.containers[0].exitCode, 0, "Compatibility verifier failed");
+        assert.equal(task.containers?.length, 1);
         assert.equal(task.containers[0].name, readback.taskDefinition.containerDefinitions[0].name);
         assert.equal(task.containers[0].imageDigest, verifier.identity.verifierImageDigest);
+        if (task.containers[0].exitCode === 1 && onFailedTask) {
+          await authenticate();
+          await onFailedTask({ task, verificationContractSha256 });
+          return { task, verificationContractSha256, failed: true };
+        }
+        assert.equal(task.containers[0].exitCode, 0, "Compatibility verifier failed");
         await authenticate(); // A changed predecessor cannot receive compatibility authority.
         await record("TASK_SUCCEEDED_EVIDENCE_PENDING");
         return { task, verificationContractSha256 }; // Exact task output is authenticated separately below.

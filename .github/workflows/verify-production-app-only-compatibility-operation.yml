@@ -173,6 +173,14 @@ jobs:
           path: ${{ steps.verify.outputs.path || steps.verify_recovered.outputs.path }}
           if-no-files-found: error
           retention-days: 7
+      - name: Preserve bounded failed compatibility result from this execution
+        if: always() && steps.verify.outputs.failure_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-compatibility-failed
+          path: ${{ steps.verify.outputs.failure_path }}
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve authenticated no-write registration recovery result
         if: always() && steps.recover.outputs.path != ''
         uses: actions/upload-artifact@v4

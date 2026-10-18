@@ -6,7 +6,8 @@ import { APP_ONLY_VERIFIER, appOnlyVerifierNetwork } from "../aws/production-app
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { buildAppOnlyVerifierDefinition } from "../aws/production-app-only-verifier-command.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { authenticateFailedAppOnlyVerifierTask, readFailedAppOnlyVerifierDiagnostic } from "../aws/production-app-only-verifier-diagnostic.mjs";
+import { authenticateFailedAppOnlyVerifierTask, readFailedAppOnlyVerifierDiagnostic,
+  waitForFailedAppOnlyVerifierDiagnostic } from "../aws/production-app-only-verifier-diagnostic.mjs";
 import { diagnosticReadOnlyAws, parseAppOnlyDiagnosticArgs } from "../aws/read-production-app-only-verifier-diagnostic.mjs";
 
 const sourceSha = "a".repeat(40), currentSourceSha = "b".repeat(40);
@@ -115,6 +116,18 @@ test("wrong stream, absent or extra output, secret-shaped fields and denied acce
   assert.throws(() => readFailedAppOnlyVerifierDiagnostic({ run: denied, authenticated, inputs: f.inputs }), /AccessDenied/);
   authenticated.stream += "-wrong";
   assert.throws(() => readFailedAppOnlyVerifierDiagnostic({ run: f.options.run, authenticated, inputs: f.inputs }));
+});
+test("fresh failed task waits for one bounded log event, but never retries access denial", async () => {
+  const f = fixture(), authenticated = authenticateFailedAppOnlyVerifierTask(f.options);
+  let reads = 0, waits = 0;
+  const delayed = diagnosticReadOnlyAws((args) => args[1] === "get-log-events" && ++reads === 1
+    ? JSON.stringify({ events: [], nextForwardToken: "end" }) : f.options.run(args));
+  const result = await waitForFailedAppOnlyVerifierDiagnostic({ run: delayed, authenticated, inputs: f.inputs,
+    wait: async (ms) => { assert.equal(ms, 5000); waits++; } });
+  assert.equal(result.verdict, "FAIL"); assert.equal(waits, 1);
+  await assert.rejects(waitForFailedAppOnlyVerifierDiagnostic({ run: diagnosticReadOnlyAws((args) => {
+    if (args[1] === "get-log-events") throw new Error("AccessDenied"); return f.options.run(args);
+  }), authenticated, inputs: f.inputs, wait: async () => { assert.fail("Denied reads cannot retry"); } }), /AccessDenied/);
 });
 
 test("protected diagnostic mode is separate from registration and requires exact workflow identity", () => {

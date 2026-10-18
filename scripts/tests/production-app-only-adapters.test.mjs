@@ -96,6 +96,26 @@ test("verifier adapters run once with exact request then bound completion to exa
   assert.deepEqual(calls.map((c) => c[1]), ["describe-task-definition", "run-task", "describe-tasks"]);
   assert.deepEqual(JSON.parse(calls[1][3]), request());
 });
+test("confirmed exit-1 verifier captures bounded failure before returning without another task", async () => {
+  const task = { taskArn, clusterArn: APP_ONLY.clusterArn, taskDefinitionArn: verifierArn, enableExecuteCommand: false,
+    lastStatus: "STOPPED", stopCode: "EssentialContainerExited", containers: [{ exitCode: 1,
+      name: "production-green-read-only-rls-canary", imageDigest: identity.verifierImageDigest }] };
+  const calls = [], evidence = [], captured = [];
+  const run = (args) => { calls.push(args[1]); return args[1] === "describe-task-definition" ? readback
+    : args[1] === "run-task" ? { tasks: [{ taskArn }], failures: [] } : { tasks: [task], failures: [] }; };
+  const result = await executeAppOnlyVerifierTask({ ...authorization, run, verifier, taskDefinitionArn: verifierArn,
+    clientToken: token, request: request(), writeEvidence: async (value) => evidence.push(value),
+    onFailedTask: async (value) => captured.push(value) });
+  assert.equal(result.failed, true); assert.equal(captured.length, 1); assert.equal(captured[0].task, task);
+  assert.deepEqual(calls, ["describe-task-definition", "run-task", "describe-tasks"]);
+  assert.deepEqual(evidence.map(({ status }) => status), ["LAUNCH_INTENT", "LAUNCHED"]);
+  await assert.rejects(executeAppOnlyVerifierTask({ ...authorization, run: (args) => {
+    if (args[1] === "describe-task-definition") return readback;
+    if (args[1] === "run-task") return { tasks: [{ taskArn }], failures: [] };
+    return { tasks: [task], failures: [] };
+  }, verifier, taskDefinitionArn: verifierArn, clientToken: token, request: request(),
+  onFailedTask: async () => { throw new Error("CloudWatch access denied"); } }), /do not relaunch/);
+});
 test("verifier override rejected before RunTask", async () => {
   let calls = 0;
   await assert.rejects(executeAppOnlyVerifierTask({ run: () => calls++, taskDefinitionArn: verifierArn, clientToken: token,
