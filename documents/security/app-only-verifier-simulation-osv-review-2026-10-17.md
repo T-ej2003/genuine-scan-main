@@ -1,0 +1,11 @@
+# App-only verifier permission simulation reachability review
+
+The source change adds a non-matching `kms:ResourceAliases` context value to the existing IAM `SimulatePrincipalPolicy` probes. It does not change an IAM policy, permissions boundary, allowed AWS action, production approval, or database operation. A protected run (`38996090894`) registered and authenticated its verifier task and wrote the exact intended launcher policy, then stopped when a denied ECS probe returned a missing KMS alias context. Read-only repetition of all four live verifier probes with the added context returned the expected positive and negative decisions and no missing context. The existing assertion continues to reject missing context and unexpected decisions.
+
+The changed executable inputs are `scripts/aws/production-app-only-provisioning.mjs` and its focused test. No dependency lock, browser/SPA source, Tailwind content glob, Dockerfile, or runtime package changed. The existing accepted advisory remains the dev-only root-lockfile `braces@3.0.3`; protected-main audit found it absent from browser and backend/worker runtime. The refreshed reachability input hash is `43589fcf0cc0c768eef4621210c68ce6a0ca14dcff90a619576d749820532a18`. Exact-head hosted OSV scanning and canonical browser-closure verification remain required before merge.
+
+This source change cannot complete run `38996090894`. Its already completed task registration and launcher-policy write must be retained as historical evidence. A future protected-source verifier run requires fresh source-bound preparation and production approval; do not retry the failed run blindly.
+
+## CI fixture review — 18 October 2026
+
+The Stage B successor-entrypoint test now uses the canonical broker packager's lockfile-backed `npm ci` instead of requiring every historical tarball to be present in a shared CI cache. It still builds and authenticates the historical ZIP and manifest, rejects substituted provenance, and tests durable restart hydration. This is a test-only change; application source, dependency locks, Dockerfiles, browser build inputs, and runtime packaging are unchanged. The recomputed reachability input hash is `f45afd97c315c78b56abe05ee31246b66617727f066fdf7145654f3aa25d4e04`. Exact-head hosted OSV scanning and browser-closure verification remain required.

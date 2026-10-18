@@ -149,12 +149,15 @@ test("effective verification checks fixed positive and negative scopes and rejec
       || action === "iam:passrole" && [APP_ONLY.taskRoleArn, APP_ONLY.executionRoleArn].includes(resource) && ctx["iam:PassedToService"] === "ecs-tasks.amazonaws.com"
       : action === "ecs:runtask" && resource === verifierArn && ctx["ecs:cluster"] === APP_ONLY.clusterArn;
     return { EvaluationResults: [{ EvalActionName: action, EvalResourceName: resource, EvalDecision: allowed ? "allowed" : "implicitDeny",
-      MissingContextValues: [], PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: allowed } }] };
+      MissingContextValues: !allowed && !ctx["kms:ResourceAliases"] ? ["kms:ResourceAliases"] : [],
+      PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: allowed } }] };
   };
   const result = verifyAppOnlyEffectivePermissions({ run, verifierArn, predecessorArn, phase: "DEPLOYER" });
   assert.equal(result.verified, true); assert.equal(result.observations.length, 15);
   const verifier = verifyAppOnlyEffectivePermissions({ run, verifierArn, predecessorArn, phase: "VERIFIER" });
   assert.equal(verifier.observations.length, 4);
+  assert.ok(calls.every((args) => JSON.parse(args[args.indexOf("--context-entries") + 1])
+    .some((entry) => entry.ContextKeyName === "kms:ResourceAliases" && entry.ContextKeyValues[0] === "alias/mscqr-unrelated-simulation-probe")));
   assert.ok(verifier.observations.every((o) => o.roleArn !== APP_ONLY.roleArn));
   assert.ok(result.observations.some((o) => o.id === "app-state-write" && o.resource.includes("mscqr-production-terraform-state")));
   for (const mutate of [

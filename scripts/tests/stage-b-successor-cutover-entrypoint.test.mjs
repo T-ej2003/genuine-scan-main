@@ -38,8 +38,7 @@ test('public successor preparation preserves published source and consumes expli
     const archive = path.join(directory, 'broker.zip');
     const historicalTree = deriveStageBToolingInputTreeSha256(ORIGINAL_RELEASE);
     await packageStageBBroker({ outputPath: archive, toolingSha: ORIGINAL_RELEASE, toolingTreeSha256: historicalTree,
-      repositoryRoot: historicalRoot, sourceDirectory: path.join(historicalRoot, historicalPaths[0]),
-      npmArgs: ['ci', '--offline', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'] });
+      repositoryRoot: historicalRoot, sourceDirectory: path.join(historicalRoot, historicalPaths[0]) });
     const currentRoot = path.join(directory, 'current');
     execFileSync('git', ['clone', '--quiet', '--shared', '--no-checkout', process.cwd(), currentRoot]);
     const currentArchive = execFileSync('git', ['archive', '--format=tar', RECOVERY_TOOLING, '--', ...historicalPaths], { cwd: currentRoot });
