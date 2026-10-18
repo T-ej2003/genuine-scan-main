@@ -101,6 +101,8 @@ test("completed revision and IAM journals recover a terminal result with read-on
   assert.equal(first.taskDefinitionArn, verifierArn);
   const result = { ...first, resultSha256: canonicalSha256(first) };
   assert.equal(assertRecoveredAppOnlyVerifierRegistration({ result, ...options }), result);
+  assert.equal(assertRecoveredAppOnlyVerifierRegistration({ result, ...options,
+    run: (args) => { assert.notEqual(args[0], "iam", "Launcher cannot read or simulate its own IAM policy"); return options.run(args); } }), result);
   assert.ok(calls.length > 0);
   assert.ok(calls.every(([service, action]) => service === "sts" || service === "ecs" && action === "describe-task-definition"
     || service === "iam" && ["get-policy", "get-policy-version", "get-role", "list-attached-role-policies",

@@ -18,7 +18,6 @@ import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentApprovalEvi
 import { createProductionAwsCommandRunner, createProductionGithubCommandRunner,
   PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createAppOnlyEcsReaders, executeAppOnlyVerifierTask, readAppOnlyVerifierResult } from "./production-app-only-adapters.mjs";
-import { verifyAppOnlyEffectivePermissions } from "./production-app-only-provisioning.mjs";
 import { authenticateProtectedMainBackendImage } from "./production-app-only-images.mjs";
 import { recoverCompletedAppOnlyVerifierRegistration, assertRecoveredAppOnlyVerifierRegistration } from "./production-app-only-verifier-recovery.mjs";
 
@@ -120,9 +119,8 @@ async function main() {
   assertRecoveredAppOnlyVerifierRegistration({ result: recovered, inputs, sourceSha, currentSourceSha,
     originalRunId: options.journal.runId, registrationJournal: journals.registration,
     permissionJournal: journals.permission, run, repositoryRoot });
-  const effective = verifyAppOnlyEffectivePermissions({ run, verifierArn: recovered.taskDefinitionArn,
-    predecessorArn: inputs.preparation.predecessor.taskDefinitionArn, phase: "VERIFIER" });
-  assert.deepEqual(effective, journals.permission[2].event.effective);
+  // The provisioner already authenticated IAM readback and effective scope in
+  // the bound recovery receipt; the separate launcher cannot simulate itself.
   failureStage = "VERIFIER_EXECUTION";
   const verifier = { requirements: inputs.requirements, identity: inputs.preparation.identity, repositoryRoot,
     databaseSecretArn: inputs.preparation.databaseSecretArn };
