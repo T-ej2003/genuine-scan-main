@@ -19,6 +19,7 @@ import { createProductionAwsCommandRunner, createProductionGithubCommandRunner,
   PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { createAppOnlyEcsReaders, executeAppOnlyVerifierTask, readAppOnlyVerifierResult } from "./production-app-only-adapters.mjs";
 import { verifyAppOnlyEffectivePermissions } from "./production-app-only-provisioning.mjs";
+import { authenticateProtectedMainBackendImage } from "./production-app-only-images.mjs";
 import { recoverCompletedAppOnlyVerifierRegistration, assertRecoveredAppOnlyVerifierRegistration } from "./production-app-only-verifier-recovery.mjs";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -125,6 +126,10 @@ async function main() {
   failureStage = "VERIFIER_EXECUTION";
   const verifier = { requirements: inputs.requirements, identity: inputs.preparation.identity, repositoryRoot,
     databaseSecretArn: inputs.preparation.databaseSecretArn };
+  const image = JSON.parse(run(["ecr", "describe-images", "--registry-id", APP_ONLY.account, "--repository-name", "mscqr-backend",
+    "--image-ids", `imageDigest=${verifier.identity.verifierImageDigest}`, "--output", "json", "--no-cli-pager"]));
+  assert.equal(authenticateProtectedMainBackendImage({ sourceSha, response: image }).digest,
+    verifier.identity.verifierImageDigest, "Verifier image is no longer available or source-bound");
   const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha: currentSourceSha,
     preparationSha256: inputs.preparation.preparationSha256 });
   output("journal", journal.directory);
