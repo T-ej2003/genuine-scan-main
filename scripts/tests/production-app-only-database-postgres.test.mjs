@@ -283,7 +283,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
         GRANT USAGE, CREATE ON SCHEMA app_rls TO ${admin}`);
       try {
         assert.equal(sql(`SELECT has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT')::text,
-          has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION')::text`), "t|f");
+          has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION')::text`), "true|false");
         sql(`SET ROLE ${admin}; ${testProjection}
           REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() FROM PUBLIC;
           GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() TO ${role}; RESET ROLE`);
