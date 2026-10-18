@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
+import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
+import { runAppOnlyVerifier } from "../aws/production-app-only-verifier-runtime.mjs";
 
 function fixture() {
   const observed = {
@@ -49,11 +50,58 @@ test("missing subscription projection is an explicit fail-closed provisioning pr
     $executeRawUnsafe: async (sql) => calls.push(sql),
     $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; },
   }) };
-  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /Subscription security inventory capability is unavailable/);
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), (error) =>
+    error instanceof CatalogueOperationFailure && error.operation === "SUBSCRIPTION_PROJECTION_MISSING"
+      && /Subscription security inventory capability is unavailable/.test(error.message));
+  assert.match(calls[5], /LEFT JOIN \(SELECT p\.oid[\s\S]*?production_security_subscription_inventory'[\s\S]*?\) projection_ref ON true/,
+    "the status query retains a row when the projection function is absent");
   assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
   const runbook = fs.readFileSync("documents/security/rls-program/production-security-rebaseline-inventory.md", "utf8");
   assert.match(runbook, /Required database prerequisite[\s\S]*?production-green-phase-4-read-only-canary-provision\.sql/);
   assert.match(runbook, /distinct, explicitly authorized provisioning change/);
+});
+test("empty projection status and catalogue query errors produce bounded operation codes", async () => {
+  const transaction = (responses) => ({ $transaction: async (fn) => fn({
+    $executeRawUnsafe: async () => {}, $queryRawUnsafe: async () => {
+      const next = responses.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    },
+  }) });
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(transaction([[identity()], [{ rows: [] }], [{ rows: [] }], []])),
+    (error) => error instanceof CatalogueOperationFailure && error.operation === "SUBSCRIPTION_STATUS_EMPTY");
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(transaction([[identity()], new Error("secret-bearing SQL failure")])),
+    (error) => error instanceof CatalogueOperationFailure && error.operation === "SECURITY_EXTENSIONS"
+      && !error.message.includes("secret-bearing"));
+  for (const [statement, expected] of [["SET TRANSACTION", "TRANSACTION_SETUP"], ["SET LOCAL", "SEARCH_PATH"]]) {
+    const client = { $transaction: async (fn) => fn({
+      $executeRawUnsafe: async (sql) => { if (sql.startsWith(statement)) throw new Error("secret-bearing setup failure"); },
+      $queryRawUnsafe: async () => { throw new Error("query must not run after setup failure"); },
+    }) };
+    await assert.rejects(collectAppOnlyDatabaseCatalogue(client),
+      (error) => error instanceof CatalogueOperationFailure && error.operation === expected
+        && !error.message.includes("secret-bearing"));
+  }
+});
+test("runtime reports a catalogue operation without emitting database exception text", async () => {
+  const databaseUrl = new URL("postgresql://db.example/mscqr_production_rls_green_phase2?sslmode=require&application_name=mscqr-production-green-read-only-rls-canary");
+  databaseUrl.username = "mscqr_prod_rls_canary_read";
+  databaseUrl.password = "local-test";
+  const env = { RLS_CANARY_DATABASE_URL: databaseUrl.toString(),
+    NODE_ENV: "production", PORT: "4000", RUN_DB_MIGRATIONS_ON_START: "false", GIT_SHA: "a".repeat(40), RELEASE_GIT_SHA: "a".repeat(40),
+    AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", AWS_REGION: "eu-west-2", AWS_DEFAULT_REGION: "eu-west-2",
+    AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/local-test", ECS_CONTAINER_METADATA_URI_V4: "http://169.254.170.2/v4/local-test" };
+  const lines = [];
+  const priorExitCode = process.exitCode;
+  try {
+    process.exitCode = 0;
+    await runAppOnlyVerifier({ payload: { identity: { databaseHostname: "db.example" } }, env,
+      createClient: () => ({ $transaction: async (fn) => fn({ $executeRawUnsafe: async () => {},
+        $queryRawUnsafe: async () => { throw new Error("connection string and secret"); } }), $disconnect: async () => {} }),
+      write: (line) => lines.push(line) });
+    assert.deepEqual(JSON.parse(lines[0]), { status: "APP_ONLY_DATABASE_VERIFICATION_FAILED", phase: "CATALOGUE", operation: "IDENTITY" });
+    assert.equal(lines.join(" ").includes("connection string"), false);
+  } finally { process.exitCode = priorExitCode; }
 });
 test("every extra subconninfo grantee fails closed before subscription projection invocation", async () => {
   const calls = [];

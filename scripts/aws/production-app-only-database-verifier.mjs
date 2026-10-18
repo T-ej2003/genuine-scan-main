@@ -12,11 +12,25 @@ export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   public_execute: false, canary_execute: true, unexpected_execute_roles: false, projection_acl_valid: true,
 });
 
+export class CatalogueOperationFailure extends Error {
+  constructor(operation, message = "Catalogue read failed") {
+    super(message);
+    this.name = "CatalogueOperationFailure";
+    this.operation = operation;
+  }
+}
+
 export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => {}) {
+    // Fixed operation names are the only error details allowed into task logs.
+    const read = async (operation, sql) => {
+      try { return await tx.$queryRawUnsafe(sql); }
+      catch { throw new CatalogueOperationFailure(operation); }
+    };
     // PostgreSQL deparsers consult the effective search path. Pin it locally so
     // identical durable state hashes identically for every authorized principal.
-    await tx.$executeRawUnsafe("SET LOCAL search_path = pg_catalog");
-    const [identity] = await tx.$queryRawUnsafe(`SELECT current_user AS role, session_user AS session_role,
+    try { await tx.$executeRawUnsafe("SET LOCAL search_path = pg_catalog"); }
+    catch { throw new CatalogueOperationFailure("SEARCH_PATH"); }
+    const [identity] = await read("IDENTITY", `SELECT current_user AS role, session_user AS session_role,
       current_database() AS database, current_setting('server_version_num')::integer AS server_version_num,
       current_setting('transaction_read_only') AS read_only,
       current_setting('default_transaction_read_only') AS default_read_only,
@@ -34,12 +48,12 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
     validateIdentity(identity);
     // Metadata only: never invoke application functions, including SECURITY
     // DEFINER canaries. Qualify all catalogue functions and relations.
-    const [securityExtensions] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [securityExtensions] = await read("SECURITY_EXTENSIONS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT e.extname AS name,e.extversion AS version,n.nspname AS schema,e.extrelocatable AS relocatable,o.rolname AS owner
       FROM pg_catalog.pg_extension e JOIN pg_catalog.pg_namespace n ON n.oid=e.extnamespace
       JOIN pg_catalog.pg_roles o ON o.oid=e.extowner
     ) x`);
-    const [securityBindings] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.kind,x.name),'[]'::jsonb) AS rows FROM (
+    const [securityBindings] = await read("SECURITY_BINDINGS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.kind,x.name),'[]'::jsonb) AS rows FROM (
       SELECT 'publication' AS kind,p.pubname AS name,o.rolname AS owner,jsonb_build_object('all_tables',p.puballtables,'insert',p.pubinsert,
         'update',p.pubupdate,'delete',p.pubdelete,'truncate',p.pubtruncate,'via_root',p.pubviaroot,'generated_columns',p.pubgencols) AS definition
       FROM pg_catalog.pg_publication p JOIN pg_catalog.pg_roles o ON o.oid=p.pubowner
@@ -159,7 +173,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         LEFT JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor) acl_state
       GROUP BY o.rolname,acl_state.grants
     ) x`);
-    const [subscriptionProjectionStatus] = await tx.$queryRawUnsafe(`SELECT
+    const [subscriptionProjectionStatus] = await read("SUBSCRIPTION_STATUS", `SELECT
       observer.oid IS NOT NULL AS role_exists, COALESCE(observer.rolcanlogin,false) AS observer_login,
       COALESCE(observer.rolsuper,false) AS observer_superuser, COALESCE(observer.rolinherit,true) AS observer_inherit,
       COALESCE(observer.rolcreaterole,false) AS observer_create_role, COALESCE(observer.rolcreatedb,false) AS observer_create_db,
@@ -197,12 +211,13 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         FROM pg_catalog.aclexplode(COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS projection_acl_valid
       FROM (SELECT pg_catalog.to_regrole('mscqr_prod_subscription_observer') AS oid) observer_ref
       LEFT JOIN pg_catalog.pg_roles observer ON observer.oid=observer_ref.oid
-      CROSS JOIN (SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
-        WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0) projection_ref
+      LEFT JOIN (SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+        WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0) projection_ref ON true
       LEFT JOIN pg_catalog.pg_proc projection ON projection.oid=projection_ref.oid
       LEFT JOIN pg_catalog.pg_roles owner ON owner.oid=projection.proowner
       CROSS JOIN (SELECT pg_catalog.to_regrole('mscqr_prod_rls_canary_read') AS oid) canary_ref
       LEFT JOIN pg_catalog.pg_roles canary ON canary.oid=canary_ref.oid`);
+    if (!subscriptionProjectionStatus) throw new CatalogueOperationFailure("SUBSCRIPTION_STATUS_EMPTY", "Subscription security inventory capability is unavailable: function_exists");
     const projectionColumns = [...subscriptionProjectionStatus.readable_columns].sort();
     const projectionStatus = { ...subscriptionProjectionStatus, readable_columns: projectionColumns };
     const expectedGrantors = ["rdsadmin", "mscqr_prod_admin", "mscqr_p2_test"];
@@ -218,9 +233,11 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
     const projectionReady = projectionMismatches.length === 0;
     const directReadReady = ["certification-administrator", "mscqr_p2_test"].includes(identity.role)
       && subscriptionProjectionStatus.collector_direct_conninfo;
-    if (!directReadReady && !projectionReady) throw new Error(`Subscription security inventory capability is unavailable: ${projectionMismatches.join(",")}`);
+    if (!directReadReady && !projectionReady) throw new CatalogueOperationFailure(
+      subscriptionProjectionStatus.function_exists ? "SUBSCRIPTION_PROJECTION_CONTRACT" : "SUBSCRIPTION_PROJECTION_MISSING",
+      `Subscription security inventory capability is unavailable: ${projectionMismatches.join(",")}`);
     const subscriptions = directReadReady
-      ? await tx.$queryRawUnsafe(`SELECT s.subname::text AS subscription_name,o.rolname::text AS subscription_owner,
+      ? await read("SUBSCRIPTIONS_DIRECT", `SELECT s.subname::text AS subscription_name,o.rolname::text AS subscription_owner,
           s.subenabled AS enabled,s.subbinary AS binary,s.substream::text AS streaming,s.subtwophasestate::text AS two_phase,
           s.subdisableonerr AS disable_on_error,s.subpasswordrequired AS password_required,s.subrunasowner AS run_as_owner,
           s.subfailover AS failover,s.subslotname::text AS slot_name,s.subsynccommit AS synchronous_commit,
@@ -234,7 +251,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(pg_catalog.jsonb_build_array(
             'mscqr-security-subscription-connection-v1',s.subname,s.subconninfo)::text,'UTF8')),'hex') AS connection_info_sha256
         FROM pg_catalog.pg_subscription s JOIN pg_catalog.pg_roles o ON o.oid=s.subowner ORDER BY s.subname`)
-      : await tx.$queryRawUnsafe(`SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name`);
+      : await read("SUBSCRIPTIONS_PROJECTION", `SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name`);
     for (const subscription of subscriptions) securityBindings.rows.push({ kind: "subscription", name: subscription.subscription_name,
       owner: subscription.subscription_owner, definition: { enabled: subscription.enabled, binary: subscription.binary,
         streaming: subscription.streaming, two_phase: subscription.two_phase, disable_on_error: subscription.disable_on_error,
@@ -246,7 +263,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       kind: "subscription_relation", name: `${subscription.subscription_name}:${relation.schema}.${relation.relation}`, owner: null,
       definition: { subscription: subscription.subscription_name, schema: relation.schema, relation: relation.relation,
         state: relation.state, state_lsn: relation.state_lsn } });
-    const [routines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
+    const [routines] = await read("ROUTINES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,
         pg_catalog.pg_get_function_result(p.oid) AS result,o.rolname AS owner,p.prosecdef AS security_definer,
         p.provolatile::text AS volatility,p.proparallel::text AS parallel,p.proleakproof AS leakproof,p.proisstrict AS strict,
@@ -260,7 +277,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_roles o ON o.oid=p.proowner JOIN pg_catalog.pg_language l ON l.oid=p.prolang
       WHERE n.nspname IN ('app_rls','app_auth','app_public','app_ops')
     ) x`);
-    const [securityRoutines] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments,x.kind),'[]'::jsonb) AS rows FROM (
+    const [securityRoutines] = await read("SECURITY_ROUTINES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name,x.arguments,x.kind),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,p.proname AS name,pg_catalog.pg_get_function_identity_arguments(p.oid) AS arguments,p.prokind::text AS kind,
         pg_catalog.pg_get_function_result(p.oid) AS result,o.rolname AS owner,p.prosecdef AS security_definer,
         p.provolatile::text AS volatility,p.proparallel::text AS parallel,p.proleakproof AS leakproof,p.proisstrict AS strict,
@@ -287,7 +304,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_proc'::pg_catalog.regclass
           AND d.objid=p.oid AND d.deptype='e')
     ) x`);
-    const [tables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [tables] = await read("TABLES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT c.relname AS name,c.relkind::text AS kind,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,
         o.rolname AS owner,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('name',a.attname,'type',pg_catalog.format_type(a.atttypid,a.atttypmod),'notNull',a.attnotnull,
@@ -312,7 +329,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       JOIN pg_catalog.pg_roles o ON o.oid=c.relowner WHERE n.nspname='public' AND c.relkind IN ('r','p')
     ) x`);
-    const [securityTables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+    const [securityTables] = await read("SECURITY_TABLES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,c.relname AS name,c.relkind::text AS kind,
         CASE c.relpersistence WHEN 'p' THEN 'PERMANENT' WHEN 'u' THEN 'UNLOGGED' WHEN 't' THEN 'TEMPORARY' ELSE 'UNKNOWN' END AS persistence,
         c.relrowsecurity AS rls,c.relforcerowsecurity AS forced,CASE WHEN c.relkind='m' THEN c.relispopulated END AS populated,
@@ -372,7 +389,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\' AND c.relkind IN ('r','p','v','m','f')
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
-    const [securityTriggers] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.relation,x.name),'[]'::jsonb) AS rows FROM (
+    const [securityTriggers] = await read("SECURITY_TRIGGERS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.relation,x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,c.relname AS relation,t.tgname AS name,t.tgenabled::text AS enabled,
         pg_catalog.format('%I.%I(%s)',fnns.nspname,p.proname,pg_catalog.pg_get_function_identity_arguments(p.oid)) AS function,
         pg_catalog.pg_get_triggerdef(t.oid,false) AS definition
@@ -383,7 +400,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         AND c.relkind IN ('r','p','v','m','f')
       AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
-    const [securityConstraintTriggers] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.constraint_schema,x.constraint_relation,x.constraint_name,x.relation,x.function,x.trigger_type),'[]'::jsonb) AS rows FROM (
+    const [securityConstraintTriggers] = await read("SECURITY_CONSTRAINT_TRIGGERS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.constraint_schema,x.constraint_relation,x.constraint_name,x.relation,x.function,x.trigger_type),'[]'::jsonb) AS rows FROM (
       SELECT constraint_ns.nspname AS constraint_schema,constraint_rel.relname AS constraint_relation,k.conname AS constraint_name,
         trigger_ns.nspname AS schema,trigger_rel.relname AS relation,t.tgenabled::text AS enabled,
         pg_catalog.format('%I.%I(%s)',fnns.nspname,p.proname,pg_catalog.pg_get_function_identity_arguments(p.oid)) AS function,
@@ -396,14 +413,14 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         AND trigger_ns.nspname NOT LIKE 'pg\_%' ESCAPE '\\' AND trigger_rel.relkind IN ('r','p')
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=trigger_rel.oid AND d.deptype='e')
     ) x`);
-    const [securityRules] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.relation,x.name),'[]'::jsonb) AS rows FROM (
+    const [securityRules] = await read("SECURITY_RULES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.relation,x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,c.relname AS relation,r.rulename AS name,r.ev_type::text AS event,r.ev_enabled::text AS enabled,
         pg_catalog.pg_get_ruledef(r.oid,false) AS definition
       FROM pg_catalog.pg_rewrite r JOIN pg_catalog.pg_class c ON c.oid=r.ev_class JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
       WHERE r.rulename<>'_RETURN' AND c.relkind IN ('r','p','v','m','f') AND n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\\_%' ESCAPE '\\'
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
-    const [securityEventTriggers] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [securityEventTriggers] = await read("SECURITY_EVENT_TRIGGERS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT e.evtname AS name,o.rolname AS owner,e.evtevent AS event,e.evtenabled::text AS enabled,
         CASE WHEN e.evttags IS NULL THEN NULL ELSE COALESCE((SELECT jsonb_agg(tag ORDER BY tag) FROM unnest(e.evttags) tag),'[]'::jsonb) END AS tags,
         pg_catalog.format('%I.%I()',n.nspname,p.proname) AS function
@@ -411,14 +428,14 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       JOIN pg_catalog.pg_proc p ON p.oid=e.evtfoid JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
       WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_event_trigger'::pg_catalog.regclass AND d.objid=e.oid AND d.deptype='e')
     ) x`);
-    const [policies] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x."table",x.name),'[]'::jsonb) AS rows FROM (
+    const [policies] = await read("POLICIES", `SELECT COALESCE(jsonb_agg(x ORDER BY x."table",x.name),'[]'::jsonb) AS rows FROM (
       SELECT c.relname AS "table",p.polname AS name,p.polpermissive AS permissive,p.polcmd::text AS command,
         ARRAY(SELECT COALESCE(r.rolname,'PUBLIC') FROM unnest(p.polroles) i LEFT JOIN pg_catalog.pg_roles r ON r.oid=i ORDER BY COALESCE(r.rolname,'PUBLIC')) AS roles,
         pg_catalog.pg_get_expr(p.polqual,p.polrelid) AS "using",pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid) AS "check"
       FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_class c ON c.oid=p.polrelid
       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
     ) x`);
-    const [securityPolicies] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x."table",x.name),'[]'::jsonb) AS rows FROM (
+    const [securityPolicies] = await read("SECURITY_POLICIES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x."table",x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,c.relname AS "table",p.polname AS name,p.polpermissive AS permissive,p.polcmd::text AS command,
         ARRAY(SELECT COALESCE(r.rolname,'PUBLIC') FROM unnest(p.polroles) i LEFT JOIN pg_catalog.pg_roles r ON r.oid=i ORDER BY COALESCE(r.rolname,'PUBLIC')) AS roles,
         pg_catalog.pg_get_expr(p.polqual,p.polrelid) AS "using",pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid) AS "check"
@@ -426,7 +443,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_policy'::pg_catalog.regclass AND d.objid=p.oid AND d.deptype='e')
     ) x`);
-    const [schemas] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [schemas] = await read("SCHEMAS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS name,o.rolname AS owner,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'privilege',a.privilege_type,'grantable',a.is_grantable)
           ORDER BY COALESCE(g.rolname,'PUBLIC'),a.privilege_type,a.is_grantable)
@@ -435,7 +452,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles o ON o.oid=n.nspowner
       WHERE n.nspname IN ('public','app_rls','app_auth','app_public','app_ops')
     ) x`);
-    const [securitySchemas] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [securitySchemas] = await read("SECURITY_SCHEMAS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS name,o.rolname AS owner,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',COALESCE(g.rolname,'PUBLIC'),'grantor',grantor.rolname,'privilege',a.privilege_type,'grantable',a.is_grantable)
           ORDER BY COALESCE(g.rolname,'PUBLIC'),grantor.rolname,a.privilege_type,a.is_grantable)
@@ -444,7 +461,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_namespace n JOIN pg_catalog.pg_roles o ON o.oid=n.nspowner
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
     ) x`);
-    const [roles] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [roles] = await read("ROLES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolsuper AS superuser,r.rolinherit AS inherit,
         r.rolcreaterole AS create_role,r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
@@ -456,7 +473,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_roles r WHERE r.rolname LIKE 'mscqr\\_prd\\_rls\\_phase2\\_%' ESCAPE '\\'
         OR r.rolname='mscqr_prod_rls_canary_read'
     ) x`);
-    const [securityRoles] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [securityRoles] = await read("SECURITY_ROLES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolvaliduntil::text AS valid_until,r.rolconnlimit AS connection_limit,r.rolsuper AS superuser,r.rolinherit AS inherit,
         r.rolcreaterole AS create_role,r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('role',parent.rolname,'grantor',grantor.rolname,'admin',m.admin_option,'inherit',m.inherit_option,'set',m.set_option)
@@ -470,7 +487,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_roles r WHERE r.rolname !~ '^pg\\_' AND r.rolname NOT IN
         ('rdsadmin','rds_superuser','rds_password','rds_iam','rds_replication','rds_ad','rds_directory_service_role','rds_reserved','rdstopmgr')
     ) x`);
-    const [roleMetadata] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [roleMetadata] = await read("ROLE_METADATA", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,pg_catalog.shobj_description(r.oid,'pg_authid') IS NOT NULL AS comment_present,
         pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(COALESCE(pg_catalog.shobj_description(r.oid,'pg_authid'),''),'UTF8')),'hex') AS comment_sha256,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('database',COALESCE(d.datname,'*'),'settings',s.safe_settings) ORDER BY COALESCE(d.datname,'*'))
@@ -485,27 +502,27 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       FROM pg_catalog.pg_roles r WHERE r.rolname !~ '^pg\\_' AND r.rolname NOT IN
         ('rdsadmin','rds_superuser','rds_password','rds_iam','rds_replication','rds_ad','rds_directory_service_role','rds_reserved','rdstopmgr')
     ) x`);
-    const [databases] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.database,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
+    const [databases] = await read("DATABASES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.database,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
       SELECT d.datname AS database,o.rolname AS owner,d.datallowconn AS allow_connections,d.datconnlimit AS connection_limit,d.datistemplate AS is_template,
         COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_catalog.pg_database d JOIN pg_catalog.pg_roles o ON o.oid=d.datdba
       CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(d.datacl,pg_catalog.acldefault('d',d.datdba))) a
       LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=a.grantor WHERE d.datname=current_database()
     ) x`);
-    const [defaults] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.owner,x.schema,x.object_type,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
+    const [defaults] = await read("DEFAULTS", `SELECT COALESCE(jsonb_agg(x ORDER BY x.owner,x.schema,x.object_type,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
       SELECT o.rolname AS owner,COALESCE(n.nspname,'*') AS schema,d.defaclobjtype::text AS object_type,
         COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_catalog.pg_default_acl d JOIN pg_catalog.pg_roles o ON o.oid=d.defaclrole
       LEFT JOIN pg_catalog.pg_namespace n ON n.oid=d.defaclnamespace
       CROSS JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) a LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=a.grantor
     ) x`);
-    const [parameterPrivileges] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.parameter,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
+    const [parameterPrivileges] = await read("PARAMETER_PRIVILEGES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.parameter,x.role,x.grantor,x.privilege,x.grantable),'[]'::jsonb) AS rows FROM (
       SELECT p.parname AS parameter,COALESCE(g.rolname,'PUBLIC') AS role,grantor.rolname AS grantor,
         a.privilege_type AS privilege,a.is_grantable AS grantable
       FROM pg_catalog.pg_parameter_acl p CROSS JOIN LATERAL pg_catalog.aclexplode(p.paracl) a
       LEFT JOIN pg_catalog.pg_roles g ON g.oid=a.grantee JOIN pg_catalog.pg_roles grantor ON grantor.oid=a.grantor
     ) x`);
-    const [types] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+    const [types] = await read("TYPES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,t.typname AS name,t.typtype::text AS kind,o.rolname AS owner,t.typcategory::text AS category,
         t.typnotnull AS not_null,CASE WHEN t.typbasetype=0 THEN NULL ELSE pg_catalog.format_type(t.typbasetype,t.typtypmod) END AS base_type,
         CASE WHEN t.typcollation=0 THEN NULL ELSE t.typcollation::pg_catalog.regcollation::text END AS collation,
@@ -539,7 +556,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       WHERE n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\' AND t.typtype<>'p' AND t.typcategory<>'A'
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_type'::pg_catalog.regclass AND d.objid=t.oid AND d.deptype='e')
     ) x`);
-    const [sequences] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
+    const [sequences] = await read("SEQUENCES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.schema,x.name),'[]'::jsonb) AS rows FROM (
       SELECT n.nspname AS schema,c.relname AS name,o.rolname AS owner,
         CASE c.relpersistence WHEN 'p' THEN 'PERMANENT' WHEN 'u' THEN 'UNLOGGED' WHEN 't' THEN 'TEMPORARY' ELSE 'UNKNOWN' END AS persistence,
         s.seqtypid::pg_catalog.regtype::text AS data_type,
@@ -552,7 +569,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       WHERE c.relkind='S' AND n.nspname<>'information_schema' AND n.nspname NOT LIKE 'pg\_%' ESCAPE '\\'
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_depend d WHERE d.classid='pg_catalog.pg_class'::pg_catalog.regclass AND d.objid=c.oid AND d.deptype='e')
     ) x`);
-    const [operatorCapabilities] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
+    const [operatorCapabilities] = await read("OPERATOR_CAPABILITIES", `SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
       SELECT r.rolname AS name,r.rolcanlogin AS login,r.rolvaliduntil::text AS valid_until,r.rolconnlimit AS connection_limit,r.rolsuper AS superuser,r.rolinherit AS inherit,r.rolcreaterole AS create_role,
         r.rolcreatedb AS create_database,r.rolreplication AS replication,r.rolbypassrls AS bypass_rls,
         pg_catalog.has_database_privilege(r.oid,current_database(),'CONNECT') AS database_connect,
@@ -594,14 +611,15 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
 
 export async function collectAppOnlyDatabaseCatalogue(client) {
   return client.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY");
+    try { await tx.$executeRawUnsafe("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); }
+    catch { throw new CatalogueOperationFailure("TRANSACTION_SETUP"); }
     return collectAppOnlyDatabaseCatalogueRows(tx, (identity) => {
       if (!identity || identity.role !== "mscqr_prod_rls_canary_read" || identity.session_role !== identity.role
       || identity.database !== "mscqr_production_rls_green_phase2" || Math.trunc(Number(identity.server_version_num) / 10000) !== 18
       || identity.read_only !== "on"
       || identity.default_read_only !== "on"
       || ["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].some((key) => identity[key] !== false)) {
-        throw new Error("Verifier database identity is not the restricted read-only contract");
+        throw new CatalogueOperationFailure("IDENTITY_CONTRACT", "Verifier database identity is not the restricted read-only contract");
       }
     });
   }, { maxWait: 5000, timeout: 30000 });
