@@ -10,8 +10,19 @@ const schemaOwnerRole = "mscqr_prd_rls_phase2_owner";
 const database = "mscqr_production_rls_green_phase2";
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 const expectedRoutines = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
-const subscriptionProjection = Object.freeze({ owner: "mscqr_prod_subscription_observer", bodySha256: "ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447",
+const subscriptionProjection = Object.freeze({ owners: ["mscqr_prod_subscription_observer", "mscqr_prod_admin"], bodySha256: "ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447",
   result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)' });
+function authenticateSubscriptionProjection(projection, properties) {
+  assert.equal(projection.arguments, ""); assert.equal(projection.result, subscriptionProjection.result);
+  assert.ok(subscriptionProjection.owners.includes(projection.owner)); assert.equal(projection.security_definer, true);
+  assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
+  assert.equal(sha256(projection.body), subscriptionProjection.bodySha256);
+  assert.deepEqual(properties, { kind: "f", parallel: "u", leakproof: false, strict: false });
+  assert.deepEqual(projection.grants, [
+    { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false },
+    { role: projection.owner, privilege: "EXECUTE", grantable: false },
+  ].sort((a,b) => a.role < b.role ? -1 : a.role > b.role ? 1 : 0));
+}
 const expectedPredecessors = Object.freeze({
   "app_rls.printing_connector_identity(p_kind text, p_agent_id text, p_device_fingerprint text, p_printer_selector text, p_gateway_id text, p_gateway_secret_hash text, p_operation text)": "aec14f16d5bf85cc48809a63d3e1a34c8a35c0eb51ac1f46899cfc05a24673b1",
   "app_rls.printing_create_job(p_capability text, p_purpose text, p_request_id text, p_batch_id text, p_printer_id text, p_quantity integer, p_range_start text, p_range_end text, p_print_mode text, p_payload_type text, p_print_lock_token_hash text, p_items jsonb)": "fafcc5b92873b51b786cf937b834f7991bc2eda8ba00b8d5e5a618edd2b1bd1c",
@@ -118,18 +129,10 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
   assert.ok(projectionRows.length <= 1, "Ambiguous subscription inventory projection");
   if (projectionRows.length) {
     const projection = projectionRows[0];
-    assert.equal(projection.arguments, ""); assert.equal(projection.result, subscriptionProjection.result);
-    assert.equal(projection.owner, subscriptionProjection.owner); assert.equal(projection.security_definer, true);
-    assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
-    assert.equal(sha256(projection.body), subscriptionProjection.bodySha256);
     const [properties] = await tx.$queryRawUnsafe(`SELECT p.prokind::text AS kind,p.proparallel::text AS parallel,p.proleakproof AS leakproof,p.proisstrict AS strict
       FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0`);
-    assert.deepEqual(properties, { kind: "f", parallel: "u", leakproof: false, strict: false });
-    assert.deepEqual(projection.grants, [
-      { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false },
-      { role: subscriptionProjection.owner, privilege: "EXECUTE", grantable: false },
-    ]);
+    authenticateSubscriptionProjection(projection, properties);
     routines.rows.splice(routines.rows.indexOf(projection), 1);
   }
   const [tables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
@@ -319,7 +322,7 @@ async function main({ argv = process.argv, env = process.env, execArgv = process
   setStage(stages.SUCCESS_EVIDENCE); console.log(evidence);
 }
 
-module.exports = { canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, stages, validateInput };
+module.exports = { authenticateSubscriptionProjection, canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, stages, validateInput };
 
 if (module.id === "[eval]") main().catch((error) => {
   const record = error instanceof PrintingRoutineDeltaFailure ? error.record : failureRecord(stages.ARGV_VALIDATION, error);

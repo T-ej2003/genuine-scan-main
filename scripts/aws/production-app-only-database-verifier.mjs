@@ -2,14 +2,23 @@
 // It has no SQL/command overrides and requires one explicit Prisma transaction,
 // avoiding pool-dependent BEGIN/query/COMMIT on different sessions.
 export const SUBSCRIPTION_PROJECTION_BODY_SHA256 = "ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447";
+export const SUBSCRIPTION_PROJECTION_RESULT = 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)';
 export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   role_exists: true, observer_login: false, observer_superuser: false, observer_inherit: false,
   observer_create_role: false, observer_create_db: false, observer_replication: false, observer_bypass_rls: false,
   observer_memberships: false, table_select: false, readable_columns: Object.freeze(["oid","subbinary","subconninfo","subdbid","subdisableonerr","subenabled","subfailover","subname","suborigin","subowner","subpasswordrequired","subpublications","subrunasowner","subskiplsn","subslotname","substream","subsynccommit","subtwophasestate"]),
   observer_schema_usage: false, observer_schema_create: false, canary_direct_conninfo: false,
-  function_exists: true, function_owner: "mscqr_prod_subscription_observer", function_security_definer: true,
-  function_volatility: "s", function_search_path: "search_path=pg_catalog", function_body_sha256: SUBSCRIPTION_PROJECTION_BODY_SHA256,
+  function_exists: true, function_owner: "mscqr_prod_subscription_observer", function_kind: "f", function_arguments: "", function_result: SUBSCRIPTION_PROJECTION_RESULT, function_security_definer: true,
+  function_volatility: "s", function_search_path: "search_path=pg_catalog", function_config: Object.freeze(["search_path=pg_catalog"]), function_body_sha256: SUBSCRIPTION_PROJECTION_BODY_SHA256,
   public_execute: false, canary_execute: true, unexpected_execute_roles: false, projection_acl_valid: true,
+});
+export const RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
+  ...SUBSCRIPTION_PROJECTION_STATUS_CONTRACT,
+  role_exists: false, observer_inherit: true, readable_columns: Object.freeze([]),
+  function_owner: "mscqr_prod_admin", admin_superuser: false,
+  catalogue_owner: "rdsadmin",
+  admin_readable_columns: SUBSCRIPTION_PROJECTION_STATUS_CONTRACT.readable_columns,
+  admin_conninfo_grantable: false,
 });
 
 export class CatalogueOperationFailure extends Error {
@@ -186,6 +195,15 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
           AND pg_catalog.has_column_privilege(observer.oid,a.attrelid,a.attnum,'SELECT')),'[]'::jsonb) END AS readable_columns,
       CASE WHEN observer.oid IS NULL THEN false ELSE pg_catalog.has_schema_privilege(observer.oid,'app_rls','USAGE') END AS observer_schema_usage,
       CASE WHEN observer.oid IS NULL THEN false ELSE pg_catalog.has_schema_privilege(observer.oid,'app_rls','CREATE') END AS observer_schema_create,
+      COALESCE(admin.rolsuper,false) AS admin_superuser,
+      CASE WHEN admin.oid IS NULL THEN '[]'::jsonb ELSE COALESCE((
+        SELECT jsonb_agg(a.attname ORDER BY a.attname) FROM pg_catalog.pg_attribute a
+        WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attnum>0 AND NOT a.attisdropped
+          AND pg_catalog.has_column_privilege(admin.oid,a.attrelid,a.attnum,'SELECT')),'[]'::jsonb) END AS admin_readable_columns,
+      CASE WHEN admin.oid IS NULL THEN false ELSE pg_catalog.has_column_privilege(admin.oid,
+        'pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION') END AS admin_conninfo_grantable,
+      (SELECT owner.rolname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner
+        WHERE c.oid='pg_catalog.pg_subscription'::pg_catalog.regclass) AS catalogue_owner,
       pg_catalog.has_column_privilege(current_user,'pg_catalog.pg_subscription','subconninfo','SELECT') AS collector_direct_conninfo,
       CASE WHEN pg_catalog.to_regrole('mscqr_prod_rls_canary_read') IS NULL THEN true ELSE
         pg_catalog.has_column_privilege('mscqr_prod_rls_canary_read','pg_catalog.pg_subscription','subconninfo','SELECT') END AS canary_direct_conninfo,
@@ -196,8 +214,11 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         LEFT JOIN pg_catalog.pg_roles grantee ON grantee.oid=acl.grantee
         LEFT JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor
         WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo'), '[]'::jsonb) AS subscription_conninfo_acl,
-      projection.oid IS NOT NULL AS function_exists, owner.rolname AS function_owner, COALESCE(projection.prosecdef,false) AS function_security_definer,
+      projection.oid IS NOT NULL AS function_exists, owner.rolname AS function_owner,
+      projection.prokind::text AS function_kind, pg_catalog.pg_get_function_identity_arguments(projection.oid) AS function_arguments,
+      pg_catalog.pg_get_function_result(projection.oid) AS function_result, COALESCE(projection.prosecdef,false) AS function_security_definer,
       projection.provolatile::text AS function_volatility, projection.proconfig[1] AS function_search_path,
+      projection.proconfig AS function_config,
       CASE WHEN projection.oid IS NULL THEN NULL ELSE pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(projection.prosrc,'UTF8')),'hex') END AS function_body_sha256,
       COALESCE((SELECT bool_or(a.grantee=0 AND a.privilege_type='EXECUTE') FROM pg_catalog.aclexplode(
         COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS public_execute,
@@ -211,6 +232,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         FROM pg_catalog.aclexplode(COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS projection_acl_valid
       FROM (SELECT pg_catalog.to_regrole('mscqr_prod_subscription_observer') AS oid) observer_ref
       LEFT JOIN pg_catalog.pg_roles observer ON observer.oid=observer_ref.oid
+      LEFT JOIN pg_catalog.pg_roles admin ON admin.rolname='mscqr_prod_admin'
       LEFT JOIN (SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0) projection_ref ON true
       LEFT JOIN pg_catalog.pg_proc projection ON projection.oid=projection_ref.oid
@@ -218,18 +240,22 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       CROSS JOIN (SELECT pg_catalog.to_regrole('mscqr_prod_rls_canary_read') AS oid) canary_ref
       LEFT JOIN pg_catalog.pg_roles canary ON canary.oid=canary_ref.oid`);
     if (!subscriptionProjectionStatus) throw new CatalogueOperationFailure("SUBSCRIPTION_STATUS_EMPTY", "Subscription security inventory capability is unavailable: function_exists");
-    const projectionColumns = [...subscriptionProjectionStatus.readable_columns].sort();
-    const projectionStatus = { ...subscriptionProjectionStatus, readable_columns: projectionColumns };
+    const projectionStatus = { ...subscriptionProjectionStatus,
+      readable_columns: [...subscriptionProjectionStatus.readable_columns].sort(),
+      admin_readable_columns: [...(subscriptionProjectionStatus.admin_readable_columns ?? [])].sort() };
     const expectedGrantors = ["rdsadmin", "mscqr_prod_admin", "mscqr_p2_test"];
     const conninfoAcl = subscriptionProjectionStatus.subscription_conninfo_acl;
-    const conninfoAclValid = Array.isArray(conninfoAcl) && conninfoAcl.length === 1
+    const observerConninfoAclValid = Array.isArray(conninfoAcl) && conninfoAcl.length === 1
       && conninfoAcl[0].grantee === "mscqr_prod_subscription_observer"
       && expectedGrantors.includes(conninfoAcl[0].grantor)
       && conninfoAcl[0].privilege === "SELECT" && conninfoAcl[0].grantable === false;
     delete projectionStatus.subscription_conninfo_acl;
-    const projectionMismatches = Object.entries(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT)
+    const rdsProjection = subscriptionProjectionStatus.function_owner === "mscqr_prod_admin";
+    const contract = rdsProjection ? RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT : SUBSCRIPTION_PROJECTION_STATUS_CONTRACT;
+    const projectionMismatches = Object.entries(contract)
       .filter(([key, value]) => JSON.stringify(projectionStatus[key]) !== JSON.stringify(value)).map(([key]) => key);
-    if (!conninfoAclValid) projectionMismatches.push("subscription_conninfo_acl");
+    if (!(rdsProjection ? Array.isArray(conninfoAcl) && conninfoAcl.length === 0 : observerConninfoAclValid))
+      projectionMismatches.push("subscription_conninfo_acl");
     const projectionReady = projectionMismatches.length === 0;
     const directReadReady = ["certification-administrator", "mscqr_p2_test"].includes(identity.role)
       && subscriptionProjectionStatus.collector_direct_conninfo;
@@ -599,6 +625,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         if (index >= 0) rows.splice(index, 1);
       }
       for (const rows of [securityRoles.rows, roleMetadata.rows]) {
+        if (rdsProjection) continue;
         const index = rows.findIndex((row) => row.name === "mscqr_prod_subscription_observer");
         if (index >= 0) rows.splice(index, 1);
       }
