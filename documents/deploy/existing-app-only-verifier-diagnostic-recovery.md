@@ -1,0 +1,9 @@
+# Existing app-only verifier diagnostic recovery
+
+The protected `verify-production-app-only-compatibility.yml` workflow accepts `diagnostic_journal_reference` to read a failed verifier task's existing output. Supply the compact reference for the failed run together with its original preparation reference and the **current protected-main SHA**. Leave `recovery_journal_reference` empty. The review job authenticates the source ancestry and preparation; the diagnostic job requires a fresh production-environment approval.
+
+The diagnostic job assumes the existing bounded verifier-launcher role. It authenticates the failed run's GitHub artifact identity, its registration, permission and execution journal chains, the exact live ECS task definition and image digest, and the stopped task's exit code. It derives the CloudWatch stream from the authenticated task ARN and task-definition log configuration. It reads that stream only, rejects missing or ambiguous output, and publishes a SHA-bound result containing only the structured phase, operation code or compatibility domains. An exit code of 1 always yields a failed compatibility verdict.
+
+Diagnostic mode does not enter the existing `verify` job, so it cannot register a task definition, update IAM, or call `RunTask`. If artifact provenance, live ECS state, approval, CloudWatch access, or the single structured result is missing, it fails closed. Preserve the original task and journal artifacts; do not relaunch the verifier to repair a failed read. The diagnostic result identifies a database prerequisite but does not authorize database changes.
+
+The original failed task for this recovery is run `39156224373`, task `ab9b012ecf744046ad89464502212c48`, revision `mscqr-production-app-only-compatibility-verifier:20`, source `675890718702856b6c36cbfb5aa930f74e920592`. The dispatch reference remains bound to those immutable identities; the workflow code is executed from the new protected-main SHA after merge.

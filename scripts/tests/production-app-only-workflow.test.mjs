@@ -147,9 +147,16 @@ test("verifier execution rejects overrides, workflow reruns and unbound private 
 test("verifier workflow previews exact preparation then separates protected provisioner and launcher credentials", () => {
   const source = fs.readFileSync(".github/workflows/verify-production-app-only-compatibility-operation.yml", "utf8");
   const workflow = yaml.load(source), job = workflow.jobs.verify;
-  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha", "recovery_journal_reference"].sort());
+  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha", "recovery_journal_reference", "diagnostic_journal_reference"].sort());
   assert.equal(workflow.jobs.review.environment, undefined);
   assert.equal(job.needs, "review"); assert.equal(job.environment, "production");
+  assert.equal(job.if, "inputs.diagnostic_journal_reference == ''");
+  const diagnostic = workflow.jobs.diagnostic;
+  assert.equal(diagnostic.if, "inputs.diagnostic_journal_reference != '' && inputs.recovery_journal_reference == ''");
+  assert.equal(diagnostic.environment, "production");
+  assert.deepEqual(diagnostic.steps.filter((s) => s.uses?.startsWith("aws-actions/configure-aws-credentials@"))
+    .map((s) => s.with["role-to-assume"].split("/").at(-1)), ["mscqr-production-app-only-verifier-launcher"]);
+  assert.ok(diagnostic.steps.every((s) => !s.run || !/register-task-definition|run-task|put-role-policy|update-service/.test(s.run)));
   assert.equal(workflow.concurrency, undefined);
   const roles = job.steps.filter((s) => s.uses?.startsWith("aws-actions/configure-aws-credentials@"));
   assert.deepEqual(roles.map((s) => s.with["role-to-assume"].split("/").at(-1)), ["mscqr-production-app-only-permission-provisioner", "mscqr-production-app-only-verifier-launcher"]);

@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readAppOnlyArtifactArchive, assertAppOnlyArtifactProvenance, downloadAppOnlyArtifact,
+  parseAppOnlyVerifierDiagnosticReference,
   downloadAppOnlyVerifierJournals, createAppOnlyEvidenceWriter } from "../aws/production-app-only-artifacts.mjs";
 
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -131,6 +132,38 @@ test("failed protected verifier journals require exact run, ZIP and both chain t
     githubRun: (_, args) => args[1].endsWith("/zip") ? extra
       : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1,
         artifacts: [{ ...artifact, digest: `sha256:${hash(extra)}` }] }]) : JSON.stringify(run) }));
+});
+
+test("failed verifier diagnostic requires the third exact execution journal and task identity", () => {
+  const kinds = { registration: "APP_ONLY_VERIFIER_REGISTRATION", permission: "APP_ONLY_PERMISSION_RESULT",
+    execution: "APP_ONLY_VERIFIER_EXECUTION" };
+  const taskArn = `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"a".repeat(32)}`;
+  const members = Object.entries(kinds).flatMap(([folder, kind]) => [1, 2, 3].map((sequence) => ({
+    name: `mscqr-app-only-evidence-${folder}/00${sequence}.json`, value: JSON.stringify({
+      event: { kind, ...(folder === "execution" && sequence > 1 ? { taskArn } : {}) },
+      evidenceSha256: ({ registration: "a", permission: "b", execution: "c" })[folder].repeat(64) }),
+  })));
+  const bytes = archive(members);
+  const reference = { sourceSha: source, runId: "123", artifactId: "456", artifactDigest: `sha256:${hash(bytes)}`,
+    registrationJournalSha256: "a".repeat(64), permissionJournalSha256: "b".repeat(64),
+    executionJournalSha256: "c".repeat(64), taskArn };
+  const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" },
+    head_repository: { id: 9 }, head_sha: source, head_branch: "main",
+    path: ".github/workflows/verify-production-app-only-compatibility.yml", event: "workflow_dispatch",
+    status: "completed", conclusion: "failure" };
+  const artifact = { id: 456, name: "production-app-only-verifier-journals", expired: false, digest: reference.artifactDigest,
+    size_in_bytes: bytes.length, workflow_run: { id: 123, head_sha: source, head_repository_id: 9, repository_id: 9 } };
+  const githubRun = (_, args) => args[1].endsWith("/zip") ? bytes
+    : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }]) : JSON.stringify(run);
+  assert.deepEqual(parseAppOnlyVerifierDiagnosticReference(JSON.stringify(reference)), reference);
+  assert.equal(downloadAppOnlyVerifierJournals({ reference, includeExecution: true, githubRun }).execution.length, 3);
+  for (const change of [
+    { ...reference, executionJournalSha256: "d".repeat(64) },
+    { ...reference, taskArn: taskArn.replace(/a{32}$/, "f".repeat(32)) },
+    { ...reference, sourceSha: "f".repeat(40) },
+  ]) assert.throws(() => downloadAppOnlyVerifierJournals({ reference: change, includeExecution: true, githubRun }));
+  assert.throws(() => parseAppOnlyVerifierDiagnosticReference(JSON.stringify({ ...reference, extra: true })));
+  assert.throws(() => downloadAppOnlyVerifierJournals({ reference, githubRun }), "Diagnostic ZIP cannot pass legacy six-entry contract");
 });
 
 test("artifact expiry, replacement and run rerun during download fail before materialization", () => {

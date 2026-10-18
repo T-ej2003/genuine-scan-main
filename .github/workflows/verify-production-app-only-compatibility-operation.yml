@@ -6,6 +6,7 @@ on:
       source_sha: { description: Exact protected-main SHA, required: true, type: string }
       preparation_reference: { description: Exact compact verifier-preparation artifact identity JSON, required: true, type: string }
       recovery_journal_reference: { description: Exact failed-run journal identity for no-write verifier registration recovery, required: false, default: '', type: string }
+      diagnostic_journal_reference: { description: Exact failed-task journal identity for read-only diagnostic recovery, required: false, default: '', type: string }
 
 permissions: { contents: read, actions: read }
 
@@ -25,6 +26,7 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
           RECOVERY_JOURNAL_REFERENCE: ${{ inputs.recovery_journal_reference }}
+          DIAGNOSTIC_JOURNAL_REFERENCE: ${{ inputs.diagnostic_journal_reference }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -32,28 +34,37 @@ jobs:
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           import { execFileSync } from 'node:child_process';
-          import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
+          import { parseAppOnlyArtifactReference, parseAppOnlyVerifierDiagnosticReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
           import { canonicalSha256 } from './scripts/aws/production-green-stage-b-contract.mjs';
           const sourceSha=process.env.SOURCE_SHA;
           assert.match(sourceSha,/^[a-f0-9]{40}$/); assert.equal(sourceSha,process.env.GITHUB_SHA);
           const reference=parseAppOnlyArtifactReference(process.env.PREPARATION_REFERENCE);
           const recovery=process.env.RECOVERY_JOURNAL_REFERENCE;
+          const diagnostic=process.env.DIAGNOSTIC_JOURNAL_REFERENCE;
+          assert.ok(!(recovery && diagnostic),'Verifier execution and diagnostic recovery are mutually exclusive');
+          if(diagnostic) {
+            const journal=parseAppOnlyVerifierDiagnosticReference(diagnostic);
+            assert.equal(journal.sourceSha,reference.sourceSha);
+            execFileSync('git',['merge-base','--is-ancestor',reference.sourceSha,sourceSha]);
+          }
           if(recovery) {
             const journal=JSON.parse(recovery);
             assert.equal(journal.sourceSha,reference.sourceSha);
             execFileSync('git',['merge-base','--is-ancestor',reference.sourceSha,sourceSha]);
-          } else assert.equal(reference.sourceSha,sourceSha);
+          } else if(!diagnostic) assert.equal(reference.sourceSha,sourceSha);
           const artifact=downloadAppOnlyArtifact({kind:'verifierPreparation',reference,repositoryRoot:process.cwd()});
           const {preparation}=JSON.parse(artifact.bytes);
           const {preparationSha256,...body}=preparation;
           assert.equal(preparationSha256,canonicalSha256(body)); assert.equal(body.sourceSha,reference.sourceSha);
           assert.equal(body.kind,'APP_ONLY_VERIFIER_PREPARATION'); assert.equal(body.eligible,false);
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,JSON.stringify({sourceSha,originalSourceSha:reference.sourceSha,
-            recoveryJournal:recovery ? JSON.parse(recovery) : null,preparationSha256,identity:body.identity,
+            recoveryJournal:recovery ? JSON.parse(recovery) : null,
+            diagnosticJournal:diagnostic ? parseAppOnlyVerifierDiagnosticReference(diagnostic) : null,preparationSha256,identity:body.identity,
             networkSha256:body.networkSha256,definitionSha256:body.definitionSha256,verificationContractSha256:body.verificationContractSha256},null,2));
           NODE
 
   verify:
+    if: inputs.diagnostic_journal_reference == ''
     needs: review
     runs-on: ubuntu-latest
     environment: production
@@ -180,5 +191,62 @@ jobs:
             ${{ steps.register.outputs.permission_journal }}
             ${{ steps.verify.outputs.journal }}
             ${{ steps.verify_recovered.outputs.journal }}
+          if-no-files-found: error
+          retention-days: 30
+
+  diagnostic:
+    if: inputs.diagnostic_journal_reference != '' && inputs.recovery_journal_reference == ''
+    needs: review
+    runs-on: ubuntu-latest
+    environment: production
+    permissions: { contents: read, actions: read, id-token: write }
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with: { ref: '${{ github.sha }}', fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v6
+        with: { node-version: 24, cache: npm }
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Authenticate actual production approval
+        id: approval
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          directory="$(mktemp -d)"
+          chmod 700 "$directory"
+          node scripts/aws/production-github-environment-approval.mjs --output "$directory/approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval > /dev/null
+          printf 'path=%s\n' "$directory/approval.json" >> "$GITHUB_OUTPUT"
+          printf 'sha256=%s\n' "$(sha256sum "$directory/approval.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+      - name: Assume existing bounded verifier launcher
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher
+          unset-current-credentials: true
+      - name: Authenticate and read only the existing failed verifier task
+        id: diagnostic
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          DIAGNOSTIC_JOURNAL_REFERENCE: ${{ inputs.diagnostic_journal_reference }}
+          APPROVAL: ${{ steps.approval.outputs.path }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/read-production-app-only-verifier-diagnostic.mjs --source-sha "$SOURCE_SHA" \
+            --preparation-reference "$PREPARATION_REFERENCE" --diagnostic-journal-reference "$DIAGNOSTIC_JOURNAL_REFERENCE" \
+            --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-verifier-failed-task-diagnostic
+          path: ${{ steps.diagnostic.outputs.path }}
           if-no-files-found: error
           retention-days: 30
