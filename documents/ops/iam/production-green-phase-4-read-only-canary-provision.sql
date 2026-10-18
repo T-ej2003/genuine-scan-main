@@ -209,4 +209,14 @@ DO $$ BEGIN
 END $$;
 COMMIT;
 
--- Rollback never prints or changes credentials: REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM mscqr_prod_rls_canary_read; DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory(); REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM mscqr_prod_subscription_observer; DROP ROLE IF EXISTS mscqr_prod_subscription_observer; REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read; DROP FUNCTION IF EXISTS app_rls.production_read_only_canary_probe(); REVOKE USAGE ON SCHEMA app_rls FROM mscqr_prod_rls_canary_read; REVOKE CONNECT ON DATABASE mscqr_production_rls_green_phase2 FROM mscqr_prod_rls_canary_read; DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;
+-- Separately approved Phase 4 rollback, both modes, after authenticating the exact installed objects and dependencies:
+-- REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() FROM mscqr_prod_rls_canary_read;
+-- DROP FUNCTION app_rls.production_security_subscription_inventory();
+-- REVOKE EXECUTE ON FUNCTION app_rls.production_read_only_canary_probe() FROM mscqr_prod_rls_canary_read;
+-- DROP FUNCTION app_rls.production_read_only_canary_probe();
+-- REVOKE USAGE ON SCHEMA app_rls FROM mscqr_prod_rls_canary_read;
+-- REVOKE CONNECT ON DATABASE mscqr_production_rls_green_phase2 FROM mscqr_prod_rls_canary_read;
+-- DROP ROLE IF EXISTS mscqr_prod_rls_canary_read;
+-- Observer mode only: REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM mscqr_prod_subscription_observer;
+-- Observer mode only: DROP ROLE IF EXISTS mscqr_prod_subscription_observer;
+-- RDS mode has no observer grant or role to revoke. For projection-only remediation, retain the pre-existing canary and use production-rds-subscription-projection-recovery.md.
