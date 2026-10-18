@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
 
 // Deliberately requires the repository's local tmpfs PostgreSQL harness. No
 // DATABASE_URL override, production connection, mock fallback or silent skip.
@@ -84,6 +84,26 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
+    await t.test("missing subscription projection returns a bounded failure and never invokes it", async () => {
+      sql(`GRANT USAGE, CREATE ON SCHEMA app_rls TO ${subscriptionObserver};
+        SET ROLE ${subscriptionObserver};
+        DROP FUNCTION app_rls.production_security_subscription_inventory();
+        RESET ROLE;
+        REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};`);
+      try {
+        await assert.rejects(collect(), (error) => error instanceof CatalogueOperationFailure
+          && error.operation === "SUBSCRIPTION_PROJECTION_MISSING");
+      } finally {
+        sql(`GRANT USAGE, CREATE ON SCHEMA app_rls TO ${subscriptionObserver};
+          SET ROLE ${subscriptionObserver};
+          ${projection}
+          REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};
+          RESET ROLE;
+          REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};`);
+      }
+      assert.deepEqual(await collect(), baseline);
+    });
     await t.test("database settings from an unrelated database do not create false drift", async () => {
       sql("ALTER DATABASE mscqr_p2_admin_test SET row_security=off", "mscqr_p2_admin_test");
       try {

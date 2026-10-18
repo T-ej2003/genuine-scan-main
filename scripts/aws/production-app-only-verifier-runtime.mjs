@@ -6,7 +6,7 @@ import process from "node:process";
 import { inflateSync } from "node:zlib";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { compareCompactAppOnlyRequirements } from "./production-app-only-requirements-runtime.mjs";
-import { collectAppOnlyDatabaseCatalogue } from "./production-app-only-database-verifier.mjs";
+import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue } from "./production-app-only-database-verifier.mjs";
 import { validateConfiguration } from "../../backend/scripts/production-read-only-database-config.mjs";
 
 const CONTRACT_VERSION = "app-only-database-verifier-v1";
@@ -72,8 +72,9 @@ export async function runAppOnlyVerifier({ payload, env = process.env, createCli
     write(JSON.stringify({ ...evidence, evidenceSha256: canonicalSha256(evidence) }));
     if (!Object.values(domains).every((value) => value === "COMPATIBLE")) process.exitCode = 1;
     return evidence;
-  } catch {
-    write(JSON.stringify({ status: "APP_ONLY_DATABASE_VERIFICATION_FAILED", phase }));
+  } catch (error) {
+    write(JSON.stringify({ status: "APP_ONLY_DATABASE_VERIFICATION_FAILED", phase,
+      ...(phase === "CATALOGUE" ? { operation: error instanceof CatalogueOperationFailure ? error.operation : "UNKNOWN" } : {}) }));
     process.exitCode = 1;
     return null;
   } finally { await client?.$disconnect(); }
