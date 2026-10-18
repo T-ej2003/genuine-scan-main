@@ -40,8 +40,8 @@ export function parseAppOnlyExecutionArgs(args, env = process.env) {
   }
   return values;
 }
-const output = (name, value) => {
-  assert.match(name, /^[a-z_]+$/); assert.ok(typeof value === "string" && !/[\r\n]/.test(value));
+export const output = (name, value) => {
+  assert.match(name, /^[a-z_][a-z0-9_]*$/); assert.ok(typeof value === "string" && !/[\r\n]/.test(value));
   assert.ok(process.env.GITHUB_OUTPUT); fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 };
 function publish(filename, body) {

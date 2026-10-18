@@ -36,8 +36,8 @@ export function parseAppOnlyVerifierExecutionArgs(args, env = process.env) {
   return { ...values, reference };
 }
 
-function output(name, value) {
-  assert.match(name, /^[a-z_]+$/); assert.ok(typeof value === "string" && !/[\r\n]/.test(value));
+export function output(name, value) {
+  assert.match(name, /^[a-z_][a-z0-9_]*$/); assert.ok(typeof value === "string" && !/[\r\n]/.test(value));
   assert.ok(process.env.GITHUB_OUTPUT, "GitHub output channel required");
   fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
 }

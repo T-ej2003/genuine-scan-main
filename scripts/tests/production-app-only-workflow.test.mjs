@@ -1,14 +1,37 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import yaml from "js-yaml";
 import { appOnlyVerifierFailureCode, observeAppOnlyVerifierAwsFailure, parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-app-only-verifier.mjs";
-import { parseAppOnlyVerifierExecutionArgs } from "../aws/run-production-app-only-verifier.mjs";
-import { parseAppOnlyVerifierRecoveryArgs } from "../aws/run-production-app-only-verifier-recovery.mjs";
+import { parseAppOnlyVerifierExecutionArgs, output as verifierOutput } from "../aws/run-production-app-only-verifier.mjs";
+import { parseAppOnlyVerifierRecoveryArgs, output as recoveryOutput } from "../aws/run-production-app-only-verifier-recovery.mjs";
 import { parseAppOnlyDeploymentPreparationArgs } from "../aws/prepare-production-app-only-deployment.mjs";
-import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs } from "../aws/run-production-app-only-deployment.mjs";
+import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs, output as deploymentOutput } from "../aws/run-production-app-only-deployment.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_OIDC_WORKFLOWS, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+
+test("app-only protected runners publish SHA-256 handoffs after durable result writes", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-app-only-output-"));
+  const previous = process.env.GITHUB_OUTPUT;
+  try {
+    for (const [name, write] of [["registration", verifierOutput], ["recovery", recoveryOutput],
+      ["deployment", deploymentOutput]]) {
+      const file = path.join(directory, name);
+      process.env.GITHUB_OUTPUT = file;
+      write("path", "/private/result.json");
+      write("sha256", "a".repeat(64));
+      assert.equal(fs.readFileSync(file, "utf8"), `path=/private/result.json\nsha256=${"a".repeat(64)}\n`);
+      assert.throws(() => write("1sha", "value"));
+      assert.throws(() => write("sha256", "value\nforged=true"));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GITHUB_OUTPUT;
+    else process.env.GITHUB_OUTPUT = previous;
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("recovered verifier deployment handoff requires current-source authorization and requirements references", () => {
   const current = "a".repeat(40), old = "b".repeat(40);
