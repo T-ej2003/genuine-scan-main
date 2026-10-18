@@ -4,7 +4,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { readAppOnlyArtifactArchive, assertAppOnlyArtifactProvenance, downloadAppOnlyArtifact, createAppOnlyEvidenceWriter } from "../aws/production-app-only-artifacts.mjs";
+import { readAppOnlyArtifactArchive, assertAppOnlyArtifactProvenance, downloadAppOnlyArtifact,
+  downloadAppOnlyVerifierJournals, createAppOnlyEvidenceWriter } from "../aws/production-app-only-artifacts.mjs";
 
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const file = "app-only-requirements.json", source = "a".repeat(40);
@@ -94,6 +95,42 @@ test("download authenticates and consumes the same immutable bytes in private st
   } finally { fs.unlinkSync(result.path); fs.rmdirSync(path.dirname(result.path)); }
   assert.throws(() => downloadAppOnlyArtifact({ ...input, githubRun, reference: { ...input.reference, fileSha256: "f".repeat(64) } }));
   assert.throws(() => downloadAppOnlyArtifact({ ...input, githubRun: (command, args) => args[1].endsWith("/zip") ? Buffer.from("substitute") : githubRun(command, args) }));
+});
+
+test("failed protected verifier journals require exact run, ZIP and both chain tips", () => {
+  const members = ["registration", "permission"].flatMap((kind) => [1, 2, 3].map((sequence) => ({
+    name: `mscqr-app-only-evidence-${kind}/00${sequence}.json`,
+    value: JSON.stringify({ event: { kind: kind === "registration" ? "APP_ONLY_VERIFIER_REGISTRATION" : "APP_ONLY_PERMISSION_RESULT" },
+      evidenceSha256: (kind === "registration" ? "a" : "b").repeat(64) }),
+  })));
+  const bytes = archive(members), reference = { sourceSha: source, runId: "123", artifactId: "456",
+    artifactDigest: `sha256:${hash(bytes)}`, registrationJournalSha256: "a".repeat(64), permissionJournalSha256: "b".repeat(64) };
+  const run = { id: 123, run_attempt: 1, repository: { id: 9, full_name: "T-ej2003/genuine-scan-main" },
+    head_repository: { id: 9 }, head_sha: source, head_branch: "main",
+    path: ".github/workflows/verify-production-app-only-compatibility.yml", event: "workflow_dispatch",
+    status: "completed", conclusion: "failure" };
+  const artifact = { id: 456, name: "production-app-only-verifier-journals", expired: false, digest: reference.artifactDigest,
+    size_in_bytes: bytes.length, workflow_run: { id: 123, head_sha: source, head_repository_id: 9, repository_id: 9 } };
+  const githubRun = (_, args) => args[1].endsWith("/zip") ? bytes
+    : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }]) : JSON.stringify(run);
+  const result = downloadAppOnlyVerifierJournals({ reference, githubRun });
+  assert.equal(result.registration.length, 3); assert.equal(result.permission.length, 3);
+  for (const mutate of [
+    () => ({ reference: { ...reference, sourceSha: "c".repeat(40) }, githubRun }),
+    () => ({ reference: { ...reference, registrationJournalSha256: "c".repeat(64) }, githubRun }),
+    () => ({ reference, githubRun: (_, args) => args[1].endsWith("/zip") ? Buffer.from("substitute") : githubRun(_, args) }),
+    () => ({ reference, githubRun: (_, args) => args[1].endsWith("/zip") ? bytes
+      : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1, artifacts: [artifact] }])
+        : JSON.stringify({ ...run, conclusion: "success" }) }),
+    () => ({ reference, githubRun: (_, args) => args[1].endsWith("/zip") ? bytes
+      : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1,
+        artifacts: [{ ...artifact, workflow_run: { ...artifact.workflow_run, head_repository_id: 10 } }] }]) : JSON.stringify(run) }),
+  ]) assert.throws(() => downloadAppOnlyVerifierJournals(mutate()));
+  const extra = archive([...members, { name: "extra.json" }]);
+  assert.throws(() => downloadAppOnlyVerifierJournals({ reference: { ...reference, artifactDigest: `sha256:${hash(extra)}` },
+    githubRun: (_, args) => args[1].endsWith("/zip") ? extra
+      : args[1].endsWith("/artifacts?per_page=100") ? JSON.stringify([{ total_count: 1,
+        artifacts: [{ ...artifact, digest: `sha256:${hash(extra)}` }] }]) : JSON.stringify(run) }));
 });
 
 test("artifact expiry, replacement and run rerun during download fail before materialization", () => {

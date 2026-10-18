@@ -163,3 +163,62 @@ export function downloadAppOnlyArtifact({ kind, reference, repositoryRoot, githu
   const file = writeStageBPrivateFileExclusive({ filePath: path.join(directory, contracts[kind].file), bytes, repositoryRoot });
   return { ...file, bytes, reference: structuredClone(reference), run, artifact };
 }
+
+// The failed protected verifier run can publish two three-entry journals even
+// when its terminal result was never written. Their ZIP is read, never extracted.
+export function downloadAppOnlyVerifierJournals({ reference, githubRun = createProductionGithubCommandRunner() }) {
+  assert.deepEqual(Object.keys(reference || {}).sort(), ["sourceSha", "runId", "artifactId", "artifactDigest",
+    "registrationJournalSha256", "permissionJournalSha256"].sort());
+  assert.match(reference.sourceSha || "", /^[a-f0-9]{40}$/);
+  for (const key of ["runId", "artifactId"]) assert.match(String(reference[key]), /^[1-9][0-9]*$/);
+  for (const key of ["registrationJournalSha256", "permissionJournalSha256"])
+    assert.match(reference[key] || "", /^[a-f0-9]{64}$/);
+  assert.match(reference.artifactDigest || "", /^sha256:[a-f0-9]{64}$/);
+  const endpoint = `repos/${repository}/actions/runs/${reference.runId}`;
+  const get = (url, flags = []) => JSON.parse(githubRun("gh", ["api", url, ...flags], { maxBuffer: 8 * 1024 * 1024 }));
+  const run = get(endpoint);
+  assert.equal(String(run.id), String(reference.runId)); assert.equal(run.run_attempt, 1);
+  assert.equal(run.repository?.full_name, repository); assert.equal(run.head_repository?.id, run.repository?.id);
+  assert.equal(run.head_sha, reference.sourceSha); assert.equal(run.head_branch, "main");
+  assert.equal(run.path, ".github/workflows/verify-production-app-only-compatibility.yml");
+  assert.equal(run.event, "workflow_dispatch"); assert.equal(run.status, "completed"); assert.equal(run.conclusion, "failure");
+  const pages = get(`${endpoint}/artifacts?per_page=100`, ["--paginate", "--slurp"]);
+  const matches = completeGithubCollection(pages, "artifacts").filter(({ name }) => name === "production-app-only-verifier-journals");
+  assert.equal(matches.length, 1, "Missing or conflicting verifier journals");
+  const [artifact] = matches;
+  assert.equal(String(artifact.id), String(reference.artifactId)); assert.equal(artifact.expired, false);
+  assert.equal(artifact.digest, reference.artifactDigest);
+  assert.equal(String(artifact.workflow_run?.id), String(run.id));
+  assert.equal(artifact.workflow_run?.head_sha, run.head_sha);
+  assert.equal(artifact.workflow_run?.head_repository_id, run.head_repository.id);
+  assert.equal(artifact.workflow_run?.repository_id, run.repository.id);
+  assert.ok(artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 8 * 1024 * 1024);
+  const archive = Buffer.from(githubRun("gh", ["api", `repos/${repository}/actions/artifacts/${reference.artifactId}/zip`],
+    { encoding: null, maxBuffer: 8 * 1024 * 1024 }));
+  assert.equal(`sha256:${sha256(archive)}`, reference.artifactDigest);
+  const reader = `import io,json,re,stat,sys,zipfile
+b=sys.stdin.buffer.read(8388609)
+assert 0<len(b)<=8388608 and b[-22:-18]==b'PK\\x05\\x06'
+with zipfile.ZipFile(io.BytesIO(b)) as z:
+ assert not z.comment and len(z.infolist())==6
+ groups={}
+ for m in z.infolist():
+  assert re.fullmatch(r'mscqr-app-only-evidence-[A-Za-z0-9_-]+/00[123]\\.json',m.filename)
+  assert m.orig_filename==m.filename and not m.is_dir() and not m.flag_bits&1
+  assert stat.S_IFMT(m.external_attr>>16) in (0,stat.S_IFREG)
+  assert 0<m.file_size<=1048576 and m.compress_type in (zipfile.ZIP_STORED,zipfile.ZIP_DEFLATED)
+  folder,filename=m.filename.split('/')
+  group=groups.setdefault(folder,{})
+  assert filename not in group
+  group[filename]=json.loads(z.read(m))
+ assert len(groups)==2 and all(set(g)=={'001.json','002.json','003.json'} for g in groups.values())
+ sys.stdout.write(json.dumps([[g[f'{i:03d}.json'] for i in (1,2,3)] for g in groups.values()]))`;
+  const groups = JSON.parse(execFileSync("/usr/bin/python3", ["-c", reader], { input: archive, timeout: 10000, maxBuffer: 8 * 1024 * 1024 }));
+  const registration = groups.find((group) => group[0]?.event?.kind === "APP_ONLY_VERIFIER_REGISTRATION");
+  const permission = groups.find((group) => group[0]?.event?.kind === "APP_ONLY_PERMISSION_RESULT");
+  assert.ok(registration && permission && registration !== permission);
+  assert.equal(registration[2]?.evidenceSha256, reference.registrationJournalSha256);
+  assert.equal(permission[2]?.evidenceSha256, reference.permissionJournalSha256);
+  assert.equal(get(endpoint).run_attempt, 1, "Verifier run changed during journal authentication");
+  return { registration, permission, run, artifact };
+}
