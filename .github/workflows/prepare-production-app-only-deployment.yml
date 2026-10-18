@@ -10,6 +10,19 @@ name: Prepare live-compatible app-only deployment
         description: Exact compact successful verifier artifact identity JSON
         required: true
         type: string
+      compatibility_kind:
+        description: normal or recovered verifier artifact contract
+        required: false
+        default: normal
+        type: string
+      authorization_reference:
+        description: Current-source signed image authorization for recovered verifier evidence
+        required: false
+        type: string
+      requirements_reference:
+        description: Current-source canonical database requirements for recovered verifier evidence
+        required: false
+        type: string
 permissions:
   contents: read
   actions: read
@@ -24,3 +37,6 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha }}
       compatibility_reference: ${{ inputs.compatibility_reference }}
+      compatibility_kind: ${{ inputs.compatibility_kind }}
+      authorization_reference: ${{ inputs.authorization_reference }}
+      requirements_reference: ${{ inputs.requirements_reference }}

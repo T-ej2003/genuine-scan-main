@@ -10,6 +10,11 @@ name: Verify production app-only database compatibility
         description: Exact compact verifier-preparation artifact identity JSON
         required: true
         type: string
+      recovery_journal_reference:
+        description: Exact failed-run journal identity for no-write verifier registration recovery
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
   actions: read
@@ -24,3 +29,4 @@ jobs:
     with:
       source_sha: ${{ inputs.source_sha }}
       preparation_reference: ${{ inputs.preparation_reference }}
+      recovery_journal_reference: ${{ inputs.recovery_journal_reference }}

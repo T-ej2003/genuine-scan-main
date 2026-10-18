@@ -5,6 +5,7 @@ on:
     inputs:
       source_sha: { description: Exact protected-main SHA, required: true, type: string }
       preparation_reference: { description: Exact compact verifier-preparation artifact identity JSON, required: true, type: string }
+      recovery_journal_reference: { description: Exact failed-run journal identity for no-write verifier registration recovery, required: false, default: '', type: string }
 
 permissions: { contents: read, actions: read }
 
@@ -23,24 +24,33 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          RECOVERY_JOURNAL_REFERENCE: ${{ inputs.recovery_journal_reference }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
+          import { execFileSync } from 'node:child_process';
           import { parseAppOnlyArtifactReference, downloadAppOnlyArtifact } from './scripts/aws/production-app-only-artifacts.mjs';
           import { canonicalSha256 } from './scripts/aws/production-green-stage-b-contract.mjs';
           const sourceSha=process.env.SOURCE_SHA;
           assert.match(sourceSha,/^[a-f0-9]{40}$/); assert.equal(sourceSha,process.env.GITHUB_SHA);
           const reference=parseAppOnlyArtifactReference(process.env.PREPARATION_REFERENCE);
-          assert.equal(reference.sourceSha,sourceSha);
+          const recovery=process.env.RECOVERY_JOURNAL_REFERENCE;
+          if(recovery) {
+            const journal=JSON.parse(recovery);
+            assert.equal(journal.sourceSha,reference.sourceSha);
+            execFileSync('git',['merge-base','--is-ancestor',reference.sourceSha,sourceSha]);
+          } else assert.equal(reference.sourceSha,sourceSha);
           const artifact=downloadAppOnlyArtifact({kind:'verifierPreparation',reference,repositoryRoot:process.cwd()});
           const {preparation}=JSON.parse(artifact.bytes);
           const {preparationSha256,...body}=preparation;
-          assert.equal(preparationSha256,canonicalSha256(body)); assert.equal(body.sourceSha,sourceSha);
+          assert.equal(preparationSha256,canonicalSha256(body)); assert.equal(body.sourceSha,reference.sourceSha);
           assert.equal(body.kind,'APP_ONLY_VERIFIER_PREPARATION'); assert.equal(body.eligible,false);
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,JSON.stringify({sourceSha,preparationSha256,identity:body.identity,networkSha256:body.networkSha256,definitionSha256:body.definitionSha256,verificationContractSha256:body.verificationContractSha256},null,2));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,JSON.stringify({sourceSha,originalSourceSha:reference.sourceSha,
+            recoveryJournal:recovery ? JSON.parse(recovery) : null,preparationSha256,identity:body.identity,
+            networkSha256:body.networkSha256,definitionSha256:body.definitionSha256,verificationContractSha256:body.verificationContractSha256},null,2));
           NODE
 
   verify:
@@ -79,6 +89,7 @@ jobs:
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-permission-provisioner
           unset-current-credentials: true
       - name: Register fixed verifier and provision only its exact launcher revision
+        if: inputs.recovery_journal_reference == ''
         id: register
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -90,6 +101,21 @@ jobs:
           set -euo pipefail
           node scripts/aws/run-production-app-only-verifier.mjs --mode register --source-sha "$SOURCE_SHA" \
             --preparation-reference "$PREPARATION_REFERENCE" --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256"
+      - name: Adopt authenticated completed verifier registration without IAM or ECS writes
+        if: inputs.recovery_journal_reference != ''
+        id: recover
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          JOURNAL_REFERENCE: ${{ inputs.recovery_journal_reference }}
+          APPROVAL: ${{ steps.approval.outputs.path }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/run-production-app-only-verifier-recovery.mjs --mode recover --source-sha "$SOURCE_SHA" \
+            --preparation-reference "$PREPARATION_REFERENCE" --journal-reference "$JOURNAL_REFERENCE" \
+            --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256"
       - name: Replace credentials with separate read-only verifier launcher
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -97,6 +123,7 @@ jobs:
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-app-only-verifier-launcher
           unset-current-credentials: true
       - name: Run exact private verifier and authenticate bounded output
+        if: inputs.recovery_journal_reference == ''
         id: verify
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
@@ -111,14 +138,40 @@ jobs:
           node scripts/aws/run-production-app-only-verifier.mjs --mode verify --source-sha "$SOURCE_SHA" \
             --preparation-reference "$PREPARATION_REFERENCE" --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256" \
             --registration "$REGISTRATION" --registration-sha256 "$REGISTRATION_SHA256"
+      - name: Run authenticated recovered verifier revision without registration
+        if: inputs.recovery_journal_reference != ''
+        id: verify_recovered
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
+          JOURNAL_REFERENCE: ${{ inputs.recovery_journal_reference }}
+          APPROVAL: ${{ steps.approval.outputs.path }}
+          APPROVAL_SHA256: ${{ steps.approval.outputs.sha256 }}
+          RECOVERY: ${{ steps.recover.outputs.path }}
+          RECOVERY_SHA256: ${{ steps.recover.outputs.sha256 }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/run-production-app-only-verifier-recovery.mjs --mode verify-recovered --source-sha "$SOURCE_SHA" \
+            --preparation-reference "$PREPARATION_REFERENCE" --journal-reference "$JOURNAL_REFERENCE" \
+            --approval "$APPROVAL" --approval-sha256 "$APPROVAL_SHA256" \
+            --recovery "$RECOVERY" --recovery-sha256 "$RECOVERY_SHA256"
       - uses: actions/upload-artifact@v4
         with:
-          name: production-app-only-compatibility
-          path: ${{ steps.verify.outputs.path }}
+          name: ${{ inputs.recovery_journal_reference == '' && 'production-app-only-compatibility' || 'production-app-only-compatibility-recovered' }}
+          path: ${{ steps.verify.outputs.path || steps.verify_recovered.outputs.path }}
           if-no-files-found: error
           retention-days: 7
+      - name: Preserve authenticated no-write registration recovery result
+        if: always() && steps.recover.outputs.path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-verifier-registration-recovery
+          path: ${{ steps.recover.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
       - name: Preserve ambiguous-operation journals independently of success
-        if: always() && steps.register.outputs.journal != ''
+        if: always() && (steps.register.outputs.journal != '' || steps.verify_recovered.outputs.journal != '')
         uses: actions/upload-artifact@v4
         with:
           name: production-app-only-verifier-journals
@@ -126,5 +179,6 @@ jobs:
             ${{ steps.register.outputs.journal }}
             ${{ steps.register.outputs.permission_journal }}
             ${{ steps.verify.outputs.journal }}
+            ${{ steps.verify_recovered.outputs.journal }}
           if-no-files-found: error
           retention-days: 30

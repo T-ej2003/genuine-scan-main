@@ -4,9 +4,34 @@ import fs from "node:fs";
 import yaml from "js-yaml";
 import { appOnlyVerifierFailureCode, observeAppOnlyVerifierAwsFailure, parseAppOnlyVerifierPreparationArgs } from "../aws/prepare-production-app-only-verifier.mjs";
 import { parseAppOnlyVerifierExecutionArgs } from "../aws/run-production-app-only-verifier.mjs";
+import { parseAppOnlyVerifierRecoveryArgs } from "../aws/run-production-app-only-verifier-recovery.mjs";
+import { parseAppOnlyDeploymentPreparationArgs } from "../aws/prepare-production-app-only-deployment.mjs";
 import { parseAppOnlyExecutionArgs, assertAppOnlyReleaseInputs } from "../aws/run-production-app-only-deployment.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_OIDC_WORKFLOWS, appOnlyProductionOidcTrust } from "../aws/production-app-only-policy.mjs";
+
+test("recovered verifier deployment handoff requires current-source authorization and requirements references", () => {
+  const current = "a".repeat(40), old = "b".repeat(40);
+  const reference = (sourceSha) => JSON.stringify({ sourceSha, runId: "1", runAttempt: "1", artifactId: "2",
+    artifactDigest: `sha256:${"c".repeat(64)}`, fileSha256: "d".repeat(64) });
+  const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main",
+    GITHUB_REF: "refs/heads/main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_SHA: current,
+    GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/prepare-production-app-only-deployment.yml@refs/heads/main" };
+  const base = ["--source-sha", current, "--compatibility-reference", reference(old),
+    "--compatibility-kind", "recovered"];
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(base, env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs([...base, "--authorization-reference", reference(current)], env));
+  const complete = [...base, "--authorization-reference", reference(current), "--requirements-reference", reference(current)];
+  assert.equal(parseAppOnlyDeploymentPreparationArgs(complete, env).compatibilityReference.sourceSha, old);
+  assert.equal(parseAppOnlyDeploymentPreparationArgs([...complete.slice(0, 2), "--compatibility-reference", reference(current),
+    ...complete.slice(4)], env).compatibilityKind, "recovered");
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs([...base, "--authorization-reference", reference(old),
+    "--requirements-reference", reference(current)], env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(["--source-sha", current,
+    "--compatibility-reference", reference(current), "--authorization-reference", reference(current)], env));
+  assert.throws(() => parseAppOnlyDeploymentPreparationArgs(["--source-sha", current,
+    "--compatibility-reference", reference(old)], env));
+});
 
 test("OIDC workflow claims bind reviewed reusable code and preserve protected approval and concurrency", () => {
   for (const [role, names] of Object.entries(APP_ONLY_OIDC_WORKFLOWS)) for (const name of names) {
@@ -99,7 +124,7 @@ test("verifier execution rejects overrides, workflow reruns and unbound private 
 test("verifier workflow previews exact preparation then separates protected provisioner and launcher credentials", () => {
   const source = fs.readFileSync(".github/workflows/verify-production-app-only-compatibility-operation.yml", "utf8");
   const workflow = yaml.load(source), job = workflow.jobs.verify;
-  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_call.inputs).sort(), ["preparation_reference", "source_sha", "recovery_journal_reference"].sort());
   assert.equal(workflow.jobs.review.environment, undefined);
   assert.equal(job.needs, "review"); assert.equal(job.environment, "production");
   assert.equal(workflow.concurrency, undefined);
@@ -108,9 +133,45 @@ test("verifier workflow previews exact preparation then separates protected prov
   assert.ok(roles.every((s) => s.with["unset-current-credentials"] === true));
   assert.match(source, /--require-actual-approval/);
   assert.match(source, /if: always\(\).*steps\.register\.outputs\.journal/);
+  const register = job.steps.find((step) => step.id === "register"), recover = job.steps.find((step) => step.id === "recover");
+  assert.equal(register.if, "inputs.recovery_journal_reference == ''");
+  assert.equal(recover.if, "inputs.recovery_journal_reference != ''");
+  assert.doesNotMatch(recover.run, /register-task-definition|put-role-policy/);
+  assert.ok(job.steps.some((step) => step.with?.name === "production-app-only-verifier-registration-recovery"
+    && step.if === "always() && steps.recover.outputs.path != ''"));
+  assert.ok(job.steps.some((step) => step.with?.name?.includes("production-app-only-compatibility-recovered")));
+  const recoveryRunner = fs.readFileSync("scripts/aws/run-production-app-only-verifier-recovery.mjs", "utf8");
+  const recoveryReader = fs.readFileSync("scripts/aws/production-app-only-verifier-recovery.mjs", "utf8");
+  assert.doesNotMatch(recoveryRunner, /verifyAppOnlyEffectivePermissions/);
+  assert.match(recoveryReader, /verifyAppOnlyEffectivePermissions/);
   assert.doesNotMatch(source, /app-only-deployer|release-gate|terraform apply|update-service|execute-command/);
   for (const phase of Object.values(workflow.jobs)) for (const step of phase.steps)
     if (step.run) assert.doesNotMatch(step.run, /\$\{\{\s*inputs\./);
+});
+
+test("verifier recovery accepts only protected source-bound failed journals and private handoff", () => {
+  const source = "a".repeat(40), current = "b".repeat(40), hash = "c".repeat(64);
+  const preparation = JSON.stringify({ sourceSha: source, runId: "12", runAttempt: "1", artifactId: "34",
+    artifactDigest: `sha256:${hash}`, fileSha256: hash });
+  const journal = JSON.stringify({ sourceSha: source, runId: "56", artifactId: "78", artifactDigest: `sha256:${hash}`,
+    registrationJournalSha256: hash, permissionJournalSha256: hash });
+  const args = ["--mode", "recover", "--source-sha", current, "--preparation-reference", preparation,
+    "--journal-reference", journal, "--approval", "/private/approval.json", "--approval-sha256", hash];
+  const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_REF: "refs/heads/main", GITHUB_SHA: current, GITHUB_RUN_ATTEMPT: "1", GITHUB_RUN_ID: "90",
+    GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/verify-production-app-only-compatibility.yml@refs/heads/main" };
+  assert.equal(parseAppOnlyVerifierRecoveryArgs(args, env).mode, "recover");
+  for (const key of Object.keys(env)) assert.throws(() => parseAppOnlyVerifierRecoveryArgs(args, { ...env, [key]: "wrong" }));
+  for (const invalid of ["{}", JSON.stringify({ ...JSON.parse(journal), sourceSha: current }),
+    JSON.stringify({ ...JSON.parse(journal), taskDefinitionArn: "attacker" })]) {
+    const changed = [...args]; changed[7] = invalid; assert.throws(() => parseAppOnlyVerifierRecoveryArgs(changed, env));
+  }
+  assert.throws(() => parseAppOnlyVerifierRecoveryArgs([...args, "--recovery", "/private/result.json"], env));
+  assert.equal(parseAppOnlyVerifierRecoveryArgs([...args.slice(0, 1), "verify-recovered", ...args.slice(2),
+    "--recovery", "/private/result.json", "--recovery-sha256", hash], env).mode, "verify-recovered");
+  const operation = yaml.load(fs.readFileSync(".github/workflows/verify-production-app-only-compatibility-operation.yml", "utf8"));
+  const wrapper = yaml.load(fs.readFileSync(".github/workflows/verify-production-app-only-compatibility.yml", "utf8"));
+  assert.deepEqual(operation.on.workflow_call.inputs, wrapper.on.workflow_dispatch.inputs);
 });
 
 test("verifier preparation failure codes expose only bounded stage and AWS operation", () => {
