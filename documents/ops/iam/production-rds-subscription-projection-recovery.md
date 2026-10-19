@@ -4,7 +4,7 @@ This change addresses the confirmed Amazon RDS PostgreSQL 18 grant-option failur
 
 The approved DBA must use `mscqr_prod_admin` on `mscqr_production_rls_green_phase2` through the existing governed private DBA route. Before any write, run the exact read-only [preflight](production-rds-subscription-projection-preflight.sql) and require `RDS_SUBSCRIPTION_PREFLIGHT_PASS`. The preflight checks the full function body's catalogue reads, the existing canary identity, absence of the observer and function, RDS catalogue ownership, and absence of direct canary access. It never selects or logs `subconninfo`. An unexpected state stops the operation.
 
-Approve the exact SHA-256 of [remediation SQL](production-rds-subscription-projection-remediation.sql), `179ae33731dd2cc0185abf68687a2d5362cec84ce4f02a35ad0f7d9cbe2f5c3d`, independently of verifier approval. On the authorized DBA connection, from the protected checkout with the approved file hash, execute:
+Approve the exact SHA-256 of [remediation SQL](production-rds-subscription-projection-remediation.sql), `49d5374783c92ec8216178f8e6b70801b997ccf03957cc41da2abba5c7b3eccf`, independently of verifier approval. The predecessor guard uses `to_regprocedure` in its catalogue comparison so an absent function is safe even when PostgreSQL evaluates both sides of the `AND`. The previous `179ae337...` SQL failed before `CREATE FUNCTION` and its transaction rolled back; do not retry it. On the authorized DBA connection, from the protected checkout with the approved file hash, execute:
 
 ```sh
 shasum -a 256 documents/ops/iam/production-rds-subscription-projection-preflight.sql documents/ops/iam/production-rds-subscription-projection-remediation.sql
