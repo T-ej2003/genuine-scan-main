@@ -8,9 +8,10 @@ export const SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   observer_create_role: false, observer_create_db: false, observer_replication: false, observer_bypass_rls: false,
   observer_memberships: false, table_select: false, readable_columns: Object.freeze(["oid","subbinary","subconninfo","subdbid","subdisableonerr","subenabled","subfailover","subname","suborigin","subowner","subpasswordrequired","subpublications","subrunasowner","subskiplsn","subslotname","substream","subsynccommit","subtwophasestate"]),
   observer_schema_usage: false, observer_schema_create: false, canary_direct_conninfo: false,
-  function_exists: true, function_owner: "mscqr_prod_subscription_observer", function_kind: "f", function_arguments: "", function_result: SUBSCRIPTION_PROJECTION_RESULT, function_security_definer: true,
-  function_volatility: "s", function_search_path: "search_path=pg_catalog", function_config: Object.freeze(["search_path=pg_catalog"]), function_body_sha256: SUBSCRIPTION_PROJECTION_BODY_SHA256,
-  public_execute: false, canary_execute: true, unexpected_execute_roles: false, projection_acl_valid: true,
+  function_exists: true, function_owner: "mscqr_prod_subscription_observer", function_kind: "f", function_arguments: "", function_result: SUBSCRIPTION_PROJECTION_RESULT, function_language: "sql", function_security_definer: true,
+  function_volatility: "s", function_parallel: "u", function_leakproof: false, function_strict: false,
+  function_search_path: "search_path=pg_catalog", function_config: Object.freeze(["search_path=pg_catalog"]), function_body_sha256: SUBSCRIPTION_PROJECTION_BODY_SHA256,
+  public_execute: false, canary_execute: true, unexpected_execute_roles: false, projection_acl_valid: true, projection_acl_count: 2,
 });
 export const RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT = Object.freeze({
   ...SUBSCRIPTION_PROJECTION_STATUS_CONTRACT,
@@ -217,7 +218,9 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       projection.oid IS NOT NULL AS function_exists, owner.rolname AS function_owner,
       projection.prokind::text AS function_kind, pg_catalog.pg_get_function_identity_arguments(projection.oid) AS function_arguments,
       pg_catalog.pg_get_function_result(projection.oid) AS function_result, COALESCE(projection.prosecdef,false) AS function_security_definer,
-      projection.provolatile::text AS function_volatility, projection.proconfig[1] AS function_search_path,
+      language.lanname AS function_language, projection.provolatile::text AS function_volatility,
+      projection.proparallel::text AS function_parallel, COALESCE(projection.proleakproof,false) AS function_leakproof,
+      COALESCE(projection.proisstrict,false) AS function_strict, projection.proconfig[1] AS function_search_path,
       projection.proconfig AS function_config,
       CASE WHEN projection.oid IS NULL THEN NULL ELSE pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(projection.prosrc,'UTF8')),'hex') END AS function_body_sha256,
       COALESCE((SELECT bool_or(a.grantee=0 AND a.privilege_type='EXECUTE') FROM pg_catalog.aclexplode(
@@ -226,6 +229,8 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
         COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS canary_execute,
       COALESCE((SELECT bool_or(a.privilege_type='EXECUTE' AND a.grantee NOT IN (projection.proowner,canary.oid)) FROM pg_catalog.aclexplode(
         COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a),false) AS unexpected_execute_roles,
+      (SELECT count(*)::integer FROM pg_catalog.aclexplode(
+        COALESCE(projection.proacl,pg_catalog.acldefault('f',projection.proowner))) a) AS projection_acl_count,
       COALESCE((SELECT bool_and(
         (a.grantee=projection.proowner AND a.grantor=projection.proowner AND a.privilege_type='EXECUTE' AND NOT a.is_grantable)
         OR (a.grantee=canary.oid AND a.grantor=projection.proowner AND a.privilege_type='EXECUTE' AND NOT a.is_grantable))
@@ -236,6 +241,7 @@ export async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity =
       LEFT JOIN (SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
         WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0) projection_ref ON true
       LEFT JOIN pg_catalog.pg_proc projection ON projection.oid=projection_ref.oid
+      LEFT JOIN pg_catalog.pg_language language ON language.oid=projection.prolang
       LEFT JOIN pg_catalog.pg_roles owner ON owner.oid=projection.proowner
       CROSS JOIN (SELECT pg_catalog.to_regrole('mscqr_prod_rls_canary_read') AS oid) canary_ref
       LEFT JOIN pg_catalog.pg_roles canary ON canary.oid=canary_ref.oid`);

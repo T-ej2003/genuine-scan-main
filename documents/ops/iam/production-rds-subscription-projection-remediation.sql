@@ -17,6 +17,8 @@ BEGIN
      OR NOT pg_catalog.has_schema_privilege(current_user,'app_rls','CREATE')
      OR NOT pg_catalog.has_language_privilege(current_user,'sql','USAGE')
      OR pg_catalog.to_regrole('mscqr_prod_subscription_observer') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs<>0)
      OR pg_catalog.to_regrole('mscqr_prod_rls_canary_read') IS NULL
      OR NOT pg_catalog.has_schema_privilege('mscqr_prod_rls_canary_read','app_rls','USAGE')
      OR pg_catalog.has_schema_privilege('mscqr_prod_rls_canary_read','app_rls','CREATE')
@@ -43,8 +45,10 @@ BEGIN
   IF pg_catalog.to_regprocedure('app_rls.production_security_subscription_inventory()') IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
        WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure
-         AND owner.rolname='mscqr_prod_admin' AND p.prokind='f' AND p.pronargs=0
-         AND p.prosecdef AND p.provolatile='s' AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+        AND owner.rolname='mscqr_prod_admin' AND p.prokind='f' AND p.pronargs=0
+        AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='sql')
+        AND p.prosecdef AND p.provolatile='s' AND p.proparallel='u' AND NOT p.proleakproof AND NOT p.proisstrict
+        AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
          AND pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex')=
            'ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447') THEN
     RAISE EXCEPTION 'Existing subscription projection conflicts with reviewed successor';
@@ -81,6 +85,8 @@ BEGIN
   IF p_oid IS NULL OR NOT EXISTS (
       SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner WHERE p.oid=p_oid
         AND owner.rolname='mscqr_prod_admin' AND p.prokind='f' AND p.prosecdef AND p.provolatile='s'
+        AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='sql')
+        AND p.proparallel='u' AND NOT p.proleakproof AND NOT p.proisstrict
         AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
         AND pg_catalog.pg_get_function_identity_arguments(p.oid)=''
         AND pg_catalog.pg_get_function_result(p.oid)=

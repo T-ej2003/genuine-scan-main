@@ -17,6 +17,8 @@ BEGIN
      OR NOT pg_catalog.has_language_privilege(current_user,'sql','USAGE')
      OR pg_catalog.to_regrole('mscqr_prod_subscription_observer') IS NOT NULL
      OR pg_catalog.to_regprocedure('app_rls.production_security_subscription_inventory()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory')
      OR pg_catalog.to_regrole('mscqr_prod_rls_canary_read') IS NULL
      OR NOT pg_catalog.has_schema_privilege('mscqr_prod_rls_canary_read','app_rls','USAGE')
      OR pg_catalog.has_schema_privilege('mscqr_prod_rls_canary_read','app_rls','CREATE')

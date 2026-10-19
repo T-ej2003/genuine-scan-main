@@ -11,8 +11,9 @@ const database = "mscqr_production_rls_green_phase2";
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
 const expectedRoutines = Object.freeze(["printing_readiness", "printing_create_job", "printing_connector_identity"]);
 const subscriptionProjection = Object.freeze({ owners: ["mscqr_prod_subscription_observer", "mscqr_prod_admin"], bodySha256: "ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447",
-  result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)' });
-function authenticateSubscriptionProjection(projection, properties) {
+  result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)',
+  readableColumns: ["oid","subbinary","subconninfo","subdbid","subdisableonerr","subenabled","subfailover","subname","suborigin","subowner","subpasswordrequired","subpublications","subrunasowner","subskiplsn","subslotname","substream","subsynccommit","subtwophasestate"] });
+function authenticateSubscriptionProjection(projection, properties, rdsState) {
   assert.equal(projection.arguments, ""); assert.equal(projection.result, subscriptionProjection.result);
   assert.ok(subscriptionProjection.owners.includes(projection.owner)); assert.equal(projection.security_definer, true);
   assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
@@ -22,6 +23,29 @@ function authenticateSubscriptionProjection(projection, properties) {
     { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false },
     { role: projection.owner, privilege: "EXECUTE", grantable: false },
   ].sort((a,b) => a.role < b.role ? -1 : a.role > b.role ? 1 : 0));
+  if (projection.owner === administrator) assert.deepEqual(rdsState, {
+    observer_absent: true, catalogue_owner: "rdsadmin", admin_superuser: false,
+    admin_readable_columns: subscriptionProjection.readableColumns, admin_conninfo_grantable: false,
+    conninfo_acl_empty: true, canary_direct_conninfo: false, projection_grantors_valid: true,
+  });
+}
+async function readRdsSubscriptionState(tx) {
+  const [state] = await tx.$queryRawUnsafe(`SELECT
+    pg_catalog.to_regrole('mscqr_prod_subscription_observer') IS NULL AS observer_absent,
+    (SELECT owner.rolname FROM pg_catalog.pg_class c JOIN pg_catalog.pg_roles owner ON owner.oid=c.relowner
+      WHERE c.oid='pg_catalog.pg_subscription'::pg_catalog.regclass) AS catalogue_owner,
+    (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname='mscqr_prod_admin') AS admin_superuser,
+    COALESCE((SELECT pg_catalog.jsonb_agg(a.attname ORDER BY a.attname) FROM pg_catalog.pg_attribute a
+      WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attnum>0 AND NOT a.attisdropped
+        AND pg_catalog.has_column_privilege('mscqr_prod_admin',a.attrelid,a.attnum,'SELECT')),'[]'::jsonb) AS admin_readable_columns,
+    pg_catalog.has_column_privilege('mscqr_prod_admin','pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION') AS admin_conninfo_grantable,
+    NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
+      WHERE a.attrelid='pg_catalog.pg_subscription'::pg_catalog.regclass AND a.attname='subconninfo') AS conninfo_acl_empty,
+    pg_catalog.has_column_privilege('mscqr_prod_rls_canary_read','pg_catalog.pg_subscription','subconninfo','SELECT') AS canary_direct_conninfo,
+    (SELECT count(*)=2 AND COALESCE(bool_and(acl.grantor=p.proowner),false)
+      FROM pg_catalog.pg_proc p CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) acl
+      WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure) AS projection_grantors_valid`);
+  return state;
 }
 const expectedPredecessors = Object.freeze({
   "app_rls.printing_connector_identity(p_kind text, p_agent_id text, p_device_fingerprint text, p_printer_selector text, p_gateway_id text, p_gateway_secret_hash text, p_operation text)": "aec14f16d5bf85cc48809a63d3e1a34c8a35c0eb51ac1f46899cfc05a24673b1",
@@ -132,7 +156,8 @@ async function collectAppOnlyDatabaseCatalogueRows(tx, validateIdentity = () => 
     const [properties] = await tx.$queryRawUnsafe(`SELECT p.prokind::text AS kind,p.proparallel::text AS parallel,p.proleakproof AS leakproof,p.proisstrict AS strict
       FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
       WHERE n.nspname='app_rls' AND p.proname='production_security_subscription_inventory' AND p.pronargs=0`);
-    authenticateSubscriptionProjection(projection, properties);
+    const rdsState = projection.owner === administrator ? await readRdsSubscriptionState(tx) : undefined;
+    authenticateSubscriptionProjection(projection, properties, rdsState);
     routines.rows.splice(routines.rows.indexOf(projection), 1);
   }
   const [tables] = await tx.$queryRawUnsafe(`SELECT COALESCE(jsonb_agg(x ORDER BY x.name),'[]'::jsonb) AS rows FROM (
@@ -322,7 +347,7 @@ async function main({ argv = process.argv, env = process.env, execArgv = process
   setStage(stages.SUCCESS_EVIDENCE); console.log(evidence);
 }
 
-module.exports = { authenticateSubscriptionProjection, canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, stages, validateInput };
+module.exports = { authenticateSubscriptionProjection, canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, readRdsSubscriptionState, stages, validateInput };
 
 if (module.id === "[eval]") main().catch((error) => {
   const record = error instanceof PrintingRoutineDeltaFailure ? error.record : failureRecord(stages.ARGV_VALIDATION, error);

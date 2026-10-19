@@ -143,6 +143,9 @@ test("exact RDS-owned projection is accepted without an observer role or catalog
 for (const [name, change] of [
   ["mixed observer role", { role_exists: true }], ["unknown owner", { function_owner: "unexpected_owner" }],
   ["changed body", { function_body_sha256: "0".repeat(64) }], ["changed return type", { function_result: "integer" }],
+  ["changed language", { function_language: "plpgsql" }], ["changed parallel mode", { function_parallel: "s" }],
+  ["leakproof", { function_leakproof: true }], ["strict", { function_strict: true }],
+  ["duplicate ACL entry", { projection_acl_count: 3 }],
   ["changed search path", { function_search_path: "search_path=public" }],
   ["extra function configuration", { function_config: ["search_path=pg_catalog", "row_security=off"] }],
   ["PUBLIC execute", { public_execute: true }], ["unexpected execute", { unexpected_execute_roles: true }],
@@ -232,6 +235,8 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   const preflight = fs.readFileSync("documents/ops/iam/production-rds-subscription-projection-preflight.sql", "utf8");
   assert.match(preflight, /BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
   assert.match(preflight, /RDS_SUBSCRIPTION_PREFLIGHT_PASS/);
+  assert.match(preflight, /p\.proname='production_security_subscription_inventory'/);
+  assert.match(remediation, /p\.proname='production_security_subscription_inventory' AND p\.pronargs<>0/);
   assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_parameter_acl") && sql.includes("a.grantor") && sql.includes("a.is_grantable")), "parameter ACL grants are collected with grantor identity");
   for (const source of ["pg_proc p", "pg_class c", "pg_namespace n", "pg_database d", "pg_default_acl d", "pg_type t"]) {
     const sql = calls.find((query) => query.includes(`FROM pg_catalog.${source}`) && query.includes("aclexplode") && query.includes("grantor.rolname"));

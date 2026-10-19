@@ -17,6 +17,7 @@ const appRole = "mscqr_prd_rls_phase2_app";
 const subscriptionObserver = "mscqr_prod_subscription_observer";
 const requireBackend = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { PrismaClient } = requireBackend("@prisma/client");
+const printing = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 function sql(statement, db = database) {
   return execFileSync("docker", ["exec", "-i", container, "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-U", "mscqr_p2_test", "-d", db], {
     input: statement, encoding: "utf8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"],
@@ -270,7 +271,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
     ]) await t.test(`restricted identity rejects ${name}`, async () => {
       sql(change); try { await assert.rejects(collect(), /restricted read-only contract/); } finally { sql(restore); }
     });
-    await t.test("real PostgreSQL 18 non-superuser projects the exact body without a catalogue grant option", () => {
+    await t.test("real PostgreSQL 18 non-superuser projects the exact body without a catalogue grant option", async () => {
       const admin = "mscqr_prod_admin";
       const source = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-rds-subscription-projection-remediation.sql"), "utf8");
       const projection = source.match(/CREATE FUNCTION app_rls\.production_security_subscription_inventory\(\)[\s\S]*?\$subscription_inventory\$;/)?.[0];
@@ -279,11 +280,17 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       assert.equal(crypto.createHash("sha256").update(body, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256);
       const testProjection = projection.replace("production_security_subscription_inventory()", "production_security_subscription_inventory_rds_test()");
       sql(`CREATE ROLE ${admin} NOLOGIN CREATEROLE;
-        GRANT SELECT (subconninfo) ON pg_catalog.pg_subscription TO ${admin};
+        GRANT SELECT ON pg_catalog.pg_subscription TO ${admin};
         GRANT USAGE, CREATE ON SCHEMA app_rls TO ${admin}`);
       try {
         assert.equal(sql(`SELECT has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT')::text,
           has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION')::text`), "true|false");
+        const db = client();
+        try {
+          const state = await printing.readRdsSubscriptionState(db);
+          assert.equal(state.observer_absent, false, "printing rejects mixed observer and DBA projection state");
+          assert.notEqual(state.catalogue_owner, "rdsadmin", "disposable PostgreSQL does not impersonate RDS catalogue ownership");
+        } finally { await db.$disconnect(); }
         sql(`SET ROLE ${admin}; ${testProjection}
           REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() FROM PUBLIC;
           GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() TO ${role}; RESET ROLE`);
@@ -300,7 +307,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       } finally {
         sql(`DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory_rds_test();
           REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${admin};
-          REVOKE SELECT (subconninfo) ON pg_catalog.pg_subscription FROM ${admin}; DROP ROLE ${admin}`);
+          REVOKE SELECT ON pg_catalog.pg_subscription FROM ${admin}; DROP ROLE ${admin}`);
       }
     });
   } finally {

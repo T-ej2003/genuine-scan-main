@@ -197,13 +197,17 @@ DO $$ BEGIN
          THEN 'mscqr_prod_admin' ELSE 'mscqr_prod_subscription_observer' END)
        AND p.prokind='f' AND p.pronargs=0 AND pg_catalog.pg_get_function_result(p.oid)=
          'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)'
-       AND p.prosecdef AND p.provolatile='s' AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+       AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='sql')
+       AND p.prosecdef AND p.provolatile='s' AND p.proparallel='u' AND NOT p.proleakproof AND NOT p.proisstrict
+       AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
        AND pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex')='ba305e220456f461a9099f8fc1c05e01ca3d96240d4c41536739a0af59830447')
      OR (SELECT COALESCE(bool_and(
        (acl.grantee=p.proowner AND acl.grantor=p.proowner AND acl.privilege_type='EXECUTE' AND NOT acl.is_grantable)
        OR (acl.grantee='mscqr_prod_rls_canary_read'::pg_catalog.regrole AND acl.grantor=p.proowner AND acl.privilege_type='EXECUTE' AND NOT acl.is_grantable)),false)
        FROM pg_catalog.pg_proc p CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
        WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure) IS NOT TRUE
+     OR (SELECT count(*) FROM pg_catalog.pg_proc p CROSS JOIN LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
+       WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure)<>2
      OR NOT pg_catalog.has_function_privilege('mscqr_prod_rls_canary_read','app_rls.production_security_subscription_inventory()','EXECUTE')
      OR EXISTS (SELECT 1 FROM information_schema.role_table_grants WHERE grantee='mscqr_prod_rls_canary_read') THEN RAISE EXCEPTION 'canary privilege verification failed'; END IF;
 END $$;
