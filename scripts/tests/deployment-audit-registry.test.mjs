@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { load } from "js-yaml";
-import { readApprovedImages, assertPinnedImageInputs, assertDisposablePostgresImage, verifyApprovedImage } from "../lib/container-image-identity.mjs";
+import { readApprovedImages, ciImageReference, assertPinnedImageInputs, assertDisposablePostgresImage, verifyApprovedImage } from "../lib/container-image-identity.mjs";
 
 const images = readApprovedImages();
 const sha = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -48,11 +48,9 @@ function fixture() {
 test("public audit builds the same approved nginx and Node bytes as production", () => {
   assertPinnedImageInputs();
   const steps = load(readFileSync(".github/workflows/deployment-audit.yml", "utf8")).jobs.audit.steps;
-  const command = steps.find(step => step.name === "Build container for scan").run
-    .replaceAll("${{ steps.docker-detect.outputs.dockerfile }}", "Dockerfile")
-    .replaceAll("${{ steps.docker-detect.outputs.context }}", ".");
-  const output = execFileSync("bash", ["-eu", "-c", `docker() { printf '%s\\n' "$@"; }; ${command}`], { encoding: "utf8" });
-  assert.deepEqual(output.trim().split("\n"), ["build", "-t", "deployment-audit:latest", "-f", "Dockerfile", "."]);
+  const command = steps.find(step => step.name === "Build container for scan").run;
+  assert.match(command, /node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP"/);
+  assert.match(command, /docker build -t deployment-audit:latest -f "\$RUNNER_TEMP\/frontend\.Dockerfile"/);
   for (const file of ["Dockerfile", "Dockerfile.ecs-frontend"]) {
     assert.ok(readFileSync(file, "utf8").includes(`FROM ${images.nginx.reference}`));
     assert.ok(readFileSync(file, "utf8").includes(`FROM ${images.node.reference} AS builder`));
@@ -67,7 +65,19 @@ test("public audit builds the same approved nginx and Node bytes as production",
     assert.equal(step["continue-on-error"], undefined);
     assert.doesNotMatch(step.if || "", /always|failure|cancelled/);
   }
-  assert.equal(steps.find(step => step.name === "Verify approved base image provenance").run, "node scripts/verify-container-image-provenance.mjs");
+  assert.equal(steps.find(step => step.name === "Verify approved base image provenance").run, "node scripts/verify-container-image-provenance.mjs --ci");
+});
+
+test("CI Dockerfiles change only the registry host for exact approved base digests", () => {
+  const output = mkdtempSync(path.join(os.tmpdir(), "mscqr-ci-dockerfiles-"));
+  try {
+    execFileSync(process.execPath, ["scripts/ci/render-pinned-dockerfiles.mjs", output]);
+    for (const [file, rendered] of [["Dockerfile", "frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
+      let expected = readFileSync(file, "utf8");
+      for (const key of ["node", "nginx"]) expected = expected.replaceAll(images[key].reference, ciImageReference(images[key]));
+      assert.equal(readFileSync(path.join(output, rendered), "utf8"), expected);
+    }
+  } finally { rmSync(output, { recursive: true, force: true }); }
 });
 
 for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {
@@ -99,6 +109,19 @@ test("routine mirror reads require immutable approved amd64 and arm64 content, w
   assert.ok(f.requests.every(url => url.startsWith("https://public.ecr.aws/")));
   assert.ok(!f.requests.some(url => url.endsWith("/manifests/1.29-alpine")));
   for (const platform of Object.values(f.image.platforms)) assert.ok(f.requests.some(url => url.endsWith(platform.configDigest)));
+});
+test("CI reads Docker Hub by immutable digest and authenticates both architectures", async () => {
+  const f = fixture(); await verifyApprovedImage(f.image, { fetcher: f.fetcher, ci: true });
+  assert.ok(f.requests.every(url => url.startsWith("https://auth.docker.io/") || url.startsWith("https://registry-1.docker.io/")));
+  assert.ok(f.requests.some(url => url.endsWith(`/manifests/${f.image.digest}`)));
+  assert.ok(!f.requests.some(url => url.endsWith("/manifests/1.29-alpine")));
+  assert.equal(ciImageReference(f.image), `docker.io/library/nginx@${f.image.digest}`);
+});
+test("CI registry denial or substituted content fails closed", async () => {
+  const denied = fixture();
+  await assert.rejects(verifyApprovedImage(denied.image, { ci: true, fetcher: async () => new Response("throttled", { status: 429 }), wait: async () => {} }), /HTTP 429/);
+  const substituted = fixture(); substituted.resources.set(substituted.image.digest, bytes({ substituted: true }));
+  await assert.rejects(verifyApprovedImage(substituted.image, { ci: true, fetcher: substituted.fetcher }), /substituted/);
 });
 test("mutable upstream tag advancement fails explicit image update review", async () => {
   const f = fixture(); f.resources.set("1.29-alpine", bytes({ newer: true }));
@@ -137,12 +160,13 @@ test("PostgreSQL mirror keeps strict reference and native content identity asser
   const reference = images.postgres.reference;
   for (const platform of Object.values(images.postgres.platforms)) assertDisposablePostgresImage({ Config: { Image: reference }, Image: platform.configDigest });
   assertDisposablePostgresImage({ Config: { Image: reference }, Image: images.postgres.digest });
+  assertDisposablePostgresImage({ Config: { Image: ciImageReference(images.postgres) }, Image: images.postgres.digest });
   assert.throws(() => assertDisposablePostgresImage({ Config: { Image: "postgres:18.4" }, Image: images.postgres.digest }));
   assert.throws(() => assertDisposablePostgresImage({ Config: { Image: reference }, Image: sha("foreign") }));
 });
 test("PostgreSQL and Node registry/digest substitution cannot masquerade as approved", () => checkout(root => {
   const file = path.join(root, ".github/workflows/auth-security-tests.yml");
-  writeFileSync(file, readFileSync(file, "utf8").replace(images.postgres.reference, images.postgres.reference.replace("public.ecr.aws", "foreign.example")));
+  writeFileSync(file, readFileSync(file, "utf8").replace(ciImageReference(images.postgres), ciImageReference(images.postgres).replace("docker.io", "foreign.example")));
   assert.throws(() => assertPinnedImageInputs(root));
 }));
 

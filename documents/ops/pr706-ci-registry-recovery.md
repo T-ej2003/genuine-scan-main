@@ -1,0 +1,9 @@
+# PR #706 CI image-pull recovery
+
+The failed canary security job pulled `public.ecr.aws/docker/library/postgres@sha256:3a82e1f56c8f0f5616a11103ac3d47e632c3938698946a7ad26da0df1334744a` through Docker Compose and received `toomanyrequests: Data limit exceeded` before PostgreSQL started. The Docker job independently failed on `public.ecr.aws` HTTP 429 during base-image provenance verification. Other CI service containers use the same registry before workflow steps can authenticate.
+
+CI now pulls the **same locked OCI digests** from Docker Official Images on Docker Hub. The approved digest and both architecture manifests are checked by `scripts/verify-container-image-provenance.mjs --ci`; static tests pin every PostgreSQL/Redis service and the temporary CI Dockerfiles to the same digests. Production Dockerfiles and image publication continue to use the reviewed ECR Public references. Only the registry host changes for CI; the rendered Dockerfiles are compared byte-for-byte with the production files after that exact substitution. GitHub documents a Docker Hub rate-limit exemption for GitHub-hosted runners: <https://docs.github.com/en/actions/reference/limits#docker-hubs-rate-limit-for-github-actions>.
+
+On a fresh runner, service images are pulled before steps, while the Docker and audit jobs verify the immutable images before building. A registry error, missing digest, wrong architecture, or byte mismatch fails the check. No mutable tag or cached image substitutes for the locked digest. Local Docker-backed tests still require a running Docker daemon; the source and manifest contracts run without one.
+
+CTO recommendation: if GitHub changes its hosted-runner registry agreement or CI moves to self-hosted runners, mirror these exact digests into an access-controlled registry and authenticate service pulls at job initialization. Do not add an unauthenticated fallback or make production image references depend on a CI mirror.

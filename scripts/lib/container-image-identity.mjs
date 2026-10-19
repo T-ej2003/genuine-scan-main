@@ -28,6 +28,12 @@ export function readApprovedImages(repository = root) {
   return lock.images;
 }
 
+export function ciImageReference(image) {
+  assert.match(image.reference, /^public\.ecr\.aws\/docker\/library\/[a-z]+@sha256:[a-f0-9]{64}$/);
+  assert.ok(image.reference.endsWith(image.digest));
+  return `docker.io/library/${image.upstream.split(":")[0]}@${image.digest}`;
+}
+
 function dockerfileStages(source) {
   assert.doesNotMatch(source, /\u0000|\r(?!\n)/, "Ambiguous Dockerfile control character");
   const stages = [], aliases = new Set();
@@ -106,9 +112,10 @@ function dockerfileStages(source) {
 
 export function assertPinnedImageInputs(repository = root) {
   const images = readApprovedImages(repository);
-  const counts = (file, pattern, key, count) => {
+  const counts = (file, pattern, key, count, reference = images[key].reference) => {
     const values = [...readFileSync(path.join(repository, file), "utf8").matchAll(pattern)].map(match => match[1]);
-    assert.equal(values.filter(value => value === images[key].reference).length, count, `${file}: unapproved ${key} image`);
+    assert.equal(values.filter(value => value === reference).length, count, `${file}: unapproved ${key} image`);
+    if (reference.startsWith("docker.io/")) assert.ok(!values.some(value => value.startsWith("public.ecr.aws/docker/library/")), `${file}: CI image fell back to ECR Public`);
     return values;
   };
   for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {
@@ -124,16 +131,16 @@ export function assertPinnedImageInputs(repository = root) {
       assert.equal(stages.at(-1).reference, images.nginx.reference, `${file}: unapproved frontend runtime family`);
     }
   }
-  for (const [file, count] of [[".github/workflows/auth-security-tests.yml", 1], [".github/workflows/quality-gate.yml", 2], [".github/workflows/release-gate.yml", 1], ["docker-compose.p2-test.yml", 1]]) {
-    counts(file, /^\s+image:\s+(\S+)\s*$/gm, "postgres", count);
+  for (const [file, count] of [[".github/workflows/auth-security-tests.yml", 1], [".github/workflows/quality-gate.yml", 2], ["docker-compose.p2-test.yml", 1]]) {
+    counts(file, /^\s+image:\s+(\S+)\s*$/gm, "postgres", count, ciImageReference(images.postgres));
   }
-  counts(".github/workflows/quality-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "redis", 2);
+  counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "postgres", 1);
   counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "redis", 1);
-  counts("docker-compose.p2-test.yml", /^\s+image:\s+(\S+)\s*$/gm, "redis", 1);
-  counts("docker-compose.production-read-only-rls-canary-test.yml", /^\s+image:\s+(\S+)\s*$/gm, "postgres-canary", 1);
-  counts("docker-compose.rls-certification.yml", /^\s+image:\s+(\S+)\s*$/gm, "postgres-certification", 1);
+  for (const [file, key, count] of [[".github/workflows/quality-gate.yml", "redis", 2], ["docker-compose.p2-test.yml", "redis", 1], ["docker-compose.production-read-only-rls-canary-test.yml", "postgres-canary", 1], ["docker-compose.rls-certification.yml", "postgres-certification", 1]]) {
+    counts(file, /^\s+image:\s+(\S+)\s*$/gm, key, count, ciImageReference(images[key]));
+  }
   const audit = readFileSync(path.join(repository, ".github/workflows/deployment-audit.yml"), "utf8");
-  assert.match(audit, /run: docker build -t deployment-audit:latest -f "\$\{\{ steps\.docker-detect\.outputs\.dockerfile \}\}" "\$\{\{ steps\.docker-detect\.outputs\.context \}\}"/);
+  assert.match(audit, /node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP"[\s\S]*?docker build -t deployment-audit:latest -f "\$RUNNER_TEMP\/frontend\.Dockerfile" "\$\{\{ steps\.docker-detect\.outputs\.context \}\}"/);
   assert.doesNotMatch(audit, /--build-context/);
   const production = readFileSync(path.join(repository, ".github/workflows/production-web-image.yml"), "utf8");
   assert.match(production, /docker buildx build --platform "\$PLATFORM" --file Dockerfile\.ecs-frontend/);
@@ -143,7 +150,7 @@ export function assertPinnedImageInputs(repository = root) {
 
 export function assertDisposablePostgresImage(instance) {
   const image = readApprovedImages().postgres;
-  assert.equal(instance.Config.Image, image.reference);
+  assert.ok([image.reference, ciImageReference(image)].includes(instance.Config.Image));
   // Docker's classic store reports config IDs; its containerd store reports index/manifest IDs.
   const identities = [image.digest, ...Object.values(image.platforms).flatMap(platform => [platform.manifestDigest, platform.configDigest])];
   assert.ok(identities.includes(instance.Image), "Unapproved PostgreSQL content identity");
@@ -154,10 +161,11 @@ export function assertImageManifest(bytes, expectedDigest) {
   return JSON.parse(Buffer.from(bytes));
 }
 
-export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, wait = pause } = {}) {
+export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, ci = false, wait = pause } = {}) {
+  assert.ok(!(upstream && ci));
   const name = image.upstream.split(":")[0];
-  const host = upstream ? "registry-1.docker.io" : "public.ecr.aws";
-  const repository = upstream ? `library/${name}` : `docker/library/${name}`;
+  const host = upstream || ci ? "registry-1.docker.io" : "public.ecr.aws";
+  const repository = upstream || ci ? `library/${name}` : `docker/library/${name}`;
   const get = async (url, headers = {}) => {
     for (let attempt = 0; attempt < 4; attempt++) {
       const response = await fetcher(url, { headers, signal: AbortSignal.timeout(30000) });
@@ -171,7 +179,7 @@ export async function verifyApprovedImage(image, { fetcher = fetch, upstream = f
       await wait(Math.max(1000 * 2 ** attempt, Math.min(30000, Number.isFinite(retryAfter) ? retryAfter * 1000 : 0)));
     }
   };
-  const tokenUrl = upstream
+  const tokenUrl = upstream || ci
     ? `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repository}:pull`
     : `https://public.ecr.aws/token/?service=public.ecr.aws&scope=repository:${repository}:pull`;
   const token = JSON.parse(await get(tokenUrl)).token;

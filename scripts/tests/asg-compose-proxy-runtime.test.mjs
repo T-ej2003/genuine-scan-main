@@ -1,4 +1,4 @@
-import { readApprovedImages } from "../lib/container-image-identity.mjs";
+import { ciImageReference, readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -36,11 +36,11 @@ test("ASG Compose excludes the pinned frontend proxy from real dynamic allocatio
   assert.doesNotThrow(() => validateAsgNetworkContract({ subnet: testSubnet, gateway: testGateway, dynamicRange: testRange, frontendIp: testFrontend, trustedCidr: `${testFrontend}/32` }));
   fs.writeFileSync(composePath, `services:
   backend:
-    image: ${readApprovedImages().alpine.reference}
+    image: ${ciImageReference(readApprovedImages().alpine)}
     command: ["sleep", "300"]
     networks: [app]
   frontend:
-    image: ${readApprovedImages().alpine.reference}
+    image: ${ciImageReference(readApprovedImages().alpine)}
     command: ["sleep", "300"]
     networks:
       app:
@@ -61,7 +61,7 @@ networks:
     const backendIp = run([...compose, "exec", "-T", "backend", "hostname", "-i"]);
     assert.notEqual(backendIp, testFrontend);
     for (const forbiddenIp of [`${testPrefix}.0`, testGateway, `${testPrefix}.7`]) {
-      const denied = spawnSync("docker", ["run", "--rm", "--network", `${project}_app`, "--ip", forbiddenIp, readApprovedImages().alpine.reference, "true"], { cwd: root, encoding: "utf8" });
+      const denied = spawnSync("docker", ["run", "--rm", "--network", `${project}_app`, "--ip", forbiddenIp, ciImageReference(readApprovedImages().alpine), "true"], { cwd: root, encoding: "utf8" });
       assert.notEqual(denied.status, 0, `${forbiddenIp} must not be assignable`);
     }
     run([...compose, "up", "-d", "frontend"]);

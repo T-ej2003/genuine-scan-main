@@ -185,7 +185,7 @@ jobs:
         run: npm ci
 
       - name: Verify approved base image provenance
-        run: node scripts/verify-container-image-provenance.mjs
+        run: node scripts/verify-container-image-provenance.mjs --ci
 
       - name: Verify OSV runtime boundary
         run: node --test scripts/tests/deployment-audit-registry.test.mjs scripts/tests/deployment-osv-policy.test.mjs scripts/tests/osv-non-runtime-acceptance.test.mjs scripts/tests/dependency-audit-policy.test.mjs scripts/tests/osv-deployment-expiry.test.mjs
@@ -255,7 +255,9 @@ jobs:
 
       - name: Build container for scan
         if: steps.docker-detect.outputs.found == 'true'
-        run: docker build -t deployment-audit:latest -f "${{ steps.docker-detect.outputs.dockerfile }}" "${{ steps.docker-detect.outputs.context }}"
+        run: |
+          node scripts/ci/render-pinned-dockerfiles.mjs "$RUNNER_TEMP"
+          docker build -t deployment-audit:latest -f "$RUNNER_TEMP/frontend.Dockerfile" "${{ steps.docker-detect.outputs.context }}"
 
       - name: Trivy container scan
         if: steps.docker-detect.outputs.found == 'true'
