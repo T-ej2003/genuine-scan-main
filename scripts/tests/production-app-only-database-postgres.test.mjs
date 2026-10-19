@@ -300,7 +300,7 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
             SELECT subscription_name,connection_info_sha256 ~ '^[a-f0-9]{64}$',
               has_column_privilege(current_user,'pg_catalog.pg_subscription','subconninfo','SELECT')
             FROM app_rls.production_security_subscription_inventory_rds_test()
-            WHERE subscription_name='rds_projection_disposable'; RESET ROLE`), "rds_projection_disposable|t|f");
+            WHERE subscription_name='rds_projection_disposable'; RESET ROLE`), "SET\nrds_projection_disposable|t|f\nRESET");
           assert.equal(sql(`SELECT pg_get_function_result('app_rls.production_security_subscription_inventory_rds_test()'::regprocedure)`),
             "TABLE(subscription_name text, subscription_owner text, enabled boolean, \"binary\" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)");
         } finally { sql("ALTER SUBSCRIPTION rds_projection_disposable SET (slot_name = NONE); DROP SUBSCRIPTION rds_projection_disposable"); }
