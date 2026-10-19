@@ -304,6 +304,23 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
           assert.equal(sql(`SELECT pg_get_function_result('app_rls.production_security_subscription_inventory_rds_test()'::regprocedure)`),
             "TABLE(subscription_name text, subscription_owner text, enabled boolean, \"binary\" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)");
         } finally { sql("ALTER SUBSCRIPTION rds_projection_disposable SET (slot_name = NONE); DROP SUBSCRIPTION rds_projection_disposable"); }
+        const rdsRollback = `BEGIN;
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
+              WHERE p.oid='app_rls.production_security_subscription_inventory_rds_test()'::pg_catalog.regprocedure
+                AND owner.rolname='${admin}' AND p.prosecdef AND p.provolatile='s'
+                AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+                AND pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex')='${SUBSCRIPTION_PROJECTION_BODY_SHA256}')
+            THEN RAISE EXCEPTION 'RDS rollback predecessor changed'; END IF;
+          END $$;
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() FROM ${role};
+          DROP FUNCTION app_rls.production_security_subscription_inventory_rds_test();
+          COMMIT;`;
+        assert.throws(() => sql(rdsRollback.replace("COMMIT;", "DO $$ BEGIN RAISE EXCEPTION 'intentional rollback proof'; END $$; COMMIT;")));
+        assert.equal(sql("SELECT to_regprocedure('app_rls.production_security_subscription_inventory_rds_test()') IS NOT NULL"), "t", "failed RDS rollback preserves the exact projection");
+        sql(rdsRollback);
+        assert.equal(sql("SELECT to_regprocedure('app_rls.production_security_subscription_inventory_rds_test()') IS NULL"), "t", "RDS rollback drops only the DBA-owned test projection");
+        assert.equal(sql(`SELECT to_regrole('${subscriptionObserver}') IS NOT NULL`), "t", "RDS rollback never revokes or drops the separate observer contract");
       } finally {
         sql(`DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory_rds_test();
           REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${admin};
