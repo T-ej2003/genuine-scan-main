@@ -86,7 +86,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
       if (!ARN.test(taskDefinitionArn || "")) throw new Error("Pre-deployment inventory registration returned an unreviewed task definition.");
       if (adopted) {
         if (adopted.taskDefinitionArn !== taskDefinitionArn) throw new Error("Completed inventory adoption task definition changed.");
-        return { inventory: adopted.inventory, taskArn: adopted.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${adopted.taskArn}`, evidenceSha256: adopted.inventorySha256, mutationCount: 0 };
+        return { inventory: adopted.inventory, taskArn: adopted.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${adopted.taskArn}`, evidenceSha256: adopted.schemaVersion === 5 ? adopted.stateBoundInventorySha256 : adopted.inventorySha256, mutationCount: 0 };
       }
       const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-broker-"));
       const outputPath = path.join(directory, "broker-response.json");

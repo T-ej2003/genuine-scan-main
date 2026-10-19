@@ -35,7 +35,10 @@ export function assertCompletedInventoryAdoptionPayload(payload, { config, confi
     throw new Error("Completed inventory adoption identity or lifetime is invalid.");
   }
   const identity = createPreDeploymentOperationIdentity({ approvalId: payload.approvalId, releaseSha: payload.sourceSha, imageReleaseSha: payload.imageReleaseSha, rotationId: payload.rotationId, operation: "production-predeployment-rotation-inventory", taskDefinitionArn: payload.taskDefinitionArn, imageDigest: payload.imageDigest });
-  if (payload.operationKey !== preDeploymentOperationKey(identity) || payload.operationIdentitySha256 !== preDeploymentOperationIdentitySha256(identity) || payload.inventorySha256 !== hash(JSON.stringify(payload.inventory)) || !/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/.test(payload.taskArn || "")) throw new Error("Completed inventory adoption operation or result changed.");
+  if (payload.operationKey !== preDeploymentOperationKey(identity) || payload.operationIdentitySha256 !== preDeploymentOperationIdentitySha256(identity)
+      || payload.inventorySha256 !== hash(stateBoundLog ? canonicalJson(payload.inventory) : JSON.stringify(payload.inventory))
+      || (stateBoundLog && payload.stateBoundInventorySha256 !== hash(JSON.stringify(payload.inventory)))
+      || !/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/.test(payload.taskArn || "")) throw new Error("Completed inventory adoption operation or result changed.");
   assertPreDeploymentInventoryResult(payload.inventory);
   return payload;
 }
@@ -77,19 +80,22 @@ export async function buildFreshInventoryAdoptionEvidence({ originalConfig, orig
   const stateBoundSha = continuationConfig.rotationSuccessor?.inventoryEvidenceSha256;
   const receiptInventorySha = hash(JSON.stringify(inventory));
   const distinctStateHash = changedImage && stateBoundSha !== receiptInventorySha;
+  let stateBoundInventory;
   if (distinctStateHash) {
     const message = completionLogEvents?.[0]?.message;
+    if (typeof message === "string") stateBoundInventory = assertPreDeploymentInventoryResult(JSON.parse(message));
     if (!predecessorState || predecessorState.sourceSha !== originalConfig.sourceSha || predecessorState.rotationId !== originalConfig.rotationId
         || predecessorState.phase !== "overlap-deploy-required" || predecessorState.inventoryEvidenceSha256 !== stateBoundSha
         || !Array.isArray(completionLogEvents) || completionLogEvents.length !== 1 || typeof message !== "string"
-        || hash(message) !== stateBoundSha || !Number.isFinite(completionLogEvents[0].timestamp)
+        || hash(message) !== stateBoundSha || hash(JSON.stringify(stateBoundInventory)) !== stateBoundSha
+        || !Number.isFinite(completionLogEvents[0].timestamp)
         || completionLogEvents[0].timestamp > Date.parse(completionReceipt.completedAt)
-        || canonicalJson(assertPreDeploymentInventoryResult(JSON.parse(message))) !== completionReceipt.inventoryJson) throw new Error("State-bound inventory log and durable completion differ.");
+        || canonicalJson(stateBoundInventory) !== completionReceipt.inventoryJson) throw new Error("State-bound inventory log and durable completion differ.");
   }
   const payload = { schemaVersion: distinctStateHash ? 5 : changedImage ? 4 : crossSource ? 3 : 2, purpose: PURPOSE, sourceSha: identity.releaseSha, ...(crossSource ? { continuationSourceSha: continuationConfig.sourceSha, currentApproval } : {}), ...(changedImage ? { continuationImageReleaseSha: continuationConfig.imageReleaseSha, continuationImageDigest: continuationConfig.overlapTaskInput.backendImage } : {}), ...(distinctStateHash ? { stateBoundInventorySha256: stateBoundSha } : {}), imageReleaseSha: identity.imageReleaseSha, rotationId: identity.rotationId,
     approvalId: identity.approvalId, taskDefinitionArn: identity.taskDefinitionArn, imageDigest: identity.imageDigest, originalConfigSha256,
     continuationConfigSha256, operationKey: preDeploymentOperationKey(identity), operationIdentitySha256: preDeploymentOperationIdentitySha256(identity),
-    completionReceiptSha256: receiptSha256, taskArn: completionReceipt.taskArn, inventorySha256: receiptInventorySha, inventory,
+    completionReceiptSha256: receiptSha256, taskArn: completionReceipt.taskArn, inventorySha256: receiptInventorySha, inventory: stateBoundInventory || inventory,
     issuedAt: now.toISOString(), expiresAt: new Date(now.getTime() + 1_800_000).toISOString() };
   assertCompletedInventoryAdoptionPayload(payload, { config: continuationConfig, configSha256: continuationConfigSha256, now });
   const signatureBase64 = await sign({ keyId: STAGE_B.approvalKmsKeyArn, message: Buffer.from(canonicalJson(payload)) });

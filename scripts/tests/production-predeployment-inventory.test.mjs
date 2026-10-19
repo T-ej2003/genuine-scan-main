@@ -16,6 +16,7 @@ import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } fr
 import { authenticatePreparedRotationSuccessor, authenticateRotationSuccessor, signRotationSuccessor } from "../aws/production-rotation-successor.mjs";
 import { validateRuntimeProof } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
+import { produceRuntimeRotationInventory } from "../security/production-runtime-rotation-inventory.mjs";
 
 const sourceSha = "a".repeat(40);
 const imageReleaseSha = "9".repeat(40);
@@ -220,7 +221,8 @@ test("changed-image successor adopts the original inventory without registering 
       assert.equal(result.taskDefinitionArn, brokerTaskDefinitionArn);
     }
     assert.deepEqual(calls, ["kms verify", "kms verify", "ecs describe-task-definition", "kms verify", "kms verify", "ecs describe-task-definition"]);
-    const bridgePayload = { ...payload, schemaVersion: 5, stateBoundInventorySha256: "0".repeat(64) };
+    const bridgePayload = { ...payload, schemaVersion: 5, stateBoundInventorySha256: payload.inventorySha256,
+      inventorySha256: createHash("sha256").update(canonicalJson(inventory)).digest("hex") };
     writeFileSync(file, JSON.stringify({ payload: bridgePayload, signatureBase64: "AA==" }));
     const bridgeAdapter = createProductionPreDeploymentInventoryAdapter({ sourceSha: currentSource, imageReleaseSha: currentSource, imageDigest: currentImage,
       config: { ...runtime, rotationSuccessor: { ...runtime.rotationSuccessor, inventoryEvidenceSha256: bridgePayload.stateBoundInventorySha256 } },
@@ -231,7 +233,9 @@ test("changed-image successor adopts the original inventory without registering 
         if (args[0] === "ecs" && args[1] === "describe-task-definition") return JSON.stringify({ taskDefinition: brokerDefinition() });
         throw new Error(`Unexpected production mutation: ${args[0]} ${args[1]}`);
       } });
-    assert.equal((await bridgeAdapter.run({ rotationId })).mutationCount, 0);
+    const bridged = await produceRuntimeRotationInventory({ execute: () => bridgeAdapter.run({ rotationId }), sourceSha: currentSource, rotationId });
+    assert.equal(bridged.mutationCount, 0);
+    assert.equal(bridged.evidenceSha256, bridgePayload.stateBoundInventorySha256);
     assert.deepEqual(calls.slice(6), ["kms verify", "kms verify", "ecs describe-task-definition"]);
     writeFileSync(file, JSON.stringify({ payload: { ...payload, continuationImageDigest: image }, signatureBase64: "AA==" }));
     await assert.rejects(adapter.run({ rotationId }), /identity or lifetime/);
@@ -1015,6 +1019,7 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
   assert.equal(distinct.payload.schemaVersion, 5);
   assert.equal(distinct.payload.stateBoundInventorySha256, stateBoundInventorySha256);
   assert.equal(distinct.payload.inventorySha256, durableReceipt.inventorySha256);
+  assert.equal(createHash("sha256").update(JSON.stringify(distinct.payload.inventory)).digest("hex"), stateBoundInventorySha256);
   await assert.doesNotReject(authenticateCompletedInventoryAdoptionEvidence(distinct, { config: distinctConfig, configSha256: "8".repeat(64), now: new Date("2026-11-16T10:00:00.000Z"), proveDescendant: ancestry }, async () => true));
   for (const changedInput of [
     { predecessorState: { ...distinctState, rotationId: "wrong-rotation" } },
