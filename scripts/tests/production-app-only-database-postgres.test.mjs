@@ -84,6 +84,21 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};
       REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
+    const liveProjection = JSON.parse(sql(`SELECT pg_catalog.jsonb_build_object(
+      'projection',pg_catalog.jsonb_build_object('arguments',pg_catalog.pg_get_function_identity_arguments(p.oid),
+        'result',pg_catalog.pg_get_function_result(p.oid),'owner',o.rolname,'security_definer',p.prosecdef,
+        'volatility',p.provolatile::text,'config',p.proconfig,'body',p.prosrc,'language',l.lanname,
+        'grants',(SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('role',g.rolname,'privilege',a.privilege_type,'grantable',a.is_grantable)
+          ORDER BY g.rolname,a.privilege_type,a.is_grantable) FROM pg_catalog.aclexplode(p.proacl) a
+          JOIN pg_catalog.pg_roles g ON g.oid=a.grantee)),
+      'properties',pg_catalog.jsonb_build_object('kind',p.prokind::text,'parallel',p.proparallel::text,
+        'leakproof',p.proleakproof,'strict',p.proisstrict))
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles o ON o.oid=p.proowner
+      JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+      WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure`));
+    assert.equal(liveProjection.projection.language, "sql");
+    assert.doesNotThrow(() => printing.authenticateSubscriptionProjection(liveProjection.projection, liveProjection.properties));
+    assert.throws(() => printing.authenticateSubscriptionProjection({ ...liveProjection.projection, language: "plpgsql" }, liveProjection.properties));
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
     await t.test("missing subscription projection returns a bounded failure and never invokes it", async () => {

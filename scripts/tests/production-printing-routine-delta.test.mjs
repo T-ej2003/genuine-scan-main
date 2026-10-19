@@ -33,7 +33,7 @@ test("printing routine collector accepts only the reviewed subscription projecti
   const body = source.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
   assert.ok(body);
   const projection = { arguments: "", result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)',
-    owner: "mscqr_prod_admin", security_definer: true, volatility: "s", config: ["search_path=pg_catalog"], body,
+    owner: "mscqr_prod_admin", language: "sql", security_definer: true, volatility: "s", config: ["search_path=pg_catalog"], body,
     grants: [{ role: "mscqr_prod_admin", privilege: "EXECUTE", grantable: false }, { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false }] };
   const properties = { kind: "f", parallel: "u", leakproof: false, strict: false };
   const rdsState = { observer_absent: true, catalogue_owner: "rdsadmin", admin_superuser: false,
@@ -46,6 +46,9 @@ test("printing routine collector accepts only the reviewed subscription projecti
     grants: projection.grants.map((grant) => grant.role === "mscqr_prod_admin" ? { ...grant, role: "mscqr_prod_subscription_observer" } : grant)
       .sort((a,b) => a.role < b.role ? -1 : a.role > b.role ? 1 : 0) };
   assert.doesNotThrow(() => runtime.authenticateSubscriptionProjection(observer, properties));
+  for (const candidate of [projection, observer]) for (const language of ["plpgsql", "SQL", "Sql", null, undefined]) {
+    assert.throws(() => runtime.authenticateSubscriptionProjection({ ...candidate, language }, properties, candidate === projection ? rdsState : undefined), `Unexpected ${String(language)} language accepted for ${candidate.owner}`);
+  }
   for (const invalid of [
     { owner: "unexpected" }, { body: `${body} ` }, { config: ["search_path=public"] },
     { grants: [...projection.grants, { role: "PUBLIC", privilege: "EXECUTE", grantable: false }] },

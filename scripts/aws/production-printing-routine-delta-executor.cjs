@@ -16,7 +16,7 @@ const subscriptionProjection = Object.freeze({ owners: ["mscqr_prod_subscription
 function authenticateSubscriptionProjection(projection, properties, rdsState) {
   assert.equal(projection.arguments, ""); assert.equal(projection.result, subscriptionProjection.result);
   assert.ok(subscriptionProjection.owners.includes(projection.owner)); assert.equal(projection.security_definer, true);
-  assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
+  assert.equal(projection.language, "sql"); assert.equal(projection.volatility, "s"); assert.deepEqual(projection.config, ["search_path=pg_catalog"]);
   assert.equal(sha256(projection.body), subscriptionProjection.bodySha256);
   assert.deepEqual(properties, { kind: "f", parallel: "u", leakproof: false, strict: false });
   assert.deepEqual(projection.grants, [
