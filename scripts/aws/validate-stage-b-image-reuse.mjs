@@ -33,6 +33,7 @@ const IMAGE_INPUTS = [
   /(^|\/)Dockerfile(?:\.|$)/,
   /(^|\/)(?:\.dockerignore|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml)$/,
   /^backend\//,
+  /^scripts\/aws\/production-app-only-database-verifier\.mjs$/,
   /^shared\//,
   /^scripts\/aws\/(?:production-green-stage-b-contract|publish-ecs-images|verify-image-manifest|stage-b-image-bindings)\./,
   /^scripts\/(?:smoke-release|lib\/staging-smoke-totp)\./,

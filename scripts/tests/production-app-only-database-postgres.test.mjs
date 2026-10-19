@@ -1,11 +1,12 @@
 import { assertDisposablePostgresImage } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
-import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue } from "../aws/production-app-only-database-verifier.mjs";
+import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256 } from "../aws/production-app-only-database-verifier.mjs";
 
 // Deliberately requires the repository's local tmpfs PostgreSQL harness. No
 // DATABASE_URL override, production connection, mock fallback or silent skip.
@@ -16,6 +17,7 @@ const appRole = "mscqr_prd_rls_phase2_app";
 const subscriptionObserver = "mscqr_prod_subscription_observer";
 const requireBackend = createRequire(new URL("../../backend/package.json", import.meta.url));
 const { PrismaClient } = requireBackend("@prisma/client");
+const printing = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 function sql(statement, db = database) {
   return execFileSync("docker", ["exec", "-i", container, "psql", "-X", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-U", "mscqr_p2_test", "-d", db], {
     input: statement, encoding: "utf8", timeout: 15000, stdio: ["pipe", "pipe", "pipe"],
@@ -82,6 +84,21 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${subscriptionObserver};
       REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory() FROM PUBLIC;
       GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory() TO ${role};`);
+    const liveProjection = JSON.parse(sql(`SELECT pg_catalog.jsonb_build_object(
+      'projection',pg_catalog.jsonb_build_object('arguments',pg_catalog.pg_get_function_identity_arguments(p.oid),
+        'result',pg_catalog.pg_get_function_result(p.oid),'owner',o.rolname,'security_definer',p.prosecdef,
+        'volatility',p.provolatile::text,'config',p.proconfig,'body',p.prosrc,'language',l.lanname,
+        'grants',(SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('role',g.rolname,'privilege',a.privilege_type,'grantable',a.is_grantable)
+          ORDER BY g.rolname,a.privilege_type,a.is_grantable) FROM pg_catalog.aclexplode(p.proacl) a
+          JOIN pg_catalog.pg_roles g ON g.oid=a.grantee)),
+      'properties',pg_catalog.jsonb_build_object('kind',p.prokind::text,'parallel',p.proparallel::text,
+        'leakproof',p.proleakproof,'strict',p.proisstrict))
+      FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles o ON o.oid=p.proowner
+      JOIN pg_catalog.pg_language l ON l.oid=p.prolang
+      WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure`));
+    assert.equal(liveProjection.projection.language, "sql");
+    assert.doesNotThrow(() => printing.authenticateSubscriptionProjection(liveProjection.projection, liveProjection.properties));
+    assert.throws(() => printing.authenticateSubscriptionProjection({ ...liveProjection.projection, language: "plpgsql" }, liveProjection.properties));
     const baseline = await collect();
     const required = { ...structuredClone(baseline), contractSha256: "a".repeat(64) };
     await t.test("missing subscription projection returns a bounded failure and never invokes it", async () => {
@@ -268,6 +285,62 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
       ["schema ownership", `ALTER SCHEMA app_auth OWNER TO ${role}`, "ALTER SCHEMA app_auth OWNER TO mscqr_p2_test"],
     ]) await t.test(`restricted identity rejects ${name}`, async () => {
       sql(change); try { await assert.rejects(collect(), /restricted read-only contract/); } finally { sql(restore); }
+    });
+    await t.test("real PostgreSQL 18 non-superuser projects the exact body without a catalogue grant option", async () => {
+      const admin = "mscqr_prod_admin";
+      const source = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-rds-subscription-projection-remediation.sql"), "utf8");
+      const projection = source.match(/CREATE FUNCTION app_rls\.production_security_subscription_inventory\(\)[\s\S]*?\$subscription_inventory\$;/)?.[0];
+      assert.ok(projection);
+      const body = projection.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
+      assert.equal(crypto.createHash("sha256").update(body, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256);
+      const testProjection = projection.replace("production_security_subscription_inventory()", "production_security_subscription_inventory_rds_test()");
+      sql(`CREATE ROLE ${admin} NOLOGIN CREATEROLE;
+        GRANT SELECT ON pg_catalog.pg_subscription TO ${admin};
+        GRANT USAGE, CREATE ON SCHEMA app_rls TO ${admin}`);
+      try {
+        assert.equal(sql(`SELECT has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT')::text,
+          has_column_privilege('${admin}','pg_catalog.pg_subscription','subconninfo','SELECT WITH GRANT OPTION')::text`), "true|false");
+        const db = client();
+        try {
+          const state = await printing.readRdsSubscriptionState(db);
+          assert.equal(state.observer_absent, false, "printing rejects mixed observer and DBA projection state");
+          assert.notEqual(state.catalogue_owner, "rdsadmin", "disposable PostgreSQL does not impersonate RDS catalogue ownership");
+        } finally { await db.$disconnect(); }
+        sql(`SET ROLE ${admin}; ${testProjection}
+          REVOKE ALL ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() FROM PUBLIC;
+          GRANT EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() TO ${role}; RESET ROLE`);
+        sql("CREATE SUBSCRIPTION rds_projection_disposable CONNECTION 'host=127.0.0.1 dbname=unused password=synthetic_fixture_only' PUBLICATION rds_projection_disposable WITH (connect=false, create_slot=false, enabled=false)");
+        try {
+          assert.equal(sql(`SET ROLE ${role};
+            SELECT subscription_name,connection_info_sha256 ~ '^[a-f0-9]{64}$',
+              has_column_privilege(current_user,'pg_catalog.pg_subscription','subconninfo','SELECT')
+            FROM app_rls.production_security_subscription_inventory_rds_test()
+            WHERE subscription_name='rds_projection_disposable'; RESET ROLE`), "SET\nrds_projection_disposable|t|f\nRESET");
+          assert.equal(sql(`SELECT pg_get_function_result('app_rls.production_security_subscription_inventory_rds_test()'::regprocedure)`),
+            "TABLE(subscription_name text, subscription_owner text, enabled boolean, \"binary\" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)");
+        } finally { sql("ALTER SUBSCRIPTION rds_projection_disposable SET (slot_name = NONE); DROP SUBSCRIPTION rds_projection_disposable"); }
+        const rdsRollback = `BEGIN;
+          DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
+              WHERE p.oid='app_rls.production_security_subscription_inventory_rds_test()'::pg_catalog.regprocedure
+                AND owner.rolname='${admin}' AND p.prosecdef AND p.provolatile='s'
+                AND p.proconfig=ARRAY['search_path=pg_catalog']::text[]
+                AND pg_catalog.encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex')='${SUBSCRIPTION_PROJECTION_BODY_SHA256}')
+            THEN RAISE EXCEPTION 'RDS rollback predecessor changed'; END IF;
+          END $$;
+          REVOKE EXECUTE ON FUNCTION app_rls.production_security_subscription_inventory_rds_test() FROM ${role};
+          DROP FUNCTION app_rls.production_security_subscription_inventory_rds_test();
+          COMMIT;`;
+        assert.throws(() => sql(rdsRollback.replace("COMMIT;", "DO $$ BEGIN RAISE EXCEPTION 'intentional rollback proof'; END $$; COMMIT;")));
+        assert.equal(sql("SELECT to_regprocedure('app_rls.production_security_subscription_inventory_rds_test()') IS NOT NULL"), "t", "failed RDS rollback preserves the exact projection");
+        sql(rdsRollback);
+        assert.equal(sql("SELECT to_regprocedure('app_rls.production_security_subscription_inventory_rds_test()') IS NULL"), "t", "RDS rollback drops only the DBA-owned test projection");
+        assert.equal(sql(`SELECT to_regrole('${subscriptionObserver}') IS NOT NULL`), "t", "RDS rollback never revokes or drops the separate observer contract");
+      } finally {
+        sql(`DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory_rds_test();
+          REVOKE USAGE, CREATE ON SCHEMA app_rls FROM ${admin};
+          REVOKE SELECT ON pg_catalog.pg_subscription FROM ${admin}; DROP ROLE ${admin}`);
+      }
     });
   } finally {
     if (createdDb) sql(`DROP DATABASE ${database}`, "mscqr_p2_admin_test");

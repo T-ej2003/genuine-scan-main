@@ -176,8 +176,17 @@ test("PostgreSQL 18 password-auth contract isolates, rotates, and rolls back the
     assert.equal(await psql(env, rotated, ROLE, "SELECT 1;", ["-At"]), "1");
 
     const source = fs.readFileSync(PROVISIONING, "utf8").replaceAll("mscqr_production_rls_green_phase2", "mscqr_production");
-    const rollback = source.match(/^-- Rollback never[^:]+:\s*(.+)$/m)?.[1].split(";").map((statement) => statement.trim()).filter(Boolean).join(";\n") + ";";
+    const marker = "-- Separately approved Phase 4 rollback, both modes, after authenticating the exact installed objects and dependencies:";
+    assert.equal(source.split(marker).length, 2, "Exactly one reviewed rollback block is required");
+    const rollbackLines = source.split(marker)[1].split("\n");
+    const common = rollbackLines.flatMap(line => /^-- ((?:REVOKE|DROP) .+;)\s*$/.exec(line)?.slice(1) || []);
+    const observer = rollbackLines.flatMap(line => /^-- Observer mode only: ((?:REVOKE|DROP) .+;)\s*$/.exec(line)?.slice(1) || []);
+    assert.equal(common.length, 7, "The complete common rollback must be present");
+    assert.equal(observer.length, 2, "The observer-only rollback must be present");
+    const rollback = `BEGIN;\n${[...common, ...observer].join("\n")}\nCOMMIT;`;
     assert.match(rollback, /DROP ROLE IF EXISTS mscqr_prod_rls_canary_read/);
+    await assert.rejects(() => psql(env, admin, "postgres", rollback.replace("COMMIT;", "DO $$ BEGIN RAISE EXCEPTION 'intentional rollback proof'; END $$;\nCOMMIT;")), /subprocess failed/);
+    assert.equal(await psql(env, admin, "postgres", `SELECT to_regprocedure('app_rls.production_security_subscription_inventory()') IS NOT NULL, to_regrole('${ROLE}') IS NOT NULL, to_regrole('mscqr_prod_subscription_observer') IS NOT NULL;`, ["-At", "-F", "'|'"]), "t|t|t", "failed rollback preserves both observer and canary contracts");
     await psql(env, admin, "postgres", rollback);
     assert.equal(await psql(env, admin, "postgres", `SELECT to_regclass('app_rls.production_read_only_canary_control') IS NOT NULL, to_regnamespace('app_rls') IS NOT NULL, (SELECT count(*) FROM app_rls.production_read_only_canary_control);`, ["-At", "-F", "'|'"]), "t|t|2");
     assert.equal(await psql(env, admin, "postgres", `SELECT count(*) FROM pg_roles WHERE rolname='${ROLE}';`, ["-At"]), "0");

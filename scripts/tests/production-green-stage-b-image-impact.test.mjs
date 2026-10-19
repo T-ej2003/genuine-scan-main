@@ -268,6 +268,14 @@ test("rotation evidence schema is canonical tooling-only input", () => {
   assert.equal(report.imageReuseCompatible, true);
 });
 
+test("the backend-copied database verifier requires a fresh image", () => {
+  const file = "scripts/aws/production-app-only-database-verifier.mjs";
+  assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "imageBuildInput", imageAffecting: true });
+  const report = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: [file] });
+  assert.deepEqual(report.imageAffectingFiles, [file]);
+  assert.equal(report.imageReuseCompatible, false);
+});
+
 test("tooling and deployment Compose inputs are image-reuse compatible while unknown paths remain fail-closed", () => {
   const files = [".gitleaks-baseline.json", ".gitleaksignore", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker/nginx-root-entrypoint.sh"];
   for (const file of files) assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "toolingOnly", imageAffecting: false });

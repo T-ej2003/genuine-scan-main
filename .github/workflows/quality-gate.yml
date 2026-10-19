@@ -343,7 +343,7 @@ jobs:
       options: --init --ipc=host
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_DB: mscqr_e2e_admin_test
           POSTGRES_USER: postgres
@@ -356,7 +356,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       redis:
-        image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-
@@ -583,7 +583,7 @@ jobs:
       options: --init --ipc=host
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
         env:
           POSTGRES_DB: mscqr_integration_admin_test
           POSTGRES_USER: postgres
@@ -596,7 +596,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: public.ecr.aws/docker/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
         ports:
           - 6379:6379
         options: >-
@@ -679,7 +679,10 @@ jobs:
 
       - name: Docker verification contract
         run: |
-          node scripts/verify-container-image-provenance.mjs
-          alpine_ref="$(node --input-type=module -e 'import { readApprovedImages } from "./scripts/lib/container-image-identity.mjs"; process.stdout.write(readApprovedImages().alpine.reference)')"
+          node scripts/verify-container-image-provenance.mjs --ci
+          alpine_ref="$(node --input-type=module -e 'import { readApprovedImages, ciImageReference } from "./scripts/lib/container-image-identity.mjs"; process.stdout.write(ciImageReference(readApprovedImages().alpine))')"
           docker image inspect "$alpine_ref" >/dev/null 2>&1 || docker pull "$alpine_ref"
-          npm run verify:ci:docker
+          node scripts/ci/render-pinned-dockerfiles.mjs "$RUNNER_TEMP"
+          docker buildx build --platform linux/amd64 --load --file "$RUNNER_TEMP/frontend.Dockerfile" --build-arg VITE_API_URL=/api --tag "mscqr-frontend-ci:${GITHUB_SHA:-local}" .
+          docker buildx build --platform linux/amd64 --load --file "$RUNNER_TEMP/backend.Dockerfile" --build-arg GIT_SHA="ci-${GITHUB_SHA:-local}" --tag "mscqr-backend-ci:${GITHUB_SHA:-local}" .
+          node --test scripts/tests/root-compose-proxy-runtime.test.mjs scripts/tests/asg-compose-proxy-runtime.test.mjs

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
-import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
+import { CatalogueOperationFailure, collectAppOnlyDatabaseCatalogue, evaluateAppOnlyDatabaseCatalogue, SUBSCRIPTION_PROJECTION_BODY_SHA256, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT, RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
 import { runAppOnlyVerifier } from "../aws/production-app-only-verifier-runtime.mjs";
 
 function fixture() {
@@ -130,21 +130,54 @@ test("subscription projection grant-option drift fails closed before function in
   await assert.rejects(collectAppOnlyDatabaseCatalogue(client), /projection_acl_valid/);
   assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
 });
+test("exact RDS-owned projection is accepted without an observer role or catalogue grant", async () => {
+  const status = { ...structuredClone(RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [] };
+  const calls = []; let read = 0;
+  const responses = successfulResponses(status, fixture().observed);
+  const client = { $transaction: async (fn) => fn({ $executeRawUnsafe: async (sql) => calls.push(sql),
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? [{ rows: [] }]; } }) };
+  await collectAppOnlyDatabaseCatalogue(client);
+  assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"));
+  assert.equal(read, 26);
+});
+for (const [name, change] of [
+  ["mixed observer role", { role_exists: true }], ["unknown owner", { function_owner: "unexpected_owner" }],
+  ["changed body", { function_body_sha256: "0".repeat(64) }], ["changed return type", { function_result: "integer" }],
+  ["changed language", { function_language: "plpgsql" }], ["changed parallel mode", { function_parallel: "s" }],
+  ["leakproof", { function_leakproof: true }], ["strict", { function_strict: true }],
+  ["duplicate ACL entry", { projection_acl_count: 3 }],
+  ["changed search path", { function_search_path: "search_path=public" }],
+  ["extra function configuration", { function_config: ["search_path=pg_catalog", "row_security=off"] }],
+  ["PUBLIC execute", { public_execute: true }], ["unexpected execute", { unexpected_execute_roles: true }],
+  ["direct canary read", { canary_direct_conninfo: true }], ["missing DBA read", { admin_readable_columns: [] }],
+  ["DBA grant option", { admin_conninfo_grantable: true }],
+  ["unexpected catalogue grant", { subscription_conninfo_acl: [{ grantee: "other", grantor: "rdsadmin", privilege: "SELECT", grantable: false }] }],
+]) test(`RDS projection rejects ${name} before execution`, async () => {
+  const status = { ...structuredClone(RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [], ...change };
+  const calls = []; let read = 0;
+  const responses = [[identity()], [{ rows: [] }], [{ rows: [] }], [status]];
+  const client = { $transaction: async (fn) => fn({ $executeRawUnsafe: async () => {},
+    $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++] ?? []; } }) };
+  await assert.rejects(collectAppOnlyDatabaseCatalogue(client), CatalogueOperationFailure);
+  assert.equal(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"), false);
+});
 const identity = () => ({ role: "mscqr_prod_rls_canary_read", session_role: "mscqr_prod_rls_canary_read", database: "mscqr_production_rls_green_phase2",
   server_version_num: 180004, read_only: "on", default_read_only: "on", ...Object.fromEntries(["rolsuper", "rolinherit", "rolcreaterole", "rolcreatedb", "rolreplication", "rolbypassrls", "memberships", "write_privileges", "schema_write", "database_write"].map((key) => [key, false])) });
-test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
-  const calls = [];
-  const { observed } = fixture(); let read = 0;
-  const responses = [[identity()], ...Array.from({ length: 2 }, () => [{ rows: [] }]),
-    [{ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
-      { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
-    ] }],
+function successfulResponses(status, observed) {
+  return [[identity()], ...Array.from({ length: 2 }, () => [{ rows: [] }]), [status],
     [], [{ rows: observed.routines }], [{ rows: observed.routines }], [{ rows: observed.tables }],
     [{ rows: observed.tables.map((row) => ({ schema: "public", ...row })) }],
     ...Array.from({ length: 4 }, () => [{ rows: [] }]), [{ rows: observed.policies }],
     [{ rows: observed.policies.map((row) => ({ schema: "public", ...row })) }], [{ rows: observed.schemas }],
     [{ rows: observed.schemas }], [{ rows: observed.roles }], [{ rows: observed.roles }],
     ...Array.from({ length: 7 }, () => [{ rows: [] }])];
+}
+test("all fixed catalogue statements use one read-only repeatable-read transaction", async () => {
+  const calls = [];
+  const { observed } = fixture(); let read = 0;
+  const responses = successfulResponses({ ...structuredClone(SUBSCRIPTION_PROJECTION_STATUS_CONTRACT), subscription_conninfo_acl: [
+      { grantee: "mscqr_prod_subscription_observer", grantor: "rdsadmin", privilege: "SELECT", grantable: false },
+    ] }, observed);
   const tx = { $executeRawUnsafe: async (sql) => calls.push(sql), $queryRawUnsafe: async (sql) => { calls.push(sql); return responses[read++]; } };
   const client = { $transaction: async (fn, options) => { assert.equal(options.timeout, 30000); return fn(tx); } };
   const result = await collectAppOnlyDatabaseCatalogue(client);
@@ -182,12 +215,12 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(calls.includes("SELECT * FROM app_rls.production_security_subscription_inventory() ORDER BY subscription_name"),
     "the restricted collector invokes only the fixed safe subscription projection");
   const provisioning = fs.readFileSync("documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql", "utf8");
-  assert.ok(provisioning.includes("acl.grantee<>'mscqr_prod_subscription_observer'::pg_catalog.regrole")
+  assert.ok(provisioning.includes("acl.grantee<>pg_catalog.to_regrole('mscqr_prod_subscription_observer')")
     && provisioning.includes("acl.is_grantable"), "provisioning verifies that the observer is the sole non-grantable subconninfo grantee");
   assert.ok(provisioning.includes("s.subskiplsn::text") && provisioning.includes("skip_lsn text")
     && provisioning.includes("DROP FUNCTION IF EXISTS app_rls.production_security_subscription_inventory()"),
   "fixed projection includes subscription skip state and safely replaces its reviewed row type transactionally");
-  assert.ok(provisioning.includes("m.roleid='mscqr_prod_subscription_observer'::pg_catalog.regrole")
+  assert.ok(provisioning.includes("m.roleid=pg_catalog.to_regrole('mscqr_prod_subscription_observer')")
     && provisioning.includes("member.rolname<>current_user") && provisioning.includes("SET TRUE")
     && provisioning.includes("REVOKE mscqr_prod_subscription_observer FROM %I"),
   "provisioning permits only its temporary self SET membership and revokes it before commit");
@@ -195,6 +228,15 @@ test("all fixed catalogue statements use one read-only repeatable-read transacti
   assert.ok(projectionBody, "the source-owned fixed projection definition is present");
   assert.equal(crypto.createHash("sha256").update(projectionBody, "utf8").digest("hex"), SUBSCRIPTION_PROJECTION_BODY_SHA256,
     "the runtime authenticates exactly the reviewed projection body before calling SECURITY DEFINER");
+  const remediation = fs.readFileSync("documents/ops/iam/production-rds-subscription-projection-remediation.sql", "utf8");
+  assert.equal(remediation.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1], projectionBody,
+    "the reviewed RDS subset preserves the exact canonical function body");
+  assert.doesNotMatch(remediation, /GRANT SELECT\s*\(subconninfo\)/i);
+  const preflight = fs.readFileSync("documents/ops/iam/production-rds-subscription-projection-preflight.sql", "utf8");
+  assert.match(preflight, /BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
+  assert.match(preflight, /RDS_SUBSCRIPTION_PREFLIGHT_PASS/);
+  assert.match(preflight, /p\.proname='production_security_subscription_inventory'/);
+  assert.match(remediation, /p\.proname='production_security_subscription_inventory' AND p\.pronargs<>0/);
   assert.ok(calls.some((sql) => sql.includes("FROM pg_catalog.pg_parameter_acl") && sql.includes("a.grantor") && sql.includes("a.is_grantable")), "parameter ACL grants are collected with grantor identity");
   for (const source of ["pg_proc p", "pg_class c", "pg_namespace n", "pg_database d", "pg_default_acl d", "pg_type t"]) {
     const sql = calls.find((query) => query.includes(`FROM pg_catalog.${source}`) && query.includes("aclexplode") && query.includes("grantor.rolname"));

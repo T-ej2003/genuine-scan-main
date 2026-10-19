@@ -23,9 +23,42 @@ import { createAppOnlyRequirements } from "../aws/production-app-only-requiremen
 import { createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
 import { encodeWorkflowDispatchGzip } from "../aws/workflow-dispatch-gzip-transport.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
+import { RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "../aws/production-app-only-database-verifier.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 const stageValues = Object.values(runtime.stages);
+
+test("printing routine collector accepts only the reviewed subscription projection owners", () => {
+  const source = fs.readFileSync("documents/ops/iam/production-rds-subscription-projection-remediation.sql", "utf8");
+  const body = source.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
+  assert.ok(body);
+  const projection = { arguments: "", result: 'TABLE(subscription_name text, subscription_owner text, enabled boolean, "binary" boolean, streaming text, two_phase text, disable_on_error boolean, password_required boolean, run_as_owner boolean, failover boolean, slot_name text, synchronous_commit text, publications text[], origin text, skip_lsn text, relations jsonb, connection_info_sha256 text)',
+    owner: "mscqr_prod_admin", language: "sql", security_definer: true, volatility: "s", config: ["search_path=pg_catalog"], body,
+    grants: [{ role: "mscqr_prod_admin", privilege: "EXECUTE", grantable: false }, { role: "mscqr_prod_rls_canary_read", privilege: "EXECUTE", grantable: false }] };
+  const properties = { kind: "f", parallel: "u", leakproof: false, strict: false };
+  const rdsState = { observer_absent: true, catalogue_owner: "rdsadmin", admin_superuser: false,
+    admin_readable_columns: ["oid","subbinary","subconninfo","subdbid","subdisableonerr","subenabled","subfailover","subname","suborigin","subowner","subpasswordrequired","subpublications","subrunasowner","subskiplsn","subslotname","substream","subsynccommit","subtwophasestate"],
+    admin_conninfo_grantable: false, conninfo_acl_empty: true,
+    canary_direct_conninfo: false, projection_grantors_valid: true };
+  assert.deepEqual(rdsState.admin_readable_columns, RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT.admin_readable_columns);
+  assert.doesNotThrow(() => runtime.authenticateSubscriptionProjection(projection, properties, rdsState));
+  const observer = { ...projection, owner: "mscqr_prod_subscription_observer",
+    grants: projection.grants.map((grant) => grant.role === "mscqr_prod_admin" ? { ...grant, role: "mscqr_prod_subscription_observer" } : grant)
+      .sort((a,b) => a.role < b.role ? -1 : a.role > b.role ? 1 : 0) };
+  assert.doesNotThrow(() => runtime.authenticateSubscriptionProjection(observer, properties));
+  for (const candidate of [projection, observer]) for (const language of ["plpgsql", "SQL", "Sql", null, undefined]) {
+    assert.throws(() => runtime.authenticateSubscriptionProjection({ ...candidate, language }, properties, candidate === projection ? rdsState : undefined), `Unexpected ${String(language)} language accepted for ${candidate.owner}`);
+  }
+  for (const invalid of [
+    { owner: "unexpected" }, { body: `${body} ` }, { config: ["search_path=public"] },
+    { grants: [...projection.grants, { role: "PUBLIC", privilege: "EXECUTE", grantable: false }] },
+  ]) assert.throws(() => runtime.authenticateSubscriptionProjection({ ...projection, ...invalid }, properties));
+  assert.throws(() => runtime.authenticateSubscriptionProjection(projection, properties));
+  for (const [name, value] of Object.entries(rdsState)) {
+    const changed = { ...rdsState, [name]: typeof value === "boolean" ? !value : "unexpected" };
+    assert.throws(() => runtime.authenticateSubscriptionProjection(projection, properties, changed), name);
+  }
+});
 
 const hash = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const identities = Object.keys(EXPECTED_PRINTING_ROUTINE_PREDECESSORS).sort();

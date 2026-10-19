@@ -6,7 +6,7 @@ import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 import { cleanRoomRepoRoot } from "../rls/lib/clean-room-source-contract.mjs";
 import { assertSecurityRebaselineInventory, SECURITY_REBASELINE_COLLECTOR_VERSION } from "./production-security-rebaseline-inventory.mjs";
-import { SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "./production-app-only-database-verifier.mjs";
+import { RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT, SUBSCRIPTION_PROJECTION_STATUS_CONTRACT } from "./production-app-only-database-verifier.mjs";
 
 export const SECURITY_REBASELINE_IMAGE_AUTHORIZATION_PURPOSE = "READ_ONLY_PRODUCTION_SECURITY_REBASELINE";
 export const SECURITY_REBASELINE_SIGNING_KEY_ALIAS = "arn:aws:kms:eu-west-2:368992683803:alias/mscqr-production-security-rebaseline-image-evidence";
@@ -28,7 +28,8 @@ const hashBytes = (value) => crypto.createHash("sha256").update(value).digest("h
 export function productionSubscriptionProjectionContractSha256(repositoryRoot = cleanRoomRepoRoot) {
   const provisioningSqlSha256 = hashBytes(fs.readFileSync(path.join(repositoryRoot, "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql")));
   const verifierSourceSha256 = hashBytes(fs.readFileSync(path.join(repositoryRoot, "scripts/aws/production-app-only-database-verifier.mjs")));
-  return canonicalSha256({ provisioningSqlSha256, verifierSourceSha256, statusContract: SUBSCRIPTION_PROJECTION_STATUS_CONTRACT });
+  return canonicalSha256({ provisioningSqlSha256, verifierSourceSha256,
+    statusContracts: [SUBSCRIPTION_PROJECTION_STATUS_CONTRACT, RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT] });
 }
 
 export function assertSecurityRebaselineSigningEnvironment(value) {
