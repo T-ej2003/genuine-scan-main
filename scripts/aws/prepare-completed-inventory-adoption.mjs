@@ -51,6 +51,10 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
   if (!fresh && !Object.keys(claim).length) throw new Error("Completed inventory replay claim is absent.");
   const completionReceipt = fresh ? fromAws(json(receiptReader, ["dynamodb", "get-item", "--table-name", STAGE_B.replayTable, "--consistent-read", "--key", JSON.stringify({ approvalMode: { S: inventoryCompletionKey(preDeploymentOperationKey(identity)) } })]).Item) : null;
   if (fresh && !Object.keys(completionReceipt).length) throw new Error("Durable inventory completion receipt is absent.");
+  const stateBoundInventorySha256 = continuationConfig.rotationSuccessor?.inventoryEvidenceSha256;
+  const changedImage = crossSource && (originalConfig.imageReleaseSha !== continuationConfig.imageReleaseSha
+    || originalConfig.overlapTaskInput?.backendImage !== continuationConfig.overlapTaskInput?.backendImage);
+  const distinctStateHash = fresh && changedImage && stateBoundInventorySha256 !== completionReceipt.inventorySha256;
   const task = fresh ? null : json(runRead, ["ecs", "describe-tasks", "--cluster", STAGE_B.clusterArn, "--tasks", claim.taskArn, "--include", "TAGS"]).tasks?.[0];
   const definition = fresh ? null : json(runRead, ["ecs", "describe-task-definition", "--task-definition", identity.taskDefinitionArn, "--include", "TAGS"]);
   const stream = fresh ? null : `predeployment-inventory/inventory/${claim.taskArn?.split("/").pop()}`;
@@ -77,8 +81,18 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
           || payload.inventorySha256 !== hash(JSON.stringify(JSON.parse(logs.events[0].message)))) throw new Error("Persisted inventory adoption differs from current readbacks.");
       return { outputPath, expiresAt: payload.expiresAt, operationKey: payload.operationKey, reused: true };
     }
+    if (distinctStateHash && !/^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[A-Za-z0-9_-]+$/.test(completionReceipt.taskArn || "")) throw new Error("Durable inventory task identity is invalid.");
+    if (distinctStateHash) await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: originalConfig, verifySignature });
+    const predecessorState = distinctStateHash ? readBoundStageBPrivateJson({ filePath: continuationConfig.rotationSuccessor.predecessorStateFile,
+      expectedSha256: continuationConfig.rotationSuccessor.predecessorStateSha256, repositoryRoot: root, label: "Original rotation state" }) : null;
+    const completionStream = distinctStateHash ? `predeployment-inventory/inventory/${completionReceipt.taskArn.split("/").pop()}` : null;
+    const completionLogs = distinctStateHash ? json(runRead, ["logs", "get-log-events", "--log-group-name", STAGE_B.inventoryLogGroupName,
+      "--log-stream-name", completionStream, "--start-from-head"]) : null;
+    if (distinctStateHash && (completionLogs.nextBackwardToken === undefined || !Array.isArray(completionLogs.events)
+        || completionLogs.events.length !== 1)) throw new Error("State-bound inventory log readback is incomplete or ambiguous.");
     const evidence = fresh
-      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt, currentApproval, proveDescendant, verifySignature, sign, now })
+      ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt,
+        completionLogEvents: completionLogs?.events, predecessorState, currentApproval, proveDescendant, verifySignature, sign, now })
       : await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign });
     ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root });
     writeStageBPrivateFileExclusive({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`), repositoryRoot: root, label: "Completed inventory adoption evidence" });

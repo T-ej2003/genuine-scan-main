@@ -46,9 +46,9 @@ export async function authenticateRotationSuccessor({ config, configSha256, pred
       || !SHA256.test(predecessorStatusSha256 || "")
       || proveDescendant?.({ ancestorSha: config.completedInventoryPredecessorSourceSha, descendantSha: config.sourceSha }) !== true) throw new Error("Rotation successor source or fixture lineage is invalid.");
   const adopted = await authenticateCompletedInventoryAdoptionEvidence(inventoryEvidence, { config, configSha256, proveDescendant, now }, verifySignature);
-  if (![3, 4].includes(adopted.schemaVersion) || adopted.sourceSha !== config.completedInventoryPredecessorSourceSha
+  if (![3, 4, 5].includes(adopted.schemaVersion) || adopted.sourceSha !== config.completedInventoryPredecessorSourceSha
       || adopted.originalConfigSha256 !== config.rotationSuccessor.predecessorConfigSha256
-      || adopted.inventorySha256 !== config.rotationSuccessor.inventoryEvidenceSha256) throw new Error("Rotation successor inventory completion is not authenticated.");
+      || (adopted.schemaVersion === 5 ? adopted.stateBoundInventorySha256 : adopted.inventorySha256) !== config.rotationSuccessor.inventoryEvidenceSha256) throw new Error("Rotation successor inventory completion is not authenticated.");
   const derived = deriveRotationSuccessorState({ predecessorState, predecessorStateSha256, config });
   const expectedPayload = {
     kind: "PRODUCTION_ROTATION_SOURCE_SUCCESSOR", schemaVersion: 1,
