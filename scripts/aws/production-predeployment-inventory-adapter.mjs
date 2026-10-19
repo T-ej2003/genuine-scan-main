@@ -66,21 +66,27 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
       const completedPath = path.join(path.dirname(config.rotationStateFile || ""), "inventory-completed-adoption-evidence.json");
       if (config.completedInventoryAdoptionRequired === true && !existsSync(completedPath)) throw new Error("Completed inventory adoption proof is required before broker invocation.");
       if (existsSync(completedPath) && !config.inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires its exact existing task definition.");
-      const registered = await getRegisteredTaskDefinition();
-      const taskDefinitionArn = registered.taskDefinitionArn;
-      if (!ARN.test(taskDefinitionArn || "")) throw new Error("Pre-deployment inventory registration returned an unreviewed task definition.");
+      let adopted;
       if (existsSync(completedPath)) {
         const evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: completedPath, label: "Completed inventory adoption evidence" }).bytes);
         const temporary = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-verify-"));
         const messageFile = path.join(temporary, "message");
         try {
-          const payload = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256, proveDescendant }, ({ keyId, message, signature }) => {
+          adopted = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256, proveDescendant }, ({ keyId, message, signature }) => {
             writeFileSync(messageFile, message, { mode: 0o600 });
             return parseJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
           });
-          if (payload.taskDefinitionArn !== taskDefinitionArn) throw new Error("Completed inventory adoption task definition changed.");
-          return { inventory: payload.inventory, taskArn: payload.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${payload.taskArn}`, evidenceSha256: payload.inventorySha256, mutationCount: 0 };
         } finally { rmSync(temporary, { recursive: true, force: true }); }
+      }
+      const registered = adopted?.schemaVersion === 4
+        ? await registerPreDeploymentInventoryTaskDefinition({ input: { ...taskInput, backendImage: adopted.imageDigest, releaseSha: adopted.imageReleaseSha }, existingTaskDefinitionArn: adopted.taskDefinitionArn,
+          describe: async arn => parseJson(run, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition })
+        : await getRegisteredTaskDefinition();
+      const taskDefinitionArn = registered.taskDefinitionArn;
+      if (!ARN.test(taskDefinitionArn || "")) throw new Error("Pre-deployment inventory registration returned an unreviewed task definition.");
+      if (adopted) {
+        if (adopted.taskDefinitionArn !== taskDefinitionArn) throw new Error("Completed inventory adoption task definition changed.");
+        return { inventory: adopted.inventory, taskArn: adopted.taskArn, taskDefinitionArn, sourceSha, rotationId, valid: true, evidenceRef: `predeployment-inventory:${adopted.taskArn}`, evidenceSha256: adopted.inventorySha256, mutationCount: 0 };
       }
       const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-broker-"));
       const outputPath = path.join(directory, "broker-response.json");
