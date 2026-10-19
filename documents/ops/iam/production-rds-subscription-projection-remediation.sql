@@ -44,7 +44,7 @@ BEGIN
   END IF;
   IF pg_catalog.to_regprocedure('app_rls.production_security_subscription_inventory()') IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles owner ON owner.oid=p.proowner
-       WHERE p.oid='app_rls.production_security_subscription_inventory()'::pg_catalog.regprocedure
+       WHERE p.oid=pg_catalog.to_regprocedure('app_rls.production_security_subscription_inventory()')
         AND owner.rolname='mscqr_prod_admin' AND p.prokind='f' AND p.pronargs=0
         AND p.prolang=(SELECT oid FROM pg_catalog.pg_language WHERE lanname='sql')
         AND p.prosecdef AND p.provolatile='s' AND p.proparallel='u' AND NOT p.proleakproof AND NOT p.proisstrict

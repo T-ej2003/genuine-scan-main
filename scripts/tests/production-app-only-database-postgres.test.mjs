@@ -289,6 +289,11 @@ test("real PostgreSQL catalogue and hostile read-only verifier regressions", { t
     await t.test("real PostgreSQL 18 non-superuser projects the exact body without a catalogue grant option", async () => {
       const admin = "mscqr_prod_admin";
       const source = fs.readFileSync(path.join(process.cwd(), "documents/ops/iam/production-rds-subscription-projection-remediation.sql"), "utf8");
+      const guard = source.match(/  IF pg_catalog\.to_regprocedure\('app_rls\.production_security_subscription_inventory\(\)'\) IS NOT NULL[\s\S]*?  END IF;/)?.[0];
+      assert.ok(guard);
+      assert.doesNotThrow(() => sql(`DO $$ BEGIN ${guard.replaceAll("production_security_subscription_inventory()", "production_security_subscription_inventory_missing_test()")} END $$;`),
+        "an absent predecessor must not evaluate a throwing regprocedure cast");
+      assert.throws(() => sql(`DO $$ BEGIN ${guard} END $$;`), "an existing observer-owned predecessor must fail closed");
       const projection = source.match(/CREATE FUNCTION app_rls\.production_security_subscription_inventory\(\)[\s\S]*?\$subscription_inventory\$;/)?.[0];
       assert.ok(projection);
       const body = projection.match(/AS \$subscription_inventory\$(.*?)\$subscription_inventory\$;/s)?.[1];
