@@ -837,7 +837,7 @@ test("signed completed inventory feeds rotation preparation and readiness withou
     assert.equal(result.results.rotationPrepare.prepared, true);
     assert.ok(result.results.readiness);
     assert.equal(result.readyForOnboarding, true);
-    assert.deepEqual(calls, ["ecs describe-task-definition", "kms verify"]);
+    assert.deepEqual(calls, ["kms verify", "ecs describe-task-definition"]);
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
