@@ -1,0 +1,9 @@
+# Rotation inventory two-hash continuation
+
+The rotation coordinator persists the SHA-256 of the validated inventory's `JSON.stringify` bytes. The durable inventory completion receipt persists the SHA-256 of the same inventory after `canonicalJson` key sorting. For rotation `rotation-20260913011819-98b062c4`, those identities are `bcbeb35e…` and `8aa3a687…` respectively. They must remain distinct; neither historical state nor receipt is rewritten.
+
+Changed-image cross-source adoption uses schema 5 only when the hashes differ. Before the independent checker signs it, the existing adoption producer authenticates the exact durable completion receipt and signed historical approval, reads the predecessor state by its configured file hash, and reads the receipt task's exact CloudWatch stream. It requires one bounded event, its raw message hash to match the predecessor state, its validated canonical inventory to match the receipt, and its timestamp to precede completion. The signed adoption binds both hashes, the original operation and task, the current source and immutable image, and the current signed approval. Schema 4 remains the same-hash path.
+
+The rotation successor and cutover inventory adapter authenticate schema 5 through the same signature and approval checks as schema 4. The adapter reads the historical task definition and reports zero inventory mutations. A persisted signed adoption can be reauthenticated after the log-retention window; its durable receipt is independently checked on producer restart. Missing or contradictory evidence fails closed before signing. No new inventory run, ECS registration, or rotation-secret write is part of this correction.
+
+After merge, a fresh protected-main SHA requires its own image and Stage B authorization. The corrected code does not authorize production overlap deployment. Database compatibility, Full-RLS Release Gate, and backend/frontend activation retain their separate gates.

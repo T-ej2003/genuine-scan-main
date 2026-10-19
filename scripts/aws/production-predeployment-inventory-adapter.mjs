@@ -78,7 +78,7 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
           });
         } finally { rmSync(temporary, { recursive: true, force: true }); }
       }
-      const registered = adopted?.schemaVersion === 4
+      const registered = adopted?.schemaVersion >= 4
         ? await registerPreDeploymentInventoryTaskDefinition({ input: { ...taskInput, backendImage: adopted.imageDigest, releaseSha: adopted.imageReleaseSha }, existingTaskDefinitionArn: adopted.taskDefinitionArn,
           describe: async arn => parseJson(run, ["ecs", "describe-task-definition", "--task-definition", arn, "--include", "TAGS"]).taskDefinition })
         : await getRegisteredTaskDefinition();
