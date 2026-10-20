@@ -355,6 +355,7 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   for (const input of ["overlap_run_id", "overlap_run_attempt", "overlap_release_sha", "overlap_rotation_id"]) assert.equal(activationWorkflow.on.workflow_dispatch.inputs[input].required, false);
   assert.equal(activationWorkflow.jobs.activate.permissions.actions, "read");
   assert.equal(activationWorkflow.jobs.activate.permissions.deployments, "read");
+  assert.equal(activationWorkflow.jobs.activate.steps.find(({ name }) => name === "Authenticate coordinated Stage-B and web evidence").env.WORKFLOW_DEFINITION_SHA, "${{ github.sha }}");
   assert.match(serializedActivation, /OVERLAP_RUN_ID.*OVERLAP_RUN_ATTEMPT.*OVERLAP_RELEASE_SHA.*OVERLAP_ROTATION_ID/);
   assert.match(serializedActivation, /git merge-base --is-ancestor.*OVERLAP_RELEASE_SHA/);
   assert.match(serializedActivation, /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
