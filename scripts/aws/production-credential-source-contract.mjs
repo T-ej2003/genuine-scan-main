@@ -117,10 +117,13 @@ export function normalizeProductionAwsCommandArguments(args, region = REGION) {
   return Object.freeze([...args]);
 }
 
-export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false } = {}) {
-  const commandEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, profile, env, region, injected });
+export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false, singleAttemptKmsSign = false } = {}) {
+  if (singleAttemptKmsSign && (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE || profile !== "default")) throw new Error("Single-attempt KMS signing requires the root named profile.");
+  const credentialEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, profile, env, region, injected });
+  const commandEnvironment = singleAttemptKmsSign ? Object.freeze({ ...credentialEnvironment, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" }) : credentialEnvironment;
   return (args) => {
     const command = normalizeProductionAwsCommandArguments(args, region);
+    if (singleAttemptKmsSign && (command[0] !== "kms" || command[1] !== "sign")) throw new Error("Single-attempt runner permits only KMS Sign.");
     return exec("aws", command, { cwd: process.cwd(), env: commandEnvironment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   };
 }

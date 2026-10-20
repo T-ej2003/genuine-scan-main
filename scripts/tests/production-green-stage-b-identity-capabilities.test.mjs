@@ -14,7 +14,7 @@ import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_STATE_IDENTITY_VERSION, stageAS
 import { assertBootstrapOperatorAssumeRoleAuthority, assertBootstrapOperatorVerifierAuthority, assertBootstrapOperatorPolicyAuthorizerAuthority, assertInitialActivationReconcilerAuthority, assertStageBAwsCallCoverage, assertStageBDeploymentCapabilityGraph, buildStageBDeploymentCapabilityGraph, classifyStageARecoveryAwsCliAction, discoverAwsCliActions, isRuntimeMutationAction } from "../aws/generate-production-green-stage-b-capability-graph.mjs";
 import { BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION, LEGACY_BOOTSTRAP_TRANSITION_SECRET_READ_RESOURCES } from "../aws/production-bootstrap-operator-policy-reconciliation.mjs";
 import { assertStageBAdministratorEvidenceIdentity, buildPermissionReportBinding, canonicalizeJson, PERMISSION_REPORT_BINDING_DOMAIN, PERMISSION_REPORT_BINDING_SCHEMA_VERSION, PERMISSION_REPORT_HASH_DOMAIN, PERMISSION_REPORT_SIGNING_ALGORITHM, PERMISSION_REPORT_SIGNING_KEY_ARN, PERMISSION_REPORT_SIGNATURE_SCHEMA_VERSION, runPermissionPreflight, signedPermissionReportBindingSha256, sourcePolicyEvidence, sourceReleaseRoleInlinePolicyEvidence } from "../aws/validate-production-green-stage-b-permissions.mjs";
-import { runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
+import { assertRecoveryAdministratorSigningEnvironment, runProductionPreflightCli } from "../aws/run-production-green-stage-b-preflight.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { buildEcsExecOperatorEvidence } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-checker-chain-contract.mjs";
@@ -23,6 +23,17 @@ import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-auth
 import { imageEvidenceSha256 } from "../aws/production-green-stage-b-image-evidence.mjs";
 
 const caller = "arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test";
+
+test("recovery administrator signing requires the exact workspace and one-attempt retry configuration", () => {
+  assert.doesNotThrow(() => assertRecoveryAdministratorSigningEnvironment({ TF_WORKSPACE: 'default', AWS_MAX_ATTEMPTS: '1' }));
+  assert.doesNotThrow(() => assertRecoveryAdministratorSigningEnvironment({ TF_WORKSPACE: 'default', AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'standard' }));
+  for (const env of [
+    {}, { AWS_MAX_ATTEMPTS: '1' }, { TF_WORKSPACE: 'default' },
+    { TF_WORKSPACE: 'other', AWS_MAX_ATTEMPTS: '1' },
+    { TF_WORKSPACE: 'default', AWS_MAX_ATTEMPTS: '2' },
+    { TF_WORKSPACE: 'default', AWS_MAX_ATTEMPTS: '1', AWS_RETRY_MODE: 'adaptive' },
+  ]) assert.throws(() => assertRecoveryAdministratorSigningEnvironment(env), /requires (?:TF_WORKSPACE|AWS_MAX_ATTEMPTS)/);
+});
 const protectedSourceSha = "73e5908658edadd9f4b2d678adec0affef0dbbac";
 const stageAState = JSON.stringify({ lineage: STAGE_A_EXPECTED_STATE_LINEAGE, serial: 35, resources: [] });
 const shapedPolicyEvidence = () => {

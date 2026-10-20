@@ -4,6 +4,7 @@ import fs from "node:fs";
 import test from "node:test";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { createProductionAwsCommandRunner, createProductionGithubCommandRunner } from "../aws/production-credential-source-contract.mjs";
+import { createRootAttestationKmsSigner } from "../aws/production-root-attestation-signer.mjs";
 import { createProductionBackendFailedRecoveryEvidenceAwsRunner } from "../aws/prepare-production-backend-failed-recovery-evidence.mjs";
 import { createReleaseGateImageAuthorizationRunner } from "../aws/verify-production-release-image-authorization.mjs";
 import { createProductionCutoverRuntimeComposition } from "../aws/production-cutover-runtime-composition.mjs";
@@ -270,6 +271,26 @@ test("root and preflight AWS-only composition pin a named profile instead of inh
   assert.equal(calls[0].options.env.AWS_PROFILE, "default");
   for (const name of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]) assert.equal(calls[0].options.env[name], undefined);
   assertAwsOverridesAbsent({ ...calls[0].options.env, AWS_PROFILE: undefined });
+});
+
+test("root KMS signing uses one AWS CLI attempt without leaking ambient AWS configuration", () => {
+  const calls = [];
+  const run = createProductionAwsCommandRunner({
+    credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "default", singleAttemptKmsSign: true,
+    env: { ...oidc, AWS_MAX_ATTEMPTS: "9", AWS_RETRY_MODE: "adaptive", AWS_ENDPOINT_URL_KMS: "https://hostile.invalid/kms" },
+    exec: (file, args, options) => { calls.push({ file, args, env: options.env }); throw new Error("signing response lost"); },
+  });
+  assert.throws(() => createRootAttestationKmsSigner({ run })({ digest: Buffer.alloc(32) }), /signing response lost/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].file, "aws");
+  assert.deepEqual(calls[0].args.slice(0, 2), ["kms", "sign"]);
+  assert.equal(calls[0].env.AWS_MAX_ATTEMPTS, "1");
+  assert.equal(calls[0].env.AWS_RETRY_MODE, "standard");
+  assert.equal(calls[0].env.AWS_PROFILE, "default");
+  assertAwsOverridesAbsent({ ...calls[0].env, AWS_PROFILE: undefined });
+  assert.throws(() => run(["kms", "verify"]), /permits only KMS Sign/);
+  assert.equal(calls.length, 1);
+  assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env: oidc, singleAttemptKmsSign: true }), /root named profile/);
 });
 
 test("failed-recovery evidence composition pins the root profile instead of inheriting ambient credentials", () => {

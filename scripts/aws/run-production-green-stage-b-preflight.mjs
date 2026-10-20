@@ -141,7 +141,13 @@ function continueReleaseReadiness(argv, { run = (command, args, options) => exec
   return { backendReady: true, stateReady: true, handoffReady: true, tfvarsReady: true, tfvarsSha256: generated.tfvarsSha256, bindingReportSha256: sha256(fs.readFileSync(generated.bindingReportPath)), ...backendMetadata };
 }
 
+export function assertRecoveryAdministratorSigningEnvironment(env = process.env) {
+  if (env.TF_WORKSPACE !== 'default') throw new Error('Recovery administrator signing requires TF_WORKSPACE=default.');
+  if (env.AWS_MAX_ATTEMPTS !== '1' || (env.AWS_RETRY_MODE && env.AWS_RETRY_MODE !== 'standard')) throw new Error('Recovery administrator signing requires AWS_MAX_ATTEMPTS=1 and standard retry mode.');
+}
+
 export function runProductionPreflightCli(argv = process.argv.slice(2), dependencies = {}) {
+  if (argv.includes('--broker-recovery') && value(argv, '--identity') === 'administrator' && !dependencies.sign) assertRecoveryAdministratorSigningEnvironment();
   if (argv.includes('--broker-recovery') && !dependencies.recoveryApproval) {
     return readBrokerRecoveryApproval({ filePath: value(argv, '--broker-recovery'), expectedSha256: value(argv, '--broker-recovery-sha256') })
       .then(recoveryApproval => runProductionPreflightCli(argv, { ...dependencies, recoveryApproval }));
@@ -159,7 +165,9 @@ export function runProductionPreflightCli(argv = process.argv.slice(2), dependen
   const collectPolicies = dependencies.collectPolicies || (() => collectLiveReleasePolicyEvidence({ run: commandRun }));
   const collectEcsExecOperatorEvidence = dependencies.collectEcsExecOperatorEvidence || (() => collectLiveEcsExecOperatorEvidence({ run: commandRun }));
   const permissionPreflight = dependencies.permissionPreflight || runPermissionPreflight;
-  const sign = dependencies.sign || createPermissionReportKmsSigner({ run: commandRun });
+  const sign = dependencies.sign || createPermissionReportKmsSigner({ run: identity === 'administrator' && recoveryApproval
+    ? createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: 'default', singleAttemptKmsSign: true })
+    : commandRun });
   const verify = dependencies.verify;
   const verifyImageEvidence = dependencies.verifyImageEvidence;
   const releasePreflight = dependencies.releasePreflight || runReleaseReadPreflight;
