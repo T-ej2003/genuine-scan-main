@@ -18,6 +18,7 @@ import { runProductionCutoverControlPlane } from "../aws/production-cutover-cont
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
 import { productionStageAIngress, productionStageAState, STAGE_A_LINEAGE, STAGE_A_STATE_OBJECT } from "./fixtures/production-stage-a-state.mjs";
 import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
+import { authenticatePreparedSuccessorBindingOrigin } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 import { assertProductionStaleSupersessionPredecessor, productionStaleSupersessionPredecessorIdentity } from "../security/production-initial-migration-source-advance.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
@@ -1738,6 +1739,26 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
     assert.equal(store.get(currentNames.qrPublic).value.keyVersion, store.get(INITIAL_DUAL_SLOT_NAMES.qrCurrentVersion).value.value);
     assert.equal(store.get(INITIAL_DUAL_SLOT_NAMES.qrPublicPrevious).value.keyVersion, store.get(INITIAL_DUAL_SLOT_NAMES.qrPreviousVersion).value.value);
     const writesAfterPrepare = sender.writes;
+    const originalConfigPath = path.join(directory, "archived-config.json");
+    const archived = { ...config, releaseProfile: "mscqr-production-release-deployer", rotationConfigFile: originalConfigPath, rotationStateFile: stateFile, rotationFixtureFile: context.values.get("fixture-file") };
+    const successor = { predecessorConfigFile: originalConfigPath, predecessorConfigSha256: "a".repeat(64), predecessorStateFile: stateFile, predecessorFixtureFile: archived.rotationFixtureFile };
+    let statusReads = 0;
+    const originInput = { bindings: binding.bindings, originalConfig: archived, originalConfigPath, originalConfigSha256: successor.predecessorConfigSha256,
+      originalState: state, originalStatePath: stateFile, originalFixturePath: archived.rotationFixtureFile, rotationSuccessor: successor,
+      proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === protectedSource && descendantSha === currentProtectedDescendant,
+      readPreparedStatus: () => { statusReads++; return "b".repeat(64); } };
+    assert.equal(authenticatePreparedSuccessorBindingOrigin(originInput).bindingSha256, origin.bindingSha256);
+    assert.equal(statusReads, 1);
+    for (const changed of [
+      { bindings: { ...binding.bindings, rotationId: "rotation-unrelated" } },
+      { bindings: { ...binding.bindings, jwt: { ...binding.bindings.jwt, pendingSecretId: arn("unrelated-pending") } } },
+      { originalConfig: { ...archived, staleSupersessionBindingOrigin: { ...archived.staleSupersessionBindingOrigin, originSha256: "0".repeat(64) } } },
+      { originalConfig: { ...archived, jwt: { ...archived.jwt, pendingSecretId: arn("unrelated-pending") } } },
+      { originalState: { ...state, phase: "prepared" } },
+      { proveDescendant: () => false },
+      { readPreparedStatus: () => { throw new Error("live state drift"); } },
+    ]) assert.throws(() => authenticatePreparedSuccessorBindingOrigin({ ...originInput, ...changed }));
+    assert.equal(sender.writes, writesAfterPrepare);
     await prepare(context);
     assert.equal(sender.writes, writesAfterPrepare);
     const rawState = readFileSync(stateFile);
