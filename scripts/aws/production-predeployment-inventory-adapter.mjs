@@ -5,7 +5,7 @@ import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { registerPreDeploymentInventoryTaskDefinition } from "./production-predeployment-inventory-task.mjs";
 import { canonicalBackendDatabaseSecretReference } from "./production-overlap-task-definition.mjs";
-import { authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const ARN = /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/mscqr-production-rls-green-predeployment-inventory:[1-9][0-9]*$/;
@@ -73,8 +73,9 @@ export function createProductionPreDeploymentInventoryAdapter({ run, sourceSha, 
         const messageFile = path.join(temporary, "message");
         try {
           adopted = await authenticateCompletedInventoryAdoptionEvidence(evidence, { config, configSha256: runtimeConfigSha256, proveDescendant }, ({ keyId, message, signature }) => {
-            writeFileSync(messageFile, message, { mode: 0o600 });
-            return parseJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+            const input = kmsAdoptionMessage(message);
+            writeFileSync(messageFile, input.bytes, { mode: 0o600 });
+            return parseJson(run, ["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", input.type, "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
           });
         } finally { rmSync(temporary, { recursive: true, force: true }); }
       }

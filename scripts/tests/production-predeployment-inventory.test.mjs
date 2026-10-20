@@ -9,7 +9,7 @@ import { assertPreDeploymentInventoryResult, assertPreDeploymentReplayRow, compl
 import { assertPreDeploymentInventoryTaskDefinition, buildPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAG } from "../aws/production-predeployment-inventory-task.mjs";
 import { assertBoundedRotationInventory, ROTATION_INVENTORY_CATEGORIES } from "../security/production-runtime-rotation-inventory.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PREDECESSOR, STAGE_B, STAGE_B_APPROVAL_ALGORITHM, STAGE_B_MODES, STAGE_B_TASK_TEMPLATE_KEYS, stageBApprovalIdForReleaseSha } from "../aws/production-green-stage-b-contract.mjs";
-import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence } from "../aws/production-completed-inventory-adoption.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence, kmsAdoptionMessage } from "../aws/production-completed-inventory-adoption.mjs";
 import { prepareCompletedInventoryAdoption } from "../aws/prepare-completed-inventory-adoption.mjs";
 import { prepareProductionRotationSuccessor } from "../aws/prepare-production-rotation-successor.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-credential-source-contract.mjs";
@@ -55,6 +55,15 @@ const ecsDefaultedReadback = (definition) => ({
   volumes: [],
 });
 const reorderObjectKeys = (value) => Array.isArray(value) ? value.map(reorderObjectKeys) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reorderObjectKeys(child)])) : value;
+test("inventory adoption KMS transport preserves RAW signatures and digests oversized canonical messages", () => {
+  const raw = Buffer.alloc(4096, 0x61);
+  assert.deepEqual(kmsAdoptionMessage(raw), { bytes: raw, type: "RAW" });
+  const oversized = Buffer.concat([raw, Buffer.from("b")]);
+  assert.deepEqual(kmsAdoptionMessage(oversized), { bytes: createHash("sha256").update(oversized).digest(), type: "DIGEST" });
+  assert.notDeepEqual(kmsAdoptionMessage(Buffer.concat([raw, Buffer.from("c")])).bytes, kmsAdoptionMessage(oversized).bytes);
+  assert.throws(() => kmsAdoptionMessage(Buffer.alloc(0)), /nonempty bytes/);
+  assert.throws(() => kmsAdoptionMessage("not bytes"), /nonempty bytes/);
+});
 const brokerConfig = {
   ...config,
   clusterArn: STAGE_B.clusterArn,
@@ -1013,10 +1022,13 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
   const distinctConfig = { ...imageChangedConfig, rotationSuccessor: { ...imageChangedConfig.rotationSuccessor, inventoryEvidenceSha256: stateBoundInventorySha256 } };
   const stateBoundLog = [{ timestamp: Date.parse(durableReceipt.completedAt) - 1, message: rawInventory }];
   const distinctState = { sourceSha, rotationId, phase: "overlap-deploy-required", inventoryEvidenceSha256: stateBoundInventorySha256 };
+  const signedMessageTypes = [];
   const distinct = await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: "7".repeat(64), continuationConfig: distinctConfig,
     continuationConfigSha256: "8".repeat(64), completionReceipt: durableReceipt, completionLogEvents: stateBoundLog, predecessorState: distinctState,
-    currentApproval: imageChangedApproval, proveDescendant: ancestry, now: new Date("2026-11-16T10:00:00.000Z"), verifySignature: async () => true, sign: async () => "AA==" });
+    currentApproval: imageChangedApproval, proveDescendant: ancestry, now: new Date("2026-11-16T10:00:00.000Z"), verifySignature: async () => true,
+    sign: async ({ message }) => { signedMessageTypes.push(kmsAdoptionMessage(message).type); return "AA=="; } });
   assert.equal(distinct.payload.schemaVersion, 5);
+  assert.deepEqual(signedMessageTypes, ["DIGEST"]);
   assert.equal(distinct.payload.stateBoundInventorySha256, stateBoundInventorySha256);
   assert.equal(distinct.payload.inventorySha256, durableReceipt.inventorySha256);
   assert.equal(createHash("sha256").update(JSON.stringify(distinct.payload.inventory)).digest("hex"), stateBoundInventorySha256);

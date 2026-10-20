@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, authenticateFreshInventoryCompletionReceipt, buildCompletedInventoryAdoptionEvidence, buildFreshInventoryAdoptionEvidence, kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { preDeploymentOperationKey, createPreDeploymentOperationIdentity, inventoryCompletionKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
@@ -68,8 +68,14 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
   const messageFile = path.join(temporary, "message");
   const message = value => { fs.writeFileSync(messageFile, value, { mode: 0o600 }); return `fileb://${messageFile}`; };
   try {
-    const verifySignature = ({ keyId, message: bytes, signature }) => json(receiptReader, ["kms", "verify", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
-    const sign = ({ keyId, message: bytes }) => json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
+    const verifySignature = ({ keyId, message: bytes, signature }) => {
+      const input = kmsAdoptionMessage(bytes);
+      return json(receiptReader, ["kms", "verify", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+    };
+    const sign = ({ keyId, message: bytes }) => {
+      const input = kmsAdoptionMessage(bytes);
+      return json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
+    };
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {
       const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
