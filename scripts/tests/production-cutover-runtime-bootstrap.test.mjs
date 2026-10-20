@@ -785,6 +785,29 @@ test("source-advance bridge anchors legacy-current bindings to the live task def
   assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, rotationBindings: changedSeven }), /resources do not match/);
 });
 
+test("completed overlap accepts only its authenticated old-to-new QR version transition", () => {
+  const originalSourceSha = "5".repeat(40);
+  const rotationId = "rotation-source-advance";
+  const rotationBindings = { ...bindings, sourceSha: originalSourceSha, rotationId, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion } };
+  const preparedRotationState = { sourceSha: originalSourceSha, rotationId, phase: "overlap-deploy-required", qr: { oldKeyVersion: bindings.qr.previousKeyVersion, newKeyVersion: "qr-v2" } };
+  const input = { currentSourceSha: sourceSha, rotationBindings, supersessionEvidence: sourceAdvanceEvidence(originalSourceSha, rotationId, rotationBindings),
+    liveLegacyBaseline: { ...rotationBindings.legacy, qrCurrentVersion: "qr-v2" }, preparedRotationState,
+    preparedRotationOrigin: verifyInitialBindingOrigin({ bindings: rotationBindings }), predecessorSourceSha: originalSourceSha,
+    proveDescendant: () => true, verifyInitialBindingOrigin };
+  assert.equal(buildInitialMigrationSourceAdvance(input).currentSourceSha, sourceSha);
+  for (const change of [
+    { preparedRotationState: undefined },
+    { preparedRotationState: { ...preparedRotationState, phase: "prepared" } },
+    { preparedRotationState: { ...preparedRotationState, rotationId: "rotation-other" } },
+    { preparedRotationState: { ...preparedRotationState, sourceSha: sourceSha } },
+    { preparedRotationState: { ...preparedRotationState, qr: { ...preparedRotationState.qr, oldKeyVersion: "qr-other" } } },
+    { preparedRotationState: { ...preparedRotationState, qr: { ...preparedRotationState.qr, newKeyVersion: "qr-other" } } },
+    { preparedRotationOrigin: { ...input.preparedRotationOrigin, bindingSha256: "0".repeat(64) } },
+    { liveLegacyBaseline: { ...input.liveLegacyBaseline, jwtCurrent: secretArn("mscqr/prod/other-AbCd12") } },
+    { liveLegacyBaseline: { ...input.liveLegacyBaseline, qrCurrentVersion: "qr-other" } },
+  ]) assert.throws(() => buildInitialMigrationSourceAdvance({ ...input, ...change }));
+});
+
 test("same-source runtime binding still authenticates the live legacy baseline", () => {
   const liveLegacyBaseline = { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion };
   assert.equal(buildInitialMigrationSourceAdvance({ currentSourceSha: sourceSha, rotationBindings: bindings, liveLegacyBaseline, verifyInitialBindingOrigin }), undefined);
@@ -1364,7 +1387,7 @@ test("LIVE_QR_VERSION_BINDING rejects an operator value that differs from live p
     input.rotationBindings = { ...bindings, qr: { ...bindings.qr, previousKeyVersion: "qr-v0" } };
     const result = prepareProductionCutoverRuntime(input);
     assert.equal(result.readyToConsumeMfa, false);
-    assert.match(result.blockers.join("\n"), /must equal the live QR_SIGN_ACTIVE_KEY_VERSION|authenticated live legacy/);
+    assert.match(result.blockers.join("\n"), /must equal the live QR_SIGN_ACTIVE_KEY_VERSION|authenticated live legacy|Prepared rotation QR version transition is not authenticated/);
   } finally {
     rmSync(path.join(process.cwd(), "documents/ops/iam/MSCQRProductionGreenStageBArtifactSigningBindings.runtime.json"), { force: true });
     rmSync(directory, { recursive: true, force: true });
