@@ -62,10 +62,11 @@ export function readProductionOverlapDeploymentReceipt({ filePath, receiptSha256
   return assertProductionOverlapDeploymentReceipt(readBoundStageBPrivateJson({ filePath: path.resolve(filePath), expectedSha256: receiptSha256, repositoryRoot, label: "Overlap deployment receipt" }), expected);
 }
 
-export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, brokerRecoveryApproval, run } = {}) {
+export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workflowRunAttempt, sourceSha, brokerRecoveryApproval, executionSourceSha, run } = {}) {
   if (!RUN.test(String(workflowRunId || "")) || !RUN.test(String(workflowRunAttempt || "")) || typeof run !== "function") throw new Error("Overlap deployment workflow identity is invalid.");
   if (!SHA40.test(sourceSha || "")) throw new Error("Overlap receipt release source is invalid.");
   if (brokerRecoveryApproval && (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.sourceSha !== sourceSha)) throw new Error("Overlap receipt recovery identity is unauthenticated.");
+  if (executionSourceSha && (brokerRecoveryApproval || !SHA40.test(executionSourceSha) || executionSourceSha === sourceSha)) throw new Error("Overlap receipt execution source is invalid.");
   const json = (args) => JSON.parse(run("gh", args));
   const pages = (endpoint, field) => {
     const value = json(["api", endpoint, "--paginate", "--slurp"]);
@@ -74,7 +75,9 @@ export function resolveProductionOverlapDeploymentReceipt({ workflowRunId, workf
   };
   const workflow = json(["api", `repos/${OVERLAP_DEPLOYMENT_RECEIPT.repository}/actions/runs/${workflowRunId}`]);
   const workflowSourceSha = workflow.head_sha;
-  if (brokerRecoveryApproval) {
+  if (executionSourceSha) {
+    if (workflowSourceSha !== executionSourceSha) throw new Error("Overlap deployment workflow differs from the exact protected execution source.");
+  } else if (brokerRecoveryApproval) {
     try { authenticateBrokerRecoveryExecutionSource(brokerRecoveryApproval, workflowSourceSha); }
     catch { throw new Error("Overlap deployment workflow is not the exact completed protected-main recovery run."); }
   } else if (workflowSourceSha !== sourceSha) throw new Error("Overlap deployment workflow is not the exact completed protected-main run.");

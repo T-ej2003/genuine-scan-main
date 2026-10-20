@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import {
@@ -32,8 +33,14 @@ import {
 import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { readFreshProtectedMainIdentity } from "../aws/stage-b-deployment-identity.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { recoveryApprovalFixture } from "./fixtures/staged-broker-runtime.mjs";
 
 const sourceSha = "96a4be6f0edcd626285c6a1bd8062a4008175d25";
+
+test("historical authorization leaves the broker and release module graph acyclic", () => {
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", "await import('./scripts/aws/stage-b-staged-broker-executor.mjs'); await import('./scripts/aws/production-cutover-runtime-bootstrap.mjs')"], { cwd: path.resolve(import.meta.dirname, "../.."), encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+});
 const imageReleaseSha = "594bab55f23ff8b2438c12b85b149ba0aebeed1e";
 const workflowRunId = "31582010244";
 const observedAt = "2026-08-12T10:00:00.000Z";
@@ -121,6 +128,56 @@ function produce(overrides = {}) {
     verifyImageEvidence: overrides.verifyImageEvidence || verifyImageEvidence,
   });
 }
+
+test("authenticated historical broker recovery refreshes original-release image authorization under descendant tooling", async () => {
+  const toolingSha = "a152743cc741601758f1402dc4b45b26a8a0f880";
+  const { context } = await recoveryApprovalFixture({ sourceSha, imageReleaseSha, tooling: { sourceSha: toolingSha, treeSha256: "c".repeat(64) } });
+  const input = {
+    sourceSha,
+    freshProtectedMain: { fetchSucceeded: true, headSha: toolingSha, freshRemoteMainSha: toolingSha },
+    imageEvidence,
+    imageEvidenceSignature,
+    imageReuseEvidence,
+    brokerRecoveryApproval: context,
+    now: observedAt,
+    verifyImageEvidence,
+  };
+  const authorization = createImageAuthorization(input);
+  assert.equal(authorization.sourceSha, sourceSha);
+  assert.doesNotThrow(() => assertImageAuthorization(authorization, sourceSha, { now: observedAt, verifyImageEvidence }));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-historical-image-authorization-"));
+  try {
+    fs.chmodSync(directory, 0o700);
+    const write = (name, value) => {
+      const target = path.join(directory, name);
+      fs.writeFileSync(target, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+      return target;
+    };
+    const output = path.join(directory, "authorization.json");
+    runCli([
+      "--source-sha", sourceSha,
+      "--broker-recovery", path.join(directory, "recovery.json"),
+      "--broker-recovery-sha256", "a".repeat(64),
+      "--image-evidence", write("evidence.json", imageEvidence),
+      "--image-signature", write("signature.json", imageEvidenceSignature),
+      "--image-reuse-evidence", write("reuse.json", imageReuseEvidence),
+      "--output", output,
+    ], { brokerRecoveryApproval: context, freshProtectedMain: input.freshProtectedMain, now: observedAt, verifyImageEvidence });
+    assert.doesNotThrow(() => assertImageAuthorization(JSON.parse(fs.readFileSync(output, "utf8")), sourceSha, { now: observedAt, verifyImageEvidence }));
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+  for (const changed of [
+    { brokerRecoveryApproval: structuredClone(context) },
+    { brokerRecoveryApproval: { ...context, sourceSha: imageReleaseSha } },
+    { freshProtectedMain: { fetchSucceeded: true, headSha: sourceSha, freshRemoteMainSha: sourceSha } },
+    { freshProtectedMain: { fetchSucceeded: true, headSha: toolingSha, freshRemoteMainSha: sourceSha } },
+    { sourceSha: toolingSha },
+  ]) assert.throws(() => createImageAuthorization({ ...input, ...changed }));
+  assert.throws(() => createImageAuthorization({ ...input, brokerRecoveryApproval: undefined }), /protected main/);
+  assert.throws(() => assertImageAuthorization(authorization, toolingSha, { now: observedAt, verifyImageEvidence }), /source SHA/);
+  assert.throws(() => createImageAuthorization({ ...input, now: "2026-08-13T10:01:00.000Z" }), /stale/);
+});
 
 const freshSourceSha = "94da9651eb9427603be87abe89f89111412755c9";
 const freshImageReleaseSha = freshSourceSha;
