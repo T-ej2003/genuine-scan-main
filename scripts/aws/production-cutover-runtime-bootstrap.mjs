@@ -27,7 +27,7 @@ import { assertBindingsMatchLegacyBaseline, deriveLegacyRotationBaseline } from 
 import { assertQrVersionResolutionCurrent, assertQrVersionResolutionEvidence } from "./production-qr-version-selector-resolution.mjs";
 import { assertPreDeploymentInventoryTaskDefinitionArn } from "./production-predeployment-inventory-task.mjs";
 import { authenticateReleasePreflightCheckerTrustEvidence } from "./production-release-preflight-checker-attestation.mjs";
-import { readOriginalRotationStatus } from "./production-rotation-successor.mjs";
+import { authenticatePreparedRebaselinePostWrite, readOriginalRotationStatus } from "./production-rotation-successor.mjs";
 import { parseEcsSecretsManagerReference } from "./production-ecs-runtime-dependencies.mjs";
 import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
 import { assertPartialRebaselineRecoveryAuthorization, assertProductionDualSlotRebaselineAuthorization, assertRebaselineRotationBindings, BASELINE_COMPLETE, PRODUCTION_DUAL_SLOT_REBASELINE, REBASELINE_ROTATION_BINDINGS_KIND, REBASELINE_ROTATION_BINDINGS_PRODUCER } from "./production-dual-slot-rebaseline-contract.mjs";
@@ -407,6 +407,7 @@ export function prepareProductionCutoverRuntime({
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
     let rotationSuccessor;
     let preparedOrigin;
+    let preparedRebaselinePostWrite;
     if (rotationSuccessorStateFile) {
       const originalConfig = readInputFile(rotationSuccessorOriginalConfigFile, repositoryRoot, "Original rotation config");
       const originalState = readInputFile(rotationSuccessorStateFile, repositoryRoot, "Original rotation state");
@@ -425,6 +426,16 @@ export function prepareProductionCutoverRuntime({
           originalConfigSha256: originalConfig.sha256, originalState: originalState.value,
           originalStatePath: originalState.path, originalFixturePath: originalFixture.path, rotationSuccessor,
           repositoryRoot, proveDescendant: proveSourceAdvance, readPreparedStatus: readPreparedRotationStatus, verifyInitialBindingOrigin });
+      } else if (rotationBindings.kind === REBASELINE_ROTATION_BINDINGS_KIND) {
+        preparedRebaselinePostWrite = authenticatePreparedRebaselinePostWrite({
+          config: { releaseProfile: originalConfig.value.releaseProfile, rotationSuccessor, jwt: rotationBindings.jwt, qr: rotationBindings.qr,
+            livePostWriteSha256: originalConfig.value.livePostWriteSha256,
+            rebaselineRuntime: { bindings: rotationBindings, authorization: rebaselineAuthorization, authorizationCoordinates: rebaselineAuthorizationCoordinates,
+              recoveryEnvelope, originalPreparation, imageAuthorization: originalConfig.value.rebaselineRuntime?.imageAuthorization,
+              runtimeVariant: recoveryEnvelope ? "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" : "ORDINARY_REBASELINE_RUNTIME" } },
+          predecessorConfig: originalConfig.value, predecessorState: originalState.value, repositoryRoot,
+          readStatus: readPreparedRotationStatus,
+        });
       }
     }
     if (!imageAuthorization?.filePath) throw new Error("image authorization evidence file is required.");
@@ -509,6 +520,7 @@ export function prepareProductionCutoverRuntime({
     const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
     const { baseUrl, currentKeyVersion } = deriveRuntimeMetadata(taskDefinition, { legacyBaseline: liveLegacyBaseline });
     const bindingOrigin = preparedOrigin ? () => preparedOrigin : verifyInitialBindingOrigin;
+    const rebaselinePostWrite = preparedRebaselinePostWrite ? () => preparedRebaselinePostWrite : verifyRebaselineLivePostWrite;
     const initialMigrationSourceAdvance = buildInitialMigrationSourceAdvance({
       currentSourceSha: protectedSha,
       rotationBindings,
@@ -517,13 +529,13 @@ export function prepareProductionCutoverRuntime({
       originalPreparation,
       supersessionEvidence: rotationSupersessionEvidence,
       liveLegacyBaseline,
-      verifyRebaselineLivePostWrite,
+      verifyRebaselineLivePostWrite: rebaselinePostWrite,
       verifyInitialBindingOrigin: bindingOrigin,
       proveDescendant: proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
         try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
       }),
     });
-    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin: bindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), schemaVersion: 2, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
+    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite: rebaselinePostWrite, verifyInitialBindingOrigin: bindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), schemaVersion: 2, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
     assertRootDropEvidence(rootDrop.value, {
       sourceSha: protectedSha,
       rotationId: approvalConfig.rotationId,

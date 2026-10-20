@@ -50,6 +50,7 @@ import { signPermissionReport } from "../aws/validate-production-green-stage-b-p
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
 import { assertInitialBindingSchemaClosed, assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
+import { authenticatePreparedRebaselinePostWrite } from "../aws/production-rotation-successor.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildPartialRebaselineRecoveryCompletion, buildPartialRebaselineRecoveryRotationBindings, createPartialRebaselineRecoveryAuthorization, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, assertPartialRebaselineRecoveryAuthorization } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
@@ -1879,6 +1880,16 @@ test("REAL successor-recovery runtime path preserves recovery context through ad
     assert.equal(result.config.rebaselineRuntime.runtimeVariant, "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME");
     assert.equal(result.config.rebaselineRuntime.recoveryEnvelope.recoverySha256, envelope.recoverySha256);
     assert.equal(result.config.rebaselineRuntime.originalPreparation.preparationSha256, originalPreparation.preparationSha256);
+    const successor = { ...result.config, sourceSha: "f".repeat(40), rotationSuccessor: { predecessorSourceSha: recoverySource,
+      predecessorConfigFile: result.config.rotationConfigFile, predecessorConfigSha256: "a".repeat(64),
+      predecessorStateFile: result.config.rotationStateFile, predecessorStateSha256: "b".repeat(64),
+      predecessorFixtureFile: result.config.rotationFixtureFile, predecessorFixtureSha256: "d".repeat(64) } };
+    const preparedState = { sourceSha: recoverySource, rotationId: envelope.rotationId, phase: "overlap-deploy-required" };
+    const preparedInput = { config: successor, predecessorConfig: result.config, predecessorState: preparedState, readStatus: () => "c".repeat(64) };
+    assert.equal(authenticatePreparedRebaselinePostWrite(preparedInput).livePostWriteSha256, result.config.livePostWriteSha256);
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...preparedInput, predecessorState: { ...preparedState, rotationId: "rotation-wrong" } }));
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...preparedInput, config: { ...successor, rebaselineRuntime: { ...successor.rebaselineRuntime, authorization: { ...authorization, authorizationSha256: "0".repeat(64) } } } }));
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...preparedInput, readStatus: () => { throw new Error("live state drift"); } }));
     assert.doesNotThrow(() => assertPartialRebaselineRecoveryAuthorization(result.config.rebaselineRuntime.authorization, { sourceSha: recoverySource, recoveryEnvelope: envelope, imageAuthorization: imageFixture.authorization, imageAuthorizationValidation: { now: imageFixture.now, verifyImageEvidence: imageFixture.verifyImageEvidence }, proveDescendant }));
     assert.equal(JSON.parse(readFileSync(result.configPath, "utf8")).rebaselineRuntime.runtimeVariant, "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME");
     const runtimeConfigSha = (config) => createHash("sha256").update(`${JSON.stringify(config, null, 2)}\n`).digest("hex");

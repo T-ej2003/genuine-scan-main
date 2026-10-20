@@ -16,6 +16,7 @@ import {
 import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId, assertProductionInitialMigrationSourceAdvance } from "../security/production-initial-migration-source-advance.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildProductionRotationConfig } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { authenticatePreparedRebaselinePostWrite } from "../aws/production-rotation-successor.mjs";
 import { prepare, readCurrentState } from "../../backend/scripts/security/rotate-production-signing-material.mjs";
 import { validateRotationTransition } from "../security/check-production-rotation-transition.mjs";
 import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
@@ -199,6 +200,24 @@ function fixture() {
   const context = { config, sm, identity: "arn:aws:sts::368992683803:assumed-role/mscqr-release-deployer/fixture", clock: () => Date.parse("2026-09-07T00:00:00.000Z"), values: new Map([["state-file", stateFile], ["fixture-file", path.join(directory, "previous-qr.json")]]) };
   return { old, next, config, records, writes, sm, context, stateFile, dispose: () => rmSync(directory, { recursive: true, force: true }) };
 }
+
+test("prepared ordinary rebaseline successor authenticates the saved post-write identity and live state", async () => {
+  const f = fixture();
+  try {
+    await prepare(f.context);
+    const state = readCurrentState(f.context);
+    const configPath = path.join(path.dirname(f.stateFile), "rotation-config.json"), fixturePath = path.join(path.dirname(f.stateFile), "rotation-fixture.json");
+    const predecessorConfig = { ...f.config, releaseProfile: "mscqr-production-release-deployer", rotationConfigFile: configPath, rotationStateFile: f.stateFile, rotationFixtureFile: fixturePath };
+    const config = { ...predecessorConfig, sourceSha: "f".repeat(40), rotationSuccessor: { predecessorSourceSha: predecessorConfig.sourceSha,
+      predecessorConfigFile: configPath, predecessorConfigSha256: "a".repeat(64), predecessorStateFile: f.stateFile,
+      predecessorStateSha256: "b".repeat(64), predecessorFixtureFile: fixturePath, predecessorFixtureSha256: "c".repeat(64) } };
+    const input = { config, predecessorConfig, predecessorState: state, readStatus: () => "d".repeat(64) };
+    assert.equal(authenticatePreparedRebaselinePostWrite(input).livePostWriteSha256, f.config.livePostWriteSha256);
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...input, predecessorState: { ...state, rotationId: "rotation-wrong" } }));
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...input, predecessorConfig: { ...predecessorConfig, livePostWriteSha256: "0".repeat(64) } }));
+    assert.throws(() => authenticatePreparedRebaselinePostWrite({ ...input, readStatus: () => { throw new Error("live status denied"); } }));
+  } finally { f.dispose(); }
+});
 
 test("authenticated rebaseline preserves the runtime label and old key identity through promotion and resume", async () => {
   const f = fixture();
