@@ -1,0 +1,9 @@
+# PR #713 OSV reachability review (2026-10-20)
+
+The initial PR head changed the Stage A prerequisite validator and tests. Its hosted Deployment Audit found that the reviewed executable-input fingerprint had changed. The same unfiltered OSV Scanner 2.6.0 report also found three newly patchable advisories in the development-only Vite 8.0.16 build tool. The gate correctly failed; refreshing only the fingerprint would not have resolved those findings.
+
+This PR pins Vite 8.1.6 and regenerates the frontend lock with the repository's npm 11.16.0. The new unfiltered OSV scan reports only `braces@3.0.3` / `GHSA-vfj7-8cjw-p6xm`, still a development-only Tailwind dependency under the existing acceptance. No new exception is added. The canonical frontend build compiles 3,993 modules; the browser closure contains 204 packages and 96 chunks, with neither Vite nor braces. Production runtime packaging passes. The backend lock contains no braces. Production users do not control the repository's Tailwind content patterns. The accepted execution scope, owner, and 2026-11-02 expiry remain unchanged.
+
+The Vite and rolldown lock changes affect frontend image build inputs. A future protected-main release must publish and authorize a fresh immutable frontend image for that source; existing signed image evidence cannot be relabeled. The checker IAM validator change affects protected tooling, not application runtime permissions. The narrow live IAM grant still requires its own saved-plan review and protected production approval.
+
+Validation: npm 11.16.0 `ci`; `npm run build`; canonical `buildBrowserClosure` and `assertRuntimePackaging`; unfiltered OSV Scanner 2.6.0; `node scripts/check-osv-runtime.mjs` against that report; focused Stage A and OSV tests. Exact-head hosted CI remains authoritative.
