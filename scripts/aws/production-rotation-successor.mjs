@@ -8,6 +8,7 @@ import { authenticateCompletedInventoryAdoptionEvidence } from "./production-com
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
+import { assertRebaselineRotationBindings, REBASELINE_ROTATION_BINDINGS_KIND } from "./production-dual-slot-rebaseline-contract.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -22,6 +23,38 @@ export function readOriginalRotationStatus({ config, repositoryRoot = process.cw
   const status = JSON.parse(output);
   if (status.mode !== "status" || status.phase !== "overlap-deploy-required" || !status.records || typeof status.records !== "object") throw new Error("Historical rotation is not live and prepared for overlap.");
   return hash(canonicalJson({ phase: status.phase, records: status.records }));
+}
+
+export function authenticatePreparedRebaselinePostWrite({ config, predecessorConfig, predecessorState, repositoryRoot = process.cwd(), readStatus = readOriginalRotationStatus } = {}) {
+  const runtime = config?.rebaselineRuntime;
+  const original = predecessorConfig?.rebaselineRuntime;
+  const bindings = runtime?.bindings;
+  const authorization = runtime?.authorization;
+  const predecessor = config?.rotationSuccessor;
+  if (bindings?.kind !== REBASELINE_ROTATION_BINDINGS_KIND || !original || !predecessor
+      || !equal(runtime.bindings, original.bindings) || !equal(authorization, original.authorization)
+      || !equal(runtime.authorizationCoordinates, original.authorizationCoordinates)
+      || !equal(runtime.recoveryEnvelope, original.recoveryEnvelope) || !equal(runtime.originalPreparation, original.originalPreparation)
+      || runtime.runtimeVariant !== original.runtimeVariant || predecessorConfig.sourceSha !== bindings.sourceSha
+      || predecessorConfig.rotationId !== bindings.rotationId || predecessorState?.sourceSha !== bindings.sourceSha
+      || predecessorState?.rotationId !== bindings.rotationId || predecessorState?.phase !== "overlap-deploy-required"
+      || !equal(predecessorConfig.jwt, config.jwt) || !equal(predecessorConfig.qr, config.qr)
+      || config.releaseProfile !== "mscqr-production-release-deployer" || predecessorConfig.releaseProfile !== config.releaseProfile
+      || predecessor.predecessorSourceSha !== bindings.sourceSha
+      || predecessor.predecessorConfigFile !== predecessorConfig.rotationConfigFile
+      || predecessor.predecessorStateFile !== predecessorConfig.rotationStateFile
+      || predecessor.predecessorFixtureFile !== predecessorConfig.rotationFixtureFile
+      || !SHA256.test(predecessor.predecessorConfigSha256 || "") || !SHA256.test(predecessor.predecessorStateSha256 || "")
+      || !SHA256.test(predecessor.predecessorFixtureSha256 || "")) throw new Error("Prepared rebaseline predecessor is not authenticated.");
+  assertRebaselineRotationBindings(bindings, { authorization, recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation });
+  const resources = { jwtPending: bindings.jwt.pendingSecretId, qrPrivatePending: bindings.qr.privatePendingSecretId, qrPublicPending: bindings.qr.publicPendingSecretId,
+    jwtPrevious: bindings.jwt.previousSecretId, qrPublicPrevious: bindings.qr.publicPreviousSecretId, qrCurrentVersion: bindings.qr.currentKeyVersionSecretId, qrPreviousVersion: bindings.qr.previousKeyVersionSecretId };
+  const body = { kind: "PRODUCTION_DUAL_SLOT_REBASELINE_LIVE_POST_WRITE", sourceSha: bindings.sourceSha, rotationId: bindings.rotationId,
+    authorizationSha256: authorization.authorizationSha256, resources, versionIds: authorization.writeIdentities, payloadIdentities: authorization.writePayloadIdentities };
+  const livePostWriteSha256 = hash(canonicalJson(body));
+  if (predecessorConfig.livePostWriteSha256 !== livePostWriteSha256 || config.livePostWriteSha256 !== livePostWriteSha256
+      || !SHA256.test(readStatus({ config, repositoryRoot }) || "")) throw new Error("Prepared rebaseline live status or post-write identity is not authenticated.");
+  return { ...body, livePostWriteSha256 };
 }
 
 export function deriveRotationSuccessorState({ predecessorState, predecessorStateSha256, config }) {

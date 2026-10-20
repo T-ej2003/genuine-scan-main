@@ -10,7 +10,7 @@ import { createTerraformStageAAdapter } from "./production-stage-a-control-plane
 import { createProductionRuntimeInventoryAdapter } from "./production-runtime-inventory-adapter.mjs";
 import { createProductionPreDeploymentInventoryAdapter } from "./production-predeployment-inventory-adapter.mjs";
 import { createProductionRotationPrepareAdapter } from "./production-rotation-prepare-adapter.mjs";
-import { authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
+import { authenticatePreparedRebaselinePostWrite, authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
 import { createProductionInteractiveEcsExecRunner, extractMarkedJson } from "./production-ecs-exec-command.mjs";
 import { createLazyProductionVerifierEcsAdapter, productionOverlapRuntimeProofCommand } from "./production-cutover-verifier-primitives.mjs";
 import { establishReleaseDeployerIdentity, establishVerifierIdentity, createAwsStsRunner } from "./production-identity-adapters.mjs";
@@ -287,7 +287,11 @@ export function createProductionCutoverAdapters({ config, sourceSha, rotationId,
       } else throw new Error("Rebaseline runtime authority variant is missing or unsupported.");
       return {
         revalidate: async () => {
-          const verified = verifyLiveProductionDualSlotRebaselineWithRunner({ run: commandRun, bindings, authorization, ...(runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? { recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant } : {}) });
+          const verified = config.rotationSuccessor
+            ? authenticatePreparedRebaselinePostWrite({ config,
+              predecessorConfig: readBoundStageBPrivateJson({ filePath: config.rotationSuccessor.predecessorConfigFile, expectedSha256: config.rotationSuccessor.predecessorConfigSha256, label: "Original rotation config" }),
+              predecessorState: readBoundStageBPrivateJson({ filePath: config.rotationSuccessor.predecessorStateFile, expectedSha256: config.rotationSuccessor.predecessorStateSha256, label: "Original rotation state" }) })
+            : verifyLiveProductionDualSlotRebaselineWithRunner({ run: commandRun, bindings, authorization, ...(runtime.runtimeVariant === "SUCCESSOR_RECOVERY_REBASELINE_RUNTIME" ? { recoveryEnvelope: runtime.recoveryEnvelope, originalPreparation: runtime.originalPreparation, imageAuthorization: runtime.imageAuthorization, proveDescendant: proveProtectedDescendant } : {}) });
           if (verified.livePostWriteSha256 !== config.livePostWriteSha256) throw new Error("Live rebaseline post-write state changed after runtime preparation.");
           return verified;
         },
