@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { assertStageAStateContract, assertStageAStateIdentity, assertStageAStateIdentityBinding, buildStageAStateIdentity, generateStageAPrerequisites, normalizeStageAStateForIdentity, parseAuthenticatedStateBytes, resolveStageASubnetRouteTable, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
-import { STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
+import { STAGE_A_CHECKER_PUBLICATION_POLICY, STAGE_A_CHECKER_ROLE_TRUST } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStageAState } from "./fixtures/production-stage-a-state.mjs";
 
@@ -47,6 +47,29 @@ test("Stage A checker trust accepts the Terraform singleton principal array and 
     "*",
     [42],
   ]) assert.throws(() => assertStageAStateContract(stateWithCheckerPrincipal(principal), { stateObject: STAGE_A_STATE_OBJECT }), /Stage A checker.*trust/);
+});
+
+test("Stage A checker receipt-read transition accepts only the exact prior and desired policies", () => {
+  const withPolicy = (change) => productionStageAState({ mutate: (state) => {
+    const checker = state.resources.find((resource) => resource.type === "aws_iam_role_policy" && resource.name === "checker");
+    const policy = JSON.parse(checker.instances[0].attributes.policy);
+    change(policy);
+    checker.instances[0].attributes.policy = JSON.stringify(policy);
+    return state;
+  } });
+  const receipt = { Sid: "ReadCompletedInventoryReceipts", Effect: "Allow", Action: "dynamodb:GetItem", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.inventoryReceiptTableArn, Condition: { "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals: { "aws:RequestedRegion": STAGE_B.region } } };
+  assert.doesNotThrow(() => assertStageAStateContract(stage));
+  assert.doesNotThrow(() => assertStageAStateContract(withPolicy(policy => policy.Statement.push(receipt))));
+  for (const change of [
+    policy => policy.Statement.push({ ...receipt, Action: "dynamodb:PutItem" }),
+    policy => policy.Statement.push({ ...receipt, Action: ["dynamodb:GetItem", "dynamodb:PutItem"] }),
+    policy => policy.Statement.push({ ...receipt, Resource: "*" }),
+    policy => policy.Statement.push({ ...receipt, Condition: { ...receipt.Condition, "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["*"] } } }),
+    policy => policy.Statement.push({ ...receipt, Condition: { ...receipt.Condition, StringEquals: { "aws:RequestedRegion": "*" } } }),
+    policy => policy.Statement.push({ ...receipt, Condition: undefined }),
+    policy => policy.Statement.push(receipt, receipt),
+    policy => policy.Statement.push(receipt, { Sid: "Extra", Effect: "Allow", Action: "dynamodb:Scan", Resource: receipt.Resource }),
+  ]) assert.throws(() => assertStageAStateContract(withPolicy(change)), /checker publication policy semantics/);
 });
 
 test("canonical Stage A handoff derives every identifier from state and read-only live evidence", () => {
