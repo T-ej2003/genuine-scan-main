@@ -228,11 +228,27 @@ export function buildProductionRotationConfig({ sourceSha, rotationId, approval,
   };
 }
 
-export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rebaselineAuthorization, recoveryEnvelope, originalPreparation, supersessionEvidence, liveLegacyBaseline, proveDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
+function assertLiveInitialQrBaseline(rotationBindings, liveLegacyBaseline, preparedRotationState, preparedRotationOrigin, predecessorSourceSha) {
+  if (liveLegacyBaseline.qrCurrentVersion === rotationBindings.qr.previousKeyVersion) {
+    assertBindingsMatchLegacyBaseline(rotationBindings, liveLegacyBaseline);
+  } else {
+    // A prepared overlap has already promoted the QR version slot; the historical binding still names its predecessor.
+    if (!preparedRotationState || !preparedRotationOrigin || preparedRotationState.phase !== "overlap-deploy-required"
+        || preparedRotationState.rotationId !== rotationBindings.rotationId || preparedRotationState.sourceSha !== predecessorSourceSha
+        || preparedRotationState.qr?.oldKeyVersion !== rotationBindings.qr.previousKeyVersion
+        || preparedRotationState.qr?.newKeyVersion !== liveLegacyBaseline.qrCurrentVersion
+        || preparedRotationState.qr.oldKeyVersion === preparedRotationState.qr.newKeyVersion) throw new Error("Prepared rotation QR version transition is not authenticated.");
+    assertAuthenticatedOrigin(preparedRotationOrigin, rotationBindings);
+    assertBindingsMatchLegacyBaseline(rotationBindings, { ...liveLegacyBaseline, qrCurrentVersion: preparedRotationState.qr.oldKeyVersion });
+  }
+  return rotationBindings.qr.previousKeyVersion;
+}
+
+export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationBindings, rebaselineAuthorization, recoveryEnvelope, originalPreparation, supersessionEvidence, liveLegacyBaseline, preparedRotationState, preparedRotationOrigin, predecessorSourceSha, proveDescendant, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin } = {}) {
   const originalSourceSha = rotationBindings?.sourceSha;
   if (!SHA40.test(currentSourceSha || "") || !SHA40.test(originalSourceSha || "") || !liveLegacyBaseline) throw new Error("Initial-migration source-advance inputs are incomplete.");
   assertBindings(rotationBindings, { rebaselineAuthorization, recoveryEnvelope, originalPreparation, verifyRebaselineLivePostWrite, verifyInitialBindingOrigin });
-  assertBindingsMatchLegacyBaseline(rotationBindings, liveLegacyBaseline);
+  assertLiveInitialQrBaseline(rotationBindings, liveLegacyBaseline, preparedRotationState, preparedRotationOrigin, predecessorSourceSha);
   if (originalSourceSha === currentSourceSha) return undefined;
   if (rotationBindings.rotationId !== supersessionEvidence?.rotationId) throw new Error("Initial-migration source-advance inputs are incomplete.");
   const evidence = assertProductionSupersessionEvidence(supersessionEvidence);
@@ -407,6 +423,7 @@ export function prepareProductionCutoverRuntime({
     if (!ROTATION_ID.test(rotationId)) throw new Error("Requested rotation ID is invalid.");
     let rotationSuccessor;
     let preparedOrigin;
+    let preparedRotationState;
     let preparedRebaselinePostWrite;
     if (rotationSuccessorStateFile) {
       const originalConfig = readInputFile(rotationSuccessorOriginalConfigFile, repositoryRoot, "Original rotation config");
@@ -426,6 +443,7 @@ export function prepareProductionCutoverRuntime({
           originalConfigSha256: originalConfig.sha256, originalState: originalState.value,
           originalStatePath: originalState.path, originalFixturePath: originalFixture.path, rotationSuccessor,
           repositoryRoot, proveDescendant: proveSourceAdvance, readPreparedStatus: readPreparedRotationStatus, verifyInitialBindingOrigin });
+        preparedRotationState = originalState.value;
       } else if (rotationBindings.kind === REBASELINE_ROTATION_BINDINGS_KIND) {
         preparedRebaselinePostWrite = authenticatePreparedRebaselinePostWrite({
           config: { releaseProfile: originalConfig.value.releaseProfile, rotationSuccessor, jwt: rotationBindings.jwt, qr: rotationBindings.qr,
@@ -529,13 +547,19 @@ export function prepareProductionCutoverRuntime({
       originalPreparation,
       supersessionEvidence: rotationSupersessionEvidence,
       liveLegacyBaseline,
+      preparedRotationState,
+      preparedRotationOrigin: preparedOrigin,
+      predecessorSourceSha: rotationSuccessor?.predecessorSourceSha,
       verifyRebaselineLivePostWrite: rebaselinePostWrite,
       verifyInitialBindingOrigin: bindingOrigin,
       proveDescendant: proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
         try { (git || execFileSync)("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { stdio: "ignore" }); return true; } catch { return false; }
       }),
     });
-    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite: rebaselinePostWrite, verifyInitialBindingOrigin: bindingOrigin, liveCurrentKeyVersion: currentKeyVersion }), schemaVersion: 2, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
+    const authenticatedCurrentQrVersion = rotationBindings.kind === INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND
+      ? assertLiveInitialQrBaseline(rotationBindings, liveLegacyBaseline, preparedRotationState, preparedOrigin, rotationSuccessor?.predecessorSourceSha)
+      : currentKeyVersion;
+    const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite: rebaselinePostWrite, verifyInitialBindingOrigin: bindingOrigin, liveCurrentKeyVersion: authenticatedCurrentQrVersion }), schemaVersion: 2, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
     assertRootDropEvidence(rootDrop.value, {
       sourceSha: protectedSha,
       rotationId: approvalConfig.rotationId,
