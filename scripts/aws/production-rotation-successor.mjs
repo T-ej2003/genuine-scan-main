@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
-import { authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { authenticateCompletedInventoryAdoptionEvidence, kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { deriveProductionRotationCleanupEligibleAt } from "../../backend/scripts/security/production-rotation-grace-contract.mjs";
@@ -168,8 +168,9 @@ export async function authenticatePreparedRotationSuccessor({ config, configSha2
   const messageFile = path.join(temporary, "message");
   try {
     const verifySignature = ({ keyId, message, signature }) => {
-      fs.writeFileSync(messageFile, message, { mode: 0o600 });
-      return JSON.parse(runAws(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256", "--output", "json", "--no-cli-pager"])).SignatureValid === true;
+      const input = kmsAdoptionMessage(message);
+      fs.writeFileSync(messageFile, input.bytes, { mode: 0o600 });
+      return JSON.parse(runAws(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", input.type, "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256", "--output", "json", "--no-cli-pager"])).SignatureValid === true;
     };
     const proveDescendant = proveSourceAdvance || (({ ancestorSha, descendantSha }) => {
       try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd: repositoryRoot, stdio: "ignore" }); return true; } catch { return false; }

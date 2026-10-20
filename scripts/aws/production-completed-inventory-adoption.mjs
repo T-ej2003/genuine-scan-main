@@ -4,6 +4,12 @@ import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, PRESERVED_INVENTORY_PRE
 import { assertPreDeploymentInventoryTaskDefinition, PREDEPLOYMENT_INVENTORY_TAGS } from "./production-predeployment-inventory-task.mjs";
 
 const hash = value => createHash("sha256").update(value).digest("hex");
+export const kmsAdoptionMessage = bytes => {
+  if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("KMS adoption message must be nonempty bytes.");
+  return bytes.length > 4096
+    ? { bytes: createHash("sha256").update(bytes).digest(), type: "DIGEST" }
+    : { bytes, type: "RAW" };
+};
 const digest = value => hash(canonicalJson(value));
 const SHA256 = /^[a-f0-9]{64}$/;
 const PURPOSE = "adopt-completed-predeployment-inventory";

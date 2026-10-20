@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { promptProductionHiddenInput } from "../security/production-interactive-mfa-provider.mjs";
 import { assertVerifierMfaSerial } from "./establish-production-ecs-exec-verifier-session.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
-import { assertCompletedInventoryAdoptionPayload, authenticateCompletedInventoryAdoptionEvidence } from "./production-completed-inventory-adoption.mjs";
+import { assertCompletedInventoryAdoptionPayload, authenticateCompletedInventoryAdoptionEvidence, kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 import { authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR } from "./production-green-stage-b-contract.mjs";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -98,8 +98,9 @@ export async function authenticateProductionInventoryAdoption({ config, runtime,
         try { execFileSync("git", ["merge-base", "--is-ancestor", ancestorSha, descendantSha], { cwd, stdio: "ignore" }); return true; } catch { return false; }
       },
     }, ({ keyId, message, signature }) => {
-      writeFileSync(messageFile, message, { mode: 0o600 });
-      return JSON.parse(run(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", "RAW", "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256", "--output", "json"])).SignatureValid === true;
+      const input = kmsAdoptionMessage(message);
+      writeFileSync(messageFile, input.bytes, { mode: 0o600 });
+      return JSON.parse(run(["kms", "verify", "--key-id", keyId, "--message", `fileb://${messageFile}`, "--message-type", input.type, "--signature", signature.toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256", "--output", "json"])).SignatureValid === true;
     });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
