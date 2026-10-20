@@ -255,14 +255,29 @@ export function buildInitialMigrationSourceAdvance({ currentSourceSha, rotationB
   });
 }
 
-export function authenticatePreparedSuccessorBindingOrigin({ bindings, originalConfig, originalConfigPath, originalConfigSha256, originalState, originalStatePath, originalFixturePath, rotationSuccessor, repositoryRoot, proveDescendant, readPreparedStatus = readOriginalRotationStatus } = {}) {
+export function authenticatePreparedSuccessorBindingOrigin({ bindings, originalConfig, originalConfigPath, originalConfigSha256, originalState, originalStatePath, originalFixturePath, rotationSuccessor, repositoryRoot, proveDescendant, readPreparedStatus = readOriginalRotationStatus, verifyInitialBindingOrigin } = {}) {
+  if (bindings?.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER
+      || ![2, 3, 4, 5].includes(bindings.schemaVersion)) throw new Error("Prepared rotation binding schema is unsupported.");
+  if (bindings.schemaVersion !== 3) {
+    if (!SHA256.test(originalConfigSha256 || "") || originalConfig?.releaseProfile !== "mscqr-production-release-deployer"
+        || originalConfig?.sourceSha !== bindings.sourceSha || originalConfig?.rotationId !== bindings.rotationId
+        || originalState?.sourceSha !== bindings.sourceSha || originalState?.rotationId !== bindings.rotationId || originalState?.phase !== "overlap-deploy-required"
+        || originalConfig?.rotationConfigFile !== originalConfigPath || originalConfig?.rotationStateFile !== originalStatePath
+        || originalConfig?.rotationFixtureFile !== originalFixturePath || rotationSuccessor?.predecessorConfigFile !== originalConfigPath
+        || rotationSuccessor?.predecessorConfigSha256 !== originalConfigSha256 || rotationSuccessor?.predecessorStateFile !== originalStatePath
+        || rotationSuccessor?.predecessorFixtureFile !== originalFixturePath || canonical(originalConfig?.jwt) !== canonical(bindings.jwt)
+        || canonical(originalConfig?.qr) !== canonical(bindings.qr) || typeof verifyInitialBindingOrigin !== "function") throw new Error("Prepared rotation binding origin does not match its predecessor.");
+    const origin = assertAuthenticatedOrigin(verifyInitialBindingOrigin({ bindings }), bindings);
+    if (!SHA256.test(readPreparedStatus({ config: { rotationSuccessor, releaseProfile: originalConfig.releaseProfile }, repositoryRoot }) || "")) throw new Error("Prepared rotation live status is not authenticated.");
+    return origin;
+  }
   const bindingFields = ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "legacy", "jwt", "qr", "ecs", "supersessionEvidence", "supersessionPredecessor"];
   if (!bindings || canonical(Object.keys(bindings).sort()) !== canonical(bindingFields.sort()) || bindings.schemaVersion !== 3
       || bindings.kind !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND || bindings.producer !== INITIAL_DUAL_SLOT_ROTATION_BINDINGS_PRODUCER) throw new Error("Prepared rotation requires the exact historical initial binding schema.");
   assertProductionSupersessionEvidence(bindings.supersessionEvidence);
   assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence: bindings.supersessionEvidence });
   const origin = originalConfig?.staleSupersessionBindingOrigin;
-  const bridge = assertProductionInitialMigrationSourceAdvance(originalConfig?.initialMigrationSourceAdvance);
+  const bridge = originalConfig?.initialMigrationSourceAdvance === undefined ? undefined : assertProductionInitialMigrationSourceAdvance(originalConfig.initialMigrationSourceAdvance);
   const originBody = Object.fromEntries(Object.entries(origin || {}).filter(([key]) => !["bindingSha256", "originSha256", "bindingKind"].includes(key)));
   const originFields = ["schemaVersion", "kind", "producer", "sourceSha", "rotationId", "resources", "observedSlots", "supersessionPredecessorIdentitySha256", "bindingSha256", "originSha256", "bindingKind"];
   if (!SHA256.test(originalConfigSha256 || "") || !origin || canonical(Object.keys(origin).sort()) !== canonical(originFields.sort())
@@ -276,9 +291,10 @@ export function authenticatePreparedSuccessorBindingOrigin({ bindings, originalC
       || originalState?.sourceSha !== originalConfig.sourceSha || originalState?.phase !== "overlap-deploy-required"
       || canonical(originalConfig.jwt) !== canonical(bindings.jwt) || canonical(originalConfig.qr) !== canonical(bindings.qr)
       || canonical(originalConfig.staleSupersessionPredecessor) !== canonical(bindings.supersessionPredecessor)
-      || bridge.currentSourceSha !== originalConfig.sourceSha || bridge.supersessionEvidence.sourceSha !== bindings.sourceSha
-      || bridge.supersessionEvidence.rotationId !== bindings.rotationId
-      || bridge.supersessionEvidence.evidenceIdentitySha256 !== bindings.supersessionEvidence?.evidenceIdentitySha256
+      || (bridge ? bridge.currentSourceSha !== originalConfig.sourceSha || bridge.supersessionEvidence.sourceSha !== bindings.sourceSha
+        || bridge.supersessionEvidence.rotationId !== bindings.rotationId
+        || bridge.supersessionEvidence.evidenceIdentitySha256 !== bindings.supersessionEvidence?.evidenceIdentitySha256
+        : originalConfig.sourceSha !== bindings.sourceSha)
       || proveDescendant?.({ ancestorSha: bindings.sourceSha, descendantSha: originalConfig.sourceSha }) !== true) throw new Error("Prepared rotation binding origin is not bound to the authenticated predecessor.");
   const checked = assertAuthenticatedOrigin(origin, bindings);
   if (!SHA256.test(readPreparedStatus({ config: { rotationSuccessor, releaseProfile: originalConfig.releaseProfile }, repositoryRoot }) || "")) throw new Error("Prepared rotation live status is not authenticated.");
@@ -404,10 +420,12 @@ export function prepareProductionCutoverRuntime({
         predecessorStateFile: originalState.path, predecessorStateSha256: originalState.sha256,
         predecessorFixtureFile: originalFixture.path, predecessorFixtureSha256: originalFixture.sha256,
         inventoryEvidenceSha256: originalState.value.inventoryEvidenceSha256 };
-      preparedOrigin = authenticatePreparedSuccessorBindingOrigin({ bindings: rotationBindings, originalConfig: originalConfig.value, originalConfigPath: originalConfig.path,
-        originalConfigSha256: originalConfig.sha256, originalState: originalState.value,
-        originalStatePath: originalState.path, originalFixturePath: originalFixture.path, rotationSuccessor,
-        repositoryRoot, proveDescendant: proveSourceAdvance, readPreparedStatus: readPreparedRotationStatus });
+      if (rotationBindings.kind === INITIAL_DUAL_SLOT_ROTATION_BINDINGS_KIND) {
+        preparedOrigin = authenticatePreparedSuccessorBindingOrigin({ bindings: rotationBindings, originalConfig: originalConfig.value, originalConfigPath: originalConfig.path,
+          originalConfigSha256: originalConfig.sha256, originalState: originalState.value,
+          originalStatePath: originalState.path, originalFixturePath: originalFixture.path, rotationSuccessor,
+          repositoryRoot, proveDescendant: proveSourceAdvance, readPreparedStatus: readPreparedRotationStatus, verifyInitialBindingOrigin });
+      }
     }
     if (!imageAuthorization?.filePath) throw new Error("image authorization evidence file is required.");
     const preparedImageAuthorization = readInputFile(imageAuthorization.filePath, repositoryRoot, "Image authorization evidence");

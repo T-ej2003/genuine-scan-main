@@ -18,7 +18,7 @@ import { runCli as produceRootDrop } from "../aws/produce-production-root-drop-e
 import { createProductionCutoverAdapters, createProductionRotationInfrastructureAdapter } from "../aws/production-cutover-production-adapters.mjs";
 import { assertImageAuthorization, assertRotationInfrastructureConverged, assertRotationInfrastructurePlan, buildRotationTerraformInputs, runProductionCutoverOverlapControlPlane } from "../aws/production-cutover-control-plane.mjs";
 import { createProductionRotationPrepareAdapter } from "../aws/production-rotation-prepare-adapter.mjs";
-import { buildInitialMigrationSourceAdvance, deriveRuntimeMetadata, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
+import { authenticatePreparedSuccessorBindingOrigin, buildInitialMigrationSourceAdvance, deriveRuntimeMetadata, parseBootstrapArgs, prepareProductionCutoverRuntime, rotationBindingsToPostPrepareTaskBindings, rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
 import { assertUniqueSecretBindingNames, buildOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -48,7 +48,8 @@ import { CHECKER_SOURCE_ROLE_ARN, CHECKER_USER_ARN } from "../aws/production-che
 import { buildReleasePreflightCheckerTrustAttestation } from "../aws/production-release-preflight-checker-attestation.mjs";
 import { signPermissionReport } from "../aws/validate-production-green-stage-b-permissions.mjs";
 import { canonicalSha256 } from "../aws/stage-b-task-definition-recovery-contract.mjs";
-import { assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { assertInitialBindingSchemaClosed, assertInitialDualSlotBindings } from "../aws/production-initial-dual-slot-bootstrap.mjs";
+import { MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID, MIXED_DUAL_SLOT_RETAINED_HISTORY, MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { buildPartialRebaselineRecoveryCompletion, buildPartialRebaselineRecoveryRotationBindings, createPartialRebaselineRecoveryAuthorization, PARTIAL_REBASELINE_RECOVERY_BASE_SOURCE_SHA, assertPartialRebaselineRecoveryAuthorization } from "../aws/production-dual-slot-rebaseline-contract.mjs";
 import { partialRecoveryEnvelopeFixture, partialRecoveryOriginalPreparationFixture } from "./fixtures/partial-rebaseline-runtime.mjs";
@@ -130,6 +131,21 @@ function approval() {
 }
 
 const verifyInitialBindingOrigin = ({ bindings: candidate }) => ({ kind: "PRODUCTION_INITIAL_DUAL_SLOT_ROTATION_BINDINGS", producer: "scripts/aws/production-initial-dual-slot-bootstrap.mjs:bootstrapInitialDualSlotRotation", sourceSha: candidate.sourceSha, rotationId: candidate.rotationId, bindingSha256: canonicalSha256(candidate) });
+
+test("prepared successors retain the canonical live-origin proof for schemas 2, 4, and AWS-legal 5", () => {
+  const base = { ...bindings, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion }, qr: { ...bindings.qr, pendingKeyVersion: "qr-v2" }, ecs: rotationBindingsToTaskBindings(bindings) };
+  const retained = { ...base, schemaVersion: 4, retainedHistory: MIXED_DUAL_SLOT_RETAINED_HISTORY, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID };
+  for (const candidate of [base, retained, { ...retained, schemaVersion: 5, recoveryHandoff: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, recoveryHandoffCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID }]) {
+    assertInitialBindingSchemaClosed(candidate);
+    assertInitialDualSlotBindings(candidate);
+    const configPath = "/private/predecessor/rotation-config.json", statePath = "/private/predecessor/rotation-state.json", fixturePath = "/private/predecessor/rotation-fixture.json";
+    const input = { bindings: candidate, originalConfig: { sourceSha, rotationId: candidate.rotationId, releaseProfile: "mscqr-production-release-deployer", rotationConfigFile: configPath, rotationStateFile: statePath, rotationFixtureFile: fixturePath, jwt: candidate.jwt, qr: candidate.qr }, originalConfigPath: configPath, originalConfigSha256: "a".repeat(64), originalState: { sourceSha, rotationId: candidate.rotationId, phase: "overlap-deploy-required" }, originalStatePath: statePath, originalFixturePath: fixturePath, rotationSuccessor: { predecessorConfigFile: configPath, predecessorConfigSha256: "a".repeat(64), predecessorStateFile: statePath, predecessorFixtureFile: fixturePath }, readPreparedStatus: () => "b".repeat(64), verifyInitialBindingOrigin: ({ bindings: observed }) => ({ ...verifyInitialBindingOrigin({ bindings: observed }), ...([4, 5].includes(observed.schemaVersion) ? { retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID } : {}), ...(observed.schemaVersion === 5 ? { recoveryHandoffCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID } : {}) }) };
+    assert.equal(authenticatePreparedSuccessorBindingOrigin(input).bindingSha256, canonicalSha256(candidate));
+    assert.throws(() => authenticatePreparedSuccessorBindingOrigin({ ...input, originalState: { ...input.originalState, rotationId: "rotation-wrong" } }));
+    assert.throws(() => authenticatePreparedSuccessorBindingOrigin({ ...input, verifyInitialBindingOrigin: () => ({ ...verifyInitialBindingOrigin({ bindings: candidate }), bindingSha256: "0".repeat(64) }) }));
+    assert.throws(() => authenticatePreparedSuccessorBindingOrigin({ ...input, bindings: { ...candidate, schemaVersion: 6 } }), /unsupported/);
+  }
+});
 const strictInitialBindingOrigin = ({ bindings: candidate }) => {
   if (JSON.stringify(Object.keys(candidate).sort()) !== JSON.stringify(["ecs", "jwt", "kind", "legacy", "producer", "qr", "rotationId", "schemaVersion", "sourceSha"])) throw new Error("Live initial binding origin schema is not exact.");
   assertInitialDualSlotBindings(candidate);

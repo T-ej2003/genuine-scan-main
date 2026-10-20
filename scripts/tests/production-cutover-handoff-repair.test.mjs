@@ -1749,12 +1749,16 @@ test("production-shaped stale supersession bootstraps a distinct canonical rotat
       readPreparedStatus: () => { statusReads++; return "b".repeat(64); } };
     assert.equal(authenticatePreparedSuccessorBindingOrigin(originInput).bindingSha256, origin.bindingSha256);
     assert.equal(statusReads, 1);
+    const sameSourceConfig = { ...archived, sourceSha: binding.bindings.sourceSha, initialMigrationSourceAdvance: undefined };
+    assert.equal(authenticatePreparedSuccessorBindingOrigin({ ...originInput, originalConfig: sameSourceConfig,
+      originalState: { ...state, sourceSha: binding.bindings.sourceSha }, proveDescendant: ({ ancestorSha, descendantSha }) => ancestorSha === descendantSha && ancestorSha === binding.bindings.sourceSha }).bindingSha256, origin.bindingSha256);
     for (const changed of [
       { bindings: { ...binding.bindings, rotationId: "rotation-unrelated" } },
       { bindings: { ...binding.bindings, jwt: { ...binding.bindings.jwt, pendingSecretId: arn("unrelated-pending") } } },
       { originalConfig: { ...archived, staleSupersessionBindingOrigin: { ...archived.staleSupersessionBindingOrigin, originSha256: "0".repeat(64) } } },
       { originalConfig: { ...archived, jwt: { ...archived.jwt, pendingSecretId: arn("unrelated-pending") } } },
       { originalState: { ...state, phase: "prepared" } },
+      { originalConfig: { ...archived, initialMigrationSourceAdvance: undefined } },
       { proveDescendant: () => false },
       { readPreparedStatus: () => { throw new Error("live state drift"); } },
     ]) assert.throws(() => authenticatePreparedSuccessorBindingOrigin({ ...originInput, ...changed }));
