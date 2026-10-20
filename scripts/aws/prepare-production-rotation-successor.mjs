@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 import { authenticateRotationSuccessor, readOriginalRotationStatus, signRotationSuccessor } from "./production-rotation-successor.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
@@ -56,7 +57,10 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
   const messageFile = path.join(temporary, "message");
   const message = bytes => { fs.writeFileSync(messageFile, bytes, { mode: 0o600 }); return `fileb://${messageFile}`; };
   try {
-    const verifySignature = ({ keyId, message: bytes, signature }) => json(releaseRun, ["kms", "verify", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+    const verifySignature = ({ keyId, message: bytes, signature }) => {
+      const input = kmsAdoptionMessage(bytes);
+      return json(releaseRun, ["kms", "verify", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
+    };
     const sign = ({ keyId, message: bytes }) => json(checkerRun, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
     const evidenceFile = path.join(path.dirname(configPath), "rotation-successor-evidence.json");
     let evidence;

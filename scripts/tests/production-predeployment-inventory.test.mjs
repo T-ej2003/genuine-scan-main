@@ -1176,12 +1176,20 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     writeFileSync(configFile, configBytes, { mode: 0o600 });
     writeFileSync(path.join(continuation, "cutover-runtime-manifest.json"), JSON.stringify({ runtimeConfigSha256: configHash, readyToConsumeMfa: true, releaseSourceSha: successorSha, protectedMainSha: successorSha }), { mode: 0o600 });
     const inventoryAdoption = await buildFreshInventoryAdoptionEvidence({ originalConfig: original, originalConfigSha256: nextConfig.rotationSuccessor.predecessorConfigSha256, continuationConfig: nextConfig, continuationConfigSha256: configHash, completionReceipt: durableReceipt, currentApproval: successorApproval, proveDescendant: ancestry, now: new Date("2026-11-16T10:00:00.000Z"), verifySignature: async () => true, sign: async () => "AA==" });
+    const adoptionBytes = Buffer.from(canonicalJson(inventoryAdoption.payload));
+    assert.ok(adoptionBytes.length > 4096);
     writeFileSync(path.join(continuation, "inventory-completed-adoption-evidence.json"), JSON.stringify(inventoryAdoption), { mode: 0o600 });
     let signed = 0, planned = 0;
+    const verifyMessages = [];
     const options = { argv: ["--config", configFile, "--config-sha256", configHash], root: repository, now: new Date("2026-11-16T10:00:00.000Z"),
       authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry,
       preflight: () => { planned++; }, statusRun: () => `${JSON.stringify({ mode: "status", phase: "overlap-deploy-required", records: { jwt: { versionId: "v1" } } })}\n`,
-      readAws: args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/test` } : { SignatureValid: true }),
+      readAws: args => {
+        if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/test` });
+        assert.deepEqual(args.slice(0, 2), ["kms", "verify"]);
+        verifyMessages.push({ type: args[args.indexOf("--message-type") + 1], bytes: readFileSync(args[args.indexOf("--message") + 1].slice("fileb://".length)) });
+        return JSON.stringify({ SignatureValid: true });
+      },
       signAws: args => JSON.stringify(args[0] === "sts" ? { Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/test` } : (signed++, { Signature: "AA==" })) };
     const first = await prepareProductionRotationSuccessor(options);
     const second = await prepareProductionRotationSuccessor(options);
@@ -1200,6 +1208,8 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     assert.deepEqual(readFileSync(originalStateFile), stateBytes);
     assert.deepEqual(readFileSync(fixtureFile), fixtureBytes);
     assert.deepEqual([signed, planned], [1, 3]);
+    assert.ok(verifyMessages.some(input => input.type === "DIGEST" && input.bytes.equals(createHash("sha256").update(adoptionBytes).digest())));
+    assert.ok(verifyMessages.some(input => input.type === "RAW"));
     const reader = { config: nextConfig, configSha256: configHash, repositoryRoot: repository, runAws: options.readAws, statusRun: options.statusRun, proveSourceAdvance: ancestry, now: options.now };
     assert.equal((await authenticatePreparedRotationSuccessor(reader)).state.sourceSha, successorSha);
     await assert.rejects(authenticatePreparedRotationSuccessor({ ...reader, proveSourceAdvance: () => false }), /source or fixture lineage/);
