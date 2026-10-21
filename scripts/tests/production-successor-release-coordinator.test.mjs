@@ -45,7 +45,7 @@ test('hosted cutover and closure setup creates every private authorization direc
    const environment=path.join(sandbox,'github-env');
    const env={...process.env,PATH:bin+path.delimiter+process.env.PATH,SOURCE_SHA:A,TOOLING_SHA:C,
     RELEASE_ID:releaseId,RELEASE_PREPARATION_REFERENCE:'2'.repeat(64),RELEASE_PHASE:phase,
-    RELEASE_AUTHORIZATION_ROUND:'0',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:C,
+    RELEASE_AUTHORIZATION_ROUND:'0',RELEASE_AUTHORIZATION_POLICY_VERSION:'INDEPENDENT_REVIEW_V1',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:C,
     GITHUB_REPOSITORY:'test/repository',GITHUB_ENV:environment};
    execFileSync('bash',['-c',setup.replaceAll(HOSTED_RELEASE_ROOT,root)],{env});
    const variables=Object.fromEntries(fs.readFileSync(environment,'utf8').trim().split('\n').map(line=>line.split('=')));

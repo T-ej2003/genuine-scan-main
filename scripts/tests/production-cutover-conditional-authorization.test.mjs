@@ -9,6 +9,8 @@ import {rehearseConditionalContinuation,runConditionalProductionContinuation} fr
 import {renderConditionalRuntime,assertConditionalRuntimeBytes} from '../aws/production-cutover-runtime-materialization.mjs';
 import {authenticateConditionalWorkflowArtifact} from '../aws/production-cutover-conditional-workflow.mjs';
 import {canonicalJson} from '../aws/production-green-stage-b-contract.mjs';
+import {createProductionEnvironmentApprovalEvidence} from '../aws/production-github-environment-approval.mjs';
+import JSZip from 'jszip';
 
 test('conditional JSON rejects duplicate, escaped-duplicate, prototype, malformed and unbounded input',()=>{
   for(const bytes of ['{"a":1,"a":2}','{"a":1,"\\u0061":2}','{"__proto__":{}}','{"a":undefined}','{} trailing','[1,]','"unterminated']) assert.throws(()=>parseConditionalJson(bytes));
@@ -50,6 +52,23 @@ test('workflow receipt is authenticated through API metadata, ZIP digest, source
     Object.assign(f.run,run);Object.assign(f.artifact,artifact);
   }
   await assert.rejects(authenticateConditionalWorkflowArtifact({d:f.d,runId:'101',artifactId:'102',token:'fixture',fetchImpl:async url=>url.endsWith('/approvals')?{ok:true,json:async()=>[]} : f.fetchImpl(url),now:f.now()}),/approval event/);
+});
+
+test('actual workflow consumer rejects same-human approval even when GitHub permits self-review',async t=>{
+  const f=await conditionalFixture();t.after(f.cleanup);
+  const config=structuredClone(f.environmentConfig);config.protection_rules[0].prevent_self_review=false;
+  config.protection_rules[0].reviewers=[{type:'User',reviewer:{id:1,login:'executor'}}];
+  const approval=createProductionEnvironmentApprovalEvidence({repository:f.d.repository,environment:'production',sourceSha:f.d.toolingSourceSha,
+    workflowRef:f.workflowArtifact.provenance.workflowRef,eventName:'workflow_dispatch',workflowRunId:'101',workflowRunAttempt:'1',
+    executionActor:'executor',observedAt:new Date(f.now()).toISOString(),environmentConfig:config,
+    actualApproval:{state:'approved',environmentId:101,environmentName:'production',userId:1,userLogin:'executor'}});
+  const envelope=structuredClone(f.envelopes.PREPARE_OVERLAP);
+  envelope.payload.approvalProvenance=approval.evidenceSha256;envelope.payloadSha256=h(envelope.payload);
+  envelope.workflowArtifactProvenance.environmentApproval=approval;
+  const zip=await new JSZip().file('authorization.json',JSON.stringify(envelope)).generateAsync({type:'nodebuffer'});
+  const artifact={...f.artifact,size_in_bytes:zip.length,digest:`sha256:${h(zip)}`};
+  const fetchImpl=async url=>({ok:true,json:async()=>url.endsWith('/approvals')?[{state:'approved',environments:[{id:101,name:'production'}],user:{id:1,login:'executor'}}]:url.endsWith('/environments/production')?config:url.endsWith('/actions/artifacts/102')?artifact:f.run,arrayBuffer:async()=>zip});
+  await assert.rejects(authenticateConditionalWorkflowArtifact({d:f.d,runId:'101',artifactId:'102',token:'fixture',fetchImpl,now:f.now()}),/self-reviewed/);
 });
 
 test('mocked historical continuation uses actual QR/root, adoption, successor and readiness consumers without post-root approval',async t=>{

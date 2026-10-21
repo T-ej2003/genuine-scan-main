@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import JSZip from 'jszip';
 import {assertConditionalDerivation,assertConditionalPayload,conditionalHash,parseConditionalJson,exactConditionalKeys} from './production-cutover-conditional-authorization.mjs';
 import {fetchProductionEnvironmentApprovalEvidence,assertProductionEnvironmentActualReviewer,assertProductionEnvironmentApprovalFreshness,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
+import {assertConditionalHumanReview,INDEPENDENT_REVIEW_V1,SOLO_OPERATOR_CONTROLLED_V1,SOLO_OPERATOR_POLICY} from './production-cutover-human-policy.mjs';
 
 const authenticated=new WeakSet();
 export const isAuthenticatedConditionalWorkflowArtifact=value=>authenticated.has(value);
 
-export async function authenticateConditionalWorkflowArtifact({d,runId,artifactId,token,fetchImpl=fetch,now=Date.now()}) {
+export async function authenticateConditionalWorkflowArtifact({d,runId,artifactId,token,policy=SOLO_OPERATOR_POLICY,fetchImpl=fetch,now=Date.now()}) {
   assertConditionalDerivation(d); assert.match(String(runId),/^[1-9][0-9]*$/); assert.match(String(artifactId),/^[1-9][0-9]*$/); assert.ok(token);
   const get=async suffix=>{
     const response=await fetchImpl(`https://api.github.com/repos/${d.repository}/${suffix}`,{headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${token}`}});
@@ -26,25 +27,31 @@ export async function authenticateConditionalWorkflowArtifact({d,runId,artifactI
   assert.ok(zip.files['authorization.json']._data.uncompressedSize<=1024*1024);
   const envelope=parseConditionalJson(await zip.files['authorization.json'].async('nodebuffer'));
   exactConditionalKeys(envelope,['payload','payloadSha256','workflowArtifactProvenance'],'Workflow authorization');
-  assertConditionalPayload(envelope.payload,d,'PREPARE_OVERLAP',now); assert.equal(envelope.payloadSha256,conditionalHash(envelope.payload));
+  const policyVersion=envelope.payload.schemaVersion===2?SOLO_OPERATOR_CONTROLLED_V1:INDEPENDENT_REVIEW_V1;
+  assertConditionalPayload(envelope.payload,d,'PREPARE_OVERLAP',now,policy); assert.equal(envelope.payloadSha256,conditionalHash(envelope.payload));
   const provenance=envelope.workflowArtifactProvenance;
   exactConditionalKeys(provenance,['workflowRunId','workflowRunAttempt','workflowRef','sourceSha','environmentApproval'],'Workflow provenance');
   assert.equal(provenance.workflowRunId,String(runId)); assert.equal(provenance.workflowRunAttempt,'1'); assert.equal(provenance.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef); assert.equal(provenance.sourceSha,d.toolingSourceSha);
   const evidence=provenance.environmentApproval;
   assertProductionEnvironmentApprovalFreshness(evidence,{now:new Date(now)});
   const reviewer=assertProductionEnvironmentActualReviewer(evidence,{sourceSha:d.toolingSourceSha,repository:d.repository,executionActor:run.actor.login});
+  const humanReview=assertConditionalHumanReview({evidence,run,phase:'PREPARE_OVERLAP',policyVersion,policy,d,now});
+  if(policyVersion===SOLO_OPERATOR_CONTROLLED_V1){
+    assert.equal(envelope.payload.humanAuthorization.operatorGithubUserId,humanReview.actorId);
+    assert.equal(envelope.payload.humanAuthorization.selfAuthorized,true);
+  }
   assert.equal(evidence.workflowRunId,String(runId)); assert.equal(evidence.workflowRunAttempt,'1'); assert.equal(evidence.workflowRef,provenance.workflowRef);
   assert.ok(Date.parse(evidence.observedAt)>=Date.parse(run.created_at) && Date.parse(evidence.observedAt)<=Date.parse(run.updated_at),'Approval observation is outside producing run');
   const live=await fetchProductionEnvironmentApprovalEvidence({token,repository:d.repository,environment:'production',sourceSha:d.toolingSourceSha,workflowRef:provenance.workflowRef,eventName:'workflow_dispatch',workflowRunId:String(runId),workflowRunAttempt:'1',executionActor:run.actor.login,observedAt:new Date(now).toISOString(),requireActualApproval:true},{fetchImpl});
   assert.deepEqual(evidence.actualApproval,live.actualApproval); assert.deepEqual(evidence.configuredReviewers,live.configuredReviewers); assert.equal(evidence.environmentId,live.environmentId); assert.equal(evidence.preventSelfReview,live.preventSelfReview); assert.equal(evidence.canAdminsBypass,live.canAdminsBypass);
   assert.equal(envelope.payload.approvalProvenance,evidence.evidenceSha256); assert.ok(reviewer);
   const freeze=value=>{if(value && typeof value==='object'){Object.values(value).forEach(freeze);Object.freeze(value);}return value;};
-  const result=freeze({provenance,derivationSha256:conditionalHash(d),payloadSha256:envelope.payloadSha256,phase:'prepare-overlap-conditional',sourceSha:d.toolingSourceSha,environmentApproval:evidence,envelope});
+  const result=freeze({provenance,derivationSha256:conditionalHash(d),payloadSha256:envelope.payloadSha256,phase:'prepare-overlap-conditional',sourceSha:d.toolingSourceSha,policyVersion:humanReview.policyVersion,environmentApproval:evidence,envelope});
   authenticated.add(result); return result;
 }
 
 /** Isolated producer used by the existing protected workflow; no broker, Terraform or KMS operation. */
-export async function produceConditionalOverlapAuthorization({d,sourceSha,ticketId,releaseId,preparationReference,authorizationRound,env=process.env,fetchImpl=fetch,now=Date.now()}) {
+export async function produceConditionalOverlapAuthorization({d,sourceSha,ticketId,releaseId,preparationReference,authorizationRound,authorizationPolicyVersion=INDEPENDENT_REVIEW_V1,policy=SOLO_OPERATOR_POLICY,env=process.env,fetchImpl=fetch,now=Date.now()}) {
   assertConditionalDerivation(d);
   assert.equal(sourceSha,d.historicalReleaseSha);assert.equal(ticketId,d.ticketId);
   const {conditionalOperationId,CONDITIONAL_RULES,CONDITIONAL_EFFECTS,CONDITIONAL_PRINCIPALS}=await import('./production-cutover-conditional-authorization.mjs');
@@ -54,17 +61,27 @@ export async function produceConditionalOverlapAuthorization({d,sourceSha,ticket
   assert.equal(env.GITHUB_REPOSITORY,d.repository);assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
   assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
   assert.equal(env.GITHUB_RUN_ATTEMPT,'1');assert.match(env.GITHUB_RUN_ID,/^[1-9][0-9]*$/);
+  assert.equal(env.RELEASE_AUTHORIZATION_POLICY_VERSION||INDEPENDENT_REVIEW_V1,authorizationPolicyVersion);
   for(const [name,value] of Object.entries({RELEASE_ID:releaseId,RELEASE_PHASE:'prepare-overlap-conditional',RELEASE_PREPARATION_REFERENCE:preparationReference,RELEASE_AUTHORIZATION_ROUND:'0'}))assert.equal(env[name],value);
   const branchResponse=await fetchImpl(`https://api.github.com/repos/${d.repository}/branches/main`,{headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${env.GH_TOKEN}`}});
   assert.ok(branchResponse.ok);const branch=await branchResponse.json();assert.equal(branch.protected,true);assert.equal(branch.commit.sha,d.toolingSourceSha,'Protected source changed');
+  const runResponse=await fetchImpl(`https://api.github.com/repos/${d.repository}/actions/runs/${env.GITHUB_RUN_ID}`,{headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${env.GH_TOKEN}`}});
+  assert.ok(runResponse.ok);const run=await runResponse.json();
+  assert.equal(String(run.id),env.GITHUB_RUN_ID);assert.equal(run.head_sha,d.toolingSourceSha);assert.equal(run.run_attempt,1);
+  assert.equal(run.path,'.github/workflows/authorize-production-stage-b-release-transition.yml');assert.equal(run.event,'workflow_dispatch');
+  assert.equal(run.repository?.full_name,d.repository);assert.equal(run.head_repository?.full_name,d.repository);
+  assert.equal(run.actor?.login,env.GITHUB_ACTOR);
   const {readBrokerProtectedEnvironmentApproval}=await import('./stage-b-staged-broker-authorization.mjs');
   const {approval}=await readBrokerProtectedEnvironmentApproval({sourceSha:d.toolingSourceSha,env,fetchImpl,now:new Date(now)});
-  const payload={kind:'CUTOVER_CONDITIONAL_AUTHORIZATION_V1',schemaVersion:1,
+  const human=assertConditionalHumanReview({evidence:approval,run,phase:'PREPARE_OVERLAP',policyVersion:authorizationPolicyVersion,policy,d,now});
+  const solo=authorizationPolicyVersion===SOLO_OPERATOR_CONTROLLED_V1;
+  const payload={kind:solo?'CUTOVER_CONDITIONAL_AUTHORIZATION_V2':'CUTOVER_CONDITIONAL_AUTHORIZATION_V1',schemaVersion:solo?2:1,
     authorizationId:conditionalHash({phase:'PREPARE_OVERLAP',derivationSha256:conditionalHash(d),preparationReference,runId:env.GITHUB_RUN_ID}),
     phase:'PREPARE_OVERLAP',derivationSha256:conditionalHash(d),authority:'GITHUB_PRODUCTION_REVIEWER',executorPrincipal:CONDITIONAL_PRINCIPALS.release,
     dependencyRule:CONDITIONAL_RULES.PREPARE_OVERLAP,operationEnvelope:CONDITIONAL_EFFECTS.PREPARE_OVERLAP,
-    notBefore:d.notBefore,notAfter:d.notAfter,maxDispatches:1,approvalProvenance:approval.evidenceSha256};
+    notBefore:d.notBefore,notAfter:d.notAfter,maxDispatches:1,approvalProvenance:approval.evidenceSha256,
+    ...(solo?{authorizationPolicyVersion,policyManifestSha256:conditionalHash(policy),humanAuthorization:{operatorAwsUserArn:policy.checkerUserArn,operatorGithubUserId:human.actorId,operatorSessionArn:null,selfAuthorized:true}}:{})};
   assert.ok(now>=Date.parse(d.notBefore)-30*60*1000&&now<Date.parse(d.notAfter),'Issuance is outside the reviewed lead window');
-  assertConditionalPayload(payload,d,'PREPARE_OVERLAP',Math.max(now,Date.parse(d.notBefore)));
+  assertConditionalPayload(payload,d,'PREPARE_OVERLAP',Math.max(now,Date.parse(d.notBefore)),policy);
   return {payload,payloadSha256:conditionalHash(payload),workflowArtifactProvenance:{workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:'1',workflowRef:env.GITHUB_WORKFLOW_REF,sourceSha:d.toolingSourceSha,environmentApproval:approval}};
 }

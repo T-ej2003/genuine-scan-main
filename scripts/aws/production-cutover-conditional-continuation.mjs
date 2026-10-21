@@ -5,6 +5,8 @@ import {parseConditionalJson} from './production-cutover-conditional-authorizati
 import {performance} from 'node:perf_hooks';
 import {authenticateConditionalBundle,assertConditionalWindow,conditionalHash,CONDITIONAL_PHASES,assertConditionalProductionEnabled} from './production-cutover-conditional-authorization.mjs';
 import {assertConditionalFileCensus,assertConditionalLiveState,renderConditionalRuntime,assertConditionalRuntimeBytes} from './production-cutover-runtime-materialization.mjs';
+import {SOLO_OPERATOR_POLICY} from './production-cutover-human-policy.mjs';
+import {SOLO_SUSPENSION_SOURCE} from './production-cutover-solo-authority.mjs';
 
 export {assertConditionalUnsignedEffect,conditionalRegistrationRequest,assertConditionalPrepareEffect} from './production-cutover-conditional-native.mjs';
 // Production entry is deliberately closed. No environment variable or injected adapter can enable it.
@@ -19,7 +21,7 @@ export async function runConditionalProductionContinuation(options) {
   const {createConditionalExecutor}=await import('./production-cutover-conditional-native.mjs');
   const execute=createConditionalExecutor(options.d);
   const store=createReleaseCoordinatorStore({run:createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,profile:'mscqr-production-release-deployer',exec:execute}),directory:path.dirname(options.d.runtimeTemplate.rotationConfigFile),repositoryRoot:process.cwd()});
-  const journal=createConditionalConsumptionJournal({store,rotationId:options.d.rotationId,predecessorStateSha256:options.d.predecessor.stateSha256});
+  const journal=createConditionalConsumptionJournal({store,rotationId:options.d.rotationId,predecessorStateSha256:options.d.predecessor.stateSha256,operatorControl:{d:options.d,policy:SOLO_OPERATOR_POLICY,trust:SOLO_SUSPENSION_SOURCE}});
   const adapters=createCanonicalConditionalAdapters(options);
   return rehearseConditionalContinuation({...options,journal,adapters});
 }

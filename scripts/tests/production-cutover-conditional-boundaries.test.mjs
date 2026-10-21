@@ -59,9 +59,10 @@ test('journal cannot accept unverified authorities, wrong phase executor or forg
   await assert.rejects(journal.claimExecution({derivationSha256:'a'.repeat(64)}),/authenticated phase authorities/);
   const binding=authenticateConditionalBundle({...f,now:f.now()}),execution=await journal.claimExecution(binding);
   const token=await journal.claimPhase(execution,'ROOT_DROP',{...binding,phase:'ROOT_DROP',runtimeFileSha256:null,dependencyHashes:{},dependencyReceipts:{}});let calls=0;
-  await assert.rejects(journal.dispatch(token,{phase:'ROOT_DROP',action:'KMS_SIGN',request:{},principal:'arn:aws:iam::368992683803:role/mscqr-production-release-deployer',checkedAt:f.now()},()=>{calls++;},()=>{}),/Wrong phase executor/);
+  await assert.rejects(journal.dispatch(token,{phase:'ROOT_DROP',action:'KMS_SIGN',request:{},principal:'arn:aws:iam::368992683803:role/mscqr-production-release-deployer',checkedAt:f.now()},()=>{calls++;},()=>{}),/Canonical native-effect guard/);
   assert.equal(calls,0);
-  await journal.dispatch(token,{phase:'ROOT_DROP',action:'KMS_SIGN',request:{exact:'fixture'},principal:'arn:aws:iam::368992683803:root',checkedAt:f.now()},()=>({Signature:'fixture'}),()=>{});
+  const signer=journal.createNativeSigner(token,{d:f.d,phase:'ROOT_DROP',trust:f.trust,materialization:undefined,outputs:{},beforeDispatch:async()=>{},principal:'arn:aws:iam::368992683803:root',now:f.now,invokeNative:async invoke=>invoke()});
+  await f.adapters.root({nativeSign:signer.sign});
   const key=[...store.map.keys()].find(key=>key.includes('COMPLETED:KMS_SIGN'));
   store.map.get(key).outputSha256='0'.repeat(64);
   await assert.rejects(journal.status('ROOT_DROP','KMS_SIGN'),/hash differs/);
