@@ -75,7 +75,14 @@ export function readIdentityCapabilityMatrix() {
   if (matrix.schemaVersion !== 1 || matrix.account !== STAGE_B.account || matrix.region !== STAGE_B.region || !matrix.phases?.some(({ id }) => id === "runtime-consumability-evidence")) throw new Error("Stage B identity capability matrix identity is wrong.");
   const releaseActions = new Set(matrix.capabilities.filter(({ identity }) => identity === "RELEASE_DEPLOYER").map(({ action }) => action));
   for (const probe of RELEASE_READ_PROBES) if (!releaseActions.has(probe.action)) throw new Error(`Stage B identity capability matrix omits release action ${probe.action}.`);
-  if (matrix.capabilities.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && ["iam:SimulatePrincipalPolicy", "cloudtrail:LookupEvents"].includes(action))) throw new Error("Stage B release identity must not own administrator audit actions.");
+  if (matrix.capabilities.some(({ identity, action, id, policy, resources, context }) => identity === "RELEASE_DEPLOYER" && (
+    action === "iam:SimulatePrincipalPolicy" || (action === "cloudtrail:LookupEvents" && (
+      id !== "manifest-conditional-ecs-registration-audit-read"
+      || policy?.sourceFile !== "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"
+      || policy?.sid !== "ReadOnlyConditionalEcsRegistrationAuditEuWest2"
+      || JSON.stringify(resources) !== '["*"]'
+      || JSON.stringify(context) !== '[{"key":"aws:RequestedRegion","type":"string","values":["eu-west-2"]}]'
+    ))))) throw new Error("Stage B release identity may only read the exact conditional ECS audit events; administrator simulation remains forbidden.");
   return { ...matrix, calls: matrix.capabilities };
 }
 

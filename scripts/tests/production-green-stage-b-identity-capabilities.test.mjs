@@ -168,7 +168,30 @@ test("identity matrix assigns IAM simulation only to administrator", () => {
   assert(matrix.calls.some(({ identity, action }) => identity === "ADMINISTRATOR" && action === "iam:SimulatePrincipalPolicy"));
   assert(!matrix.calls.some(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "iam:SimulatePrincipalPolicy"));
   assert(matrix.calls.some(({ identity, action }) => identity === "ROOT_OPERATOR" && action === "iam:SimulatePrincipalPolicy"));
+  const audit = matrix.calls.filter(({ identity, action }) => identity === "RELEASE_DEPLOYER" && action === "cloudtrail:LookupEvents");
+  assert.deepEqual(audit.map(({ id, resources, context, policy }) => ({ id, resources, context, sourceFile: policy.sourceFile, sid: policy.sid })), [{
+    id: "manifest-conditional-ecs-registration-audit-read",
+    resources: ["*"],
+    context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }],
+    sourceFile: "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json",
+    sid: "ReadOnlyConditionalEcsRegistrationAuditEuWest2",
+  }]);
   assert.equal(matrix.phases.length, 61);
+});
+
+test("conditional ECS audit read cannot expand to another region or IAM simulation", () => {
+  const graph = buildStageBDeploymentCapabilityGraph();
+  const audit = graph.capabilities.find(({ id }) => id === "manifest-conditional-ecs-registration-audit-read");
+  assert(audit);
+  for (const mutate of [
+    (item) => { item.context[0].values = ["us-east-1"]; },
+    (item) => { item.action = "iam:SimulatePrincipalPolicy"; },
+    (item) => { item.policy.sid = "UnreviewedAuditRead"; },
+  ]) {
+    const changed = structuredClone(graph);
+    mutate(changed.capabilities.find(({ id }) => id === audit.id));
+    assert.throws(() => assertStageBDeploymentCapabilityGraph(changed));
+  }
 });
 
 test("bootstrap AssumeRole capabilities are bound to their exact MFA-gated inline-policy statements", () => {
@@ -215,7 +238,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 767, uniqueActions: 161, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 768, uniqueActions: 161, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",

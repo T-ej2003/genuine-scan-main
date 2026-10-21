@@ -667,6 +667,13 @@ test("Stage A live-evidence policy source contains no mutation permission", () =
   const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json", "utf8"));
   const statement = policy.Statement.find((item) => item.Sid === "ReadStageALivePrerequisites");
   assert.deepEqual(statement, { Sid: "ReadStageALivePrerequisites", Effect: "Allow", Action: ["ec2:DescribeSubnets", "ec2:DescribeRouteTables", "ec2:DescribeSecurityGroups", "ecs:DescribeClusters", "rds:DescribeDBInstances"], Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } });
+  assert.deepEqual(policy.Statement.filter((item) => item.Action === "cloudtrail:LookupEvents"), [{
+    Sid: "ReadOnlyConditionalEcsRegistrationAuditEuWest2",
+    Effect: "Allow",
+    Action: "cloudtrail:LookupEvents",
+    Resource: "*",
+    Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  }]);
   for (const action of ["ec2:CreateSubnet", "ecs:UpdateService", "rds:ModifyDBInstance"]) {
     const evaluation = { id: `unrelated-${action}`, action, resource: "*", context: [{ key: "aws:RequestedRegion", type: "string", values: ["eu-west-2"] }], expectedDecision: "implicitDeny", expectedMissingContextValues: [] };
     Object.defineProperty(evaluation, "forbidden", { value: true });
@@ -883,7 +890,8 @@ test("production-shaped plan requires and binds the exact account and region var
   assert.throws(() => run({ ...productionPlan, variables: { ...productionPlan.variables, aws_region: { value: "us-east-1" } } }), /Plan account or region is wrong/);
   const report = runPermissionPreflight({ reportGeneratorCallerArn: generatorArn, simulatedRoleArn: roleArn, plan: productionPlan, planBytes: bytes, savedPlanBytes, manifest, generatedAt: now, now, policyPublishedAt: now, cloudTrailSessionName: "test-session", simulate: allowRequiredDenyForbidden, cloudTrail: clearCloudTrail });
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredEvaluations.length, 277);
+  assert.equal(report.requiredEvaluations.length, 278);
+  assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId === "conditional-ecs-registration-audit-read").map(({ action, resource }) => [action, resource]), [["cloudtrail:LookupEvents", "*"]]);
   assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId.startsWith("staged-broker-")).map(({ manifestId, action, resource }) => [manifestId, action, resource]).sort(), [
     ["staged-broker-lambda-listaliases", "lambda:ListAliases", STAGE_B.brokerFunctionArn],
     ["staged-broker-lambda-listfunctionurlconfigs", "lambda:ListFunctionUrlConfigs", STAGE_B.brokerFunctionArn],
