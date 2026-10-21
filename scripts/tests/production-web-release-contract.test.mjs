@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 import yaml from "js-yaml";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
@@ -13,12 +14,12 @@ import {
   buildFrontendUpdate, buildFrontendRollback,
   runGovernedFrontendActivation,
 } from "../aws/production-web-release-contract.mjs";
-import { activateAuthenticatedWebRelease, createAwsFrontendActivationAdapters, createWebActivationAwsRunner, assertBackendActivationLiveReadback, assertOverlapBackendLiveReadback, assertFrontendActivationAuthorized, runCli as runWebActivationCli } from "../aws/run-production-web-activation.mjs";
+import { activateAuthenticatedWebRelease, createAwsFrontendActivationAdapters, createWebActivationAwsRunner, assertBackendActivationLiveReadback, assertOverlapBackendLiveReadback, assertOverlapReleaseLineage, assertFrontendActivationAuthorized, runCli as runWebActivationCli } from "../aws/run-production-web-activation.mjs";
 import { assertNormalBackendActivationEvidence, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildProductionOverlapDeploymentReceipt } from "../aws/production-overlap-deployment-receipt.mjs";
 
-const sourceSha = "a".repeat(40); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
+const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
 const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${digest}`;
 const artifact = (changes = {}) => Buffer.from(`${JSON.stringify({ service: "frontend", repository: "mscqr-web", image_uri: `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/mscqr-web:${sourceSha}`, image_tag: sourceSha, image_digest: digest, image_ref: imageRef, platform: "linux/amd64", dockerfile: "Dockerfile.ecs-frontend", build_context: ".", critical_scan: "pass", sbom_sha256: "1".repeat(64), provenance_sha256: "2".repeat(64), cosign_signature_verified: true, sbom_attestation_verified: true, provenance_attestation_verified: true, ...changes })}\n`);
 const impact = Object.freeze({ schemaVersion: 1, toolingSha: sourceSha, webPublicationRequired: true, classifiedFiles: ["src/App.tsx"] });
@@ -88,13 +89,28 @@ function fixture() {
   return { artifactBytes, identity, evidence, signature, authorization };
 }
 
-function overlapFixture() {
-  const historicalSource = "4".repeat(40); const toolingSha = "c".repeat(40); const rotationId = "rotation-20260913011819-98b062c4";
+function overlapFixture(historicalSource = sourceSha) {
+  const toolingSha = "c".repeat(40); const rotationId = "rotation-20260913011819-98b062c4";
   const targetArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:25";
   const approval = createProductionEnvironmentApprovalEvidence({ environmentConfig: { id: 1, name: "production", can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "User", reviewer: { id: 2, login: "reviewer" } }] }] }, repository: "T-ej2003/genuine-scan-main", environment: "production", sourceSha: historicalSource, workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main", eventName: "workflow_dispatch", workflowRunId: "10", workflowRunAttempt: "1", executionActor: "operator", observedAt: createdAt });
   const receipt = buildProductionOverlapDeploymentReceipt({ sourceSha: historicalSource, rotationId, rotationStateSha256: "1".repeat(64), readinessSha256: "2".repeat(64), rotationFixtureSha256: "3".repeat(64), environmentApproval: approval, deployedAt: createdAt, expectedCurrentTaskDefinitionArn: targetArn.replace(":25", ":24"), taskDefinitionArn: targetArn, imageDigest: digest, deploymentSha: historicalSource, deployment: { updateServiceCount: 1, disposition: "APPLIED", metadata: { clusterName: NORMAL_ACTIVATION.cluster, serviceName: NORMAL_ACTIVATION.service, observedTaskDefinitionArn: targetArn, observedImageDigest: digest, serviceStable: true } } });
   return { receipt, historicalSource, toolingSha, rotationId, workflow: { conclusion: "success" }, workflowSourceSha: toolingSha, expectedExecutionSourceSha: toolingSha, expectedRotationId: rotationId, tailFailures: [] };
 }
+
+test("real Git lineage rejects a later or unrelated overlap release for an older frontend target", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-web-lineage-"));
+  const git = (...args) => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  const commit = (name) => { fs.writeFileSync(path.join(directory, "release"), name); git("add", "release"); git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", name); return git("rev-parse", "HEAD"); };
+  try {
+    git("init", "-q");
+    const historical = commit("historical"); const frontendTarget = commit("frontend-target"); const laterBackend = commit("later-backend");
+    git("checkout", "-q", "--detach", historical); const unrelatedBackend = commit("unrelated-backend");
+    assert.equal(assertOverlapReleaseLineage(historical, frontendTarget, directory), true);
+    assert.equal(assertOverlapReleaseLineage(frontendTarget, frontendTarget, directory), true);
+    for (const overlapRelease of [laterBackend, unrelatedBackend, "f".repeat(40)]) assert.throws(() => assertOverlapReleaseLineage(overlapRelease, frontendTarget, directory), /ancestor/);
+    assert.throws(() => assertOverlapReleaseLineage("", frontendTarget, directory), /malformed/);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+});
 
 test("web publication accepts only its exact immutable source contract", () => {
   assert.equal(parseWebPublicationArtifact(artifact(), sourceSha).image_ref, imageRef);
@@ -233,13 +249,15 @@ test("overlap-backed web activation requires authenticated release receipt, matc
     { expectedRotationId: "rotation-unrelated" },
     { workflow: { conclusion: "failure" } },
     { tailFailures: [{ name: "Verify backend health" }] },
+    { receipt: { ...overlap.receipt, sourceSha: "d".repeat(40) } },
   ]) await assert.rejects(() => activateAuthenticatedWebRelease({ ...options, authenticatedOverlap: { ...overlap, ...change } }), /overlap|receipt/);
+  await assert.rejects(() => activateAuthenticatedWebRelease({ ...options, authenticatedOverlap: overlapFixture("d".repeat(40)), isAncestor: () => true }), /ancestor/);
   assert.equal(adapters, 2);
   const backendService = { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: overlap.receipt.taskDefinitionArn, deployments: [{ status: "PRIMARY", taskDefinition: overlap.receipt.taskDefinitionArn, rolloutState: "COMPLETED" }] };
   const tasks = [1, 2].map(() => ({ lastStatus: "RUNNING", taskDefinitionArn: overlap.receipt.taskDefinitionArn, containers: [{ name: NORMAL_ACTIVATION.container, imageDigest: digest }] }));
   const live = { sourceSha, imageReleaseSha: sourceSha, expectedDigest: digest, receipt: overlap.receipt, service: backendService, tasks, healthStatus: 200, healthBody: { status: "ready", release: { gitSha: sourceSha } } };
   assert.equal(assertOverlapBackendLiveReadback(live), true);
-  for (const change of [{ tasks: tasks.slice(0, 1) }, { healthBody: { status: "ready", release: { gitSha: overlap.historicalSource } } }, { receipt: { ...overlap.receipt, receiptSha256: "0".repeat(64) } }]) assert.throws(() => assertOverlapBackendLiveReadback({ ...live, ...change }), /overlap|receipt/);
+  for (const change of [{ tasks: tasks.slice(0, 1) }, { healthBody: { status: "ready", release: { gitSha: "d".repeat(40) } } }, { receipt: { ...overlap.receipt, receiptSha256: "0".repeat(64) } }]) assert.throws(() => assertOverlapBackendLiveReadback({ ...live, ...change }), /overlap|receipt/);
   const webAuthorization = fixture().authorization; const candidateArn = taskArn.replace(":20", ":21"); const updates = [];
   const activated = await activateAuthenticatedWebRelease({ ...options, webAuthorization, createAdapters: () => ({
     verifyBackendActivation: async ({ backendActivationEvidence }) => assertOverlapBackendLiveReadback({ ...live, receipt: backendActivationEvidence }),
@@ -358,6 +376,7 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   assert.equal(activationWorkflow.jobs.activate.steps.find(({ name }) => name === "Authenticate coordinated Stage-B and web evidence").env.WORKFLOW_DEFINITION_SHA, "${{ github.sha }}");
   assert.match(serializedActivation, /OVERLAP_RUN_ID.*OVERLAP_RUN_ATTEMPT.*OVERLAP_RELEASE_SHA.*OVERLAP_ROTATION_ID/);
   assert.match(serializedActivation, /git merge-base --is-ancestor.*OVERLAP_RELEASE_SHA/);
+  assert.match(activationWorkflow.jobs.activate.steps.find(({ name }) => name === "Bind exact protected source").run, /git merge-base --is-ancestor "\$OVERLAP_RELEASE_SHA" "\$TARGET_SHA"/);
   assert.match(serializedActivation, /MSCQR_AWS_CREDENTIAL_SOURCE.*github-oidc-release-deployer/);
   for (const forbidden of ["inputs.service", "inputs.task_definition", "inputs.image", "inputs.rollback", "execute-command"]) assert.doesNotMatch(serializedActivation, new RegExp(forbidden));
   const fourImage = fs.readFileSync("scripts/aws/production-green-stage-b-image-evidence.mjs", "utf8"); assert.match(fourImage, /exactly four image records|all four Stage B images/);

@@ -89,7 +89,7 @@ jobs:
           git merge-base --is-ancestor "$WORKFLOW_DEFINITION_SHA" "$protected_main_sha"
           if [[ -n "$OVERLAP_RELEASE_SHA" ]]; then
             [[ "$OVERLAP_RELEASE_SHA" =~ ^[a-f0-9]{40}$ ]]
-            git merge-base --is-ancestor "$OVERLAP_RELEASE_SHA" "$WORKFLOW_DEFINITION_SHA"
+            git merge-base --is-ancestor "$OVERLAP_RELEASE_SHA" "$TARGET_SHA"
           fi
           test -z "$(git status --porcelain)"
       - uses: aws-actions/configure-aws-credentials@v6

@@ -77,12 +77,20 @@ export function assertFrontendActivationAuthorized(coordinated) {
   return true;
 }
 
+export function assertOverlapReleaseLineage(ancestor, descendant, cwd = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..")) {
+  if (!/^[a-f0-9]{40}$/.test(ancestor || "") || !/^[a-f0-9]{40}$/.test(descendant || "")) throw new Error("Overlap release lineage is malformed.");
+  try { execFileSync("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd, stdio: "ignore" }); }
+  catch { throw new Error("Overlap release is not an ancestor of the signed frontend target."); }
+  return true;
+}
+
 export async function activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence, authenticatedOverlap, verifyWeb, verifyStageBImageEvidence, verifyCoordinated = verifyCoordinatedWebRelease, createAdapters = createAwsFrontendActivationAdapters, now } = {}) {
   const coordinated = await verifyCoordinated({ sourceSha, stageBAuthorization, webAuthorization, verifyWeb, verifyStageBImageEvidence });
   assertFrontendActivationAuthorized(coordinated);
   if (authenticatedOverlap) {
     if (backendActivationEvidence || authenticatedOverlap.workflow?.conclusion !== "success" || !Array.isArray(authenticatedOverlap.tailFailures) || authenticatedOverlap.tailFailures.some(({ conclusion }) => conclusion !== "skipped") || authenticatedOverlap.receipt?.imageDigest !== authorizedBackendDigest(stageBAuthorization) || authenticatedOverlap.workflowSourceSha !== authenticatedOverlap.expectedExecutionSourceSha || authenticatedOverlap.receipt?.rotationId !== authenticatedOverlap.expectedRotationId) throw new Error("Authenticated overlap does not bind a successful exact frontend release.");
     backendActivationEvidence = assertProductionOverlapDeploymentReceipt(authenticatedOverlap.receipt);
+    assertOverlapReleaseLineage(backendActivationEvidence.sourceSha, sourceSha);
   } else assertNormalBackendActivationEvidence(backendActivationEvidence, { sourceSha, stageBAuthorization });
   const adapters = createAdapters();
   if (typeof adapters.verifyBackendActivation !== "function") throw new Error("Frontend activation requires the canonical backend activation readback.");
