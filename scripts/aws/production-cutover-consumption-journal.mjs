@@ -17,6 +17,8 @@ const seal = body => ({...body, recordSha256:conditionalHash(body)});
 const artifact=value=>Buffer.isBuffer(value)?{encoding:'base64',bytes:value.toString('base64')}:value;
 export {conditionalRotationClaimId,assertNoConditionalCutoverConflict,claimLegacyCutoverLane,assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import {conditionalRotationClaimId} from './production-cutover-conditional-lock.mjs';
+import {SOLO_OPERATOR_CONTROLLED_V1} from './production-cutover-human-policy.mjs';
+import {assertSoloAuthorityActive} from './production-cutover-solo-authority.mjs';
 function authenticate(record, expected) {
   if (record === null || record === undefined) return null;
   exactConditionalKeys(record, [...Object.keys(expected), 'recordSha256'], 'Consumption record');
@@ -26,10 +28,11 @@ function authenticate(record, expected) {
   return record;
 }
 
-export function createConditionalConsumptionJournal({store, rotationId, predecessorStateSha256, executionId = randomBytes(32).toString('hex')}) {
+export function createConditionalConsumptionJournal({store, rotationId, predecessorStateSha256,soloAuthority, executionId = randomBytes(32).toString('hex')}) {
   conditionalSha(executionId); const operationId = conditionalOperationId(rotationId,predecessorStateSha256);
   for (const method of ['readOperation','writeOperation','claimOperation']) assert.equal(typeof store[method],'function','Confirmed conditional store required');
   const scope = {schemaVersion:1,kind:'CUTOVER_CONDITIONAL_CONSUMPTION_V1',operationId,executionId};
+  const nativeGate=Symbol('conditional-native-effect');
   const read = async (phase,record, extra = {}) => authenticate(await store.readOperation(operationId,name(phase,record)), {...scope,...extra});
   const record = async (phase,type,extra) => {
     const value=seal({...scope,...extra}); await store.writeOperation(operationId,name(phase,type),value);
@@ -45,11 +48,17 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
     const own=owners.get(token); assert.ok(own && !own.used && own.operationId===operationId && own.executionId===executionId && own.phase===phase && own.type===type,'No live claim ownership');
     own.used=true; return own;
   };
+  const assertSoloActive=async binding=>{
+    if(binding.policyVersion!==SOLO_OPERATOR_CONTROLLED_V1)return;
+    assert.equal(conditionalHash(soloAuthority?.d),binding.derivationSha256,'Solo authority derivation differs');
+    await assertSoloAuthorityActive({store,policy:soloAuthority.policy,d:soloAuthority.d,trust:soloAuthority.trust,now:soloAuthority.now?.()??Date.now()});
+  };
   return Object.freeze({operationId,executionId,
     claimExecution: async binding => {
       assert.ok(isAuthenticatedConditionalBinding(binding),'Four authenticated phase authorities required');
       assert.equal(binding.operationId,operationId,'Rotation/predecessor claim identity differs');
       conditionalSha(binding.derivationSha256);
+      await assertSoloActive(binding);
       const global=seal({...scope,binding});
       assert.equal(await store.claimOperation(conditionalRotationClaimId(rotationId),'CLAIM',global),true,'Rotation already claimed');
       assert.deepEqual(await store.readOperation(conditionalRotationClaimId(rotationId),'CLAIM'),global,'Global claim readback differs');
@@ -58,7 +67,7 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
     async claimPhase(executionToken,phase,binding) {
       assert.ok(CONDITIONAL_PHASES.includes(phase));
       const own=owners.get(executionToken); assert.ok(own && own.operationId===operationId && own.executionId===executionId && own.phase==='EXECUTION','Execution ownership required');
-      exactConditionalKeys(binding,['derivationSha256','operationId','authorizationHashes','phase','runtimeFileSha256','dependencyHashes','dependencyReceipts'],'Phase binding');
+      exactConditionalKeys(binding,['derivationSha256','operationId','authorizationHashes','policyVersion','phase','runtimeFileSha256','dependencyHashes','dependencyReceipts'],'Phase binding');
       assert.equal(binding.phase,phase);
       const dependencies=CONDITIONAL_PHASES.slice(0,CONDITIONAL_PHASES.indexOf(phase));
       exactConditionalKeys(binding.dependencyHashes,dependencies,'Dependency hashes');
@@ -77,7 +86,8 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
         assert.equal(binding.runtimeFileSha256,materialization.manifest.runtimeFileSha256);
         assert.equal(conditionalHash(Buffer.from(materialization.runtimeBytesBase64,'base64')),binding.runtimeFileSha256);
       }
-      for(const key of ['derivationSha256','operationId','authorizationHashes']) assert.deepEqual(binding[key],own.extra.binding[key],'Phase authorization differs from claimed execution');
+      for(const key of ['derivationSha256','operationId','authorizationHashes','policyVersion']) assert.deepEqual(binding[key],own.extra.binding[key],'Phase authorization differs from claimed execution');
+      await assertSoloActive(binding);
       // A revocation and a claim contend for this one immutable decision key.
       return claim(phase,'DECISION',{decision:'CLAIMED',binding});
     },
@@ -91,7 +101,7 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
       const authority=Object.freeze({});
       prepareAuthorities.set(authority,{d,successor,executionId,validateReadiness:async()=>{await beforeDispatch();for(const action of ['ROTATION_LOCAL_STATE','REGISTER_TASK_DEFINITION'])assert.ok((action==='REGISTER_TASK_DEFINITION'?['COMPLETED_CONFIRMED','RECONCILED_COMPLETED']:['COMPLETED_CONFIRMED']).includes(await this.status('PREPARE_OVERLAP',action)),'Readiness requires confirmed native effects');},reconcileRegistration:options=>this.reconcileRegistration(phaseToken,options),dispatch:async(action,request,invoke,verify)=>{
         await beforeDispatch();assertConditionalPrepareEffect({d,executionId,action,request,successor});
-        return this.dispatch(phaseToken,{phase:'PREPARE_OVERLAP',action,request,principal,checkedAt:now()},()=>invokeNative(invoke),verify);
+        return this.dispatch(phaseToken,{phase:'PREPARE_OVERLAP',action,request,principal,checkedAt:now()},()=>invokeNative(invoke),verify,nativeGate);
       }});
       return authority;
     },
@@ -111,12 +121,13 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
         const bound={keyId:d.keys[kind].keyArn,messageBase64:request.message.toString('base64'),messageType:request.messageType,signingAlgorithm:request.signingAlgorithm};
         assertConditionalNativeSignRequest({d,phase,trust,request:bound});
         assertConditionalUnsignedEffect({d,phase,request:bound,materialization,outputs,now:now()});
-        const result=await this.dispatch(phaseToken,{phase,action:'KMS_SIGN',request:bound,principal,checkedAt:now()},()=>invokeNative(()=>invoke(bound.keyId)),response=>verifyConditionalNativeSign({d,phase,trust,request:bound,response}));
+        const result=await this.dispatch(phaseToken,{phase,action:'KMS_SIGN',request:bound,principal,checkedAt:now()},()=>invokeNative(()=>invoke(bound.keyId)),response=>verifyConditionalNativeSign({d,phase,trust,request:bound,response}),nativeGate);
         completion=result.completion;return result.output;
       };
       nativeSigners.add(sign);return Object.freeze({sign,completion:()=>completion});
     },
-    async dispatch(phaseToken,{phase,action,request,principal,checkedAt},invoke,verifyResult) {
+    async dispatch(phaseToken,{phase,action,request,principal,checkedAt},invoke,verifyResult,gate) {
+      assert.equal(gate,nativeGate,'Canonical native-effect guard required');
       const own=owners.get(phaseToken);
       assert.ok(own && !own.used && own.operationId===operationId && own.executionId===executionId && own.phase===phase && own.type==='DECISION','No live phase ownership');
       assert.equal(typeof invoke,'function'); assert.equal(typeof verifyResult,'function');
@@ -127,9 +138,11 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
         const prefix=authority.replace(':iam::',':sts::').replace(':role/',':assumed-role/')+'/';
         assert.ok(typeof principal==='string'&&principal.startsWith(prefix)&&/^[A-Za-z0-9+=,.@_-]{1,64}$/.test(principal.slice(prefix.length)),'Wrong phase executor session');
       } assert.ok(Number.isSafeInteger(checkedAt));
+      await assertSoloActive(own.extra.binding);
       const dispatch={phase,action,binding:own.extra.binding,request,requestSha256:conditionalHash(request),principal,checkedAt};
       const token=await claim(phase,`DISPATCH:${action}`,{dispatch}); take(token,phase,`DISPATCH:${action}`);
       try {
+        await assertSoloActive(own.extra.binding);
         const output=await invoke();
         const result=await record(phase,`RESULT:${action}`,{dispatch,output});
         await verifyResult(output);

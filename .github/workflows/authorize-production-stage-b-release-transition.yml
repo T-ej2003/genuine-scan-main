@@ -15,6 +15,12 @@ on:
         options: [registration, pruning, policy, publication, cutover, closure, prepare-overlap-conditional]
       preparation_reference: {description: Immutable preparation artifact SHA-256 in the release journal, required: true, type: string}
       authorization_round: {description: Immutable approval round, required: true, type: string}
+      authorization_policy_version:
+        description: Conditional approval policy; other phases remain independent
+        required: true
+        type: choice
+        options: [INDEPENDENT_REVIEW_V1, SOLO_OPERATOR_CONTROLLED_V1]
+        default: INDEPENDENT_REVIEW_V1
 
 permissions: {contents: read, actions: read, id-token: write}
 concurrency:
@@ -35,6 +41,7 @@ jobs:
       RELEASE_PHASE: ${{ inputs.phase }}
       RELEASE_PREPARATION_REFERENCE: ${{ inputs.preparation_reference }}
       RELEASE_AUTHORIZATION_ROUND: ${{ inputs.authorization_round }}
+      RELEASE_AUTHORIZATION_POLICY_VERSION: ${{ inputs.authorization_policy_version }}
       TF_WORKSPACE: default
     steps:
       - uses: actions/checkout@v6
@@ -54,6 +61,7 @@ jobs:
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$TOOLING_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
           [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover|closure|prepare-overlap-conditional)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$RELEASE_AUTHORIZATION_POLICY_VERSION" =~ ^(INDEPENDENT_REVIEW_V1|SOLO_OPERATOR_CONTROLLED_V1)$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_SHA" = "$TOOLING_SHA"
           git fetch --no-tags origin main
@@ -91,6 +99,7 @@ jobs:
             --source-sha "$SOURCE_SHA" --ticket-id "$TICKET_ID" --release-id "$RELEASE_ID" \
             --phase "$RELEASE_PHASE" --preparation-reference "$RELEASE_PREPARATION_REFERENCE" \
             --authorization-round "$RELEASE_AUTHORIZATION_ROUND" \
+            --authorization-policy-version "$RELEASE_AUTHORIZATION_POLICY_VERSION" \
             --output "$AUTHORIZATION_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:

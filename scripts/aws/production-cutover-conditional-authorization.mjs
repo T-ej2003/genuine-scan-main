@@ -5,6 +5,8 @@ import {buildOverlapTaskDefinition} from './production-overlap-task-definition.m
 import {canonicalJson, STAGE_B} from './production-green-stage-b-contract.mjs';
 import {assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness} from './production-github-environment-approval.mjs';
 import {isAuthenticatedConditionalWorkflowArtifact} from './production-cutover-conditional-workflow.mjs';
+import {SOLO_OPERATOR_CONTROLLED_V1,SOLO_OPERATOR_POLICY,assertSoloOperatorPolicy} from './production-cutover-human-policy.mjs';
+import {authenticateSoloPhaseApproval,SOLO_APPROVAL_ISSUER} from './production-cutover-solo-authority.mjs';
 
 export {CONDITIONAL_LANE_ENABLED,assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
 export const CONDITIONAL_PHASES = Object.freeze(['ROOT_DROP', 'INVENTORY_ADOPTION', 'ROTATION_SUCCESSOR', 'PREPARE_OVERLAP']);
@@ -121,10 +123,17 @@ export function assertConditionalWindow(d, now, reserveMs = 0) {
   assert.ok(now >= iso(d.notBefore) && now + reserveMs < iso(d.notAfter), 'Conditional authorization is outside its execution window');
 }
 
-export function verifyConditionalKmsEnvelope(envelope, {d, phase, trust, now = Date.now()}) {
+export function verifyConditionalKmsEnvelope(envelope, {d, phase, trust, policy=SOLO_OPERATOR_POLICY,approvalTrust=SOLO_APPROVAL_ISSUER, now = Date.now()}) {
   assertConditionalDerivation(d); assert.ok(CONDITIONAL_PHASES.includes(phase) && phase !== 'PREPARE_OVERLAP');
-  exactConditionalKeys(envelope, ['payload','payloadSha256','signingKeyArn','signingAlgorithm','signatureBase64'], 'Signed authorization');
-  assertConditionalPayload(envelope.payload, d, phase, now);
+  const solo=envelope?.payload?.schemaVersion===2;
+  exactConditionalKeys(envelope, [...(solo?['approvalEvidence']:[]),'payload','payloadSha256','signingKeyArn','signingAlgorithm','signatureBase64'], 'Signed authorization');
+  assertConditionalPayload(envelope.payload, d, phase, now, policy);
+  if(solo){
+    const request={kind:'CUTOVER_CONDITIONAL_EXACT_MESSAGE_ISSUANCE_V1',schemaVersion:1,payload:envelope.payload,payloadSha256:conditionalHash(envelope.payload),signingKeyArn:d.keys.checker.keyArn,signingAlgorithm:'RSASSA_PSS_SHA_256'};
+    const approved=authenticateSoloPhaseApproval({envelope:envelope.approvalEvidence,trust:approvalTrust,d,phase,requestSha256:conditionalHash(request),operatorSessionArn:envelope.payload.humanAuthorization.operatorSessionArn,policy,now});
+    assert.equal(approved.authorizationId,envelope.payload.approvalProvenance);
+    assert.equal(approved.operatorSessionArn,envelope.payload.humanAuthorization.operatorSessionArn);
+  }
   assert.equal(envelope.payloadSha256, conditionalHash(envelope.payload));
   const kind = phase === 'ROOT_DROP' ? 'root' : 'checker', expected = d.keys[kind], actual = trust[kind];
   exactConditionalKeys(actual, ['keyArn','publicKeyDerBase64','policySha256'], 'Authenticated key');
@@ -136,22 +145,35 @@ export function verifyConditionalKmsEnvelope(envelope, {d, phase, trust, now = D
   return envelope.payload;
 }
 
-export function assertConditionalPayload(p, d, phase, now) {
-  exactConditionalKeys(p, ['kind','schemaVersion','authorizationId','phase','derivationSha256','authority','executorPrincipal','dependencyRule','operationEnvelope','notBefore','notAfter','maxDispatches','approvalProvenance'], 'Authorization payload');
-  assert.equal(p.kind, 'CUTOVER_CONDITIONAL_AUTHORIZATION_V1'); assert.equal(p.schemaVersion, 1); assert.match(p.authorizationId, /^[a-f0-9]{64}$/);
+export function assertConditionalPayload(p, d, phase, now, policy=SOLO_OPERATOR_POLICY) {
+  const common=['kind','schemaVersion','authorizationId','phase','derivationSha256','authority','executorPrincipal','dependencyRule','operationEnvelope','notBefore','notAfter','maxDispatches','approvalProvenance'];
+  const solo=p?.schemaVersion===2;
+  exactConditionalKeys(p,solo?[...common,'authorizationPolicyVersion','policyManifestSha256','humanAuthorization']:common,'Authorization payload');
+  assert.equal(p.kind,solo?'CUTOVER_CONDITIONAL_AUTHORIZATION_V2':'CUTOVER_CONDITIONAL_AUTHORIZATION_V1');
+  assert.equal(p.schemaVersion,solo?2:1);assert.match(p.authorizationId,/^[a-f0-9]{64}$/);
   assert.equal(p.phase, phase); assert.equal(p.derivationSha256, conditionalHash(d)); assert.equal(p.dependencyRule, CONDITIONAL_RULES[phase]);
   const principal = phase === 'ROOT_DROP' ? CONDITIONAL_PRINCIPALS.root : phase === 'PREPARE_OVERLAP' ? CONDITIONAL_PRINCIPALS.release : CONDITIONAL_PRINCIPALS.checker;
   assert.equal(p.executorPrincipal, principal); assert.equal(p.authority, phase === 'PREPARE_OVERLAP' ? 'GITHUB_PRODUCTION_REVIEWER' : principal);
   assert.deepEqual(p.operationEnvelope, CONDITIONAL_EFFECTS[phase]); assert.equal(p.maxDispatches, 1);
   assert.equal(p.notBefore, d.notBefore); assert.equal(p.notAfter, d.notAfter); assertConditionalWindow(p, now);
   conditionalSha(p.approvalProvenance);
+  if(solo){
+    assert.equal(p.authorizationPolicyVersion,SOLO_OPERATOR_CONTROLLED_V1);
+    assert.equal(p.policyManifestSha256,assertSoloOperatorPolicy(policy,{d,phase,now}));
+    exactConditionalKeys(p.humanAuthorization,['operatorAwsUserArn','operatorGithubUserId','operatorSessionArn','selfAuthorized'],'Solo human authorization');
+    assert.equal(p.humanAuthorization.operatorAwsUserArn,policy.checkerUserArn);
+    assert.equal(p.humanAuthorization.operatorGithubUserId,policy.githubUserId);
+    assert.equal(p.humanAuthorization.selfAuthorized,true);
+    if(phase==='PREPARE_OVERLAP')assert.equal(p.humanAuthorization.operatorSessionArn,null);
+    else assert.match(p.humanAuthorization.operatorSessionArn,/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-rls-independent-checker\/[A-Za-z0-9+=,.@_-]{1,64}$/);
+  }
   return p;
 }
 
-export function assertConditionalWorkflowEnvelope(envelope, {d, now, authenticatedArtifact}) {
+export function assertConditionalWorkflowEnvelope(envelope, {d, now, authenticatedArtifact,policy=SOLO_OPERATOR_POLICY}) {
   assert.ok(isAuthenticatedConditionalWorkflowArtifact(authenticatedArtifact),'Independent workflow artifact authentication required');
   exactConditionalKeys(envelope, ['payload','payloadSha256','workflowArtifactProvenance'], 'Workflow authorization');
-  assertConditionalPayload(envelope.payload, d, 'PREPARE_OVERLAP', now);
+  assertConditionalPayload(envelope.payload, d, 'PREPARE_OVERLAP', now,policy);
   assert.equal(envelope.payloadSha256, conditionalHash(envelope.payload));
   assert.deepEqual(envelope.workflowArtifactProvenance, authenticatedArtifact.provenance, 'Authorization artifact provenance differs');
   assert.equal(authenticatedArtifact.payloadSha256, envelope.payloadSha256);
@@ -160,6 +182,7 @@ export function assertConditionalWorkflowEnvelope(envelope, {d, now, authenticat
   assert.equal(authenticatedArtifact.sourceSha, d.toolingSourceSha);
   assertProductionEnvironmentApprovalFreshness(authenticatedArtifact.environmentApproval, {now:new Date(now)});
   assertProductionEnvironmentActualReviewer(authenticatedArtifact.environmentApproval, {sourceSha:d.toolingSourceSha,repository:d.repository,executionActor:authenticatedArtifact.environmentApproval.executionActor});
+  assert.equal(authenticatedArtifact.policyVersion,envelope.payload.schemaVersion===2?SOLO_OPERATOR_CONTROLLED_V1:'INDEPENDENT_REVIEW_V1');
   assert.equal(envelope.payload.approvalProvenance, authenticatedArtifact.environmentApproval.evidenceSha256);
   return envelope.payload;
 }
@@ -167,14 +190,16 @@ export function assertConditionalWorkflowEnvelope(envelope, {d, now, authenticat
 const authenticatedBindings=new WeakSet();
 export const isAuthenticatedConditionalBinding=value=>authenticatedBindings.has(value);
 
-export function authenticateConditionalBundle({d, envelopes, trust, workflowArtifact, now = Date.now()}) {
+export function authenticateConditionalBundle({d, envelopes, trust, workflowArtifact,policy=SOLO_OPERATOR_POLICY,approvalTrust=SOLO_APPROVAL_ISSUER, now = Date.now()}) {
   assertConditionalDerivation(d); exactConditionalKeys(envelopes, CONDITIONAL_PHASES, 'Four-authority bundle');
   const ids = new Set();
   for (const phase of CONDITIONAL_PHASES) {
-    const p = phase === 'PREPARE_OVERLAP' ? assertConditionalWorkflowEnvelope(envelopes[phase], {d,now,authenticatedArtifact:workflowArtifact}) : verifyConditionalKmsEnvelope(envelopes[phase], {d,phase,trust,now});
+    const p = phase === 'PREPARE_OVERLAP' ? assertConditionalWorkflowEnvelope(envelopes[phase], {d,now,authenticatedArtifact:workflowArtifact,policy}) : verifyConditionalKmsEnvelope(envelopes[phase], {d,phase,trust,policy,approvalTrust,now});
     assert.ok(!ids.has(p.authorizationId), 'Each phase requires a distinct authorization'); ids.add(p.authorizationId);
   }
-  const binding=Object.freeze({derivationSha256:conditionalHash(d), operationId:conditionalOperationId(d.rotationId,d.predecessor.stateSha256), authorizationHashes:Object.freeze(Object.fromEntries(CONDITIONAL_PHASES.map(phase => [phase,conditionalHash(envelopes[phase])])))});
+  const solo=['INVENTORY_ADOPTION','ROTATION_SUCCESSOR','PREPARE_OVERLAP'].some(phase=>envelopes[phase].payload.schemaVersion===2);
+  if(solo)for(const phase of ['INVENTORY_ADOPTION','ROTATION_SUCCESSOR','PREPARE_OVERLAP'])assert.equal(envelopes[phase].payload.schemaVersion,2,'Solo policy must cover every eligible phase');
+  const binding=Object.freeze({derivationSha256:conditionalHash(d), operationId:conditionalOperationId(d.rotationId,d.predecessor.stateSha256), authorizationHashes:Object.freeze(Object.fromEntries(CONDITIONAL_PHASES.map(phase => [phase,conditionalHash(envelopes[phase])]))),policyVersion:solo?SOLO_OPERATOR_CONTROLLED_V1:'INDEPENDENT_REVIEW_V1'});
   authenticatedBindings.add(binding); return binding;
 }
 

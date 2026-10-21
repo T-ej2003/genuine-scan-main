@@ -16,15 +16,18 @@ import {runStagedBrokerRequest} from './run-stage-b-staged-broker.mjs';
 import {produceConditionalOverlapAuthorization} from './production-cutover-conditional-workflow.mjs';
 import {conditionalHash,assertConditionalDerivation,exactConditionalKeys} from './production-cutover-conditional-authorization.mjs';
 import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {INDEPENDENT_REVIEW_V1,SOLO_OPERATOR_CONTROLLED_V1} from './production-cutover-human-policy.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const operations=Object.freeze({registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'});
 
-export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,phase,preparationReference,authorizationRound,output},
+export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,phase,preparationReference,authorizationRound,authorizationPolicyVersion=INDEPENDENT_REVIEW_V1,output},
  {env=process.env,run,
   ghRun=(args,options)=>execFileSync('gh',args,{encoding:'utf8',maxBuffer:8*1024*1024,...options}),runRequest=runStagedBrokerRequest,
   hydrateMaterial=hydrateReleasePhaseMaterial,createStore=createReleaseCoordinatorStore,authenticateAbort=authenticatePreNativeClosureAbort,fetchImpl=fetch}={}) {
  if(phase==='prepare-overlap-conditional') assertConditionalProductionEnabled();
+ if(phase!=='prepare-overlap-conditional')assert.equal(authorizationPolicyVersion,INDEPENDENT_REVIEW_V1,'Solo policy is unavailable for broker phases');
+ else assert.ok([INDEPENDENT_REVIEW_V1,SOLO_OPERATOR_CONTROLLED_V1].includes(authorizationPolicyVersion));
  run ||= createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env});
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
  assert.equal(env.GITHUB_REPOSITORY,PRODUCTION_ENVIRONMENT_APPROVAL.repository);assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');assert.equal(env.GITHUB_RUN_ATTEMPT,'1');
@@ -42,7 +45,7 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
   assertConditionalDerivation(prepared.derivation);assert.equal(prepared.derivationSha256,conditionalHash(prepared.derivation));
   const record=store.readStep(releaseId,'prepare-overlap-conditional:prepared');
   assert.ok(record);assert.equal(record.result,preparationReference);assert.equal(record.sourceSha,sourceSha);
-  const authorization=await produceConditionalOverlapAuthorization({d:prepared.derivation,sourceSha,ticketId,releaseId,preparationReference,authorizationRound,env,fetchImpl});
+  const authorization=await produceConditionalOverlapAuthorization({d:prepared.derivation,sourceSha,ticketId,releaseId,preparationReference,authorizationRound,authorizationPolicyVersion,env,fetchImpl});
   assert.equal(path.resolve(output),path.join(directory,'authorization.json'));
   const written=writeStageBPrivateFileAtomic({filePath:output,bytes:Buffer.from(`${JSON.stringify(authorization)}\n`),repositoryRoot:root,label:'Conditional production authorization'});
   return {authorizationPath:written.path,authorizationFileSha256:written.sha256,authorizationSha256:conditionalHash(authorization)};
@@ -157,11 +160,11 @@ export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,p
 
 if(process.argv[1]===fileURLToPath(import.meta.url)){
  try{
-  const argv=process.argv.slice(2),names=['source-sha','ticket-id','release-id','phase','preparation-reference','authorization-round','output'];
+  const argv=process.argv.slice(2),names=['source-sha','ticket-id','release-id','phase','preparation-reference','authorization-round','authorization-policy-version','output'];
   assert.equal(argv.length,names.length*2);const values={};
   for(let i=0;i<argv.length;i+=2){assert.ok(names.includes(argv[i].slice(2))&&argv[i].startsWith('--'));assert.equal(values[argv[i]],undefined);values[argv[i]]=argv[i+1];}
   assert.match(values['--authorization-round']||'',/^(?:0|[1-9][0-9]*)$/);
-  const result=await authorizeReleaseTransition({sourceSha:values['--source-sha'],ticketId:values['--ticket-id'],releaseId:values['--release-id'],phase:values['--phase'],preparationReference:values['--preparation-reference'],authorizationRound:Number(values['--authorization-round']),output:values['--output']});
+  const result=await authorizeReleaseTransition({sourceSha:values['--source-sha'],ticketId:values['--ticket-id'],releaseId:values['--release-id'],phase:values['--phase'],preparationReference:values['--preparation-reference'],authorizationRound:Number(values['--authorization-round']),authorizationPolicyVersion:values['--authorization-policy-version'],output:values['--output']});
   process.stdout.write(`${JSON.stringify(result)}\n`);
  }catch(error){process.stderr.write(`${error.message}\n`);process.exitCode=1;}
 }
