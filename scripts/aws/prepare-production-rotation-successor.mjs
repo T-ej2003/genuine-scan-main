@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { canonicalJson, STAGE_B } from "./production-green-stage-b-contract.mjs";
+import { canonicalJson, PRODUCTION_ACTIVATION_LIFECYCLE, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { kmsAdoptionMessage } from "./production-completed-inventory-adoption.mjs";
 import { authenticateRotationSuccessor, readOriginalRotationStatus, signRotationSuccessor } from "./production-rotation-successor.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
@@ -47,7 +47,8 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
   const checkerRun = signAws || createAwsRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
   const releaseIdentity = json(releaseRun, ["sts", "get-caller-identity"]);
   const checkerIdentity = json(checkerRun, ["sts", "get-caller-identity"]);
-  if (!new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/`).test(releaseIdentity.Arn || "")
+  const releaseSessionPrefix = `${PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn.replace(":iam::", ":sts::").replace(":role/", ":assumed-role/")}/`;
+  if (!String(releaseIdentity.Arn || "").startsWith(releaseSessionPrefix)
       || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(checkerIdentity.Arn || "")) throw new Error("Rotation successor requires separate release and checker identities.");
   const predecessorStatusSha256 = readOriginalRotationStatus({ config, repositoryRoot: root, execute: statusRun });
   const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
