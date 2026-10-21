@@ -72,6 +72,13 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
   writeStep:value=>write('STEP',{releaseId:value.releaseId,name:value.name},value),
   readOperation:(operationId,phase)=>read('OPERATION',{operationId,phase})??null,
   writeOperation:(operationId,phase,value)=>write('OPERATION',{operationId,phase},value),
+  // Claims never use identical-artifact recovery: a lost response grants no dispatch ownership.
+  claimOperation:(operationId,phase,value)=>{
+   const key={operationId,phase};
+   const bytes=Buffer.from(canonicalJson({kind:'PRODUCTION_RELEASE_COORDINATOR_OPERATION',key,value}));
+   reserveStageBSharedApplyAttempt({artifactSetIdentity:id('OPERATION',key),bytes,privateDirectory:directory,run});
+   return true;
+  },
   putArtifact:(sha256,value)=>{assert.equal(brokerDigest(value),sha256);write('ARTIFACT',{sha256},value);},
   getArtifact:sha256=>{assert.match(sha256||'',/^[a-f0-9]{64}$/);const value=read('ARTIFACT',{sha256});assert.ok(value!==undefined,'Missing release artifact');assert.equal(brokerDigest(value),sha256);return value;},
  };

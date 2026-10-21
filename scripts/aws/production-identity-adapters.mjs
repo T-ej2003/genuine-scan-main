@@ -92,6 +92,14 @@ export async function establishVerifierIdentity({ adapter, mfaSerial, mfaCode, g
   return result;
 }
 
+export async function revalidateProcessVerifierIdentity({adapter} = {}) {
+  const session=adapter.getVerifierSession(); // Enforces process ownership and remaining STS lifetime.
+  if (!Number.isFinite(Date.parse(session.expiration)) || Date.parse(session.expiration)-Date.now()<VERIFIER_SESSION_MIN_REMAINING_MS) throw new Error('Fresh process-scoped verifier MFA session required.');
+  const caller=JSON.parse(await session.run(['sts','get-caller-identity'])).Arn;
+  if (caller!==session.callerArn || !new RegExp(ECS_EXEC_OPERATOR_CALLER_PATTERN).test(caller||'')) throw new Error('Process verifier identity changed.');
+  return {valid:true,roleArn:ECS_EXEC_OPERATOR_ROLE_ARN,callerArn:caller,evidenceRef:`sts:${ECS_EXEC_OPERATOR_ROLE_ARN}`,evidenceSha256:cryptoSha(`${ECS_EXEC_OPERATOR_ROLE_ARN}\n${caller}`),session};
+}
+
 export async function establishInheritedVerifierIdentity({ adapter } = {}) {
   if (!adapter || typeof adapter.getCallerIdentity !== "function" || typeof adapter.getVerifierSession !== "function") throw new Error("Inherited verifier identity adapter is incomplete.");
   const callerArn = await adapter.getCallerIdentity();

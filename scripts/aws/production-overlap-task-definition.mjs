@@ -1,11 +1,15 @@
+import {readConditionalPrepareContext} from './production-cutover-conditional-capability.mjs';
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
+import { STAGE_B, canonicalJson, assertConditionalProductionEnabled, CONDITIONAL_LANE_ENABLED } from "./production-green-stage-b-contract.mjs";
 import { assertFixedTaskDefinition } from "./production-green-stage-b-task-definitions.mjs";
 import { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 
+import {conditionalRotationClaimId,claimLegacyCutoverLane} from './production-cutover-conditional-lock.mjs';
+
+const nativeRegistrars=new WeakSet(),nativeRequests=new WeakMap();
 const ROOT = path.resolve("infra/aws/terraform/production-green-stage-b/task-definitions");
 const TEMPLATE_PATH = path.join(ROOT, "green-backend-rotation-candidate.json");
 const FAMILY = "mscqr-production-rls-green-backend-candidate";
@@ -77,7 +81,13 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
   return { taskDefinition: definition, tags: [OVERLAP_TASK_MARKER] };
 }
 
-export async function registerOverlapTaskDefinition({ input, register, describe = null, list = null, journal = null, sourceSha, rotationId }) {
+export async function registerOverlapTaskDefinition({ input, register, describe = null, list = null, journal = null, sourceSha, rotationId, executionId, nativeRegister, conditionalContext, reconcileRead }) {
+  const conditional=conditionalContext?readConditionalPrepareContext(conditionalContext):null;
+  if(conditional){assertConditionalProductionEnabled();executionId=conditional.executionId;if(sourceSha!==conditional.d.historicalReleaseSha||rotationId!==conditional.d.rotationId)throw new Error('Conditional registration identity differs');}
+  if (executionId || nativeRegister) assertConditionalProductionEnabled();
+  if (!conditional && journal && rotationId && CONDITIONAL_LANE_ENABLED) await claimLegacyCutoverLane({store:journal,rotationId});
+  if (!conditional && journal && rotationId && !CONDITIONAL_LANE_ENABLED && await journal.readOperation(conditionalRotationClaimId(rotationId),'CLAIM') !== null) throw new Error('Rotation is claimed by conditional execution; legacy registration is forbidden.');
+  if(nativeRegistrars.has(register)&&!journal)throw new Error('Native overlap registration requires the durable rotation guard');
   if (typeof register !== "function") throw new Error("Overlap task registration adapter is required.");
   const payload = buildOverlapTaskDefinition(input);
   const operationId = journal ? createHash("sha256").update(canonicalJson({ sourceSha, rotationId, payload })).digest("hex") : null;
@@ -85,6 +95,10 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
       || typeof describe !== "function" || typeof list !== "function"
       || typeof journal.readOperation !== "function" || typeof journal.writeOperation !== "function")) throw new Error("Durable overlap registration boundary is incomplete.");
   if (journal) payload.tags.push({ key: OVERLAP_OPERATION_TAG, value: operationId });
+  if (executionId || nativeRegister) {
+    if (!conditional || !journal || !/^[a-f0-9]{64}$/.test(executionId||'')) throw new Error('Conditional registration requires exact context and durable native boundary.');
+    payload.tags.push({key:'MSCQRConditionalExecution',value:executionId});
+  }
   const intent = operationId && { sourceSha, rotationId, operationId, payloadSha256: createHash("sha256").update(canonicalJson(payload)).digest("hex") };
   if (journal) {
     const previous = await journal.readOperation(operationId, "INTENT");
@@ -99,6 +113,7 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
     assertEcsTaskDefinitionReadback({ definition: registered, taskDefinitionArn: arn, expected: payload.taskDefinition, label: "Registered overlap task definition" });
     if (!Array.isArray(registered.tags) || !registered.tags.some(({ key, value }) => key === OVERLAP_TASK_MARKER.key && value === OVERLAP_TASK_MARKER.value)) throw new Error("Registered overlap task definition is missing the creation-time execution marker.");
     if (journal && !registered.tags.some(({ key, value }) => key === OVERLAP_OPERATION_TAG && value === operationId)) throw new Error("Registered overlap task definition is not bound to the durable operation.");
+    if(conditional && canonicalJson([...registered.tags].sort((a,b)=>a.key.localeCompare(b.key)))!==canonicalJson([...payload.tags].sort((a,b)=>a.key.localeCompare(b.key))))throw new Error('Conditional registration tags differ');
     const registeredBackend = registered.containerDefinitions?.find(({ name }) => name === "backend");
     if (registeredBackend && registeredBackend.image !== payload.taskDefinition.containerDefinitions.find(({ name }) => name === "backend")?.image) throw new Error("Registered overlap image differs from the authorized immutable digest.");
   };
@@ -107,6 +122,7 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
     const completed = await journal.readOperation(operationId, "COMPLETED");
     if (completed) {
       if (canonicalJson(completed.intent) !== canonicalJson(intent)) throw new Error("Overlap registration completion conflicts with durable intent.");
+      if(conditional)throw new Error('Conditional registration history requires read-only authoritative reconciliation');
       await verify(completed.taskDefinitionArn);
       return result(completed.taskDefinitionArn, 0);
     }
@@ -117,6 +133,7 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
       if (candidate?.tags?.some(({ key, value }) => key === OVERLAP_OPERATION_TAG && value === operationId)) matching.push(arn);
     }
     if (matching.length > 1) throw new Error("Overlap operation produced multiple task-definition revisions.");
+    if (conditional && matching.length) throw new Error('Conditional registration history requires read-only authoritative reconciliation');
     if (matching.length === 1) {
       await verify(matching[0]);
       await journal.writeOperation(operationId, "COMPLETED", { intent, taskDefinitionArn: matching[0] });
@@ -125,7 +142,17 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
     if (await journal.readOperation(operationId, "DISPATCH")) throw new Error("Overlap registration outcome remains ambiguous; another revision is forbidden.");
     if (await journal.writeOperation(operationId, "DISPATCH", intent) !== true) throw new Error("Overlap registration was already dispatched; another revision is forbidden.");
   }
-  const response = await register(payload);
+  const invokeRegistration=async()=>{
+    if(nativeRegistrars.has(register))nativeRequests.set(payload,{journal,rotationId,conditional});
+    try{return await register(payload);}finally{nativeRequests.delete(payload);}
+  };
+  let response;
+  try{response = conditional ? (await conditional.dispatch('REGISTER_TASK_DEFINITION',{...payload.taskDefinition,tags:payload.tags},invokeRegistration,async output=>verify(output?.taskDefinition?.taskDefinitionArn||output?.taskDefinitionArn))).output : await invokeRegistration();}
+  catch(error){
+    if(!conditional||error.code!=='OUTCOME_UNKNOWN'||typeof reconcileRead!=='function')throw error;
+    try{response=await conditional.reconcileRegistration({run:reconcileRead});}
+    catch(reconciliationError){throw new Error('Registration remains UNKNOWN after read-only reconciliation; never register again',{cause:reconciliationError});}
+  }
   const arn = response?.taskDefinition?.taskDefinitionArn || response?.taskDefinitionArn;
   await verify(arn);
   if (journal) await journal.writeOperation(operationId, "COMPLETED", { intent, taskDefinitionArn: arn });
@@ -134,11 +161,18 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
 
 export function createAwsOverlapTaskRegistrationAdapter({ run }) {
   if (typeof run !== "function") throw new Error("AWS overlap registration runner is required.");
-  return async ({ taskDefinition, tags }) => {
+  const register=async payload => {
+    const own=nativeRequests.get(payload);if(!own)throw new Error('Native registration is outside the claimed canonical consumer');nativeRequests.delete(payload);
+    if(!own.conditional){
+      if(CONDITIONAL_LANE_ENABLED)await claimLegacyCutoverLane({store:own.journal,rotationId:own.rotationId});
+      else if(await own.journal.readOperation(conditionalRotationClaimId(own.rotationId),'CLAIM')!==null)throw new Error('Conditional rotation claim forbids native legacy registration');
+    }
+    const {taskDefinition,tags}=payload;
     const response = await run(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify({ ...taskDefinition, tags }), "--output", "json"]);
     const registered = typeof response === "string" ? JSON.parse(response) : response;
     const arn = registered?.taskDefinition?.taskDefinitionArn;
     if (!ARN.test(arn || "")) throw new Error("AWS overlap registration response is outside the reviewed family.");
     return registered;
   };
+  nativeRegistrars.add(register);return register;
 }

@@ -1,3 +1,5 @@
+import {readConditionalPrepareContext} from './production-cutover-conditional-capability.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
 import { createHash } from "node:crypto";
 import { assertCutoverCriticalEvidence } from "./validate-production-green-stage-b-permissions.mjs";
 import { runStageAControlPlane } from "./production-stage-a-control-plane.mjs";
@@ -290,6 +292,12 @@ function assertCheckerTrustEvidence(evidence, sourceSha) {
  * Every adapter is required to return sanitized, hash-bound evidence.
  */
 export async function runProductionCutoverControlPlane(input = {}) {
+  const conditional=input.conditionalContext?readConditionalPrepareContext(input.conditionalContext):null;
+  if(conditional){
+    assertConditionalProductionEnabled();
+    if(input.mode!==PRODUCTION_CUTOVER_MODE.PREPARE_OVERLAP || input.sourceSha!==conditional.d.historicalReleaseSha || input.operationExecutionSourceSha!==conditional.d.toolingSourceSha || input.rotationId!==conditional.d.rotationId) throw new Error('Conditional control-plane identity or mode differs');
+  }
+
   const { mode = PRODUCTION_CUTOVER_MODE.FULL, sourceSha, operationExecutionSourceSha = sourceSha, rotationId, rotationStateSha256: expectedRotationStateSha256, imageAuthorization, imageAuthorizationValidation, iam, iamReport = iam?.report, checkerTrustEvidence, identities: suppliedIdentities, rootDropContinuity, verifyRootDropSignature, checkerChain, stageA, artifactSigning, rebaseline, overlapTask, preDeploymentInventory, inventory, rotationPrepare, rotationInfrastructure, readiness, deployOverlap, postDeploy, ecsExec, onboarding } = input;
   if (!Object.values(PRODUCTION_CUTOVER_MODE).includes(mode)) throw new Error("Production cutover mode is invalid.");
   if (!SHA40.test(sourceSha || "") || !SHA40.test(operationExecutionSourceSha || "") || !rotationId || (expectedRotationStateSha256 !== undefined && !SHA256.test(expectedRotationStateSha256 || ""))) throw new Error("Cutover identity bindings are invalid.");
@@ -301,7 +309,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
 
   assertIamReport(iamReport, sourceSha);
   assertCheckerTrustEvidence(checkerTrustEvidence, sourceSha);
-  if (typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
+  if (!conditional && typeof iam?.reconcile === "function") recordMutation(mutations, "M1_IAM_RECONCILIATION", await iam.reconcile());
   results.iamPreflight = { ...iamReport, sourceSha, evidenceSha256: (iamReport.evidence || iamReport).evidenceSha256 };
 
   if (typeof checkerChain?.verifySourceTrust !== "function" || typeof checkerChain?.verifyComplete !== "function") throw new Error("Live checker-chain trust assertion is required before Stage A convergence.");
@@ -324,7 +332,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
     const authenticated = await stageA.revalidateRecovery({ sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98 });
     stageAResult = assertPostApplyStageAPlanRecovery(stageA.recoveryEvidence, { sourceSha, expectedStageBLineage: "4e438e59-8b8b-194d-030c-5ede0c26344a", expectedStageBSerial: 98, authenticated });
   } else {
-    stageAResult = await runStageAControlPlane({ ...stageA, sourceSha });
+    stageAResult = await runStageAControlPlane({ ...stageA, sourceSha, ...(conditional?{adapter:{...stageA.adapter,applySavedPlan:async()=>{throw new Error('Conditional Stage A mutation is forbidden');}}}:{}) });
   }
   recordMutation(mutations, "M2_STAGE_A_APPLY", stageAResult);
   results.stageA = { ...stageAResult, ...identities, sourceSha };
@@ -333,7 +341,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
 
   let artifact;
   let runtimeOverlapTask = overlapTask;
-  if (typeof artifactSigning?.bootstrap === "function") {
+  if (!conditional && typeof artifactSigning?.bootstrap === "function") {
     const bootstrapped = await artifactSigning.bootstrap();
     recordMutation(mutations, "M3_ARTIFACT_SECRET_BOOTSTRAP", bootstrapped);
     runtimeOverlapTask = {
@@ -344,7 +352,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
       },
     };
   }
-  if (typeof artifactSigning?.provision === "function") {
+  if (!conditional && typeof artifactSigning?.provision === "function") {
     const provisioned = await artifactSigning.provision();
     recordMutation(mutations, "M3_ARTIFACT_SECRET_PROVISION", provisioned);
   }
@@ -393,7 +401,7 @@ export async function runProductionCutoverControlPlane(input = {}) {
     if (typeof rotationPrepare.revalidate !== "function") throw new Error("Live prepared rotation revalidation is required before ECS registration.");
     results.rebaselinePreRegistration = await rotationPrepare.revalidate({ rotationId, rotationStateSha256 });
   }
-  const task = await registerOverlapTaskDefinition({ ...runtimeOverlapTask, sourceSha, rotationId });
+  const task = await registerOverlapTaskDefinition({ ...runtimeOverlapTask, sourceSha, rotationId, ...(conditional?{conditionalContext:input.conditionalContext}:{}) });
   recordMutation(mutations, "M4_REGISTER_TASK_DEFINITION", task);
   results.overlapTaskDefinition = { ...task, sourceSha, rotationId, rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true, activeKeyVersion: artifact.activeKeyVersion, bindings: task.input?.secretBindings || runtimeOverlapTask.input?.secretBindings };
   results.registrationReadback = { ...results.overlapTaskDefinition, registeredTaskDefinitionArn: task.taskDefinitionArn, sourceSha, rotationId, rotationStateSha256: rotation.rotationStateSha256, rotationPrepared: true, rotationInfraConverged: true };

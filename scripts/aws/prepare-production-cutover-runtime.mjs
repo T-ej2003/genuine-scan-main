@@ -12,6 +12,12 @@ import { readGitHubApiToken, resolveQrVersionResolutionArtifact } from "./produc
 import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs";
 
 const args = parseBootstrapArgs(process.argv.slice(2));
+const conditionalPreparation = args.has('conditional-seed') || args.has('conditional-seed-sha256');
+if(conditionalPreparation){
+  const {assertConditionalProductionEnabled}=await import('./production-green-stage-b-contract.mjs');
+  assertConditionalProductionEnabled();
+  if(!args.has('conditional-seed')||!args.has('conditional-seed-sha256'))throw new Error('Conditional preparation requires an exact seed hash');
+}
 const required = (name) => { const value = args.get(name); if (!value) throw new Error(`--${name} is required.`); return value; };
 if (args.has("adopt-completed-inventory") && args.get("adopt-completed-inventory") !== "true") throw new Error("Completed inventory adoption flag must be true.");
 if (args.has("new-inventory-after-completed") && args.get("new-inventory-after-completed") !== "true") throw new Error("Fresh inventory flag must be true.");
@@ -34,7 +40,7 @@ capture("release-preflight-evidence", "Release-preflight checker-trust evidence"
 capture("release-preflight-attestation", "Release-preflight checker-trust attestation");
 capture("release-preflight-attestation-signature", "Release-preflight checker-trust attestation signature");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
-for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name)) capture(name, label);
+for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name) && !(conditionalPreparation && name === "root-drop-evidence")) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
 const rotationSupersessionCapture = args.has("rotation-supersession-evidence") ? capture("rotation-supersession-evidence", "Rotation supersession evidence") : null;
 const recoveryEnvelopeCapture = args.has("recovery-envelope") ? capture("recovery-envelope", "Partial rebaseline recovery envelope") : null;
@@ -98,7 +104,7 @@ const approval = {
   verificationRef: required("verification-ref"),
   minimumGraceSeconds: Number(required("minimum-grace-seconds")),
 };
-const result = prepareProductionCutoverRuntime({
+const runtimeInput = {
   brokerRecoveryApproval,
   sourceSha: brokerRecoveryApproval?.sourceSha,
   outputDirectory,
@@ -151,7 +157,18 @@ const result = prepareProductionCutoverRuntime({
   stageBTerraformDataDir: required("stage-b-terraform-data-dir"),
   ...composition,
   proveSourceAdvance: proveRecoveryDescendant,
-});
+};
+if(conditionalPreparation){
+  const {parseConditionalJson}=await import('./production-cutover-conditional-authorization.mjs');
+  const {publishConditionalPreparation}=await import('./production-cutover-runtime-materialization.mjs');
+  const {createReleaseCoordinatorStore}=await import('./production-release-evidence-store.mjs');
+  const seed=capture('conditional-seed','Conditional immutable preparation seed');
+  if(seed.sha256!==required('conditional-seed-sha256'))throw new Error('Conditional seed checksum differs');
+  ensureStageBPrivateDirectory({directory:outputDirectory,repositoryRoot:process.cwd(),create:true});
+  const result=await publishConditionalPreparation({runtimeInput,sealedInputs:parseConditionalJson(seed.bytes),read:releaseRun,store:createReleaseCoordinatorStore({run:releaseRun,directory:outputDirectory,repositoryRoot:process.cwd()})});
+  process.stdout.write(`${JSON.stringify({releaseId:result.releaseId,preparationReference:result.preparationReference,derivationSha256:result.derivationSha256})}\n`);
+}else{
+const result = prepareProductionCutoverRuntime(runtimeInput);
 process.stdout.write(`${JSON.stringify({
   RUNTIME_DIRECTORY: result.runtimeDirectory,
   ROTATION_CONFIG: result.configPath || null,
@@ -163,3 +180,5 @@ process.stdout.write(`${JSON.stringify({
   FIRST_BLOCKER: result.blockers?.[0] || null,
   NEXT_COMMAND: result.nextCommand || null,
 }, null, 2)}\n`);
+
+}

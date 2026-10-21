@@ -318,6 +318,7 @@ export function authenticatePreparedSuccessorBindingOrigin({ bindings, originalC
 }
 
 export function prepareProductionCutoverRuntime({
+  immutablePreparation = false,
   repositoryRoot = process.cwd(),
   outputDirectory,
   approval,
@@ -379,6 +380,7 @@ export function prepareProductionCutoverRuntime({
   proveSourceAdvance,
   readPreparedRotationStatus = readOriginalRotationStatus,
 } = {}) {
+  if (immutablePreparation !== false && immutablePreparation !== true) throw new Error('Immutable preparation flag is invalid.');
   if (inventoryTaskDefinitionArn !== undefined) assertPreDeploymentInventoryTaskDefinitionArn(inventoryTaskDefinitionArn);
   if (adoptCompletedInventory && !inventoryTaskDefinitionArn) throw new Error("Completed inventory adoption requires the existing task definition.");
   if (adoptCompletedInventoryFromSourceSha !== undefined && (!adoptCompletedInventory || !SHA40.test(adoptCompletedInventoryFromSourceSha))) throw new Error("Cross-source inventory predecessor is invalid.");
@@ -503,7 +505,7 @@ export function prepareProductionCutoverRuntime({
     const artifactBinding = readStageBPrivateFileBytes({ filePath: artifactBindingFile, repositoryRoot, label: "Artifact-signing runtime binding" });
     const artifactBindings = loadApprovedArtifactSigningBindings(artifactBinding.path, { expectedSourceSha: protectedSha, expectedSha256: artifactBinding.sha256, repositoryRoot });
     if (!rootDropEvidenceFile) throw new Error("Root-drop evidence file is required.");
-    const rootDrop = readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
+    const rootDrop = immutablePreparation ? {path:path.resolve(rootDropEvidenceFile),sha256:null} : readInputFile(rootDropEvidenceFile, repositoryRoot, "Root-drop evidence");
     if ((stageAPlanPath && stageARecoveryEvidenceFile) || (!stageAPlanPath && !stageARecoveryEvidenceFile)) throw new Error("Exactly one of preserved Stage-A saved plan or post-apply Stage-A recovery evidence is required.");
     if ((stageAPlanPath && (!/^sg-[a-f0-9]{8,17}$/.test(endpointSecurityGroupId || "") || !/^sg-[a-f0-9]{8,17}$/.test(runtimeSecurityGroupId || "") || endpointSecurityGroupId === runtimeSecurityGroupId))
         || (!stageAPlanPath && (endpointSecurityGroupId || runtimeSecurityGroupId))) throw new Error("Stage-A security-group inputs are invalid.");
@@ -532,7 +534,8 @@ export function prepareProductionCutoverRuntime({
     const loadedTaskDefinition = typeof loadCurrentTaskDefinition === "function" ? loadCurrentTaskDefinition() : currentTaskDefinition;
     const taskDefinition = loadedTaskDefinition?.taskDefinition || loadedTaskDefinition;
     if (qrVersionResolution) {
-      assertQrVersionResolutionEvidence(qrVersionResolution, { sourceSha: toolingSha, changeTicket: approval.ticket, expectedSecretArn: qrVersionResolution.secretArn });
+      // Historical observation may build a non-executable template only; final materialization checks the real clock.
+      assertQrVersionResolutionEvidence(qrVersionResolution, { sourceSha: toolingSha, changeTicket: approval.ticket, expectedSecretArn: qrVersionResolution.secretArn, ...(immutablePreparation ? {now:new Date(qrVersionResolution.createdAt)} : {}) });
       assertQrVersionResolutionCurrent({ taskDefinition, resolution: qrVersionResolution, secretMetadata: loadCurrentQrSecretMetadata?.(qrVersionResolution.secretArn) });
     }
     const liveLegacyBaseline = deriveLegacyRotationBaseline(taskDefinition, { qrVersionResolution });
@@ -560,7 +563,7 @@ export function prepareProductionCutoverRuntime({
       ? assertLiveInitialQrBaseline(rotationBindings, liveLegacyBaseline, preparedRotationState, preparedOrigin, rotationSuccessor?.predecessorSourceSha)
       : currentKeyVersion;
     const approvalConfig = { ...buildProductionRotationConfig({ sourceSha: protectedSha, rotationId, approval, bindings: rotationBindings, rebaselineAuthorization, rebaselineAuthorizationCoordinates, recoveryEnvelope, originalPreparation, imageAuthorization: preparedImageAuthorization.value, proveRecoveryDescendant, verifyRebaselineLivePostWrite: rebaselinePostWrite, verifyInitialBindingOrigin: bindingOrigin, liveCurrentKeyVersion: authenticatedCurrentQrVersion }), schemaVersion: 2, imageReleaseSha: preparedImageAuthorization.value.imageReleaseSha, ...(initialMigrationSourceAdvance ? { initialMigrationSourceAdvance } : {}) };
-    assertRootDropEvidence(rootDrop.value, {
+    if (!immutablePreparation) assertRootDropEvidence(rootDrop.value, {
       sourceSha: protectedSha,
       rotationId: approvalConfig.rotationId,
       imageAuthorizationSha256: preparedImageAuthorization.value.authorizationSha256,
@@ -659,6 +662,13 @@ export function prepareProductionCutoverRuntime({
     configBytes = Buffer.from(`${JSON.stringify(staticBindings, null, 2)}\n`);
     runtimeConfigSha256 = hash(configBytes);
   } catch (error) { blockers.push(error.message); }
+  if (immutablePreparation) return {
+    conditionalPreparation: true, readyToConsumeMfa: false, blockers:[...new Set(blockers)],
+    runtimeTemplate: blockers.length ? null : staticBindings,
+    templateBytes: blockers.length ? null : configBytes,
+    precomputedFiles: blockers.length ? [] : [{filePath:onboardingPathsFile,bytes:onboardingPathsBytes,label:'Canonical onboarding path manifest'}, {filePath:rotationTerraformInputFile,bytes:rotationTerraformInputBytes,label:'Rotation Terraform input'}],
+    protectedMainSha: toolingSha || null, releaseSourceSha: protectedSha || null,
+  };
   const manifest = {
     schemaVersion: 1,
     generatedBy: "scripts/aws/prepare-production-cutover-runtime.mjs",
@@ -735,7 +745,7 @@ export function parseBootstrapArgs(argv) {
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
     "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory", "adopt-completed-inventory-from-source-sha", "rotation-successor-original-config", "rotation-successor-original-config-sha256", "rotation-successor-state", "rotation-successor-state-sha256", "rotation-successor-fixture", "rotation-successor-fixture-sha256", "new-inventory-after-completed",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
-    "broker-recovery", "broker-recovery-sha256",
+    "broker-recovery", "broker-recovery-sha256", "conditional-seed", "conditional-seed-sha256",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {

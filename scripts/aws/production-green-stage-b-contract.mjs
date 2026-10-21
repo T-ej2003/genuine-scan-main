@@ -573,3 +573,8 @@ export const assertBrokerApprovalValidationRequest = (event) => {
   }
   return event;
 };
+// A separate protected change must approve governance and activate this lane.
+export const CONDITIONAL_LANE_ENABLED = false;
+export function assertConditionalProductionEnabled() {
+  if (!CONDITIONAL_LANE_ENABLED) throw new Error('Conditional production lane is disabled pending governance and rehearsal');
+}

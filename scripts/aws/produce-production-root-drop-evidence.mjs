@@ -1,16 +1,20 @@
 #!/usr/bin/env node
+import {isConditionalNativeSigner} from './production-cutover-consumption-journal.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
-import { writeStageBPrivateFileAtomic } from "./stage-b-artifact-contract.mjs";
+import { writeStageBPrivateFileAtomic,writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN, ROOT_DROP_SIGNING_ALGORITHM } from "./production-root-drop-evidence.mjs";
 
-export async function runCli(argv = process.argv.slice(2), { readRecovery = async options => (await import("./stage-b-staged-broker-executor.mjs")).readBrokerRecoveryApproval(options), protectedMain = readFreshProtectedMainIdentity, commandRunner = createProductionCommandRunner } = {}) {
+export async function runCli(argv = process.argv.slice(2), { readRecovery = async options => (await import("./stage-b-staged-broker-executor.mjs")).readBrokerRecoveryApproval(options), protectedMain = readFreshProtectedMainIdentity, commandRunner = createProductionCommandRunner, nativeSign, legacyGuard = assertLegacyProductionUnclaimed } = {}) {
+  if (nativeSign) {assertConditionalProductionEnabled();if(!isConditionalNativeSigner(nativeSign))throw new Error('Confirmed conditional signing claim required');}
   const args = new Map();
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i]?.replace(/^--/, "");
@@ -35,9 +39,11 @@ export async function runCli(argv = process.argv.slice(2), { readRecovery = asyn
   const messagePath = path.join(directory, "message");
   try {
     writeFileSync(messagePath, canonicalRootDropPayload(payload), { mode: 0o600, flag: "wx" });
-    const signed = JSON.parse(run(["kms", "sign", "--key-id", ROOT_DROP_SIGNING_KEY_ARN, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", ROOT_DROP_SIGNING_ALGORITHM]));
+    const invoke=(keyId=ROOT_DROP_SIGNING_KEY_ARN)=>JSON.parse(run(["kms", "sign", "--key-id", keyId, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", ROOT_DROP_SIGNING_ALGORITHM]));
+    if (!nativeSign) await legacyGuard({rotationId:args.get('rotation-id'),directory,repositoryRoot:process.cwd(),run});
+    const signed = nativeSign ? await nativeSign({keyId:ROOT_DROP_SIGNING_KEY_ARN,message:Buffer.from(canonicalRootDropPayload(payload)),messageType:'RAW',signingAlgorithm:ROOT_DROP_SIGNING_ALGORITHM},invoke) : invoke();
     const evidence = buildRootDropEvidence({ payload, signatureBase64: signed.Signature, signingKeyArn: ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm: ROOT_DROP_SIGNING_ALGORITHM });
-    writeStageBPrivateFileAtomic({ filePath: args.get("output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Root-drop evidence" });
+    (nativeSign?writeStageBPrivateFileExclusive:writeStageBPrivateFileAtomic)({ filePath: args.get("output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Root-drop evidence" });
     return evidence;
   } finally { rmSync(directory, { recursive: true, force: true }); }
 

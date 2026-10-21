@@ -13,23 +13,40 @@ import {PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-a
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
 import {ensureStageBPrivateDirectory,writeStageBPrivateFileAtomic} from './stage-b-artifact-contract.mjs';
 import {runStagedBrokerRequest} from './run-stage-b-staged-broker.mjs';
+import {produceConditionalOverlapAuthorization} from './production-cutover-conditional-workflow.mjs';
+import {conditionalHash,assertConditionalDerivation,exactConditionalKeys} from './production-cutover-conditional-authorization.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
 
 const root=path.resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const operations=Object.freeze({registration:'authorize-registration',pruning:'authorize-pruning',policy:'authorize-policy',publication:'authorize-publication',cutover:'authorize-cutover',closure:'authorize-closure'});
 
 export async function authorizeReleaseTransition({sourceSha,ticketId,releaseId,phase,preparationReference,authorizationRound,output},
- {env=process.env,run=createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env}),
+ {env=process.env,run,
   ghRun=(args,options)=>execFileSync('gh',args,{encoding:'utf8',maxBuffer:8*1024*1024,...options}),runRequest=runStagedBrokerRequest,
-  hydrateMaterial=hydrateReleasePhaseMaterial,createStore=createReleaseCoordinatorStore,authenticateAbort=authenticatePreNativeClosureAbort}={}) {
+  hydrateMaterial=hydrateReleasePhaseMaterial,createStore=createReleaseCoordinatorStore,authenticateAbort=authenticatePreNativeClosureAbort,fetchImpl=fetch}={}) {
+ if(phase==='prepare-overlap-conditional') assertConditionalProductionEnabled();
+ run ||= createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,env});
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_WORKFLOW_REF,PRODUCTION_ENVIRONMENT_APPROVAL.stageBReleaseTransitionWorkflowRef);
  assert.equal(env.GITHUB_REPOSITORY,PRODUCTION_ENVIRONMENT_APPROVAL.repository);assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');assert.equal(env.GITHUB_RUN_ATTEMPT,'1');
  assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.match(env.GITHUB_SHA||'',/^[a-f0-9]{40}$/);assert.match(releaseId||'',/^[a-f0-9]{64}$/);
- assert.match(preparationReference||'',/^[a-f0-9]{64}$/);assert.ok(Object.hasOwn(operations,phase));assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
+ assert.match(preparationReference||'',/^[a-f0-9]{64}$/);assert.ok(Object.hasOwn(operations,phase)||phase==='prepare-overlap-conditional');assert.ok(Number.isSafeInteger(authorizationRound)&&authorizationRound>=0);
  assert.ok(path.isAbsolute(env.RUNNER_TEMP||''));
  assert.equal(env.RELEASE_ID,releaseId);assert.equal(env.RELEASE_PHASE,phase);assert.equal(env.RELEASE_PREPARATION_REFERENCE,preparationReference);assert.equal(env.RELEASE_AUTHORIZATION_ROUND,String(authorizationRound));
  const directory=path.join(HOSTED_RELEASE_ROOT,releaseId,phase==='closure'?'cutover':phase);
  ensureStageBPrivateDirectory({directory,repositoryRoot:root,create:true});
  const store=createStore({run,directory,repositoryRoot:root});
+ if(phase==='prepare-overlap-conditional'){
+  const prepared=store.getArtifact(preparationReference);
+  exactConditionalKeys(prepared,['kind','schemaVersion','derivation','derivationSha256'],'Conditional preparation');
+  assert.equal(prepared.kind,'CUTOVER_CONDITIONAL_PREPARATION_V1');assert.equal(prepared.schemaVersion,1);
+  assertConditionalDerivation(prepared.derivation);assert.equal(prepared.derivationSha256,conditionalHash(prepared.derivation));
+  const record=store.readStep(releaseId,'prepare-overlap-conditional:prepared');
+  assert.ok(record);assert.equal(record.result,preparationReference);assert.equal(record.sourceSha,sourceSha);
+  const authorization=await produceConditionalOverlapAuthorization({d:prepared.derivation,sourceSha,ticketId,releaseId,preparationReference,authorizationRound,env,fetchImpl});
+  assert.equal(path.resolve(output),path.join(directory,'authorization.json'));
+  const written=writeStageBPrivateFileAtomic({filePath:output,bytes:Buffer.from(`${JSON.stringify(authorization)}\n`),repositoryRoot:root,label:'Conditional production authorization'});
+  return {authorizationPath:written.path,authorizationFileSha256:written.sha256,authorizationSha256:conditionalHash(authorization)};
+ }
  const start=store.readStart(successorReleaseStartKey({sourceSha,ticketId,releaseId}))||store.readStart({sourceSha,ticketId});
  assert.ok(start,'Missing governed release start');
  const release=store.getArtifact(start.release),{releaseId:originalId,...identity}=release;

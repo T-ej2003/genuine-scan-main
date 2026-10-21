@@ -12,7 +12,7 @@ on:
         description: Exact coordinator transition awaiting approval
         required: true
         type: choice
-        options: [registration, pruning, policy, publication, cutover, closure]
+        options: [registration, pruning, policy, publication, cutover, closure, prepare-overlap-conditional]
       preparation_reference: {description: Immutable preparation artifact SHA-256 in the release journal, required: true, type: string}
       authorization_round: {description: Immutable approval round, required: true, type: string}
 
@@ -41,15 +41,19 @@ jobs:
         with: {ref: '${{ inputs.tooling_sha || inputs.source_sha }}', fetch-depth: 0, persist-credentials: false}
       - uses: actions/setup-node@v6
         with: {node-version: 24, cache: npm}
+      - name: Enforce production-disabled conditional lane before AWS credentials
+        if: ${{ inputs.phase == 'prepare-overlap-conditional' }}
+        run: node --input-type=module -e "import {assertConditionalProductionEnabled} from './scripts/aws/production-green-stage-b-contract.mjs'; assertConditionalProductionEnabled();"
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm --prefix backend ci --ignore-scripts --no-audit --no-fund
       - uses: hashicorp/setup-terraform@v3
+        if: ${{ inputs.phase != 'prepare-overlap-conditional' }}
         with: {terraform_version: 1.15.8, terraform_wrapper: false}
       - name: Authenticate exact protected source and private phase paths
         run: |
           set -euo pipefail
           [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ && "$TOOLING_SHA" =~ ^[a-f0-9]{40}$ && "$RELEASE_ID" =~ ^[a-f0-9]{64}$ && "$RELEASE_PREPARATION_REFERENCE" =~ ^[a-f0-9]{64}$ ]]
-          [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover|closure)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
+          [[ "$RELEASE_PHASE" =~ ^(registration|pruning|policy|publication|cutover|closure|prepare-overlap-conditional)$ && "$RELEASE_AUTHORIZATION_ROUND" =~ ^(0|[1-9][0-9]*)$ ]]
           test "$GITHUB_RUN_ATTEMPT" = 1
           test "$GITHUB_SHA" = "$TOOLING_SHA"
           git fetch --no-tags origin main
@@ -74,6 +78,7 @@ jobs:
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
           role-session-name: release-approval-${{ github.run_id }}
       - name: Initialize exact provider schemas without applying or accessing the backend
+        if: ${{ inputs.phase != 'prepare-overlap-conditional' }}
         run: |
           terraform -chdir=infra/aws/terraform/production-green-stage-b init -backend=false -input=false -lockfile=readonly
           # Hydration writes the exact captured backend metadata from preparation.
@@ -89,7 +94,7 @@ jobs:
             --output "$AUTHORIZATION_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
-          name: production-stage-b-release-transition-authorization
+          name: ${{ inputs.phase == 'prepare-overlap-conditional' && 'production-stage-b-conditional-overlap-authorization' || 'production-stage-b-release-transition-authorization' }}
           path: /tmp/mscqr-production-release/${{ inputs.release_id }}/${{ inputs.phase }}/authorization.json
           if-no-files-found: error
           retention-days: 90

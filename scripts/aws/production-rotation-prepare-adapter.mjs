@@ -1,3 +1,5 @@
+import {readConditionalPrepareContext} from './production-cutover-conditional-capability.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
 import { createHash } from "node:crypto";
 import { lstatSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -27,7 +29,9 @@ const lastJsonLine = (output) => {
  * secret/state transaction; this boundary supplies only aggregate inventory
  * evidence and returns redacted persisted-state metadata.
  */
-export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, runtimeProofFile, authenticateSuccessor, repositoryRoot = process.cwd() } = {}) {
+export function createProductionRotationPrepareAdapter({ run, coordinator, configFile, configSha256, stateFile, fixtureFile, runtimeProofFile, authenticateSuccessor, conditionalContext, repositoryRoot = process.cwd() } = {}) {
+  const conditional=conditionalContext?readConditionalPrepareContext(conditionalContext):null;
+  if(conditional)assertConditionalProductionEnabled();
   if (typeof run !== "function" || typeof coordinator !== "string" || !configFile || !stateFile || !fixtureFile) {
     throw new Error("Production rotation prepare adapter is incomplete.");
   }
@@ -72,6 +76,23 @@ export function createProductionRotationPrepareAdapter({ run, coordinator, confi
       if (!inventory || typeof inventory !== "object" || !SHA256.test(inventory.evidenceSha256 || "")) throw new Error("Rotation prepare requires hash-bound bounded inventory evidence.");
       if (!/^[A-Za-z0-9._-]{8,128}$/.test(rotationId || "")) throw new Error("Rotation prepare rotation ID is invalid.");
       const config = readBoundStageBPrivateJson({ filePath: configFile, expectedSha256: configSha256, repositoryRoot, label: "Production cutover runtime config" });
+      if(conditional){
+        if(configSha256!==conditional.materialization.manifest.runtimeFileSha256 || rotationId!==conditional.d.rotationId)throw new Error('Conditional rotation persistence differs');
+        const stateBytes=Buffer.from(`${JSON.stringify(conditional.successor.state,null,2)}\n`);
+        const original=readStageBPrivateFileBytes({filePath:config.rotationSuccessor.predecessorFixtureFile,repositoryRoot,label:'Original rotation fixture'});
+        const fixtureBytes=original.bytes;
+        const request={stateFile,fixtureFile,stateFileSha256:createHash('sha256').update(stateBytes).digest('hex'),fixtureFileSha256:original.sha256};
+        const verify=()=>{if(!readStageBPrivateFileBytes({filePath:stateFile,repositoryRoot,label:'Conditional state'}).bytes.equals(stateBytes)||!readStageBPrivateFileBytes({filePath:fixtureFile,repositoryRoot,label:'Conditional fixture'}).bytes.equals(fixtureBytes))throw new Error('Conditional rotation readback differs');};
+        const result=await conditional.dispatch('ROTATION_LOCAL_STATE',request,async()=>{
+          const {writeStageBPrivateFileExclusive}=await import('./stage-b-artifact-contract.mjs');
+          for(const [filePath,bytes] of [[stateFile,stateBytes],[fixtureFile,fixtureBytes]]){
+            if(lstatSync(filePath,{throwIfNoEntry:false})){if(!readStageBPrivateFileBytes({filePath,repositoryRoot,label:'Conditional output'}).bytes.equals(bytes))throw new Error('Conditional local output conflict');}
+            else writeStageBPrivateFileExclusive({filePath,bytes,repositoryRoot,label:'Conditional rotation output'});
+          }
+          return {stateFileSha256:request.stateFileSha256,fixtureFileSha256:request.fixtureFileSha256};
+        },verify);
+        return {valid:true,prepared:true,rotationId,rotationStateSha256:result.output.stateFileSha256,rotationFixtureSha256:result.output.fixtureFileSha256,evidenceRef:`rotation-state:${rotationId}`,evidenceSha256:createHash('sha256').update(JSON.stringify(result.output)).digest('hex'),overlapSecretBindings:rotationBindingsToPostPrepareTaskBindings(config),mutationCount:1};
+      }
       if (config.rotationSuccessor) {
         if (typeof authenticateSuccessor !== "function") throw new Error("Rotation successor authenticator is required.");
         await authenticateSuccessor();
