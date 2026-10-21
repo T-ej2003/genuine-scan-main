@@ -7,14 +7,38 @@ const hash=value=>createHash('sha256').update(canonicalJson(value)).digest('hex'
 const exact=(value,names)=>assert.deepEqual(Object.keys(value||{}).sort(),names.sort(),'Solo authority fields differ');
 const sha=value=>assert.match(value||'',/^[a-f0-9]{64}$/);
 const time=value=>{const n=Date.parse(value);assert.ok(Number.isFinite(n)&&new Date(n).toISOString()===value,'Canonical time required');return n;};
+const verifiedIssuerPolicies=new WeakMap();
 
 // Governance has not designated these issuers. Production callers cannot inject trust.
 export const SOLO_APPROVAL_ISSUER=null;
 export const SOLO_SUSPENSION_SOURCE=null;
 
-function verifyIssuerSignature(envelope,trust) {
+// A configured hash is only an expectation. Authenticate the current KMS policy
+// and public key through the fixed metadata-reader role before using an issuer.
+export async function authenticateSoloIssuerTrust({trust,read,d,now=Date.now()}) {
   assert.ok(trust?.designated===true,'Solo issuer has not been designated');
   exact(trust,['designated','issuerId','keyArn','publicKeyDerBase64','policySha256']);
+  assert.equal(typeof read,'function','Fixed KMS metadata reader required');
+  assert.notEqual(trust.keyArn,d.keys.root.keyArn);assert.notEqual(trust.keyArn,d.keys.checker.keyArn);
+  const json=async args=>{const result=await read([...args,'--output','json','--no-cli-pager']);return typeof result==='string'?JSON.parse(result):result;};
+  const caller=await json(['sts','get-caller-identity']);
+  assert.equal(caller.Account,'368992683803');
+  assert.match(caller.Arn||'',/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[A-Za-z0-9+=,.@_-]{1,64}$/);
+  const publicKey=await json(['kms','get-public-key','--key-id',trust.keyArn]);
+  assert.equal(publicKey.KeyId,trust.keyArn);assert.equal(publicKey.PublicKey,trust.publicKeyDerBase64,'Solo issuer public key changed');
+  const policy=await json(['kms','get-key-policy','--key-id',trust.keyArn,'--policy-name','default']);
+  const {parseConditionalJson}=await import('./production-cutover-conditional-authorization.mjs');
+  assert.equal(hash(parseConditionalJson(policy.Policy)),trust.policySha256,'Solo issuer key policy changed');
+  const confirmed=Object.freeze({...trust});
+  verifiedIssuerPolicies.set(confirmed,now);
+  return confirmed;
+}
+
+function verifyIssuerSignature(envelope,trust,now) {
+  assert.ok(trust?.designated===true,'Solo issuer has not been designated');
+  exact(trust,['designated','issuerId','keyArn','publicKeyDerBase64','policySha256']);
+  const observedAt=verifiedIssuerPolicies.get(trust);
+  assert.ok(Number.isSafeInteger(observedAt)&&observedAt<=now&&now-observedAt<15*60*1000,'Current solo issuer KMS policy evidence required');
   exact(envelope,['payload','payloadSha256','issuerKeyArn','signatureBase64']);
   assert.equal(envelope.payload.issuerId,trust.issuerId);
   assert.equal(envelope.issuerKeyArn,trust.keyArn);
@@ -31,7 +55,7 @@ export function authenticateSoloPhaseApproval({envelope,trust=SOLO_APPROVAL_ISSU
   assert.ok(phase==='INVENTORY_ADOPTION'||phase==='ROTATION_SUCCESSOR','Root-drop and other phases cannot use solo KMS approval');
   assert.notEqual(trust?.keyArn,d.keys.checker.keyArn,'Human approval issuer cannot be the checker signing key');
   assert.notEqual(trust?.keyArn,d.keys.root.keyArn,'Human approval issuer cannot be the root signing key');
-  const p=verifyIssuerSignature(envelope,trust);
+  const p=verifyIssuerSignature(envelope,trust,now);
   exact(p,['kind','schemaVersion','policyVersion','policyManifestSha256','issuerId','authorizationId','phase','derivationSha256','requestSha256','operatorGithubUserId','operatorAwsUserArn','operatorSessionArn','mfaAttestationSha256','issuedAt','expiresAt']);
   assert.equal(p.kind,'CUTOVER_SOLO_PHASE_APPROVAL_V1');assert.equal(p.schemaVersion,1);
   assert.equal(p.policyVersion,SOLO_OPERATOR_CONTROLLED_V1);
@@ -53,7 +77,7 @@ export async function issueSoloPhaseApproval() {
 
 const stateKey=(policy,d)=>hash({kind:'CUTOVER_SOLO_AUTHORITY_STATE_V1',policyManifestSha256:hash(policy),toolingSourceSha:d.toolingSourceSha,rotationId:d.rotationId});
 export function authenticateSoloAuthorityState({envelope,trust=SOLO_SUSPENSION_SOURCE,policy,d,now=Date.now()}) {
-  const p=verifyIssuerSignature(envelope,trust);
+  const p=verifyIssuerSignature(envelope,trust,now);
   exact(p,['kind','schemaVersion','policyVersion','policyManifestSha256','issuerId','operatorGithubUserId','operatorAwsUserArn','toolingSourceSha','rotationId','state','reason','issuedAt','expiresAt']);
   assert.equal(p.kind,'CUTOVER_SOLO_AUTHORITY_STATE_V1');assert.equal(p.schemaVersion,1);
   assert.equal(p.policyVersion,SOLO_OPERATOR_CONTROLLED_V1);

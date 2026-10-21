@@ -10,7 +10,7 @@ import {produceConditionalOverlapAuthorization,authenticateConditionalWorkflowAr
 import {canonicalJson,STAGE_B} from '../aws/production-green-stage-b-contract.mjs';
 import {generateKeyPairSync,sign,constants} from 'node:crypto';
 import {SOLO_OPERATOR_POLICY,SOLO_OPERATOR_CONTROLLED_V1,soloPolicyHash} from '../aws/production-cutover-human-policy.mjs';
-import {authenticateSoloPhaseApproval,assertSoloAuthorityActive,recordSoloAuthorityState,issueSoloPhaseApproval} from '../aws/production-cutover-solo-authority.mjs';
+import {authenticateSoloIssuerTrust,authenticateSoloPhaseApproval,assertSoloAuthorityActive,recordSoloAuthorityState,issueSoloPhaseApproval} from '../aws/production-cutover-solo-authority.mjs';
 
 const issuer=(f,phase)=>{
   const kind=phase==='ROOT_DROP'?'root':'checker',key=f.d.keys[kind];
@@ -122,8 +122,16 @@ test('advance issuance cannot authorize early execution or extend the absolute e
 test('mocked designated issuer binds solo approval to exact adoption request and live authority state',async t=>{
  const f=await conditionalFixture();t.after(f.cleanup);
  const pair=generateKeyPairSync('rsa',{modulusLength:2048});
- const approvalTrust={designated:true,issuerId:'fixture-human-mfa-issuer',keyArn:'arn:aws:kms:eu-west-2:368992683803:key/22222222-2222-2222-2222-222222222222',publicKeyDerBase64:pair.publicKey.export({format:'der',type:'spki'}).toString('base64'),policySha256:'a'.repeat(64)};
- const suspensionTrust={...approvalTrust,issuerId:'fixture-emergency-issuer',keyArn:'arn:aws:kms:eu-west-2:368992683803:key/33333333-3333-3333-3333-333333333333'};
+ const issuerPolicy={Version:'2012-10-17',Statement:[{Effect:'Allow',Principal:{AWS:'arn:aws:iam::368992683803:role/mscqr-production-release-deployer'},Action:'kms:GetKeyPolicy',Resource:'*'}]};
+ const baseTrust={designated:true,issuerId:'fixture-human-mfa-issuer',keyArn:'arn:aws:kms:eu-west-2:368992683803:key/22222222-2222-2222-2222-222222222222',publicKeyDerBase64:pair.publicKey.export({format:'der',type:'spki'}).toString('base64'),policySha256:conditionalHash(issuerPolicy)};
+ const metadata=args=>args[0]==='sts'?{Account:STAGE_B.account,Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test'}:args[1]==='get-public-key'?{KeyId:args[3],PublicKey:baseTrust.publicKeyDerBase64}:{Policy:JSON.stringify(issuerPolicy)};
+ const approvalTrust=await authenticateSoloIssuerTrust({trust:baseTrust,read:metadata,d:f.d,now:f.now()});
+ const suspensionTrust=await authenticateSoloIssuerTrust({trust:{...baseTrust,issuerId:'fixture-emergency-issuer',keyArn:'arn:aws:kms:eu-west-2:368992683803:key/33333333-3333-3333-3333-333333333333'},read:metadata,d:f.d,now:f.now()});
+ await assert.rejects(authenticateSoloIssuerTrust({trust:baseTrust,read:args=>args[1]==='get-key-policy'?{Policy:'{}'}:metadata(args),d:f.d,now:f.now()}),/key policy changed/);
+ await assert.rejects(authenticateSoloIssuerTrust({trust:baseTrust,read:args=>args[1]==='get-key-policy'?{Policy:'{"Version":"2012-10-17","Version":"2012-10-17"}'}:metadata(args),d:f.d,now:f.now()}),/Duplicate/);
+ await assert.rejects(authenticateSoloIssuerTrust({trust:baseTrust,read:args=>args[0]==='sts'?{Account:STAGE_B.account,Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/test'}:metadata(args),d:f.d,now:f.now()}));
+ await assert.rejects(authenticateSoloIssuerTrust({trust:baseTrust,read:args=>args[1]==='get-public-key'?{KeyId:args[3],PublicKey:'substituted'}:metadata(args),d:f.d,now:f.now()}),/public key changed/);
+ assert.throws(()=>authenticateSoloPhaseApproval({envelope:{},trust:baseTrust,d:f.d,phase:'INVENTORY_ADOPTION',requestSha256:'0'.repeat(64),operatorSessionArn:'',policy:{},now:f.now()}),/policy evidence required/);
  const signPayload=bytes=>sign('sha256',bytes,{key:pair.privateKey,padding:constants.RSA_PKCS1_PSS_PADDING,saltLength:32}).toString('base64');
  const policy={...SOLO_OPERATOR_POLICY,enabled:true,githubUserId:1,githubLogin:'executor',toolingSourceSha:f.d.toolingSourceSha,historicalReleaseSha:f.d.historicalReleaseSha,backendImageDigest:f.d.backendImageDigest,notAfter:f.d.notAfter};
  const approvalId=conditionalHash({kind:'FIXTURE_SOLO_APPROVAL',phase:'INVENTORY_ADOPTION'});
@@ -138,6 +146,7 @@ test('mocked designated issuer binds solo approval to exact adoption request and
    operatorSessionArn:sessionArn,mfaAttestationSha256:'b'.repeat(64),issuedAt:new Date(f.now()-1000).toISOString(),expiresAt:new Date(f.now()+600000).toISOString()};
  const alteredApproval=p=>({payload:p,payloadSha256:conditionalHash(p),issuerKeyArn:approvalTrust.keyArn,signatureBase64:signPayload(Buffer.from(canonicalJson(p)))});
  const approval=alteredApproval(approvalPayload);
+ assert.throws(()=>authenticateSoloPhaseApproval({envelope:approval,trust:approvalTrust,d:f.d,phase:'INVENTORY_ADOPTION',requestSha256:conditionalHash(request),operatorSessionArn:sessionArn,policy,now:f.now()+900000}),/policy evidence required/);
  await assert.rejects(issueSoloPhaseApproval({payload:approvalPayload,trust:approvalTrust,store:memoryConditionalStore(),sign:signPayload}),/not designated/);
  for(const mutate of [p=>{delete p.mfaAttestationSha256;},p=>{p.operatorGithubUserId=2;},p=>{p.operatorAwsUserArn='arn:aws:iam::368992683803:user/other';},p=>{p.operatorSessionArn=sessionArn.replace('/test','/other');},p=>{p.phase='ROTATION_SUCCESSOR';},p=>{p.derivationSha256='0'.repeat(64);},p=>{p.requestSha256='0'.repeat(64);},p=>{p.policyVersion='INDEPENDENT_REVIEW_V1';},p=>{p.expiresAt=new Date(f.now()-1).toISOString();}]){
    const bad=structuredClone(approvalPayload);mutate(bad);

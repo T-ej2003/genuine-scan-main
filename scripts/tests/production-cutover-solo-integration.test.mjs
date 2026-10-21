@@ -8,19 +8,24 @@ import {authenticateConditionalBundle,conditionalOperationId,CONDITIONAL_PRINCIP
 import {createConditionalConsumptionJournal} from '../aws/production-cutover-consumption-journal.mjs';
 import {produceConditionalOverlapAuthorization,authenticateConditionalWorkflowArtifact} from '../aws/production-cutover-conditional-workflow.mjs';
 import {SOLO_OPERATOR_POLICY,SOLO_OPERATOR_CONTROLLED_V1,soloPolicyHash} from '../aws/production-cutover-human-policy.mjs';
-import {recordSoloAuthorityState} from '../aws/production-cutover-solo-authority.mjs';
+import {authenticateSoloIssuerTrust,recordSoloAuthorityState} from '../aws/production-cutover-solo-authority.mjs';
 import {canonicalJson} from '../aws/production-green-stage-b-contract.mjs';
 
 const signed=(payload,trust,privateKey)=>({payload,payloadSha256:h(payload),issuerKeyArn:trust.keyArn,
   signatureBase64:sign('sha256',Buffer.from(canonicalJson(payload)),{key:privateKey,padding:constants.RSA_PKCS1_PSS_PADDING,saltLength:32}).toString('base64')});
-const issuer=(id,keyArn,pair)=>({designated:true,issuerId:id,keyArn,publicKeyDerBase64:pair.publicKey.export({format:'der',type:'spki'}).toString('base64'),policySha256:'a'.repeat(64)});
+const issuer=async(id,keyArn,pair,d,now)=>{
+  const policy={Version:'2012-10-17',Statement:[]};
+  const trust={designated:true,issuerId:id,keyArn,publicKeyDerBase64:pair.publicKey.export({format:'der',type:'spki'}).toString('base64'),policySha256:h(policy)};
+  const read=args=>args[0]==='sts'?{Account:'368992683803',Arn:'arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/test'}:args[1]==='get-public-key'?{KeyId:keyArn,PublicKey:trust.publicKeyDerBase64}:{Policy:JSON.stringify(policy)};
+  return authenticateSoloIssuerTrust({trust,read,d,now});
+};
 
 async function soloBundle(f){
   const policy={...SOLO_OPERATOR_POLICY,enabled:true,githubUserId:1,githubLogin:'executor',toolingSourceSha:f.d.toolingSourceSha,
     historicalReleaseSha:f.d.historicalReleaseSha,backendImageDigest:f.d.backendImageDigest,notAfter:f.d.notAfter};
   const approvalPair=generateKeyPairSync('rsa',{modulusLength:2048}),statePair=generateKeyPairSync('rsa',{modulusLength:2048});
-  const approvalTrust=issuer('fixture-human-mfa-issuer','arn:aws:kms:eu-west-2:368992683803:key/22222222-2222-2222-2222-222222222222',approvalPair);
-  const stateTrust=issuer('fixture-emergency-issuer','arn:aws:kms:eu-west-2:368992683803:key/33333333-3333-3333-3333-333333333333',statePair);
+  const approvalTrust=await issuer('fixture-human-mfa-issuer','arn:aws:kms:eu-west-2:368992683803:key/22222222-2222-2222-2222-222222222222',approvalPair,f.d,f.now());
+  const stateTrust=await issuer('fixture-emergency-issuer','arn:aws:kms:eu-west-2:368992683803:key/33333333-3333-3333-3333-333333333333',statePair,f.d,f.now());
   const session='arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/test';
   const envelopes={...f.envelopes};
   for(const phase of ['INVENTORY_ADOPTION','ROTATION_SUCCESSOR']){
