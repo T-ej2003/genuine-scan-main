@@ -64,7 +64,10 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   });
   assertStageBPermissionEvidenceKind(report, INITIAL_ADMINISTRATOR_CAPABILITY_EVIDENCE_KIND, "initial");
   assert.equal(report.status, "valid");
-  assert.equal(report.requiredAllowedCount, 277);
+  assert.equal(report.requiredAllowedCount, 278);
+  assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId === "conditional-ecs-registration-audit-read").map(({ action, resource, phase, decision }) => ({ action, resource, phase, decision })), [{
+    action: "cloudtrail:LookupEvents", resource: "*", phase: "recovery-read", decision: "allowed",
+  }]);
   assert.equal(report.forbiddenDeniedCount, 38);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
