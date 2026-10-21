@@ -21,7 +21,7 @@ export async function runConditionalProductionContinuation(options) {
   const {createConditionalExecutor}=await import('./production-cutover-conditional-native.mjs');
   const execute=createConditionalExecutor(options.d);
   const store=createReleaseCoordinatorStore({run:createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,profile:'mscqr-production-release-deployer',exec:execute}),directory:path.dirname(options.d.runtimeTemplate.rotationConfigFile),repositoryRoot:process.cwd()});
-  const journal=createConditionalConsumptionJournal({store,rotationId:options.d.rotationId,predecessorStateSha256:options.d.predecessor.stateSha256,soloAuthority:{d:options.d,policy:SOLO_OPERATOR_POLICY,trust:SOLO_SUSPENSION_SOURCE}});
+  const journal=createConditionalConsumptionJournal({store,rotationId:options.d.rotationId,predecessorStateSha256:options.d.predecessor.stateSha256,operatorControl:{d:options.d,policy:SOLO_OPERATOR_POLICY,trust:SOLO_SUSPENSION_SOURCE}});
   const adapters=createCanonicalConditionalAdapters(options);
   return rehearseConditionalContinuation({...options,journal,adapters});
 }

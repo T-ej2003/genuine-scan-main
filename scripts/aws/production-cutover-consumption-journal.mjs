@@ -28,7 +28,7 @@ function authenticate(record, expected) {
   return record;
 }
 
-export function createConditionalConsumptionJournal({store, rotationId, predecessorStateSha256,soloAuthority, executionId = randomBytes(32).toString('hex')}) {
+export function createConditionalConsumptionJournal({store, rotationId, predecessorStateSha256,operatorControl, executionId = randomBytes(32).toString('hex')}) {
   conditionalSha(executionId); const operationId = conditionalOperationId(rotationId,predecessorStateSha256);
   for (const method of ['readOperation','writeOperation','claimOperation']) assert.equal(typeof store[method],'function','Confirmed conditional store required');
   const scope = {schemaVersion:1,kind:'CUTOVER_CONDITIONAL_CONSUMPTION_V1',operationId,executionId};
@@ -50,8 +50,8 @@ export function createConditionalConsumptionJournal({store, rotationId, predeces
   };
   const assertSoloActive=async binding=>{
     if(binding.policyVersion!==SOLO_OPERATOR_CONTROLLED_V1)return;
-    assert.equal(conditionalHash(soloAuthority?.d),binding.derivationSha256,'Solo authority derivation differs');
-    await assertSoloAuthorityActive({store,policy:soloAuthority.policy,d:soloAuthority.d,trust:soloAuthority.trust,now:soloAuthority.now?.()??Date.now()});
+    assert.equal(conditionalHash(operatorControl?.d),binding.derivationSha256,'Solo authority derivation differs');
+    await assertSoloAuthorityActive({store,policy:operatorControl.policy,d:operatorControl.d,trust:operatorControl.trust,now:operatorControl.now?.()??Date.now()});
   };
   return Object.freeze({operationId,executionId,
     claimExecution: async binding => {

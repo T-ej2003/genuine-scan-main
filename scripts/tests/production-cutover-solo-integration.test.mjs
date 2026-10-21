@@ -59,7 +59,7 @@ test('real bundle, execution claim and native-effect boundary require live solo 
   assert.equal(s.binding.policyVersion,SOLO_OPERATOR_CONTROLLED_V1);
   const store=memoryConditionalStore();
   const journal=createConditionalConsumptionJournal({store,rotationId:f.d.rotationId,predecessorStateSha256:f.d.predecessor.stateSha256,
-    soloAuthority:{d:f.d,policy:s.policy,trust:s.stateTrust,now:f.now}});
+    operatorControl:{d:f.d,policy:s.policy,trust:s.stateTrust,now:f.now}});
   await assert.rejects(journal.claimExecution(s.binding),/active solo authority state required/);
   await recordSoloAuthorityState({store,envelope:s.active,trust:s.stateTrust,policy:s.policy,d:f.d,now:f.now()});
   const execution=await journal.claimExecution(s.binding);
@@ -83,7 +83,7 @@ test('suspension racing a native claim burns the attempt before any KMS call',as
     return result;
   }};
   const journal=createConditionalConsumptionJournal({store,rotationId:f.d.rotationId,predecessorStateSha256:f.d.predecessor.stateSha256,
-    soloAuthority:{d:f.d,policy:s.policy,trust:s.stateTrust,now:f.now}});
+    operatorControl:{d:f.d,policy:s.policy,trust:s.stateTrust,now:f.now}});
   const execution=await journal.claimExecution(s.binding);
   const token=await journal.claimPhase(execution,'ROOT_DROP',{...s.binding,phase:'ROOT_DROP',runtimeFileSha256:null,dependencyHashes:{},dependencyReceipts:{}});
   const signer=journal.createNativeSigner(token,{d:f.d,phase:'ROOT_DROP',trust:f.trust,materialization:undefined,outputs:{},beforeDispatch:async()=>{},principal:CONDITIONAL_PRINCIPALS.root,now:f.now,invokeNative:async invoke=>{invoked++;return invoke();}});
