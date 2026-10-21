@@ -1,0 +1,7 @@
+# PR #717 OSV reachability review
+
+The conditional authorization change affects production-disabled operator tooling, its existing protected workflow branch, tests, test registration and generated RLS source seals. It adds no dependency. Compared with protected main, frontend/backend application source, dependency locks, Tailwind patterns, Vite configuration, Dockerfiles and runtime packaging are unchanged. None of the added tooling imports `braces` or accepts production-user build patterns.
+
+Authenticated PR audit run 39626762133 at head `898d538e2fac5026738645a1dec3949d08bdd01e` produced an unfiltered OSV report retained in artifact 12358176013. It contains only the existing development-only `braces@3.0.3` advisory `GHSA-vfj7-8cjw-p6xm` / `CVE-2026-93687`. Its canonical browser build and package attribution completed; validation stopped at the intentionally strict outdated reachability fingerprint. This is not a passing audit result. No exception is added or extended: owner, 2026-11-02 expiry, non-runtime scope and attacker-input conclusion remain unchanged.
+
+After the deterministic source-seal update, `reachabilityInputsSha256(process.cwd())` is `9781e84fcfa6de2ae5a8877c565cbe82c37fde5f812a96a0147f062f32002eaf`. The existing acceptance is rebound only after reviewing these tooling changes against the unchanged application/build/runtime boundary. Final-head hosted unfiltered scanning and canonical browser closure must pass before merge. New findings require separate review; this document does not authorize any production operation.
