@@ -1185,7 +1185,7 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
       authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry,
       preflight: () => { planned++; }, statusRun: () => `${JSON.stringify({ mode: "status", phase: "overlap-deploy-required", records: { jwt: { versionId: "v1" } } })}\n`,
       readAws: args => {
-        if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/test` });
+        if (args[0] === "sts") return JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/test` });
         assert.deepEqual(args.slice(0, 2), ["kms", "verify"]);
         verifyMessages.push({ type: args[args.indexOf("--message-type") + 1], bytes: readFileSync(args[args.indexOf("--message") + 1].slice("fileb://".length)) });
         return JSON.stringify({ SignatureValid: true });
@@ -1202,7 +1202,9 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     await assert.rejects(prepareProductionRotationSuccessor({ ...options, signAws: undefined,
       createAwsRunner: selected => createProductionAwsCommandRunner({ ...selected, env: {} }) }), /requires AWS_ACCESS_KEY_ID/);
     await assert.rejects(prepareProductionRotationSuccessor({ ...options,
-      signAws: args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/wrong` }) : options.signAws(args) }), /separate release and checker identities/);
+      readAws: args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-release-deployer/wrong` }) : options.readAws(args) }), /separate release and checker identities/);
+    await assert.rejects(prepareProductionRotationSuccessor({ ...options,
+      signAws: args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-release-deployer/wrong` }) : options.signAws(args) }), /separate release and checker identities/);
     assert.equal(first.successorStateSha256, second.successorStateSha256);
     assert.equal(JSON.parse(readFileSync(stateFile)).sourceSha, successorSha);
     assert.deepEqual(readFileSync(originalStateFile), stateBytes);
