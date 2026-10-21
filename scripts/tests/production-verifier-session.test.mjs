@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAwsStsRunner, establishInheritedVerifierIdentity, establishVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
+import { createAwsStsRunner, establishInheritedVerifierIdentity, establishVerifierIdentity, revalidateProcessVerifierIdentity, VERIFIER_SESSION_MIN_REMAINING_MS } from "../aws/production-identity-adapters.mjs";
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN, ECS_EXEC_OPERATOR_ROLE_ARN } from "../aws/production-ecs-exec-operator-contract.mjs";
 import { establishEcsExecVerifierSession } from "../aws/establish-production-ecs-exec-verifier-session.mjs";
 import { createProductionVerifierOnlyAdapters } from "../aws/production-cutover-verifier-adapters.mjs";
@@ -131,7 +131,7 @@ test("verifier-only composition constructs no release-owned adapter or command r
   const calls = [];
   const session = Object.freeze({ callerArn: verifierArn, run: () => { throw new Error("AWS command must not run during composition"); }, spawn: () => { throw new Error("ECS Exec must not run during composition"); } });
   const adapters = createProductionVerifierOnlyAdapters({
-    config: { sourceSha: "a".repeat(40), rotationId: "rotation-20260829015311-765c8a16", rotationCoordinator: "coordinator.mjs", rotationConfigFile: "/private/tmp/config.json", rotationStateFile: "/private/tmp/state.json", rotationFixtureFile: "/private/tmp/fixture.json", overlapRuntimeProofFile: "/private/tmp/proof.json" },
+    config: { sourceSha: "a".repeat(40), imageReleaseSha: "a".repeat(40), rotationId: "rotation-20260829015311-765c8a16", rotationCoordinator: "coordinator.mjs", rotationConfigFile: "/private/tmp/config.json", rotationStateFile: "/private/tmp/state.json", rotationFixtureFile: "/private/tmp/fixture.json", overlapRuntimeProofFile: "/private/tmp/proof.json" },
     sourceSha: "a".repeat(40), rotationId: "rotation-20260829015311-765c8a16", runtimeConfigSha256: "b".repeat(64),
     createCommandRunner: (options) => { calls.push(options); return () => ""; },
     createStsRunner: () => ({ getCallerIdentity: async () => verifierArn, getVerifierSession: () => session }),
@@ -143,4 +143,16 @@ test("verifier-only composition constructs no release-owned adapter or command r
   const identity = await adapters.identities.establish();
   assert.equal(identity.verifier.callerArn, verifierArn);
   assert.deepEqual(calls, [{ credentialSource: "inherited-ecs-exec-verifier-session" }]);
+});
+
+test("conditional verifier reuse rechecks actual STS identity without another MFA or credential serialization", async () => {
+  const {runner,calls}=fixtureRunner();
+  await establishEcsExecVerifierSession({adapter:runner,mfaSerial,mfaCode:"123456"});
+  const first=await revalidateProcessVerifierIdentity({adapter:runner});
+  const second=await revalidateProcessVerifierIdentity({adapter:runner});
+  assert.equal(first.session,second.session);
+  assert.equal(calls.filter(({args})=>args[1]==="assume-role").length,1);
+  assert.equal(JSON.stringify({first,second}).includes("sentinel-secret"),false);
+  await assert.rejects(revalidateProcessVerifierIdentity({adapter:{getVerifierSession:()=>({callerArn:verifierArn,expiration:new Date(Date.now()-1).toISOString(),run:()=>{throw Error("expired session must not run");}})}}),/Fresh process-scoped/);
+  await assert.rejects(revalidateProcessVerifierIdentity({adapter:{getVerifierSession:()=>({callerArn:verifierArn,expiration:future(),run:()=>JSON.stringify({Arn:bootstrapArn})})}}),/identity changed/);
 });

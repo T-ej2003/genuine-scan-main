@@ -15,6 +15,8 @@ import { createProductionRotationInfrastructureAdapter } from "./production-cuto
 import { rotationBindingsToPostPrepareTaskBindings } from "./production-cutover-runtime-bootstrap.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 
 const SHA1 = /^[a-f0-9]{40}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -105,12 +107,20 @@ export async function authenticateProductionInventoryAdoption({ config, runtime,
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }
 
-export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, authenticateCheckout = readStageBProtectedMainCheckout, authenticateInventory = authenticateProductionInventoryAdoption, authenticateSuccessor = authenticatePreparedRotationSuccessor, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath } = {}) {
+export async function runProductionCutoverOperator({ argv = process.argv.slice(2), stdin = process.stdin, stdout = process.stdout, prompt = promptProductionHiddenInput, spawnChild = spawn, validateConfig = assertProductionCutoverOperatorConfig, authenticateCheckout = readStageBProtectedMainCheckout, authenticateInventory = authenticateProductionInventoryAdoption, authenticateSuccessor = authenticatePreparedRotationSuccessor, preflightRotation = preflightProductionCutoverRotation, parentEnvironment = process.env, cwd = process.cwd(), childExecutable = process.execPath, legacyGuard = assertLegacyProductionUnclaimed } = {}) {
+  if (argv.includes('conditional-continuation')) {
+    assertConditionalProductionEnabled();
+    if(!stdin?.isTTY||!stdout?.isTTY)throw new Error('Conditional continuation requires an interactive trusted terminal');
+    const index=argv.indexOf('--mode');if(index<0||argv[index+1]!=='conditional-continuation')throw new Error('Conditional mode must be explicit');
+    const {runConditionalContinuationCli}=await import('./production-cutover-conditional-continuation.mjs');
+    return runConditionalContinuationCli([...argv.slice(0,index),...argv.slice(index+2)]);
+  }
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
   const config = validateConfig(runtime, { repositoryRoot: cwd });
   authenticateCheckout({ cwd, expectedSourceSha: config.recoveryTooling?.sourceSha || runtime["--source-sha"], requireCanonicalRepository: true });
+  if (config.rotationId) await legacyGuard({config,repositoryRoot:cwd});
   await authenticateInventory({ config, runtime, cwd });
   if (config.rotationSuccessor) await authenticateSuccessor({ config, configSha256: runtime["--config-sha256"], repositoryRoot: cwd, runAws: createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: config.releaseProfile }) });
   preflightRotation({ config, runtime, cwd });

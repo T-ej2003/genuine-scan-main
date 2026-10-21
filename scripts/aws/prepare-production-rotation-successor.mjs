@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import {isConditionalNativeSigner} from './production-cutover-consumption-journal.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -21,7 +24,9 @@ const arg = (argv, name) => {
   return argv[index + 1];
 };
 
-export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, createAwsRunner = createProductionAwsCommandRunner, statusRun = execFileSync, preflight = preflightProductionCutoverRotation, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
+export async function prepareProductionRotationSuccessor({ argv, root = process.cwd(), readAws, signAws, createAwsRunner = createProductionAwsCommandRunner, statusRun = execFileSync, preflight = preflightProductionCutoverRotation, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date(), nativeSign, deferStateWrites = false, legacyGuard = assertLegacyProductionUnclaimed } = {}) {
+  if (nativeSign) {assertConditionalProductionEnabled();if(!isConditionalNativeSigner(nativeSign))throw new Error('Confirmed conditional signing claim required');}
+  if(deferStateWrites && !nativeSign)throw new Error('Deferred successor state requires conditional signing');
   const configPath = path.resolve(arg(argv, "config"));
   const configSha256 = arg(argv, "config-sha256");
   const config = readBoundStageBPrivateJson({ filePath: configPath, expectedSha256: configSha256, repositoryRoot: root, label: "Successor rotation config" });
@@ -62,7 +67,11 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
       const input = kmsAdoptionMessage(bytes);
       return json(releaseRun, ["kms", "verify", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
     };
-    const sign = ({ keyId, message: bytes }) => json(checkerRun, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
+    const sign = async ({ keyId, message: bytes }) => {
+      if (!nativeSign) await legacyGuard({config,repositoryRoot:root,run:releaseRun});
+      const invoke=()=>json(checkerRun, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
+      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:'RAW',signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke) : invoke()).Signature;
+    };
     const evidenceFile = path.join(path.dirname(configPath), "rotation-successor-evidence.json");
     let evidence;
     let state;
@@ -74,7 +83,7 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
       ({ evidence, state } = await signRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, inventoryEvidence, proveDescendant, verifySignature, sign, now }));
     }
     await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
-    preflight({ config, runtime, cwd: root });
+    if(!deferStateWrites)preflight({ config, runtime, cwd: root });
     if (!existingEvidence) {
       try { writeStageBPrivateFileExclusive({ filePath: evidenceFile, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: root, label: "Rotation successor evidence" }); }
       catch (error) {
@@ -84,7 +93,7 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
         await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
       }
     }
-    for (const [filePath, bytes, label] of [
+    if(!deferStateWrites) for (const [filePath, bytes, label] of [
       [config.rotationStateFile, Buffer.from(`${JSON.stringify(state, null, 2)}\n`), "Successor rotation state"],
       [config.rotationFixtureFile, originalFixture.bytes, "Successor rotation fixture"],
     ]) {
@@ -92,7 +101,7 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
         if (!readStageBPrivateFileBytes({ filePath, repositoryRoot: root, label }).bytes.equals(bytes)) throw new Error(`${label} conflicts with signed successor.`);
       } else writeStageBPrivateFileExclusive({ filePath, bytes, repositoryRoot: root, label });
     }
-    return { sourceSha: config.sourceSha, rotationId: config.rotationId, predecessorStateSha256: predecessor.predecessorStateSha256, successorStateSha256: hash(Buffer.from(`${JSON.stringify(state, null, 2)}\n`)), evidenceSha256: hash(canonicalJson(evidence)), adopted: true };
+    return { ...(deferStateWrites?{state,evidence,fixtureBytes:originalFixture.bytes}:{}), sourceSha: config.sourceSha, rotationId: config.rotationId, predecessorStateSha256: predecessor.predecessorStateSha256, successorStateSha256: hash(Buffer.from(`${JSON.stringify(state, null, 2)}\n`)), evidenceSha256: hash(canonicalJson(evidence)), adopted: true };
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }
 

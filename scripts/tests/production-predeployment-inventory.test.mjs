@@ -148,8 +148,8 @@ test("completed inventory producer authenticates historical claim, signed approv
     const argv = ["--original-config", originalPath, "--original-config-sha256", originalHash, "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash, "--original-recovery-evidence", recoveryPath, "--original-recovery-evidence-sha256", recoveryHash, "--original-approval", approvalPath, "--original-approval-sha256", approvalHash];
     const runRead = args => JSON.stringify(response(args));
     const runSign = args => args[0] === "sts" ? JSON.stringify({ Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-rls-independent-checker/fixture" }) : JSON.stringify(response(args));
-    const first = await prepareCompletedInventoryAdoption({ argv, runRead, runSign });
-    const second = await prepareCompletedInventoryAdoption({ argv, runRead, runSign });
+    const first = await prepareCompletedInventoryAdoption({ legacyGuard:async()=>{}, argv, runRead, runSign });
+    const second = await prepareCompletedInventoryAdoption({ legacyGuard:async()=>{}, argv, runRead, runSign });
     assert.equal(first.outputPath, second.outputPath);
     assert.equal(second.reused, true);
     assert.equal(signs, 1);
@@ -1096,10 +1096,10 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
       };
       const argv = ["--original-config", originalPath, "--original-config-sha256", originalHash, "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash,
         "--current-approval", approvalPath, "--current-approval-sha256", approvalHash];
-      const options = { argv, root: process.cwd(), runRead: () => { throw new Error("Wrong receipt reader"); }, runSign,
+      const options = { legacyGuard:async()=>{}, argv, root: process.cwd(), runRead: () => { throw new Error("Wrong receipt reader"); }, runSign,
         authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry, now: new Date("2026-11-16T10:00:00.000Z") };
-      const first = await prepareCompletedInventoryAdoption(options);
-      const second = await prepareCompletedInventoryAdoption(options);
+      const first = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
+      const second = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
       assert.equal(second.reused, true);
       assert.equal(first.outputPath, second.outputPath);
       assert.equal(JSON.parse(readFileSync(first.outputPath)).payload.schemaVersion, 4);
@@ -1137,13 +1137,13 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
         assert.equal(args[args.indexOf("--log-stream-name") + 1], `predeployment-inventory/inventory/${brokerTaskArn.split("/").at(-1)}`);
         return JSON.stringify({ nextBackwardToken: "complete", events: stateBoundLog });
       };
-      const options = { argv: ["--original-config", originalPath, "--original-config-sha256", continuation.rotationSuccessor.predecessorConfigSha256,
+      const options = { legacyGuard:async()=>{}, argv: ["--original-config", originalPath, "--original-config-sha256", continuation.rotationSuccessor.predecessorConfigSha256,
         "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash, "--current-approval", approvalPath,
         "--current-approval-sha256", createHash("sha256").update(approvalBytes).digest("hex")], root: process.cwd(), runRead, runSign,
         authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry,
         now: new Date("2026-11-16T10:00:00.000Z") };
-      const first = await prepareCompletedInventoryAdoption(options);
-      const second = await prepareCompletedInventoryAdoption(options);
+      const first = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
+      const second = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
       assert.equal(second.reused, true);
       assert.equal(JSON.parse(readFileSync(first.outputPath)).payload.schemaVersion, 5);
       assert.equal(calls.filter(call => call === "kms sign").length, 1);
@@ -1181,7 +1181,7 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     writeFileSync(path.join(continuation, "inventory-completed-adoption-evidence.json"), JSON.stringify(inventoryAdoption), { mode: 0o600 });
     let signed = 0, planned = 0;
     const verifyMessages = [];
-    const options = { argv: ["--config", configFile, "--config-sha256", configHash], root: repository, now: new Date("2026-11-16T10:00:00.000Z"),
+    const options = { legacyGuard:async()=>{}, argv: ["--config", configFile, "--config-sha256", configHash], root: repository, now: new Date("2026-11-16T10:00:00.000Z"),
       authenticateCheckout: ({ expectedSourceSha }) => assert.equal(expectedSourceSha, successorSha), proveSourceAdvance: ancestry,
       preflight: () => { planned++; }, statusRun: () => `${JSON.stringify({ mode: "status", phase: "overlap-deploy-required", records: { jwt: { versionId: "v1" } } })}\n`,
       readAws: args => {
@@ -1307,8 +1307,8 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
     let signs = 0;
     const signAws = args => args[0] === "sts" ? JSON.stringify({ Arn: `arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/fixture` }) : (signs++, JSON.stringify({ Signature: "AA==" }));
     const argv = ["--original-config", originalPath, "--original-config-sha256", originalHash, "--continuation-config", continuationPath, "--continuation-config-sha256", continuationHash];
-    const produced = await prepareCompletedInventoryAdoption({ argv, runRead: readAws, runSign: signAws });
-    const resumed = await prepareCompletedInventoryAdoption({ argv, runRead: readAws, runSign: signAws });
+    const produced = await prepareCompletedInventoryAdoption({ legacyGuard:async()=>{}, argv, runRead: readAws, runSign: signAws });
+    const resumed = await prepareCompletedInventoryAdoption({ legacyGuard:async()=>{}, argv, runRead: readAws, runSign: signAws });
     assert.equal(produced.outputPath, resumed.outputPath); assert.equal(resumed.reused, true); assert.equal(signs, 1);
     assert.ok(!calls.some(call => call.startsWith("ecs ") || call.startsWith("lambda ")));
     const proof = JSON.parse(readFileSync(produced.outputPath));
@@ -1346,18 +1346,18 @@ test("fresh signed inventory reserves one new operation and retains an atomic co
       if (args[0] === "kms" && args[1] === "sign") return JSON.stringify({ Signature: "AA==" });
       throw new Error("Unexpected signer call");
     };
-    const options = { argv, root: process.cwd(), runRead: readAws, runSign: signAws,
+    const options = { legacyGuard:async()=>{}, argv, root: process.cwd(), runRead: readAws, runSign: signAws,
       authenticateCheckout: ({ expectedSourceSha }) => checkoutShas.push(expectedSourceSha),
       proveSourceAdvance: ancestry, now: new Date("2026-11-16T10:00:00.000Z") };
-    const produced = await prepareCompletedInventoryAdoption(options);
-    const resumed = await prepareCompletedInventoryAdoption(options);
+    const produced = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
+    const resumed = await prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}});
     assert.equal(resumed.reused, true);
     assert.deepEqual(checkoutShas, [toolingSha, toolingSha]);
     assert.equal(JSON.parse(readFileSync(produced.outputPath)).payload.continuationSourceSha, successorSha);
     assert.ok(!calls.some(args => ["ecs", "lambda"].includes(args[0])));
     saveFuture("cutover-runtime-manifest.json", { runtimeConfigSha256: continuation.sha256, readyToConsumeMfa: true,
       releaseSourceSha: successorSha, protectedMainSha: successorSha });
-    await assert.rejects(prepareCompletedInventoryAdoption(options), /tooling or release identity/);
+    await assert.rejects(prepareCompletedInventoryAdoption({...options,legacyGuard:async()=>{}}), /tooling or release identity/);
     assert.equal(checkoutShas.length, 2);
   } finally { rmSync(futureDirectory, { recursive: true, force: true }); }
 });

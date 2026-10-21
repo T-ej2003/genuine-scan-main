@@ -50,7 +50,7 @@ test("operator authenticates a clean canonical checkout before Terraform or MFA"
   let planning = 0;
   let prompts = 0;
   let children = 0;
-  const invoke = (args = writeConfig()) => runOperator({ argv: args, cwd: checkout, stdin: { isTTY: true }, stdout: { isTTY: true }, authenticateCheckout,
+  const invoke = (args = writeConfig()) => runOperator({ argv: args, cwd: checkout, stdin: { isTTY: true }, stdout: { isTTY: true }, legacyGuard:async()=>{}, authenticateCheckout,
     preflightRotation: ({ cwd }) => { assert.equal(cwd, checkout); planning++; }, prompt: async () => { prompts++; return ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN; }, spawnChild: childThatExits({ capture: () => { children++; } }) });
   try {
     assert.equal((await invoke()).exitCode, 0);

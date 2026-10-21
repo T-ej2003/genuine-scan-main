@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import {isConditionalNativeSigner} from './production-cutover-consumption-journal.mjs';
+import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -21,7 +24,8 @@ const read = (argv, name) => {
 const hash = value => createHash("sha256").update(value).digest("hex");
 const fromAws = item => Object.fromEntries(Object.entries(item || {}).map(([key, value]) => [key, value.S ?? (value.N !== undefined ? Number(value.N) : value.SS)]));
 
-export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date() } = {}) {
+export async function prepareCompletedInventoryAdoption({ argv, root = process.cwd(), runRead, runSign, authenticateCheckout = readStageBProtectedMainCheckout, proveSourceAdvance, now = new Date(), nativeSign, legacyGuard = assertLegacyProductionUnclaimed } = {}) {
+  if (nativeSign) {assertConditionalProductionEnabled();if(!isConditionalNativeSigner(nativeSign))throw new Error('Confirmed conditional signing claim required');}
   const originalPath = path.resolve(read(argv, "original-config"));
   const originalHash = read(argv, "original-config-sha256");
   const continuationPath = path.resolve(read(argv, "continuation-config"));
@@ -72,9 +76,11 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
       const input = kmsAdoptionMessage(bytes);
       return json(receiptReader, ["kms", "verify", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signature", Buffer.from(signature).toString("base64"), "--signing-algorithm", "RSASSA_PSS_SHA_256"]).SignatureValid === true;
     };
-    const sign = ({ keyId, message: bytes }) => {
+    const sign = async ({ keyId, message: bytes }) => {
+      if (!nativeSign) await legacyGuard({config:continuationConfig,repositoryRoot:root,run:runRead});
       const input = kmsAdoptionMessage(bytes);
-      return json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signing-algorithm", "RSASSA_PSS_SHA_256"]).Signature;
+      const invoke=()=>json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
+      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:input.type,signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke) : invoke()).Signature;
     };
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {

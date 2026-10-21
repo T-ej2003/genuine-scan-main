@@ -364,8 +364,9 @@ test("public descendant preflight preserves original contracts through approval 
       execFileSync('git', ['checkout'], { cwd: checkout, stdio: 'pipe' });
       symlinkSync(path.join(originalCwd, 'node_modules'), path.join(checkout, 'node_modules'), 'dir');
       symlinkSync(path.join(originalCwd, 'backend/node_modules'), path.join(checkout, 'backend/node_modules'), 'dir');
-      const changed = execFileSync('git', ['diff', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
-      for (const file of [...changed, 'scripts/aws/stage-b-broker-recovery-approval.mjs', 'scripts/aws/production-completed-inventory-adoption.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
+      const changed = execFileSync('git', ['diff', 'HEAD', '--name-only'], { cwd: originalCwd, encoding: 'utf8' }).trim().split('\n').filter(Boolean);
+      const added = execFileSync('git', ['ls-files', '--others', '--exclude-standard', 'scripts/aws'], {cwd:originalCwd,encoding:'utf8'}).trim().split('\n').filter(Boolean);
+      for (const file of [...changed,...added, 'scripts/aws/stage-b-broker-recovery-approval.mjs', 'scripts/aws/production-completed-inventory-adoption.mjs']) cpSync(path.join(originalCwd, file), path.join(checkout, file));
       writeFileSync(path.join(checkout, 'documents/security/rls-program/generated/checksums.json'), JSON.stringify({ sourceContractSha256: 'f'.repeat(64), migrationSetDigest: 'f'.repeat(64) }));
       execFileSync('git', ['add', '.'], { cwd: checkout }); execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '-m', 'Descendant tooling with different release contracts'], { cwd: checkout, stdio: 'pipe' });
       const origin = path.join(directory, 'origin.git');
@@ -542,7 +543,7 @@ test("public descendant preflight preserves original contracts through approval 
     const rootDrop = await produceRootDrop(rootDropArgs, {
       readRecovery: async () => r.context,
       protectedMain: ({ expectedSourceSha }) => { assert.equal(expectedSourceSha, tooling.sourceSha); return { headSha: tooling.sourceSha }; },
-      commandRunner: () => args => {
+      legacyGuard:async()=>{}, commandRunner: () => args => {
         if (args[0] === 'sts' && args[1] === 'get-caller-identity') return JSON.stringify({ Arn: 'arn:aws:iam::368992683803:root', Account: '368992683803' });
         if (args[0] === 'kms' && args[1] === 'sign') return JSON.stringify({ Signature: 'AQ==' });
         throw new Error(`Unexpected root-drop external command: ${args}`);
@@ -1054,6 +1055,12 @@ test("rotation infrastructure adopts an exact no-op plan without Terraform apply
     assert.equal(converged.applyCount, 0);
     assert.equal(converged.mutationCount, 0);
     assert.equal(converged.alreadyConverged, true);
+    const readonly = createProductionRotationInfrastructureAdapter({run:(command,args,options)=>{
+      if(command==='terraform'&&args.some(value=>['init','plan','apply'].includes(value)))throw new Error('Sealed consumption cannot regenerate or apply a plan');
+      return run(command,args,options);
+    },releaseProfile:'fixture',config:result.config,readOnly:true});
+    assert.equal((await readonly.run({sourceSha,rotationId:result.config.rotationId,secretBindings})).applyCount,0);
+    assert.equal(readFileSync(result.config.rotationTerraformPlanFile,'utf8'),'reviewed-plan');
     assert.equal(assertRotationInfrastructureConverged(converged, { sourceSha, rotationId: result.config.rotationId, secretBindings }).rotationInfraConverged, true);
     assert.throws(() => assertRotationInfrastructureConverged({ ...converged, alreadyConverged: false }, { sourceSha, rotationId: result.config.rotationId, secretBindings }), /did not converge/);
     assert.equal(applyCalls, 0);
@@ -1938,3 +1945,19 @@ function fsTemp() {
 }
 
 test.after(() => rmSync(artifactSigningRuntimeBindingPath(sourceSha), { force: true }));
+
+test('immutable conditional bootstrap emits the canonical auxiliary recipe without consuming root or verifier MFA',()=>{
+  const directory=fsTemp();
+  try{
+    const input=fullInput(directory,process.cwd());
+    rmSync(input.rootDropEvidenceFile);
+    const result=prepareProductionCutoverRuntime({...input,immutablePreparation:true});
+    assert.equal(result.conditionalPreparation,true);assert.deepEqual(result.blockers,[]);assert.equal(result.readyToConsumeMfa,false);
+    assert.equal(result.runtimeTemplate.rootDropEvidenceSha256,null);
+    assert.equal(existsSync(result.runtimeTemplate.rotationConfigFile),false);
+    assert.equal(existsSync(result.runtimeTemplate.rotationStateFile),false);
+    assert.equal(existsSync(result.runtimeTemplate.rotationFixtureFile),false);
+    assert.equal(result.precomputedFiles.length,2);
+    assert.ok(result.precomputedFiles.every(file=>Buffer.isBuffer(file.bytes)));
+  }finally{rmSync(directory,{recursive:true,force:true});}
+});
