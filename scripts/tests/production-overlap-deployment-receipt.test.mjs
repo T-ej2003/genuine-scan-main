@@ -95,6 +95,13 @@ test("receipt resolver authenticates the exact independently approved workflow d
   assert.equal(resolved.reviewer, "reviewer");
   assert.equal(resolved.workflowSourceSha, sourceSha);
   assert.equal(resolved.releaseSourceSha, sourceSha);
+  const toolingSha = "c".repeat(40);
+  const recoveredRun = (command, args) => args[0] === "run" ? run(command, args) : run(command, args).replaceAll(sourceSha, toolingSha);
+  const recovered = resolveProductionOverlapDeploymentReceipt({ workflowRunId: "10", workflowRunAttempt: "1", sourceSha, executionSourceSha: toolingSha, run: recoveredRun });
+  assert.equal(recovered.receipt.sourceSha, sourceSha);
+  assert.equal(recovered.workflowSourceSha, toolingSha);
+  assert.throws(() => resolveProductionOverlapDeploymentReceipt({ workflowRunId: "10", workflowRunAttempt: "1", sourceSha, executionSourceSha: "d".repeat(40), run: recoveredRun }), /exact protected execution source/);
+  assert.throws(() => resolveProductionOverlapDeploymentReceipt({ workflowRunId: "10", workflowRunAttempt: "1", sourceSha, executionSourceSha: sourceSha, run: recoveredRun }), /execution source is invalid/);
   const wrongAttempt = (command, args) => {
     const output = run(command, args);
     return args[1]?.endsWith("/artifacts") ? output.replaceAll("receipt-attempt-1", "receipt-attempt-2") : output;

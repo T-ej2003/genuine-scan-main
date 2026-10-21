@@ -17,6 +17,7 @@ import {
 } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { authenticateBrokerRecoveryExecutionSource, isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -112,11 +113,18 @@ export function createImageAuthorization({
   imageEvidence,
   imageEvidenceSignature,
   imageReuseEvidence,
+  brokerRecoveryApproval,
   now,
   verifyImageEvidence,
 } = {}) {
   requireSha(sourceSha, "Protected-main source SHA");
-  if (freshProtectedMain?.fetchSucceeded !== true || freshProtectedMain.headSha !== sourceSha || freshProtectedMain.freshRemoteMainSha !== sourceSha) {
+  if (brokerRecoveryApproval && (!isAuthenticatedBrokerRecoveryApproval(brokerRecoveryApproval) || brokerRecoveryApproval.sourceSha !== sourceSha)) {
+    throw new Error("Historical image authorization requires authenticated broker recovery for the original release.");
+  }
+  const toolingSha = brokerRecoveryApproval
+    ? authenticateBrokerRecoveryExecutionSource(brokerRecoveryApproval, brokerRecoveryApproval.tooling?.sourceSha).sourceSha
+    : sourceSha;
+  if (freshProtectedMain?.fetchSucceeded !== true || freshProtectedMain.headSha !== toolingSha || freshProtectedMain.freshRemoteMainSha !== toolingSha) {
     throw new Error("Image authorization source SHA does not match freshly fetched protected main.");
   }
   if (!imageEvidence || typeof imageEvidence !== "object" || Array.isArray(imageEvidence)) throw new Error("Canonical image evidence is required.");
@@ -183,7 +191,7 @@ function git(args) {
 }
 
 export function runCli(argv = process.argv.slice(2), deps = {}) {
-  const allowedOptions = new Set(["--source-sha", "--image-evidence", "--image-signature", "--image-reuse-evidence", "--output"]);
+  const allowedOptions = new Set(["--source-sha", "--image-evidence", "--image-signature", "--image-reuse-evidence", "--output", "--broker-recovery", "--broker-recovery-sha256"]);
   const seenOptions = new Set();
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -194,13 +202,21 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
     index += 1;
   }
   const sourceSha = requiredOption(argv, "--source-sha");
+  const hasRecovery = argv.includes("--broker-recovery") || argv.includes("--broker-recovery-sha256");
+  if (hasRecovery && (!argv.includes("--broker-recovery") || !argv.includes("--broker-recovery-sha256"))) throw new Error("Historical image authorization requires both broker recovery path and SHA-256.");
+  if (hasRecovery && !deps.brokerRecoveryApproval) {
+    return import("./stage-b-staged-broker-executor.mjs")
+      .then(({ readBrokerRecoveryApproval }) => readBrokerRecoveryApproval({ filePath: requiredOption(argv, "--broker-recovery"), expectedSha256: requiredOption(argv, "--broker-recovery-sha256") }))
+      .then((brokerRecoveryApproval) => runCli(argv, { ...deps, brokerRecoveryApproval }));
+  }
+  if (hasRecovery !== Boolean(deps.brokerRecoveryApproval)) throw new Error("Historical image authorization recovery context is missing or unexpected.");
   const imageEvidencePath = requiredOption(argv, "--image-evidence");
   const imageSignaturePath = requiredOption(argv, "--image-signature");
   const imageReuseEvidencePath = requiredOption(argv, "--image-reuse-evidence");
   const outputPath = requiredOption(argv, "--output");
   const freshProtectedMain = deps.freshProtectedMain || readFreshProtectedMainIdentity({
     cwd: repositoryRoot,
-    expectedSourceSha: sourceSha,
+    expectedSourceSha: deps.brokerRecoveryApproval?.tooling.sourceSha || sourceSha,
     run: deps.git || git,
   });
   const { value: imageEvidence } = readJsonPrivate(imageEvidencePath, "Image evidence");
@@ -225,6 +241,7 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
     imageEvidence,
     imageEvidenceSignature,
     imageReuseEvidence,
+    brokerRecoveryApproval: deps.brokerRecoveryApproval,
     now: deps.now,
     verifyImageEvidence: deps.verifyImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run: releaseRun })),
   });
@@ -233,4 +250,4 @@ export function runCli(argv = process.argv.slice(2), deps = {}) {
   return result;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runCli();
+if (import.meta.url === pathToFileURL(process.argv[1] || "").href) Promise.resolve().then(() => runCli()).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });

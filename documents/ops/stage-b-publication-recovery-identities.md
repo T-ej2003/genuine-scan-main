@@ -10,6 +10,8 @@ After reconciliation, preserve a private digest-bound transport `{ "request": <s
 
 Recovery does not renew expired mutation authority. Prepare and authorize the remaining exact write; authenticate completed receipts read-only instead of replaying registration, pruning, policy convergence, publication or alias CAS. Keep the original publication source distinct from the new tooling checkout in operator records.
 
+When the original release's image observation expires, the canonical image-evidence producer may observe and sign the same immutable publication again under a separate image-evidence authorization. The image-authorization producer accepts `--broker-recovery` and its exact `--broker-recovery-sha256` only after authenticating the native broker closure and today's clean protected-main tooling. The resulting authorization remains bound to the original release and original image-impact report; the refreshed observation does not relabel the publication or authorize new images. Without authenticated recovery, the producer still requires the authorization source to equal protected main.
+
 Approval publication uses the existing public `publishStageBApproval` operation with `expectedSourceSha` set to the authenticated original release source. Its independent-checker signature, approval ID, and idempotency token continue binding that release; the tooling checkout is not an approval relabelling input.
 
 ## Original renderer and rotation handoff
@@ -38,7 +40,7 @@ this authority.
 | Published broker / publication receipt | Native publication → cutover, closure, recovery | Durable / no replay | RELEASE_SOURCE | Immutable version and code provenance |
 | Reviewed output reconciliation | Native preparation → cutover and state refresh | Exact state predecessor / reprepare | RELEASE_SOURCE | Authenticates original release's exact output transition |
 | Historical checksums, migrations, package, full task renderer | Original Git tree → public tfvars producer and approval collector | Immutable / reconstruct exact bytes | RELEASE_SOURCE | Descendant bytes must never redefine release contracts |
-| Image authorization and image identities | Canonical image producer → preflight/bootstrap | Authenticated immutable publication; no QR-style TTL / reuse only under compatibility contract | RELEASE_SOURCE | Preserve original release and reusable image publication |
+| Image authorization and image identities | Canonical image producer → preflight/bootstrap | Signed observation and signature expire after 24 hours; refresh the same immutable image identity with authenticated broker recovery and image-reuse evidence | RELEASE_SOURCE; current protected tooling independently authenticated | Preserve original release without relabelling its image publication |
 | Administrator report and release-preflight/attestation | Public preflight/checker → approval/bootstrap | Fresh report / regenerate | RELEASE_SOURCE with authenticated RECOVERY_TOOLING binding | Current observation of the exact original release target |
 | Stage-B approval | Canonical approval producer → reviewed broker | Expiring / renew exact approval | RELEASE_SOURCE | Broker version and original contracts determine approval target |
 | QR selector resolution | Protected workflow → GitHub artifact resolver → bootstrap | 30 minutes / regenerate | RECOVERY_TOOLING | Fresh operational live selector read from current protected main |
