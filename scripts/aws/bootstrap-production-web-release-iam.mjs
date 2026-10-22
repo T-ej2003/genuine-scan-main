@@ -34,6 +34,7 @@ export const phase3IamAuthorizationMarker = headSha => `MSCQR_PHASE3_IAM_SOLO_AU
 export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
   const stat = fsOps.statSync("/usr/bin/git");
   assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe production Git executable");
+  for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
   env.PATH = "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin";
 }
 export function productionTerraformExecutable(fsOps = fs) {

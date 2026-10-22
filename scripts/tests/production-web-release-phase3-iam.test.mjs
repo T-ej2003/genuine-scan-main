@@ -131,9 +131,11 @@ test('saved Terraform plan must bind exact post-merge protected main before owne
  }
 });
 test('Terraform plan decoder pins executable, environment and exact captured bytes',()=>{
- const gitEnv={PATH:'/tmp/attacker'};
+ const gitEnv={PATH:'/tmp/attacker',GIT_WORK_TREE:'/tmp/clean',GIT_DIR:'/tmp/other',GIT_INDEX_FILE:'/tmp/index',
+  GIT_EXEC_PATH:'/tmp/bin',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'core.worktree',GIT_CONFIG_VALUE_0:'/tmp/clean'};
  pinPhase3IamGitPath(gitEnv,{statSync:()=>({isFile:()=>true,mode:0o755})});
  assert.equal(gitEnv.PATH.split(':')[0],'/usr/bin');
+ assert.deepEqual(Object.keys(gitEnv),['PATH']);
  assert.throws(()=>pinPhase3IamGitPath({}, {statSync:()=>({isFile:()=>true,mode:0o777})}),/Unsafe/);
  const safe={existsSync:()=>true,realpathSync:()=>'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform',
   statSync:()=>({isFile:()=>true,mode:0o555})};
