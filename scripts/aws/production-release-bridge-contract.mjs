@@ -85,11 +85,17 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
    const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
    if(!dispatch||dispatch.requestSha256!==prior.requestSha256)continue;
    const result=await store.readOperation(operationId,`${prefix}:RESULT`);
-   const completed=await store.readOperation(operationId,`${prefix}:COMPLETED`);
-   assert.equal(classifyBridgeNativeResult({dispatch,result,completion:completed}),'COMPLETED',`${phase} Sign outcome is unknown; reauthorization is forbidden`);
+   assert.ok(result,`${phase} Sign outcome is unknown; reauthorization is forbidden`);
    assert.ok(Date.parse(dispatch.claimedAt)>=Date.parse(prior.issuedAt)&&Date.parse(dispatch.claimedAt)<Date.parse(prior.expiresAt),`${phase} Sign was not claimed during its authorization`);
    assert.equal(typeof verifyCompletedSign,'function','Independent native Sign verification is required before reauthorization');
    assert.equal(await verifyCompletedSign({phase,dispatch,result,request:prior}),true,`${phase} native Sign could not be authenticated`);
+   let completed=await store.readOperation(operationId,`${prefix}:COMPLETED`);
+   if(!completed){
+    completed={dispatch,resultSha256:brokerDigest(result)};
+    await store.writeOperation(operationId,`${prefix}:COMPLETED`,completed);
+    assert.deepEqual(await store.readOperation(operationId,`${prefix}:COMPLETED`),completed,`${phase} Sign completion readback differs`);
+   }
+   assert.equal(classifyBridgeNativeResult({dispatch,result,completion:completed}),'COMPLETED');
   }
   const root=await store.readOperation(operationId,'BRIDGE:SIGN:ROOT_DROP:DISPATCH');
   if(root){

@@ -88,7 +88,8 @@ test('expired request preserves captured root and adoption while requiring a fre
   readStep:async()=>({releaseId:release.releaseId,sourceSha:input.sourceSha,result:'f'.repeat(64)}),
   putArtifact:async(id,value)=>{artifacts.set(id,value);},
   readOperation:async(_id,phase)=>records.get(phase)||null,
-  claimOperation:async(_id,phase,value)=>{assert.equal(records.has(phase),false);records.set(phase,value);return true;}};
+  claimOperation:async(_id,phase,value)=>{assert.equal(records.has(phase),false);records.set(phase,value);return true;},
+  writeOperation:async(_id,phase,value)=>{assert.equal(records.has(phase),false);records.set(phase,value);return true;}};
  const approvalFor=(runId,at)=>createProductionEnvironmentApprovalEvidence({repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',
   sourceSha:input.sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,eventName:'workflow_dispatch',
   workflowRunId:String(runId),workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(at).toISOString(),
@@ -109,10 +110,12 @@ test('expired request preserves captured root and adoption while requiring a fre
  const first=await requestAt(1,now);
  const rootAt=now+29*60*1000;
  const root=captured('ROOT_DROP',first,rootAt);
+ records.delete('BRIDGE:SIGN:ROOT_DROP:COMPLETED'); // Native response persisted; completion-marker acknowledgement was lost.
  assert.equal((await bridgeRequestForSign({store,operationId,dispatch:root,...input,releaseId:release.releaseId})).requestSha256,first.requestSha256);
  let verified=0;
  const second=await requestAt(2,now+31*60*1000,({phase})=>{assert.equal(phase,'ROOT_DROP');verified++;return true;});
  assert.equal(second.authorizationRound,1);assert.equal(verified,1);
+ assert.equal(records.get('BRIDGE:SIGN:ROOT_DROP:COMPLETED').resultSha256,brokerDigest(records.get('BRIDGE:SIGN:ROOT_DROP:RESULT')));
  assert.equal(records.get('BRIDGE:SIGN:ROOT_DROP:DISPATCH'),root,'Root Sign must not be replaced');
  assert.equal(await requestAt(3,now+32*60*1000),second,'Active renewed authorization must be reused');
  assert.equal(records.has('BRIDGE:REQUEST:ROUND:2'),false);
