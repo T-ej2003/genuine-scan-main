@@ -115,6 +115,8 @@ test('expired request preserves captured root and adoption while requiring a fre
  assert.equal(records.get('BRIDGE:SIGN:ROOT_DROP:DISPATCH'),root,'Root Sign must not be replaced');
  assert.equal(await requestAt(3,now+32*60*1000),second,'Active renewed authorization must be reused');
  assert.equal(records.has('BRIDGE:REQUEST:ROUND:2'),false);
+ await assert.rejects(()=>requestAt(4,now+62*60*1000),/Root freshness reserve is exhausted/);
+ assert.equal(records.has('BRIDGE:REQUEST:ROUND:2'),false,'Expired root cannot mint another signing round');
  await assert.rejects(()=>bridgeRequestForSign({store,operationId,dispatch:{...root,claimedAt:new Date(now+31*60*1000).toISOString()},
   ...input,releaseId:release.releaseId}),/not claimed during/);
  await assert.rejects(()=>requestTrustedTerminalCutover({store,sourceSha:'d'.repeat(40),ticketId:input.ticketId,rotationId:input.rotationId,
