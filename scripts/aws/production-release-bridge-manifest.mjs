@@ -37,6 +37,7 @@ export function assertBridgeManifest(value,request){
  assert.ok(args.root.get('--nonce').length>=16,'Root nonce is too short');
  assert.equal(args.root.get('--source-sha'),value.sourceSha);assert.equal(args.root.get('--rotation-id'),value.rotationId);
  assert.equal(args.root.get('--output'),args.runtime.get('--root-drop-evidence'));
+ assert.ok(args.runtime.get('--output-directory'),'Bridge requires a fixed private runtime directory for recovery');
  assert.equal(args.runtime.get('--ticket'),value.ticketId);
  assert.equal(args.adoption.get('--continuation-config'),'@RUNTIME_CONFIG');
  assert.equal(args.adoption.get('--continuation-config-sha256'),'@RUNTIME_CONFIG_SHA256');

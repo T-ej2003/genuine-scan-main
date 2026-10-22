@@ -22,6 +22,23 @@ const argv=(value)=>Object.fromEntries(value.slice(0).reduce((items,item,index)=
 const replace=(args,runtime)=>args.map(value=>value==='@RUNTIME_CONFIG'?runtime.configPath:value==='@RUNTIME_CONFIG_SHA256'?runtime.runtimeConfigSha256:value);
 const scripts=Object.freeze({root:'produce-production-root-drop-evidence.mjs',runtime:'prepare-production-cutover-runtime.mjs',adoption:'prepare-completed-inventory-adoption.mjs',successor:'prepare-production-rotation-successor.mjs',operator:'run-production-cutover-operator.mjs'});
 
+export function recoverMaterializedBridgeRuntime({outputDirectory,sourceSha,rotationId,rootDropPath,repositoryRoot=process.cwd()}={}){
+ const configPath=path.join(path.resolve(outputDirectory),'rotation-config.json');
+ if(!fs.existsSync(configPath))return null;
+ const configBytes=readStageBPrivateFileBytes({filePath:configPath,repositoryRoot,label:'Materialized rotation config'}).bytes;
+ const manifestPath=path.join(path.resolve(outputDirectory),'cutover-runtime-manifest.json');
+ const manifest=JSON.parse(readStageBPrivateFileBytes({filePath:manifestPath,repositoryRoot,label:'Materialized cutover manifest'}).bytes);
+ const config=JSON.parse(configBytes);
+ assert.equal(manifest.generatedBy,'scripts/aws/prepare-production-cutover-runtime.mjs');
+ assert.equal(manifest.readyToConsumeMfa,true);assert.deepEqual(manifest.blockers,[]);
+ assert.equal(manifest.runtimeConfigSha256,hash(configBytes));
+ assert.equal(manifest.staticBindingSha256,brokerDigest(config));
+ assert.equal(manifest.protectedMainSha,sourceSha);assert.equal(manifest.releaseSourceSha,sourceSha);
+ assert.equal(config.sourceSha,sourceSha);assert.equal(config.rotationId,rotationId);
+ assert.equal(path.resolve(config.rootDropEvidenceFile),path.resolve(rootDropPath));
+ return {READY_TO_CONSUME_MFA:true,ROTATION_CONFIG:configPath,ROTATION_CONFIG_SHA256:manifest.runtimeConfigSha256,RELEASE_SOURCE_SHA:sourceSha};
+}
+
 export async function reserveBridgePhaseTimestamp({store,operationId,requestSha256,name,now=Date.now}){
  const dispatched=await store.readOperation(operationId,`BRIDGE:SIGN:${name}:DISPATCH`);
  if(dispatched){
@@ -131,13 +148,17 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
  const phaseRun=(name,values,extra={})=>runPhase(name,values,{env:{...bridgeEnv,...extra},root});
  const phaseTime=name=>reserveBridgePhaseTimestamp({store:journal,operationId,requestSha256:request.requestSha256,name,now});
  // The immutable preparation performs the expensive read-only checks before root issuance.
- const preflight=await phaseRun('runtime',[...manifest.commands.runtime,'--bridge-preflight','true']);
- assert.equal(preflight?.ready,true,'Pre-root runtime preparation is not ready');
+ const recoveredRuntime=recoverMaterializedBridgeRuntime({outputDirectory:args.runtime.get('--output-directory'),sourceSha:manifest.sourceSha,
+  rotationId:manifest.rotationId,rootDropPath:args.root.get('--output'),repositoryRoot:root});
+ if(!recoveredRuntime){
+  const preflight=await phaseRun('runtime',[...manifest.commands.runtime,'--bridge-preflight','true']);
+  assert.equal(preflight?.ready,true,'Pre-root runtime preparation is not ready');
+ }
  assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now()});
  const rootTimestamp=await phaseTime('ROOT_DROP'),rootStarted=Date.parse(rootTimestamp);
  await phaseRun('root',manifest.commands.root,{MSCQR_BRIDGE_PHASE_TIMESTAMP:rootTimestamp});
  assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before runtime materialization');
- const materialized=await phaseRun('runtime',manifest.commands.runtime);
+ const materialized=recoveredRuntime||await phaseRun('runtime',manifest.commands.runtime);
  const runtime={configPath:materialized?.ROTATION_CONFIG,runtimeConfigSha256:materialized?.ROTATION_CONFIG_SHA256,
   releaseSourceSha:materialized?.RELEASE_SOURCE_SHA};
  assert.ok(materialized?.READY_TO_CONSUME_MFA===true&&runtime.configPath&&runtime.runtimeConfigSha256,'Materialized runtime is not ready');
