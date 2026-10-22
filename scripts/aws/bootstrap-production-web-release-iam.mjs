@@ -23,14 +23,25 @@ const activationPolicyName = "MSCQRProductionFrontendActivation";
 const auditPolicyName = "MSCQRProductionStageBNativeAudit";
 export const PHASE3_IAM_TRANSITION = Object.freeze({
   baselineSha: "8d0aa82ebf6b5fc70447c4133ea9c9e2aeae4f44",
+  reviewedPrNumber: 721,
+  reviewedHeadSha: "503460a5d7eeda19bf66f7782bbefe34f5524fdf",
+  reviewedMergeSha: "0237d3f24afe5e3af5efbf26e5176edc8db81fc4",
   ticketId: "CHG-20261022-001",
   account,
   region: "eu-west-2",
+  roleName: releaseRoleName,
+  frontendPolicyName: activationPolicyName,
+  auditPolicyName,
   frontendPredecessorSha256: "a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352",
   frontendTargetSha256: "5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d",
   auditTargetSha256: "741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122",
 });
-export const phase3IamAuthorizationMarker = headSha => `MSCQR_PHASE3_IAM_SOLO_AUTH_V1:${iamDigest(PHASE3_IAM_TRANSITION)}:${headSha}`;
+const PHASE3_IAM_AUTHORIZATION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+export const phase3IamAuthorizationMarker = (headSha, sourceSha) => {
+  assert.match(headSha || "", /^[a-f0-9]{40}$/);
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  return `MSCQR_PHASE3_IAM_SOLO_AUTH_V2:${iamDigest(PHASE3_IAM_TRANSITION)}:${headSha}:${sourceSha}`;
+};
 export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
   const stat = fsOps.statSync("/usr/bin/git");
   assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe production Git executable");
@@ -52,9 +63,13 @@ export function readPhase3IamProtectedSource({ sourceSha, cwd = root, execute = 
   assert.equal(gitExecute("/usr/bin/git", ["for-each-ref", "--format=%(refname)", "refs/replace"],
     { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(), "", "Git replacement refs are forbidden");
   const ghEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
-  return readCheckout({ cwd, expectedSourceSha: sourceSha, githubRun: (_command, args) =>
+  const currentHead = readCheckout({ cwd, expectedSourceSha: sourceSha, githubRun: (_command, args) =>
     execute(executable, ["api", "--hostname", "github.com", args[1]],
       { env: ghEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }) }).currentHead;
+  assert.equal(currentHead, sourceSha, "IAM checkout differs from protected main");
+  gitExecute("/usr/bin/git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.reviewedMergeSha, sourceSha],
+    { cwd, env, stdio: "ignore" });
+  return currentHead;
 }
 export function productionTerraformExecutable(fsOps = fs) {
   for (const candidate of ["/usr/bin/terraform", "/opt/homebrew/bin/terraform", "/usr/local/bin/terraform"]) {
@@ -130,8 +145,21 @@ export function assertPhase3IamPlan(plan, sourceSha, checkpoint) {
   assert.equal(iamDigest(normalizeIamPolicyDocument(audit.after?.policy)), PHASE3_IAM_TRANSITION.auditTargetSha256);
   assert.ok(Object.values(plan.output_changes || {}).every(({ actions }) => actions?.join(",") === "no-op"), "IAM plan changes outputs");
 }
-export function assertPhase3IamAuthorization({ pull, comments, operator, sourceSha }) {
+export function assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now = Date.now() }) {
+  assert.equal(reviewedPull?.number, PHASE3_IAM_TRANSITION.reviewedPrNumber);
+  assert.equal(reviewedPull?.merged, true);
+  assert.equal(reviewedPull?.head?.sha, PHASE3_IAM_TRANSITION.reviewedHeadSha);
+  assert.equal(reviewedPull?.merge_commit_sha, PHASE3_IAM_TRANSITION.reviewedMergeSha);
+  assert.equal(reviewedPull?.base?.ref, "main");
+  assert.equal(reviewedPull?.base?.sha, PHASE3_IAM_TRANSITION.baselineSha);
+  assert.equal(reviewedPull?.base?.repo?.full_name, "T-ej2003/genuine-scan-main");
+  assert.equal(reviewedPull?.user?.id, 183396573);
   assert.equal(pull?.merged, true, "IAM correction PR is not merged");
+  assert.equal(pull?.number, Number(prNumber), "IAM authorization PR identity differs");
+  assert.ok(Number.isSafeInteger(pull?.number) && pull.number > PHASE3_IAM_TRANSITION.reviewedPrNumber,
+    "Post-merge IAM authorization requires a distinct correction PR");
+  assert.equal(pull?.base?.sha, PHASE3_IAM_TRANSITION.reviewedMergeSha,
+    "IAM correction PR is not based on the reviewed PR #721 merge");
   assert.equal(pull?.merge_commit_sha, sourceSha, "IAM authorization does not bind current protected main");
   assert.equal(pull?.base?.ref, "main");
   assert.equal(pull?.base?.repo?.full_name, "T-ej2003/genuine-scan-main");
@@ -139,23 +167,28 @@ export function assertPhase3IamAuthorization({ pull, comments, operator, sourceS
   assert.equal(operator?.id, 183396573, "IAM authorization requires the accountable operator");
   assert.ok(Array.isArray(comments) && comments.length < 100, "IAM authorization comment page is incomplete");
   assert.ok(Number.isFinite(Date.parse(pull.merged_at)), "IAM merge time is invalid");
+  assert.ok(Number.isFinite(Date.parse(reviewedPull.merged_at)) && Date.parse(pull.merged_at) > Date.parse(reviewedPull.merged_at),
+    "IAM correction did not merge after reviewed PR #721");
   const authorized = comments.filter(({ body, user, created_at, updated_at }) =>
-    body === phase3IamAuthorizationMarker(pull.head?.sha) && user?.id === operator.id && user?.type === "User"
-    && created_at === updated_at && Number.isFinite(Date.parse(created_at)) && Date.parse(created_at) <= Date.parse(pull.merged_at));
-  assert.equal(authorized.length, 1, "Exact IAM transition needs one unedited solo-operator authorization comment");
+    body === phase3IamAuthorizationMarker(pull.head?.sha, sourceSha) && user?.id === operator.id && user?.type === "User"
+    && created_at === updated_at && Number.isFinite(Date.parse(created_at))
+    && Date.parse(created_at) > Date.parse(pull.merged_at) && Date.parse(created_at) <= now
+    && now - Date.parse(created_at) < PHASE3_IAM_AUTHORIZATION_MAX_AGE_MS);
+  assert.equal(authorized.length, 1, "Exact IAM transition needs one fresh unedited post-merge operator authorization comment");
   assert.ok(Number.isSafeInteger(authorized[0].id) && authorized[0].id > 0, "IAM authorization identity is invalid");
   return authorized[0].id;
 }
-export function readPhase3IamAuthorization({ prNumber, sourceSha, execute = execFileSync, executable = productionGithubExecutable(), env = process.env }) {
+export function readPhase3IamAuthorization({ prNumber, sourceSha, execute = execFileSync, executable = productionGithubExecutable(), env = process.env, now = Date.now }) {
   assert.match(String(prNumber || ""), /^[1-9][0-9]*$/);
   const ghEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
   const gh = endpoint => JSON.parse(execute(executable, ["api", "--hostname", "github.com", endpoint],
     { env: ghEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const base = "repos/T-ej2003/genuine-scan-main";
   const pull = gh(`${base}/pulls/${prNumber}`);
+  const reviewedPull = gh(`${base}/pulls/${PHASE3_IAM_TRANSITION.reviewedPrNumber}`);
   const comments = gh(`${base}/issues/${prNumber}/comments?per_page=100`);
   const operator = gh("user");
-  return assertPhase3IamAuthorization({ pull, comments, operator, sourceSha });
+  return assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now: now() });
 }
 export async function verifyPhase3IamMfa({ sourceSha, authorizationId, execute = execFileSync,
   prompt = () => promptProductionMfaCode({ prompt: "Phase 3 IAM operator MFA code: " }), now = Date.now } = {}) {
@@ -205,6 +238,8 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
   assert.ok(!parent.startsWith(`${root}${path.sep}`) && parent !== root, "IAM owner file must stay outside the repository");
   assert.equal(fs.statSync(parent).mode & 0o077, 0, "IAM owner directory is not private");
   const binding = { sourceSha, ticketId: PHASE3_IAM_TRANSITION.ticketId, authorizationId,
+    reviewedHeadSha: PHASE3_IAM_TRANSITION.reviewedHeadSha, reviewedMergeSha: PHASE3_IAM_TRANSITION.reviewedMergeSha,
+    roleName: releaseRoleName, frontendPolicyName: activationPolicyName, auditPolicyName,
     frontendPredecessorSha256: PHASE3_IAM_TRANSITION.frontendPredecessorSha256,
     frontendTargetSha256: PHASE3_IAM_TRANSITION.frontendTargetSha256, auditTargetSha256: PHASE3_IAM_TRANSITION.auditTargetSha256 };
   assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
