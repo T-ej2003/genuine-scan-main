@@ -37,7 +37,7 @@ AWS IAM cannot resource-scope or field-constrain `ecs:RegisterTaskDefinition`. T
 
 ## Terraform state and publisher provisioning
 
-The `infra/aws/terraform/production-web-release` root is the canonical desired-state owner for the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. Its IAM resource mutations are bootstrapped only by `scripts/aws/bootstrap-production-web-release-iam.mjs`, which reads those exact documents, accepts only the production account root configuration profile, creates absent resources, and fails closed on any non-identical existing object. It never updates or deletes IAM resources. Terraform imports the resulting objects into its dedicated state and detects drift; the operator has no IAM mutation permissions.
+The `infra/aws/terraform/production-web-release` root is the canonical desired-state owner for the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. Its IAM resource mutations are bootstrapped only by `scripts/aws/bootstrap-production-web-release-iam.mjs`, which reads those exact documents and accepts only the production account root configuration profile. Ordinary bootstrap creates absent resources and fails closed on a non-identical existing object; the separately reviewed CHG-20261022-001 transition below permits exactly one recorded frontend predecessor update and one native-audit creation. Terraform imports the resulting objects into its dedicated state and detects drift; the operator has no IAM mutation permissions.
 
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
@@ -88,6 +88,42 @@ TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release
 ```
 
 Read back the publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. A later approved IAM-document change must add its exact live predecessor to the source bootstrap before it can converge; the bootstrap never overwrites unknown drift.
+
+## CHG-20261022-001 exact IAM reconciliation
+
+The Phase 3 transition is deliberately narrower than a general IAM update. The reviewed source bootstrap accepts only the recorded live frontend policy fingerprint `a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352`, target frontend fingerprint `5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d`, and new native audit fingerprint `741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122`. It binds ticket `CHG-20261022-001` and requires an independently approved, merged correction PR whose review on its final head contains:
+
+```text
+MSCQR_PHASE3_IAM_APPROVAL_V1:37872f115cf26ba9d8105cfeaf21686caa683ef876cfe9a9153f52beeb24bf69
+```
+
+The reviewer must have repository write authority and differ from the PR author and executing GitHub identity. A Codex comment alone is not this approval. A missing or superseded approval stops before IAM writes. The existing component-IAM approval workflow is scoped to other documents and cannot authorize this transition.
+
+After the correction PR merges, treat its new protected-main SHA as a **new release source**; do not rebind older image or Stage B approvals. Generate a fresh private Terraform plan with the existing MFA-backed non-root profile and the production-web-release backend. Confirm only the two permitted transitions are present. Keep its saved binary outside the repository and record its SHA-256. Do not apply this plan; the exact-document bootstrap is the IAM writer.
+
+On the trusted terminal, keep the owner file in a private mode-0700 directory outside the repository. After independent PR approval and fresh-plan review, run the source-controlled installer from a clean exact-main checkout with the governed root configuration profile:
+
+```sh
+node scripts/aws/bootstrap-production-web-release-iam.mjs \
+  --source-sha <new_protected_main_sha> \
+  --admin-profile mscqr-production-root \
+  --ticket-id CHG-20261022-001 \
+  --approval-pr <independently_approved_correction_pr> \
+  --plan-file <private_saved_plan> \
+  --owner-file <private_directory>/phase3-iam-owner.json
+```
+
+The installer authenticates exact account root, the PR review, source policy fingerprints, plan semantics, live predecessor, and a write-once S3 ownership claim before any IAM write. It installs the native audit policy first, then the frontend policy, with exact readback after each. A lost IAM response is reused only when live policy equals the target. Retain the owner file for interrupted recovery; another owner cannot claim this operation. Unexpected drift or an unknown write outcome stops.
+
+After live readback, import only the new inline policy into the existing remote Terraform state using the MFA-backed non-root operator:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import \
+  aws_iam_role_policy.stage_b_native_audit \
+  mscqr-production-release-deployer:MSCQRProductionStageBNativeAudit
+```
+
+Then produce a fresh plan and require **zero changes**. Verify live policy fingerprints and IAM simulation of the required reads and forbidden writes before Stage B root issuance. Never run Terraform plan/apply as root or edit IAM directly.
 
 ## Governed operator sequence
 

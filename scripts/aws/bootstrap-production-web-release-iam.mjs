@@ -2,9 +2,13 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
+import { productionGithubExecutable } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { digest as iamDigest } from "./component-iam-installation-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -14,6 +18,123 @@ const boundaryName = "MSCQRProductionWebImagePublisherBoundary";
 const releaseRoleName = "mscqr-production-release-deployer";
 const publisherPolicyName = "MSCQRProductionWebImagePublisher";
 const activationPolicyName = "MSCQRProductionFrontendActivation";
+const auditPolicyName = "MSCQRProductionStageBNativeAudit";
+export const PHASE3_IAM_TRANSITION = Object.freeze({
+  baselineSha: "8d0aa82ebf6b5fc70447c4133ea9c9e2aeae4f44",
+  ticketId: "CHG-20261022-001",
+  frontendPredecessorSha256: "a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352",
+  frontendTargetSha256: "5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d",
+  auditTargetSha256: "741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122",
+});
+export const phase3IamReviewMarker = () => `MSCQR_PHASE3_IAM_APPROVAL_V1:${iamDigest(PHASE3_IAM_TRANSITION)}`;
+const POLICY_NO_OPS = Object.freeze({
+  "aws_iam_policy.publisher_boundary": "no-op",
+  "aws_iam_role.publisher": "no-op",
+  "aws_iam_role_policy.publisher": "no-op",
+});
+export function assertPhase3IamPlan(plan) {
+  assert.ok(plan && typeof plan === "object");
+  const changes = plan.resource_changes || [];
+  const actions = Object.fromEntries(changes.map(({ address, change }) => [address, change?.actions?.join(",")]));
+  assert.equal(Object.keys(actions).length, changes.length, "IAM plan repeats a resource address");
+  assert.deepEqual(Object.fromEntries(Object.keys(POLICY_NO_OPS).map(address => [address, actions[address]])), POLICY_NO_OPS,
+    "IAM plan changes an unrelated resource");
+  assert.deepEqual(Object.keys(actions).sort(), [...Object.keys(POLICY_NO_OPS), "aws_iam_role_policy.frontend_activation", "aws_iam_role_policy.stage_b_native_audit"].sort(),
+    "IAM plan contains an unapproved resource");
+  assert.ok([["update", "create"], ["update", "no-op"], ["no-op", "no-op"]].some(([frontend, audit]) =>
+    actions["aws_iam_role_policy.frontend_activation"] === frontend && actions["aws_iam_role_policy.stage_b_native_audit"] === audit),
+  "IAM plan does not match a safe transition checkpoint");
+  const frontend = changes.find(({ address }) => address === "aws_iam_role_policy.frontend_activation").change;
+  const audit = changes.find(({ address }) => address === "aws_iam_role_policy.stage_b_native_audit").change;
+  assert.equal(frontend.before?.name, activationPolicyName);
+  assert.equal(frontend.after?.name, activationPolicyName);
+  assert.equal(frontend.before?.role, releaseRoleName);
+  assert.equal(frontend.after?.role, releaseRoleName);
+  assert.equal(iamDigest(normalizeIamPolicyDocument(frontend.before?.policy)),
+    frontend.actions.join(",") === "update" ? PHASE3_IAM_TRANSITION.frontendPredecessorSha256 : PHASE3_IAM_TRANSITION.frontendTargetSha256);
+  assert.equal(iamDigest(normalizeIamPolicyDocument(frontend.after?.policy)), PHASE3_IAM_TRANSITION.frontendTargetSha256);
+  if (audit.actions.join(",") === "create") assert.equal(audit.before, null);
+  else assert.equal(iamDigest(normalizeIamPolicyDocument(audit.before?.policy)), PHASE3_IAM_TRANSITION.auditTargetSha256);
+  assert.equal(audit.after?.name, auditPolicyName);
+  assert.equal(audit.after?.role, releaseRoleName);
+  assert.equal(iamDigest(normalizeIamPolicyDocument(audit.after?.policy)), PHASE3_IAM_TRANSITION.auditTargetSha256);
+  assert.ok(Object.values(plan.output_changes || {}).every(({ actions }) => actions?.join(",") === "no-op"), "IAM plan changes outputs");
+}
+export function assertPhase3IamReview({ pull, reviews, permission, operator, sourceSha }) {
+  assert.equal(pull?.merged, true, "IAM correction PR is not merged");
+  assert.equal(pull?.merge_commit_sha, sourceSha, "IAM review does not bind current protected main");
+  assert.equal(pull?.base?.ref, "main");
+  assert.equal(pull?.base?.repo?.full_name, "T-ej2003/genuine-scan-main");
+  assert.ok(Array.isArray(reviews) && reviews.length < 100, "IAM review page is incomplete");
+  assert.ok(Number.isFinite(Date.parse(pull.merged_at)), "IAM merge time is invalid");
+  const approved = reviews.filter(({ state, commit_id, body, user, submitted_at }) =>
+    state === "APPROVED" && commit_id === pull.head?.sha && body?.includes(phase3IamReviewMarker())
+    && user?.type === "User" && user?.id !== pull.user?.id && user?.id !== operator?.id
+    && Number.isFinite(Date.parse(submitted_at)) && Date.parse(submitted_at) <= Date.parse(pull.merged_at));
+  assert.equal(approved.length, 1, "Exact IAM transition needs one independent approved review");
+  assert.ok(Number.isSafeInteger(approved[0].id) && approved[0].id > 0, "IAM review identity is invalid");
+  assert.equal(permission?.user?.id, approved[0].user.id);
+  assert.ok(["admin", "maintain", "write"].includes(permission.permission), "IAM reviewer lacks repository write authority");
+  assert.ok(!reviews.some(({ state, user, submitted_at }) => user?.id === approved[0].user.id
+    && ["CHANGES_REQUESTED", "DISMISSED"].includes(state)
+    && Date.parse(submitted_at) > Date.parse(approved[0].submitted_at)), "Independent IAM approval was superseded");
+  return approved[0].id;
+}
+function readPhase3IamReview({ prNumber, sourceSha }) {
+  assert.match(String(prNumber || ""), /^[1-9][0-9]*$/);
+  const gh = endpoint => JSON.parse(execFileSync(productionGithubExecutable(), ["api", endpoint], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  const base = "repos/T-ej2003/genuine-scan-main";
+  const pull = gh(`${base}/pulls/${prNumber}`);
+  const reviews = gh(`${base}/pulls/${prNumber}/reviews?per_page=100`);
+  const operator = gh("user");
+  const matching = reviews.find(({ state, commit_id, body, user }) =>
+    state === "APPROVED" && commit_id === pull.head?.sha && body?.includes(phase3IamReviewMarker())
+    && user?.type === "User" && user?.id !== pull.user?.id && user?.id !== operator?.id);
+  const permission = matching ? gh(`${base}/collaborators/${matching.user.login}/permission`) : null;
+  return assertPhase3IamReview({ pull, reviews, permission, operator, sourceSha });
+}
+export function claimPhase3IamOwner({ run, sourceSha, independentReviewId, ownerFile }) {
+  assert.equal(typeof run, "function");
+  assert.ok(path.isAbsolute(ownerFile), "IAM owner file must use a private absolute path");
+  const parent = fs.realpathSync(path.dirname(ownerFile));
+  assert.ok(!parent.startsWith(`${root}${path.sep}`) && parent !== root, "IAM owner file must stay outside the repository");
+  assert.equal(fs.statSync(parent).mode & 0o077, 0, "IAM owner directory is not private");
+  const binding = { sourceSha, ticketId: PHASE3_IAM_TRANSITION.ticketId, independentReviewId,
+    frontendPredecessorSha256: PHASE3_IAM_TRANSITION.frontendPredecessorSha256,
+    frontendTargetSha256: PHASE3_IAM_TRANSITION.frontendTargetSha256, auditTargetSha256: PHASE3_IAM_TRANSITION.auditTargetSha256 };
+  let owner;
+  try {
+    const stat = fs.lstatSync(ownerFile);
+    assert.ok(stat.isFile() && !stat.isSymbolicLink() && (stat.mode & 0o077) === 0, "IAM owner file is not private");
+    owner = JSON.parse(fs.readFileSync(ownerFile, "utf8"));
+    assert.deepEqual(owner.binding, binding, "IAM owner file belongs to another operation");
+    assert.match(owner.ownerId || "", /^[a-f0-9-]{36}$/);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    owner = { binding, ownerId: randomUUID() };
+    fs.writeFileSync(ownerFile, JSON.stringify(owner), { mode: 0o600, flag: "wx" });
+  }
+  const bucket = "mscqr-production-terraform-state-368992683803-eu-west-2";
+  const operation = Object.fromEntries(Object.entries(binding).filter(([key]) => key !== "independentReviewId"));
+  const key = `mscqr/production/web-release/phase3-iam/${iamDigest(operation)}.json`;
+  const expected = Buffer.from(JSON.stringify(owner));
+  const readback = () => {
+    const file = path.join(path.dirname(ownerFile), `.iam-claim-read-${randomUUID()}`);
+    try {
+      run(["s3api", "get-object", "--bucket", bucket, "--key", key, "--expected-bucket-owner", account, "--region", "eu-west-2", file]);
+      return fs.readFileSync(file);
+    } finally { fs.rmSync(file, { force: true }); }
+  };
+  try {
+    run(["s3api", "put-object", "--bucket", bucket, "--key", key, "--body", ownerFile,
+      "--if-none-match", "*", "--server-side-encryption", "AES256", "--expected-bucket-owner", account, "--region", "eu-west-2"]);
+  } catch (error) {
+    try { if (!readback().equals(expected)) throw new Error("IAM operation is owned by another terminal"); }
+    catch (readError) { throw new Error("IAM ownership outcome unknown or conflicting", { cause: readError }); }
+  }
+  assert.ok(readback().equals(expected), "IAM ownership readback differs");
+  return iamDigest(owner);
+}
 const publisherTags = [
   { Key: "Environment", Value: "production" },
   { Key: "ManagedBy", Value: "Terraform" },
@@ -123,6 +244,57 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   return Object.freeze({ status: "WEB_RELEASE_IAM_SOURCE_VERIFIED", sourceSha, roleArn, boundaryArn, actions: Object.freeze(actions) });
 }
 
+// One reviewed transition for CHG-20261022-001; the ordinary bootstrap remains create-only.
+export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, independentReviewId, claimOwnership }) {
+  assert.equal(typeof run, "function");
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.equal(ticketId, PHASE3_IAM_TRANSITION.ticketId);
+  assert.ok(Number.isSafeInteger(independentReviewId) && independentReviewId > 0, "Independent IAM approval is missing");
+  assertPhase3IamPlan(plan);
+  const frontend = source("frontend-activation-policy.json");
+  const audit = source("stage-b-native-audit-policy.json");
+  assert.equal(iamDigest(frontend), PHASE3_IAM_TRANSITION.frontendTargetSha256, "Frontend source fingerprint changed");
+  assert.equal(iamDigest(audit), PHASE3_IAM_TRANSITION.auditTargetSha256, "Native audit source fingerprint changed");
+  const caller = readJson(run, ["sts", "get-caller-identity"]);
+  assert.equal(caller.Account, account);
+  assert.equal(caller.Arn, `arn:aws:iam::${account}:root`, "Exact IAM bootstrap requires account root");
+  const readInline = name => {
+    try { return readJson(run, ["iam", "get-role-policy", "--role-name", releaseRoleName, "--policy-name", name]).PolicyDocument; }
+    catch (error) { if (/NoSuchEntity/.test(`${error?.message || ""} ${error?.stderr || ""}`)) return null; throw error; }
+  };
+  const observed = name => {
+    const value = readInline(name);
+    return value === null ? null : iamDigest(normalizeIamPolicyDocument(value));
+  };
+  const beforeFrontend = observed(activationPolicyName), beforeAudit = observed(auditPolicyName);
+  assert.ok([PHASE3_IAM_TRANSITION.frontendPredecessorSha256, PHASE3_IAM_TRANSITION.frontendTargetSha256].includes(beforeFrontend),
+    "Frontend predecessor fingerprint changed");
+  assert.ok(beforeAudit === null || beforeAudit === PHASE3_IAM_TRANSITION.auditTargetSha256, "Native audit policy conflicts");
+  assert.ok(!(beforeAudit === null && beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256),
+    "Frontend transition preceded native audit installation");
+  assert.equal(typeof claimOwnership, "function", "Durable IAM ownership claim is required");
+  const ownershipSha256 = claimOwnership({ run, sourceSha, independentReviewId });
+  assert.match(ownershipSha256 || "", /^[a-f0-9]{64}$/, "IAM ownership claim is not authenticated");
+  const actions = [];
+  const install = (name, document, expectedBefore, expectedAfter) => {
+    const current = observed(name);
+    if (current === expectedAfter) return;
+    assert.equal(current, expectedBefore, `${name} changed during IAM reconciliation`);
+    try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
+    catch (error) {
+      if (observed(name) !== expectedAfter) throw new Error(`${name} write outcome unknown; reconcile live IAM before retry`, { cause: error });
+    }
+    assert.equal(observed(name), expectedAfter, `${name} readback differs from authorized target`);
+    actions.push(`INSTALL_${name}`);
+  };
+  install(auditPolicyName, audit, null, PHASE3_IAM_TRANSITION.auditTargetSha256);
+  assert.equal(observed(auditPolicyName), PHASE3_IAM_TRANSITION.auditTargetSha256);
+  install(activationPolicyName, frontend, PHASE3_IAM_TRANSITION.frontendPredecessorSha256, PHASE3_IAM_TRANSITION.frontendTargetSha256);
+  assert.equal(observed(auditPolicyName), PHASE3_IAM_TRANSITION.auditTargetSha256);
+  assert.equal(observed(activationPolicyName), PHASE3_IAM_TRANSITION.frontendTargetSha256);
+  return Object.freeze({ status: "PHASE3_WEB_IAM_RECONCILED", sourceSha, ticketId, independentReviewId, ownershipSha256, actions: Object.freeze(actions) });
+}
+
 function args(argv) {
   const result = new Map();
   for (let i = 0; i < argv.length; i += 2) {
@@ -130,15 +302,32 @@ function args(argv) {
     if (!key?.startsWith("--") || !value || value.startsWith("--") || result.has(key)) throw new Error(`Invalid or duplicate argument: ${key || "<missing>"}`);
     result.set(key, value);
   }
-  assert.deepEqual([...result.keys()].sort(), ["--admin-profile", "--source-sha"]);
+  const keys = [...result.keys()].sort();
+  assert.ok(
+    JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--source-sha"])
+    || JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--approval-pr", "--owner-file", "--plan-file", "--source-sha", "--ticket-id"]),
+    "IAM bootstrap accepts only the existing bootstrap or exact Phase 3 transition arguments",
+  );
   return result;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const values = args(process.argv.slice(2));
   const sourceSha = values.get("--source-sha");
   const checkout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
   assert.equal(checkout.currentHead, sourceSha, "IAM bootstrap source is not exact protected main.");
-  const result = bootstrapProductionWebReleaseIam({ sourceSha, run: createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: values.get("--admin-profile") }) });
+  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: values.get("--admin-profile") });
+  let result;
+  if (values.has("--ticket-id")) {
+    execFileSync("git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
+    const planFile = path.resolve(values.get("--plan-file"));
+    const planBytes = fs.readFileSync(planFile);
+    const plan = JSON.parse(execFileSync("terraform", ["show", "-json", planFile], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    assertPhase3IamPlan(plan);
+    const independentReviewId = readPhase3IamReview({ prNumber: values.get("--approval-pr"), sourceSha });
+    result = { ...reconcilePhase3WebIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, independentReviewId,
+      claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }),
+      planSha256: createHash("sha256").update(planBytes).digest("hex") };
+  } else result = bootstrapProductionWebReleaseIam({ sourceSha, run });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
