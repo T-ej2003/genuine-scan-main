@@ -20,4 +20,7 @@ test('both inventory adoption paths use the reserved timestamp when building sig
  const source=fs.readFileSync(new URL('../aws/prepare-completed-inventory-adoption.mjs',import.meta.url),'utf8');
  assert.match(source,/buildFreshInventoryAdoptionEvidence\(\{[^;]*sign, now \}\)/s);
  assert.match(source,/buildCompletedInventoryAdoptionEvidence\(\{[^;]*sign, now \}\)/s);
+ assert.match(source,/authenticateCompletedInventoryAdoptionEvidence\([^;]*now:bridge\?new Date\(\):now/s);
+ const successor=fs.readFileSync(new URL('../aws/prepare-production-rotation-successor.mjs',import.meta.url),'utf8');
+ assert.equal((successor.match(/authenticateRotationSuccessor\([^;]*now:bridge\?new Date\(\):now/g)||[]).length,2);
 });

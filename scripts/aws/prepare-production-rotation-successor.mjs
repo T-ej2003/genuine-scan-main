@@ -87,7 +87,7 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
     } else {
       ({ evidence, state } = await signRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, inventoryEvidence, proveDescendant, verifySignature, sign, now }));
     }
-    await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
+    await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now:bridge?new Date():now });
     if(!deferStateWrites)preflight({ config, runtime, cwd: root });
     if (!existingEvidence) {
       try { writeStageBPrivateFileExclusive({ filePath: evidenceFile, bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: root, label: "Rotation successor evidence" }); }
@@ -95,7 +95,7 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
         if (!fs.existsSync(evidenceFile)) throw error;
         evidence = JSON.parse(readStageBPrivateFileBytes({ filePath: evidenceFile, repositoryRoot: root, label: "Rotation successor evidence" }).bytes);
         state = { ...originalState, sourceSha: config.sourceSha, overlapDeploymentSha: config.sourceSha, successorProvenance: evidence };
-        await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now });
+        await authenticateRotationSuccessor({ config, configSha256, predecessorState: originalState, predecessorStateSha256: predecessor.predecessorStateSha256, predecessorFixtureSha256: originalFixture.sha256, predecessorStatusSha256, state, fixtureSha256: originalFixture.sha256, inventoryEvidence, evidence, proveDescendant, verifySignature, now:bridge?new Date():now });
       }
     }
     if(!deferStateWrites) for (const [filePath, bytes, label] of [

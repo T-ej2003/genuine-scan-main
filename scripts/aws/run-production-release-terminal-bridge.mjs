@@ -39,6 +39,16 @@ export function recoverMaterializedBridgeRuntime({outputDirectory,sourceSha,rota
  return {READY_TO_CONSUME_MFA:true,ROTATION_CONFIG:configPath,ROTATION_CONFIG_SHA256:manifest.runtimeConfigSha256,RELEASE_SOURCE_SHA:sourceSha};
 }
 
+export async function reserveBridgeOperator({store,operationId,requestSha256,configSha256,commands}={}){
+ const phase='BRIDGE:OPERATOR:DISPATCH';
+ const dispatch={requestSha256,operationId,inputSha256:brokerDigest({configSha256,commands})};
+ const prior=await store.readOperation(operationId,phase);
+ if(prior){assert.deepEqual(prior,dispatch,'Prior operator mutation has different inputs');return 'RECONCILE';}
+ assert.equal(await store.claimOperation(operationId,phase,dispatch),true,'Another operator owns the native cutover');
+ assert.deepEqual(await store.readOperation(operationId,phase),dispatch);
+ return 'EXECUTE';
+}
+
 export async function reserveBridgePhaseTimestamp({store,operationId,requestSha256,name,now=Date.now}){
  const dispatched=await store.readOperation(operationId,`BRIDGE:SIGN:${name}:DISPATCH`);
  if(dispatched){
@@ -127,7 +137,8 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
  }
  const imageAuthorization=JSON.parse(readStageBPrivateFileBytes({filePath:path.resolve(args.runtime.get('--image-authorization')),repositoryRoot:root,label:'Image authorization'}).bytes);
  assert.equal(imageAuthorization.authorizationSha256,args.root.get('--image-authorization-sha256'));
- assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now()});
+ const priorOperatorClaim=await journal.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
+ assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now(),allowExpired:!!priorOperatorClaim});
  process.stdout.write(`MSCQR PRODUCTION RELEASE AUTHORIZATION\nRelease: ${request.releaseId}\nSource: ${manifest.sourceSha}\nRotation: ${manifest.rotationId}\nOperation: prepare-overlap legacy\nExpected signers: exact AWS account root; independent checker\nAuthorization expires: ${request.expiresAt}\nRequest authenticated: YES\n`);
  assert.equal(typeof prompt,'function','Explicit operator confirmation callback is required');
  assert.equal(await prompt(`Type ${manifest.rotationId} to authorize the exact bound cutover: `),manifest.rotationId,'Operator did not confirm exact rotation');
@@ -150,25 +161,39 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
  // The immutable preparation performs the expensive read-only checks before root issuance.
  const recoveredRuntime=recoverMaterializedBridgeRuntime({outputDirectory:args.runtime.get('--output-directory'),sourceSha:manifest.sourceSha,
   rotationId:manifest.rotationId,rootDropPath:args.root.get('--output'),repositoryRoot:root});
- if(!recoveredRuntime){
-  const preflight=await phaseRun('runtime',[...manifest.commands.runtime,'--bridge-preflight','true']);
-  assert.equal(preflight?.ready,true,'Pre-root runtime preparation is not ready');
+ let materialized;
+ if(priorOperatorClaim){
+  assert.ok(recoveredRuntime,'OUTCOME_UNKNOWN: verifier-owned mutation has no authenticated runtime checkpoint');
+  materialized=recoveredRuntime;
+ }else{
+  if(!recoveredRuntime){
+   const preflight=await phaseRun('runtime',[...manifest.commands.runtime,'--bridge-preflight','true']);
+   assert.equal(preflight?.ready,true,'Pre-root runtime preparation is not ready');
+  }
+  assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now()});
+  const rootTimestamp=await phaseTime('ROOT_DROP'),rootStarted=Date.parse(rootTimestamp);
+  await phaseRun('root',manifest.commands.root,{MSCQR_BRIDGE_PHASE_TIMESTAMP:rootTimestamp});
+  assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before runtime materialization');
+  materialized=recoveredRuntime||await phaseRun('runtime',manifest.commands.runtime);
+  assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before checker preparation');
  }
- assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now()});
- const rootTimestamp=await phaseTime('ROOT_DROP'),rootStarted=Date.parse(rootTimestamp);
- await phaseRun('root',manifest.commands.root,{MSCQR_BRIDGE_PHASE_TIMESTAMP:rootTimestamp});
- assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before runtime materialization');
- const materialized=recoveredRuntime||await phaseRun('runtime',manifest.commands.runtime);
  const runtime={configPath:materialized?.ROTATION_CONFIG,runtimeConfigSha256:materialized?.ROTATION_CONFIG_SHA256,
   releaseSourceSha:materialized?.RELEASE_SOURCE_SHA};
  assert.ok(materialized?.READY_TO_CONSUME_MFA===true&&runtime.configPath&&runtime.runtimeConfigSha256,'Materialized runtime is not ready');
  assert.equal(runtime.releaseSourceSha||runtime.RELEASE_SOURCE_SHA,manifest.sourceSha);
- assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before checker preparation');
- await phaseRun('adoption',replace(manifest.commands.adoption,runtime),{MSCQR_BRIDGE_PHASE_TIMESTAMP:await phaseTime('INVENTORY_ADOPTION')});
- await phaseRun('successor',replace(manifest.commands.successor,runtime),{MSCQR_BRIDGE_PHASE_TIMESTAMP:await phaseTime('ROTATION_SUCCESSOR')});
- assert.ok(now()-rootStarted<780000,'Root freshness reserve exhausted before final verifier');
- await phaseRun('operator',replace(manifest.commands.operator,runtime));
+ if(!priorOperatorClaim){
+  await phaseRun('adoption',replace(manifest.commands.adoption,runtime),{MSCQR_BRIDGE_PHASE_TIMESTAMP:await phaseTime('INVENTORY_ADOPTION')});
+  await phaseRun('successor',replace(manifest.commands.successor,runtime),{MSCQR_BRIDGE_PHASE_TIMESTAMP:await phaseTime('ROTATION_SUCCESSOR')});
+  assert.ok(now()-Date.parse(await phaseTime('ROOT_DROP'))<780000,'Root freshness reserve exhausted before final verifier');
+ }
  const config=JSON.parse(readStageBPrivateFileBytes({filePath:runtime.configPath,repositoryRoot:root,label:'Runtime config'}).bytes);
+ const operatorDisposition=await reserveBridgeOperator({store:journal,operationId,requestSha256:request.requestSha256,
+  configSha256:runtime.runtimeConfigSha256,commands:replace(manifest.commands.operator,runtime)});
+ if(operatorDisposition==='EXECUTE'){
+  await phaseRun('operator',replace(manifest.commands.operator,runtime));
+ }
+ if(operatorDisposition==='RECONCILE'&&(!fs.existsSync(config.readinessEvidenceFile)||!fs.existsSync(config.rotationStateFile)))
+  throw new Error('OUTCOME_UNKNOWN: prior verifier-owned cutover has no complete local readiness; reconcile native AWS state before retry');
  const readinessBytes=readStageBPrivateFileBytes({filePath:config.readinessEvidenceFile,repositoryRoot:root,label:'Overlap readiness'}).bytes;
  const stateBytes=readStageBPrivateFileBytes({filePath:config.rotationStateFile,repositoryRoot:root,label:'Rotation state'}).bytes;
  const readiness=JSON.parse(readinessBytes),state=JSON.parse(stateBytes);

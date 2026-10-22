@@ -90,7 +90,7 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {
       const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
-      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now }, verifySignature);
+      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now:bridge?new Date():now }, verifySignature);
       if (fresh) {
         const authenticated = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: crossSource ? originalConfig : continuationConfig, verifySignature });
         if (payload.completionReceiptSha256 !== authenticated.receiptSha256 || payload.taskArn !== completionReceipt.taskArn) throw new Error("Persisted inventory adoption differs from durable completion.");
