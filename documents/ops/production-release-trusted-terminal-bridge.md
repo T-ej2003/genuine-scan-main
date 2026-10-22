@@ -31,7 +31,7 @@ Release Train **fails before creating a trusted-terminal request** because indep
 
 ### Request expiry and operator claim decision
 
-The hosted waiter and terminal use `bridgeOperatorExpiryAction` against the same immutable request and write-once `BRIDGE:OPERATOR:DISPATCH` record. The claim binds the request hash, operation ID, native input hash and a claim time inside the request window. The terminal checks expiry again before claiming and after durable claim readback; if the readback crosses expiry, it does not start the native operator. A matching claim can be reconciled after request expiry, but it does not prove the native operation completed. Completion verification also requires this exact claim.
+The hosted waiter and terminal use `bridgeOperatorExpiryAction` against the same immutable request and write-once `BRIDGE:OPERATOR:DISPATCH` record. The claim binds the request hash, operation ID, native input hash and a claim initiation time inside the request window. The terminal checks expiry immediately before claiming. If the claim commits and its readback crosses expiry, the same already-authorized operation may continue; stopping after the claim would strand a pre-mutation reservation. A matching claim can be reconciled after request expiry, but it does not prove the native operation completed. Completion verification also requires this exact claim.
 
 | Request and native state | Operator claim | Action |
 | --- | --- | --- |

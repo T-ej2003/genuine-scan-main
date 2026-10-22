@@ -45,15 +45,14 @@ export async function reserveBridgeOperator({store,request,configSha256,commands
  const {operationId,requestSha256}=request;
  const phase='BRIDGE:OPERATOR:DISPATCH';
  const prior=await store.readOperation(operationId,phase);
- const action=bridgeOperatorExpiryAction({request,operator:prior,now:now()});
+ const claimedAt=now();
+ const action=bridgeOperatorExpiryAction({request,operator:prior,now:claimedAt});
  if(action==='REAUTHORIZE')throw new Error('REAUTHORIZATION_REQUIRED: operator mutation was not claimed before request expiry');
  const inputSha256=brokerDigest({configSha256,commands});
  if(prior){assert.equal(prior.inputSha256,inputSha256,'Prior operator mutation has different inputs');return 'RECONCILE';}
- const dispatch={requestSha256,operationId,inputSha256,claimedAt:new Date(now()).toISOString()};
+ const dispatch={requestSha256,operationId,inputSha256,claimedAt:new Date(claimedAt).toISOString()};
  assert.equal(await store.claimOperation(operationId,phase,dispatch),true,'Another operator owns the native cutover');
  assert.deepEqual(await store.readOperation(operationId,phase),dispatch);
- assert.ok(now()<Date.parse(request.expiresAt),
-  'OUTCOME_UNKNOWN: operator claim readback crossed authorization expiry; reconcile before native mutation');
  return 'EXECUTE';
 }
 
