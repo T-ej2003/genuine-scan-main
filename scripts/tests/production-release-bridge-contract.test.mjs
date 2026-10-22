@@ -33,12 +33,13 @@ test('claim is write once and conflicting replacement fails closed',async()=>{
 
 test('a dispatched native operation without a captured result remains unknown',()=>{
  const dispatch={operationId:'a'.repeat(64),phase:'ROOT_DROP',requestSha256:'b'.repeat(64)};
- const result={...dispatch,signatureBase64:'c'};
+ const result={dispatch,response:{Signature:'c'}};
  assert.equal(classifyBridgeNativeResult({}),'NOT_STARTED');
  assert.equal(classifyBridgeNativeResult({dispatch}),'OUTCOME_UNKNOWN');
  assert.equal(classifyBridgeNativeResult({dispatch,result}),'OUTCOME_UNKNOWN');
- assert.equal(classifyBridgeNativeResult({dispatch,result,completion:{resultSha256:brokerDigest(result)}}),'COMPLETED');
- assert.throws(()=>classifyBridgeNativeResult({dispatch,result,completion:{resultSha256:'0'.repeat(64)}}));
+ assert.equal(classifyBridgeNativeResult({dispatch,result,completion:{dispatch,resultSha256:brokerDigest(result)}}),'COMPLETED');
+ assert.throws(()=>classifyBridgeNativeResult({dispatch,result:{...result,dispatch:{...dispatch,phase:'OTHER'}},completion:{dispatch,resultSha256:brokerDigest(result)}}));
+ assert.throws(()=>classifyBridgeNativeResult({dispatch,result,completion:{dispatch,resultSha256:'0'.repeat(64)}}));
 });
 
 test('hosted request requires durable prerequisite closure and actual protected review',async()=>{
@@ -99,10 +100,10 @@ test('expired request preserves captured root and adoption while requiring a fre
  const captured=(phase,request,at)=>{
   const dispatch={operationId,phase,requestSha256:request.requestSha256,claimedAt:new Date(at).toISOString(),
    phaseTimestamp:new Date(at).toISOString()};
-  const result={operationId,phase,requestSha256:request.requestSha256,dispatch,response:{KeyId:'key',Signature:'c2ln'}};
+  const result={dispatch,response:{KeyId:'key',Signature:'c2ln'}};
   records.set(`BRIDGE:SIGN:${phase}:DISPATCH`,dispatch);
   records.set(`BRIDGE:SIGN:${phase}:RESULT`,result);
-  records.set(`BRIDGE:SIGN:${phase}:COMPLETED`,{resultSha256:brokerDigest(result)});
+  records.set(`BRIDGE:SIGN:${phase}:COMPLETED`,{dispatch,resultSha256:brokerDigest(result)});
   return dispatch;
  };
  const first=await requestAt(1,now);

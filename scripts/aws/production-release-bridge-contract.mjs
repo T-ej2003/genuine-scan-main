@@ -117,8 +117,8 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
 export function classifyBridgeNativeResult({dispatch,result,completion}={}) {
  if(!dispatch)return 'NOT_STARTED';
  if(!result||!completion)return 'OUTCOME_UNKNOWN';
- assert.equal(result.operationId,dispatch.operationId);assert.equal(result.phase,dispatch.phase);
- assert.equal(result.requestSha256,dispatch.requestSha256);
+ assert.deepEqual(result.dispatch,dispatch,'Bridge native result belongs to a different dispatch');
+ assert.deepEqual(completion.dispatch,dispatch,'Bridge native completion belongs to a different dispatch');
  assert.equal(completion.resultSha256,brokerDigest(result),'Bridge native result differs from completion');
  return 'COMPLETED';
 }

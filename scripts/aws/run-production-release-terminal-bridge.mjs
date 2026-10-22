@@ -67,7 +67,7 @@ export async function reserveBridgePhaseTimestamp({store,operationId,requestSha2
    assert.deepEqual(await store.readOperation(operationId,key),record);
    return record.timestamp;
   }
-  assert.equal(record.requestSha256,requestSha256);
+  if(record.requestSha256!==requestSha256)continue;
   if(now()-Date.parse(record.timestamp)<45000)return record.timestamp;
  }
  throw new Error('Bridge signing timestamp attempts exhausted before any native Sign');

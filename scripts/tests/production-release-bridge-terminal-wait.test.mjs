@@ -7,11 +7,11 @@ test('captured signatures remain observable after request expiry while the opera
  let minute=29,checks=0;
  const completion={readinessSha256:'a'.repeat(64)};
  const dispatch={operationId:'operation',phase:'ROOT_DROP',requestSha256:'request'};
- const native={operationId:'operation',phase:'ROOT_DROP',requestSha256:'request',dispatch};
+ const native={dispatch,response:{Signature:'c2ln'}};
  const result=await waitForTerminalCutover({verify:async()=>++checks===3?completion:null,
   ensureCredentials:async()=>{},store:{readOperation:async(_operation,phase)=>({
    'BRIDGE:SIGN:ROOT_DROP:DISPATCH':dispatch,'BRIDGE:SIGN:ROOT_DROP:RESULT':native,
-   'BRIDGE:SIGN:ROOT_DROP:COMPLETED':{resultSha256:brokerDigest(native)},
+   'BRIDGE:SIGN:ROOT_DROP:COMPLETED':{dispatch,resultSha256:brokerDigest(native)},
    'BRIDGE:OPERATOR:DISPATCH':{requestSha256:'request'}})[phase]||null},
   operationId:'operation',requestSha256:'request',expiresAt:new Date(30*60*1000).toISOString(),now:()=>minute*60*1000,
   wait:async()=>{minute++;},maxPolls:4});
@@ -24,8 +24,8 @@ test('expired request without a Sign and bounded unknown outcome fail closed',as
  await assert.rejects(waitForTerminalCutover({...input,store:{readOperation:async()=>null}}),/expired before a native Sign/);
  await assert.rejects(waitForTerminalCutover({...input,store:{readOperation:async(_id,phase)=>phase.endsWith(':DISPATCH')?{requestSha256:'request'}:null}}),/OUTCOME_UNKNOWN/);
  const dispatch={operationId:'operation',phase:'ROOT_DROP',requestSha256:'earlier-round'};
- const native={operationId:'operation',phase:'ROOT_DROP',requestSha256:'earlier-round',dispatch};
+ const native={dispatch,response:{Signature:'c2ln'}};
  await assert.rejects(waitForTerminalCutover({...input,store:{readOperation:async(_id,phase)=>({
   'BRIDGE:SIGN:ROOT_DROP:DISPATCH':dispatch,'BRIDGE:SIGN:ROOT_DROP:RESULT':native,
-  'BRIDGE:SIGN:ROOT_DROP:COMPLETED':{resultSha256:brokerDigest(native)}})[phase]||null}}),/REAUTHORIZATION_REQUIRED/);
+  'BRIDGE:SIGN:ROOT_DROP:COMPLETED':{dispatch,resultSha256:brokerDigest(native)}})[phase]||null}}),/REAUTHORIZATION_REQUIRED/);
 });
