@@ -78,8 +78,10 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
   assert.equal(prior.requestSha256,owner.requestSha256);
   if(await store.readOperation(operationId,'BRIDGE:CUTOVER:COMPLETED'))return prior;
   if(now<Date.parse(prior.expiresAt))return prior;
-  for(const signingPhase of ['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR'])
-   assert.ok(!await store.readOperation(operationId,`BRIDGE:SIGN:${signingPhase}:DISPATCH`),'Expired bridge request has a possible KMS Sign; reconcile separately');
+  const signingDispatches=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']
+   .map(signingPhase=>store.readOperation(operationId,`BRIDGE:SIGN:${signingPhase}:DISPATCH`)));
+  // Observe the old operation after expiry; a dispatched Sign forbids a new request.
+  if(signingDispatches.some(dispatch=>dispatch?.requestSha256===prior.requestSha256))return prior;
  }
  assert.ok(authorizationRound<32,'Bridge authorization rounds exhausted');
  assertProductionEnvironmentApprovalIdentity(approval,{sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});

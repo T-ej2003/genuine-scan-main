@@ -71,5 +71,6 @@ test('hosted request requires durable prerequisite closure and actual protected 
  const renewed=await requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later});
  assert.equal(renewed.authorizationRound,1);
  records.set(`${renewed.operationId}:BRIDGE:SIGN:ROOT_DROP:DISPATCH`,{requestSha256:renewed.requestSha256});
- await assert.rejects(()=>requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later+31*60*1000}),/possible KMS Sign/);
+ assert.deepEqual(await requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later+31*60*1000}),renewed);
+ assert.equal(records.has(`${renewed.operationId}:BRIDGE:REQUEST:ROUND:2`),false);
 });

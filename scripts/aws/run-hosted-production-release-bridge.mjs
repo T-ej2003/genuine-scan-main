@@ -25,6 +25,20 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const json=(run,args)=>JSON.parse(run([...args,'--output','json','--no-cli-pager']));
 const gh=(args)=>execFileSync('gh',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024});
 
+export async function waitForTerminalCutover({verify,ensureCredentials,store,operationId,requestSha256,expiresAt,now=Date.now,wait=sleep,maxPolls=1200}={}){
+ for(let i=0;i<maxPolls;i++){
+  await ensureCredentials();
+  const completed=await verify();if(completed)return completed;
+  if(now()>=Date.parse(expiresAt)){
+   const dispatched=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']
+    .map(phase=>store.readOperation(operationId,`BRIDGE:SIGN:${phase}:DISPATCH`)));
+   if(dispatched.every(value=>value?.requestSha256!==requestSha256))throw new Error('Trusted-terminal request expired before a native Sign dispatch');
+  }
+  await wait(15000);
+ }
+ throw new Error('Trusted-terminal outcome remains unknown after the bounded recovery wait');
+}
+
 export async function runHostedBridge({env=process.env,requestCutover=runTerminalCutoverRequest,authenticate=authenticateTerminalCutover,
  verifyNativeStages,dispatchSource=dispatchSourceBoundWorkflow,dispatchGate=dispatchProtectedMainReleaseGate,wait=sleep,fetchImpl=fetch,now=Date.now}={}){
  assert.equal(typeof verifyNativeStages,'function','Independent Stage B native verifier is required before requesting trusted-terminal authorization');
@@ -57,7 +71,6 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  assert.ok(start);const release=await store.getArtifact(start.release);
  assert.equal(release.releaseId,requested.releaseId);assert.equal(release.releaseId,releaseId||release.releaseId);assert.equal(release.sourceSha,env.TARGET_SHA);
  process.stdout.write(`TRUSTED_TERMINAL_REQUEST_RELEASE_ID=${requested.releaseId}\nTRUSTED_TERMINAL_REQUEST_RUN_ID=${requested.workflowRunId}\nTRUSTED_TERMINAL_REQUEST_RUN_ATTEMPT=${requested.workflowRunAttempt}\n`);
- let verified;
  const verify=()=>authenticate({store,releaseId:release.releaseId,sourceSha:release.sourceSha,ticketId:release.ticketId,
   rotationId:env.BRIDGE_ROTATION_ID,manifestSha256:env.BRIDGE_MANIFEST_SHA256,
   observeApproval:(approval,request)=>fetchProductionEnvironmentApprovalEvidence({token:env.GH_TOKEN,
@@ -91,17 +104,8 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    assert.equal(componentDeploymentProvenance(state,'backend').githubRunId,prior.runId);
    return true;
   }});
- for(let i=0;i<120;i++){
-  await credentials.ensure();
-  verified=await verify();if(verified)break;
-  if(now()>=Date.parse(requested.expiresAt)){
-   const dispatched=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']
-    .map(phase=>store.readOperation(operationId,`BRIDGE:SIGN:${phase}:DISPATCH`)));
-   if(dispatched.every(value=>!value))throw new Error('Trusted-terminal request expired before a native Sign dispatch');
-  }
-  await wait(15000);
- }
- assert.ok(verified,'Trusted-terminal completion was not durably authenticated');
+ const verified=await waitForTerminalCutover({verify,ensureCredentials:()=>credentials.ensure(),store,operationId,requestSha256:requested.requestSha256,
+  expiresAt:requested.expiresAt,now,wait});
  const {completion,readiness,readinessBytes,stateBytes}=verified;
  assert.equal(completion.operationId,operationId);
  const stateJson=stateBytes.toString('utf8'),readinessJson=readinessBytes.toString('utf8');
