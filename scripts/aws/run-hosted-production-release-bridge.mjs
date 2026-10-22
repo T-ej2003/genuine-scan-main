@@ -85,6 +85,12 @@ export async function requestNormalGateRerun({store,operationId,runId,runAttempt
  throw new Error('Normal Gate rerun exhausted bounded rejected requests');
 }
 
+export function classifyNormalGateRerunOutcome(child,recovery){
+ if(child.conclusion==='success')return 'COMPLETED';
+ assert.ok(recovery<2,'Normal Gate exhausted same-run recovery; preserve its child identity for reconciliation');
+ return 'RECONCILE';
+}
+
 export async function waitForTerminalCutover({verify,coordinateNative=async()=>{},ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
  const operationId=request.operationId;
  for(let i=0;i<maxPolls;i++){
@@ -297,6 +303,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
     sourceSha:env.TARGET_SHA,releaseTrainRunId:boundParentRunId,requireMain,fetchImpl,
     fetchRun:runId=>fetchJson(`actions/runs/${runId}`),token:env.GH_TOKEN});
    child=await waitChild(id,'release-gate.yml',{allowFailure:true,minAttempt:child.run_attempt+1});
+   if(classifyNormalGateRerunOutcome(child,recovery)==='COMPLETED')return {runId:id,child};
    }
   }
   throw new Error(`${mode} Gate exhausted bounded authenticated pre-mutation retries`);

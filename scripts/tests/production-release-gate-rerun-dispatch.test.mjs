@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {requestNormalGateRerun} from '../aws/run-hosted-production-release-bridge.mjs';
+import {requestNormalGateRerun,classifyNormalGateRerunOutcome} from '../aws/run-hosted-production-release-bridge.mjs';
 
 const sourceSha='a'.repeat(40);
 const marker={runId:'123',runAttempt:1,sourceSha,releaseTrainRunId:'456'};
@@ -75,4 +75,11 @@ test('protected-main drift fails before creating a rerun claim',async()=>{
  await assert.rejects(requestNormalGateRerun({...f.base,requireMain:async()=>{throw Error('source drift');},
   fetchImpl:async()=>assert.fail('source drift reached POST')}),/source drift/);
  assert.equal(f.records.size,0);
+});
+
+test('final same-run rerun success is reused and final failure cannot dispatch a new child',()=>{
+ assert.equal(classifyNormalGateRerunOutcome({conclusion:'failure'},0),'RECONCILE');
+ assert.equal(classifyNormalGateRerunOutcome({conclusion:'success',run_attempt:4},2),'COMPLETED');
+ assert.throws(()=>classifyNormalGateRerunOutcome({conclusion:'failure',run_attempt:4},2),
+  /preserve its child identity/);
 });

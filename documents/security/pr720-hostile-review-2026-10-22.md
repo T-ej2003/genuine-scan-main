@@ -1,6 +1,6 @@
 # PR #720 hostile security review — 22 October 2026
 
-This review covers the trusted-terminal bridge through pushed commit `77a25aa0be82cfd0b92d95853089f20ef8d9712d` and subsequent unpushed corrections. It uses source inspection and non-production tests; no production cutover or KMS Sign was run. **The PR is not ready to merge until exact-head CI and independent review pass.**
+This review covers the trusted-terminal bridge through pushed commit `49a9b86aa12f6830523ce677e163bde95a1b2769` and subsequent local corrections. It uses source inspection and non-production tests; no production cutover or KMS Sign was run. **The PR is not ready to merge until exact-head CI and independent review pass.**
 
 ## Blocking findings
 
@@ -30,6 +30,8 @@ The `f95782df` CI head failed Integration and Frontend during their five-minute 
 
 CI on `49a9b86a` exposed two guardrail failures before broad validation could run. A new test title contained the DR scanner's database-removal command pattern despite executing no destructive command; the title was clarified without exempting the scanner. Three synthetic Stage B fixture lines also contained complete production-shaped Secrets Manager ARNs, which the branch secret-diff guard correctly rejected. The fixtures now assemble the inert ARN prefix at runtime, preserving exact test input while avoiding committed resource strings. The hosted Gitleaks history scan on `49a9b86a` passed. These follow-up corrections still require exact-head CI and review.
 
+Codex review of `49a9b86a` also found a P1 at the final normal Gate rerun boundary. The third successful same-run rerun was not checked before leaving the recovery loop, which could dispatch a different child run ID and strand journals owned by the first child. The parent now returns that authenticated successful attempt immediately. If the final rerun still fails, it stops with the original child identity available for reconciliation. A focused boundary regression test covers both outcomes; no new Gate lane or authorization path was added.
+
 ## Release decision
 
 Keep the PR open for review and fail closed; review state does not imply merge readiness. The new post-cutover checker signature has its own protected approval binding and one-use claim. The release-deployer's regional `cloudtrail:LookupEvents` and frontend `ecs:ListTaskDefinitions` permissions and the authoritative event shapes must be verified before hosted native verification is used in production. The source-managed IAM policy is not live authorization: a later approved production IAM apply and readback would be a separate Phase 3 prerequisite. The local recovery implementation still needs exact-head CI and a fresh Codex review. The recovery code refuses repeated ECS registration and UpdateService after ambiguous dispatch; if the exact result cannot be authenticated, a separate authorized reconciliation is required.
@@ -41,6 +43,8 @@ No root, checker, MFA, 900-second root TTL, protected environment, OIDC, or disa
 The focused recovery and authorization tests pass (71/71). Normal deployment tests pass (146/146). Workflow YAML validation, typecheck, frontend build, changed-file lint, and web IAM tests pass. The broad Stage B suite had one failure in an older assertion matching the exact approval-error wording; the approval test passed after preserving that wording. The import cycle found by the first broad run was removed and its five affected tests passed. These checks cover the local tree only; they do not establish exact-head PR CI or a new Codex review.
 
 After the RLS rollback and PostgreSQL client corrections, the focused RLS, bridge, Gate, OSV and parsed-workflow suite passes 121/121. The full generated RLS verifier passes 24/24; the migration set digest remains unchanged. Workflow YAML validation passes 99 files, typecheck and frontend build pass, and changed-file ESLint and `git diff --check` pass. Local Gitleaks v8.24.2 with the same baseline and current-branch history reports no leaks; scanning all unrelated local refs reports seven findings outside the PR ancestry and is not evidence for this PR. Hosted CI must still validate the final pushed head.
+
+After the final rerun boundary and CI guardrail corrections, `npm run verify:release:source` passes end to end, including source guardrails, the 296-test frontend suite, trust-critical backend tests and full backend tests. `npm run rls:full-verify` passes 24/24; focused Gate and RLS recovery tests pass 29/29, OSV policy tests pass 76/76, and changed-file lint, typecheck, build and workflow YAML validation pass. The current pushed head's Gitleaks job passed; the new local head still requires its own hosted scan.
 
 ## Build dependency reachability
 
