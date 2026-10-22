@@ -223,11 +223,18 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
  return completion;
 }
 
+export function terminalLockCommand({platform=process.platform,manifest,executable=process.execPath,script=process.argv[1],args=process.argv.slice(2)}={}){
+ const lock=path.resolve(manifest)+'.lock';
+ if(platform==='linux')return {command:'flock',args:['-n',lock,executable,script,...args]};
+ if(platform==='darwin'||platform==='freebsd')return {command:'lockf',args:['-t','0',lock,executable,script,...args]};
+ throw new Error(`Unsupported trusted-terminal lock platform: ${platform}`);
+}
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
  const values=argv(process.argv.slice(2));
  if(process.env.MSCQR_BRIDGE_LOCAL_LOCK!=='held'){
-  const manifest=path.resolve(values['--manifest']||'');
-  const locked=spawnSync('lockf',['-t','0',`${manifest}.lock`,process.execPath,process.argv[1],...process.argv.slice(2)],
+  const {command,args}=terminalLockCommand({manifest:values['--manifest']||''});
+  const locked=spawnSync(command,args,
    {stdio:'inherit',env:{...process.env,MSCQR_BRIDGE_LOCAL_LOCK:'held'}});
   if(locked.error)throw locked.error;
   process.exitCode=locked.status??1;

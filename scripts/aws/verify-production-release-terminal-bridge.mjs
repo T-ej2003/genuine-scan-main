@@ -24,6 +24,11 @@ const decodeTransport=(value,expectedSha)=>{
  return {bytes,value:JSON.parse(bytes.toString('utf8'))};
 };
 
+export async function requireBridgeNativeStages(verifyNativeStages,evidence){
+ assert.equal(typeof verifyNativeStages,'function','Independent Stage B native receipt verification is required before Release Gate');
+ assert.equal(await verifyNativeStages(evidence),true,'Independent Stage B native receipts are incomplete');
+}
+
 export async function authenticateBridgeEnvironmentApproval({store,request,observeApproval}={}){
  assert.equal(typeof observeApproval,'function');
  const approval=await store.getArtifact(request.environmentApprovalSha256);
@@ -36,7 +41,7 @@ export async function authenticateBridgeEnvironmentApproval({store,request,obser
  return approval;
 }
 
-export async function authenticateTerminalCutover({store,releaseId,sourceSha,ticketId,rotationId,manifestSha256,verifyCheckerSignature,verifyRootSignature,observeApproval,readLive}={}){
+export async function authenticateTerminalCutover({store,releaseId,sourceSha,ticketId,rotationId,manifestSha256,verifyCheckerSignature,verifyRootSignature,observeApproval,readLive,verifyNativeStages}={}){
  assert.equal(typeof store?.readOperation,'function');assert.equal(typeof store?.getArtifact,'function');
  assert.equal(typeof verifyCheckerSignature,'function');assert.equal(typeof verifyRootSignature,'function');assert.equal(typeof readLive,'function');
  const operationId=bridgeOperationId({releaseId,sourceSha,rotationId});
@@ -102,6 +107,7 @@ export async function authenticateTerminalCutover({store,releaseId,sourceSha,tic
  assert.equal(adoption.payload.rotationId,rotationId);assert.equal(successor.payload.rotationId,rotationId);
  assert.equal(successor.payload.successorSourceSha||successor.payload.sourceSha,sourceSha);
  assert.equal(await readLive({completion,readiness,state}),true,'Native AWS state does not match overlap readiness');
+ await requireBridgeNativeStages(verifyNativeStages,{request,completion,readiness,state});
  return {request,completion,readiness,state,readinessBytes,stateBytes,root,adoption,successor};
 }
 
