@@ -344,7 +344,7 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
 }
 
 // One reviewed transition for CHG-20261022-001; the ordinary bootstrap remains create-only.
-export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence, claimOwnership,
+export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence, claimOwnership, assertCurrentAuthorization,
   assertProtectedSource = () => readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead }) {
   assert.equal(typeof run, "function");
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
@@ -376,6 +376,8 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   const checkpoint = { frontend: beforeFrontend, audit: beforeAudit };
   assertPhase3IamPlan(plan, checkpoint);
   assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM ownership");
+  assert.equal(typeof assertCurrentAuthorization, "function", "Fresh IAM authorization verification is required");
+  assert.equal(assertCurrentAuthorization(), authorizationId, "Solo-operator IAM authorization changed before ownership");
   assert.equal(typeof claimOwnership, "function", "Durable IAM ownership claim is required");
   const resumeOnly = beforeAudit !== null || beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256;
   const { ownershipSha256, hasDispatch, markDispatch, complete } = claimOwnership({ run, sourceSha, authorizationId, mfaEvidence, resumeOnly });
@@ -402,6 +404,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     if (!markDispatch(name, expectedAfter)) throw new Error(`${name} dispatch outcome unknown; reconcile live IAM before another attempt`);
     assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced after IAM journal");
+    assert.equal(assertCurrentAuthorization(), authorizationId, "Solo-operator IAM authorization changed before IAM write");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     assert.equal(observed(name), expectedBefore, `${name} changed after dispatch journal and before IAM write`);
     try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
@@ -478,6 +481,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     assert.equal(readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha }), authorizationId,
       "Solo-operator IAM authorization changed during MFA");
     result = { ...reconcilePhase3WebIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, authorizationId, mfaEvidence,
+      assertCurrentAuthorization: () => readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha }),
       claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }),
       planSha256: createHash("sha256").update(planBytes).digest("hex") };
   } else result = bootstrapProductionWebReleaseIam({ sourceSha, run });
