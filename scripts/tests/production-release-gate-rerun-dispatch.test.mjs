@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {requestNormalGateRerun,classifyNormalGateRerunOutcome,isBoundCompletedNormalSuccessor} from '../aws/run-hosted-production-release-bridge.mjs';
+import {requestNormalGateRerun,classifyNormalGateRerunOutcome,isBoundNormalSuccessor} from '../aws/run-hosted-production-release-bridge.mjs';
 
 const sourceSha='a'.repeat(40);
 const marker={runId:'123',runAttempt:1,sourceSha,releaseTrainRunId:'456'};
@@ -84,12 +84,14 @@ test('final same-run rerun success is reused and final failure cannot dispatch a
   /preserve its child identity/);
 });
 
-test('a failed overlap keeps its original child after the bound normal successor committed',()=>{
+test('a failed overlap keeps its original child after a bound normal successor was dispatched',()=>{
  const record={runId:'123',inputs:{target_sha:sourceSha,rotation_id:'rotation-test',release_train_run_id:'456'}};
  const expected={record,child:{id:123,conclusion:'success'},sourceSha,rotationId:'rotation-test',parentRunId:'456'};
- assert.equal(isBoundCompletedNormalSuccessor(expected),true);
- assert.equal(isBoundCompletedNormalSuccessor({...expected,child:{id:123,conclusion:'failure'}}),false);
- assert.equal(isBoundCompletedNormalSuccessor({...expected,record:null}),false);
+ assert.equal(isBoundNormalSuccessor(expected),true);
+ for(const conclusion of ['failure','cancelled','timed_out'])
+  assert.equal(isBoundNormalSuccessor({...expected,child:{id:123,conclusion}}),true);
+ assert.equal(isBoundNormalSuccessor({...expected,record:null}),false);
  for(const changed of [{sourceSha:'b'.repeat(40)},{rotationId:'rotation-other'},{parentRunId:'457'},
-  {child:{id:124,conclusion:'success'}}])assert.throws(()=>isBoundCompletedNormalSuccessor({...expected,...changed}));
+  {child:{id:124,conclusion:'success'}},{child:{id:123,conclusion:'queued'}}])
+  assert.throws(()=>isBoundNormalSuccessor({...expected,...changed}));
 });

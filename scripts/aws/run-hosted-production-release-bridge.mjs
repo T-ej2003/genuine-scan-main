@@ -91,13 +91,14 @@ export function classifyNormalGateRerunOutcome(child,recovery){
  return 'RECONCILE';
 }
 
-export function isBoundCompletedNormalSuccessor({record,child,sourceSha,rotationId,parentRunId}){
+export function isBoundNormalSuccessor({record,child,sourceSha,rotationId,parentRunId}){
  if(!record)return false;
  assert.equal(record.inputs?.target_sha,sourceSha);
  assert.equal(record.inputs?.rotation_id,rotationId);
  assert.equal(record.inputs?.release_train_run_id,parentRunId);
  assert.equal(String(child.id),String(record.runId));
- return child.conclusion==='success';
+ assert.ok(['success','failure','cancelled','timed_out'].includes(child.conclusion));
+ return true;
 }
 
 export async function waitForTerminalCutover({verify,coordinateNative=async()=>{},ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
@@ -270,8 +271,8 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
     const normal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
     if(normal){
      const successor=await waitChild(normal.runId,'release-gate.yml',{allowFailure:true});
-     // authenticateTerminalCutover already checked this successful successor against live ECS and component state.
-     if(isBoundCompletedNormalSuccessor({record:normal,child:successor,sourceSha:env.TARGET_SHA,
+     // The historical overlap artifact is checked below; the bound normal child is reconciled before completion.
+     if(isBoundNormalSuccessor({record:normal,child:successor,sourceSha:env.TARGET_SHA,
       rotationId:env.BRIDGE_ROTATION_ID,parentRunId:boundParentRunId}))return {runId:id,child};
     }
    }
