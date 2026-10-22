@@ -6,7 +6,7 @@ import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import {assertBridgeRequest,bridgeOperationId,bridgeRequestForSign} from './production-release-bridge-contract.mjs';
+import {assertBridgeRequest,bridgeOperationId,bridgeOperatorExpiryAction,bridgeRequestForSign} from './production-release-bridge-contract.mjs';
 import {assertReadyForOverlapDeployment} from './production-overlap-readiness-contract.mjs';
 import {assertRootDropEvidence,canonicalRootDropPayload,verifyRootDropEvidenceWithKms} from './production-root-drop-evidence.mjs';
 import {STAGE_B} from './production-green-stage-b-contract.mjs';
@@ -57,6 +57,9 @@ export async function authenticateTerminalCutover({store,releaseId,sourceSha,tic
  const request=await store.readOperation(operationId,`BRIDGE:REQUEST:${owner.workflowRunId}:${owner.workflowRunAttempt}`);
  assertBridgeRequest(request,{releaseId,sourceSha,ticketId,rotationId,manifestSha256,allowExpired:true});
  assert.equal(request.requestSha256,owner.requestSha256);
+ const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
+ assert.equal(bridgeOperatorExpiryAction({request,operator}),'RECONCILE',
+  'Terminal completion has no timely, matching operator dispatch claim');
  await authenticateBridgeEnvironmentApproval({store,request,observeApproval});
  assert.equal(completion.operationId,operationId);assert.equal(completion.requestSha256,request.requestSha256);
  for(const key of ['releaseId','sourceSha','rotationId','manifestSha256'])assert.equal(completion[key],request[key]);

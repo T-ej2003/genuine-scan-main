@@ -19,18 +19,19 @@ import {packReleaseEvidenceTransport,unpackReleaseEvidenceTransport} from './pro
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {createBridgeCredentialRefresher} from './production-release-bridge-credentials.mjs';
 import {fetchProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
-import {classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
+import {bridgeOperatorExpiryAction,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
 
 const repository='T-ej2003/genuine-scan-main';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const json=(run,args)=>JSON.parse(run([...args,'--output','json','--no-cli-pager']));
 const gh=(args)=>execFileSync('gh',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024});
 
-export async function waitForTerminalCutover({verify,ensureCredentials,store,operationId,requestSha256,expiresAt,now=Date.now,wait=sleep,maxPolls=1200}={}){
+export async function waitForTerminalCutover({verify,ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
+ const operationId=request.operationId;
  for(let i=0;i<maxPolls;i++){
   await ensureCredentials();
   const completed=await verify();if(completed)return completed;
-  if(now()>=Date.parse(expiresAt)){
+  if(now()>=Date.parse(request.expiresAt)){
    const signed=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR'].map(async phase=>{
     const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
     if(!dispatch)return 'NOT_STARTED';
@@ -40,10 +41,10 @@ export async function waitForTerminalCutover({verify,ensureCredentials,store,ope
    }));
    assert.ok(!signed.includes('OUTCOME_UNKNOWN'),'OUTCOME_UNKNOWN: native KMS Sign dispatch has no authenticated result');
    const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
-   if(operator?.requestSha256!==requestSha256&&!signed.every(state=>state==='COMPLETED'))
-    throw new Error(signed.every(state=>state==='NOT_STARTED')
-     ?'Trusted-terminal request expired before a native Sign dispatch'
-     :'REAUTHORIZATION_REQUIRED: completed native signatures are preserved; resume under a fresh protected request');
+   const action=bridgeOperatorExpiryAction({request,operator,now:now()});
+   if(action==='REAUTHORIZE')throw new Error(signed.every(state=>state==='NOT_STARTED')
+    ?'REAUTHORIZATION_REQUIRED: trusted-terminal request expired before a native Sign dispatch'
+    :'REAUTHORIZATION_REQUIRED: completed native signatures are preserved; resume under a fresh protected request');
   }
   await wait(15000);
  }
@@ -115,8 +116,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    assert.equal(componentDeploymentProvenance(state,'backend').githubRunId,prior.runId);
    return true;
   }});
- const verified=await waitForTerminalCutover({verify,ensureCredentials:()=>credentials.ensure(),store,operationId,requestSha256:requested.requestSha256,
-  expiresAt:requested.expiresAt,now,wait});
+ const verified=await waitForTerminalCutover({verify,ensureCredentials:()=>credentials.ensure(),store,request:requested,now,wait});
  const {completion,readiness,readinessBytes,stateBytes}=verified;
  assert.equal(completion.operationId,operationId);
  const stateJson=stateBytes.toString('utf8'),readinessJson=readinessBytes.toString('utf8');

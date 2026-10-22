@@ -37,6 +37,21 @@ export function assertBridgeRequest(value,{releaseId,sourceSha,ticketId,rotation
  return value;
 }
 
+export function bridgeOperatorExpiryAction({request,operator,now=Date.now()}={}) {
+ assertBridgeRequest(request,{releaseId:request?.releaseId,sourceSha:request?.sourceSha,ticketId:request?.ticketId,
+  rotationId:request?.rotationId,manifestSha256:request?.manifestSha256,allowExpired:true});
+ if(operator){
+  assert.equal(operator.operationId,request.operationId,'Operator claim belongs to another operation');
+  assert.equal(operator.requestSha256,request.requestSha256,'Operator claim belongs to another authorization');
+  assert.match(operator.inputSha256||'',SHA256,'Operator claim has no bound native input');
+  const claimed=Date.parse(operator.claimedAt);
+  assert.ok(Number.isSafeInteger(claimed)&&claimed>=Date.parse(request.issuedAt)&&claimed<Date.parse(request.expiresAt),
+   'Operator claim was not acquired during its authorization');
+  return 'RECONCILE';
+ }
+ return now>=Date.parse(request.expiresAt)?'REAUTHORIZE':'WAIT';
+}
+
 export async function claimBridgeRequest(store,request,{now=Date.now()}={}) {
  assertBridgeRequest(request,{releaseId:request.releaseId,sourceSha:request.sourceSha,ticketId:request.ticketId,rotationId:request.rotationId,manifestSha256:request.manifestSha256,now});
  const phase=`BRIDGE:REQUEST:${request.workflowRunId}:${request.workflowRunAttempt}`;
@@ -79,7 +94,10 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
   assert.equal(prior.requestSha256,owner.requestSha256);
   if(await store.readOperation(operationId,'BRIDGE:CUTOVER:COMPLETED'))return prior;
   if(now<Date.parse(prior.expiresAt))return prior;
-  if(operator?.requestSha256===prior.requestSha256)return prior;
+  if(operator?.requestSha256===prior.requestSha256){
+   bridgeOperatorExpiryAction({request:prior,operator,now});
+   return prior;
+  }
   if(operator)continue;
   for(const phase of ['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']){
    const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);

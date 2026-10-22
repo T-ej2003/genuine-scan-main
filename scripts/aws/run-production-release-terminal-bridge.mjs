@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
-import {assertBridgeRequest,bridgeOperationId,bridgeRequestForSign,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
+import {assertBridgeRequest,bridgeOperationId,bridgeOperatorExpiryAction,bridgeRequestForSign,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
 import {verifyBridgeCapturedSign} from './production-release-bridge-sign-journal.mjs';
 import {authenticateBridgeEnvironmentApproval} from './verify-production-release-terminal-bridge.mjs';
 import {assertBridgeManifest} from './production-release-bridge-manifest.mjs';
@@ -41,13 +41,19 @@ export function recoverMaterializedBridgeRuntime({outputDirectory,sourceSha,rota
  return {READY_TO_CONSUME_MFA:true,ROTATION_CONFIG:configPath,ROTATION_CONFIG_SHA256:manifest.runtimeConfigSha256,RELEASE_SOURCE_SHA:sourceSha};
 }
 
-export async function reserveBridgeOperator({store,operationId,requestSha256,configSha256,commands}={}){
+export async function reserveBridgeOperator({store,request,configSha256,commands,now=Date.now}={}){
+ const {operationId,requestSha256}=request;
  const phase='BRIDGE:OPERATOR:DISPATCH';
- const dispatch={requestSha256,operationId,inputSha256:brokerDigest({configSha256,commands})};
  const prior=await store.readOperation(operationId,phase);
- if(prior){assert.deepEqual(prior,dispatch,'Prior operator mutation has different inputs');return 'RECONCILE';}
+ const action=bridgeOperatorExpiryAction({request,operator:prior,now:now()});
+ if(action==='REAUTHORIZE')throw new Error('REAUTHORIZATION_REQUIRED: operator mutation was not claimed before request expiry');
+ const inputSha256=brokerDigest({configSha256,commands});
+ if(prior){assert.equal(prior.inputSha256,inputSha256,'Prior operator mutation has different inputs');return 'RECONCILE';}
+ const dispatch={requestSha256,operationId,inputSha256,claimedAt:new Date(now()).toISOString()};
  assert.equal(await store.claimOperation(operationId,phase,dispatch),true,'Another operator owns the native cutover');
  assert.deepEqual(await store.readOperation(operationId,phase),dispatch);
+ assert.ok(now()<Date.parse(request.expiresAt),
+  'OUTCOME_UNKNOWN: operator claim readback crossed authorization expiry; reconcile before native mutation');
  return 'EXECUTE';
 }
 
@@ -140,7 +146,8 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
  const imageAuthorization=JSON.parse(readStageBPrivateFileBytes({filePath:path.resolve(args.runtime.get('--image-authorization')),repositoryRoot:root,label:'Image authorization'}).bytes);
  assert.equal(imageAuthorization.authorizationSha256,args.root.get('--image-authorization-sha256'));
  const priorOperatorClaim=await journal.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
- assertBridgeRequest(request,{...manifest,releaseId,manifestSha256:brokerDigest(manifest),now:now(),allowExpired:!!priorOperatorClaim});
+ const operatorAction=bridgeOperatorExpiryAction({request,operator:priorOperatorClaim,now:now()});
+ if(operatorAction==='REAUTHORIZE')throw new Error('REAUTHORIZATION_REQUIRED: request expired before operator claim');
  process.stdout.write(`MSCQR PRODUCTION RELEASE AUTHORIZATION\nRelease: ${request.releaseId}\nSource: ${manifest.sourceSha}\nRotation: ${manifest.rotationId}\nOperation: prepare-overlap legacy\nExpected signers: exact AWS account root; independent checker\nAuthorization expires: ${request.expiresAt}\nRequest authenticated: YES\n`);
  assert.equal(typeof prompt,'function','Explicit operator confirmation callback is required');
  assert.equal(await prompt(`Type ${manifest.rotationId} to authorize the exact bound cutover: `),manifest.rotationId,'Operator did not confirm exact rotation');
@@ -217,8 +224,8 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
   assert.ok(now()-Date.parse(await phaseTime('ROOT_DROP'))<780000,'Root freshness reserve exhausted before final verifier');
  }
  const config=JSON.parse(readStageBPrivateFileBytes({filePath:runtime.configPath,repositoryRoot:root,label:'Runtime config'}).bytes);
- const operatorDisposition=await reserveBridgeOperator({store:journal,operationId,requestSha256:request.requestSha256,
-  configSha256:runtime.runtimeConfigSha256,commands:replace(manifest.commands.operator,runtime)});
+ const operatorDisposition=await reserveBridgeOperator({store:journal,request,
+  configSha256:runtime.runtimeConfigSha256,commands:replace(manifest.commands.operator,runtime),now});
  if(operatorDisposition==='EXECUTE'){
   await phaseRun('operator',replace(manifest.commands.operator,runtime));
  }

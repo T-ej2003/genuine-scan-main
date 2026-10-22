@@ -29,6 +29,22 @@ Each new KMS Sign dispatch must occur before the owning request expires; that ex
 
 Release Train **fails before creating a trusted-terminal request** because independent Stage B native receipt verification is not implemented. This prevents the draft from soliciting root or checker signatures. Once that verifier is implemented, the bridge must validate the three KMS signatures, readiness shape, native Stage B results, and live ECS state before Release Gate dispatch. Do not run this draft against production or treat its terminal completion as sufficient proof. The later Gate checks are designed to authenticate RLS, backend, frontend, post-activation smoke, and component state before `RELEASE_COMPLETE`.
 
+### Request expiry and operator claim decision
+
+The hosted waiter and terminal use `bridgeOperatorExpiryAction` against the same immutable request and write-once `BRIDGE:OPERATOR:DISPATCH` record. The claim binds the request hash, operation ID, native input hash and a claim time inside the request window. The terminal checks expiry again before claiming and after durable claim readback; if the readback crosses expiry, it does not start the native operator. A matching claim can be reconciled after request expiry, but it does not prove the native operation completed. Completion verification also requires this exact claim.
+
+| Request and native state | Operator claim | Action |
+| --- | --- | --- |
+| Valid, no unknown Sign | Absent | WAIT or RESUME the exact pending phase; new Sign requires its own valid approval and signer |
+| Expired, no Sign dispatched | Absent | REAUTHORIZE under a fresh protected request |
+| Expired, captured Sign results, runtime incomplete or complete | Absent | REAUTHORIZE; verify and reuse captured signatures, then claim the operator under the fresh request |
+| Any request, Sign dispatch without recoverable native result | Any | FAILED_CLOSED as OUTCOME_UNKNOWN; never repeat Sign |
+| Expired, any Sign state | Matching timely claim | RECONCILE native operator state; never invoke it again from an unproven checkpoint |
+| Any request | Mismatched, unbound, or late claim | FAILED_CLOSED; reconcile the conflicting ownership record |
+| Any request, root too old for a required direct verifier | Any | FAILED_CLOSED; separate recovery, with no automatic root reissuance |
+
+An expired request without a matching operator claim never remains in the hosted polling loop merely because all three Sign records are complete. The next authorized invocation may create a new round only after authenticating those results and confirming no unresolved operator claim. A lost claim response after the claim committed is treated as ambiguous native ownership and is not automatically reauthorized.
+
 ## Recovery and stop conditions
 
 Rerun Release Train for the same exact source, ticket, rotation, and manifest digest after a failed hosted run. The coordinator and write-once records determine the checkpoint. The same terminal can resume a pending request while it is valid and root evidence remains fresh. If a request expires before any KMS Sign dispatch, a new approved Release Train invocation can create the next authorization round. An expired request with an authenticated completed Sign can also be renewed under a new protected approval if the root freshness reserve remains; the original Sign is reused and its request cannot be overwritten. A prior operator dispatch with complete authenticated readiness can be finalized without repeating native cutover mutations. A failed normal Gate workflow can be reused only when its exact deployment job, approval, database and activation receipts, post-frontend smoke, component state, and live ECS readbacks all authenticate; the final receipt records the child workflow's failed conclusion. A partial child Gate remains claimed and stops without redispatch. A missing Sign result, expired root before the final direct verifier, or incomplete operator output requires separate reconciliation and authorization; do not automatically sign or run the operator again. A changed protected-main head, conflicting claim, invalid receipt, unverified child Gate, or unmatched live ECS state must stop the workflow.
