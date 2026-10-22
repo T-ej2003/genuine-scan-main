@@ -81,7 +81,6 @@ test('Terraform actions must equal the live checkpoint before claiming mutation 
  for(const [options,selected] of [
   [{},plan('no-op','no-op')],
   [{},plan('update','no-op')],
-  [{native:audit},plan()],
   [{front:frontend,native:audit},plan()],
   [{front:frontend},plan('no-op','no-op')],
   [{front:null},plan('no-op','no-op')],
@@ -95,10 +94,26 @@ test('Terraform actions must equal the live checkpoint before claiming mutation 
  reconcilePhase3WebIam({run:partial.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
   plan:plan('update','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,claimOwnership:input=>{resumeOnly=input.resumeOnly;return claim(()=>true);}});
  assert.equal(resumeOnly,true);
+ const unimported=fixture({native:audit});
+ assert.deepEqual(reconcilePhase3WebIam({run:unimported.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('update','create'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
+  claimOwnership:input=>{assert.equal(input.resumeOnly,true);return claim(()=>true);}}).actions,
+ ['INSTALL_MSCQRProductionFrontendActivation']);
+ assert.deepEqual(writes(unimported),['MSCQRProductionFrontendActivation']);
  const unauthenticated=fixture({native:audit});
  assert.throws(()=>reconcilePhase3WebIam({run:unauthenticated.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
   plan:plan('update','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
  assert.deepEqual(writes(unauthenticated),[]);
+ const forged=fixture({native:audit});
+ assert.throws(()=>reconcilePhase3WebIam({run:forged.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('update','create'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
+  claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
+ assert.deepEqual(writes(forged),[]);
+ const completedWithoutJournal=fixture({front:frontend,native:audit});
+ assert.throws(()=>reconcilePhase3WebIam({run:completedWithoutJournal.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('no-op','create'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
+  claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
+ assert.deepEqual(writes(completedWithoutJournal),[]);
 });
 test('saved Terraform plan must bind exact post-merge protected main before ownership',()=>{
  for(const variables of [undefined,{}, {phase3_iam_source_sha:{value:'a'.repeat(40)}}]){
@@ -267,7 +282,7 @@ test('durably dispatched IAM write with predecessor still live fails closed with
  assert.deepEqual(writes(value),[]);
  const completed=fixture({front:frontend,native:audit});
  assert.deepEqual(reconcilePhase3WebIam({run:completed.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan('no-op','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
+  plan:plan('no-op','create'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
   claimOwnership:()=>claim(()=>{throw Error('completed write replayed');})}).actions,[]);
 });
 test('solo-operator GitHub authorization binds merged source and exact final PR head',()=>{

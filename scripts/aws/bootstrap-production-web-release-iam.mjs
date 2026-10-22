@@ -49,14 +49,16 @@ export function assertPhase3IamPlan(plan, sourceSha, checkpoint) {
   assert.deepEqual(Object.keys(actions).sort(), [...Object.keys(POLICY_NO_OPS), "aws_iam_role_policy.frontend_activation", "aws_iam_role_policy.stage_b_native_audit"].sort(),
     "IAM plan contains an unapproved resource");
   const tuple = [actions["aws_iam_role_policy.frontend_activation"], actions["aws_iam_role_policy.stage_b_native_audit"]];
-  assert.ok([["update", "create"], ["update", "no-op"], ["no-op", "no-op"]].some(expected =>
+  assert.ok([["update", "create"], ["update", "no-op"], ["no-op", "create"], ["no-op", "no-op"]].some(expected =>
     expected.every((action, index) => action === tuple[index])), "IAM plan does not match a safe transition checkpoint");
   if (checkpoint) {
-    const expected = checkpoint.frontend === PHASE3_IAM_TRANSITION.frontendPredecessorSha256
-      ? checkpoint.audit === null ? ["update", "create"] : ["update", "no-op"]
+    const expectedFrontend = checkpoint.frontend === PHASE3_IAM_TRANSITION.frontendPredecessorSha256 ? "update"
       : checkpoint.frontend === PHASE3_IAM_TRANSITION.frontendTargetSha256 && checkpoint.audit === PHASE3_IAM_TRANSITION.auditTargetSha256
-        ? ["no-op", "no-op"] : null;
-    assert.deepEqual(tuple, expected, "IAM plan actions differ from authenticated live checkpoint");
+        ? "no-op" : null;
+    assert.equal(tuple[0], expectedFrontend, "IAM frontend plan action differs from authenticated live checkpoint");
+    assert.ok(checkpoint.audit === null ? tuple[1] === "create"
+      : checkpoint.audit === PHASE3_IAM_TRANSITION.auditTargetSha256 && ["create", "no-op"].includes(tuple[1]),
+    "IAM audit plan action differs from authenticated live checkpoint");
   }
   const frontend = changes.find(({ address }) => address === "aws_iam_role_policy.frontend_activation").change;
   const audit = changes.find(({ address }) => address === "aws_iam_role_policy.stage_b_native_audit").change;
