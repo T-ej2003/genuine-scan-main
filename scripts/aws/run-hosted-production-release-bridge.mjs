@@ -26,7 +26,8 @@ const json=(run,args)=>JSON.parse(run([...args,'--output','json','--no-cli-pager
 const gh=(args)=>execFileSync('gh',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024});
 
 export async function runHostedBridge({env=process.env,requestCutover=runTerminalCutoverRequest,authenticate=authenticateTerminalCutover,
- dispatchSource=dispatchSourceBoundWorkflow,dispatchGate=dispatchProtectedMainReleaseGate,wait=sleep,fetchImpl=fetch,now=Date.now}={}){
+ verifyNativeStages,dispatchSource=dispatchSourceBoundWorkflow,dispatchGate=dispatchProtectedMainReleaseGate,wait=sleep,fetchImpl=fetch,now=Date.now}={}){
+ assert.equal(typeof verifyNativeStages,'function','Independent Stage B native verifier is required before requesting trusted-terminal authorization');
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
  assert.equal(env.GITHUB_REPOSITORY,repository);
  assert.equal(env.GITHUB_WORKFLOW_REF,`${repository}/.github/workflows/release-train.yml@refs/heads/main`);
@@ -63,7 +64,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:request.sourceSha,
    workflowRef:approval.workflowRef,eventName:'workflow_dispatch',workflowRunId:request.workflowRunId,
    workflowRunAttempt:request.workflowRunAttempt,executionActor:approval.executionActor,requireActualApproval:true}),
-  verifyCheckerSignature:checkerBridgeVerifier(run),verifyRootSignature:rootBridgeVerifier(run),readLive:async input=>{
+  verifyCheckerSignature:checkerBridgeVerifier(run),verifyRootSignature:rootBridgeVerifier(run),verifyNativeStages,readLive:async input=>{
    const priorNormal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
    if(priorNormal){
     const child=await fetchJson(`actions/runs/${priorNormal.runId}`);
