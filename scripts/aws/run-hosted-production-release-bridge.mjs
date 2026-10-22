@@ -199,19 +199,22 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  const deployed=assertNormalGateCompletion({run:normalChild,job:job[0],approvals,releaseTrainRunId:boundParentRunId,
   sourceSha:env.TARGET_SHA,authorization:auth,rlsReceipt,backendActivation,componentState,
   backendService:liveService('mscqr-backend-servi-euw2'),frontendService:liveService('mscqr-frontend-servi-euw2'),webRequired});
- const existing=await store.readStep(release.releaseId,'RELEASE_COMPLETE');
- if(existing){
-  assert.equal(existing.sourceSha,env.TARGET_SHA);assert.equal(existing.rotationId,env.BRIDGE_ROTATION_ID);
-  assert.equal(existing.overlapGateRunId,String(overlapRunId));assert.equal(existing.normalGateRunId,String(normalRunId));
-  assert.equal(existing.componentStateGeneration,deployed.componentStateGeneration);
-  return existing;
- }
  const receipt={name:'RELEASE_COMPLETE',releaseId:release.releaseId,sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
-  requestSha256:verified.request.requestSha256,terminalCompletionSha256:brokerDigest(completion),
+  requestSha256:verified.request.requestSha256,terminalEnvironmentApprovalSha256:verified.request.environmentApprovalSha256,
+  terminalCompletionSha256:brokerDigest(completion),overlapGateReviewer:resolved.reviewer,
   overlapGateRunId:String(overlapRunId),overlapReceiptSha256:resolved.receipt.receiptSha256,
-  normalGateRunId:String(normalRunId),parentReleaseTrainRunId:boundParentRunId,gateRunIds,
+  normalGateRunId:String(normalRunId),normalGateApprovalUserId:approvals.find(item=>item.state==='approved'&&item.environments?.some(environment=>environment.name==='production')).user.id,
+  parentReleaseTrainRunId:boundParentRunId,completionInvocationRunId:String(env.GITHUB_RUN_ID),gateRunIds,
   imageAuthorizationSha256:env.NORMAL_IMAGE_AUTHORIZATION_SHA256,
   ...deployed,completedAt:new Date(now()).toISOString()};
+ const existing=await store.readStep(release.releaseId,'RELEASE_COMPLETE');
+ if(existing){
+  const {completedAt:priorCompletedAt,completionInvocationRunId:priorInvocation,...priorBody}=existing;
+  const {completedAt,completionInvocationRunId,...expectedBody}=receipt;
+  assert.ok(Number.isSafeInteger(Date.parse(priorCompletedAt))&&/^[1-9][0-9]*$/.test(String(priorInvocation)));
+  assert.deepEqual(priorBody,expectedBody,'Persisted RELEASE_COMPLETE differs from authenticated live completion');
+  return existing;
+ }
  await store.writeStep(receipt);
  assert.deepEqual(await store.readStep(release.releaseId,'RELEASE_COMPLETE'),receipt,'Final release receipt readback differs');
  return receipt;
