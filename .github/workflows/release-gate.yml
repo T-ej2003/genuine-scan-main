@@ -1308,6 +1308,12 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Verify production after frontend activation
+        if: ${{ inputs.release_mode == 'normal' }}
+        run: |
+          set -euo pipefail
+          ./scripts/aws/verify-production-smoke.sh
+
       - name: Commit authenticated security component state
         if: ${{ inputs.release_mode == 'normal' }}
         env:

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import {isConditionalNativeSigner} from './production-cutover-consumption-journal.mjs';
 import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
+import {bridgeSignerFromEnvironment} from './production-release-bridge-sign-journal.mjs';
 import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -55,6 +56,8 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
   const releaseSessionPrefix = `${PRODUCTION_ACTIVATION_LIFECYCLE.releaseRoleArn.replace(":iam::", ":sts::").replace(":role/", ":assumed-role/")}/`;
   if (!String(releaseIdentity.Arn || "").startsWith(releaseSessionPrefix)
       || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(checkerIdentity.Arn || "")) throw new Error("Rotation successor requires separate release and checker identities.");
+  const bridge=process.env.MSCQR_BRIDGE_OPERATION_ID ? await bridgeSignerFromEnvironment({directory:path.dirname(configPath),repositoryRoot:root,readCaller:()=>json(checkerRun,['sts','get-caller-identity'])}) : null;
+  if(bridge&&(nativeSign||config.sourceSha!==process.env.MSCQR_BRIDGE_SOURCE_SHA||config.rotationId!==process.env.MSCQR_BRIDGE_ROTATION_ID))throw new Error('Bridge successor identity differs');
   const predecessorStatusSha256 = readOriginalRotationStatus({ config, repositoryRoot: root, execute: statusRun });
   const adoptionFile = path.join(path.dirname(configPath), "inventory-completed-adoption-evidence.json");
   const inventoryEvidence = JSON.parse(readStageBPrivateFileBytes({ filePath: adoptionFile, repositoryRoot: root, label: "Current inventory adoption" }).bytes);
@@ -69,8 +72,10 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
     };
     const sign = async ({ keyId, message: bytes }) => {
       if (!nativeSign) await legacyGuard({config,repositoryRoot:root,run:releaseRun});
-      const invoke=()=>json(checkerRun, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
-      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:'RAW',signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke) : invoke()).Signature;
+      const signRun=bridge?createAwsRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,singleAttemptMutation:'KMS_SIGN'}):checkerRun;
+      const invoke=()=>json(signRun, ["kms", "sign", "--key-id", keyId, "--message", message(bytes), "--message-type", "RAW", "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
+      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:'RAW',signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke)
+        : bridge ? await bridge({phase:'ROTATION_SUCCESSOR',keyId,message:Buffer.from(bytes),messageType:'RAW',signingAlgorithm:'RSASSA_PSS_SHA_256',invoke}) : invoke()).Signature;
     };
     const evidenceFile = path.join(path.dirname(configPath), "rotation-successor-evidence.json");
     let evidence;
@@ -106,5 +111,6 @@ export async function prepareProductionRotationSuccessor({ argv, root = process.
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  prepareProductionRotationSuccessor({ argv: process.argv.slice(2) }).then(result => process.stdout.write(`${JSON.stringify(result)}\n`), error => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
+  prepareProductionRotationSuccessor({ argv: process.argv.slice(2),
+    ...(process.env.MSCQR_BRIDGE_OPERATION_ID?{now:new Date(process.env.MSCQR_BRIDGE_PHASE_TIMESTAMP)}:{}) }).then(result => process.stdout.write(`${JSON.stringify(result)}\n`), error => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });
 }

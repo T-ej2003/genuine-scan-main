@@ -27,7 +27,8 @@ test('both deployment routes retain rotation gates while prerequisite-only stops
  assert.equal(train.jobs.orchestrate.needs,'gates');
  const steps=train.jobs.orchestrate.steps;
  assert.ok(steps.findIndex(step=>step.name==='Require authenticated prerequisite closure')<steps.findIndex(step=>step.name==='Trigger final Release Gate'));
- assert.equal(steps.find(step=>step.name==='Trigger final Release Gate').if,'${{ !inputs.prerequisites_only }}');
+ assert.equal(steps.find(step=>step.name==='Trigger final Release Gate').if,'${{ !inputs.prerequisites_only && !inputs.trusted_terminal_cutover }}');
+ assert.ok(steps.findIndex(step=>step.name==='Require authenticated prerequisite closure')<steps.findIndex(step=>step.name==='Resume trusted-terminal cutover and complete protected Release Gates'));
  assert.match(dispatch.run,/strict\)\s+;;/);
  assert.match(dispatch.run,/authenticated-initial-overlap\)[\s\S]*--mode validate-candidate/);
  assert.match(dispatch.run,/--image-release-sha "\$image_release_sha"/);

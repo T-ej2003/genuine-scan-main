@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  PRODUCTION_ENVIRONMENT_APPROVAL,
   assertProductionEnvironmentApprovalEvidence,
   assertProductionEnvironmentActualReviewer,
   assertProductionEnvironmentReviewer,
@@ -95,7 +96,8 @@ test("tamper, wrong bindings, and stale environment evidence fail closed", () =>
   ]) assert.throws(() => assertProductionEnvironmentApprovalEvidence(changedEvidence, changedContext), pattern);
 });
 
-test("only the protected-main Release Gate workflow identity can create production approval evidence", () => {
+test("only designated protected-main release workflows can create production approval evidence", () => {
+  assert.equal(evidence({workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef}).workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef);
   for (const workflowRef of [
     "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/release-2026-09-10",
     "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/tags/v1.2.3",

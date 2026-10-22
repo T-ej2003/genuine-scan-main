@@ -13,6 +13,8 @@ import { readBrokerRecoveryApproval } from "./stage-b-staged-broker-executor.mjs
 
 const args = parseBootstrapArgs(process.argv.slice(2));
 const conditionalPreparation = args.has('conditional-seed') || args.has('conditional-seed-sha256');
+const bridgePreflight=args.has('bridge-preflight');
+if(bridgePreflight && (args.get('bridge-preflight')!=='true'||conditionalPreparation))throw new Error('Bridge preflight must be a separate read-only legacy preparation');
 if(conditionalPreparation){
   const {assertConditionalProductionEnabled}=await import('./production-green-stage-b-contract.mjs');
   assertConditionalProductionEnabled();
@@ -40,7 +42,7 @@ capture("release-preflight-evidence", "Release-preflight checker-trust evidence"
 capture("release-preflight-attestation", "Release-preflight checker-trust attestation");
 capture("release-preflight-attestation-signature", "Release-preflight checker-trust attestation signature");
 if (temporaryKmsCapabilityPath) readStageBPrivateFileBytes({ filePath: temporaryKmsCapabilityPath, repositoryRoot: process.cwd(), label: "Temporary Stage-A KMS capability evidence" });
-for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name) && !(conditionalPreparation && name === "root-drop-evidence")) capture(name, label);
+for (const [name, label] of [["artifact-binding", "Artifact-signing runtime binding"], ["root-drop-evidence", "Root-drop evidence"], ["stage-a-plan", "Preserved Stage-A saved plan"], ["stage-a-recovery-evidence", "Stage-A recovery evidence"], ["stage-a-state", "Stage-A state"], ["stage-a-handoff", "Stage-A handoff"], ["stage-b-state", "Historical Stage-B state"], ["current-stage-b-state", "Current Stage-B state"], ["stage-b-tfvars", "Canonical Stage B tfvars"], ["stage-b-tfvars-binding-report", "Canonical Stage B tfvars binding report"]]) if (args.has(name) && !((conditionalPreparation||bridgePreflight) && name === "root-drop-evidence")) capture(name, label);
 const rotationBindingCapture = args.has("rotation-bindings") ? capture("rotation-bindings", "Rotation secret binding manifest") : null;
 const rotationSupersessionCapture = args.has("rotation-supersession-evidence") ? capture("rotation-supersession-evidence", "Rotation supersession evidence") : null;
 const recoveryEnvelopeCapture = args.has("recovery-envelope") ? capture("recovery-envelope", "Partial rebaseline recovery envelope") : null;
@@ -168,7 +170,12 @@ if(conditionalPreparation){
   const result=await publishConditionalPreparation({runtimeInput,sealedInputs:parseConditionalJson(seed.bytes),read:releaseRun,store:createReleaseCoordinatorStore({run:releaseRun,directory:outputDirectory,repositoryRoot:process.cwd()})});
   process.stdout.write(`${JSON.stringify({releaseId:result.releaseId,preparationReference:result.preparationReference,derivationSha256:result.derivationSha256})}\n`);
 }else{
-const result = prepareProductionCutoverRuntime(runtimeInput);
+const result = prepareProductionCutoverRuntime(bridgePreflight?{...runtimeInput,immutablePreparation:true}:runtimeInput);
+if(bridgePreflight){
+  if(result.blockers.length)throw new Error(`Legacy bridge pre-root readiness failed: ${result.blockers.join('; ')}`);
+  process.stdout.write(`${JSON.stringify({ready:true,sourceSha:result.releaseSourceSha,toolingSha:result.protectedMainSha,rotationId:rotationBindings?.rotationId,staticBindingSha256:result.runtimeTemplate ? result.runtimeTemplate.staticBindingSha256 || null : null})}\n`);
+  process.exit(0);
+}
 process.stdout.write(`${JSON.stringify({
   RUNTIME_DIRECTORY: result.runtimeDirectory,
   ROTATION_CONFIG: result.configPath || null,
