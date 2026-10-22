@@ -2,11 +2,15 @@ import assert from 'node:assert/strict';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {canonicalJson} from './production-green-stage-b-contract.mjs';
 import {kmsAdoptionMessage} from './production-completed-inventory-adoption.mjs';
-import {createHash,createPublicKey,verify,constants} from 'node:crypto';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 import {assertBridgeRequest,bridgeOperationId} from './production-release-bridge-contract.mjs';
 import {assertReadyForOverlapDeployment} from './production-overlap-readiness-contract.mjs';
 import {assertRootDropEvidence,canonicalRootDropPayload,verifyRootDropEvidenceWithKms} from './production-root-drop-evidence.mjs';
 import {STAGE_B} from './production-green-stage-b-contract.mjs';
+import {assertProductionEnvironmentApprovalIdentity,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 
 const stages=Object.freeze({ROOT_DROP:'rootEvidenceArtifactSha256',INVENTORY_ADOPTION:'adoptionEvidenceArtifactSha256',ROTATION_SUCCESSOR:'successorEvidenceArtifactSha256'});
 const SHA256=/^[a-f0-9]{64}$/;
@@ -20,7 +24,19 @@ const decodeTransport=(value,expectedSha)=>{
  return {bytes,value:JSON.parse(bytes.toString('utf8'))};
 };
 
-export async function authenticateTerminalCutover({store,releaseId,sourceSha,ticketId,rotationId,manifestSha256,verifyCheckerSignature,verifyRootSignature,readLive}={}){
+export async function authenticateBridgeEnvironmentApproval({store,request,observeApproval}={}){
+ assert.equal(typeof observeApproval,'function');
+ const approval=await store.getArtifact(request.environmentApprovalSha256);
+ assert.equal(brokerDigest(approval),request.environmentApprovalSha256);
+ assertProductionEnvironmentApprovalIdentity(approval,{sourceSha:request.sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
+ assert.equal(approval.schemaVersion,3);assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef);
+ assert.equal(approval.workflowRunId,request.workflowRunId);assert.equal(approval.workflowRunAttempt,request.workflowRunAttempt);
+ const observed=await observeApproval(approval,request);
+ assert.deepEqual(observed.actualApproval,approval.actualApproval,'Protected environment approval changed');
+ return approval;
+}
+
+export async function authenticateTerminalCutover({store,releaseId,sourceSha,ticketId,rotationId,manifestSha256,verifyCheckerSignature,verifyRootSignature,observeApproval,readLive}={}){
  assert.equal(typeof store?.readOperation,'function');assert.equal(typeof store?.getArtifact,'function');
  assert.equal(typeof verifyCheckerSignature,'function');assert.equal(typeof verifyRootSignature,'function');assert.equal(typeof readLive,'function');
  const operationId=bridgeOperationId({releaseId,sourceSha,rotationId});
@@ -36,6 +52,7 @@ export async function authenticateTerminalCutover({store,releaseId,sourceSha,tic
  const request=await store.readOperation(operationId,`BRIDGE:REQUEST:${owner.workflowRunId}:${owner.workflowRunAttempt}`);
  assertBridgeRequest(request,{releaseId,sourceSha,ticketId,rotationId,manifestSha256,allowExpired:true});
  assert.equal(request.requestSha256,owner.requestSha256);
+ await authenticateBridgeEnvironmentApproval({store,request,observeApproval});
  assert.equal(completion.operationId,operationId);assert.equal(completion.requestSha256,request.requestSha256);
  for(const key of ['releaseId','sourceSha','rotationId','manifestSha256'])assert.equal(completion[key],request[key]);
  for(const key of [...Object.values(stages),'readinessArtifactSha256','readinessSha256','rotationStateArtifactSha256','rotationStateSha256','rotationFixtureSha256'])assert.match(completion[key]||'',SHA256);
@@ -97,11 +114,14 @@ export function checkerBridgeVerifier(run){
   const input=dispatch.phase==='INVENTORY_ADOPTION'?kmsAdoptionMessage(original):{bytes:original,type:'RAW'};
   if(dispatch.input.keyId!==STAGE_B.approvalKmsKeyArn||dispatch.input.messageType!==input.type||dispatch.input.messageBase64!==input.bytes.toString('base64')
     ||dispatch.input.signingAlgorithm!=='RSASSA_PSS_SHA_256')return false;
-  const response=JSON.parse(run(['kms','get-public-key','--key-id',STAGE_B.approvalKmsKeyArn,'--output','json','--no-cli-pager']));
-  if(response.KeyId!==STAGE_B.approvalKmsKeyArn||response.KeyUsage!=='SIGN_VERIFY'||!response.SigningAlgorithms?.includes('RSASSA_PSS_SHA_256'))return false;
-  const key=createPublicKey({key:Buffer.from(response.PublicKey,'base64'),format:'der',type:'spki'});
-  return verify('sha256',original,{key,padding:constants.RSA_PKCS1_PSS_PADDING,saltLength:32},
-   Buffer.from(result.response.Signature,'base64'));
+  const directory=mkdtempSync(path.join(os.tmpdir(),'mscqr-bridge-kms-verify-'));
+  try{
+   const messagePath=path.join(directory,'message'),signaturePath=path.join(directory,'signature');
+   writeFileSync(messagePath,input.bytes,{mode:0o600});writeFileSync(signaturePath,Buffer.from(result.response.Signature,'base64'),{mode:0o600});
+   const response=JSON.parse(run(['kms','verify','--key-id',STAGE_B.approvalKmsKeyArn,'--message',`fileb://${messagePath}`,
+    '--message-type',input.type,'--signature',`fileb://${signaturePath}`,'--signing-algorithm','RSASSA_PSS_SHA_256','--output','json','--no-cli-pager']));
+   return response.KeyId===STAGE_B.approvalKmsKeyArn&&response.SignatureValid===true;
+  }finally{rmSync(directory,{recursive:true,force:true});}
  };
 }
 

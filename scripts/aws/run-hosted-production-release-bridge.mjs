@@ -18,6 +18,7 @@ import {requiredWorkflowFiles,usesLifecycleInputs} from '../github/release-lifec
 import {packReleaseEvidenceTransport,unpackReleaseEvidenceTransport} from './production-release-dispatch-contract.mjs';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {createBridgeCredentialRefresher} from './production-release-bridge-credentials.mjs';
+import {fetchProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 
 const repository='T-ej2003/genuine-scan-main';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -58,6 +59,10 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  let verified;
  const verify=()=>authenticate({store,releaseId:release.releaseId,sourceSha:release.sourceSha,ticketId:release.ticketId,
   rotationId:env.BRIDGE_ROTATION_ID,manifestSha256:env.BRIDGE_MANIFEST_SHA256,
+  observeApproval:(approval,request)=>fetchProductionEnvironmentApprovalEvidence({token:env.GH_TOKEN,
+   repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:request.sourceSha,
+   workflowRef:approval.workflowRef,eventName:'workflow_dispatch',workflowRunId:request.workflowRunId,
+   workflowRunAttempt:request.workflowRunAttempt,executionActor:approval.executionActor,requireActualApproval:true}),
   verifyCheckerSignature:checkerBridgeVerifier(run),verifyRootSignature:rootBridgeVerifier(run),readLive:async input=>{
    const priorNormal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
    if(priorNormal){

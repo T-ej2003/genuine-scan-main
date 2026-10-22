@@ -3,6 +3,7 @@ import test from 'node:test';
 import {bridgeOperationId,createBridgeRequest,assertBridgeRequest,claimBridgeRequest,classifyBridgeNativeResult,requestTrustedTerminalCutover} from '../aws/production-release-bridge-contract.mjs';
 import {brokerDigest} from '../aws/stage-b-staged-broker-contract.mjs';
 import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
+import {authenticateBridgeEnvironmentApproval} from '../aws/verify-production-release-terminal-bridge.mjs';
 
 const input={releaseId:'a'.repeat(64),sourceSha:'b'.repeat(40),ticketId:'CHG-1',rotationId:'rotation-20260913011819-98b062c4',manifestSha256:'c'.repeat(64),environmentApprovalSha256:'e'.repeat(64),workflowRunId:'123',workflowRunAttempt:'1',issuedAt:'2026-10-22T10:00:00.000Z',expiresAt:'2026-10-22T10:30:00.000Z'};
 const now=Date.parse('2026-10-22T10:01:00.000Z');
@@ -48,10 +49,10 @@ test('hosted request requires durable prerequisite closure and actual protected 
   workflowRunId:'123',workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(now).toISOString(),
   actualApproval:{state:'approved',environmentId:10,environmentName:'production',userId:1,userLogin:'operator'},
   environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
- const records=new Map();let complete=false;
- const store={readStart:async()=>({release:brokerDigest(release)}),getArtifact:async id=>id===brokerDigest(release)?release:{status:'PREREQUISITES_CONVERGED',releaseId:release.releaseId},
+ const records=new Map(),artifacts=new Map();let complete=false;
+ const store={readStart:async()=>({release:brokerDigest(release)}),getArtifact:async id=>artifacts.get(id)|| (id===brokerDigest(release)?release:{status:'PREREQUISITES_CONVERGED',releaseId:release.releaseId}),
   readStep:async()=>complete?{releaseId:release.releaseId,sourceSha:input.sourceSha,result:'f'.repeat(64)}:null,
-  putArtifact:async()=>{},readOperation:async(id,phase)=>records.get(`${id}:${phase}`)||null,
+  putArtifact:async(id,value)=>{artifacts.set(id,value);},readOperation:async(id,phase)=>records.get(`${id}:${phase}`)||null,
   claimOperation:async(id,phase,value)=>{records.set(`${id}:${phase}`,value);return true;}};
  const params={store,sourceSha:input.sourceSha,ticketId:input.ticketId,rotationId:input.rotationId,manifestSha256:input.manifestSha256,approval,workflowRunId:'123',workflowRunAttempt:'1',now};
  await assert.rejects(()=>requestTrustedTerminalCutover(params),/prerequisites/);
@@ -59,6 +60,8 @@ test('hosted request requires durable prerequisite closure and actual protected 
  const request=await requestTrustedTerminalCutover(params);
  assert.equal(request.environmentApprovalSha256,brokerDigest(approval));
  assert.equal(request.releaseId,release.releaseId);
+ assert.equal(await authenticateBridgeEnvironmentApproval({store,request,observeApproval:async()=>approval}),approval);
+ await assert.rejects(()=>authenticateBridgeEnvironmentApproval({store,request,observeApproval:async()=>({...approval,actualApproval:{...approval.actualApproval,userLogin:'forged'}})}),/approval changed/);
  const later=now+31*60*1000;
  const nextApproval=createProductionEnvironmentApprovalEvidence({repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',
   sourceSha:input.sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,eventName:'workflow_dispatch',

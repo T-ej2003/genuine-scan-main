@@ -20,6 +20,15 @@ test('one Sign is reused from its durable native result',async()=>{
  assert.equal(calls,1);
 });
 
+test('captured checker Sign survives a renewed checker STS session without another Sign',async()=>{
+ const store=memoryStore(),checker=session=>({Account:STAGE_B.account,
+  Arn:`arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/${session}`});
+ const input={...args,phase:'INVENTORY_ADOPTION',keyId:STAGE_B.approvalKmsKeyArn};
+ const response={KeyId:input.keyId,Signature:Buffer.from('checker-signature').toString('base64')};
+ await make(store,()=>checker('original'))({...input,invoke:()=>response});
+ assert.deepEqual(await make(store,()=>checker('renewed'))({...input,invoke:()=>{throw Error('duplicate Sign');}}),response);
+});
+
 test('lost KMS response leaves a permanent dispatch reservation',async()=>{
  const store=memoryStore();let calls=0;
  await assert.rejects(()=>make(store)({...args,invoke:()=>{calls++;throw Error('transport lost');}}),/outcome unknown/i);

@@ -32,7 +32,9 @@ export function createBridgeSignJournal({store,request,releaseId,sourceSha,ticke
    assert.equal(dispatch.requestSha256,request.requestSha256,'Bridge authorization changed after Sign dispatch');
    assert.equal(dispatch.inputSha256,inputSha256,'Bridge KMS input changed after Sign dispatch');
    assert.deepEqual(dispatch.input,input,'Bridge native Sign message changed');
-   assert.equal(dispatch.principal,caller.Arn,'Bridge signer changed after Sign dispatch');
+   if(phase==='ROOT_DROP')assert.equal(dispatch.principal,caller.Arn,'Bridge root signer changed after Sign dispatch');
+   else assert.ok(dispatch.principal.startsWith(checkerPrefix)&&dispatch.principal.length>checkerPrefix.length,
+    'Original independent checker signer differs');
    const result=await store.readOperation(operationId,`${recordPhase}:RESULT`);
    if(!result)throw unknown();
    assert.deepEqual(result.dispatch,dispatch,'Persisted KMS result has a different dispatch');
