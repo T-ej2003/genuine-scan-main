@@ -54,6 +54,8 @@ test('normal Gate completion binds backend, frontend, database and smoke to one 
  const frontendService={taskDefinition:webArn,desiredCount:2,runningCount:2,pendingCount:0};
  const input={run,job,approvals,releaseTrainRunId:'9',sourceSha:source,authorization,rlsReceipt,backendActivation,componentState,backendService,frontendService,webRequired:true};
  assert.equal(assertNormalGateCompletion(input).frontendImageDigest,webDigest);
+ assert.equal(assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'}}).frontendImageDigest,webDigest);
+ assert.throws(()=>assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'},job:{...job,conclusion:'failure'}}));
  assert.throws(()=>assertNormalGateCompletion({...input,frontendService:{...frontendService,taskDefinition:'wrong'}}));
  assert.throws(()=>assertNormalGateCompletion({...input,componentState:{...componentState,components:{...components,database:{...components.database,releaseIdentity:'wrong'}}}}));
  assert.throws(()=>assertNormalGateCompletion({...input,job:{...job,steps:job.steps.filter(step=>step.name!=='Verify production after frontend activation')}}));

@@ -183,7 +183,8 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   normal_image_authorization_sha256:transport.sha256,
   ...(env.WEB_IMAGE_AUTHORIZATION_JSON?{web_image_authorization_json:env.WEB_IMAGE_AUTHORIZATION_JSON}:{})};
  const normalRunId=await dispatchOnce('NORMAL',normalInputs);
- const normalChild=await waitChild(normalRunId,'release-gate.yml');
+ // A failed workflow can still have a completed deployment job; native receipts decide reuse.
+ const normalChild=await waitChild(normalRunId,'release-gate.yml',{allowFailure:true});
  await credentials.ensure();
  const jobs=await fetchJson(`actions/runs/${normalRunId}/attempts/${normalChild.run_attempt}/jobs?per_page=100`);
  const job=(jobs.jobs||[]).filter(item=>item.name==='Deploy production ECS'&&String(item.run_id)===String(normalRunId));
@@ -208,8 +209,8 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  const receipt={name:'RELEASE_COMPLETE',releaseId:release.releaseId,sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
   requestSha256:verified.request.requestSha256,terminalEnvironmentApprovalSha256:verified.request.environmentApprovalSha256,
   terminalCompletionSha256:brokerDigest(completion),overlapGateReviewer:resolved.reviewer,
-  overlapGateRunId:String(overlapRunId),overlapReceiptSha256:resolved.receipt.receiptSha256,
-  normalGateRunId:String(normalRunId),normalGateApprovalUserId:approvals.find(item=>item.state==='approved'&&item.environments?.some(environment=>environment.name==='production')).user.id,
+  overlapGateRunId:String(overlapRunId),overlapGateWorkflowConclusion:overlapChild.conclusion,overlapReceiptSha256:resolved.receipt.receiptSha256,
+  normalGateRunId:String(normalRunId),normalGateWorkflowConclusion:normalChild.conclusion,normalGateApprovalUserId:approvals.find(item=>item.state==='approved'&&item.environments?.some(environment=>environment.name==='production')).user.id,
   parentReleaseTrainRunId:boundParentRunId,completionInvocationRunId:String(env.GITHUB_RUN_ID),gateRunIds,
   imageAuthorizationSha256:env.NORMAL_IMAGE_AUTHORIZATION_SHA256,
   ...deployed,completedAt:new Date(now()).toISOString()};

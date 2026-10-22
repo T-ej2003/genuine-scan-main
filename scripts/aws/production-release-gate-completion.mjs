@@ -12,7 +12,8 @@ export function assertNormalGateCompletion({run,job,approvals,releaseTrainRunId,
  assert.match(String(releaseTrainRunId||''),/^[1-9][0-9]*$/);
  assert.equal(run?.repository?.full_name,repository);assert.equal(run.head_repository?.full_name,repository);
  assert.equal(run.head_sha,sourceSha);assert.equal(run.head_branch,'main');assert.equal(run.path,'.github/workflows/release-gate.yml');
- assert.equal(run.event,'workflow_dispatch');assert.equal(run.status,'completed');assert.equal(run.conclusion,'success');
+ assert.equal(run.event,'workflow_dispatch');assert.equal(run.status,'completed');
+ assert.ok(['success','failure'].includes(run.conclusion),'Normal Gate has no final authenticated conclusion');
  assert.equal(job?.run_id,run.id);assert.equal(job.run_attempt,run.run_attempt);assert.equal(job.head_sha,sourceSha);
  assert.equal(job.status,'completed');assert.equal(job.conclusion,'success');
  const byName=name=>{const matches=(job.steps||[]).filter(step=>step.name===name);assert.equal(matches.length,1,`${name} step identity is ambiguous`);return matches[0];};
