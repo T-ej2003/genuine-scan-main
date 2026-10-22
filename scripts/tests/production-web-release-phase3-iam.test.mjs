@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {assertPhase3IamPlan,assertPhase3IamReview,claimPhase3IamOwner,phase3IamReviewMarker,reconcilePhase3WebIam,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,phase3IamAuthorizationMarker,readPhase3IamAuthorization,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
 
 const directory='infra/aws/terraform/production-web-release';
@@ -11,6 +11,10 @@ const frontend=JSON.parse(fs.readFileSync(`${directory}/frontend-activation-poli
 const audit=JSON.parse(fs.readFileSync(`${directory}/stage-b-native-audit-policy.json`));
 const predecessor={...frontend,Statement:frontend.Statement.filter(({Sid})=>Sid!=='FindClaimedFrontendRevision')};
 const sourceSha='b'.repeat(40);
+const mfaEvidence={sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,authorizationId:42,operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator',accessKeyIdSha256:'f'.repeat(64),verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
+assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');
+assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
+assert.ok(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_WEB_RELEASE.md','utf8').includes(phase3IamAuthorizationMarker('<final_pr_head_sha>')));
 assert.equal(digest(predecessor),PHASE3_IAM_TRANSITION.frontendPredecessorSha256);
 
 function plan(frontendAction='update',auditAction='create'){
@@ -51,7 +55,8 @@ function fixture({front=predecessor,native=null,lostResponse=null,onRead=null,ca
  };
  return {run,calls,state:()=>({frontendPolicy,auditPolicy})};
 }
-const reconcile=(value,selected=plan(),review=42)=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,plan:selected,independentReviewId:review,claimOwnership:()=> 'd'.repeat(64)});
+const claim=markDispatch=>({ownershipSha256:'d'.repeat(64),markDispatch,complete:()=> 'e'.repeat(64)});
+const reconcile=(value,selected=plan(),authorizationId=42)=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,plan:selected,authorizationId,mfaEvidence,claimOwnership:()=>claim(()=>true)});
 const writes=value=>value.calls.filter(([service,operation])=>service==='iam'&&operation==='put-role-policy').map(args=>args[args.indexOf('--policy-name')+1]);
 
 test('exact approved two-policy transition and authenticated rerun',()=>{
@@ -65,8 +70,8 @@ test('exact approved two-policy transition and authenticated rerun',()=>{
 });
 test('approval, source fingerprints and plan reject unauthorized expansion before a write',()=>{
  const value=fixture();
- assert.throws(()=>reconcile(value,plan(),null),/Independent IAM approval/);
- assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:'different',plan:plan(),independentReviewId:42,claimOwnership:()=> 'd'.repeat(64)}));
+ assert.throws(()=>reconcile(value,plan(),null),/Solo-operator IAM authorization/);
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:'different',plan:plan(),authorizationId:42,mfaEvidence,claimOwnership:()=>claim(()=>true)}));
  for(const altered of [
   p=>p.resource_changes.push({address:'aws_iam_role_policy.unrelated',change:{actions:['create']}}),
   p=>p.resource_changes.push({...p.resource_changes[0]}),
@@ -96,31 +101,37 @@ test('partial installation and lost AWS responses reconcile without duplicate wr
 test('write-once S3 owner claim reuses the same terminal and rejects another owner',()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mscqr-iam-owner-test-'));fs.chmodSync(dir,0o700);
  try{
-  let stored=null,lost=false;const calls=[];
+  const stored=new Map();let lost=false;const calls=[];
   const run=args=>{
    calls.push(args);const flag=name=>args[args.indexOf(name)+1];
+   const key=flag('--key');
    if(args[1]==='put-object'){
-    if(stored)throw Error('PreconditionFailed');
-    stored=fs.readFileSync(flag('--body'));
+    if(stored.has(key))throw Error('PreconditionFailed');
+    stored.set(key,fs.readFileSync(flag('--body')));
     if(lost)throw Error('response lost');
     return '{}';
    }
    if(args[1]==='get-object'){
-    if(!stored)throw Error('NoSuchKey');
-    fs.writeFileSync(args.at(-1),stored);return '{}';
+    if(!stored.has(key))throw Error('NoSuchKey');
+    fs.writeFileSync(args.at(-1),stored.get(key));return '{}';
    }
    throw Error('Unexpected S3 call');
   };
   const first=path.join(dir,'first.json'),second=path.join(dir,'second.json');
-  const input={run,sourceSha,independentReviewId:42};
+  const input={run,sourceSha,authorizationId:42,mfaEvidence};
   const owner=claimPhase3IamOwner({...input,ownerFile:first});
-  assert.equal(claimPhase3IamOwner({...input,ownerFile:first}),owner);
+  assert.equal(claimPhase3IamOwner({...input,ownerFile:first}).ownershipSha256,owner.ownershipSha256);
   assert.throws(()=>claimPhase3IamOwner({...input,ownerFile:second}),/ownership outcome unknown or conflicting/);
-  assert.throws(()=>claimPhase3IamOwner({...input,independentReviewId:43,ownerFile:path.join(dir,'third.json')}),/ownership outcome unknown or conflicting/);
+  assert.throws(()=>claimPhase3IamOwner({...input,authorizationId:43,mfaEvidence:{...mfaEvidence,authorizationId:43},ownerFile:path.join(dir,'third.json')}),/ownership outcome unknown or conflicting/);
+  assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),true);
+  assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),false,'existing dispatch must never be repeated');
+  assert.throws(()=>owner.markDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),/dispatch journal conflicts/);
+  assert.match(owner.complete(),/^[a-f0-9]{64}$/);
+  assert.equal(owner.complete(),owner.complete(),'completion receipt is write-once and reusable');
   const claimKeys=calls.filter(args=>args[1]==='put-object').map(args=>args[args.indexOf('--key')+1]);
-  assert.equal(new Set(claimKeys).size,1,'renewed approval cannot claim a second IAM operation key');
-  stored=null;lost=true;
-  assert.equal(claimPhase3IamOwner({...input,ownerFile:first}),owner,'lost create response is reconciled by exact readback');
+  assert.equal(new Set(claimKeys).size,3,'renewed authorization cannot claim a second IAM operation key');
+  stored.clear();lost=true;
+  assert.equal(claimPhase3IamOwner({...input,ownerFile:first}).ownershipSha256,owner.ownershipSha256,'lost create response is reconciled by exact readback');
   assert.ok(calls.filter(args=>args[1]==='put-object').every(args=>args.includes('--if-none-match')));
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
@@ -135,11 +146,63 @@ test('concurrent IAM change and interrupted bootstrap stop or resume at the exac
  const wrong=fixture({caller:'arn:aws:iam::368992683803:user/operator'});
  assert.throws(()=>reconcile(wrong),/account root/);assert.deepEqual(writes(wrong),[]);
 });
-test('independent GitHub approval binds merged source and exact reviewed policy transition',()=>{
+test('durably dispatched IAM write with predecessor still live fails closed without replay',()=>{
+ const value=fixture();
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan(),authorizationId:42,mfaEvidence,
+  claimOwnership:()=>claim(()=>false)}),/dispatch outcome unknown/);
+ assert.deepEqual(writes(value),[]);
+ const completed=fixture({front:frontend,native:audit});
+ assert.deepEqual(reconcilePhase3WebIam({run:completed.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('no-op','no-op'),authorizationId:42,mfaEvidence,
+  claimOwnership:()=>claim(()=>{throw Error('completed write replayed');})}).actions,[]);
+});
+test('solo-operator GitHub authorization binds merged source and exact final PR head',()=>{
  const pull={merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T17:00:00Z',base:{ref:'main',repo:{full_name:'T-ej2003/genuine-scan-main'}},head:{sha:'c'.repeat(40)},user:{id:1}};
- const review={id:42,state:'APPROVED',commit_id:pull.head.sha,body:phase3IamReviewMarker(),user:{id:2,login:'security-reviewer',type:'User'},submitted_at:'2026-10-22T16:00:00Z'};
- const accepted={pull,reviews:[review],permission:{user:{id:2},permission:'write'},operator:{id:1},sourceSha};
- assert.equal(assertPhase3IamReview(accepted),42);
- for(const change of [{reviews:[]},{reviews:[{...review,user:{id:1,type:'User'}}]},{reviews:[{...review,user:{id:2,type:'Bot'}}]},{reviews:[{...review,body:'no exact binding'}]},{reviews:[{...review,submitted_at:'invalid'}]},{pull:{...pull,merge_commit_sha:'d'.repeat(40)}},{permission:{user:{id:2},permission:'read'}}])
-  assert.throws(()=>assertPhase3IamReview({...accepted,...change}));
+ pull.user.id=183396573;
+ const comment={id:42,body:phase3IamAuthorizationMarker(pull.head.sha),user:{id:183396573,type:'User'},created_at:'2026-10-22T16:00:00Z',updated_at:'2026-10-22T16:00:00Z'};
+ const accepted={pull,comments:[comment],operator:{id:183396573},sourceSha};
+ assert.equal(assertPhase3IamAuthorization(accepted),42);
+ for(const change of [{comments:[]},{comments:[{...comment,user:{id:2,type:'User'}}]},{comments:[{...comment,user:{id:183396573,type:'Bot'}}]},{comments:[{...comment,body:'other operation'}]},{comments:[{...comment,updated_at:'2026-10-22T16:01:00Z'}]},{pull:{...pull,merge_commit_sha:'d'.repeat(40)}},{operator:{id:2}}])
+  assert.throws(()=>assertPhase3IamAuthorization({...accepted,...change}));
+});
+test('production GitHub authorization is pinned to github.com despite ambient host injection',()=>{
+ const head='c'.repeat(40),calls=[];
+ const pull={merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T17:00:00Z',base:{ref:'main',repo:{full_name:'T-ej2003/genuine-scan-main'}},head:{sha:head},user:{id:183396573}};
+ const comments=[{id:42,body:phase3IamAuthorizationMarker(head),user:{id:183396573,type:'User'},created_at:'2026-10-22T16:00:00Z',updated_at:'2026-10-22T16:00:00Z'}];
+ const execute=(_executable,args,options)=>{
+  calls.push({args,options});
+  const endpoint=args.at(-1);
+  return JSON.stringify(endpoint==='user'?{id:183396573}:endpoint.includes('/comments?')?comments:pull);
+ };
+ assert.equal(readPhase3IamAuthorization({prNumber:'721',sourceSha,execute,executable:'gh',env:{GH_HOST:'attacker.example',GH_ENTERPRISE_TOKEN:'forged',PATH:process.env.PATH}}),42);
+ assert.equal(calls.length,3);
+ for(const {args,options} of calls){assert.deepEqual(args.slice(0,3),['api','--hostname','github.com']);assert.equal(options.env.GH_HOST,'github.com');assert.equal(options.env.GH_ENTERPRISE_TOKEN,undefined);}
+});
+test('fresh MFA challenge uses fixed non-root user and never sends code in CLI arguments',async()=>{
+ const calls=[];
+ const execute=(_aws,args,options)=>{
+  calls.push({args,options});
+  if(args[1]==='get-session-token'){
+   const file=args[args.indexOf('--cli-input-json')+1].replace(/^file:\/\//,'');
+   assert.equal(fs.statSync(file).mode&0o077,0);
+   assert.equal(JSON.parse(fs.readFileSync(file)).TokenCode,'123456');
+   return JSON.stringify({Credentials:{AccessKeyId:'ASIAEXAMPLE',SecretAccessKey:'private',SessionToken:'private-session',Expiration:new Date(Date.now()+900000).toISOString()}});
+  }
+  return JSON.stringify({Account:'368992683803',Arn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator'});
+ };
+ const result=await verifyPhase3IamMfa({sourceSha,authorizationId:42,execute,prompt:async()=>'123456'});
+ assert.equal(result.authorizationId,42);
+ assert.equal(calls.length,2);
+ assert.ok(calls[0].args.every(value=>!value.includes('123456')));
+ assert.ok(calls[0].args.includes('--cli-input-json'));
+ assert.equal(calls[0].options.env.AWS_PROFILE,'mscqr-production-bootstrap-operator');
+ assert.equal(calls[1].options.env.AWS_PROFILE,undefined);
+ assert.equal(calls[1].options.env.AWS_SESSION_TOKEN,'private-session');
+ assert.throws(()=>reconcile(fixture(),plan(),null),/Solo-operator IAM authorization/);
+ const expired=fixture();
+ assert.throws(()=>reconcilePhase3WebIam({run:expired.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan(),authorizationId:42,mfaEvidence:{...mfaEvidence,expiresAt:new Date(Date.now()-1000).toISOString()},
+  claimOwnership:()=>claim(()=>true)}),/MFA authority expired/);
+ assert.deepEqual(writes(expired),[]);
 });

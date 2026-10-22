@@ -91,29 +91,29 @@ Read back the publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAG
 
 ## CHG-20261022-001 exact IAM reconciliation
 
-The Phase 3 transition is deliberately narrower than a general IAM update. The reviewed source bootstrap accepts only the recorded live frontend policy fingerprint `a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352`, target frontend fingerprint `5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d`, and new native audit fingerprint `741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122`. It binds ticket `CHG-20261022-001` and requires an independently approved, merged correction PR whose review on its final head contains:
+The Phase 3 transition is deliberately narrower than a general IAM update. The reviewed source bootstrap accepts only the recorded live frontend policy fingerprint `a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352`, target frontend fingerprint `5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d`, and new native audit fingerprint `741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122`. It binds ticket `CHG-20261022-001`. There is no external or AWS requirement for a second human IAM reviewer, and protected-main branch protection currently requires zero approving reviews. This transition uses an exact solo-operator GitHub authorization comment, CI, automated Codex review, and a fresh non-root MFA challenge. The accountable operator must post the following comment on the **final PR head**, replacing `<final_pr_head_sha>` with that SHA:
 
 ```text
-MSCQR_PHASE3_IAM_APPROVAL_V1:37872f115cf26ba9d8105cfeaf21686caa683ef876cfe9a9153f52beeb24bf69
+MSCQR_PHASE3_IAM_SOLO_AUTH_V1:6ef467d26a26e2b40669256951ba3a44d7dbc700b2662db9506e62bb0611938c:<final_pr_head_sha>
 ```
 
-The reviewer must have repository write authority and differ from the PR author and executing GitHub identity. A Codex comment alone is not this approval. A missing or superseded approval stops before IAM writes. The existing component-IAM approval workflow is scoped to other documents and cannot authorize this transition.
+The installer retrieves the unedited comment through the authenticated GitHub API, requires it to be authored by GitHub user `T-ej2003` (ID `183396573`) before the PR merges, and binds it to the merged protected-main source. Codex's automated review is a separate defect check, never a human approval. A missing or edited operator comment stops before IAM writes. The existing component-IAM approval workflow is scoped to other documents and cannot authorize this transition. This solo IAM authorization does not enable the disabled Stage B conditional lane or change root, checker, or verifier approval rules.
 
 After the correction PR merges, treat its new protected-main SHA as a **new release source**; do not rebind older image or Stage B approvals. Generate a fresh private Terraform plan with the existing MFA-backed non-root profile and the production-web-release backend. Confirm only the two permitted transitions are present. Keep its saved binary outside the repository and record its SHA-256. Do not apply this plan; the exact-document bootstrap is the IAM writer. Preserve the same initialized private `TF_DATA_DIR` in the trusted terminal for the installer's read-only `terraform show`; the plan cannot be decoded without its provider schema.
 
-On the trusted terminal, keep the owner file in a private mode-0700 directory outside the repository. After independent PR approval and fresh-plan review, run the source-controlled installer from a clean exact-main checkout with the governed root configuration profile:
+On the trusted terminal, keep the owner file in a private mode-0700 directory outside the repository. After the final-head operator comment, clean Codex review, passing required CI, protected-main merge, and fresh-plan review, run the source-controlled installer from a clean exact-main checkout with the governed root configuration profile. The command prompts for the bootstrap operator's MFA code, obtains a fresh 900-second STS session with the fixed MFA serial, and verifies the exact non-root IAM user. The AWS CLI challenge is held briefly in a mode-0600 file under a mode-0700 temporary directory and removed immediately after issuance; credentials and the code never go to GitHub or logs:
 
 ```sh
 node scripts/aws/bootstrap-production-web-release-iam.mjs \
   --source-sha <new_protected_main_sha> \
   --admin-profile mscqr-production-root \
   --ticket-id CHG-20261022-001 \
-  --approval-pr <independently_approved_correction_pr> \
+  --authorization-pr <solo_authorized_correction_pr> \
   --plan-file <private_saved_plan> \
   --owner-file <private_directory>/phase3-iam-owner.json
 ```
 
-The installer authenticates exact account root, the PR review, source policy fingerprints, plan semantics, live predecessor, and a write-once S3 ownership claim before any IAM write. It installs the native audit policy first, then the frontend policy, with exact readback after each. A lost IAM response is reused only when live policy equals the target. Retain the owner file for interrupted recovery; another owner cannot claim this operation. Unexpected drift or an unknown write outcome stops.
+The installer authenticates exact account root, the operator comment, fresh MFA session, source policy fingerprints, plan semantics, live predecessor, and a write-once S3 ownership claim before any IAM write. The initial MFA proof metadata is retained in the encrypted claim; credentials and MFA code are not. Each policy receives a separate encrypted write-ahead dispatch marker before `PutRolePolicy`. It installs the native audit policy first, then the frontend policy, with exact readback after each, and publishes an encrypted write-once completion receipt. A lost IAM response is reused only when live policy equals the target. If a dispatch marker exists but live IAM remains at the predecessor, outcome is unknown and the installer stops instead of issuing a duplicate write. Retain the owner file for interrupted recovery; another owner cannot claim this operation. A restart requires a new MFA challenge. Unexpected drift or an unknown write outcome stops.
 
 After live readback, import only the new inline policy into the existing remote Terraform state using the MFA-backed non-root operator:
 
