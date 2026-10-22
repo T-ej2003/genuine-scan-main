@@ -91,6 +91,15 @@ export function classifyNormalGateRerunOutcome(child,recovery){
  return 'RECONCILE';
 }
 
+export function isBoundCompletedNormalSuccessor({record,child,sourceSha,rotationId,parentRunId}){
+ if(!record)return false;
+ assert.equal(record.inputs?.target_sha,sourceSha);
+ assert.equal(record.inputs?.rotation_id,rotationId);
+ assert.equal(record.inputs?.release_train_run_id,parentRunId);
+ assert.equal(String(child.id),String(record.runId));
+ return child.conclusion==='success';
+}
+
 export async function waitForTerminalCutover({verify,coordinateNative=async()=>{},ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
  const operationId=request.operationId;
  for(let i=0;i<maxPolls;i++){
@@ -257,6 +266,15 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    let child=await waitChild(id,'release-gate.yml',{allowFailure:true});
    for(let recovery=0;recovery<3;recovery++){
    if(child.conclusion==='success')return {runId:id,child};
+   if(mode==='OVERLAP'){
+    const normal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
+    if(normal){
+     const successor=await waitChild(normal.runId,'release-gate.yml',{allowFailure:true});
+     // authenticateTerminalCutover already checked this successful successor against live ECS and component state.
+     if(isBoundCompletedNormalSuccessor({record:normal,child:successor,sourceSha:env.TARGET_SHA,
+      rotationId:env.BRIDGE_ROTATION_ID,parentRunId:boundParentRunId}))return {runId:id,child};
+    }
+   }
    await credentials.ensure();
    const jobs=await fetchJson(`actions/runs/${id}/attempts/${child.run_attempt}/jobs?per_page=100`);
    const matches=(jobs.jobs||[]).filter(job=>job.name==='Deploy production ECS'&&String(job.run_id)===String(id));
@@ -277,8 +295,9 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
      backendService:live('mscqr-backend-servi-euw2'),frontendService:live('mscqr-frontend-servi-euw2'),
      expectedFrontendArn,predecessorArn:expectedBackendArn,targetArn:targetBackendArn,
      imageDigest:targetImageDigest,componentState:createProductionComponentDeploymentStateClient({run}).read(),
-     runningTasks:described.failures?.length?[]:described.tasks,sourceSha:env.TARGET_SHA});
+     runningTasks:described.failures?.length?[]:described.tasks,sourceSha:env.TARGET_SHA,childRunId:id});
     if(overlapRecovery==='INCOMPLETE')break;
+    assert.equal(overlapRecovery,'COMPLETED','Overlap child failed without authenticated native completion');
     return {runId:id,child};
    }
    if(mode!=='NORMAL')return {runId:id,child};

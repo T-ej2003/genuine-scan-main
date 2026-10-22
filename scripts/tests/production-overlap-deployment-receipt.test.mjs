@@ -135,6 +135,14 @@ test("receipt remains usable when an auditable post-receipt health tail fails", 
   const resolved = resolveProductionOverlapDeploymentReceipt({ workflowRunId: "10", workflowRunAttempt: "1", sourceSha, run });
   assert.equal(resolved.receipt.receiptSha256, value.receiptSha256);
   assert.deepEqual(resolved.tailFailures.map(({ name }) => name), ["Verify backend health"]);
+  for (const conclusion of ["cancelled", "timed_out"]) {
+    const interrupted = (command, args) => {
+      if (args[1]?.endsWith("/actions/runs/10")) return JSON.stringify({ ...workflow, conclusion });
+      if (args[1]?.endsWith("/attempts/1/jobs")) return JSON.stringify([{ jobs: [{ ...job, conclusion }] }]);
+      return run(command, args);
+    };
+    assert.equal(resolveProductionOverlapDeploymentReceipt({ workflowRunId: "10", workflowRunAttempt: "1", sourceSha, run: interrupted }).receipt.receiptSha256, value.receiptSha256);
+  }
 });
 
 test("verifier cross-binds the deployed task definition to authenticated readiness", () => {

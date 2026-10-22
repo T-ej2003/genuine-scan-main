@@ -107,4 +107,16 @@ test('failed overlap child can use the existing native zero-update reconciliatio
  assert.equal(classifyPostMutationOverlapGateRecovery({...input,backendService:stable('attacker:3')}),'OUTCOME_UNKNOWN');
  assert.equal(classifyPostMutationOverlapGateRecovery({...input,runningTasks:input.runningTasks.slice(0,1)}),'OUTCOME_UNKNOWN');
  assert.equal(classifyPostMutationOverlapGateRecovery({...input,componentState:{components:{backend:{taskDefinitionArn:'attacker:3'}}}}),'CONFLICTED');
+ const committed={...input,childRunId:'42',componentState:{components:{backend:{taskDefinitionArn:targetArn,
+  imageDigest:digest,establishedThroughSha:sourceSha},security:{sourceSha,releaseIdentity:'1'.repeat(64)}},
+  completedEmergencyWork:{'rotation-overlap':{sourceSha,evidenceSha256:'1'.repeat(64)}},
+  componentProvenance:{backend:{githubRunId:'42'},security:{githubRunId:'42'}}}};
+ assert.equal(classifyPostMutationOverlapGateRecovery(committed),'COMPLETED');
+ assert.equal(classifyPostMutationOverlapGateRecovery({...committed,childRunId:'43'}),'CONFLICTED');
+ assert.equal(classifyPostMutationOverlapGateRecovery({...committed,childRunId:undefined}),'CONFLICTED');
+ assert.equal(classifyPostMutationOverlapGateRecovery({...committed,componentState:{...committed.componentState,
+  completedEmergencyWork:{}}}),'CONFLICTED');
+ assert.equal(classifyPostMutationOverlapGateRecovery({...committed,componentState:{...committed.componentState,
+  components:{...committed.componentState.components,backend:{...committed.componentState.components.backend,
+   imageDigest:'sha256:'+'0'.repeat(64)}}}}),'CONFLICTED');
 });

@@ -96,7 +96,7 @@ export async function classifyPreBackendNormalGateRecovery({store,backendOperati
 }
 
 export function classifyPostMutationOverlapGateRecovery({backendService,frontendService,expectedFrontendArn,
- predecessorArn,targetArn,imageDigest,componentState,runningTasks,sourceSha}={}){
+ predecessorArn,targetArn,imageDigest,componentState,runningTasks,sourceSha,childRunId}={}){
  const stable=(service,arn)=>service?.taskDefinition===arn&&service.status==='ACTIVE'&&
   service.desiredCount===2&&service.runningCount===2&&service.pendingCount===0&&
   service.deployments?.length===1&&service.deployments[0].status==='PRIMARY'&&
@@ -110,6 +110,11 @@ export function classifyPostMutationOverlapGateRecovery({backendService,frontend
  const backend=componentState?.components?.backend;
  if(backend?.taskDefinitionArn===predecessorArn)return 'INCOMPLETE';
  if(backend?.taskDefinitionArn===targetArn&&backend.imageDigest===imageDigest&&
-  componentState.components.security?.sourceSha===sourceSha)return 'INCOMPLETE';
+  backend.establishedThroughSha===sourceSha&&componentState.components.security?.sourceSha===sourceSha&&
+  componentState.completedEmergencyWork?.['rotation-overlap']?.sourceSha===sourceSha&&
+  componentState.completedEmergencyWork['rotation-overlap'].evidenceSha256===componentState.components.security.releaseIdentity&&
+  /^[1-9][0-9]*$/.test(String(childRunId))&&
+  String(componentState.componentProvenance?.backend?.githubRunId)===String(childRunId)&&
+  String(componentState.componentProvenance?.security?.githubRunId)===String(childRunId))return 'COMPLETED';
  return 'CONFLICTED';
 }
