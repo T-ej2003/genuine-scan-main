@@ -11,7 +11,7 @@ import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from 
 import { createAssumedRoleSessionEnvironment, createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, productionGithubExecutable } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { digest as iamDigest } from "./component-iam-installation-contract.mjs";
-import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import { readStageBProtectedMainCheckoutFromGitHub } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const account = "368992683803";
@@ -35,7 +35,21 @@ export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
   const stat = fsOps.statSync("/usr/bin/git");
   assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe production Git executable");
   for (const key of Object.keys(env)) if (key.startsWith("GIT_")) delete env[key];
+  env.GIT_CONFIG_GLOBAL = "/dev/null";
+  env.GIT_CONFIG_NOSYSTEM = "1";
+  env.GIT_CONFIG_COUNT = "2";
+  env.GIT_CONFIG_KEY_0 = "core.worktree";
+  env.GIT_CONFIG_VALUE_0 = root;
+  env.GIT_CONFIG_KEY_1 = "core.fsmonitor";
+  env.GIT_CONFIG_VALUE_1 = "false";
   env.PATH = "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin";
+}
+export function readPhase3IamProtectedSource({ sourceSha, cwd = root, execute = execFileSync,
+  executable = productionGithubExecutable(), env = process.env, readCheckout = readStageBProtectedMainCheckoutFromGitHub }) {
+  const ghEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
+  return readCheckout({ cwd, expectedSourceSha: sourceSha, githubRun: (_command, args) =>
+    execute(executable, ["api", "--hostname", "github.com", args[1]],
+      { env: ghEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 30000 }) }).currentHead;
 }
 export function productionTerraformExecutable(fsOps = fs) {
   for (const candidate of ["/usr/bin/terraform", "/opt/homebrew/bin/terraform", "/usr/local/bin/terraform"]) {
@@ -385,7 +399,7 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
 
 // One reviewed transition for CHG-20261022-001; the ordinary bootstrap remains create-only.
 export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence, claimOwnership, assertCurrentAuthorization,
-  assertProtectedSource = () => readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead }) {
+  assertProtectedSource = () => readPhase3IamProtectedSource({ sourceSha }) }) {
   assert.equal(typeof run, "function");
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.equal(ticketId, PHASE3_IAM_TRANSITION.ticketId);
@@ -502,8 +516,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   pinPhase3IamGitPath();
   const values = args(process.argv.slice(2));
   const sourceSha = values.get("--source-sha");
-  const checkout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
-  assert.equal(checkout.currentHead, sourceSha, "IAM bootstrap source is not exact protected main.");
+  assert.equal(readPhase3IamProtectedSource({ sourceSha }), sourceSha, "IAM bootstrap source is not exact protected main.");
   const run = createPhase3IamAwsRunner({ profile: values.get("--admin-profile") });
   let result;
   if (values.has("--ticket-id")) {
@@ -512,7 +525,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const { plan, planSha256 } = readPhase3IamPlan({ planFile });
     assertPhase3IamPlan(plan, sourceSha);
     const authorizationId = readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha });
-    assert.equal(readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead,
+    assert.equal(readPhase3IamProtectedSource({ sourceSha }),
       sourceSha, "Protected main advanced before IAM installation");
     const mfaEvidence = await verifyPhase3IamMfa({ sourceSha, authorizationId });
     assert.equal(readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha }), authorizationId,

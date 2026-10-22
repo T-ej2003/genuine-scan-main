@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import test from 'node:test';
-import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,pinPhase3IamGitPath,productionTerraformExecutable,readPhase3IamAuthorization,readPhase3IamPlan,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,pinPhase3IamGitPath,productionTerraformExecutable,readPhase3IamAuthorization,readPhase3IamPlan,readPhase3IamProtectedSource,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {readAuthenticatedGitHubProtectedMainIdentity} from '../aws/stage-b-deployment-identity.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
 import {productionAwsExecutable} from '../aws/production-credential-source-contract.mjs';
 
@@ -135,7 +136,8 @@ test('Terraform plan decoder pins executable, environment and exact captured byt
   GIT_EXEC_PATH:'/tmp/bin',GIT_CONFIG_COUNT:'1',GIT_CONFIG_KEY_0:'core.worktree',GIT_CONFIG_VALUE_0:'/tmp/clean'};
  pinPhase3IamGitPath(gitEnv,{statSync:()=>({isFile:()=>true,mode:0o755})});
  assert.equal(gitEnv.PATH.split(':')[0],'/usr/bin');
- assert.deepEqual(Object.keys(gitEnv),['PATH']);
+ assert.deepEqual(gitEnv,{PATH:'/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin',GIT_CONFIG_GLOBAL:'/dev/null',GIT_CONFIG_NOSYSTEM:'1',
+  GIT_CONFIG_COUNT:'2',GIT_CONFIG_KEY_0:'core.worktree',GIT_CONFIG_VALUE_0:process.cwd(),GIT_CONFIG_KEY_1:'core.fsmonitor',GIT_CONFIG_VALUE_1:'false'});
  assert.throws(()=>pinPhase3IamGitPath({}, {statSync:()=>({isFile:()=>true,mode:0o777})}),/Unsafe/);
  const safe={existsSync:()=>true,realpathSync:()=>'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform',
   statSync:()=>({isFile:()=>true,mode:0o555})};
@@ -160,6 +162,22 @@ test('Terraform plan decoder pins executable, environment and exact captured byt
   assert.equal(result.planSha256,createHash('sha256').update('saved-plan-bytes').digest('hex'));
   assert.equal(fs.existsSync(captured),false);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('protected source uses pinned GitHub main even when local origin is stale or Git transport is redirected',()=>{
+ const seen=[];
+ const readCheckout=({expectedSourceSha,githubRun})=>{
+  readAuthenticatedGitHubProtectedMainIdentity({expectedSourceSha,githubRun});
+  return {currentHead:expectedSourceSha};
+ };
+ const options={sourceSha,readCheckout,executable:'/usr/bin/gh',env:{GH_TOKEN:'test-token',GH_HOST:'attacker.invalid',GH_REPO:'attacker/repo'},
+  execute:(file,args,settings)=>{
+   seen.push({file,args,env:settings.env});
+   return JSON.stringify({name:'main',protected:true,commit:{sha:'c'.repeat(40)}});
+  }};
+ assert.throws(()=>readPhase3IamProtectedSource(options),/does not match/);
+ assert.deepEqual(seen[0].args,['api','--hostname','github.com','repos/T-ej2003/genuine-scan-main/branches/main']);
+ assert.equal(seen[0].env.GH_HOST,'github.com');assert.equal(seen[0].env.GH_REPO,undefined);
+ assert.equal(readPhase3IamProtectedSource({...options,execute:()=>JSON.stringify({name:'main',protected:true,commit:{sha:sourceSha}})}),sourceSha);
 });
 test('MFA authority expiring after durable ownership stops before IAM dispatch',()=>{
  const value=fixture(),fresh={...mfaEvidence};let dispatched=false;

@@ -69,8 +69,8 @@ test("web IAM bootstrap creates only source-defined resources and is idempotent"
   assert.deepEqual(mutations.map(([, operation]) => operation).sort(), ["create-policy", "create-role", "put-role-policy", "put-role-policy"]);
   assert.deepEqual(value.calls.filter(([service, operation]) => service === "iam" && operation === "get-policy-version").map((args) => args[args.indexOf("--version-id") + 1]), ["v1", "v1"]);
   const source = fs.readFileSync("scripts/aws/bootstrap-production-web-release-iam.mjs", "utf8");
-  assert.match(source, /readStageBProtectedMainCheckout\(\{ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true \}\)/);
-  assert.match(source, /checkout\.currentHead, sourceSha/);
+  assert.match(source, /readPhase3IamProtectedSource\(\{ sourceSha \}\)/);
+  assert.match(source, /readStageBProtectedMainCheckoutFromGitHub/);
   const terraform = fs.readFileSync(`${root}/main.tf`, "utf8");
   const boundaryDescription = terraform.match(/resource "aws_iam_policy" "publisher_boundary" \{[^}]*description\s*=\s*"([^"]+)"/s)?.[1];
   assert.ok(boundaryDescription, "Terraform must own the imported boundary description.");
