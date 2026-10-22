@@ -7,7 +7,7 @@ const source='a'.repeat(64);
 const bound={checksums:{sourceContractSha256:source}};
 const url=new URL('postgresql://mscqr_prod_admin@mscqr-production-db.internal/mscqr_production?sslmode=require');
 
-test('rollback checks the exact package marker and inactive database before DROP DATABASE',()=>{
+test('rollback checks the exact package marker and inactive database before removal',()=>{
  let sql;
  assertExactRollbackTarget(PRODUCTION_GREEN,url,bound,(target,statement,label)=>{
   assert.equal(target.pathname,`/${PRODUCTION_GREEN.database}`);

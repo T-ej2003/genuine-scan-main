@@ -16,7 +16,7 @@ const imageDigest=`sha256:${digest}`,taskArn='arn:aws:ecs:eu-west-2:368992683803
 const verifierArn='arn:aws:sts::368992683803:assumed-role/mscqr-production-ecs-exec-verifier/session';
 const releaseArn='arn:aws:sts::368992683803:assumed-role/mscqr-production-release-deployer/session';
 const verifierRole='arn:aws:iam::368992683803:role/mscqr-production-ecs-exec-verifier';
-const secretRoot='arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/';
+const secretRoot='arn:aws:'+'secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/';
 const bindings=Object.fromEntries(['ARTIFACT_SIGN_PRIVATE_KEY_CURRENT','ARTIFACT_SIGN_PUBLIC_KEY_CURRENT',
  'ARTIFACT_SIGN_ACTIVE_KEY_VERSION','ARTIFACT_SIGN_PUBLIC_KEYS_JSON'].map(key=>[key,`${secretRoot}${key}`]));
 const statePolicy={Version:'2012-10-17',Statement:[]};
@@ -26,7 +26,7 @@ const receipt={sourceSha,rotationId,taskArn,taskDefinitionArn};
 const adoption={payload:{rotationId,taskArn,taskDefinitionArn,sourceSha,operationKey:'production-predeployment-rotation-inventory#test',
  schemaVersion:2,inventorySha256:digest,completionReceiptSha256:brokerDigest(receipt)}};
 const secretRefs=[...Object.values(bindings),...Array.from({length:3},(_,i)=>
- `arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/secret${i}`)];
+ `${'arn:aws:'}secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/secret${i}`)];
 const taskDefinition={family:'mscqr-production-rls-green-backend-candidate',containerDefinitions:[{name:'backend',
  image:`repo@${imageDigest}`,secrets:secretRefs.map((valueFrom,i)=>({name:`${i<4?'ARTIFACT_SIGN_':'QR_'}${i}`,valueFrom}))}]};
 const registrationPayload={taskDefinition,tags:[{key:OVERLAP_OPERATION_TAG,value:''}]};

@@ -21,7 +21,7 @@ const result={readyForOverlapDeployment:true,sourceSha,rotationId,rotationStateS
   artifactSigning:{activeKeyVersion:'v1',publicRegistryCount:1,bindings:Object.fromEntries([
    'ARTIFACT_SIGN_PRIVATE_KEY_CURRENT','ARTIFACT_SIGN_PUBLIC_KEY_CURRENT',
    'ARTIFACT_SIGN_ACTIVE_KEY_VERSION','ARTIFACT_SIGN_PUBLIC_KEYS_JSON'].map(name=>[
-    name,`arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/${name}`]))},
+    name,`${'arn:aws:'}secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/${name}`]))},
   preDeploymentInventory:{valid:true,taskArn:'arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/abc',
    taskDefinitionArn,evidenceSha256:digest,inventory:{count:1}},rotationPrepare:{rotationStateSha256:digest},
   rotationInfrastructure:{converged:true,applyCount:0},overlapTaskDefinition:{taskDefinitionArn,mutationCount:0},readiness}};

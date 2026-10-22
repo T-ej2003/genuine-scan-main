@@ -13,9 +13,10 @@ test('frontend and integration install PostgreSQL client from bounded signed Nob
   assert.equal(step['timeout-minutes'],5);
   assert.match(step.run,/Dir::Etc::sourcelist=.*mscqr-postgres-client\.list/);
   assert.match(step.run,/Dir::Etc::sourceparts=-/);
-  assert.match(step.run,/noble-security main/);
+  assert.match(step.run,/deb http:\/\/archive\.ubuntu\.com\/ubuntu noble main/);
+  assert.doesNotMatch(step.run,/noble-security|noble-updates/);
   assert.doesNotMatch(step.run,/\buniverse\b|\bmultiverse\b/);
-  assert.match(step.run,/install -y --no-install-recommends postgresql-client/);
+  assert.match(step.run,/install -y --no-install-recommends postgresql-client-16/);
   assert.match(step.run,/command -v psql[\s\S]*command -v pg_isready/);
  }
 });
