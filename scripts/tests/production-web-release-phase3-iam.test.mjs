@@ -152,6 +152,14 @@ test('IAM drift during S3 dispatch is caught before PutRolePolicy',()=>{
   assert.deepEqual(writes(value),[]);
  }
 });
+test('audit policy drift after frontend journal stops before frontend PutRolePolicy',()=>{
+ const value=fixture();let checks=0;
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource,
+  assertCurrentAuthorization:()=>{if(++checks===3)value.setAudit(null);return 42;},claimOwnership:()=>claim(()=>true)}),
+ /Native audit policy changed before frontend IAM write/);
+ assert.deepEqual(writes(value),['MSCQRProductionStageBNativeAudit']);
+});
 test('protected main advancing after MFA, ownership or journaling stops before IAM write',()=>{
  for(const driftAt of [1,2,3]){
   const value=fixture();let checks=0,claimed=false,dispatched=false;

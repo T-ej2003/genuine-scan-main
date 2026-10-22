@@ -412,6 +412,8 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
     assert.equal(assertCurrentAuthorization(), authorizationId, "Solo-operator IAM authorization changed before IAM write");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     assert.equal(observed(name), expectedBefore, `${name} changed after dispatch journal and before IAM write`);
+    if (name === activationPolicyName) assert.equal(observed(auditPolicyName), PHASE3_IAM_TRANSITION.auditTargetSha256,
+      "Native audit policy changed before frontend IAM write");
     try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
     catch (error) {
       if (observed(name) !== expectedAfter) throw new Error(`${name} write outcome unknown; reconcile live IAM before retry`, { cause: error });
