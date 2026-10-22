@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { advanceProductionComponentDeploymentStateWithRetry, createProductionComponentDeploymentStateClient, PRODUCTION_COMPONENT_STATE, stateHash } from "./production-component-deployment-state.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
@@ -20,6 +21,9 @@ import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandR
 import { assertStagedBrokerProof, assertStagedBrokerTerminal, readStagedBrokerClosure } from "./stage-b-staged-broker-closure.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reuse.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
+import {ensureStageBPrivateDirectory} from './stage-b-artifact-contract.mjs';
+import {componentCommitOperationId,journalComponentCommit,matchesCommittedReleaseState} from './production-release-gate-component-journal.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
 const HASH = /^[a-f0-9]{64}$/;
@@ -103,9 +107,30 @@ async function main() {
     const checkout = readStageBProtectedMainCheckout({ cwd: root, fetchOriginMain: true, requireCanonicalRepository: true });
     return { sourceSha: checkout.currentHead, treeSha256: deriveStageBToolingInputTreeSha256(checkout.currentHead) };
   } });
-  const result = await commitSecurityComponentState({ stagedBrokerProof, historicalRuntimeRequired, historicalRuntimeEvidence, runtimeReader, sourceSha: values["source-sha"], authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource: frontendLive?.sourceSha, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
+  const client=createProductionComponentDeploymentStateClient({run});
+  const commit=()=>commitSecurityComponentState({ stagedBrokerProof, historicalRuntimeRequired, historicalRuntimeEvidence, runtimeReader, sourceSha: values["source-sha"], authorization, releaseReceipt, backendActivation, backendLive, backendImageSource, frontendActivation, frontendLive, frontendImageSource: frontendLive?.sourceSha, client, writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", sourceSha, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });
+  let result;
+  if(process.env.ROTATION_ID&&process.env.RELEASE_TRAIN_RUN_ID){
+    const operationId=componentCommitOperationId({sourceSha:values['source-sha'],rotationId:process.env.ROTATION_ID,
+      releaseTrainRunId:process.env.RELEASE_TRAIN_RUN_ID,authorizationSha256:authorization.authorizationSha256});
+    const directory=path.join(os.tmpdir(),`mscqr-component-journal-${process.pid}`);
+    ensureStageBPrivateDirectory({directory,repositoryRoot:root,create:true});
+    const store=createReleaseCoordinatorStore({run,directory,repositoryRoot:root});
+    const intent={operationId,sourceSha:values['source-sha'],rotationId:process.env.ROTATION_ID,
+      releaseTrainRunId:process.env.RELEASE_TRAIN_RUN_ID,childRunId:process.env.GITHUB_RUN_ID,
+      authorizationSha256:authorization.authorizationSha256,rlsReceiptSha256:releaseReceipt.receiptBundleSha256,
+      backendTaskDefinitionArn:backendActivation.targetArn,backendImageDigest:backendActivation.imageDigest,
+      ...(frontendActivation?{frontendTaskDefinitionArn:frontendActivation.candidateTaskDefinitionArn,
+        frontendImageDigest:frontendActivation.imageRef.split('@')[1]}:{})};
+    if(stagedBrokerProof)await stagedBrokerProof.revalidate();
+    result=await journalComponentCommit({store,operationId,intent,readState:()=>client.read(),commit,
+      verifyCommitted:state=>matchesCommittedReleaseState({state,sourceSha:values['source-sha'],
+        authorizationSha256:authorization.authorizationSha256,rlsReceipt:releaseReceipt,backendActivation,frontendActivation,
+        childRunId:process.env.GITHUB_RUN_ID,webRequired:authorization.imageReuseEvidence?.webPublicationRequired===true})});
+    if(stagedBrokerProof)await stagedBrokerProof.revalidate();
+  }else result=await commit();
   process.stdout.write(`${JSON.stringify({ generation: result.state.generation, component: "security", sourceSha: result.state.components.security.sourceSha })}\n`);
 }
 

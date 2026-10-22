@@ -4,9 +4,11 @@ import { createProductionCutoverRuntimeComposition } from "./production-cutover-
 import { PRODUCTION_CUTOVER_MODE, runProductionCutoverControlPlane, runProductionCutoverOverlapControlPlane } from "./production-cutover-control-plane.mjs";
 import { readAndAssertReadyForOverlapDeployment, rotationExpectedImageReleaseSha } from "./production-overlap-readiness-contract.mjs";
 import { buildProductionOverlapDeploymentReceipt, persistProductionOverlapDeploymentReceipt, readProductionOverlapDeploymentReceipt } from "./production-overlap-deployment-receipt.mjs";
-import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
+import { readBoundStageBPrivateJson, readStageBPrivateFileBytes, writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
+import {projectBridgeNativeResult} from './production-release-bridge-native-result.mjs';
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import path from 'node:path';
 import { assertRotationBackendTaskArn, runReconciledRotationDeployment } from "./production-rotation-reconciliation.mjs";
 import { rotationReleaseIdentity } from "./commit-production-component-rotation-state.mjs";
 import { authenticatePreparedRotationSuccessor } from "./production-rotation-successor.mjs";
@@ -92,6 +94,15 @@ const result = await runProductionCutoverControlPlane({
   imageAuthorization: readBoundStageBPrivateJson({ filePath: config.imageAuthorizationFile, expectedSha256: config.imageAuthorizationSha256, label: "Image authorization evidence" }),
   ...adapters,
 });
+const nativeResultOutput=optionalValue('--native-result-output');
+if(nativeResultOutput){
+ assert.equal(mode,'prepare-overlap','Bridge native handoff is restricted to preparation');
+ assert.equal(path.resolve(nativeResultOutput),path.join(path.dirname(path.resolve(value('--config'))),'bridge-native-result.json'),
+  'Bridge native handoff path differs from the protected runtime directory');
+ const native=projectBridgeNativeResult(result,{sourceSha,rotationId,runtimeConfigSha256});
+ writeStageBPrivateFileExclusive({filePath:nativeResultOutput,bytes:Buffer.from(`${JSON.stringify(native)}\n`),
+  repositoryRoot:process.cwd(),label:'Bridge native result handoff'});
+}
 process.stdout.write(`${JSON.stringify(mode === "prepare-overlap"
   ? { preparedForOverlapAuthorization: true, sourceSha, rotationId, rotationStateFile: config.rotationStateFile, rotationStateSha256: result.rotationStateSha256, rotationFixtureSha256: result.rotationFixtureSha256, taskDefinitionArn: result.taskDefinitionArn, expectedCurrentTaskDefinitionArn: config.expectedCurrentTaskDefinitionArn, imageDigest: config.backendImageDigest, deploymentSha: config.rotationDeploymentSha, readinessFile: result.readinessFile, readinessSha256: result.readinessSha256, ecsUpdateServiceCount: 0, mutationSequence: result.mutationSequence }
   : { readyForOnboarding: result.readyForOnboarding, mutationSequence: result.mutationSequence, transitionMatrix: result.transitionMatrix, readiness: result.readiness, onboardingEvidence: { valid: result.onboardingEvidence.valid, evidenceRef: result.onboardingEvidence.evidenceRef, evidenceSha256: result.onboardingEvidence.evidenceSha256 } })}\n`);

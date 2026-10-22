@@ -220,16 +220,25 @@ test("web activation requires completed same-source backend activation evidence"
     const [backendFile, backendHash] = boundFile("historical-backend-v1.json", legacy);
     const [stageFile, stageHash] = boundFile("stage-b-authorization.json", { ...legacyAuthorization, imageReuseEvidence: impact });
     const [webFile, webHash] = boundFile("web-authorization.json", webAuthorization);
-    const cliResult = await runWebActivationCli(["--source-sha", sourceSha, "--web-authorization", webFile, "--web-authorization-sha256", webHash, "--stage-b-authorization", stageFile, "--stage-b-authorization-sha256", stageHash, "--backend-activation-evidence", backendFile, "--backend-activation-evidence-sha256", backendHash], {
+    const records = new Map(); let active = taskArn; let registered;
+    const journal = { readOperation: async (_, phase) => records.get(phase) || null,
+      writeOperation: async (_, phase, value) => { if (records.has(phase)) assert.deepEqual(records.get(phase), value); else records.set(phase, value); return true; },
+      claimOperation: async (_, phase, value) => { if (records.has(phase)) throw new Error("claim conflict"); records.set(phase, value); return true; } };
+    const cliArgs = ["--source-sha", sourceSha, "--rotation-id", "rotation-test", "--release-train-run-id", "34", "--web-authorization", webFile, "--web-authorization-sha256", webHash, "--stage-b-authorization", stageFile, "--stage-b-authorization-sha256", stageHash, "--backend-activation-evidence", backendFile, "--backend-activation-evidence-sha256", backendHash];
+    const cliResult = await runWebActivationCli(cliArgs, {
+      journal,
       verifyWebAuthorization: () => true, verifyCoordinated: async (input) => assertCoordinatedImageAuthorization({ ...input, now: createdAt, webPublicationRequired: true }), releaseRun: () => {}, now: createdAt,
       createAdapters: () => ({
         verifyBackendActivation: backendAdapter(sourceSha).verifyBackendActivation,
-        readService: async () => service, describeTaskDefinition: async (arn) => arn === taskArn ? task : { ...buildFrontendCandidate({ predecessor: captureFrontendPredecessor(service, task), authenticatedWebAuthorization: authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: () => true, now: createdAt }) }), taskDefinitionArn: candidateArn, revision: 21, status: "ACTIVE" },
-        registerTaskDefinition: async () => ({ taskDefinitionArn: candidateArn }), updateService: async () => {}, waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
+        readService: async () => ({ ...service, taskDefinition: active, deployments: [{ ...service.deployments[0], taskDefinition: active }] }),
+        describeTaskDefinition: async (arn) => arn === taskArn ? task : registered,
+        listTaskDefinitions: async () => registered ? [candidateArn] : [],
+        registerTaskDefinition: async (candidate) => { registered = { ...candidate, taskDefinitionArn: candidateArn, revision: 21, status: "ACTIVE" }; return { taskDefinitionArn: candidateArn }; },
+        updateService: async ({ taskDefinition }) => { active = taskDefinition; }, waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
       }),
     });
     assert.equal(cliResult.updateCount, 1);
-    await assert.rejects(() => runWebActivationCli(["--source-sha", sourceSha, "--web-authorization", webFile, "--web-authorization-sha256", webHash, "--stage-b-authorization", stageFile, "--stage-b-authorization-sha256", stageHash, "--backend-activation-evidence", backendFile, "--backend-activation-evidence-sha256", "0".repeat(64)], { verifyCoordinated: async () => ({ webRequired: true }) }), /bytes do not match/);
+    await assert.rejects(() => runWebActivationCli([...cliArgs.slice(0, -1), "0".repeat(64)], { verifyCoordinated: async () => ({ webRequired: true }) }), /bytes do not match/);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
   assert.equal(typeof backend.operation, "string");
 });
@@ -340,6 +349,43 @@ test("frontend activation updates once and rollback can only restore its capture
   assert.deepEqual(updates, [candidateArn, taskArn]);
 });
 
+test("journaled frontend activation reuses registration, service update and completion after lost responses", async () => {
+  const authorization = fixture().authorization;
+  const candidateArn = taskArn.replace(":20", ":29"); const operationId = "f".repeat(64);
+  const records = new Map(); let active = taskArn, registered, registrations = 0, updates = 0, failAt = "register";
+  const journal = { readOperation: async (_, phase) => records.get(phase) || null,
+    writeOperation: async (_, phase, value) => {
+      if (records.has(phase)) assert.deepEqual(records.get(phase), value); else records.set(phase, value);
+      if (phase === "FRONTEND:ACTIVATION:COMPLETED" && failAt === "receipt") throw Error("receipt response lost");
+      return true;
+    },
+    claimOperation: async (_, phase, value) => { if (records.has(phase)) throw Error("conflicting claim"); records.set(phase, value); return true; } };
+  const current = () => ({ ...service, taskDefinition: active,
+    deployments: [{ ...service.deployments[0], taskDefinition: active }] });
+  const options = { sourceSha, webAuthorization: authorization, verifyWebAuthorization: () => true, now: createdAt,
+    journal, operationId, readService: async () => current(),
+    describeTaskDefinition: async arn => arn === taskArn ? task : registered,
+    listTaskDefinitions: async () => registered ? [candidateArn] : [],
+    registerTaskDefinition: async candidate => { registrations++; registered = { ...candidate, taskDefinitionArn: candidateArn,
+      revision: 29, status: "ACTIVE" }; if (failAt === "register") throw Error("registration response lost"); return { taskDefinitionArn: candidateArn }; },
+    updateService: async ({ taskDefinition }) => { updates++; active = taskDefinition;
+      if (failAt === "update") throw Error("update response lost"); },
+    waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }) };
+  await assert.rejects(runGovernedFrontendActivation(options), /registration response lost/);
+  assert.equal(registrations, 1); assert.equal(updates, 0);
+  failAt = "update";
+  await assert.rejects(runGovernedFrontendActivation(options), /update response lost/);
+  assert.equal(registrations, 1); assert.equal(updates, 1);
+  failAt = "receipt";
+  await assert.rejects(runGovernedFrontendActivation(options), /receipt response lost/);
+  failAt = "none";
+  assert.equal((await runGovernedFrontendActivation(options)).candidateTaskDefinitionArn, candidateArn);
+  assert.equal(registrations, 1); assert.equal(updates, 1);
+  await assert.rejects(runGovernedFrontendActivation({ ...options, sourceSha: "0".repeat(40) }), /authorization|source|release/);
+  active = taskArn;
+  await assert.rejects(runGovernedFrontendActivation(options), /CONFLICTED/);
+});
+
 test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-image authority", () => {
   const workflow = yaml.load(fs.readFileSync(".github/workflows/production-web-image.yml", "utf8")); const job = workflow.jobs.publish;
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ["release_sha"]); assert.equal(job.environment, WEB_RELEASE.environment); assert.equal(job.permissions["id-token"], "write");
@@ -361,6 +407,10 @@ test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-
   assert.equal(job.env.WORKFLOW_DEFINITION_SHA, "${{ github.sha }}");
   const publisher = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/publisher-permissions-policy.json")); const allowedResources = publisher.Statement.filter(({ Effect }) => Effect === "Allow").flatMap(({ Resource }) => Array.isArray(Resource) ? Resource : [Resource]); assert.equal(allowedResources.some((resource) => String(resource).includes("mscqr-backend") || String(resource).includes("mscqr-worker")), false);
   const activation = JSON.parse(fs.readFileSync("infra/aws/terraform/production-web-release/frontend-activation-policy.json"));
+  const revisionCensus=activation.Statement.find(({Sid})=>Sid==='FindClaimedFrontendRevision');
+  assert.equal(revisionCensus.Action,'ecs:ListTaskDefinitions');
+  assert.equal(revisionCensus.Resource,'*');
+  assert.deepEqual(revisionCensus.Condition,{StringEquals:{'aws:RequestedRegion':'eu-west-2'}});
   const register = activation.Statement.find(({ Action }) => Action === "ecs:RegisterTaskDefinition"); assert.equal(register.Resource, "*"); assert.deepEqual(register.Condition, { StringEquals: { "aws:RequestedRegion": "eu-west-2" } });
   const tag = activation.Statement.find(({ Action }) => Action === "ecs:TagResource"); assert.equal(tag.Resource, `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:task-definition/${WEB_RELEASE.family}:*`); assert.deepEqual(tag.Condition, { StringEquals: { "aws:RequestedRegion": WEB_RELEASE.region, "ecs:CreateAction": "RegisterTaskDefinition" } });
   const passRole = activation.Statement.find(({ Action }) => Action === "iam:PassRole"); assert.deepEqual(passRole.Resource, [`arn:aws:iam::${WEB_RELEASE.account}:role/mscqr-ecs-execution-role`, `arn:aws:iam::${WEB_RELEASE.account}:role/mscqr-ecs-task-role`]); assert.equal(passRole.Condition.StringEquals["iam:PassedToService"], "ecs-tasks.amazonaws.com");

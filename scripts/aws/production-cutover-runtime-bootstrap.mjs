@@ -745,7 +745,7 @@ export function parseBootstrapArgs(argv) {
     "artifact-binding", "root-drop-evidence", "temporary-kms-capability", "stage-a-plan", "stage-a-recovery-evidence", "stage-a-state", "stage-a-handoff", "stage-b-state", "current-stage-b-state", "inventory-approval-id", "inventory-task-definition-arn", "onboarding-paths",
     "endpoint-security-group-id", "runtime-security-group-id", "adopt-completed-inventory", "adopt-completed-inventory-from-source-sha", "rotation-successor-original-config", "rotation-successor-original-config-sha256", "rotation-successor-state", "rotation-successor-state-sha256", "rotation-successor-fixture", "rotation-successor-fixture-sha256", "new-inventory-after-completed",
     "stage-b-tfvars", "stage-b-tfvars-binding-report", "stage-b-tfvars-binding-report-sha256", "stage-b-terraform-data-dir", "qr-version-resolution-run-id", "qr-version-secret-arn",
-    "broker-recovery", "broker-recovery-sha256", "conditional-seed", "conditional-seed-sha256",
+    "broker-recovery", "broker-recovery-sha256", "conditional-seed", "conditional-seed-sha256", "bridge-preflight",
   ]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 1) {

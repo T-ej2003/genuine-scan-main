@@ -100,7 +100,8 @@ test("overlap secret set is bounded into the backend execution role", () => {
   assert.match(terraform, /alltrue\(\[for arn in local\.overlap_rotation_secret_arns : contains\(local\.backend_execution_secret_arns, arn\) && !strcontains\(arn, "\*"\)\]\)/);
   const executionPolicy = terraform.match(/resource "aws_iam_role_policy" "execution"[\s\S]*?(?=\nresource )/)?.[0] || "";
   assert.match(executionPolicy, /secretsmanager:GetSecretValue/);
-  assert.match(executionPolicy, /local\.backend_execution_secret_arns/);
+  assert.match(terraform, /normal_execution_policy_secret_arns[\s\S]*?backend\s*=\s*distinct\(concat\(local\.backend_execution_secret_arns/);
+  assert.match(executionPolicy, /local\.execution_policy_secret_arns\[each\.key\]/);
   const secretStatement = executionPolicy.match(/Sid\s*=\s*"ReadOnlyExactInjectedSecrets"[\s\S]*?\n      \}/)?.[0] || "";
   assert.doesNotMatch(secretStatement, /Resource\s*=\s*["']\*["']/);
   assert.doesNotMatch(secretStatement, /mscqr\/prod\/\*/);

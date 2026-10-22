@@ -58,9 +58,7 @@ export async function provisionArtifactSigningDomain({ bindings, approvedBinding
     let resolvedPrivate = privateValue;
     let resolvedPublic = publicValue;
     if (!resolvedPrivate && !resolvedPublic) {
-      const pair = generateKeyPairSync("ed25519", { privateKeyEncoding: { format: "pem", type: "pkcs8" }, publicKeyEncoding: { format: "pem", type: "spki" } });
-      resolvedPrivate = pair.privateKey;
-      resolvedPublic = pair.publicKey;
+      throw new Error("Artifact signing partial domain has no recoverable private key; bootstrap outcome is unknown.");
     } else if (resolvedPrivate && !resolvedPublic) {
       resolvedPublic = createPublicKey(createPrivateKey(pem(resolvedPrivate, "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT"))).export({ format: "pem", type: "spki" });
     }

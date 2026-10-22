@@ -1,0 +1,58 @@
+# Production Release Train trusted-terminal bridge
+
+Release Train remains the operator's GitHub Actions entry point. The trusted terminal performs the existing root, checker, and interactive MFA operations; GitHub receives no privileged terminal credential. Release Gate remains the deployment authority. This document describes the proposed implementation. It is not a production authorization.
+
+## Before the workflow
+
+1. Confirm protected main, the intended source SHA, ticket, rotation, image authorization, historical broker receipts, and all Stage B prerequisites independently. An approval for an earlier source SHA cannot be reused for a newer source.
+2. Prepare the existing private legacy cutover inputs on the trusted terminal. Put a private JSON manifest in the existing Stage B private evidence directory. Its `commands` object contains the exact argument arrays for `root`, `runtime`, `adoption`, `successor`, and `operator`, validated by `production-release-bridge-manifest.mjs`. Keep the manifest at mode 0600. The manifest binds source, ticket, rotation, root nonce, every input path, and expected output paths. It does not contain a GitHub run ID or a release ID; the durable request supplies those after prerequisite convergence.
+3. Compute the manifest digest using the repository's canonical `brokerDigest(JSON.parse(...))` implementation and record it. Do not use a raw file SHA-256 in the workflow input.
+4. Start **Release Train** on the exact protected main SHA with `trusted_terminal_cutover=true`, `release_lifecycle=authenticated-initial-overlap`, `prerequisites_only=false`, the exact rotation, ticket, manifest digest, and existing signed image and runtime authorization transport. Approve the protected production environment through GitHub's established mechanism.
+
+## Trusted-terminal action
+
+When Release Train prints the durable request's release ID, run ID and attempt, use the exact protected-main checkout and private manifest on the trusted terminal:
+
+```sh
+node scripts/aws/run-production-release-terminal-bridge.mjs \
+  --manifest /private/path/to/bridge-manifest.json \
+  --release-id <request-release-id> \
+  --run-id <release-train-run-id> \
+  --run-attempt <release-train-run-attempt>
+```
+
+The helper authenticates the immutable request, actual GitHub environment approval, protected source, manifest, and local prerequisite files. It displays the release and signer identities, requires the operator to type the rotation ID, performs read-only runtime preparation before root issuance, then uses the existing root, checker, and MFA-backed verifier scripts. The helper takes an exclusive local `flock` lock on Linux or `lockf` lock on macOS/BSD and a write-once coordinator claim. Its local private owner file permits the same terminal to resume after interruption while another terminal identity is rejected. Keep that file; deleting it can make recovery fail closed.
+
+Root KMS Sign, adoption Sign, and successor Sign each have a write-once dispatch claim and captured native result. A lost Sign response without a durable result is `OUTCOME_UNKNOWN`; stop and obtain separately authorized recovery. The helper never issues another signature based on a timeout. Root age remains 900 seconds. Read-only preparation happens before issuance, and the helper stops before the final direct root-age verifier if the 120-second reserve is exhausted. Runtime materialization is authenticated and reused on retry. The verifier-owned operator is claimed before invocation; a later attempt may finalize complete local readiness without rerunning the operator, including after root expiry, but incomplete readiness requires native AWS reconciliation.
+
+Each new KMS Sign dispatch must occur before the owning request expires; that expiry also cannot outlive the observed protected-environment approval's 30-minute freshness window. A captured Sign can be reused after expiry only under its original immutable request, with its original timely claim, native KMS key ARN, signature, message, and signer verified. If the native result was durably captured but its completion marker was lost, a new invocation verifies the exact signature and writes only that marker. A dispatch with no recoverable result remains `OUTCOME_UNKNOWN`. The root signing request does not authorize a later checker Sign. If runtime materialization crosses the request expiry after a captured root Sign, the current terminal stops before adoption Sign. The hosted run reports `REAUTHORIZATION_REQUIRED` after confirming no Sign outcome is unknown. Start a new approved Release Train invocation for the same release, source, rotation, and manifest; it verifies the completed root Sign and creates the next immutable authorization round. The operator resumes using the new run ID and attempt. Adoption and successor must be dispatched under that round while it remains fresh. The old root Sign is never repeated. If the root has less than 120 seconds of freshness reserve before the required verifier, or any Sign response is irretrievably lost, stop for separate authorized recovery. A claimed verifier-owned operator stays with its original round and cannot be automatically replayed.
+
+Release Train **fails before creating a trusted-terminal request** because independent Stage B native receipt verification is not implemented. This prevents the draft from soliciting root or checker signatures. Once that verifier is implemented, the bridge must validate the three KMS signatures, readiness shape, native Stage B results, and live ECS state before Release Gate dispatch. Do not run this draft against production or treat its terminal completion as sufficient proof. The later Gate checks are designed to authenticate RLS, backend, frontend, post-activation smoke, and component state before `RELEASE_COMPLETE`.
+
+### Request expiry and operator claim decision
+
+The hosted waiter and terminal use `bridgeOperatorExpiryAction` against the same immutable request and write-once `BRIDGE:OPERATOR:DISPATCH` record. The claim binds the request hash, operation ID, native input hash and a claim initiation time inside the request window. The terminal checks expiry immediately before claiming. If the claim commits and its readback crosses expiry, the same already-authorized operation may continue; stopping after the claim would strand a pre-mutation reservation. A matching claim can be reconciled after request expiry, but it does not prove the native operation completed. Completion verification also requires this exact claim.
+
+| Request and native state | Operator claim | Action |
+| --- | --- | --- |
+| Valid, no unknown Sign | Absent | WAIT or RESUME the exact pending phase; new Sign requires its own valid approval and signer |
+| Expired, no Sign dispatched | Absent | REAUTHORIZE under a fresh protected request |
+| Expired, captured Sign results, runtime incomplete or complete | Absent | REAUTHORIZE; verify and reuse captured signatures, then claim the operator under the fresh request |
+| Any request, Sign dispatch without recoverable native result | Any | FAILED_CLOSED as OUTCOME_UNKNOWN; never repeat Sign |
+| Expired, any Sign state | Matching timely claim | RECONCILE native operator state; never invoke it again from an unproven checkpoint |
+| Any request | Mismatched, unbound, or late claim | FAILED_CLOSED; reconcile the conflicting ownership record |
+| Any request, root too old for a required direct verifier | Any | FAILED_CLOSED; separate recovery, with no automatic root reissuance |
+
+An expired request without a matching operator claim never remains in the hosted polling loop merely because all three Sign records are complete. The next authorized invocation may create a new round only after authenticating those results and confirming no unresolved operator claim. A lost claim response after the claim committed is treated as ambiguous native ownership and is not automatically reauthorized.
+
+## Recovery and stop conditions
+
+Rerun Release Train for the same exact source, ticket, rotation, and manifest digest after a failed hosted run. The coordinator and write-once records determine the checkpoint. The same terminal can resume a pending request while it is valid and root evidence remains fresh. If a request expires before any KMS Sign dispatch, a new approved Release Train invocation can create the next authorization round. An expired request with an authenticated completed Sign can also be renewed under a new protected approval if the root freshness reserve remains; the original Sign is reused and its request cannot be overwritten. A prior operator dispatch with complete authenticated readiness can be finalized without repeating native cutover mutations. A failed normal Gate workflow can be reused only when its exact deployment job, approval, database and activation receipts, post-frontend smoke, component state, and live ECS readbacks all authenticate; the final receipt records the child workflow's failed conclusion. A partial child Gate remains claimed and stops without redispatch. A missing Sign result, expired root before the final direct verifier, or incomplete operator output requires separate reconciliation and authorization; do not automatically sign or run the operator again. A changed protected-main head, conflicting claim, invalid receipt, unverified child Gate, or unmatched live ECS state must stop the workflow.
+
+Do not use GitHub run conclusion as an AWS mutation receipt. Do not use the disabled conditional Stage B lane. Do not place root credentials, checker credentials, MFA secrets, or verifier STS sessions in GitHub secrets or artifacts.
+
+Artifact-signing bootstrap uses an exact Secrets Manager client request token derived from the approved secret reference and value, checks the native version ID, and reads back that version. A crash after the private key version commits can resume from that same key. If a partial domain has no recoverable private key, stop for separately authorized reconciliation. A lost response is never a reason to generate a new key against an ambiguous partial state.
+
+## Review boundary
+
+This code has not been exercised against production. **Merge blocker:** `authenticateTerminalCutover` cannot yet independently prove the verifier MFA session, Stage A/Terraform and Secrets Manager outcomes, rotation preparation, or inventory native receipts. The verifier STS session is intentionally process scoped and excluded from persisted evidence (`production-identity-adapters.mjs` and `establish-production-ecs-exec-verifier-session.mjs`). The existing three checker/root signatures do not bind a final native cutover receipt. A separately authorized checker-signed post-cutover receipt and minimal hosted read-only AWS audit permission are now approved for reviewed implementation; neither is implemented by this draft. The receipt must bind the exact native outcomes, and hosted verification must check authoritative AWS events and live state, including the MFA session issuance, rather than accepting a terminal success flag. A forged terminal completion after valid signatures would otherwise advance to Release Gate; the hosted entry therefore stops before creating a trusted-terminal request. Failed or partial child Gate attempts also need an ambiguity-safe continuation contract; the current single child-run claim stops unless every native completion proof is present. Before a Phase 3 invocation, the exact merged SHA, IAM/KMS permissions, trusted-terminal identity, current approvals, historical receipts, and runtime materialization window must be revalidated. These blockers require tests and a clean exact-head review before this implementation is considered ready to merge.

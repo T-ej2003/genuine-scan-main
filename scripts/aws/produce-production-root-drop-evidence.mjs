@@ -3,15 +3,17 @@ import {isConditionalNativeSigner} from './production-cutover-consumption-journa
 import {assertConditionalProductionEnabled} from './production-green-stage-b-contract.mjs';
 import {assertLegacyProductionUnclaimed} from './production-cutover-conditional-lock.mjs';
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { isAuthenticatedBrokerRecoveryApproval } from "./stage-b-broker-recovery-approval.mjs";
 import { writeStageBPrivateFileAtomic,writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
-import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
-import { buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN, ROOT_DROP_SIGNING_ALGORITHM } from "./production-root-drop-evidence.mjs";
+import { createProductionCommandRunner } from "./production-cutover-production-adapters.mjs";
+import { assertRootDropEvidence, buildRootDropEvidence, buildRootDropPayload, canonicalRootDropPayload, ROOT_DROP_SIGNING_KEY_ARN, ROOT_DROP_SIGNING_ALGORITHM } from "./production-root-drop-evidence.mjs";
+import {bridgeSignerFromEnvironment} from './production-release-bridge-sign-journal.mjs';
+import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
 
 export async function runCli(argv = process.argv.slice(2), { readRecovery = async options => (await import("./stage-b-staged-broker-executor.mjs")).readBrokerRecoveryApproval(options), protectedMain = readFreshProtectedMainIdentity, commandRunner = createProductionCommandRunner, nativeSign, legacyGuard = assertLegacyProductionUnclaimed } = {}) {
   if (nativeSign) {assertConditionalProductionEnabled();if(!isConditionalNativeSigner(nativeSign))throw new Error('Confirmed conditional signing claim required');}
@@ -34,16 +36,36 @@ export async function runCli(argv = process.argv.slice(2), { readRecovery = asyn
   const run = commandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: args.get("profile"), region });
   const identity = JSON.parse(run(["sts", "get-caller-identity"]));
   const successorRecoveryAuthorizationSha256 = args.get("successor-recovery-authorization-sha256") === "none" ? null : args.get("successor-recovery-authorization-sha256");
-  const payload = buildRootDropPayload({ sourceSha: releaseSourceSha, callerArn: identity.Arn, accountId: identity.Account, region, nonce: args.get("nonce") || `${fresh.headSha}-${Date.now()}-operator`, rotationId: args.get("rotation-id"), imageAuthorizationSha256: args.get("image-authorization-sha256"), successorRecoveryAuthorizationSha256, administratorEvidenceSha256: args.get("administrator-evidence-sha256"), administratorSignatureSha256: args.get("administrator-signature-sha256") });
+  if(process.env.MSCQR_BRIDGE_OPERATION_ID&&(!args.get('nonce')||!process.env.MSCQR_BRIDGE_PHASE_TIMESTAMP))throw new Error('Bridge root needs its immutable nonce and phase time');
+  const payload = buildRootDropPayload({ sourceSha: releaseSourceSha, callerArn: identity.Arn, accountId: identity.Account, region,
+    ...(process.env.MSCQR_BRIDGE_PHASE_TIMESTAMP?{now:process.env.MSCQR_BRIDGE_PHASE_TIMESTAMP}:{}),
+    nonce: args.get("nonce") || `${fresh.headSha}-${Date.now()}-operator`, rotationId: args.get("rotation-id"), imageAuthorizationSha256: args.get("image-authorization-sha256"), successorRecoveryAuthorizationSha256, administratorEvidenceSha256: args.get("administrator-evidence-sha256"), administratorSignatureSha256: args.get("administrator-signature-sha256") });
+  const bridge=process.env.MSCQR_BRIDGE_OPERATION_ID ? await bridgeSignerFromEnvironment({directory:path.dirname(path.resolve(args.get('output'))),readCaller:()=>JSON.parse(run(['sts','get-caller-identity']))}) : null;
+  if(bridge){
+    if(nativeSign || args.get('profile')!=='default' || payload.sourceSha!==process.env.MSCQR_BRIDGE_SOURCE_SHA || payload.rotationId!==process.env.MSCQR_BRIDGE_ROTATION_ID)throw new Error('Bridge root signing identity differs');
+    if(existsSync(args.get('output'))){
+      const existing=JSON.parse(readFileSync(args.get('output'),'utf8'));
+      assertRootDropEvidence(existing,{sourceSha:payload.sourceSha,rotationId:payload.rotationId,imageAuthorizationSha256:payload.imageAuthorizationSha256,
+        successorRecoveryAuthorizationSha256:payload.successorRecoveryAuthorizationSha256,administratorEvidenceSha256:payload.administratorEvidenceSha256,
+        administratorSignatureSha256:payload.administratorSignatureSha256});
+      const {signingKeyArn,signingAlgorithm,signedPayloadSha256,signatureBase64,evidenceSha256,...unsigned}=existing;
+      const saved=await bridge({phase:'ROOT_DROP',keyId:ROOT_DROP_SIGNING_KEY_ARN,message:Buffer.from(canonicalRootDropPayload(unsigned)),
+        messageType:'RAW',signingAlgorithm:ROOT_DROP_SIGNING_ALGORITHM,recoverOnly:true,invoke:()=>{throw new Error('Existing root must not be signed again');}});
+      if(saved.Signature!==existing.signatureBase64)throw new Error('Existing root signature differs from durable native result');
+      return existing;
+    }
+  }
   const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-root-drop-sign-"));
   const messagePath = path.join(directory, "message");
   try {
     writeFileSync(messagePath, canonicalRootDropPayload(payload), { mode: 0o600, flag: "wx" });
-    const invoke=(keyId=ROOT_DROP_SIGNING_KEY_ARN)=>JSON.parse(run(["kms", "sign", "--key-id", keyId, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", ROOT_DROP_SIGNING_ALGORITHM]));
+    const bridgeRun=bridge?createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,profile:'default',singleAttemptMutation:'KMS_SIGN'}):null;
+    const invoke=(keyId=ROOT_DROP_SIGNING_KEY_ARN)=>JSON.parse((bridgeRun||run)(["kms", "sign", "--key-id", keyId, "--message", `fileb://${messagePath}`, "--message-type", "RAW", "--signing-algorithm", ROOT_DROP_SIGNING_ALGORITHM]));
     if (!nativeSign) await legacyGuard({rotationId:args.get('rotation-id'),directory,repositoryRoot:process.cwd(),run});
-    const signed = nativeSign ? await nativeSign({keyId:ROOT_DROP_SIGNING_KEY_ARN,message:Buffer.from(canonicalRootDropPayload(payload)),messageType:'RAW',signingAlgorithm:ROOT_DROP_SIGNING_ALGORITHM},invoke) : invoke();
+    const signed = nativeSign ? await nativeSign({keyId:ROOT_DROP_SIGNING_KEY_ARN,message:Buffer.from(canonicalRootDropPayload(payload)),messageType:'RAW',signingAlgorithm:ROOT_DROP_SIGNING_ALGORITHM},invoke)
+      : bridge ? await bridge({phase:'ROOT_DROP',keyId:ROOT_DROP_SIGNING_KEY_ARN,message:Buffer.from(canonicalRootDropPayload(payload)),messageType:'RAW',signingAlgorithm:ROOT_DROP_SIGNING_ALGORITHM,invoke}) : invoke();
     const evidence = buildRootDropEvidence({ payload, signatureBase64: signed.Signature, signingKeyArn: ROOT_DROP_SIGNING_KEY_ARN, signingAlgorithm: ROOT_DROP_SIGNING_ALGORITHM });
-    (nativeSign?writeStageBPrivateFileExclusive:writeStageBPrivateFileAtomic)({ filePath: args.get("output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Root-drop evidence" });
+    (nativeSign||bridge?writeStageBPrivateFileExclusive:writeStageBPrivateFileAtomic)({ filePath: args.get("output"), bytes: Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), repositoryRoot: process.cwd(), label: "Root-drop evidence" });
     return evidence;
   } finally { rmSync(directory, { recursive: true, force: true }); }
 

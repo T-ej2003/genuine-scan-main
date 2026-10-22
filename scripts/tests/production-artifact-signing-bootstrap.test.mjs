@@ -42,7 +42,9 @@ function fakeRunner({ existing = {}, createFailure = null } = {}) {
       const state = Object.values(existing).find((candidate) => (typeof candidate === "string" ? candidate : candidate?.arn) === name) || Object.values(existing).find((candidate) => (typeof candidate === "string" ? candidate : candidate?.arn) === name);
       const normalized = typeof state === "string" ? { initialized: true, value: "fixture-value" } : state;
       if (!normalized?.initialized) throw new Error("GetSecretValue unexpectedly called for value-less secret");
-      return JSON.stringify({ SecretString: normalized.value });
+      const requestedVersion = args.includes("--version-id") ? args[args.indexOf("--version-id") + 1] : null;
+      if (requestedVersion && requestedVersion !== normalized.versionId) throw new Error("VersionId differs");
+      return JSON.stringify({ SecretString: normalized.value, VersionId: normalized.versionId });
     }
     if (operation === "put-secret-value") {
       const secretRef = args[args.indexOf("--secret-id") + 1];
@@ -51,7 +53,8 @@ function fakeRunner({ existing = {}, createFailure = null } = {}) {
       const valueFile = args[args.indexOf("--secret-string") + 1].replace(/^file:\/\//, "");
       state.value = readFileSync(valueFile, "utf8");
       state.initialized = true;
-      return JSON.stringify({ ARN: secretRef, VersionId: "fixture-version", VersionStages: ["AWSCURRENT"] });
+      state.versionId = args[args.indexOf("--client-request-token") + 1];
+      return JSON.stringify({ ARN: secretRef, VersionId: state.versionId, VersionStages: ["AWSCURRENT"] });
     }
     throw new Error(`Unexpected operation: ${operation}`);
   };
@@ -311,6 +314,56 @@ test("partial initialized/value-less domains fill only missing values", async ()
   assert.equal(existing[names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT].value, before);
   assert.equal(existing[names.ARTIFACT_SIGN_ACTIVE_KEY_VERSION].value, "v1");
   assert.equal(fixture.calls.filter((args) => args[1] === "put-secret-value").length, 2);
+});
+
+test("partial domain without a recoverable private key fails closed instead of generating another key", async () => {
+  const existing = {
+    [names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT]: { arn: suffix("private-key-current"), initialized: false, value: null },
+    [names.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT]: { arn: suffix("public-key-current"), initialized: false, value: null },
+    [names.ARTIFACT_SIGN_ACTIVE_KEY_VERSION]: { arn: suffix("active-key-version"), initialized: true, value: "v1" },
+    [names.ARTIFACT_SIGN_PUBLIC_KEYS_JSON]: { arn: suffix("public-keys-json"), initialized: false, value: null },
+  };
+  const fixture = fakeRunner({ existing });
+  const adapter = createAwsArtifactSigningAdapter({ run: fixture.run, sourceSha });
+  await adapter.bootstrap();
+  await assert.rejects(() => adapter.provision(), /bootstrap outcome is unknown/);
+  assert.equal(fixture.calls.filter((args) => args[1] === "put-secret-value").length, 0);
+});
+
+test("lost native secret write response retains its version and recovers the same private key", async () => {
+  const fixture = fakeRunner();
+  let lost = false;
+  const run = async (args) => {
+    const response = await fixture.run(args);
+    if (!lost && args[1] === "put-secret-value") { lost = true; throw new Error("response lost after commit"); }
+    return response;
+  };
+  const adapter = createAwsArtifactSigningAdapter({ run, sourceSha });
+  await adapter.bootstrap();
+  await assert.rejects(() => adapter.provision(), /response lost after commit/);
+  const privateState = fixture.existing[names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT];
+  const originalKey = privateState.value;
+  assert.ok(originalKey.includes("PRIVATE KEY"));
+  assert.match(privateState.versionId, /^[a-f0-9]{64}$/);
+  const recovery = createAwsArtifactSigningAdapter({ run: fixture.run, sourceSha });
+  await recovery.bootstrap();
+  assert.equal((await recovery.provision()).valid, true);
+  assert.equal(privateState.value, originalKey);
+  assert.equal(fixture.calls.filter((args) => args[1] === "put-secret-value" && args.includes(privateState.arn)).length, 1);
+});
+
+test("wrong native secret version cannot be reported as a completed write", async () => {
+  const fixture = fakeRunner();
+  const run = async (args) => {
+    const response = await fixture.run(args);
+    if (args[1] === "put-secret-value") return JSON.stringify({ ...JSON.parse(response), VersionId: "wrong-version" });
+    return response;
+  };
+  const adapter = createAwsArtifactSigningAdapter({ run, sourceSha });
+  await adapter.bootstrap();
+  await assert.rejects(() => adapter.provision(), /native secret version differs/);
+  const privateState = fixture.existing[names.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT];
+  assert.ok(privateState.initialized, "committed write remains visible for separate recovery");
 });
 
 test("approved adapter denies GetSecretValue and PutSecretValue failures without widening targets", async () => {

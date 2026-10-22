@@ -14,6 +14,7 @@ import { ensureStageBPrivateDirectory, readBoundStageBPrivateJson, readStageBPri
 import { preDeploymentOperationKey, createPreDeploymentOperationIdentity, inventoryCompletionKey } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs";
 import { canonicalJson, COMPLETED_INVENTORY_PREDECESSOR, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
+import {bridgeSignerFromEnvironment} from './production-release-bridge-sign-journal.mjs';
 
 const json = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const read = (argv, name) => {
@@ -67,6 +68,8 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
   const readIdentity = json(receiptReader, ["sts", "get-caller-identity"]);
   const signerIdentity = json(runSign, ["sts", "get-caller-identity"]);
   if (readIdentity.Arn !== (crossSource ? signerIdentity.Arn : `arn:aws:iam::${STAGE_B.account}:root`) || !new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`).test(signerIdentity.Arn || "")) throw new Error("Completed inventory adoption reader or signer identity is invalid.");
+  const bridge=process.env.MSCQR_BRIDGE_OPERATION_ID ? await bridgeSignerFromEnvironment({directory:path.dirname(continuationPath),repositoryRoot:root,readCaller:()=>json(runSign,['sts','get-caller-identity'])}) : null;
+  if(bridge&&(nativeSign||continuationConfig.sourceSha!==process.env.MSCQR_BRIDGE_SOURCE_SHA||continuationConfig.rotationId!==process.env.MSCQR_BRIDGE_ROTATION_ID))throw new Error('Bridge adoption identity differs');
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-inventory-adoption-"));
   fs.chmodSync(temporary, 0o700);
   const messageFile = path.join(temporary, "message");
@@ -79,13 +82,15 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
     const sign = async ({ keyId, message: bytes }) => {
       if (!nativeSign) await legacyGuard({config:continuationConfig,repositoryRoot:root,run:runRead});
       const input = kmsAdoptionMessage(bytes);
-      const invoke=()=>json(runSign, ["kms", "sign", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
-      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:input.type,signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke) : invoke()).Signature;
+      const signRun=bridge?createProductionAwsCommandRunner({credentialSource:PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION,singleAttemptMutation:'KMS_SIGN'}):runSign;
+      const invoke=()=>json(signRun, ["kms", "sign", "--key-id", keyId, "--message", message(input.bytes), "--message-type", input.type, "--signing-algorithm", "RSASSA_PSS_SHA_256"]);
+      return (nativeSign ? await nativeSign({keyId,message:Buffer.from(bytes),messageType:input.type,signingAlgorithm:'RSASSA_PSS_SHA_256'},invoke)
+        : bridge ? await bridge({phase:'INVENTORY_ADOPTION',keyId,message:input.bytes,messageType:input.type,signingAlgorithm:'RSASSA_PSS_SHA_256',invoke}) : invoke()).Signature;
     };
     const outputPath = path.join(path.dirname(continuationPath), "inventory-completed-adoption-evidence.json");
     if (fs.existsSync(outputPath)) {
       const existing = JSON.parse(readStageBPrivateFileBytes({ filePath: outputPath, repositoryRoot: root, label: "Completed inventory adoption evidence" }).bytes);
-      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now }, verifySignature);
+      const payload = await authenticateCompletedInventoryAdoptionEvidence(existing, { config: continuationConfig, configSha256: continuationHash, proveDescendant, now:bridge?new Date():now }, verifySignature);
       if (fresh) {
         const authenticated = await authenticateFreshInventoryCompletionReceipt(completionReceipt, { config: crossSource ? originalConfig : continuationConfig, verifySignature });
         if (payload.completionReceiptSha256 !== authenticated.receiptSha256 || payload.taskArn !== completionReceipt.taskArn) throw new Error("Persisted inventory adoption differs from durable completion.");
@@ -105,7 +110,7 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
     const evidence = fresh
       ? await buildFreshInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, completionReceipt,
         completionLogEvents: completionLogs?.events, predecessorState, currentApproval, proveDescendant, verifySignature, sign, now })
-      : await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign });
+      : await buildCompletedInventoryAdoptionEvidence({ originalConfig, originalConfigSha256: originalHash, continuationConfig, continuationConfigSha256: continuationHash, approval, recoveryEvidence, replayRow: claim, task, taskDefinition: { ...definition.taskDefinition, tags: definition.tags }, logEvents: logs.events, verifySignature, sign, now });
     ensureStageBPrivateDirectory({ directory: path.dirname(outputPath), repositoryRoot: root });
     writeStageBPrivateFileExclusive({ filePath: outputPath, bytes: Buffer.from(`${JSON.stringify(evidence)}\n`), repositoryRoot: root, label: "Completed inventory adoption evidence" });
     return { outputPath, expiresAt: evidence.payload.expiresAt, operationKey: evidence.payload.operationKey };
@@ -115,5 +120,6 @@ export async function prepareCompletedInventoryAdoption({ argv, root = process.c
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const runRead = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-production-root" });
   const runSign = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
-  console.log(JSON.stringify(await prepareCompletedInventoryAdoption({ argv: process.argv.slice(2), runRead, runSign })));
+  console.log(JSON.stringify(await prepareCompletedInventoryAdoption({ argv: process.argv.slice(2), runRead, runSign,
+    ...(process.env.MSCQR_BRIDGE_OPERATION_ID?{now:new Date(process.env.MSCQR_BRIDGE_PHASE_TIMESTAMP)}:{}) })));
 }

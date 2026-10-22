@@ -72,6 +72,9 @@ test("durable overlap registration adopts a completed revision after a lost AWS 
     throw new Error("AWS response lost");
   };
   await assert.rejects(() => registerOverlapTaskDefinition(fixture.options), /response lost/);
+  const durablePayload=[...fixture.entries].find(([key])=>key.endsWith(':PAYLOAD'));
+  assert.ok(durablePayload,'exact reviewed ECS payload must be durable before native registration');
+  assert.equal(durablePayload[1].taskDefinition.containerDefinitions[0].image,backendImage);
   fixture.options.register = () => { throw new Error("duplicate registration"); };
   const recovered = await registerOverlapTaskDefinition(fixture.options);
   assert.equal(recovered.taskDefinitionArn, taskDefinitionArn);

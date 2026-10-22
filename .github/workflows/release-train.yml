@@ -25,6 +25,15 @@ on:
         required: false
         type: boolean
         default: false
+      trusted_terminal_cutover:
+        description: "Resume the exact legacy Stage B cutover through the protected trusted-terminal bridge, then complete both Release Gates."
+        required: false
+        type: boolean
+        default: false
+      bridge_manifest_sha256:
+        description: "Canonical SHA-256 of the private trusted-terminal command manifest; required for the cutover bridge."
+        required: false
+        type: string
       release_lifecycle:
         description: "Strict post-rotation release or exact authenticated initial-overlap activation."
         required: false
@@ -81,6 +90,7 @@ on:
 permissions:
   contents: read
   actions: write
+  deployments: read
   id-token: write
 
 concurrency:
@@ -165,7 +175,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
           DISPATCH_REF: ${{ steps.resolve.outputs.dispatch_ref }}
-          RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
+          RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
           NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
           NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
@@ -280,8 +290,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
-          TARGET_EVENTS: ${{ inputs.prerequisites_only && 'push' || 'push,workflow_dispatch' }}
-          RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
+          TARGET_EVENTS: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'push' || 'push,workflow_dispatch' }}
+          RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
           MAX_ATTEMPTS: 90
           POLL_SECONDS: 30
         run: |
@@ -299,8 +309,8 @@ jobs:
       TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
       RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
       COMPLETED_BROKER_CLOSURE_SOURCE_SHA: ${{ inputs.completed_broker_closure_source_sha }}
-      RELEASE_LIFECYCLE: ${{ inputs.prerequisites_only && 'prerequisites' || inputs.release_lifecycle }}
-      RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only }}
+      RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
+      RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only || inputs.trusted_terminal_cutover }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
       NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
       REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}
@@ -369,8 +379,36 @@ jobs:
             exit 1
           fi
 
+      - name: Refresh protected production release credentials for bridge
+        if: ${{ inputs.trusted_terminal_cutover }}
+        uses: aws-actions/configure-aws-credentials@v6
+        id: bridge_credentials
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+          role-session-name: release-bridge-${{ github.run_id }}
+          output-credentials: true
+          unset-current-credentials: true
+
+      - name: Resume trusted-terminal cutover and complete protected Release Gates
+        if: ${{ inputs.trusted_terminal_cutover }}
+        env:
+          TARGET_REF: ${{ needs.gates.outputs.target_ref }}
+          BRIDGE_ROTATION_ID: ${{ inputs.rotation_id }}
+          BRIDGE_MANIFEST_SHA256: ${{ inputs.bridge_manifest_sha256 }}
+          AWS_CREDENTIAL_EXPIRATION: ${{ fromJSON(steps.bridge_credentials.outputs.aws-expiration) }}
+          HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
+          HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ inputs.historical_runtime_evidence_sha256 }}
+          WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
+        run: |
+          set -euo pipefail
+          test "${{ inputs.prerequisites_only }}" = false
+          test "${{ inputs.release_lifecycle }}" = authenticated-initial-overlap
+          test "$TARGET_REF" = main
+          node scripts/aws/run-hosted-production-release-bridge.mjs
+
       - name: Trigger final Release Gate
-        if: ${{ !inputs.prerequisites_only }}
+        if: ${{ !inputs.prerequisites_only && !inputs.trusted_terminal_cutover }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TARGET_REF: ${{ needs.gates.outputs.target_ref }}

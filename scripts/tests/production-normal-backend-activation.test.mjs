@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
-import { HISTORICAL_FINAL_APPLY_WRITE_V16, NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertHistoricalFinalApplyWriteV16ArtifactIdentity, assertHistoricalFinalApplyWriteV16Predecessor, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, normalActivationSimulationContext, readHistoricalFinalApplyWriteV16Artifacts } from "../aws/production-normal-backend-activation.mjs";
+import { HISTORICAL_FINAL_APPLY_WRITE_V16, NORMAL_ACTIVATION, NormalActivationPolicyConvergenceError, assertHistoricalFinalApplyWriteV16ArtifactIdentity, assertHistoricalFinalApplyWriteV16Predecessor, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, classifyNormalActivationLiveOutcome, collectNormalActivationLiveEvidence, contractNormalActivationPolicy, convergeNormalActivationPolicy, deriveNormalBackendCandidate, executeNormalBackendActivation, prepareJournaledNormalBackendActivation, normalActivationSimulationContext, readHistoricalFinalApplyWriteV16Artifacts } from "../aws/production-normal-backend-activation.mjs";
 import { iamSimulationContextArgs } from "../aws/iam-simulation-context.mjs";
 import { AWS_MANAGED_POLICY_DOCUMENT_LIMIT, assertNormalActivationPolicyDeltaOnly, compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 import { assertImageAuthorization } from "../aws/production-cutover-control-plane.mjs";
@@ -39,6 +39,21 @@ const contextArgsFor = (arn) => [
   `ContextKeyName=ecs:cluster,ContextKeyValues=${NORMAL_ACTIVATION.clusterArn},ContextKeyType=string`,
   `ContextKeyName=ecs:task-definition,ContextKeyValues=${arn},ContextKeyType=string`,
 ];
+
+test('same-revision overlap becomes a recoverable normal backend target only with exact service settings', () => {
+  const binding={sourceArn:targetArn,targetArn,sourceDigest:digest,digest,desiredCount:2};
+  const service={...stableService(targetArn),runningCount:2,pendingCount:0,enableExecuteCommand:true,
+    propagateTags:'TASK_DEFINITION'};
+  const run=command=>{
+    if(command[0]==='ecs'&&command[1]==='describe-services')return JSON.stringify({services:[service]});
+    if(command[0]==='ecs'&&command[1]==='list-tasks')return JSON.stringify(listedTasks);
+    if(command[0]==='ecs'&&command[1]==='describe-tasks')return JSON.stringify(describedTasks(targetArn,digest));
+    throw new Error(`Unexpected command: ${command.join(' ')}`);
+  };
+  assert.equal(classifyNormalActivationLiveOutcome({run,binding}).status,'TARGET_STABLE');
+  service.propagateTags='SERVICE';
+  assert.equal(classifyNormalActivationLiveOutcome({run,binding}).status,'SOURCE_STABLE');
+});
 
 const historicalV16Source = () => JSON.parse(execFileSync("git", ["show", `${HISTORICAL_FINAL_APPLY_WRITE_V16.sourcePolicyCommit}:${NORMAL_ACTIVATION.policyPath}`], { encoding: "utf8" }));
 const historicalV16Policy = () => buildNormalActivationPolicy(HISTORICAL_FINAL_APPLY_WRITE_V16.activationTargetArn, historicalV16Source());
@@ -399,7 +414,8 @@ test("live outcome reconciliation verifies exact SOURCE/TARGET running digests",
   const binding = { sourceArn, targetArn, sourceDigest, digest, desiredCount: 2 };
   const outcomeRun = ({ currentArn = sourceArn, runningDigest = sourceDigest } = {}) => (command) => {
     const joined = command.join(" ");
-    if (joined.startsWith("ecs describe-services")) return JSON.stringify({ services: [stableService(currentArn)] });
+    if (joined.startsWith("ecs describe-services")) return JSON.stringify({ services: [{ ...stableService(currentArn),
+      enableExecuteCommand: true, propagateTags: "TASK_DEFINITION" }] });
     if (joined.startsWith("ecs list-tasks")) return JSON.stringify({ taskArns: ["task-1", "task-2"] });
     if (joined.startsWith("ecs describe-tasks")) return JSON.stringify({ failures: [], tasks: [1, 2].map((value) => ({ lastStatus: "RUNNING", taskDefinitionArn: currentArn, containers: [{ name: "backend", imageDigest: runningDigest }] })) });
     throw new Error(`unexpected command ${joined}`);
@@ -407,6 +423,54 @@ test("live outcome reconciliation verifies exact SOURCE/TARGET running digests",
   assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun(), binding }).status, "SOURCE_STABLE");
   assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun({ currentArn: targetArn, runningDigest: digest }), binding }).status, "TARGET_STABLE");
   assert.equal(classifyNormalActivationLiveOutcome({ run: outcomeRun({ runningDigest: digest }), binding }).status, "LIVE_STATE_UNAUTHENTICATED");
+});
+
+test("backend preflight reuses only a dispatched, stable exact target after a failed child", async () => {
+  const operationId = "f".repeat(64); const authorizationSha256 = "e".repeat(64);
+  const authorization = { authorizationSha256 }; const runIdentity = { workflowRunId: "91", releaseTrainRunId: "42" };
+  const binding = { sourceArn, targetArn, sourceDigest, digest, desiredCount: 2 };
+  const identity = { sourceSha, authorizationSha256, runIdentity, expectedCurrentTaskDefinitionArn: sourceArn,
+    expectedCurrentDeploymentId: "ecs-svc/123456789" };
+  const records = new Map([["BACKEND:BINDING", { identity, binding }], ["BACKEND:UPDATE:DISPATCH", { operationId }]]);
+  const store = { readOperation: async (_, phase) => records.get(phase) || null };
+  let currentArn = targetArn;
+  const run = command => {
+    const joined = command.join(" ");
+    if (joined.startsWith("ecs describe-services")) return JSON.stringify({ services: [{ ...stableService(currentArn),
+      enableExecuteCommand: true, propagateTags: "TASK_DEFINITION" }] });
+    if (joined.startsWith("ecs list-tasks")) return JSON.stringify({ taskArns: ["task-1", "task-2"] });
+    if (joined.startsWith("ecs describe-tasks")) return JSON.stringify(describedTasks(currentArn, currentArn === targetArn ? digest : sourceDigest));
+    throw Error(`unexpected command ${joined}`);
+  };
+  const options = { store, operationId, run, sourceSha, imageAuthorization: authorization, runIdentity,
+    expectedCurrentTaskDefinitionArn: sourceArn, expectedCurrentDeploymentId: identity.expectedCurrentDeploymentId };
+  assert.deepEqual(await prepareJournaledNormalBackendActivation(options), binding);
+  records.delete("BACKEND:UPDATE:DISPATCH");
+  await assert.rejects(prepareJournaledNormalBackendActivation(options), /without this operation dispatch/);
+  records.set("BACKEND:UPDATE:DISPATCH", { operationId });
+  await assert.rejects(prepareJournaledNormalBackendActivation({ ...options, sourceSha: "0".repeat(40) }), /identity differs/);
+  currentArn = sourceArn;
+  await assert.rejects(prepareJournaledNormalBackendActivation(options), /OUTCOME_UNKNOWN/);
+});
+
+test('backend preflight accepts same-revision overlap after durable dispatch without repeating activation',async()=>{
+  const operationId='f'.repeat(64),authorizationSha256='e'.repeat(64);
+  const runIdentity={workflowRunId:'91',releaseTrainRunId:'42'};
+  const binding={sourceArn:targetArn,targetArn,sourceDigest:digest,digest,desiredCount:2};
+  const identity={sourceSha,authorizationSha256,runIdentity,expectedCurrentTaskDefinitionArn:targetArn,
+    expectedCurrentDeploymentId:'ecs-svc/123456789'};
+  const store={readOperation:async(_,phase)=>phase==='BACKEND:BINDING'?{identity,binding}:
+    phase==='BACKEND:UPDATE:DISPATCH'?{operationId}:null};
+  const run=command=>{
+    if(command[0]==='ecs'&&command[1]==='describe-services')return JSON.stringify({services:[{
+      ...stableService(targetArn),enableExecuteCommand:true,propagateTags:'TASK_DEFINITION'}]});
+    if(command[0]==='ecs'&&command[1]==='list-tasks')return JSON.stringify(listedTasks);
+    if(command[0]==='ecs'&&command[1]==='describe-tasks')return JSON.stringify(describedTasks(targetArn,digest));
+    throw Error(`Unexpected command: ${command.join(' ')}`);
+  };
+  assert.deepEqual(await prepareJournaledNormalBackendActivation({store,operationId,run,sourceSha,
+    imageAuthorization:{authorizationSha256},runIdentity,expectedCurrentTaskDefinitionArn:targetArn,
+    expectedCurrentDeploymentId:'ecs-svc/123456789'}),binding);
 });
 
 test("normal activation simulation uses canonical AWS CLI context structures for exact candidate and legacy SOURCE revisions", () => {
@@ -595,7 +659,8 @@ test("normal activation metadata preserves every downstream predecessor identity
   assert.match(source, /normalActivationSourceArn: binding\.sourceArn/);
   assert.match(source, /previousTaskDefinitionArn: binding\.sourceArn/);
   assert.match(source, /targetTaskDefinitionArn: binding\.targetArn/);
-  assert.match(source, /newTaskDefinitionArn: metadata\.newTaskDefinitionArn/);
+  assert.match(source, /assert\.equal\(metadata\.newTaskDefinitionArn, binding\.targetArn/);
+  assert.match(source, /newTaskDefinitionArn: binding\.targetArn/);
 });
 
 test("Release Gate prepares exact normal activation before database mutation and never registers or updates a worker service", () => {

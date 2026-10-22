@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {reserveBridgePhaseTimestamp} from '../aws/run-production-release-terminal-bridge.mjs';
+
+test('slow validation before Sign gets a fresh timestamp while a dispatched Sign keeps its exact timestamp',async()=>{
+ const records=new Map(),operationId='a'.repeat(64),requestSha256='b'.repeat(64),start=Date.parse('2026-10-22T01:00:00.000Z');
+ const store={readOperation:async(id,key)=>records.get(`${id}:${key}`)||null,
+  writeOperation:async(id,key,value)=>{const k=`${id}:${key}`;if(records.has(k))throw Error('conflict');records.set(k,value);}};
+ const options={store,operationId,requestSha256,name:'ROOT_DROP'};
+ const first=await reserveBridgePhaseTimestamp({...options,now:()=>start});
+ const second=await reserveBridgePhaseTimestamp({...options,now:()=>start+61000});
+ assert.notEqual(second,first);
+ records.set(`${operationId}:BRIDGE:SIGN:ROOT_DROP:DISPATCH`,{requestSha256,phaseTimestamp:second});
+ assert.equal(await reserveBridgePhaseTimestamp({...options,now:()=>start+180000}),second);
+ assert.equal(records.size,3);
+});
+
+test('a new authorization round advances past an unconsumed timestamp from an expired request',async()=>{
+ const records=new Map(),operationId='a'.repeat(64),oldRequest='b'.repeat(64),newRequest='c'.repeat(64),start=Date.parse('2026-10-22T01:00:00.000Z');
+ const store={readOperation:async(id,key)=>records.get(`${id}:${key}`)||null,
+  writeOperation:async(id,key,value)=>{const scoped=`${id}:${key}`;assert.equal(records.has(scoped),false);records.set(scoped,value);}};
+ const oldTime=await reserveBridgePhaseTimestamp({store,operationId,requestSha256:oldRequest,name:'INVENTORY_ADOPTION',now:()=>start});
+ const newTime=await reserveBridgePhaseTimestamp({store,operationId,requestSha256:newRequest,name:'INVENTORY_ADOPTION',now:()=>start+61000});
+ assert.notEqual(newTime,oldTime);
+ assert.deepEqual(records.get(`${operationId}:BRIDGE:PHASE:INVENTORY_ADOPTION:TIMESTAMP:0`),{requestSha256:oldRequest,timestamp:oldTime});
+ assert.equal(await reserveBridgePhaseTimestamp({store,operationId,requestSha256:newRequest,name:'INVENTORY_ADOPTION',now:()=>start+62000}),newTime);
+ assert.equal(records.size,2);
+});
+
+test('both inventory adoption paths use the reserved timestamp when building signed evidence',()=>{
+ const source=fs.readFileSync(new URL('../aws/prepare-completed-inventory-adoption.mjs',import.meta.url),'utf8');
+ assert.match(source,/buildFreshInventoryAdoptionEvidence\(\{[^;]*sign, now \}\)/s);
+ assert.match(source,/buildCompletedInventoryAdoptionEvidence\(\{[^;]*sign, now \}\)/s);
+ assert.match(source,/authenticateCompletedInventoryAdoptionEvidence\([^;]*now:bridge\?new Date\(\):now/s);
+ const successor=fs.readFileSync(new URL('../aws/prepare-production-rotation-successor.mjs',import.meta.url),'utf8');
+ assert.equal((successor.match(/authenticateRotationSuccessor\([^;]*now:bridge\?new Date\(\):now/g)||[]).length,2);
+});

@@ -1,6 +1,7 @@
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { provisionArtifactSigningDomain, verifyArtifactSigningDomain, ARTIFACT_SIGNING_BINDINGS } from "./production-artifact-signing-domain.mjs";
 import { ARTIFACT_SIGNING_BOOTSTRAP_CONTRACT_PATH, ARTIFACT_SIGNING_INITIAL_KEY_VERSION, artifactSigningRuntimeBindingPath, bootstrapArtifactSigningBindings } from "./production-artifact-signing-bootstrap.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -49,9 +50,15 @@ export function createAwsArtifactSigningAdapter({ run, sourceSha, repositoryRoot
     const valueFile = path.join(directory, "secret-value");
     try {
       writeFileSync(valueFile, value, { mode: 0o600 });
-      await run(["secretsmanager", "put-secret-value", "--secret-id", secretRef, "--secret-string", `file://${valueFile}`, "--output", "json", "--no-cli-pager"]);
+      const token = createHash("sha256").update(secretRef).update("\0").update(value).digest("hex");
+      const result = JSON.parse(await run(["secretsmanager", "put-secret-value", "--secret-id", secretRef,
+        "--client-request-token", token, "--secret-string", `file://${valueFile}`, "--output", "json", "--no-cli-pager"]));
+      if (result.ARN !== secretRef || result.VersionId !== token) throw new Error("Artifact signing native secret version differs from the immutable input");
+      const readback = JSON.parse(await run(["secretsmanager", "get-secret-value", "--secret-id", secretRef,
+        "--version-id", token, "--output", "json", "--no-cli-pager"]));
+      if (readback.VersionId !== token || readback.SecretString !== value) throw new Error("Artifact signing native secret version readback differs");
       uninitializedSecretRefs.delete(secretRef);
-      return { mutationCount: 1, secretRef };
+      return { mutationCount: 1, secretRef, versionId: token };
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

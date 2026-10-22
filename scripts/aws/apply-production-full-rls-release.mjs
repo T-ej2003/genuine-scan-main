@@ -104,15 +104,21 @@ const waitForTask = (taskArn, config, aws) => {
   }
   aws(["ecs", "wait", "tasks-stopped", "--cluster", config.clusterArn, "--tasks", taskArn]);
   const described = aws(["ecs", "describe-tasks", "--cluster", config.clusterArn, "--tasks", taskArn]);
-  if (described.tasks?.length !== 1 || described.tasks[0]?.containers?.length !== 1 || described.tasks[0].containers[0]?.exitCode !== 0) {
-    throw new Error("Production executor task failed; task detail suppressed.");
+  if (described.tasks?.length !== 1 || described.tasks[0]?.lastStatus !== 'STOPPED'
+      || described.tasks[0]?.containers?.length !== 1 || described.tasks[0].containers[0]?.exitCode !== 0) {
+    const error = new Error("Production executor task failed; task detail suppressed.");
+    if (described.tasks?.length === 1 && described.tasks[0]?.lastStatus === 'STOPPED'
+        && described.tasks[0]?.containers?.length === 1 && Number.isInteger(described.tasks[0].containers[0]?.exitCode))
+      error.nativeTaskStopped = true;
+    throw error;
   }
 };
 
 const readReceipt = (mode, config, aws, directory, startedAt) => {
   const prefix = `rls-receipts/${config.releaseSha}/${mode}/`;
   const listed = { Contents: listProductionReceiptObjects({ run: aws, bucket: config.receiptBucket, prefix }) };
-  const item = [...(listed.Contents || [])].sort((left, right) => String(right.LastModified).localeCompare(String(left.LastModified)))[0];
+  if (listed.Contents.length > 1) throw new Error('Production executor receipt is ambiguous for a one-use approval mode.');
+  const item = listed.Contents[0];
   if (!item?.Key?.startsWith(prefix)) throw new Error("Production executor receipt is missing.");
   const file = path.join(directory, `${mode}-receipt.json`);
   aws(["s3api", "get-object", "--bucket", config.receiptBucket, "--key", item.Key, file]);
@@ -120,6 +126,8 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
   const receiptSha256 = value.receiptSha256;
   delete value.receiptSha256;
   if (value.environment !== "production"
+      || value.database !== PRODUCTION_GREEN.database
+      || value.deploymentId !== PRODUCTION_GREEN.deploymentId
       || value.mode !== mode
       || value.status !== "passed"
       || value.releaseSha !== config.releaseSha
@@ -127,7 +135,10 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
       || value.migrationSetDigest !== config.migrationSetDigest
       || value.packageChecksumSha256 !== config.packageChecksumSha256
       || value.approvalId !== config.approvalId
+      || item.Key !== `${prefix}${value.nonce}.json`
+      || !/^[a-f0-9]{64}$/.test(value.catalogueSha256 || '')
       || Date.parse(value.completedAt || 0) < startedAt - 300_000
+      || Date.parse(value.completedAt || 0) > Date.now() + 300_000
       || receiptSha256 !== sha256(`${JSON.stringify(value)}\n`)) {
     throw new Error("Production executor receipt binding is invalid.");
   }
@@ -138,6 +149,20 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
     approvalContractSha256: value.approvalContractSha256,
   };
 };
+
+function priorModeOutcome(mode, config, aws, directory) {
+  const prefix=`rls-receipts/${config.releaseSha}/${mode}/`;
+  const receipts=listProductionReceiptObjects({run:aws,bucket:config.receiptBucket,prefix});
+  if(receipts.length>1)throw new Error('OUTCOME_UNKNOWN: multiple native receipts for one broker mode');
+  if(receipts.length===1)return {status:'COMPLETED',receipt:readReceipt(mode,config,aws,directory,0)};
+  const key=`${config.approvalId}#${mode}`;
+  const response=aws(['dynamodb','get-item','--table-name',STAGE_B.replayTable,
+   '--key',JSON.stringify({approvalMode:{S:key}}),'--consistent-read']);
+  if(!response.Item)return {status:'INCOMPLETE'};
+  if(response.Item.approvalMode?.S!==key||response.Item.approvalNonce?.S===undefined)
+   throw new Error('OUTCOME_UNKNOWN: broker claim identity differs');
+  throw new Error(`OUTCOME_UNKNOWN: ${mode} broker claim exists without an authenticated executor receipt`);
+}
 
 export async function applyProductionFullRlsRelease({
   env = process.env,
@@ -174,17 +199,41 @@ export async function applyProductionFullRlsRelease({
   assertFullRlsReceiptReleaseAuthority({ run: aws, releaseSha: config.releaseSha });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-production-rls-"));
   const receipts = [];
-  let mutationStarted = false;
+  let mutationStarted = false, outcomeUnknown = false, releaseVerified = false;
   try {
+    outcomeUnknown = true;
+    const rollback=priorModeOutcome('full-rls-rollback',config,aws,directory);
+    outcomeUnknown = false;
+    if(rollback.status!=='INCOMPLETE')throw new Error('REAUTHORIZATION_REQUIRED: a prior rollback closed this approval');
     for (const mode of APPLY_MODES) {
-      mutationStarted ||= Boolean(PRODUCTION_GREEN.confirmations[mode]);
+      outcomeUnknown = true;
+      const prior=priorModeOutcome(mode,config,aws,directory);
+      outcomeUnknown = false;
+      if(prior.status==='COMPLETED'){
+        mutationStarted ||= Boolean(PRODUCTION_GREEN.confirmations[mode]);
+        receipts.push(prior.receipt);continue;
+      }
       const startedAt = Date.now();
+      outcomeUnknown = true;
       const taskArn = invokeBroker(mode, config, aws, directory);
-      waitForTask(taskArn, config, aws);
+      try { waitForTask(taskArn, config, aws); }
+      catch(error){if(error.nativeTaskStopped&&!PRODUCTION_GREEN.confirmations[mode])outcomeUnknown=false;throw error;}
       receipts.push(readReceipt(mode, config, aws, directory, startedAt));
+      mutationStarted ||= Boolean(PRODUCTION_GREEN.confirmations[mode]);
+      outcomeUnknown = false;
     }
-    const canaryTaskArn = invokeBroker("full-rls-application-canary", config, aws, directory);
-    waitForTask(canaryTaskArn, config, aws);
+    outcomeUnknown = true;
+    const canary=priorModeOutcome('full-rls-application-canary',config,aws,directory);
+    outcomeUnknown = false;
+    if(canary.status==='INCOMPLETE'){
+      const canaryStartedAt=Date.now();
+      outcomeUnknown = true;
+      const canaryTaskArn = invokeBroker("full-rls-application-canary", config, aws, directory);
+      try { waitForTask(canaryTaskArn, config, aws); }
+      catch(error){if(error.nativeTaskStopped)outcomeUnknown=false;throw error;}
+      readReceipt('full-rls-application-canary',config,aws,directory,canaryStartedAt);
+      outcomeUnknown = false;
+    }
     if (new Set(receipts.map((item) => item.approvalContractSha256)).size !== 1) {
       throw new Error("Production executor receipts do not share one approval contract.");
     }
@@ -208,19 +257,23 @@ export async function applyProductionFullRlsRelease({
       receipts,
     };
     bundle.receiptBundleSha256 = sha256(`${JSON.stringify(bundle)}\n`);
+    releaseVerified = true;
     if (!outputPath) throw new Error("Production release receipt output path is required.");
     fs.writeFileSync(outputPath, `${JSON.stringify(bundle, null, 2)}\n`, { mode: 0o600, flag: "wx" });
     process.stdout.write(`${JSON.stringify({ status: "verified", releaseSha: config.releaseSha, receiptBundleSha256: bundle.receiptBundleSha256 })}\n`);
     return bundle;
   } catch {
-    if (mutationStarted) {
+    if(outcomeUnknown)throw new Error('OUTCOME_UNKNOWN: production RLS native mode or receipt requires reconciliation before rollback');
+    if (mutationStarted && !releaseVerified) {
       try {
+        const priorRollback=priorModeOutcome('full-rls-rollback',config,aws,directory);
+        if(priorRollback.status==='COMPLETED')throw new Error('ROLLBACK_COMPLETED');
         const startedAt = Date.now();
         const taskArn = invokeBroker("full-rls-rollback", config, aws, directory);
         waitForTask(taskArn, config, aws);
         readReceipt("full-rls-rollback", config, aws, directory, startedAt);
       } catch {
-        throw new Error("Production package failed and exact rollback could not be verified.");
+        throw new Error("Production package failed; rollback completion is ambiguous or already committed. Reconcile the exact native receipt before any retry.");
       }
     }
     throw new Error("Production full-RLS activation failed; detail suppressed.");

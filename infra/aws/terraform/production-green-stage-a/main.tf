@@ -304,7 +304,12 @@ resource "aws_iam_role_policy" "checker" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Sid = "SignExactStageBApproval", Effect = "Allow", Action = ["kms:GetPublicKey", "kms:Sign", "kms:Verify"], Resource = aws_kms_key.approval.arn },
     { Sid = "PublishExactStageBApproval", Effect = "Allow", Action = "secretsmanager:PutSecretValue", Resource = aws_secretsmanager_secret.approval.arn },
-    { Sid = "ReadCompletedInventoryReceipts", Effect = "Allow", Action = "dynamodb:GetItem", Resource = "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay", Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } }
+    { Sid = "ReadCompletedInventoryReceipts", Effect = "Allow", Action = "dynamodb:GetItem", Resource = "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay", Condition = { "ForAllValues:StringLike" = { "dynamodb:LeadingKeys" = ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } },
+    { Sid = "ReadNativeCutoverEvents", Effect = "Allow", Action = "cloudtrail:LookupEvents", Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } },
+    { Sid = "ReadNativeStageBState", Effect = "Allow", Action = ["s3:GetObject", "s3:GetObjectVersion"], Resource = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate" },
+    { Sid = "ReadNativeStageBExecutionPolicy", Effect = "Allow", Action = "iam:GetRolePolicy", Resource = "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution" },
+    { Sid = "ReadNativeStageBSecretMetadata", Effect = "Allow", Action = ["secretsmanager:DescribeSecret", "secretsmanager:ListSecretVersionIds"], Resource = ["arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/*", "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"], Condition = { StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } },
+    { Sid = "ReadNativeStageBTaskDefinitions", Effect = "Allow", Action = "ecs:DescribeTaskDefinition", Resource = "*", Condition = { StringEquals = { "aws:RequestedRegion" = "eu-west-2" } } }
   ] })
 }
 

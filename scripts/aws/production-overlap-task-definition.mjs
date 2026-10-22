@@ -101,6 +101,10 @@ export async function registerOverlapTaskDefinition({ input, register, describe 
   }
   const intent = operationId && { sourceSha, rotationId, operationId, payloadSha256: createHash("sha256").update(canonicalJson(payload)).digest("hex") };
   if (journal) {
+    const capturedPayload=await journal.readOperation(operationId,"PAYLOAD");
+    if(capturedPayload && canonicalJson(capturedPayload)!==canonicalJson(payload))throw new Error("Overlap registration payload conflicts with durable history.");
+    if(!capturedPayload)await journal.writeOperation(operationId,"PAYLOAD",payload);
+    if(canonicalJson(await journal.readOperation(operationId,"PAYLOAD"))!==canonicalJson(payload))throw new Error("Overlap registration payload readback differs.");
     const previous = await journal.readOperation(operationId, "INTENT");
     if (previous && canonicalJson(previous) !== canonicalJson(intent)) throw new Error("Overlap registration intent conflicts with durable history.");
     if (!previous) await journal.writeOperation(operationId, "INTENT", intent);

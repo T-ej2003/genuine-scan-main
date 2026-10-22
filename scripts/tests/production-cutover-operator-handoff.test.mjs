@@ -209,6 +209,20 @@ test("prepare-overlap collects only its verifier input and excludes post-deploym
   assert.deepEqual(output, []);
 });
 
+test('only the trusted bridge can pass a private native result handoff to the verifier child',async()=>{
+ const handoff=path.join(path.dirname(argv[3]),'bridge-native-result.json');
+ const options={argv:[...argv,'--native-result-output',handoff],stdin:{isTTY:true},stdout:{isTTY:true},
+  prompt:async request=>inputFor(request.prompt),spawnChild:childThatExits({capture:()=>{}})};
+ await assert.rejects(()=>runProductionCutoverOperator(options),/trusted-terminal bridge runtime/);
+ let child;
+ const result=await runProductionCutoverOperator({...options,
+  parentEnvironment:{HOME:'/operator',PATH:'/usr/bin',MSCQR_BRIDGE_OPERATION_ID:'a'.repeat(64)},
+  spawnChild:childThatExits({capture:value=>{child=value;}})});
+ assert.equal(result.exitCode,0);
+ assert.deepEqual(child.args.slice(-2),['--native-result-output',handoff]);
+ assert.equal(child.options.env.MSCQR_BRIDGE_OPERATION_ID,undefined,'bridge identity and privileged sessions stay outside the MFA child');
+});
+
 test("operator handoff fails closed before a child exists for empty or malformed input", async () => {
   let spawns = 0;
   await assert.rejects(() => runProductionCutoverOperator({ argv, stdin: { isTTY: true }, stdout: { isTTY: true }, prompt: async () => "", spawnChild: () => { spawns += 1; } }), /MSCQR_VERIFIER_MFA_SERIAL entry failed/);
@@ -242,7 +256,9 @@ test("operator handoff accepts only the exact non-secret runtime argument contra
   assert.throws(() => parseProductionCutoverOperatorArgs(argv.slice(2)), /exactly five/);
   assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "production", ...argv.slice(2)]), /runtime identity/);
   assert.throws(() => parseProductionCutoverOperatorArgs(["--mode", "unknown", ...argv.slice(2)]), /runtime identity/);
-  assert.throws(() => parseProductionCutoverOperatorArgs([...argv, "--extra", "value"]), /exactly five/);
+  assert.throws(() => parseProductionCutoverOperatorArgs([...argv, "--extra", "value"]), /arguments are invalid/);
+  assert.equal(parseProductionCutoverOperatorArgs([...argv,'--native-result-output','/private/bridge-native-result.json'])['--native-result-output'],
+    '/private/bridge-native-result.json');
   assert.throws(() => buildProductionCutoverChildEnvironment({ inputs: { ...values, MSCQR_VERIFIER_MFA_SERIAL: "" } }), /incomplete/);
   const environment = buildProductionCutoverChildEnvironment({ inputs: values });
   for (const name of ["MSCQR_ONBOARDING_EMAIL", "MSCQR_ONBOARDING_PASSWORD", "MSCQR_CANARY_ORDINARY_EMAIL", "MSCQR_CANARY_ORDINARY_PASSWORD"]) assert.equal(environment[name], undefined);
