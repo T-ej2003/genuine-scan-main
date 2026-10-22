@@ -338,7 +338,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
 }
 
 // One reviewed transition for CHG-20261022-001; the ordinary bootstrap remains create-only.
-export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence, claimOwnership }) {
+export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence, claimOwnership,
+  assertProtectedSource = () => readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead }) {
   assert.equal(typeof run, "function");
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.equal(ticketId, PHASE3_IAM_TRANSITION.ticketId);
@@ -368,6 +369,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
     "Frontend transition preceded native audit installation");
   const checkpoint = { frontend: beforeFrontend, audit: beforeAudit };
   assertPhase3IamPlan(plan, checkpoint);
+  assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM ownership");
   assert.equal(typeof claimOwnership, "function", "Durable IAM ownership claim is required");
   const resumeOnly = beforeAudit !== null || beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256;
   const { ownershipSha256, hasDispatch, markDispatch, complete } = claimOwnership({ run, sourceSha, authorizationId, mfaEvidence, resumeOnly });
@@ -387,6 +389,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
     const current = observed(name);
     if (current === expectedAfter) return;
     assert.equal(current, expectedBefore, `${name} changed during IAM reconciliation`);
+    assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM dispatch");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     if (!markDispatch(name, expectedAfter)) throw new Error(`${name} dispatch outcome unknown; reconcile live IAM before another attempt`);
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);

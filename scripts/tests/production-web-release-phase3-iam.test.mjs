@@ -59,7 +59,8 @@ function fixture({front=predecessor,native=null,lostResponse=null,onRead=null,ca
  return {run,calls,state:()=>({frontendPolicy,auditPolicy})};
 }
 const claim=(markDispatch,hasDispatch=()=>true)=>({ownershipSha256:'d'.repeat(64),hasDispatch,markDispatch,complete:()=> 'e'.repeat(64)});
-const reconcile=(value,selected=plan(),authorizationId=42)=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,plan:selected,authorizationId,mfaEvidence,claimOwnership:()=>claim(()=>true)});
+const assertProtectedSource=()=>sourceSha;
+const reconcile=(value,selected=plan(),authorizationId=42)=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,plan:selected,authorizationId,mfaEvidence,assertProtectedSource,claimOwnership:()=>claim(()=>true)});
 const writes=value=>value.calls.filter(([service,operation])=>service==='iam'&&operation==='put-role-policy').map(args=>args[args.indexOf('--policy-name')+1]);
 
 test('exact approved two-policy transition and authenticated rerun',()=>{
@@ -82,26 +83,35 @@ test('Terraform actions must equal the live checkpoint before claiming mutation 
  ]){
   const value=fixture(options);let claimed=false;
   assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-   plan:selected,authorizationId:42,mfaEvidence,claimOwnership:()=>{claimed=true;return claim(()=>true);}}));
+   plan:selected,authorizationId:42,mfaEvidence,assertProtectedSource,claimOwnership:()=>{claimed=true;return claim(()=>true);}}));
   assert.equal(claimed,false);assert.deepEqual(writes(value),[]);
  }
  const partial=fixture({native:audit});let resumeOnly;
  reconcilePhase3WebIam({run:partial.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,claimOwnership:input=>{resumeOnly=input.resumeOnly;return claim(()=>true);}});
+  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,claimOwnership:input=>{resumeOnly=input.resumeOnly;return claim(()=>true);}});
  assert.equal(resumeOnly,true);
  const unauthenticated=fixture({native:audit});
  assert.throws(()=>reconcilePhase3WebIam({run:unauthenticated.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
+  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
  assert.deepEqual(writes(unauthenticated),[]);
 });
 test('MFA authority expiring after durable ownership stops before IAM dispatch',()=>{
  const value=fixture(),fresh={...mfaEvidence};let dispatched=false;
  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan(),authorizationId:42,mfaEvidence:fresh,claimOwnership:()=>{
+  plan:plan(),authorizationId:42,mfaEvidence:fresh,assertProtectedSource,claimOwnership:()=>{
    fresh.expiresAt=new Date(Date.now()-1).toISOString();
    return claim(()=>{dispatched=true;return true;});
   }}),/MFA authority expired/);
  assert.equal(dispatched,false);assert.deepEqual(writes(value),[]);
+});
+test('protected main advancing after MFA or ownership stops before IAM dispatch',()=>{
+ for(const driftAt of [1,2]){
+  const value=fixture();let checks=0,claimed=false,dispatched=false;
+  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+   plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource:()=>++checks===driftAt?'c'.repeat(40):sourceSha,
+   claimOwnership:()=>{claimed=true;return claim(()=>{dispatched=true;return true;});}}),/Protected main advanced/);
+  assert.equal(claimed,driftAt===2);assert.equal(dispatched,false);assert.deepEqual(writes(value),[]);
+ }
 });
 test('journaled IAM and S3 writes use one CLI attempt while reads retain normal retry settings',()=>{
  const calls=[];
@@ -119,7 +129,7 @@ test('journaled IAM and S3 writes use one CLI attempt while reads retain normal 
 test('approval, source fingerprints and plan reject unauthorized expansion before a write',()=>{
  const value=fixture();
  assert.throws(()=>reconcile(value,plan(),null),/Solo-operator IAM authorization/);
- assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:'different',plan:plan(),authorizationId:42,mfaEvidence,claimOwnership:()=>claim(()=>true)}));
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:'different',plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource,claimOwnership:()=>claim(()=>true)}));
  for(const altered of [
   p=>p.resource_changes.push({address:'aws_iam_role_policy.unrelated',change:{actions:['create']}}),
   p=>p.resource_changes.push({...p.resource_changes[0]}),
@@ -202,12 +212,12 @@ test('concurrent IAM change and interrupted bootstrap stop or resume at the exac
 test('durably dispatched IAM write with predecessor still live fails closed without replay',()=>{
  const value=fixture();
  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan(),authorizationId:42,mfaEvidence,
+  plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource,
   claimOwnership:()=>claim(()=>false)}),/dispatch outcome unknown/);
  assert.deepEqual(writes(value),[]);
  const completed=fixture({front:frontend,native:audit});
  assert.deepEqual(reconcilePhase3WebIam({run:completed.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan('no-op','no-op'),authorizationId:42,mfaEvidence,
+  plan:plan('no-op','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,
   claimOwnership:()=>claim(()=>{throw Error('completed write replayed');})}).actions,[]);
 });
 test('solo-operator GitHub authorization binds merged source and exact final PR head',()=>{
@@ -255,7 +265,7 @@ test('fresh MFA challenge uses fixed non-root user and never sends code in CLI a
  assert.throws(()=>reconcile(fixture(),plan(),null),/Solo-operator IAM authorization/);
  const expired=fixture();
  assert.throws(()=>reconcilePhase3WebIam({run:expired.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
-  plan:plan(),authorizationId:42,mfaEvidence:{...mfaEvidence,expiresAt:new Date(Date.now()-1000).toISOString()},
+  plan:plan(),authorizationId:42,mfaEvidence:{...mfaEvidence,expiresAt:new Date(Date.now()-1000).toISOString()},assertProtectedSource,
   claimOwnership:()=>claim(()=>true)}),/MFA authority expired/);
  assert.deepEqual(writes(expired),[]);
 });
