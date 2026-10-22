@@ -289,6 +289,9 @@ jobs:
       - name: RF7 application and dependency contracts
         run: npm run test:rf7:static
 
+      - name: Phase 3 IAM authorization and recovery contract
+        run: node --test scripts/tests/production-web-release-phase3-iam.test.mjs scripts/tests/production-web-release-iam-bootstrap.test.mjs
+
       - name: Production read-only RLS canary PostgreSQL contract
         run: npm run test:production-green-read-only-rls-canary:integration
 

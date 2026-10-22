@@ -27,7 +27,7 @@ assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.m
 const mfaEvidence={sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,authorizationId:42,operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator',accessKeyIdSha256:'f'.repeat(64),verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
 assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');
 assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
-assert.ok(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_WEB_RELEASE.md','utf8').includes(phase3IamAuthorizationMarker('<final_pr_head_sha>')));
+assert.match(fs.readFileSync('documents/ops/iam/MSCQR_PRODUCTION_WEB_RELEASE.md','utf8'),/MSCQR_PHASE3_IAM_SOLO_AUTH_V2/);
 assert.equal(digest(predecessor),PHASE3_IAM_TRANSITION.frontendPredecessorSha256);
 
 function plan(frontendAction='update',auditAction='create'){
@@ -170,7 +170,9 @@ test('protected source uses pinned GitHub main even when local origin is stale o
   return {currentHead:expectedSourceSha};
  };
  const options={sourceSha,readCheckout,executable:'/usr/bin/gh',env:{GH_TOKEN:'test-token',GH_HOST:'attacker.invalid',GH_REPO:'attacker/repo',GIT_NO_REPLACE_OBJECTS:'1'},
-  gitExecute:(file,args,settings)=>{assert.equal(file,'/usr/bin/git');assert.deepEqual(args,['for-each-ref','--format=%(refname)','refs/replace']);assert.equal(settings.env.GIT_NO_REPLACE_OBJECTS,'1');return '';},
+  gitExecute:(file,args,settings)=>{assert.equal(file,'/usr/bin/git');assert.equal(settings.env.GIT_NO_REPLACE_OBJECTS,'1');
+   if(args[0]==='for-each-ref')return '';
+   assert.deepEqual(args,['merge-base','--is-ancestor',PHASE3_IAM_TRANSITION.reviewedMergeSha,sourceSha]);return '';},
   execute:(file,args,settings)=>{
    seen.push({file,args,env:settings.env});
    return JSON.stringify({name:'main',protected:true,commit:{sha:'c'.repeat(40)}});
@@ -179,6 +181,8 @@ test('protected source uses pinned GitHub main even when local origin is stale o
  assert.deepEqual(seen[0].args,['api','--hostname','github.com','repos/T-ej2003/genuine-scan-main/branches/main']);
  assert.equal(seen[0].env.GH_HOST,'github.com');assert.equal(seen[0].env.GH_REPO,undefined);
  assert.equal(readPhase3IamProtectedSource({...options,execute:()=>JSON.stringify({name:'main',protected:true,commit:{sha:sourceSha}})}),sourceSha);
+ assert.throws(()=>readPhase3IamProtectedSource({...options,execute:()=>JSON.stringify({name:'main',protected:true,commit:{sha:sourceSha}}),
+  gitExecute:(file,args)=>{if(args[0]==='merge-base')throw Error('reviewed merge is not an ancestor');return '';}}),/not an ancestor/);
  assert.throws(()=>readPhase3IamProtectedSource({...options,gitExecute:()=> 'refs/replace/'+sourceSha}),/replacement refs are forbidden/);
  assert.throws(()=>readPhase3IamProtectedSource({...options,env:{GH_TOKEN:'test-token'}}),/replacement objects must be disabled/);
 });
@@ -350,27 +354,65 @@ test('durably dispatched IAM write with predecessor still live fails closed with
   plan:plan('no-op','create'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
   claimOwnership:()=>claim(()=>{throw Error('completed write replayed');})}).actions,[]);
 });
-test('solo-operator GitHub authorization binds merged source and exact final PR head',()=>{
- const pull={merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T17:00:00Z',base:{ref:'main',repo:{full_name:'T-ej2003/genuine-scan-main'}},head:{sha:'c'.repeat(40)},user:{id:1}};
- pull.user.id=183396573;
- const comment={id:42,body:phase3IamAuthorizationMarker(pull.head.sha),user:{id:183396573,type:'User'},created_at:'2026-10-22T16:00:00Z',updated_at:'2026-10-22T16:00:00Z'};
- const accepted={pull,comments:[comment],operator:{id:183396573},sourceSha};
+test('solo-operator post-merge authorization binds both PRs, source and exact IAM transition',()=>{
+ const now=Date.parse('2026-10-22T18:02:00Z');
+ const reviewedPull={number:721,merged:true,merge_commit_sha:PHASE3_IAM_TRANSITION.reviewedMergeSha,
+  merged_at:'2026-10-22T17:00:00Z',head:{sha:PHASE3_IAM_TRANSITION.reviewedHeadSha},
+  base:{ref:'main',sha:PHASE3_IAM_TRANSITION.baselineSha,repo:{full_name:'T-ej2003/genuine-scan-main'}},user:{id:183396573}};
+ const pull={number:722,merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T18:00:00Z',
+  base:{ref:'main',sha:PHASE3_IAM_TRANSITION.reviewedMergeSha,repo:{full_name:'T-ej2003/genuine-scan-main'}},
+  head:{sha:'c'.repeat(40)},user:{id:183396573}};
+ const comment={id:42,body:phase3IamAuthorizationMarker(pull.head.sha,sourceSha),user:{id:183396573,type:'User'},
+  created_at:'2026-10-22T18:01:00Z',updated_at:'2026-10-22T18:01:00Z'};
+ const accepted={pull,reviewedPull,comments:[comment],operator:{id:183396573},prNumber:'722',sourceSha,now};
  assert.equal(assertPhase3IamAuthorization(accepted),42);
- for(const change of [{comments:[]},{comments:[{...comment,user:{id:2,type:'User'}}]},{comments:[{...comment,user:{id:183396573,type:'Bot'}}]},{comments:[{...comment,body:'other operation'}]},{comments:[{...comment,updated_at:'2026-10-22T16:01:00Z'}]},{pull:{...pull,merge_commit_sha:'d'.repeat(40)}},{operator:{id:2}}])
-  assert.throws(()=>assertPhase3IamAuthorization({...accepted,...change}));
+ assert.equal(PHASE3_IAM_TRANSITION.ticketId,'CHG-20261022-001');
+ assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
+ assert.equal(PHASE3_IAM_TRANSITION.frontendPolicyName,'MSCQRProductionFrontendActivation');
+ assert.equal(PHASE3_IAM_TRANSITION.auditPolicyName,'MSCQRProductionStageBNativeAudit');
+ for(const change of [
+  {comments:[]},{comments:[comment,comment]},{comments:[{...comment,user:{id:2,type:'User'}}]},
+  {comments:[{...comment,user:{id:183396573,type:'Bot'}}]},{comments:[{...comment,body:'forged'}]},
+  {comments:[{...comment,body:phase3IamAuthorizationMarker(pull.head.sha,'d'.repeat(40))}]},
+  {comments:[{...comment,created_at:'2026-10-22T17:59:00Z',updated_at:'2026-10-22T17:59:00Z'}]},
+  {comments:[{...comment,created_at:pull.merged_at,updated_at:pull.merged_at}]},
+  {comments:[{...comment,updated_at:'2026-10-22T18:02:00Z'}]},
+  {now:now+2*60*60*1000},
+  {prNumber:'723'},{pull:{...pull,number:721}},{pull:{...pull,merge_commit_sha:'d'.repeat(40)}},
+  {pull:{...pull,base:{...pull.base,sha:'d'.repeat(40)}}},
+  {pull:{...pull,head:{sha:'d'.repeat(40)}}},{pull:{...pull,base:{...pull.base,repo:{full_name:'other/repo'}}}},
+  {reviewedPull:{...reviewedPull,head:{sha:'d'.repeat(40)}}},
+  {reviewedPull:{...reviewedPull,merge_commit_sha:'d'.repeat(40)}},
+  {reviewedPull:{...reviewedPull,base:{...reviewedPull.base,sha:'d'.repeat(40)}}},
+  {operator:{id:2}},
+ ]) assert.throws(()=>assertPhase3IamAuthorization({...accepted,...change}));
+ for(const [field,value] of [['ticketId','OTHER'],['account','000000000000'],['region','us-east-1'],
+  ['frontendPolicyName','OtherFrontend'],['auditPolicyName','OtherAudit'],
+  ['frontendPredecessorSha256','0'.repeat(64)],['frontendTargetSha256','0'.repeat(64)],['auditTargetSha256','0'.repeat(64)]]){
+  const forged=`MSCQR_PHASE3_IAM_SOLO_AUTH_V2:${digest({...PHASE3_IAM_TRANSITION,[field]:value})}:${pull.head.sha}:${sourceSha}`;
+  assert.throws(()=>assertPhase3IamAuthorization({...accepted,comments:[{...comment,body:forged}]}));
+ }
 });
-test('production GitHub authorization is pinned to github.com despite ambient host injection',()=>{
- const head='c'.repeat(40),calls=[];
- const pull={merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T17:00:00Z',base:{ref:'main',repo:{full_name:'T-ej2003/genuine-scan-main'}},head:{sha:head},user:{id:183396573}};
- const comments=[{id:42,body:phase3IamAuthorizationMarker(head),user:{id:183396573,type:'User'},created_at:'2026-10-22T16:00:00Z',updated_at:'2026-10-22T16:00:00Z'}];
+test('production GitHub authorization pins host and reads both exact PR identities',()=>{
+ const calls=[];
+ const reviewedPull={number:721,merged:true,merge_commit_sha:PHASE3_IAM_TRANSITION.reviewedMergeSha,
+  merged_at:'2026-10-22T17:00:00Z',head:{sha:PHASE3_IAM_TRANSITION.reviewedHeadSha},
+  base:{ref:'main',sha:PHASE3_IAM_TRANSITION.baselineSha,repo:{full_name:'T-ej2003/genuine-scan-main'}},user:{id:183396573}};
+ const pull={number:722,merged:true,merge_commit_sha:sourceSha,merged_at:'2026-10-22T18:00:00Z',
+  base:{ref:'main',sha:PHASE3_IAM_TRANSITION.reviewedMergeSha,repo:{full_name:'T-ej2003/genuine-scan-main'}},
+  head:{sha:'c'.repeat(40)},user:{id:183396573}};
+ const comments=[{id:42,body:phase3IamAuthorizationMarker(pull.head.sha,sourceSha),user:{id:183396573,type:'User'},
+  created_at:'2026-10-22T18:01:00Z',updated_at:'2026-10-22T18:01:00Z'}];
  const execute=(_executable,args,options)=>{
-  calls.push({args,options});
-  const endpoint=args.at(-1);
-  return JSON.stringify(endpoint==='user'?{id:183396573}:endpoint.includes('/comments?')?comments:pull);
+  calls.push({args,options});const endpoint=args.at(-1);
+  return JSON.stringify(endpoint==='user'?{id:183396573}:endpoint.includes('/comments?')?comments:
+   endpoint.endsWith('/pulls/721')?reviewedPull:pull);
  };
- assert.equal(readPhase3IamAuthorization({prNumber:'721',sourceSha,execute,executable:'gh',env:{GH_HOST:'attacker.example',GH_ENTERPRISE_TOKEN:'forged',PATH:process.env.PATH}}),42);
- assert.equal(calls.length,3);
- for(const {args,options} of calls){assert.deepEqual(args.slice(0,3),['api','--hostname','github.com']);assert.equal(options.env.GH_HOST,'github.com');assert.equal(options.env.GH_ENTERPRISE_TOKEN,undefined);}
+ assert.equal(readPhase3IamAuthorization({prNumber:'722',sourceSha,execute,executable:'gh',now:()=>Date.parse('2026-10-22T18:02:00Z'),
+  env:{GH_HOST:'attacker.example',GH_ENTERPRISE_TOKEN:'forged',GH_REPO:'other/repo',PATH:process.env.PATH}}),42);
+ assert.equal(calls.length,4);
+ for(const {args,options} of calls){assert.deepEqual(args.slice(0,3),['api','--hostname','github.com']);
+  assert.equal(options.env.GH_HOST,'github.com');assert.equal(options.env.GH_ENTERPRISE_TOKEN,undefined);assert.equal(options.env.GH_REPO,undefined);}
 });
 test('fresh MFA challenge uses fixed non-root user and never sends code in CLI arguments',async()=>{
  const calls=[];
