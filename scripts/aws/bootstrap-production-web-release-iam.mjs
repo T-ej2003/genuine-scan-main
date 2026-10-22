@@ -401,6 +401,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
     assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM dispatch");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     if (!markDispatch(name, expectedAfter)) throw new Error(`${name} dispatch outcome unknown; reconcile live IAM before another attempt`);
+    assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced after IAM journal");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     assert.equal(observed(name), expectedBefore, `${name} changed after dispatch journal and before IAM write`);
     try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
@@ -474,6 +475,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     assert.equal(readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead,
       sourceSha, "Protected main advanced before IAM installation");
     const mfaEvidence = await verifyPhase3IamMfa({ sourceSha, authorizationId });
+    assert.equal(readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha }), authorizationId,
+      "Solo-operator IAM authorization changed during MFA");
     result = { ...reconcilePhase3WebIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, authorizationId, mfaEvidence,
       claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }),
       planSha256: createHash("sha256").update(planBytes).digest("hex") };

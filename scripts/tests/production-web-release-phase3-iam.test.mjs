@@ -123,13 +123,13 @@ test('IAM drift during S3 dispatch is caught before PutRolePolicy',()=>{
   assert.deepEqual(writes(value),[]);
  }
 });
-test('protected main advancing after MFA or ownership stops before IAM dispatch',()=>{
- for(const driftAt of [1,2]){
+test('protected main advancing after MFA, ownership or journaling stops before IAM write',()=>{
+ for(const driftAt of [1,2,3]){
   const value=fixture();let checks=0,claimed=false,dispatched=false;
   assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
    plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource:()=>++checks===driftAt?'c'.repeat(40):sourceSha,
    claimOwnership:()=>{claimed=true;return claim(()=>{dispatched=true;return true;});}}),/Protected main advanced/);
-  assert.equal(claimed,driftAt===2);assert.equal(dispatched,false);assert.deepEqual(writes(value),[]);
+  assert.equal(claimed,driftAt>1);assert.equal(dispatched,driftAt===3);assert.deepEqual(writes(value),[]);
  }
 });
 test('journaled IAM and S3 writes use one CLI attempt while reads retain normal retry settings',()=>{
