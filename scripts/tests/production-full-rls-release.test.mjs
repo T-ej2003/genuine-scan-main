@@ -68,6 +68,8 @@ test("production executor accepts only the exact production identity and TLS end
     const confirmation = PRODUCTION_GREEN.confirmations[mode];
     assert.equal(validateGreenExecutorMode(mode, confirmation || ""), mode);
   }
+  assert.deepEqual(GREEN_EXECUTOR_MODES.filter(mode=>mode!=='full-rls-rollback'&&PRODUCTION_GREEN.confirmations[mode]),
+    ['full-rls-role-provision','full-rls-admin-bootstrap','full-rls-admin-ownership','full-rls-runtime-policy']);
 });
 
 test("production green canary provisioning is approval-bound, secret-safe and idempotent", async () => {
@@ -140,6 +142,9 @@ for (const authority of ["initial transport", "retained without transport", "mat
   const outputPath = path.join(directory, "release-receipt.json");
   const modes = [];
   const nativeReceipts=new Map();
+  const receiptNonces=new Map();
+  let failTaskMode,failReceiptReadMode,currentTaskMode,failRollbackTask=false;
+  const missingReceiptModes=new Set();
   const historical = historicalRuntimeFixture();
   const historicalJson = JSON.stringify(historical.evidence);
   const retention = historicalRuntimeRetention({ evidence: historical.evidence, sourceSha: historical.release, current: historical.state, componentStateSha256: stateHash(historical.state), reader: historical.reader, verify: historical.verify, writerContext: historical.writerContext, now: historical.now });
@@ -162,6 +167,8 @@ for (const authority of ["initial transport", "retained without transport", "mat
       const request = JSON.parse(fs.readFileSync(args.find((item) => item.startsWith("fileb://")).slice(8), "utf8"));
       assert.equal(request.historicalRuntimeReferenceSha256, historical.reference.referenceSha256);
       modes.push(request.mode);
+      currentTaskMode=request.mode;
+      receiptNonces.set(request.mode,crypto.randomUUID());
       fs.writeFileSync(args.at(-1), JSON.stringify({
         status: "started",
         mode: request.mode,
@@ -171,17 +178,22 @@ for (const authority of ["initial transport", "retained without transport", "mat
       return { StatusCode: 200 };
     }
     if (args[0] === "ecs" && args[1] === "wait") return {};
-    if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ containers: [{ exitCode: 0 }] }] };
+    if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ lastStatus:'STOPPED',containers: [{ exitCode:currentTaskMode===failTaskMode||currentTaskMode==='full-rls-rollback'&&failRollbackTask?1:0 }] }] };
     if (args[0] === "s3api" && args[1] === "list-objects-v2") {
       const prefix = args[args.indexOf("--prefix") + 1];
       const mode=prefix.split('/').at(-2);
-      const contents=modes.includes(mode)?[{Key:`${prefix}fixture.json`,LastModified:new Date().toISOString()}]:[];
+      const contents=modes.includes(mode)&&!missingReceiptModes.has(mode)?[{Key:`${prefix}${receiptNonces.get(mode)}.json`,LastModified:new Date().toISOString()}]:[];
       return {KeyCount:contents.length,IsTruncated:false,Contents:contents};
     }
-    if(args[0]==='dynamodb'&&args[1]==='get-item')return {};
+    if(args[0]==='dynamodb'&&args[1]==='get-item'){
+      const key=JSON.parse(args[args.indexOf('--key')+1]).approvalMode.S;
+      return key.endsWith('#full-rls-rollback')&&modes.includes('full-rls-rollback')
+        ?{Item:{approvalMode:{S:key},approvalNonce:{S:'claimed'}}}:{};
+    }
     if (args[0] === "s3api" && args[1] === "get-object") {
       const key = args[args.indexOf("--key") + 1];
       const mode = key.split("/").at(-2);
+      if(mode===failReceiptReadMode)throw new Error('Injected native receipt read failure');
       let value=nativeReceipts.get(mode);
       if(!value)value={
         schemaVersion: 1,
@@ -202,7 +214,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
         approvalExpiresAt: new Date(Date.now() + 60_000).toISOString(),
         catalogueSha256: "f".repeat(64),
         completedAt: new Date().toISOString(),
-        nonce: crypto.randomUUID(),
+        nonce: receiptNonces.get(mode),
       };
       if(!value.receiptSha256)value.receiptSha256 = sha256(`${JSON.stringify(value)}\n`);
       nativeReceipts.set(mode,value);
@@ -235,6 +247,46 @@ for (const authority of ["initial transport", "retained without transport", "mat
   const resumed=await applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.recovered`});
   assert.equal(modes.length,invoked,'authenticated executor receipts must not replay one-use broker modes');
   assert.equal(resumed.receiptBundleSha256,bundle.receiptBundleSha256);
+  if(authority==='initial transport'||authority==='retained without transport'){
+    const failingMode=authority==='initial transport'?'full-rls-application-canary':'full-rls-verification';
+    modes.splice(modes.indexOf(failingMode),1);failTaskMode=failingMode;
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.failed`}),/activation failed/);
+    assert.deepEqual(modes.slice(-2),[failingMode,'full-rls-rollback'],
+      'a resumed mutation followed by verification failure must invoke exact rollback once');
+    const before=modes.length;
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.after-rollback`}),/activation failed/);
+    assert.equal(modes.length,before,'authenticated rollback cannot be replayed');
+    failReceiptReadMode='full-rls-rollback';
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.unknown-rollback`}),/OUTCOME_UNKNOWN/);
+    assert.equal(modes.length,before,'ambiguous rollback receipt cannot dispatch another rollback');
+  }
+  if(authority==='matching transport and retention'){
+    failReceiptReadMode='full-rls-runtime-policy';
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.unknown-mode`}),/OUTCOME_UNKNOWN/);
+    assert.ok(!modes.includes('full-rls-rollback'),'unreadable mutating receipt cannot trigger blind rollback');
+    failReceiptReadMode=undefined;modes.splice(modes.indexOf('full-rls-application-canary'),1);
+    failTaskMode='full-rls-application-canary';failRollbackTask=true;
+    missingReceiptModes.add('full-rls-rollback');
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.partial-rollback`}),/rollback completion is ambiguous/);
+    const before=modes.length;
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.retry-partial-rollback`}),/OUTCOME_UNKNOWN/);
+    assert.equal(modes.length,before,'a claimed rollback without a receipt cannot run again');
+  }
+  if(authority==='retained after backend/frontend transactions'){
+    const before=modes.length;
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath}),/activation failed/);
+    assert.equal(modes.length,before,'a local receipt-file conflict after verified canary cannot roll back production');
+    const completed=[...modes];modes.splice(0,modes.length,'full-rls-capability-preflight');
+    failTaskMode='full-rls-admin-bootstrap';
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.partial-bootstrap`}),/OUTCOME_UNKNOWN/);
+    assert.ok(!modes.includes('full-rls-rollback'),'read-only recovery plus a partially failed mutation cannot authorize rollback');
+    modes.splice(0,modes.length,...completed);failTaskMode=undefined;
+    const wrong=nativeReceipts.get('full-rls-admin-bootstrap');wrong.releaseSha='0'.repeat(40);
+    const {receiptSha256:previousDigest,...unsigned}=wrong;
+    assert.match(previousDigest,/^[a-f0-9]{64}$/);wrong.receiptSha256=sha256(`${JSON.stringify(unsigned)}\n`);
+    await assert.rejects(applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.foreign-receipt`}),/OUTCOME_UNKNOWN/);
+    assert.ok(!modes.includes('full-rls-rollback'),'foreign native receipt cannot authorize rollback');
+  }
 });
 
 test("production workflow applies verified green and canaries before backend traffic switch", () => {

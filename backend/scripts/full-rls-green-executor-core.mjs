@@ -243,6 +243,16 @@ const catalogueFingerprint = (target, adminUrl) => sha256(JSON.stringify({
   managedRoleCount: managedRoleCount(target, adminUrl),
 }));
 
+export function assertExactRollbackTarget(target,adminUrl,bound,read=query){
+  const source=bound.checksums.sourceContractSha256;
+  if(read(targetUrl(target,adminUrl),`SELECT count(*) FROM mscqr_rls_install.state WHERE singleton
+    AND target_environment='${target.environment}' AND deployment_id='${target.deploymentId}'
+    AND green_database=current_database() AND source_contract_sha256='${source}'
+    AND package_role_marker='mscqr-full-rls-clean-room:${target.environment}:${source}'
+    AND administrator_role=current_user AND NOT traffic_enabled`,'rollback-package-marker')!=='1')
+    throw new Error('Exact rollback refused an unmarked, changed or active green database.');
+}
+
 const receipt = ({
   target,
   mode,
@@ -341,6 +351,7 @@ export async function executeFullRlsGreenMode(target, {
     await verifyRuntimeRoles(target, adminUrl, secretsManager);
   } else if (mode === "full-rls-rollback") {
     if (!databaseExists(target, adminUrl)) throw new Error("Exact rollback requires the reviewed green database.");
+    assertExactRollbackTarget(target,adminUrl,bound);
     query(adminUrl, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${target.database}' AND pid<>pg_backend_pid();DROP DATABASE "${target.database}"`, mode);
     runFile(adminUrl, "clean-room-cleanup.sql", mode, [["candidate_database", target.database]]);
     if (databaseExists(target, adminUrl) || managedRoleCount(target, adminUrl) !== 0) {

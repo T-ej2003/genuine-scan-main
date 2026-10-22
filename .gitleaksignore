@@ -55,3 +55,5 @@ documents/security/rls-program/release-fix-7-contract-inventory.json:generic-api
 62b73a98b6e0f960e0d326df9addd310324c9740:backend/tests/rls-wave-b/b03/repositoryFunctions.test.js:generic-api-key:49
 8b58ece86aa96e9f11a79623e3cd385b14889957:documents/security/rls-program/public-read-contract.json:generic-api-key:301
 b5c712f7bdb4a01c1736b8a89dc3664069336018:scripts/rls/lib/program-inventory.mjs:generic-api-key:1498
+# Historical-only Secrets Manager ARN prefix, not credential material; split in 2f6a7ab6.
+bcc57efd3951876db2a675dfb8441793d9d5abf7:scripts/aws/production-release-bridge-native-audit.mjs:generic-api-key:112
