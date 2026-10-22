@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,phase3IamAuthorizationMarker,readPhase3IamAuthorization,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,readPhase3IamAuthorization,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
 
 const directory='infra/aws/terraform/production-web-release';
@@ -11,6 +11,9 @@ const frontend=JSON.parse(fs.readFileSync(`${directory}/frontend-activation-poli
 const audit=JSON.parse(fs.readFileSync(`${directory}/stage-b-native-audit-policy.json`));
 const predecessor={...frontend,Statement:frontend.Statement.filter(({Sid})=>Sid!=='FindClaimedFrontendRevision')};
 const sourceSha='b'.repeat(40);
+assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.mjs','utf8'),
+ /const run = createPhase3IamAwsRunner\(\{ profile: values\.get\("--admin-profile"\) \}\)/,
+ 'Production CLI must use the single-attempt IAM writer');
 const mfaEvidence={sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,authorizationId:42,operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator',accessKeyIdSha256:'f'.repeat(64),verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
 assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');
 assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
@@ -55,7 +58,7 @@ function fixture({front=predecessor,native=null,lostResponse=null,onRead=null,ca
  };
  return {run,calls,state:()=>({frontendPolicy,auditPolicy})};
 }
-const claim=markDispatch=>({ownershipSha256:'d'.repeat(64),markDispatch,complete:()=> 'e'.repeat(64)});
+const claim=(markDispatch,hasDispatch=()=>true)=>({ownershipSha256:'d'.repeat(64),hasDispatch,markDispatch,complete:()=> 'e'.repeat(64)});
 const reconcile=(value,selected=plan(),authorizationId=42)=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,plan:selected,authorizationId,mfaEvidence,claimOwnership:()=>claim(()=>true)});
 const writes=value=>value.calls.filter(([service,operation])=>service==='iam'&&operation==='put-role-policy').map(args=>args[args.indexOf('--policy-name')+1]);
 
@@ -67,6 +70,51 @@ test('exact approved two-policy transition and authenticated rerun',()=>{
  assert.equal(digest(value.state().frontendPolicy),PHASE3_IAM_TRANSITION.frontendTargetSha256);
  assert.deepEqual(reconcile(value,plan('no-op','no-op')).actions,[]);
  assert.equal(writes(value).length,2);
+});
+test('Terraform actions must equal the live checkpoint before claiming mutation ownership',()=>{
+ for(const [options,selected] of [
+  [{},plan('no-op','no-op')],
+  [{},plan('update','no-op')],
+  [{native:audit},plan()],
+  [{front:frontend,native:audit},plan()],
+  [{front:frontend},plan('no-op','no-op')],
+  [{front:null},plan('no-op','no-op')],
+ ]){
+  const value=fixture(options);let claimed=false;
+  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+   plan:selected,authorizationId:42,mfaEvidence,claimOwnership:()=>{claimed=true;return claim(()=>true);}}));
+  assert.equal(claimed,false);assert.deepEqual(writes(value),[]);
+ }
+ const partial=fixture({native:audit});let resumeOnly;
+ reconcilePhase3WebIam({run:partial.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,claimOwnership:input=>{resumeOnly=input.resumeOnly;return claim(()=>true);}});
+ assert.equal(resumeOnly,true);
+ const unauthenticated=fixture({native:audit});
+ assert.throws(()=>reconcilePhase3WebIam({run:unauthenticated.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan('update','no-op'),authorizationId:42,mfaEvidence,claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
+ assert.deepEqual(writes(unauthenticated),[]);
+});
+test('MFA authority expiring after durable ownership stops before IAM dispatch',()=>{
+ const value=fixture(),fresh={...mfaEvidence};let dispatched=false;
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan(),authorizationId:42,mfaEvidence:fresh,claimOwnership:()=>{
+   fresh.expiresAt=new Date(Date.now()-1).toISOString();
+   return claim(()=>{dispatched=true;return true;});
+  }}),/MFA authority expired/);
+ assert.equal(dispatched,false);assert.deepEqual(writes(value),[]);
+});
+test('journaled IAM and S3 writes use one CLI attempt while reads retain normal retry settings',()=>{
+ const calls=[];
+ const run=createPhase3IamAwsRunner({profile:'mscqr-production-root',exec:(_file,args,options)=>{
+  calls.push({args,env:options.env});return '{}';
+ }});
+ for(const args of [['iam','get-role-policy'],['iam','put-role-policy'],['iam','create-role'],['s3api','put-object'],['s3api','get-object']])run(args);
+ for(const {args,env} of calls){
+  assert.equal(env.AWS_PROFILE,'mscqr-production-root');
+  if(args[1]==='put-role-policy'||args[1]==='create-role'||args[1]==='put-object'){
+   assert.equal(env.AWS_MAX_ATTEMPTS,'1');assert.equal(env.AWS_RETRY_MODE,'standard');
+  }else assert.equal(env.AWS_MAX_ATTEMPTS,undefined);
+ }
 });
 test('approval, source fingerprints and plan reject unauthorized expansion before a write',()=>{
  const value=fixture();
@@ -92,7 +140,7 @@ test('partial installation and lost AWS responses reconcile without duplicate wr
   const value=fixture({lostResponse});reconcile(value);assert.deepEqual(writes(value),['MSCQRProductionStageBNativeAudit','MSCQRProductionFrontendActivation']);
   assert.deepEqual(reconcile(value,plan('no-op','no-op')).actions,[]);
  }
- const crashed=fixture({onRead:({reads})=>{if(reads===4)throw Error('runner interrupted after audit write');}});
+ const crashed=fixture({onRead:({reads})=>{if(reads===6)throw Error('runner interrupted after audit write');}});
  assert.throws(()=>reconcile(crashed),/runner interrupted/);
  assert.equal(digest(crashed.state().auditPolicy),PHASE3_IAM_TRANSITION.auditTargetSha256);
  const resumed=fixture({native:crashed.state().auditPolicy,front:crashed.state().frontendPolicy});
@@ -119,11 +167,16 @@ test('write-once S3 owner claim reuses the same terminal and rejects another own
   };
   const first=path.join(dir,'first.json'),second=path.join(dir,'second.json');
   const input={run,sourceSha,authorizationId:42,mfaEvidence};
+  assert.throws(()=>claimPhase3IamOwner({...input,ownerFile:first,resumeOnly:true}),/lacks a durable owner/);
   const owner=claimPhase3IamOwner({...input,ownerFile:first});
+  assert.equal(owner.hasDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),false);
+  assert.equal(claimPhase3IamOwner({...input,ownerFile:first,resumeOnly:true}).ownershipSha256,owner.ownershipSha256);
   assert.equal(claimPhase3IamOwner({...input,ownerFile:first}).ownershipSha256,owner.ownershipSha256);
   assert.throws(()=>claimPhase3IamOwner({...input,ownerFile:second}),/ownership outcome unknown or conflicting/);
   assert.throws(()=>claimPhase3IamOwner({...input,authorizationId:43,mfaEvidence:{...mfaEvidence,authorizationId:43},ownerFile:path.join(dir,'third.json')}),/ownership outcome unknown or conflicting/);
   assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),true);
+  assert.equal(owner.hasDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),true);
+  assert.equal(owner.hasDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),false);
   assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),false,'existing dispatch must never be repeated');
   assert.throws(()=>owner.markDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),/dispatch journal conflicts/);
   assert.match(owner.complete(),/^[a-f0-9]{64}$/);
@@ -141,8 +194,8 @@ test('concurrent IAM change and interrupted bootstrap stop or resume at the exac
  const changed=fixture({onRead:({reads,policyName,setFrontend})=>{
   if(reads>2&&policyName==='MSCQRProductionFrontendActivation')setFrontend({Version:'2012-10-17',Statement:[]});
  }});
- assert.throws(()=>reconcile(changed),/changed during IAM reconciliation/);
- assert.deepEqual(writes(changed),['MSCQRProductionStageBNativeAudit']);
+ assert.throws(()=>reconcile(changed),/changed after checkpoint authentication/);
+ assert.deepEqual(writes(changed),[]);
  const wrong=fixture({caller:'arn:aws:iam::368992683803:user/operator'});
  assert.throws(()=>reconcile(wrong),/account root/);assert.deepEqual(writes(wrong),[]);
 });

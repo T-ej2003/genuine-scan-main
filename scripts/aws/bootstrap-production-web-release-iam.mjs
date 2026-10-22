@@ -36,7 +36,7 @@ const POLICY_NO_OPS = Object.freeze({
   "aws_iam_role.publisher": "no-op",
   "aws_iam_role_policy.publisher": "no-op",
 });
-export function assertPhase3IamPlan(plan) {
+export function assertPhase3IamPlan(plan, checkpoint) {
   assert.ok(plan && typeof plan === "object");
   const changes = plan.resource_changes || [];
   const actions = Object.fromEntries(changes.map(({ address, change }) => [address, change?.actions?.join(",")]));
@@ -45,9 +45,16 @@ export function assertPhase3IamPlan(plan) {
     "IAM plan changes an unrelated resource");
   assert.deepEqual(Object.keys(actions).sort(), [...Object.keys(POLICY_NO_OPS), "aws_iam_role_policy.frontend_activation", "aws_iam_role_policy.stage_b_native_audit"].sort(),
     "IAM plan contains an unapproved resource");
-  assert.ok([["update", "create"], ["update", "no-op"], ["no-op", "no-op"]].some(([frontend, audit]) =>
-    actions["aws_iam_role_policy.frontend_activation"] === frontend && actions["aws_iam_role_policy.stage_b_native_audit"] === audit),
-  "IAM plan does not match a safe transition checkpoint");
+  const tuple = [actions["aws_iam_role_policy.frontend_activation"], actions["aws_iam_role_policy.stage_b_native_audit"]];
+  assert.ok([["update", "create"], ["update", "no-op"], ["no-op", "no-op"]].some(expected =>
+    expected.every((action, index) => action === tuple[index])), "IAM plan does not match a safe transition checkpoint");
+  if (checkpoint) {
+    const expected = checkpoint.frontend === PHASE3_IAM_TRANSITION.frontendPredecessorSha256
+      ? checkpoint.audit === null ? ["update", "create"] : ["update", "no-op"]
+      : checkpoint.frontend === PHASE3_IAM_TRANSITION.frontendTargetSha256 && checkpoint.audit === PHASE3_IAM_TRANSITION.auditTargetSha256
+        ? ["no-op", "no-op"] : null;
+    assert.deepEqual(tuple, expected, "IAM plan actions differ from authenticated live checkpoint");
+  }
   const frontend = changes.find(({ address }) => address === "aws_iam_role_policy.frontend_activation").change;
   const audit = changes.find(({ address }) => address === "aws_iam_role_policy.stage_b_native_audit").change;
   assert.equal(frontend.before?.name, activationPolicyName);
@@ -132,7 +139,7 @@ function assertPhase3IamMfaEvidence(value, sourceSha, authorizationId, now = Dat
     && Date.parse(value.verifiedAt) >= now - 300000, "Operator MFA verification is stale");
   assert.ok(Date.parse(value?.expiresAt) > now + 120000, "Operator MFA authority expired");
 }
-export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEvidence, ownerFile }) {
+export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEvidence, ownerFile, resumeOnly = false }) {
   assert.equal(typeof run, "function");
   assert.ok(path.isAbsolute(ownerFile), "IAM owner file must use a private absolute path");
   const parent = fs.realpathSync(path.dirname(ownerFile));
@@ -151,6 +158,7 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
     assert.match(owner.ownerId || "", /^[a-f0-9-]{36}$/);
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
+    assert.equal(resumeOnly, false, "Partial IAM state lacks a durable owner");
     owner = { binding, ownerId: randomUUID(), initialMfaEvidence: mfaEvidence };
     fs.writeFileSync(ownerFile, JSON.stringify(owner), { mode: 0o600, flag: "wx" });
   }
@@ -165,31 +173,41 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
       return fs.readFileSync(file);
     } finally { fs.rmSync(file, { force: true }); }
   };
-  try {
-    run(["s3api", "put-object", "--bucket", bucket, "--key", key, "--body", ownerFile,
-      "--if-none-match", "*", "--server-side-encryption", "AES256", "--expected-bucket-owner", account, "--region", "eu-west-2"]);
-  } catch (error) {
-    try { if (!readback(key).equals(expected)) throw new Error("IAM operation is owned by another terminal"); }
-    catch (readError) { throw new Error("IAM ownership outcome unknown or conflicting", { cause: readError }); }
+  if (!resumeOnly) {
+    try {
+      run(["s3api", "put-object", "--bucket", bucket, "--key", key, "--body", ownerFile,
+        "--if-none-match", "*", "--server-side-encryption", "AES256", "--expected-bucket-owner", account, "--region", "eu-west-2"]);
+    } catch (error) {
+      try { if (!readback(key).equals(expected)) throw new Error("IAM operation is owned by another terminal"); }
+      catch (readError) { throw new Error("IAM ownership outcome unknown or conflicting", { cause: readError }); }
+    }
   }
   assert.ok(readback(key).equals(expected), "IAM ownership readback differs");
+  const dispatchBody = (policyName, inputHash) => Buffer.from(JSON.stringify({ ownerId: owner.ownerId, binding, policyName, inputHash }));
+  const dispatchKey = policyName => `${key.slice(0, -5)}/${policyName}.json`;
+  const hasDispatch = (policyName, inputHash) => {
+    assert.ok([auditPolicyName, activationPolicyName].includes(policyName));
+    assert.match(inputHash || "", /^[a-f0-9]{64}$/);
+    try { return readback(dispatchKey(policyName)).equals(dispatchBody(policyName, inputHash)); }
+    catch (error) { if (/NoSuchKey/.test(`${error?.message || ""} ${error?.stderr || ""}`)) return false; throw error; }
+  };
   const markDispatch = (policyName, inputHash) => {
     assert.ok([auditPolicyName, activationPolicyName].includes(policyName));
     assert.match(inputHash || "", /^[a-f0-9]{64}$/);
-    const dispatchKey = `${key.slice(0, -5)}/${policyName}.json`;
+    const keyForDispatch = dispatchKey(policyName);
     const dispatchFile = path.join(path.dirname(ownerFile), `.iam-dispatch-${randomUUID()}`);
-    const body = Buffer.from(JSON.stringify({ ownerId: owner.ownerId, binding, policyName, inputHash }));
+    const body = dispatchBody(policyName, inputHash);
     fs.writeFileSync(dispatchFile, body, { mode: 0o600, flag: "wx" });
     let created = false;
     try {
       try {
-        run(["s3api", "put-object", "--bucket", bucket, "--key", dispatchKey, "--body", dispatchFile,
+        run(["s3api", "put-object", "--bucket", bucket, "--key", keyForDispatch, "--body", dispatchFile,
           "--if-none-match", "*", "--server-side-encryption", "AES256", "--expected-bucket-owner", account, "--region", "eu-west-2"]);
         created = true;
       } catch (error) {
-        if (!readback(dispatchKey).equals(body)) throw new Error("IAM dispatch journal conflicts", { cause: error });
+        if (!readback(keyForDispatch).equals(body)) throw new Error("IAM dispatch journal conflicts", { cause: error });
       }
-      assert.ok(readback(dispatchKey).equals(body), "IAM dispatch journal readback differs");
+      assert.ok(readback(keyForDispatch).equals(body), "IAM dispatch journal readback differs");
       return created;
     } finally { fs.rmSync(dispatchFile, { force: true }); }
   };
@@ -208,7 +226,7 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
       return iamDigest(JSON.parse(body));
     } finally { fs.rmSync(completionFile, { force: true }); }
   };
-  return Object.freeze({ ownershipSha256: iamDigest(owner), markDispatch, complete });
+  return Object.freeze({ ownershipSha256: iamDigest(owner), hasDispatch, markDispatch, complete });
 }
 const publisherTags = [
   { Key: "Environment", Value: "production" },
@@ -348,17 +366,30 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   assert.ok(beforeAudit === null || beforeAudit === PHASE3_IAM_TRANSITION.auditTargetSha256, "Native audit policy conflicts");
   assert.ok(!(beforeAudit === null && beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256),
     "Frontend transition preceded native audit installation");
+  const checkpoint = { frontend: beforeFrontend, audit: beforeAudit };
+  assertPhase3IamPlan(plan, checkpoint);
   assert.equal(typeof claimOwnership, "function", "Durable IAM ownership claim is required");
-  const { ownershipSha256, markDispatch, complete } = claimOwnership({ run, sourceSha, authorizationId, mfaEvidence });
+  const resumeOnly = beforeAudit !== null || beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256;
+  const { ownershipSha256, hasDispatch, markDispatch, complete } = claimOwnership({ run, sourceSha, authorizationId, mfaEvidence, resumeOnly });
   assert.match(ownershipSha256 || "", /^[a-f0-9]{64}$/, "IAM ownership claim is not authenticated");
+  assert.equal(typeof hasDispatch, "function", "Durable IAM dispatch inspection is required");
   assert.equal(typeof markDispatch, "function", "Durable per-policy dispatch journal is required");
   assert.equal(typeof complete, "function", "Durable IAM completion receipt is required");
+  if (beforeAudit !== null) assert.equal(hasDispatch(auditPolicyName, PHASE3_IAM_TRANSITION.auditTargetSha256), true,
+    "Native audit target lacks an authenticated dispatch journal");
+  if (beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256)
+    assert.equal(hasDispatch(activationPolicyName, PHASE3_IAM_TRANSITION.frontendTargetSha256), true,
+      "Frontend target lacks an authenticated dispatch journal");
+  assert.equal(observed(activationPolicyName), beforeFrontend, "Frontend IAM changed after checkpoint authentication");
+  assert.equal(observed(auditPolicyName), beforeAudit, "Native audit IAM changed after checkpoint authentication");
   const actions = [];
   const install = (name, document, expectedBefore, expectedAfter) => {
     const current = observed(name);
     if (current === expectedAfter) return;
     assert.equal(current, expectedBefore, `${name} changed during IAM reconciliation`);
+    assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     if (!markDispatch(name, expectedAfter)) throw new Error(`${name} dispatch outcome unknown; reconcile live IAM before another attempt`);
+    assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
     catch (error) {
       if (observed(name) !== expectedAfter) throw new Error(`${name} write outcome unknown; reconcile live IAM before retry`, { cause: error });
@@ -374,6 +405,16 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   const completionSha256 = complete();
   assert.match(completionSha256 || "", /^[a-f0-9]{64}$/, "IAM completion receipt is not authenticated");
   return Object.freeze({ status: "PHASE3_WEB_IAM_RECONCILED", sourceSha, ticketId, authorizationId, ownershipSha256, completionSha256, actions: Object.freeze(actions) });
+}
+
+export function createPhase3IamAwsRunner({ profile, exec = execFileSync } = {}) {
+  const mutating = new Set(["create-policy", "create-role", "put-role-policy"]);
+  return createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile,
+    exec: (file, command, options) => exec(file, command, {
+      ...options,
+      env: command[0] === "iam" && mutating.has(command[1]) || command[0] === "s3api" && command[1] === "put-object"
+        ? { ...options.env, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : options.env,
+    }) });
 }
 
 function args(argv) {
@@ -397,7 +438,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const sourceSha = values.get("--source-sha");
   const checkout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
   assert.equal(checkout.currentHead, sourceSha, "IAM bootstrap source is not exact protected main.");
-  const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: values.get("--admin-profile") });
+  const run = createPhase3IamAwsRunner({ profile: values.get("--admin-profile") });
   let result;
   if (values.has("--ticket-id")) {
     execFileSync("git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
