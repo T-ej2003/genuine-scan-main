@@ -270,5 +270,26 @@
   "Message": "fix(audit): preserve SSE compatibility and structural RF7 references",
   "Tags": [],
   "Fingerprint": "616f94c69e7fef0a6090d86567100d40aad11f7a:documents/ops/g06-g11-local-remediation.md:generic-api-key:8"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Reviewed historical Secrets Manager ARN prefix used only for resource allowlisting; the line contains no credential and was rewritten in 2f6a7ab6.",
+  "StartLine": 112,
+  "EndLine": 112,
+  "StartColumn": 51,
+  "EndColumn": 78,
+  "Match": "REDACTED",
+  "Secret": "REDACTED",
+  "File": "scripts/aws/production-release-bridge-native-audit.mjs",
+  "SymlinkFile": "",
+  "Commit": "bcc57efd3951876db2a675dfb8441793d9d5abf7",
+  "Link": "https://github.com/T-ej2003/genuine-scan-main/blob/bcc57efd3951876db2a675dfb8441793d9d5abf7/scripts/aws/production-release-bridge-native-audit.mjs#L112",
+  "Entropy": 0,
+  "Author": "T-ej2003",
+  "Email": "karatlapallyabhiramteja@gmail.com",
+  "Date": "2026-10-22T12:11:28Z",
+  "Message": "Complete trusted-terminal native proof and Gate mutation recovery",
+  "Tags": [],
+  "Fingerprint": "bcc57efd3951876db2a675dfb8441793d9d5abf7:scripts/aws/production-release-bridge-native-audit.mjs:generic-api-key:112"
  }
 ]

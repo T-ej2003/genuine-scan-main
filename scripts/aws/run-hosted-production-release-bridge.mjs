@@ -40,6 +40,51 @@ export const createProductionNativeStageVerifier=({store,run,env})=>evidence=>ve
   workflowRef:approval.workflowRef,eventName:'workflow_dispatch',workflowRunId:request.workflowRunId,
   workflowRunAttempt:request.workflowRunAttempt,executionActor:approval.executionActor,requireActualApproval:true})});
 
+export async function requestNormalGateRerun({store,operationId,runId,runAttempt,sourceSha,releaseTrainRunId,
+ requireMain,fetchImpl,fetchRun,token,repositoryName=repository}={}){
+ const marker={runId,runAttempt,sourceSha,releaseTrainRunId};
+ const definitiveRejection=status=>status>=400&&status<500&&status!==408&&status!==429;
+ const observe=async()=>{
+  const observed=await fetchRun(runId);
+  assert.equal(String(observed.id),String(runId));assert.equal(observed.head_sha,sourceSha);
+  assert.equal(observed.path,'.github/workflows/release-gate.yml');assert.equal(observed.event,'workflow_dispatch');
+  assert.equal(observed.repository?.full_name,repositoryName);
+  if(observed.run_attempt>runAttempt)return 'WAIT';
+  throw new Error('OUTCOME_UNKNOWN: GitHub rerun dispatch has no durable accepted attempt; reconcile before retry');
+ };
+ for(let request=1;request<=3;request++){
+  const phase=`BRIDGE:GATE:NORMAL:RERUN:${runAttempt}:DISPATCH:${request}`;
+  const prior=await store.readOperation(operationId,phase);
+  if(prior){
+   assert.deepEqual(prior,marker,'Conflicting normal Gate rerun ownership');
+   const result=await store.readOperation(operationId,`${phase}:RESULT`);
+   if(result){
+    assert.deepEqual(result.marker,marker);
+    if(result.status===201)return 'WAIT';
+    assert.ok(Number.isInteger(result.status)&&result.status>=100&&result.status<600,
+     'Invalid rerun response receipt');
+    if(definitiveRejection(result.status))continue;
+    return observe();
+   }
+   return observe();
+  }
+  await requireMain();
+  assert.equal(await store.claimOperation(operationId,phase,marker),true,
+   'Another Release Train invocation owns this child rerun');
+  const response=await fetchImpl(`https://api.github.com/repos/${repositoryName}/actions/runs/${runId}/rerun`,{
+   method:'POST',headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${token}`,
+    'X-GitHub-Api-Version':'2022-11-28'}});
+  const result={marker,status:response.status};
+  await store.writeOperation(operationId,`${phase}:RESULT`,result);
+  assert.deepEqual(await store.readOperation(operationId,`${phase}:RESULT`),result,
+   'Normal Gate rerun response was not durably captured');
+  if(response.status===201)return 'WAIT';
+  if(!definitiveRejection(response.status))return observe();
+  throw new Error(`GitHub rejected normal Gate rerun request for ${runId} with ${response.status}; next invocation may retry`);
+ }
+ throw new Error('Normal Gate rerun exhausted bounded rejected requests');
+}
+
 export async function waitForTerminalCutover({verify,coordinateNative=async()=>{},ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
  const operationId=request.operationId;
  for(let i=0;i<maxPolls;i++){
@@ -203,13 +248,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   }
   for(let attempt=latest;attempt<3;attempt++){
    const id=await dispatchOnce(mode,inputs,attempt);
-   let rerunAttempt=1;
-   if(mode==='NORMAL')for(let prior=1;prior<4;prior++){
-    const marker=await store.readOperation(operationId,`BRIDGE:GATE:NORMAL:RERUN:${prior}:DISPATCH`);
-    if(!marker)break;
-    assert.equal(marker.runId,id);assert.equal(marker.runAttempt,prior);rerunAttempt=prior+1;
-   }
-   let child=await waitChild(id,'release-gate.yml',{allowFailure:true,minAttempt:rerunAttempt});
+   let child=await waitChild(id,'release-gate.yml',{allowFailure:true});
    for(let recovery=0;recovery<3;recovery++){
    if(child.conclusion==='success')return {runId:id,child};
    await credentials.ensure();
@@ -254,20 +293,9 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
     ?await classifyPostMutationNormalGateRecovery(recoveryInput)
     :await classifyPreBackendNormalGateRecovery({...recoveryInput,expectedBackendArn});
    if(recoveryDisposition!=='RESUME_SAME_RUN')return {runId:id,child};
-   const rerunPhase=`BRIDGE:GATE:NORMAL:RERUN:${child.run_attempt}:DISPATCH`;
-   const rerunMarker={runId:id,runAttempt:child.run_attempt,sourceSha:env.TARGET_SHA,
-    releaseTrainRunId:boundParentRunId};
-   const priorRerun=await store.readOperation(operationId,rerunPhase);
-   if(priorRerun)assert.deepEqual(priorRerun,rerunMarker);
-   else{
-    assert.equal(await store.claimOperation(operationId,rerunPhase,rerunMarker),true,
-     'Another Release Train invocation owns this child rerun');
-    await requireMain();
-    const response=await fetchImpl(`https://api.github.com/repos/${repository}/actions/runs/${id}/rerun`,{
-     method:'POST',headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${env.GH_TOKEN}`,
-      'X-GitHub-Api-Version':'2022-11-28'}});
-    if(!response.ok)throw new Error(`OUTCOME_UNKNOWN: GitHub rerun request for ${id} returned ${response.status}`);
-   }
+   await requestNormalGateRerun({store,operationId,runId:id,runAttempt:child.run_attempt,
+    sourceSha:env.TARGET_SHA,releaseTrainRunId:boundParentRunId,requireMain,fetchImpl,
+    fetchRun:runId=>fetchJson(`actions/runs/${runId}`),token:env.GH_TOKEN});
    child=await waitChild(id,'release-gate.yml',{allowFailure:true,minAttempt:child.run_attempt+1});
    }
   }
