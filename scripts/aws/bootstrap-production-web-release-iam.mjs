@@ -31,6 +31,35 @@ export const PHASE3_IAM_TRANSITION = Object.freeze({
   auditTargetSha256: "741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122",
 });
 export const phase3IamAuthorizationMarker = headSha => `MSCQR_PHASE3_IAM_SOLO_AUTH_V1:${iamDigest(PHASE3_IAM_TRANSITION)}:${headSha}`;
+export function productionTerraformExecutable(fsOps = fs) {
+  for (const candidate of ["/usr/bin/terraform", "/opt/homebrew/bin/terraform", "/usr/local/bin/terraform"]) {
+    if (!fsOps.existsSync(candidate)) continue;
+    const resolved = fsOps.realpathSync(candidate);
+    assert(/^(?:\/usr\/bin\/terraform|\/(?:opt\/homebrew|usr\/local)\/Cellar\/terraform\/[0-9.]+\/bin\/terraform|\/usr\/local\/bin\/terraform)$/.test(resolved),
+      "Terraform executable is outside canonical safelist");
+    const stat = fsOps.statSync(resolved);
+    assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe Terraform executable");
+    return resolved;
+  }
+  throw new Error("No safelisted Terraform installation found");
+}
+export function readPhase3IamPlan({ planFile, execute = execFileSync, executable = productionTerraformExecutable(), env = process.env }) {
+  const data = env.TF_DATA_DIR && path.isAbsolute(env.TF_DATA_DIR) && fs.statSync(env.TF_DATA_DIR);
+  assert.ok(data?.isDirectory() && data.uid === process.getuid() && (data.mode & 0o077) === 0,
+    "An initialized operator-owned private TF_DATA_DIR is required to verify the saved plan");
+  assert.ok(path.isAbsolute(planFile), "Saved Terraform plan path must be absolute");
+  const bytes = fs.readFileSync(planFile);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-phase3-iam-plan-"));
+  try {
+    fs.chmodSync(directory, 0o700);
+    const captured = path.join(directory, "saved.tfplan");
+    fs.writeFileSync(captured, bytes, { mode: 0o600, flag: "wx" });
+    const plan = JSON.parse(execute(executable, ["-chdir=infra/aws/terraform/production-web-release", "show", "-json", captured],
+      { cwd: root, env: { HOME: env.HOME, PATH: "/usr/bin:/bin", TF_DATA_DIR: env.TF_DATA_DIR,
+        TF_WORKSPACE: "default", TF_CLI_CONFIG_FILE: "/dev/null" }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    return { plan, planSha256: createHash("sha256").update(bytes).digest("hex") };
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+}
 const POLICY_NO_OPS = Object.freeze({
   "aws_iam_policy.publisher_boundary": "no-op",
   "aws_iam_role.publisher": "no-op",
@@ -471,15 +500,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const run = createPhase3IamAwsRunner({ profile: values.get("--admin-profile") });
   let result;
   if (values.has("--ticket-id")) {
-    execFileSync("git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
-    assert.ok(process.env.TF_DATA_DIR && path.isAbsolute(process.env.TF_DATA_DIR)
-      && fs.statSync(process.env.TF_DATA_DIR).isDirectory()
-      && (fs.statSync(process.env.TF_DATA_DIR).mode & 0o077) === 0,
-    "An initialized private TF_DATA_DIR is required to verify the saved plan");
+    execFileSync("/usr/bin/git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
     const planFile = path.resolve(values.get("--plan-file"));
-    const planBytes = fs.readFileSync(planFile);
-    const plan = JSON.parse(execFileSync("terraform", ["-chdir=infra/aws/terraform/production-web-release", "show", "-json", planFile],
-      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    const { plan, planSha256 } = readPhase3IamPlan({ planFile });
     assertPhase3IamPlan(plan, sourceSha);
     const authorizationId = readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha });
     assert.equal(readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead,
@@ -490,7 +513,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     result = { ...reconcilePhase3WebIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, authorizationId, mfaEvidence,
       assertCurrentAuthorization: () => readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha }),
       claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }),
-      planSha256: createHash("sha256").update(planBytes).digest("hex") };
+      planSha256 };
   } else result = bootstrapProductionWebReleaseIam({ sourceSha, run });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }

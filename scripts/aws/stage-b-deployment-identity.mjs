@@ -158,7 +158,7 @@ export function assertStageBToolingCheckout(toolingSha, currentHead, checkout = 
 }
 
 function git(cwd, args, encoding = "utf8") {
-  return execFileSync("git", args, { cwd, encoding }).trim();
+  return execFileSync("/usr/bin/git", args, { cwd, encoding }).trim();
 }
 
 function gitPath(cwd, name) {

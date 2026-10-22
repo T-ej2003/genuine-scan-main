@@ -8,7 +8,7 @@ OSV Scanner 2.6.0 was run unfiltered with `--recursive --no-resolve --config=/de
 
 The retained `braces` acceptance applies only to Tailwind's repository-controlled build glob. It is a frontend dev dependency, absent from the backend lock, and its package/version, owner, expiry (2026-11-02), and attacker-input decision remain unchanged. The initial local shared `node_modules` symlink resolved outside this isolated checkout and failed the closure's exact lockfile-path assertion. A local APFS-cloned dependency tree resolved that environment issue without changing the validator. The exact OSV runtime gate then passed: the canonical browser closure attributed 204 browser packages, excluded `braces`, and retained the one visible time-bounded build-only finding. Hosted final-head Deployment Audit remains mandatory.
 
-The reviewed executable/build-input fingerprint for this source is `72faf93fc4ec23b42bf8c45728f5fcf0f2309f99d7d41187239b67d76e857c97`. A later executable change must update this review and recompute the fingerprint; CI will reject stale evidence.
+The reviewed executable/build-input fingerprint for this source is `3b6039c813438eee0d48a34c75e5bc0bb6166eea1187ffe12f0ff8586f4d89ca`. A later executable change must update this review and recompute the fingerprint; CI will reject stale evidence.
 
 ## Hostile review of the production installer
 
@@ -17,6 +17,10 @@ The saved Terraform plan must include `phase3_iam_source_sha` equal to the fresh
 Interrupted recovery can observe an installed audit policy before it is imported into Terraform state. In that case Terraform still plans `create`. The installer accepts that action only with the exact live target fingerprint, original S3 owner claim, and matching durable audit dispatch marker; it performs no second audit write. The plan is never applied. The operator imports the authenticated policy after installation, then requires a no-change state-convergence plan.
 
 Before the frontend IAM write, the installer rereads the native-audit policy after the frontend dispatch marker and rejects deletion or drift. This closes the network interval between audit installation and frontend mutation. IAM has no atomic compare-and-swap across the two inline policies, so the operator must still exclude out-of-band IAM writers during installation.
+
+The production CLI resolves Terraform from fixed installation paths, checks its resolved binary and mode, and executes it without ambient `PATH`, Terraform CLI options, or AWS credentials. It copies the supplied saved plan bytes to a private file, decodes that same copy, and reports the SHA-256 of those bytes. A replaced or stale original path cannot make the plan JSON differ from the reported digest.
+
+The protected-main checkout helper and the bootstrap's lineage check use `/usr/bin/git`, so a terminal `PATH` override cannot substitute the Git binary used for release-source verification.
 
 The actual CLI constructs the single-attempt AWS runner using the safelisted AWS binary, verifies a clean exact-main checkout, decodes the saved plan with an initialized private Terraform data directory, pins GitHub API calls to `github.com`, requires the unedited accountable-operator comment for the final PR head, and checks fresh MFA from the fixed non-root user. It rereads the authorization comment after MFA, before ownership and after each dispatch journal immediately before the IAM write. A fresh protected-main fetch after MFA, before ownership, before each IAM journal and after each journal closes the longer interactive and S3 time-of-check gaps. The tests reject wrong source, ticket, caller, policy expansion, target hash, live predecessor, Terraform action tuple, GitHub host injection, PATH-shadowed AWS CLI, authorization revocation and protected-main drift. A changed live policy is checked again after ownership and immediately before its own dispatch.
 

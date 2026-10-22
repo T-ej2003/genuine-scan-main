@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {createHash} from 'node:crypto';
 import test from 'node:test';
-import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,readPhase3IamAuthorization,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,productionTerraformExecutable,readPhase3IamAuthorization,readPhase3IamPlan,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
 import {productionAwsExecutable} from '../aws/production-credential-source-contract.mjs';
 
@@ -18,6 +19,10 @@ assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.m
 assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.mjs','utf8'),
  /assertCurrentAuthorization: \(\) => readPhase3IamAuthorization\(\{ prNumber: values\.get\("--authorization-pr"\), sourceSha \}\)/,
  'Production CLI must reauthenticate the operator before each IAM write');
+assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.mjs','utf8'),
+ /readPhase3IamPlan\(\{ planFile \}\)/, 'Production CLI must use the pinned Terraform plan decoder');
+assert.match(fs.readFileSync('scripts/aws/stage-b-deployment-identity.mjs','utf8'),
+ /execFileSync\("\/usr\/bin\/git"/, 'Protected-main checkout must not resolve Git from ambient PATH');
 const mfaEvidence={sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,authorizationId:42,operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator',accessKeyIdSha256:'f'.repeat(64),verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
 assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');
 assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
@@ -124,6 +129,31 @@ test('saved Terraform plan must bind exact post-merge protected main before owne
   assert.equal(claimed,false);
   assert.deepEqual(writes(value),[]);
  }
+});
+test('Terraform plan decoder pins executable, environment and exact captured bytes',()=>{
+ const safe={existsSync:()=>true,realpathSync:()=>'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform',
+  statSync:()=>({isFile:()=>true,mode:0o555})};
+ assert.equal(productionTerraformExecutable(safe),'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform');
+ assert.throws(()=>productionTerraformExecutable({...safe,realpathSync:()=>'/tmp/attacker/terraform'}),/safelist/);
+ assert.throws(()=>productionTerraformExecutable({...safe,statSync:()=>({isFile:()=>true,mode:0o777})}),/Unsafe/);
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'mscqr-phase3-plan-test-'));
+ try{
+  fs.chmodSync(dir,0o700);const input=path.join(dir,'input.tfplan');fs.writeFileSync(input,'saved-plan-bytes');
+  let captured;
+  const result=readPhase3IamPlan({planFile:input,executable:'/usr/bin/terraform',
+   env:{HOME:'/tmp/untrusted',PATH:'/tmp/attacker',TF_CLI_ARGS:'-var=bad',TF_DATA_DIR:dir,AWS_ACCESS_KEY_ID:'forged'},
+   execute:(file,args,options)=>{
+    assert.equal(file,'/usr/bin/terraform');captured=args.at(-1);
+    assert.notEqual(captured,input);assert.equal(fs.readFileSync(captured,'utf8'),'saved-plan-bytes');
+    assert.equal(options.env.PATH,'/usr/bin:/bin');assert.equal(options.env.TF_CLI_ARGS,undefined);
+    assert.equal(options.env.AWS_ACCESS_KEY_ID,undefined);assert.equal(options.env.TF_DATA_DIR,dir);
+    assert.equal(options.env.TF_WORKSPACE,'default');assert.equal(options.env.TF_CLI_CONFIG_FILE,'/dev/null');
+    return JSON.stringify(plan());
+   }});
+  assert.equal(result.plan.variables.phase3_iam_source_sha.value,sourceSha);
+  assert.equal(result.planSha256,createHash('sha256').update('saved-plan-bytes').digest('hex'));
+  assert.equal(fs.existsSync(captured),false);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test('MFA authority expiring after durable ownership stops before IAM dispatch',()=>{
  const value=fixture(),fresh={...mfaEvidence};let dispatched=false;
