@@ -183,12 +183,17 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
     }
   }
   assert.ok(readback(key).equals(expected), "IAM ownership readback differs");
-  const dispatchBody = (policyName, inputHash) => Buffer.from(JSON.stringify({ ownerId: owner.ownerId, binding, policyName, inputHash }));
+  const dispatchPayload = (policyName, inputHash, dispatchId) => ({ ownerId: owner.ownerId, binding, policyName, inputHash, dispatchId });
   const dispatchKey = policyName => `${key.slice(0, -5)}/${policyName}.json`;
   const hasDispatch = (policyName, inputHash) => {
     assert.ok([auditPolicyName, activationPolicyName].includes(policyName));
     assert.match(inputHash || "", /^[a-f0-9]{64}$/);
-    try { return readback(dispatchKey(policyName)).equals(dispatchBody(policyName, inputHash)); }
+    try {
+      const { dispatchId, ...actual } = JSON.parse(readback(dispatchKey(policyName)));
+      assert.match(dispatchId || "", /^[a-f0-9-]{36}$/);
+      assert.deepEqual(actual, { ownerId: owner.ownerId, binding, policyName, inputHash }, "IAM dispatch journal conflicts");
+      return true;
+    }
     catch (error) { if (/NoSuchKey/.test(`${error?.message || ""} ${error?.stderr || ""}`)) return false; throw error; }
   };
   const markDispatch = (policyName, inputHash) => {
@@ -196,7 +201,7 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
     assert.match(inputHash || "", /^[a-f0-9]{64}$/);
     const keyForDispatch = dispatchKey(policyName);
     const dispatchFile = path.join(path.dirname(ownerFile), `.iam-dispatch-${randomUUID()}`);
-    const body = dispatchBody(policyName, inputHash);
+    const body = Buffer.from(JSON.stringify(dispatchPayload(policyName, inputHash, randomUUID())));
     fs.writeFileSync(dispatchFile, body, { mode: 0o600, flag: "wx" });
     let created = false;
     try {
@@ -205,9 +210,10 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
           "--if-none-match", "*", "--server-side-encryption", "AES256", "--expected-bucket-owner", account, "--region", "eu-west-2"]);
         created = true;
       } catch (error) {
-        if (!readback(keyForDispatch).equals(body)) throw new Error("IAM dispatch journal conflicts", { cause: error });
+        if (readback(keyForDispatch).equals(body)) created = true;
+        else if (!hasDispatch(policyName, inputHash)) throw new Error("IAM dispatch journal conflicts", { cause: error });
       }
-      assert.ok(readback(keyForDispatch).equals(body), "IAM dispatch journal readback differs");
+      if (created) assert.ok(readback(keyForDispatch).equals(body), "IAM dispatch journal readback differs");
       return created;
     } finally { fs.rmSync(dispatchFile, { force: true }); }
   };
@@ -412,12 +418,16 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
 
 export function createPhase3IamAwsRunner({ profile, exec = execFileSync } = {}) {
   const mutating = new Set(["create-policy", "create-role", "put-role-policy"]);
+  const aws = productionAwsExecutable();
   return createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile,
-    exec: (file, command, options) => exec(file, command, {
-      ...options,
-      env: command[0] === "iam" && mutating.has(command[1]) || command[0] === "s3api" && command[1] === "put-object"
-        ? { ...options.env, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : options.env,
-    }) });
+    exec: (file, command, options) => {
+      assert.equal(file, "aws", "IAM bootstrap permits only the safelisted AWS CLI");
+      return exec(aws, command, {
+        ...options,
+        env: command[0] === "iam" && mutating.has(command[1]) || command[0] === "s3api" && command[1] === "put-object"
+          ? { ...options.env, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : options.env,
+      });
+    } });
 }
 
 function args(argv) {

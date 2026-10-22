@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,readPhase3IamAuthorization,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
+import {productionAwsExecutable} from '../aws/production-credential-source-contract.mjs';
 
 const directory='infra/aws/terraform/production-web-release';
 const frontend=JSON.parse(fs.readFileSync(`${directory}/frontend-activation-policy.json`));
@@ -115,11 +116,12 @@ test('protected main advancing after MFA or ownership stops before IAM dispatch'
 });
 test('journaled IAM and S3 writes use one CLI attempt while reads retain normal retry settings',()=>{
  const calls=[];
- const run=createPhase3IamAwsRunner({profile:'mscqr-production-root',exec:(_file,args,options)=>{
-  calls.push({args,env:options.env});return '{}';
+ const run=createPhase3IamAwsRunner({profile:'mscqr-production-root',exec:(file,args,options)=>{
+  calls.push({file,args,env:options.env});return '{}';
  }});
  for(const args of [['iam','get-role-policy'],['iam','put-role-policy'],['iam','create-role'],['s3api','put-object'],['s3api','get-object']])run(args);
- for(const {args,env} of calls){
+ for(const {file,args,env} of calls){
+  assert.equal(file,productionAwsExecutable(),'production runner must not execute PATH-shadowed aws');
   assert.equal(env.AWS_PROFILE,'mscqr-production-root');
   if(args[1]==='put-role-policy'||args[1]==='create-role'||args[1]==='put-object'){
    assert.equal(env.AWS_MAX_ATTEMPTS,'1');assert.equal(env.AWS_RETRY_MODE,'standard');
@@ -186,13 +188,19 @@ test('write-once S3 owner claim reuses the same terminal and rejects another own
   assert.throws(()=>claimPhase3IamOwner({...input,authorizationId:43,mfaEvidence:{...mfaEvidence,authorizationId:43},ownerFile:path.join(dir,'third.json')}),/ownership outcome unknown or conflicting/);
   assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),true);
   assert.equal(owner.hasDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),true);
-  assert.equal(owner.hasDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),false);
+  assert.throws(()=>owner.hasDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),/dispatch journal conflicts/);
+  lost=true;
+  assert.equal(owner.markDispatch('MSCQRProductionFrontendActivation',PHASE3_IAM_TRANSITION.frontendTargetSha256),true,
+   'a lost first marker response is authenticated by its unique dispatch ID');
+  lost=false;
+  assert.equal(owner.markDispatch('MSCQRProductionFrontendActivation',PHASE3_IAM_TRANSITION.frontendTargetSha256),false,
+   'another invocation cannot consume the first marker');
   assert.equal(owner.markDispatch('MSCQRProductionStageBNativeAudit',PHASE3_IAM_TRANSITION.auditTargetSha256),false,'existing dispatch must never be repeated');
   assert.throws(()=>owner.markDispatch('MSCQRProductionStageBNativeAudit','0'.repeat(64)),/dispatch journal conflicts/);
   assert.match(owner.complete(),/^[a-f0-9]{64}$/);
   assert.equal(owner.complete(),owner.complete(),'completion receipt is write-once and reusable');
   const claimKeys=calls.filter(args=>args[1]==='put-object').map(args=>args[args.indexOf('--key')+1]);
-  assert.equal(new Set(claimKeys).size,3,'renewed authorization cannot claim a second IAM operation key');
+  assert.equal(new Set(claimKeys).size,4,'renewed authorization cannot claim a second IAM operation key');
   stored.clear();lost=true;
   assert.equal(claimPhase3IamOwner({...input,ownerFile:first}).ownershipSha256,owner.ownershipSha256,'lost create response is reconciled by exact readback');
   assert.ok(calls.filter(args=>args[1]==='put-object').every(args=>args.includes('--if-none-match')));
