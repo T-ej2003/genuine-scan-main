@@ -99,7 +99,15 @@ MSCQR_PHASE3_IAM_SOLO_AUTH_V1:6ef467d26a26e2b40669256951ba3a44d7dbc700b2662db950
 
 The installer retrieves the unedited comment through the authenticated GitHub API, requires it to be authored by GitHub user `T-ej2003` (ID `183396573`) before the PR merges, and binds it to the merged protected-main source. It checks the comment again after interactive MFA, before ownership and after each dispatch journal immediately before the corresponding IAM write. Codex's automated review is a separate defect check, never a human approval. A missing or edited operator comment stops any pending IAM write. The existing component-IAM approval workflow is scoped to other documents and cannot authorize this transition. This solo IAM authorization does not enable the disabled Stage B conditional lane or change root, checker, or verifier approval rules.
 
-After the correction PR merges, treat its new protected-main SHA as a **new release source**; do not rebind older image or Stage B approvals. Generate a fresh private Terraform plan with the existing MFA-backed non-root profile and the production-web-release backend. Confirm only the two permitted transitions are present. Keep its saved binary outside the repository and record its SHA-256. Do not apply this plan; the exact-document bootstrap is the IAM writer. Preserve the same initialized private `TF_DATA_DIR` in the trusted terminal for the installer's read-only `terraform show`; the plan cannot be decoded without its provider schema.
+After the correction PR merges, treat its new protected-main SHA as a **new release source**; do not rebind older image or Stage B approvals. Generate a fresh private Terraform plan with the existing MFA-backed non-root profile and the production-web-release backend, binding the exact merged protected-main SHA:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan \
+  -var="phase3_iam_source_sha=<new_protected_main_sha>" \
+  -out=<private_saved_plan>
+```
+
+The installer rejects a plan with an absent or different `phase3_iam_source_sha` before acquiring mutation ownership. Confirm only the two permitted transitions are present. Keep its saved binary outside the repository and record its SHA-256. Do not apply this plan; the exact-document bootstrap is the IAM writer. Preserve the same initialized private `TF_DATA_DIR` in the trusted terminal for the installer's read-only `terraform show`; the plan cannot be decoded without its provider schema.
 
 On the trusted terminal, keep the owner file in a private mode-0700 directory outside the repository. After the final-head operator comment, clean Codex review, passing required CI, protected-main merge, and fresh-plan review, run the source-controlled installer from a clean exact-main checkout with the governed root configuration profile. The command prompts for the bootstrap operator's MFA code, obtains a fresh 900-second STS session with the fixed MFA serial, and verifies the exact non-root IAM user. The AWS CLI challenge is held briefly in a mode-0600 file under a mode-0700 temporary directory and removed immediately after issuance; credentials and the code never go to GitHub or logs:
 

@@ -36,8 +36,11 @@ const POLICY_NO_OPS = Object.freeze({
   "aws_iam_role.publisher": "no-op",
   "aws_iam_role_policy.publisher": "no-op",
 });
-export function assertPhase3IamPlan(plan, checkpoint) {
+export function assertPhase3IamPlan(plan, sourceSha, checkpoint) {
   assert.ok(plan && typeof plan === "object");
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.equal(plan.variables?.phase3_iam_source_sha?.value, sourceSha,
+    "Saved IAM plan is not bound to current protected main");
   const changes = plan.resource_changes || [];
   const actions = Object.fromEntries(changes.map(({ address, change }) => [address, change?.actions?.join(",")]));
   assert.equal(Object.keys(actions).length, changes.length, "IAM plan repeats a resource address");
@@ -351,7 +354,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   assert.equal(ticketId, PHASE3_IAM_TRANSITION.ticketId);
   assert.ok(Number.isSafeInteger(authorizationId) && authorizationId > 0, "Solo-operator IAM authorization is missing");
   assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
-  assertPhase3IamPlan(plan);
+  assertPhase3IamPlan(plan, sourceSha);
   const frontend = source("frontend-activation-policy.json");
   const audit = source("stage-b-native-audit-policy.json");
   assert.equal(iamDigest(frontend), PHASE3_IAM_TRANSITION.frontendTargetSha256, "Frontend source fingerprint changed");
@@ -374,7 +377,7 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   assert.ok(!(beforeAudit === null && beforeFrontend === PHASE3_IAM_TRANSITION.frontendTargetSha256),
     "Frontend transition preceded native audit installation");
   const checkpoint = { frontend: beforeFrontend, audit: beforeAudit };
-  assertPhase3IamPlan(plan, checkpoint);
+  assertPhase3IamPlan(plan, sourceSha, checkpoint);
   assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM ownership");
   assert.equal(typeof assertCurrentAuthorization, "function", "Fresh IAM authorization verification is required");
   assert.equal(assertCurrentAuthorization(), authorizationId, "Solo-operator IAM authorization changed before ownership");
@@ -473,7 +476,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const planBytes = fs.readFileSync(planFile);
     const plan = JSON.parse(execFileSync("terraform", ["-chdir=infra/aws/terraform/production-web-release", "show", "-json", planFile],
       { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-    assertPhase3IamPlan(plan);
+    assertPhase3IamPlan(plan, sourceSha);
     const authorizationId = readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha });
     assert.equal(readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead,
       sourceSha, "Protected main advanced before IAM installation");

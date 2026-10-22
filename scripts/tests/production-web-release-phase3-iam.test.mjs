@@ -26,7 +26,7 @@ assert.equal(digest(predecessor),PHASE3_IAM_TRANSITION.frontendPredecessorSha256
 
 function plan(frontendAction='update',auditAction='create'){
  const change=(address,actions,before,after)=>({address,change:{actions:[actions],before,after}});
- return {resource_changes:[
+ return {variables:{phase3_iam_source_sha:{value:sourceSha}},resource_changes:[
   change('aws_iam_policy.publisher_boundary','no-op',{},{}),
   change('aws_iam_role.publisher','no-op',{},{}),
   change('aws_iam_role_policy.publisher','no-op',{},{}),
@@ -99,6 +99,16 @@ test('Terraform actions must equal the live checkpoint before claiming mutation 
  assert.throws(()=>reconcilePhase3WebIam({run:unauthenticated.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
   plan:plan('update','no-op'),authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,claimOwnership:()=>claim(()=>true,()=>false)}),/authenticated dispatch journal/);
  assert.deepEqual(writes(unauthenticated),[]);
+});
+test('saved Terraform plan must bind exact post-merge protected main before ownership',()=>{
+ for(const variables of [undefined,{}, {phase3_iam_source_sha:{value:'a'.repeat(40)}}]){
+  const value=fixture();let claimed=false;const selected=plan();selected.variables=variables;
+  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+   plan:selected,authorizationId:42,mfaEvidence,assertProtectedSource,assertCurrentAuthorization,
+   claimOwnership:()=>{claimed=true;throw new Error('ownership acquired');}}),/Saved IAM plan is not bound/);
+  assert.equal(claimed,false);
+  assert.deepEqual(writes(value),[]);
+ }
 });
 test('MFA authority expiring after durable ownership stops before IAM dispatch',()=>{
  const value=fixture(),fresh={...mfaEvidence};let dispatched=false;
