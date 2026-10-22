@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
+import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {assertBridgeRequest} from './production-release-bridge-contract.mjs';
+import {canonicalRootDropPayload,verifyRootDropEvidenceWithKms} from './production-root-drop-evidence.mjs';
 import {STAGE_B} from './production-green-stage-b-contract.mjs';
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
 import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
@@ -9,7 +13,61 @@ import {createReleaseCoordinatorStore} from './production-release-evidence-store
 const SHA256=/^[a-f0-9]{64}$/;
 const PHASE_KEYS=Object.freeze({ROOT_DROP:STAGE_B.rootDropKmsKeyArn,INVENTORY_ADOPTION:STAGE_B.approvalKmsKeyArn,ROTATION_SUCCESSOR:STAGE_B.approvalKmsKeyArn});
 const checkerPrefix=`arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/`;
+const ROOT_KEY_ARN=new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`);
+const assertNativeKey=(phase,keyId)=>phase==='ROOT_DROP'?assert.match(keyId||'',ROOT_KEY_ARN):assert.equal(keyId,STAGE_B.approvalKmsKeyArn);
 const unknown=()=>Object.assign(new Error('KMS Sign outcome unknown; recover an authenticated result or obtain separate authorization. Never sign again.'),{code:'OUTCOME_UNKNOWN'});
+
+export function verifyBridgeCapturedSign({phase,dispatch,result,request,run}={}){
+ assert.equal(typeof run,'function');assert.ok(Object.hasOwn(PHASE_KEYS,phase));
+ assertBridgeRequest(request,{releaseId:request.releaseId,sourceSha:request.sourceSha,ticketId:request.ticketId,
+  rotationId:request.rotationId,manifestSha256:request.manifestSha256,allowExpired:true});
+ assert.equal(dispatch?.phase,phase);assert.equal(dispatch.requestSha256,request.requestSha256);
+ assert.equal(dispatch.operationId,request.operationId);
+ const claimed=Date.parse(dispatch.claimedAt);
+ assert.ok(Number.isSafeInteger(claimed)&&claimed>=Date.parse(request.issuedAt)&&claimed<Date.parse(request.expiresAt),
+  'Captured Sign dispatch was outside its authorization window');
+ assert.equal(dispatch.inputSha256,brokerDigest(dispatch.input));assert.deepEqual(result?.dispatch,dispatch);
+ assert.equal(dispatch.input.keyId,PHASE_KEYS[phase]);assertNativeKey(phase,result.response?.KeyId);
+ assert.equal(dispatch.input.signingAlgorithm,'RSASSA_PSS_SHA_256');
+ assert.ok(phase==='INVENTORY_ADOPTION'?['RAW','DIGEST'].includes(dispatch.input.messageType):dispatch.input.messageType==='RAW');
+ assert.ok(phase==='ROOT_DROP'?dispatch.principal===`arn:aws:iam::${STAGE_B.account}:root`
+  :typeof dispatch.principal==='string'&&new RegExp(`^${checkerPrefix}[^/]+$`).test(dispatch.principal),'Captured Sign principal differs');
+ const message=Buffer.from(dispatch.input.messageBase64||'','base64');
+ assert.equal(message.toString('base64'),dispatch.input.messageBase64);
+ assert.ok(message.length>0&&message.length<=4096);
+ if(dispatch.input.messageType==='DIGEST')assert.equal(message.length,32);
+ if(phase==='ROOT_DROP'){
+  const payload=JSON.parse(message.toString('utf8'));
+  assert.equal(payload.sourceSha,request.sourceSha);assert.equal(payload.rotationId,request.rotationId);
+  assert.equal(payload.generatedAt,dispatch.phaseTimestamp);
+  assert.equal(message.toString('utf8'),canonicalRootDropPayload(payload),'Captured root message differs from canonical evidence');
+ }
+ if(phase==='ROTATION_SUCCESSOR'){
+  const payload=JSON.parse(message.toString('utf8'));
+  assert.equal(payload.successorSourceSha||payload.sourceSha,request.sourceSha);assert.equal(payload.rotationId,request.rotationId);
+ }
+ if(phase==='INVENTORY_ADOPTION'&&dispatch.input.messageType==='RAW'){
+  const payload=JSON.parse(message.toString('utf8'));
+  assert.equal(payload.continuationSourceSha||payload.sourceSha,request.sourceSha);assert.equal(payload.rotationId,request.rotationId);
+ }
+ const signature=Buffer.from(result.response.Signature||'','base64');
+ assert.equal(signature.toString('base64'),result.response.Signature);assert.ok(signature.length>0);
+ if(phase==='ROOT_DROP'){
+  let nativeKeyArn;
+  const verified=verifyRootDropEvidenceWithKms({message,signature,keyArn:PHASE_KEYS[phase],run:args=>{
+   const output=run(args);nativeKeyArn=JSON.parse(output).KeyId;return output;
+  }});
+  return nativeKeyArn===result.response.KeyId&&verified;
+ }
+ const directory=mkdtempSync(path.join(os.tmpdir(),'mscqr-bridge-captured-sign-'));
+ try{
+  const messagePath=path.join(directory,'message'),signaturePath=path.join(directory,'signature');
+  writeFileSync(messagePath,message,{mode:0o600});writeFileSync(signaturePath,signature,{mode:0o600});
+  const verified=JSON.parse(run(['kms','verify','--key-id',PHASE_KEYS[phase],'--message',`fileb://${messagePath}`,
+   '--message-type',dispatch.input.messageType,'--signature',`fileb://${signaturePath}`,'--signing-algorithm','RSASSA_PSS_SHA_256','--output','json','--no-cli-pager']));
+  return verified.KeyId===result.response.KeyId&&verified.SignatureValid===true;
+ }finally{rmSync(directory,{recursive:true,force:true});}
+}
 
 export function createBridgeSignJournal({store,request,releaseId,sourceSha,ticketId,rotationId,manifestSha256,readCaller,phaseTimestamp,now=Date.now}={}) {
  assert.equal(typeof store?.readOperation,'function');assert.equal(typeof store?.claimOperation,'function');assert.equal(typeof store?.writeOperation,'function');
@@ -38,7 +96,7 @@ export function createBridgeSignJournal({store,request,releaseId,sourceSha,ticke
    const result=await store.readOperation(operationId,`${recordPhase}:RESULT`);
    if(!result)throw unknown();
    assert.deepEqual(result.dispatch,dispatch,'Persisted KMS result has a different dispatch');
-   assert.equal(result.response?.KeyId,keyId);assert.match(result.response?.Signature||'',/^[A-Za-z0-9+/]+={0,2}$/);
+   assertNativeKey(phase,result.response?.KeyId);assert.match(result.response?.Signature||'',/^[A-Za-z0-9+/]+={0,2}$/);
    const completion=await store.readOperation(operationId,`${recordPhase}:COMPLETED`);
    if(completion)assert.equal(completion.resultSha256,brokerDigest(result),'KMS completion conflicts with native result');
    else{
@@ -57,7 +115,7 @@ export function createBridgeSignJournal({store,request,releaseId,sourceSha,ticke
   assert.equal(await store.claimOperation(operationId,`${recordPhase}:DISPATCH`,scope),true);
   assert.deepEqual(await store.readOperation(operationId,`${recordPhase}:DISPATCH`),scope,'Sign dispatch claim readback differs');
   try{
-   const response=await invoke();assert.equal(response?.KeyId,keyId);assert.match(response.Signature||'',/^[A-Za-z0-9+/]+={0,2}$/);
+   const response=await invoke();assertNativeKey(phase,response?.KeyId);assert.match(response.Signature||'',/^[A-Za-z0-9+/]+={0,2}$/);
    const result={dispatch:scope,response};await store.writeOperation(operationId,`${recordPhase}:RESULT`,result);
    assert.deepEqual(await store.readOperation(operationId,`${recordPhase}:RESULT`),result,'Sign result readback differs');
    const completion={dispatch:scope,resultSha256:brokerDigest(result)};

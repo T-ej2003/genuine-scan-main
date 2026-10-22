@@ -6,7 +6,9 @@ import {createHash} from 'node:crypto';
 import {execFileSync,spawnSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
-import {assertBridgeRequest,bridgeOperationId} from './production-release-bridge-contract.mjs';
+import {assertBridgeRequest,bridgeOperationId,bridgeRequestForSign,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
+import {verifyBridgeCapturedSign} from './production-release-bridge-sign-journal.mjs';
+import {authenticateBridgeEnvironmentApproval} from './verify-production-release-terminal-bridge.mjs';
 import {assertBridgeManifest} from './production-release-bridge-manifest.mjs';
 import {createReleaseCoordinatorStore} from './production-release-evidence-store.mjs';
 import {createProductionAwsCommandRunner,PRODUCTION_AWS_CREDENTIAL_SOURCE} from './production-credential-source-contract.mjs';
@@ -156,8 +158,36 @@ export async function runTerminalBridge({manifestPath,releaseId,runId,runAttempt
   MSCQR_BRIDGE_RUN_ID:request.workflowRunId,MSCQR_BRIDGE_RUN_ATTEMPT:request.workflowRunAttempt,MSCQR_BRIDGE_RELEASE_ID:request.releaseId,
   MSCQR_BRIDGE_SOURCE_SHA:request.sourceSha,MSCQR_BRIDGE_TICKET_ID:request.ticketId,MSCQR_BRIDGE_ROTATION_ID:request.rotationId,
   MSCQR_BRIDGE_MANIFEST_SHA256:request.manifestSha256};
- const phaseRun=(name,values,extra={})=>runPhase(name,values,{env:{...bridgeEnv,...extra},root});
- const phaseTime=name=>reserveBridgePhaseTimestamp({store:journal,operationId,requestSha256:request.requestSha256,name,now});
+ const signedPhases={root:'ROOT_DROP',adoption:'INVENTORY_ADOPTION',successor:'ROTATION_SUCCESSOR'};
+ const phaseBindings={};
+ for(const [name,signingPhase] of Object.entries(signedPhases)){
+  const prefix=`BRIDGE:SIGN:${signingPhase}`,dispatch=await journal.readOperation(operationId,`${prefix}:DISPATCH`);
+  if(!dispatch){phaseBindings[name]={request};continue;}
+  const owner=await bridgeRequestForSign({store:journal,operationId,dispatch,...manifest,releaseId,
+   manifestSha256:request.manifestSha256});
+  const result=await journal.readOperation(operationId,`${prefix}:RESULT`);
+  const done=await journal.readOperation(operationId,`${prefix}:COMPLETED`);
+  if(owner.requestSha256!==request.requestSha256){
+   assert.equal(classifyBridgeNativeResult({dispatch,result,completion:done}),'COMPLETED',`${signingPhase} outcome requires reconciliation`);
+   assert.equal(verifyBridgeCapturedSign({phase:signingPhase,dispatch,result,request:owner,run:releaseRun}),true,
+    `${signingPhase} native signature cannot be reused`);
+   await authenticateBridgeEnvironmentApproval({store:journal,request:owner,observeApproval:(approved,original)=>fetchApproval({token,
+    repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:manifest.sourceSha,
+    workflowRef:approved.workflowRef,eventName:'workflow_dispatch',workflowRunId:original.workflowRunId,
+    workflowRunAttempt:original.workflowRunAttempt,executionActor:approved.executionActor,requireActualApproval:true})});
+  }
+  phaseBindings[name]={request:owner,dispatch};
+ }
+ const phaseRun=(name,values,extra={})=>{
+  const bound=phaseBindings[name]?.request||request;
+  return runPhase(name,values,{env:{...bridgeEnv,MSCQR_BRIDGE_RUN_ID:bound.workflowRunId,
+   MSCQR_BRIDGE_RUN_ATTEMPT:bound.workflowRunAttempt,...extra},root});
+ };
+ const phaseTime=name=>{
+  const bound=phaseBindings[Object.keys(signedPhases).find(key=>signedPhases[key]===name)];
+  return bound?.dispatch?.phaseTimestamp||reserveBridgePhaseTimestamp({store:journal,operationId,
+   requestSha256:request.requestSha256,name,now});
+ };
  // The immutable preparation performs the expensive read-only checks before root issuance.
  const recoveredRuntime=recoverMaterializedBridgeRuntime({outputDirectory:args.runtime.get('--output-directory'),sourceSha:manifest.sourceSha,
   rotationId:manifest.rotationId,rootDropPath:args.root.get('--output'),repositoryRoot:root});

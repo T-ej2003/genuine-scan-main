@@ -6,7 +6,7 @@ import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
-import {assertBridgeRequest,bridgeOperationId} from './production-release-bridge-contract.mjs';
+import {assertBridgeRequest,bridgeOperationId,bridgeRequestForSign} from './production-release-bridge-contract.mjs';
 import {assertReadyForOverlapDeployment} from './production-overlap-readiness-contract.mjs';
 import {assertRootDropEvidence,canonicalRootDropPayload,verifyRootDropEvidenceWithKms} from './production-root-drop-evidence.mjs';
 import {STAGE_B} from './production-green-stage-b-contract.mjs';
@@ -89,11 +89,13 @@ export async function authenticateTerminalCutover({store,releaseId,sourceSha,tic
   const result=await store.readOperation(operationId,`${prefix}:RESULT`);
   const done=await store.readOperation(operationId,`${prefix}:COMPLETED`);
   assert.ok(dispatch&&result&&done,`${phase} native Sign completion is absent`);
-  assert.equal(dispatch.operationId,operationId);assert.equal(dispatch.requestSha256,request.requestSha256);
+  const phaseRequest=await bridgeRequestForSign({store,operationId,dispatch,releaseId,sourceSha,ticketId,rotationId,manifestSha256});
+  if(phaseRequest.requestSha256!==request.requestSha256)await authenticateBridgeEnvironmentApproval({store,request:phaseRequest,observeApproval});
   assert.equal(dispatch.phase,phase);assert.equal(dispatch.inputSha256,brokerDigest(dispatch.input));
   assert.deepEqual(result.dispatch,dispatch);assert.equal(done.resultSha256,brokerDigest(result));
   assert.equal(result.response.Signature,evidence.signatureBase64,'Native KMS signature differs from evidence');
-  assert.equal(result.response.KeyId,phase==='ROOT_DROP'?STAGE_B.rootDropKmsKeyArn:STAGE_B.approvalKmsKeyArn);
+  if(phase==='ROOT_DROP')assert.match(result.response.KeyId||'',new RegExp(`^arn:aws:kms:${STAGE_B.region}:${STAGE_B.account}:key/[a-f0-9-]{36}$`));
+  else assert.equal(result.response.KeyId,STAGE_B.approvalKmsKeyArn);
   if(phase==='ROOT_DROP'){
    assert.equal(dispatch.principal,`arn:aws:iam::${STAGE_B.account}:root`);
    const {signingKeyArn,signingAlgorithm,signedPayloadSha256,signatureBase64,evidenceSha256,...unsigned}=root;

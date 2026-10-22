@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
-import {assertProductionEnvironmentApprovalIdentity,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
+import {assertProductionEnvironmentApprovalIdentity,assertProductionEnvironmentApprovalFreshness,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 
 const SHA40=/^[a-f0-9]{40}$/;
 const SHA256=/^[a-f0-9]{64}$/;
@@ -57,7 +57,7 @@ export async function claimBridgeRequest(store,request,{now=Date.now()}={}) {
  return !existing;
 }
 
-export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,rotationId,manifestSha256,approval,workflowRunId,workflowRunAttempt,now=Date.now()}) {
+export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,rotationId,manifestSha256,approval,workflowRunId,workflowRunAttempt,verifyCompletedSign,now=Date.now()}) {
  const start=await store.readStart({sourceSha,ticketId});
  assert.ok(start,'Release coordinator has no authenticated start');
  const release=await store.getArtifact(start.release);
@@ -68,6 +68,7 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
  const result=await store.getArtifact(closure.result);
  assert.equal(result.status,'PREREQUISITES_CONVERGED');assert.equal(result.releaseId,release.releaseId);
  const operationId=bridgeOperationId({releaseId:release.releaseId,sourceSha,rotationId});
+ const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
  let authorizationRound=0;
  for(;authorizationRound<32;authorizationRound++){
   const owner=await store.readOperation(operationId,`BRIDGE:REQUEST:ROUND:${authorizationRound}`);
@@ -78,20 +79,38 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
   assert.equal(prior.requestSha256,owner.requestSha256);
   if(await store.readOperation(operationId,'BRIDGE:CUTOVER:COMPLETED'))return prior;
   if(now<Date.parse(prior.expiresAt))return prior;
-  const signingDispatches=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']
-   .map(signingPhase=>store.readOperation(operationId,`BRIDGE:SIGN:${signingPhase}:DISPATCH`)));
-  // Observe the old operation after expiry; a dispatched Sign forbids a new request.
-  if(signingDispatches.some(dispatch=>dispatch?.requestSha256===prior.requestSha256))return prior;
+  if(operator?.requestSha256===prior.requestSha256)return prior;
+  if(operator)continue;
+  for(const phase of ['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']){
+   const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
+   if(!dispatch||dispatch.requestSha256!==prior.requestSha256)continue;
+   const result=await store.readOperation(operationId,`${prefix}:RESULT`);
+   const completed=await store.readOperation(operationId,`${prefix}:COMPLETED`);
+   assert.equal(classifyBridgeNativeResult({dispatch,result,completion:completed}),'COMPLETED',`${phase} Sign outcome is unknown; reauthorization is forbidden`);
+   assert.ok(Date.parse(dispatch.claimedAt)>=Date.parse(prior.issuedAt)&&Date.parse(dispatch.claimedAt)<Date.parse(prior.expiresAt),`${phase} Sign was not claimed during its authorization`);
+   assert.equal(typeof verifyCompletedSign,'function','Independent native Sign verification is required before reauthorization');
+   assert.equal(await verifyCompletedSign({phase,dispatch,result,request:prior}),true,`${phase} native Sign could not be authenticated`);
+  }
+  const root=await store.readOperation(operationId,'BRIDGE:SIGN:ROOT_DROP:DISPATCH');
+  if(root){
+   const rootResult=await store.readOperation(operationId,'BRIDGE:SIGN:ROOT_DROP:RESULT');
+   const rootCompletion=await store.readOperation(operationId,'BRIDGE:SIGN:ROOT_DROP:COMPLETED');
+   assert.equal(classifyBridgeNativeResult({dispatch:root,result:rootResult,completion:rootCompletion}),'COMPLETED','Root Sign outcome is unknown');
+   const rootIssued=Date.parse(root.phaseTimestamp);
+   assert.ok(Number.isSafeInteger(rootIssued)&&now>=rootIssued&&now-rootIssued<780000,'Root freshness reserve is exhausted; separate recovery is required');
+  }
  }
+ assert.ok(!operator,'Operator claim has no authenticated authorization owner');
  assert.ok(authorizationRound<32,'Bridge authorization rounds exhausted');
  assertProductionEnvironmentApprovalIdentity(approval,{sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
+ assertProductionEnvironmentApprovalFreshness(approval,{now:new Date(now)});
  assert.equal(approval.workflowRef,PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef);
  assert.equal(approval.workflowRunId,String(workflowRunId));assert.equal(approval.workflowRunAttempt,String(workflowRunAttempt));
  assert.equal(approval.schemaVersion,3,'Actual protected-environment review is required');
  await store.putArtifact(brokerDigest(approval),approval);
  const request=createBridgeRequest({releaseId:release.releaseId,sourceSha,ticketId,rotationId,manifestSha256,
   environmentApprovalSha256:brokerDigest(approval),workflowRunId,workflowRunAttempt,authorizationRound,
-  issuedAt:new Date(now).toISOString(),expiresAt:new Date(now+30*60*1000).toISOString()});
+  issuedAt:new Date(now).toISOString(),expiresAt:new Date(Math.min(now+30*60*1000,Date.parse(approval.observedAt)+PRODUCTION_ENVIRONMENT_APPROVAL.maxAgeMs)).toISOString()});
  await claimBridgeRequest(store,request,{now});return request;
 }
 
@@ -102,4 +121,24 @@ export function classifyBridgeNativeResult({dispatch,result,completion}={}) {
  assert.equal(result.requestSha256,dispatch.requestSha256);
  assert.equal(completion.resultSha256,brokerDigest(result),'Bridge native result differs from completion');
  return 'COMPLETED';
+}
+
+export async function bridgeRequestForSign({store,operationId,dispatch,releaseId,sourceSha,ticketId,rotationId,manifestSha256}={}){
+ assert.equal(dispatch?.operationId,operationId);
+ let owner;
+ for(let round=0;round<32;round++){
+  const candidate=await store.readOperation(operationId,`BRIDGE:REQUEST:ROUND:${round}`);
+  if(!candidate)break;
+  assert.equal(candidate.operationId,operationId);assert.equal(candidate.authorizationRound,round);
+  if(candidate.requestSha256===dispatch.requestSha256){owner=candidate;break;}
+ }
+ assert.ok(owner,'Sign has no owned authorization request');
+ const request=await store.readOperation(operationId,`BRIDGE:REQUEST:${owner.workflowRunId}:${owner.workflowRunAttempt}`);
+ assertBridgeRequest(request,{releaseId,sourceSha,ticketId,rotationId,manifestSha256,allowExpired:true});
+ assert.equal(request.requestSha256,dispatch.requestSha256);
+ assert.equal(request.authorizationRound,owner.authorizationRound);
+ const claimed=Date.parse(dispatch.claimedAt);
+ assert.ok(Number.isSafeInteger(claimed)&&claimed>=Date.parse(request.issuedAt)&&claimed<Date.parse(request.expiresAt),
+  'Sign dispatch was not claimed during its exact authorization');
+ return request;
 }

@@ -19,6 +19,7 @@ import {packReleaseEvidenceTransport,unpackReleaseEvidenceTransport} from './pro
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {createBridgeCredentialRefresher} from './production-release-bridge-credentials.mjs';
 import {fetchProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
+import {classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
 
 const repository='T-ej2003/genuine-scan-main';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -30,9 +31,19 @@ export async function waitForTerminalCutover({verify,ensureCredentials,store,ope
   await ensureCredentials();
   const completed=await verify();if(completed)return completed;
   if(now()>=Date.parse(expiresAt)){
-   const dispatched=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']
-    .map(phase=>store.readOperation(operationId,`BRIDGE:SIGN:${phase}:DISPATCH`)));
-   if(dispatched.every(value=>value?.requestSha256!==requestSha256))throw new Error('Trusted-terminal request expired before a native Sign dispatch');
+   const signed=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR'].map(async phase=>{
+    const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
+    if(!dispatch)return 'NOT_STARTED';
+    const result=await store.readOperation(operationId,`${prefix}:RESULT`);
+    const completion=await store.readOperation(operationId,`${prefix}:COMPLETED`);
+    return classifyBridgeNativeResult({dispatch,result,completion});
+   }));
+   assert.ok(!signed.includes('OUTCOME_UNKNOWN'),'OUTCOME_UNKNOWN: native KMS Sign dispatch has no authenticated result');
+   const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
+   if(operator?.requestSha256!==requestSha256&&!signed.every(state=>state==='COMPLETED'))
+    throw new Error(signed.every(state=>state==='NOT_STARTED')
+     ?'Trusted-terminal request expired before a native Sign dispatch'
+     :'REAUTHORIZATION_REQUIRED: completed native signatures are preserved; resume under a fresh protected request');
   }
   await wait(15000);
  }

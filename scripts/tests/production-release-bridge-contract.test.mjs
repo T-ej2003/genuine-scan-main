@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {bridgeOperationId,createBridgeRequest,assertBridgeRequest,claimBridgeRequest,classifyBridgeNativeResult,requestTrustedTerminalCutover} from '../aws/production-release-bridge-contract.mjs';
+import {bridgeOperationId,createBridgeRequest,assertBridgeRequest,claimBridgeRequest,classifyBridgeNativeResult,requestTrustedTerminalCutover,bridgeRequestForSign} from '../aws/production-release-bridge-contract.mjs';
 import {brokerDigest} from '../aws/stage-b-staged-broker-contract.mjs';
 import {createProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from '../aws/production-github-environment-approval.mjs';
 import {authenticateBridgeEnvironmentApproval} from '../aws/verify-production-release-terminal-bridge.mjs';
@@ -46,7 +46,7 @@ test('hosted request requires durable prerequisite closure and actual protected 
  const release={...identity,releaseId:brokerDigest(identity)};
  const approval=createProductionEnvironmentApprovalEvidence({repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',
   sourceSha:input.sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,eventName:'workflow_dispatch',
-  workflowRunId:'123',workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(now).toISOString(),
+  workflowRunId:'123',workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(now-15*60*1000).toISOString(),
   actualApproval:{state:'approved',environmentId:10,environmentName:'production',userId:1,userLogin:'operator'},
   environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
  const records=new Map(),artifacts=new Map();let complete=false;
@@ -58,6 +58,7 @@ test('hosted request requires durable prerequisite closure and actual protected 
  await assert.rejects(()=>requestTrustedTerminalCutover(params),/prerequisites/);
  complete=true;
  const request=await requestTrustedTerminalCutover(params);
+ assert.equal(request.expiresAt,new Date(now+15*60*1000).toISOString(),'Sign request cannot outlive its observed protected approval');
  assert.equal(request.environmentApprovalSha256,brokerDigest(approval));
  assert.equal(request.releaseId,release.releaseId);
  assert.equal(await authenticateBridgeEnvironmentApproval({store,request,observeApproval:async()=>approval}),approval);
@@ -70,7 +71,53 @@ test('hosted request requires durable prerequisite closure and actual protected 
   environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
  const renewed=await requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later});
  assert.equal(renewed.authorizationRound,1);
- records.set(`${renewed.operationId}:BRIDGE:SIGN:ROOT_DROP:DISPATCH`,{requestSha256:renewed.requestSha256});
- assert.deepEqual(await requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later+31*60*1000}),renewed);
+ const dispatch={operationId:renewed.operationId,phase:'ROOT_DROP',requestSha256:renewed.requestSha256,
+  phaseTimestamp:new Date(later+29*60*1000).toISOString(),claimedAt:new Date(later+29*60*1000).toISOString()};
+ records.set(`${renewed.operationId}:BRIDGE:SIGN:ROOT_DROP:DISPATCH`,dispatch);
+ await assert.rejects(()=>requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later+31*60*1000}),/outcome is unknown/);
  assert.equal(records.has(`${renewed.operationId}:BRIDGE:REQUEST:ROUND:2`),false);
+});
+
+test('expired request preserves captured root and adoption while requiring a fresh authorization for each pending Sign',async()=>{
+ const identity={schemaVersion:1,sourceSha:input.sourceSha,ticketId:input.ticketId,baselineSha256:'0'.repeat(64),baselineGeneration:1,changedFiles:[]};
+ const release={...identity,releaseId:brokerDigest(identity)},records=new Map(),artifacts=new Map();
+ const operationId=bridgeOperationId({...input,releaseId:release.releaseId});
+ const store={readStart:async()=>({release:brokerDigest(release)}),getArtifact:async id=>artifacts.get(id)||
+  (id===brokerDigest(release)?release:{status:'PREREQUISITES_CONVERGED',releaseId:release.releaseId}),
+  readStep:async()=>({releaseId:release.releaseId,sourceSha:input.sourceSha,result:'f'.repeat(64)}),
+  putArtifact:async(id,value)=>{artifacts.set(id,value);},
+  readOperation:async(_id,phase)=>records.get(phase)||null,
+  claimOperation:async(_id,phase,value)=>{assert.equal(records.has(phase),false);records.set(phase,value);return true;}};
+ const approvalFor=(runId,at)=>createProductionEnvironmentApprovalEvidence({repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',
+  sourceSha:input.sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,eventName:'workflow_dispatch',
+  workflowRunId:String(runId),workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(at).toISOString(),
+  actualApproval:{state:'approved',environmentId:10,environmentName:'production',userId:1,userLogin:'operator'},
+  environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
+ const requestAt=(runId,at,verifyCompletedSign=()=>true)=>requestTrustedTerminalCutover({store,sourceSha:input.sourceSha,ticketId:input.ticketId,
+  rotationId:input.rotationId,manifestSha256:input.manifestSha256,approval:approvalFor(runId,at),workflowRunId:String(runId),workflowRunAttempt:'1',
+  verifyCompletedSign,now:at});
+ const captured=(phase,request,at)=>{
+  const dispatch={operationId,phase,requestSha256:request.requestSha256,claimedAt:new Date(at).toISOString(),
+   phaseTimestamp:new Date(at).toISOString()};
+  const result={operationId,phase,requestSha256:request.requestSha256,dispatch,response:{KeyId:'key',Signature:'c2ln'}};
+  records.set(`BRIDGE:SIGN:${phase}:DISPATCH`,dispatch);
+  records.set(`BRIDGE:SIGN:${phase}:RESULT`,result);
+  records.set(`BRIDGE:SIGN:${phase}:COMPLETED`,{resultSha256:brokerDigest(result)});
+  return dispatch;
+ };
+ const first=await requestAt(1,now);
+ const rootAt=now+29*60*1000;
+ const root=captured('ROOT_DROP',first,rootAt);
+ assert.equal((await bridgeRequestForSign({store,operationId,dispatch:root,...input,releaseId:release.releaseId})).requestSha256,first.requestSha256);
+ let verified=0;
+ const second=await requestAt(2,now+31*60*1000,({phase})=>{assert.equal(phase,'ROOT_DROP');verified++;return true;});
+ assert.equal(second.authorizationRound,1);assert.equal(verified,1);
+ assert.equal(records.get('BRIDGE:SIGN:ROOT_DROP:DISPATCH'),root,'Root Sign must not be replaced');
+ assert.equal(await requestAt(3,now+32*60*1000),second,'Active renewed authorization must be reused');
+ assert.equal(records.has('BRIDGE:REQUEST:ROUND:2'),false);
+ await assert.rejects(()=>bridgeRequestForSign({store,operationId,dispatch:{...root,claimedAt:new Date(now+31*60*1000).toISOString()},
+  ...input,releaseId:release.releaseId}),/not claimed during/);
+ await assert.rejects(()=>requestTrustedTerminalCutover({store,sourceSha:'d'.repeat(40),ticketId:input.ticketId,rotationId:input.rotationId,
+  manifestSha256:input.manifestSha256,approval:approvalFor(4,now+32*60*1000),workflowRunId:'4',workflowRunAttempt:'1',now:now+32*60*1000}),
+ /Expected values to be strictly equal/);
 });

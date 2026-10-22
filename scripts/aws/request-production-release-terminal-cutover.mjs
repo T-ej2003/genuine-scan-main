@@ -7,6 +7,7 @@ import {createReleaseCoordinatorStore} from './production-release-evidence-store
 import {HOSTED_RELEASE_ROOT} from './production-release-coordinator.mjs';
 import {fetchProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
 import {requestTrustedTerminalCutover} from './production-release-bridge-contract.mjs';
+import {verifyBridgeCapturedSign} from './production-release-bridge-sign-journal.mjs';
 import {readStageBProtectedMainCheckout} from './stage-b-deployment-identity.mjs';
 
 export async function runTerminalCutoverRequest({env=process.env,fetchApproval=fetchProductionEnvironmentApprovalEvidence,makeStore=createReleaseCoordinatorStore,now=Date.now}={}) {
@@ -25,7 +26,8 @@ export async function runTerminalCutoverRequest({env=process.env,fetchApproval=f
   workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,executionActor:env.GITHUB_ACTOR,requireActualApproval:true});
  const request=await requestTrustedTerminalCutover({store,sourceSha:env.TARGET_SHA,ticketId:env.RELEASE_TICKET_ID,
   rotationId:env.BRIDGE_ROTATION_ID,manifestSha256:env.BRIDGE_MANIFEST_SHA256,approval,
-  workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,now:now()});
+  workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,
+  verifyCompletedSign:input=>verifyBridgeCapturedSign({...input,run}),now:now()});
  return {operationId:request.operationId,releaseId:request.releaseId,requestSha256:request.requestSha256,expiresAt:request.expiresAt,workflowRunId:request.workflowRunId,workflowRunAttempt:request.workflowRunAttempt};
 }
 
