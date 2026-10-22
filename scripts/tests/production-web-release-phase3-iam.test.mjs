@@ -57,7 +57,7 @@ function fixture({front=predecessor,native=null,lostResponse=null,onRead=null,ca
   }
   throw Error(`Unexpected IAM operation ${operation}`);
  };
- return {run,calls,state:()=>({frontendPolicy,auditPolicy})};
+ return {run,calls,state:()=>({frontendPolicy,auditPolicy}),setAudit:value=>{auditPolicy=value;}};
 }
 const claim=(markDispatch,hasDispatch=()=>true)=>({ownershipSha256:'d'.repeat(64),hasDispatch,markDispatch,complete:()=> 'e'.repeat(64)});
 const assertProtectedSource=()=>sourceSha;
@@ -104,6 +104,24 @@ test('MFA authority expiring after durable ownership stops before IAM dispatch',
    return claim(()=>{dispatched=true;return true;});
   }}),/MFA authority expired/);
  assert.equal(dispatched,false);assert.deepEqual(writes(value),[]);
+});
+test('late target without this operation journal is not accepted as completion',()=>{
+ const value=fixture({onRead:({reads,policyName,setAudit})=>{
+  if(reads===5&&policyName==='MSCQRProductionStageBNativeAudit')setAudit(audit);
+ }});
+ assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+  plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource,
+  claimOwnership:()=>claim(()=>{throw Error('unowned IAM write');},()=>false)}),/target lacks an authenticated dispatch journal/);
+ assert.deepEqual(writes(value),[]);
+});
+test('IAM drift during S3 dispatch is caught before PutRolePolicy',()=>{
+ for(const changed of [audit,{Version:'2012-10-17',Statement:[]}]){
+  const value=fixture();
+  assert.throws(()=>reconcilePhase3WebIam({run:value.run,sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,
+   plan:plan(),authorizationId:42,mfaEvidence,assertProtectedSource,
+   claimOwnership:()=>claim(()=>{value.setAudit(changed);return true;})}),/changed after dispatch journal/);
+  assert.deepEqual(writes(value),[]);
+ }
 });
 test('protected main advancing after MFA or ownership stops before IAM dispatch',()=>{
  for(const driftAt of [1,2]){
@@ -152,7 +170,7 @@ test('partial installation and lost AWS responses reconcile without duplicate wr
   const value=fixture({lostResponse});reconcile(value);assert.deepEqual(writes(value),['MSCQRProductionStageBNativeAudit','MSCQRProductionFrontendActivation']);
   assert.deepEqual(reconcile(value,plan('no-op','no-op')).actions,[]);
  }
- const crashed=fixture({onRead:({reads})=>{if(reads===6)throw Error('runner interrupted after audit write');}});
+ const crashed=fixture({onRead:({reads})=>{if(reads===7)throw Error('runner interrupted after audit write');}});
  assert.throws(()=>reconcile(crashed),/runner interrupted/);
  assert.equal(digest(crashed.state().auditPolicy),PHASE3_IAM_TRANSITION.auditTargetSha256);
  const resumed=fixture({native:crashed.state().auditPolicy,front:crashed.state().frontendPolicy});

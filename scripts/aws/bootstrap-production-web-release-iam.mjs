@@ -393,12 +393,16 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   const actions = [];
   const install = (name, document, expectedBefore, expectedAfter) => {
     const current = observed(name);
-    if (current === expectedAfter) return;
+    if (current === expectedAfter) {
+      assert.equal(hasDispatch(name, expectedAfter), true, `${name} target lacks an authenticated dispatch journal`);
+      return;
+    }
     assert.equal(current, expectedBefore, `${name} changed during IAM reconciliation`);
     assert.equal(assertProtectedSource(), sourceSha, "Protected main advanced before IAM dispatch");
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
     if (!markDispatch(name, expectedAfter)) throw new Error(`${name} dispatch outcome unknown; reconcile live IAM before another attempt`);
     assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
+    assert.equal(observed(name), expectedBefore, `${name} changed after dispatch journal and before IAM write`);
     try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", name, "--policy-document", JSON.stringify(document)]); }
     catch (error) {
       if (observed(name) !== expectedAfter) throw new Error(`${name} write outcome unknown; reconcile live IAM before retry`, { cause: error });
@@ -411,6 +415,8 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   install(activationPolicyName, frontend, PHASE3_IAM_TRANSITION.frontendPredecessorSha256, PHASE3_IAM_TRANSITION.frontendTargetSha256);
   assert.equal(observed(auditPolicyName), PHASE3_IAM_TRANSITION.auditTargetSha256);
   assert.equal(observed(activationPolicyName), PHASE3_IAM_TRANSITION.frontendTargetSha256);
+  assert.equal(hasDispatch(auditPolicyName, PHASE3_IAM_TRANSITION.auditTargetSha256), true);
+  assert.equal(hasDispatch(activationPolicyName, PHASE3_IAM_TRANSITION.frontendTargetSha256), true);
   const completionSha256 = complete();
   assert.match(completionSha256 || "", /^[a-f0-9]{64}$/, "IAM completion receipt is not authenticated");
   return Object.freeze({ status: "PHASE3_WEB_IAM_RECONCILED", sourceSha, ticketId, authorizationId, ownershipSha256, completionSha256, actions: Object.freeze(actions) });
