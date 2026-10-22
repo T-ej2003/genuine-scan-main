@@ -76,7 +76,10 @@ test("web release Terraform root uses its dedicated production S3 state and lock
     "apply web-release.tfplan",
     "mscqr-production-release-deployer",
   ]) assert.ok(runbook.includes(required), `web release Terraform procedure must include ${required}`);
-  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 8);
+  assert.equal(runbook.match(/TF_WORKSPACE=default terraform/g)?.length, 10);
+  assert.match(runbook, /-var="phase3_iam_source_sha=<new_protected_main_sha>"/);
+  assert.match(runbook, /CHG-20261022-001 exact IAM reconciliation/);
+  assert.match(runbook, /aws_iam_role_policy\.stage_b_native_audit/);
   assert.match(runbook, /MFA-backed, non-root production operator/);
 });
 

@@ -37,7 +37,7 @@ AWS IAM cannot resource-scope or field-constrain `ecs:RegisterTaskDefinition`. T
 
 ## Terraform state and publisher provisioning
 
-The `infra/aws/terraform/production-web-release` root is the canonical desired-state owner for the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. Its IAM resource mutations are bootstrapped only by `scripts/aws/bootstrap-production-web-release-iam.mjs`, which reads those exact documents, accepts only the production account root configuration profile, creates absent resources, and fails closed on any non-identical existing object. It never updates or deletes IAM resources. Terraform imports the resulting objects into its dedicated state and detects drift; the operator has no IAM mutation permissions.
+The `infra/aws/terraform/production-web-release` root is the canonical desired-state owner for the publisher role, its boundary and permissions policy, and the narrowly scoped `MSCQRProductionFrontendActivation` inline policy on the existing `mscqr-production-release-deployer` role. Its IAM resource mutations are bootstrapped only by `scripts/aws/bootstrap-production-web-release-iam.mjs`, which reads those exact documents and accepts only the production account root configuration profile. Ordinary bootstrap creates absent resources and fails closed on a non-identical existing object; the separately reviewed CHG-20261022-001 transition below permits exactly one recorded frontend predecessor update and one native-audit creation. Terraform imports the resulting objects into its dedicated state and detects drift; the operator has no IAM mutation permissions.
 
 An MFA-backed, non-root production operator must use the dedicated encrypted production S3 state and S3 lockfile. AWS root must not plan or apply:
 
@@ -88,6 +88,50 @@ TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release
 ```
 
 Read back the publisher trust/policy and boundary, then set `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE` on the protected `production-web-image-publish` environment to the Terraform `publisher_role_arn` output. A later approved IAM-document change must add its exact live predecessor to the source bootstrap before it can converge; the bootstrap never overwrites unknown drift.
+
+## CHG-20261022-001 exact IAM reconciliation
+
+The Phase 3 transition is deliberately narrower than a general IAM update. The reviewed source bootstrap accepts only the recorded live frontend policy fingerprint `a43a0e5e579f91e6dd1da3005de72984becc28e86f9d316a87b8001164dc6352`, target frontend fingerprint `5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d`, and new native audit fingerprint `741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122`. It binds ticket `CHG-20261022-001`. There is no external or AWS requirement for a second human IAM reviewer, and protected-main branch protection currently requires zero approving reviews. This transition uses an exact solo-operator GitHub authorization comment, CI, automated Codex review, and a fresh non-root MFA challenge. The accountable operator must post the following comment on the **final PR head**, replacing `<final_pr_head_sha>` with that SHA:
+
+```text
+MSCQR_PHASE3_IAM_SOLO_AUTH_V1:6ef467d26a26e2b40669256951ba3a44d7dbc700b2662db9506e62bb0611938c:<final_pr_head_sha>
+```
+
+The installer retrieves the unedited comment through the authenticated GitHub API, requires it to be authored by GitHub user `T-ej2003` (ID `183396573`) before the PR merges, and binds it to the merged protected-main source. It checks the comment again after interactive MFA, before ownership and after each dispatch journal immediately before the corresponding IAM write. Codex's automated review is a separate defect check, never a human approval. A missing or edited operator comment stops any pending IAM write. The existing component-IAM approval workflow is scoped to other documents and cannot authorize this transition. This solo IAM authorization does not enable the disabled Stage B conditional lane or change root, checker, or verifier approval rules.
+
+After the correction PR merges, treat its new protected-main SHA as a **new release source**; do not rebind older image or Stage B approvals. Generate a fresh private Terraform plan with the existing MFA-backed non-root profile and the production-web-release backend, binding the exact merged protected-main SHA:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release plan \
+  -var="phase3_iam_source_sha=<new_protected_main_sha>" \
+  -out=<private_saved_plan>
+```
+
+The installer rejects a plan with an absent or different `phase3_iam_source_sha` before acquiring mutation ownership. Confirm only the two permitted transitions are present. Keep its saved binary outside the repository and record its SHA-256. Do not apply this plan; the exact-document bootstrap is the IAM writer. Preserve the same initialized private `TF_DATA_DIR` in the trusted terminal for the installer's read-only `terraform show`; the plan cannot be decoded without its provider schema. The installer uses only a safelisted Terraform binary and a sanitized subprocess environment, and decodes a private copy of the exact bytes whose SHA-256 it records.
+
+On the trusted terminal, keep the owner file in a private mode-0700 directory outside the repository. After the final-head operator comment, clean Codex review, passing required CI, protected-main merge, and fresh-plan review, run the source-controlled installer from a clean exact-main checkout with the governed root configuration profile. The command prompts for the bootstrap operator's MFA code, obtains a fresh 900-second STS session with the fixed MFA serial, and verifies the exact non-root IAM user. The AWS CLI challenge is held briefly in a mode-0600 file under a mode-0700 temporary directory and removed immediately after issuance; credentials and the code never go to GitHub or logs:
+
+```sh
+node scripts/aws/bootstrap-production-web-release-iam.mjs \
+  --source-sha <new_protected_main_sha> \
+  --admin-profile mscqr-production-root \
+  --ticket-id CHG-20261022-001 \
+  --authorization-pr <solo_authorized_correction_pr> \
+  --plan-file <private_saved_plan> \
+  --owner-file <private_directory>/phase3-iam-owner.json
+```
+
+The installer authenticates exact account root, the operator comment, fresh MFA session, source policy fingerprints, plan semantics, live predecessor, and a write-once S3 ownership claim before any IAM write. The frontend plan action must match its live checkpoint: predecessor requires update and target requires no-op. An absent audit policy requires create; an already installed audit target permits create while it remains unimported in Terraform state, or no-op after import. Never apply a recovery plan that still shows create; import the authenticated audit target only after IAM reconciliation completes. A partial or completed checkpoint also requires the original private owner file, matching encrypted S3 claim, and exact dispatch markers before any continuation. The installer reads protected main through the pinned, authenticated GitHub API after interactive MFA, immediately before ownership, before each IAM journal and again after each journal; source advancement stops the transition. It never trusts a locally redirected Git transport for protected-main freshness. It also rechecks both live policies before dispatch. The initial MFA proof metadata is retained in the encrypted claim; credentials and MFA code are not. Each policy receives a separate encrypted write-ahead dispatch marker with a unique attempt ID before `PutRolePolicy`; if its first S3 response is lost, exact readback of that attempt ID permits this invocation to continue, while another invocation cannot consume the marker. The safelisted AWS CLI subprocess uses one attempt for every IAM write and conditional S3 journal write. A target appearing between checkpoint and installation is accepted only with this owner's matching dispatch marker. The policy predecessor is read again after the marker is durable and immediately before `PutRolePolicy`; drift stops the write. The installer installs the native audit policy first, then the frontend policy, with exact readback after each, and publishes an encrypted write-once completion receipt. A lost IAM response is reused only when live policy equals the target. If a dispatch marker exists but live IAM remains at the predecessor, outcome is unknown and the installer stops instead of issuing a duplicate write. Retain the owner file for interrupted recovery; another owner cannot claim this operation. A restart requires a new MFA challenge and a fresh plan for the observed checkpoint. Unexpected drift or an unknown write outcome stops.
+
+After live readback, import only the new inline policy into the existing remote Terraform state using the MFA-backed non-root operator:
+
+```sh
+TF_WORKSPACE=default terraform -chdir=infra/aws/terraform/production-web-release import \
+  aws_iam_role_policy.stage_b_native_audit \
+  mscqr-production-release-deployer:MSCQRProductionStageBNativeAudit
+```
+
+Then produce a fresh plan and require **zero changes**. Verify live policy fingerprints and IAM simulation of the required reads and forbidden writes before Stage B root issuance. Never run Terraform plan/apply as root or edit IAM directly.
 
 ## Governed operator sequence
 
