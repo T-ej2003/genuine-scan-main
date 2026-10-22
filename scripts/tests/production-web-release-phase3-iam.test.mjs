@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import test from 'node:test';
-import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,productionTerraformExecutable,readPhase3IamAuthorization,readPhase3IamPlan,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
+import {assertPhase3IamPlan,assertPhase3IamAuthorization,claimPhase3IamOwner,createPhase3IamAwsRunner,phase3IamAuthorizationMarker,pinPhase3IamGitPath,productionTerraformExecutable,readPhase3IamAuthorization,readPhase3IamPlan,reconcilePhase3WebIam,verifyPhase3IamMfa,PHASE3_IAM_TRANSITION} from '../aws/bootstrap-production-web-release-iam.mjs';
 import {digest} from '../aws/component-iam-installation-contract.mjs';
 import {productionAwsExecutable} from '../aws/production-credential-source-contract.mjs';
 
@@ -21,8 +21,8 @@ assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.m
  'Production CLI must reauthenticate the operator before each IAM write');
 assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.mjs','utf8'),
  /readPhase3IamPlan\(\{ planFile \}\)/, 'Production CLI must use the pinned Terraform plan decoder');
-assert.match(fs.readFileSync('scripts/aws/stage-b-deployment-identity.mjs','utf8'),
- /execFileSync\("\/usr\/bin\/git"/, 'Protected-main checkout must not resolve Git from ambient PATH');
+assert.match(fs.readFileSync('scripts/aws/bootstrap-production-web-release-iam.mjs','utf8'),
+ /pinPhase3IamGitPath\(\);\s*const values = args/, 'Production CLI must pin Git before source verification');
 const mfaEvidence={sourceSha,ticketId:PHASE3_IAM_TRANSITION.ticketId,authorizationId:42,operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator',accessKeyIdSha256:'f'.repeat(64),verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()};
 assert.equal(PHASE3_IAM_TRANSITION.account,'368992683803');
 assert.equal(PHASE3_IAM_TRANSITION.region,'eu-west-2');
@@ -131,6 +131,10 @@ test('saved Terraform plan must bind exact post-merge protected main before owne
  }
 });
 test('Terraform plan decoder pins executable, environment and exact captured bytes',()=>{
+ const gitEnv={PATH:'/tmp/attacker'};
+ pinPhase3IamGitPath(gitEnv,{statSync:()=>({isFile:()=>true,mode:0o755})});
+ assert.equal(gitEnv.PATH.split(':')[0],'/usr/bin');
+ assert.throws(()=>pinPhase3IamGitPath({}, {statSync:()=>({isFile:()=>true,mode:0o777})}),/Unsafe/);
  const safe={existsSync:()=>true,realpathSync:()=>'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform',
   statSync:()=>({isFile:()=>true,mode:0o555})};
  assert.equal(productionTerraformExecutable(safe),'/opt/homebrew/Cellar/terraform/1.15.8/bin/terraform');

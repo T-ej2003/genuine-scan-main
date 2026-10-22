@@ -31,6 +31,11 @@ export const PHASE3_IAM_TRANSITION = Object.freeze({
   auditTargetSha256: "741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122",
 });
 export const phase3IamAuthorizationMarker = headSha => `MSCQR_PHASE3_IAM_SOLO_AUTH_V1:${iamDigest(PHASE3_IAM_TRANSITION)}:${headSha}`;
+export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
+  const stat = fsOps.statSync("/usr/bin/git");
+  assert(stat.isFile() && (stat.mode & 0o111) && !(stat.mode & 0o022), "Unsafe production Git executable");
+  env.PATH = "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin";
+}
 export function productionTerraformExecutable(fsOps = fs) {
   for (const candidate of ["/usr/bin/terraform", "/opt/homebrew/bin/terraform", "/usr/local/bin/terraform"]) {
     if (!fsOps.existsSync(candidate)) continue;
@@ -493,6 +498,7 @@ function args(argv) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  pinPhase3IamGitPath();
   const values = args(process.argv.slice(2));
   const sourceSha = values.get("--source-sha");
   const checkout = readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true });
