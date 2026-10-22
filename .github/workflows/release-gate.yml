@@ -1312,6 +1312,7 @@ jobs:
         if: ${{ inputs.release_mode == 'normal' }}
         run: |
           set -euo pipefail
+          node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
           ./scripts/aws/verify-production-smoke.sh
 
       - name: Commit authenticated security component state
