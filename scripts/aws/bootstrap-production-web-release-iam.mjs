@@ -320,11 +320,18 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   let result;
   if (values.has("--ticket-id")) {
     execFileSync("git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
+    assert.ok(process.env.TF_DATA_DIR && path.isAbsolute(process.env.TF_DATA_DIR)
+      && fs.statSync(process.env.TF_DATA_DIR).isDirectory()
+      && (fs.statSync(process.env.TF_DATA_DIR).mode & 0o077) === 0,
+    "An initialized private TF_DATA_DIR is required to verify the saved plan");
     const planFile = path.resolve(values.get("--plan-file"));
     const planBytes = fs.readFileSync(planFile);
-    const plan = JSON.parse(execFileSync("terraform", ["show", "-json", planFile], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+    const plan = JSON.parse(execFileSync("terraform", ["-chdir=infra/aws/terraform/production-web-release", "show", "-json", planFile],
+      { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
     assertPhase3IamPlan(plan);
     const independentReviewId = readPhase3IamReview({ prNumber: values.get("--approval-pr"), sourceSha });
+    assert.equal(readStageBProtectedMainCheckout({ cwd: root, expectedSourceSha: sourceSha, requireCanonicalRepository: true }).currentHead,
+      sourceSha, "Protected main advanced before IAM installation");
     result = { ...reconcilePhase3WebIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, independentReviewId,
       claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }),
       planSha256: createHash("sha256").update(planBytes).digest("hex") };
