@@ -50,10 +50,11 @@ test('hosted request requires durable prerequisite closure and actual protected 
   workflowRunId:'123',workflowRunAttempt:'1',executionActor:'operator',observedAt:new Date(now-15*60*1000).toISOString(),
   actualApproval:{state:'approved',environmentId:10,environmentName:'production',userId:1,userLogin:'operator'},
   environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
- const records=new Map(),artifacts=new Map();let complete=false;
+ const records=new Map(),artifacts=new Map();let complete=false,operatorCommit;
  const store={readStart:async()=>({release:brokerDigest(release)}),getArtifact:async id=>artifacts.get(id)|| (id===brokerDigest(release)?release:{status:'PREREQUISITES_CONVERGED',releaseId:release.releaseId}),
   readStep:async()=>complete?{releaseId:release.releaseId,sourceSha:input.sourceSha,result:'f'.repeat(64)}:null,
   putArtifact:async(id,value)=>{artifacts.set(id,value);},readOperation:async(id,phase)=>records.get(`${id}:${phase}`)||null,
+  readOperationCommittedAt:async()=>operatorCommit,
   claimOperation:async(id,phase,value)=>{records.set(`${id}:${phase}`,value);return true;}};
  const params={store,sourceSha:input.sourceSha,ticketId:input.ticketId,rotationId:input.rotationId,manifestSha256:input.manifestSha256,approval,workflowRunId:'123',workflowRunAttempt:'1',now};
  await assert.rejects(()=>requestTrustedTerminalCutover(params),/prerequisites/);
@@ -64,6 +65,10 @@ test('hosted request requires durable prerequisite closure and actual protected 
  assert.equal(request.releaseId,release.releaseId);
  assert.equal(await authenticateBridgeEnvironmentApproval({store,request,observeApproval:async()=>approval}),approval);
  await assert.rejects(()=>authenticateBridgeEnvironmentApproval({store,request,observeApproval:async()=>({...approval,actualApproval:{...approval.actualApproval,userLogin:'forged'}})}),/approval changed/);
+ records.set(`${request.operationId}:BRIDGE:OPERATOR:DISPATCH`,{requestSha256:request.requestSha256,operationId:request.operationId,
+  inputSha256:'a'.repeat(64),claimedAt:new Date(Date.parse(request.expiresAt)-1000).toISOString(),
+  executionContract:'S3_COMMIT_BEFORE_NATIVE_V2'});
+ operatorCommit=request.expiresAt;
  const later=now+31*60*1000;
  const nextApproval=createProductionEnvironmentApprovalEvidence({repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',
   sourceSha:input.sourceSha,workflowRef:PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,eventName:'workflow_dispatch',
@@ -72,6 +77,7 @@ test('hosted request requires durable prerequisite closure and actual protected 
   environmentConfig:{id:10,name:'production',can_admins_bypass:false,protection_rules:[{type:'required_reviewers',prevent_self_review:false,reviewers:[{type:'User',reviewer:{id:1,login:'operator'}}]}]}});
  const renewed=await requestTrustedTerminalCutover({...params,approval:nextApproval,workflowRunId:'124',now:later});
  assert.equal(renewed.authorizationRound,1);
+ assert.equal(records.get(`${request.operationId}:BRIDGE:OPERATOR:DISPATCH`).requestSha256,request.requestSha256);
  const dispatch={operationId:renewed.operationId,phase:'ROOT_DROP',requestSha256:renewed.requestSha256,
   phaseTimestamp:new Date(later+29*60*1000).toISOString(),claimedAt:new Date(later+29*60*1000).toISOString()};
  records.set(`${renewed.operationId}:BRIDGE:SIGN:ROOT_DROP:DISPATCH`,dispatch);

@@ -71,6 +71,13 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
   readStep:(releaseId,name)=>read('STEP',{releaseId,name})??null,
   writeStep:value=>write('STEP',{releaseId:value.releaseId,name:value.name},value),
   readOperation:(operationId,phase)=>read('OPERATION',{operationId,phase})??null,
+  readOperationCommittedAt:(operationId,phase)=>{
+   const key=stageBApplyAttemptS3Key(id('OPERATION',{operationId,phase}));
+   const head=JSON.parse(run(['s3api','head-object','--bucket',STAGE_B_TERRAFORM_BACKEND.bucketName,'--key',key,
+    '--expected-bucket-owner','368992683803','--region',STAGE_B_TERRAFORM_BACKEND.region,'--output','json','--no-cli-pager']));
+   assert.ok(Number.isSafeInteger(Date.parse(head.LastModified)),'Coordinator claim has no native S3 commit time');
+   return head.LastModified;
+  },
   writeOperation:(operationId,phase,value)=>write('OPERATION',{operationId,phase},value),
   // Claims never use identical-artifact recovery: a lost response grants no dispatch ownership.
   claimOperation:(operationId,phase,value)=>{

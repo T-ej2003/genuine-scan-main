@@ -35,9 +35,9 @@ const inputsForMode = (mode) => {
 };
 
 export function parseProductionCutoverOperatorArgs(argv = []) {
-  const expected = new Set(["--mode", "--config", "--config-sha256", "--source-sha", "--rotation-id"]);
+  const expected = new Set(["--mode", "--config", "--config-sha256", "--source-sha", "--rotation-id", "--native-result-output"]);
   const values = {};
-  if (argv.length !== 10) throw new Error("Production cutover operator launcher requires exactly five non-secret runtime arguments.");
+  if (![10,12].includes(argv.length)) throw new Error("Production cutover operator launcher requires exactly five non-secret runtime arguments and an optional native handoff.");
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
     const value = argv[index + 1];
@@ -45,6 +45,7 @@ export function parseProductionCutoverOperatorArgs(argv = []) {
     values[name] = value;
   }
   if (values["--mode"] !== "prepare-overlap" || !SHA256.test(values["--config-sha256"]) || !SHA1.test(values["--source-sha"]) || !/^rotation-[a-z0-9-]+$/.test(values["--rotation-id"])) throw new Error("Production cutover operator launcher runtime identity is invalid.");
+  if(Boolean(values['--native-result-output']) !== (argv.length===12))throw new Error('Native handoff argument is incomplete.');
   return Object.freeze(values);
 }
 
@@ -118,6 +119,10 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
   if (!stdin?.isTTY || !stdout?.isTTY) throw new Error("Production cutover operator launcher requires an interactive trusted terminal.");
   if (typeof prompt !== "function" || typeof spawnChild !== "function") throw new Error("Production cutover operator launcher dependencies are invalid.");
   const runtime = parseProductionCutoverOperatorArgs(argv);
+  if(runtime['--native-result-output']){
+    if(!parentEnvironment.MSCQR_BRIDGE_OPERATION_ID || path.resolve(runtime['--native-result-output'])!==path.join(path.dirname(path.resolve(runtime['--config'])),'bridge-native-result.json'))
+      throw new Error('Native handoff requires the exact trusted-terminal bridge runtime');
+  }
   const config = validateConfig(runtime, { repositoryRoot: cwd });
   authenticateCheckout({ cwd, expectedSourceSha: config.recoveryTooling?.sourceSha || runtime["--source-sha"], requireCanonicalRepository: true });
   if (config.rotationId) await legacyGuard({config,repositoryRoot:cwd});
@@ -140,7 +145,8 @@ export async function runProductionCutoverOperator({ argv = process.argv.slice(2
       inputs[name] = input;
     }
     childEnvironment = buildProductionCutoverChildEnvironment({ parentEnvironment, inputs, mode: runtime["--mode"] });
-    const child = spawnChild(childExecutable, [CHILD_SCRIPT, "--mode", runtime["--mode"], "--config", runtime["--config"], "--config-sha256", runtime["--config-sha256"], "--source-sha", runtime["--source-sha"], "--rotation-id", runtime["--rotation-id"]], { cwd, env: childEnvironment, stdio: "inherit" });
+    const child = spawnChild(childExecutable, [CHILD_SCRIPT, "--mode", runtime["--mode"], "--config", runtime["--config"], "--config-sha256", runtime["--config-sha256"], "--source-sha", runtime["--source-sha"], "--rotation-id", runtime["--rotation-id"],
+      ...(runtime['--native-result-output']?['--native-result-output',runtime['--native-result-output']]:[])], { cwd, env: childEnvironment, stdio: "inherit" });
     for (const { name } of requiredInputs) {
       delete inputs[name];
       delete childEnvironment[name];

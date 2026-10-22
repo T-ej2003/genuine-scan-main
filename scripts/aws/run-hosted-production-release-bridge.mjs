@@ -12,6 +12,9 @@ import {runTerminalCutoverRequest} from './request-production-release-terminal-c
 import {authenticateTerminalCutover,checkerBridgeVerifier,rootBridgeVerifier,bridgeOverlapLiveReader} from './verify-production-release-terminal-bridge.mjs';
 import {resolveProductionOverlapDeploymentReceipt} from './production-overlap-deployment-receipt.mjs';
 import {createProductionComponentDeploymentStateClient,componentDeploymentProvenance} from './production-component-deployment-state.mjs';
+import {stateHash} from './production-component-deployment-state.mjs';
+import {componentCommitOperationId} from './production-release-gate-component-journal.mjs';
+import {smokeOperationId} from './run-production-release-gate-smoke.mjs';
 import {assertNormalGateCompletion} from './production-release-gate-completion.mjs';
 import {dispatchSourceBoundWorkflow,dispatchProtectedMainReleaseGate} from '../github/dispatch-source-bound-workflow.mjs';
 import {requiredWorkflowFiles,usesLifecycleInputs} from '../github/release-lifecycle-contract.mjs';
@@ -19,18 +22,30 @@ import {packReleaseEvidenceTransport,unpackReleaseEvidenceTransport} from './pro
 import {brokerDigest} from './stage-b-staged-broker-contract.mjs';
 import {createBridgeCredentialRefresher} from './production-release-bridge-credentials.mjs';
 import {fetchProductionEnvironmentApprovalEvidence,PRODUCTION_ENVIRONMENT_APPROVAL} from './production-github-environment-approval.mjs';
-import {bridgeOperatorExpiryAction,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
+import {bridgeOperatorClaimPhase,bridgeOperatorExpiryAction,classifyBridgeNativeResult} from './production-release-bridge-contract.mjs';
+import {readBridgeNativeCandidate,verifyHostedBridgeNativeStages} from './production-release-bridge-native-verifier.mjs';
+import {readBridgeNativeAudit} from './production-release-bridge-native-audit.mjs';
+import {requestBridgeNativeAttestation} from './production-release-bridge-native-attestation.mjs';
+import {classifyPreMutationGateRetry,classifyPostMutationNormalGateRecovery,classifyPreBackendNormalGateRecovery,classifyPostMutationOverlapGateRecovery} from './production-release-gate-recovery.mjs';
+import {gateEcsOperationId} from './production-release-gate-ecs-journal.mjs';
 
 const repository='T-ej2003/genuine-scan-main';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const json=(run,args)=>JSON.parse(run([...args,'--output','json','--no-cli-pager']));
 const gh=(args)=>execFileSync('gh',args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024});
 
-export async function waitForTerminalCutover({verify,ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
+export const createProductionNativeStageVerifier=({store,run,env})=>evidence=>verifyHostedBridgeNativeStages({store,run,evidence,
+ observeApproval:(approval,request)=>fetchProductionEnvironmentApprovalEvidence({token:env.GH_TOKEN,
+  repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:request.sourceSha,
+  workflowRef:approval.workflowRef,eventName:'workflow_dispatch',workflowRunId:request.workflowRunId,
+  workflowRunAttempt:request.workflowRunAttempt,executionActor:approval.executionActor,requireActualApproval:true})});
+
+export async function waitForTerminalCutover({verify,coordinateNative=async()=>{},ensureCredentials,store,request,now=Date.now,wait=sleep,maxPolls=1200}={}){
  const operationId=request.operationId;
  for(let i=0;i<maxPolls;i++){
   await ensureCredentials();
   const completed=await verify();if(completed)return completed;
+  await coordinateNative();
   if(now()>=Date.parse(request.expiresAt)){
    const signed=await Promise.all(['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR'].map(async phase=>{
     const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
@@ -40,8 +55,10 @@ export async function waitForTerminalCutover({verify,ensureCredentials,store,req
     return classifyBridgeNativeResult({dispatch,result,completion});
    }));
    assert.ok(!signed.includes('OUTCOME_UNKNOWN'),'OUTCOME_UNKNOWN: native KMS Sign dispatch has no authenticated result');
-   const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
-   const action=bridgeOperatorExpiryAction({request,operator,now:now()});
+   const operatorPhase=bridgeOperatorClaimPhase(request);
+   const operator=await store.readOperation(operationId,operatorPhase);
+   const action=bridgeOperatorExpiryAction({request,operator,
+    operatorCommittedAt:operator?await store.readOperationCommittedAt(operationId,operatorPhase):undefined,now:now()});
    if(action==='REAUTHORIZE')throw new Error(signed.every(state=>state==='NOT_STARTED')
     ?'REAUTHORIZATION_REQUIRED: trusted-terminal request expired before a native Sign dispatch'
     :'REAUTHORIZATION_REQUIRED: completed native signatures are preserved; resume under a fresh protected request');
@@ -53,7 +70,7 @@ export async function waitForTerminalCutover({verify,ensureCredentials,store,req
 
 export async function runHostedBridge({env=process.env,requestCutover=runTerminalCutoverRequest,authenticate=authenticateTerminalCutover,
  verifyNativeStages,dispatchSource=dispatchSourceBoundWorkflow,dispatchGate=dispatchProtectedMainReleaseGate,wait=sleep,fetchImpl=fetch,now=Date.now}={}){
- assert.equal(typeof verifyNativeStages,'function','Independent Stage B native verifier is required before requesting trusted-terminal authorization');
+ assert.ok(verifyNativeStages===undefined||typeof verifyNativeStages==='function','Independent Stage B native verifier must be callable');
  assert.equal(env.GITHUB_ACTIONS,'true');assert.equal(env.GITHUB_EVENT_NAME,'workflow_dispatch');
  assert.equal(env.GITHUB_REPOSITORY,repository);
  assert.equal(env.GITHUB_WORKFLOW_REF,`${repository}/.github/workflows/release-train.yml@refs/heads/main`);
@@ -68,6 +85,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  const caller=json(run,['sts','get-caller-identity']);
  assert.equal(caller.Account,'368992683803');assert.match(caller.Arn||'',/^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
  const store=createReleaseCoordinatorStore({run,directory:HOSTED_RELEASE_ROOT,repositoryRoot:process.cwd()});
+ const nativeVerifier=verifyNativeStages||createProductionNativeStageVerifier({store,run,env});
  const authorizationTransport=unpackReleaseEvidenceTransport({json:env.NORMAL_IMAGE_AUTHORIZATION_JSON,sha256:env.NORMAL_IMAGE_AUTHORIZATION_SHA256});
  const auth=JSON.parse(authorizationTransport.authorizationJson);
  const fetchJson=async endpoint=>{
@@ -79,6 +97,8 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  await requireMain();
  const requested=await requestCutover({env:credentials.env()});
  const operationId=requested.operationId,releaseId=env.BRIDGE_RELEASE_ID||null;
+ const bridgeRequest=await store.readOperation(operationId,`BRIDGE:REQUEST:${requested.workflowRunId}:${requested.workflowRunAttempt}`);
+ assert.equal(bridgeRequest?.requestSha256,requested.requestSha256);
  const start=await store.readStart({sourceSha:env.TARGET_SHA,ticketId:env.RELEASE_TICKET_ID});
  assert.ok(start);const release=await store.getArtifact(start.release);
  assert.equal(release.releaseId,requested.releaseId);assert.equal(release.releaseId,releaseId||release.releaseId);assert.equal(release.sourceSha,env.TARGET_SHA);
@@ -89,7 +109,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:request.sourceSha,
    workflowRef:approval.workflowRef,eventName:'workflow_dispatch',workflowRunId:request.workflowRunId,
    workflowRunAttempt:request.workflowRunAttempt,executionActor:approval.executionActor,requireActualApproval:true}),
-  verifyCheckerSignature:checkerBridgeVerifier(run),verifyRootSignature:rootBridgeVerifier(run),verifyNativeStages,readLive:async input=>{
+  verifyCheckerSignature:checkerBridgeVerifier(run),verifyRootSignature:rootBridgeVerifier(run),verifyNativeStages:nativeVerifier,readLive:async input=>{
    const priorNormal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
    if(priorNormal){
     const child=await fetchJson(`actions/runs/${priorNormal.runId}`);
@@ -116,7 +136,26 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    assert.equal(componentDeploymentProvenance(state,'backend').githubRunId,prior.runId);
    return true;
   }});
- const verified=await waitForTerminalCutover({verify,ensureCredentials:()=>credentials.ensure(),store,request:requested,now,wait});
+ let candidateSha,proof;
+ const coordinateNative=async()=>{
+  const loaded=await readBridgeNativeCandidate({store,operationId});
+  if(!loaded)return;
+  const {candidate,native,readiness,adoption}=loaded;
+  assert.equal(candidate.releaseId,release.releaseId);assert.equal(candidate.sourceSha,env.TARGET_SHA);
+  assert.equal(candidate.rotationId,env.BRIDGE_ROTATION_ID);assert.equal(candidate.requestSha256,bridgeRequest.requestSha256);
+  if(candidateSha!==brokerDigest(candidate)){
+   await credentials.ensure();
+   proof=await readBridgeNativeAudit({run,store,native,readiness,adoption,now:now()});
+   candidateSha=brokerDigest(candidate);
+  }
+  const approval=await fetchProductionEnvironmentApprovalEvidence({token:env.GH_TOKEN,
+   repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository,environment:'production',sourceSha:env.TARGET_SHA,
+   workflowRef:env.GITHUB_WORKFLOW_REF,eventName:'workflow_dispatch',workflowRunId:env.GITHUB_RUN_ID,
+   workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,executionActor:env.GITHUB_ACTOR,requireActualApproval:true});
+  await requestBridgeNativeAttestation({store,cutoverRequest:bridgeRequest,candidate,nativeProof:proof,approval,
+   workflowRunId:env.GITHUB_RUN_ID,workflowRunAttempt:env.GITHUB_RUN_ATTEMPT,now:now()});
+ };
+ const verified=await waitForTerminalCutover({verify,coordinateNative,ensureCredentials:()=>credentials.ensure(),store,request:bridgeRequest,now,wait});
  const {completion,readiness,readinessBytes,stateBytes}=verified;
  assert.equal(completion.operationId,operationId);
  const stateJson=stateBytes.toString('utf8'),readinessJson=readinessBytes.toString('utf8');
@@ -126,44 +165,128 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   rotation_state_json:stateJson,rotation_state_sha256:completion.rotationStateSha256,
   rotation_task_definition_arn:completion.taskDefinitionArn,rotation_image_digest:completion.imageDigest,
   rotation_deployment_sha:completion.deploymentSha};
- const dispatchOnce=async(mode,inputs)=>{
+ const dispatchOnce=async(mode,inputs,attempt=0)=>{
   await credentials.ensure();
   await requireMain();
-  const prefix=`BRIDGE:GATE:${mode}`,prior=await store.readOperation(operationId,`${prefix}:RUN`);
+  const prefix=`BRIDGE:GATE:${mode}${attempt?`:RETRY:${attempt}`:''}`,
+   prior=await store.readOperation(operationId,`${prefix}:RUN`);
   if(prior){assert.deepEqual(prior.inputs,inputs,'Child Gate inputs changed during recovery');return prior.runId;}
   const child=await dispatchGate({repository,token:env.GH_TOKEN,targetSha:env.TARGET_SHA,targetRef:'main',inputs,
-   dispatchJournal:{read:()=>store.readOperation(operationId,`${prefix}:DISPATCH`),write:value=>store.writeOperation(operationId,`${prefix}:DISPATCH`,value)}});
+   dispatchJournal:{read:()=>store.readOperation(operationId,`${prefix}:DISPATCH`),write:async value=>{
+    assert.equal(await store.writeOperation(operationId,`${prefix}:DISPATCH`,value),true,'Concurrent Gate dispatch owns this attempt');
+   }}});
   const record={inputs,runId:String(child.id),headSha:child.head_sha};
   await store.writeOperation(operationId,`${prefix}:RUN`,record);
   assert.deepEqual(await store.readOperation(operationId,`${prefix}:RUN`),record);
   return record.runId;
  };
- const waitChild=async(id,workflow,{allowFailure=false,maxPolls=720}={})=>{
+ const waitChild=async(id,workflow,{allowFailure=false,maxPolls=720,minAttempt=1}={})=>{
   for(let i=0;i<maxPolls;i++){
    const child=await fetchJson(`actions/runs/${id}`);
    assert.equal(String(child.id),String(id));assert.equal(child.head_sha,env.TARGET_SHA);
    assert.equal(child.path,`.github/workflows/${workflow}`);assert.equal(child.event,'workflow_dispatch');
    assert.equal(child.repository?.full_name,repository);assert.equal(child.head_repository?.full_name,repository);
-   if(child.status==='completed'){
+   if(child.status==='completed'&&child.run_attempt>=minAttempt){
     if(!allowFailure)assert.equal(child.conclusion,'success',`${workflow} did not complete successfully`);
-    else assert.ok(['success','failure'].includes(child.conclusion));
+    else assert.ok(['success','failure','cancelled','timed_out'].includes(child.conclusion));
     return child;
    }
    await wait(15000);
   }
   throw new Error(`${workflow} did not reach a terminal authenticated status`);
  };
+ const runGate=async(mode,inputs,{expectedBackendArn,expectedFrontendArn,expectedOverlapRunId,targetBackendArn,targetImageDigest}={})=>{
+  let latest=0;
+  for(let attempt=1;attempt<3;attempt++){
+   if(await store.readOperation(operationId,`BRIDGE:GATE:${mode}:RETRY:${attempt}:RUN`))latest=attempt;
+   else break;
+  }
+  for(let attempt=latest;attempt<3;attempt++){
+   const id=await dispatchOnce(mode,inputs,attempt);
+   let rerunAttempt=1;
+   if(mode==='NORMAL')for(let prior=1;prior<4;prior++){
+    const marker=await store.readOperation(operationId,`BRIDGE:GATE:NORMAL:RERUN:${prior}:DISPATCH`);
+    if(!marker)break;
+    assert.equal(marker.runId,id);assert.equal(marker.runAttempt,prior);rerunAttempt=prior+1;
+   }
+   let child=await waitChild(id,'release-gate.yml',{allowFailure:true,minAttempt:rerunAttempt});
+   for(let recovery=0;recovery<3;recovery++){
+   if(child.conclusion==='success')return {runId:id,child};
+   await credentials.ensure();
+   const jobs=await fetchJson(`actions/runs/${id}/attempts/${child.run_attempt}/jobs?per_page=100`);
+   const matches=(jobs.jobs||[]).filter(job=>job.name==='Deploy production ECS'&&String(job.run_id)===String(id));
+   if(matches.length!==1)return {runId:id,child};
+   assert.equal(matches[0].head_sha,env.TARGET_SHA);
+   assert.equal(matches[0].run_attempt,child.run_attempt);
+   const live=name=>json(run,['ecs','describe-services','--cluster','mscqr-prod-euw2-main','--services',name]).services?.[0];
+   const disposition=await classifyPreMutationGateRetry({mode,job:matches[0],run,sourceSha:env.TARGET_SHA,
+    backendService:live('mscqr-backend-servi-euw2'),frontendService:live('mscqr-frontend-servi-euw2'),
+    expectedBackendArn,expectedFrontendArn});
+   if(mode==='OVERLAP'){
+    if(disposition==='INCOMPLETE')break;
+    const taskArns=json(run,['ecs','list-tasks','--cluster','mscqr-prod-euw2-main',
+     '--service-name','mscqr-backend-servi-euw2','--desired-status','RUNNING']).taskArns||[];
+    const described=taskArns.length===2?json(run,['ecs','describe-tasks','--cluster','mscqr-prod-euw2-main',
+     '--tasks',...taskArns]):{tasks:[]};
+    const overlapRecovery=classifyPostMutationOverlapGateRecovery({
+     backendService:live('mscqr-backend-servi-euw2'),frontendService:live('mscqr-frontend-servi-euw2'),
+     expectedFrontendArn,predecessorArn:expectedBackendArn,targetArn:targetBackendArn,
+     imageDigest:targetImageDigest,componentState:createProductionComponentDeploymentStateClient({run}).read(),
+     runningTasks:described.failures?.length?[]:described.tasks,sourceSha:env.TARGET_SHA});
+    if(overlapRecovery==='INCOMPLETE')break;
+    return {runId:id,child};
+   }
+   if(mode!=='NORMAL')return {runId:id,child};
+   const backendOperationId=gateEcsOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
+    releaseTrainRunId:boundParentRunId,authorizationSha256:auth.authorizationSha256,kind:'BACKEND'});
+   const webAuthorization=env.WEB_IMAGE_AUTHORIZATION_JSON?JSON.parse(env.WEB_IMAGE_AUTHORIZATION_JSON):null;
+   const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true;
+   const frontendOperationId=webRequired?gateEcsOperationId({sourceSha:env.TARGET_SHA,
+    rotationId:env.BRIDGE_ROTATION_ID,releaseTrainRunId:boundParentRunId,
+    authorizationSha256:webAuthorization?.authorizationSha256,kind:'FRONTEND'}):null;
+   const recoveryInput={store,backendOperationId,
+    frontendOperationId,run,childRunId:id,expectedOverlapRunId,sourceSha:env.TARGET_SHA,
+    authorizationSha256:auth.authorizationSha256,webAuthorizationSha256:webAuthorization?.authorizationSha256,
+    backendService:live('mscqr-backend-servi-euw2'),frontendService:live('mscqr-frontend-servi-euw2'),
+    expectedFrontendArn,componentState:createProductionComponentDeploymentStateClient({run}).read(),webRequired};
+   const backendDispatched=await store.readOperation(backendOperationId,'BACKEND:UPDATE:DISPATCH');
+   const recoveryDisposition=backendDispatched
+    ?await classifyPostMutationNormalGateRecovery(recoveryInput)
+    :await classifyPreBackendNormalGateRecovery({...recoveryInput,expectedBackendArn});
+   if(recoveryDisposition!=='RESUME_SAME_RUN')return {runId:id,child};
+   const rerunPhase=`BRIDGE:GATE:NORMAL:RERUN:${child.run_attempt}:DISPATCH`;
+   const rerunMarker={runId:id,runAttempt:child.run_attempt,sourceSha:env.TARGET_SHA,
+    releaseTrainRunId:boundParentRunId};
+   const priorRerun=await store.readOperation(operationId,rerunPhase);
+   if(priorRerun)assert.deepEqual(priorRerun,rerunMarker);
+   else{
+    assert.equal(await store.claimOperation(operationId,rerunPhase,rerunMarker),true,
+     'Another Release Train invocation owns this child rerun');
+    await requireMain();
+    const response=await fetchImpl(`https://api.github.com/repos/${repository}/actions/runs/${id}/rerun`,{
+     method:'POST',headers:{Accept:'application/vnd.github+json',Authorization:`Bearer ${env.GH_TOKEN}`,
+      'X-GitHub-Api-Version':'2022-11-28'}});
+    if(!response.ok)throw new Error(`OUTCOME_UNKNOWN: GitHub rerun request for ${id} returned ${response.status}`);
+   }
+   child=await waitChild(id,'release-gate.yml',{allowFailure:true,minAttempt:child.run_attempt+1});
+   }
+  }
+  throw new Error(`${mode} Gate exhausted bounded authenticated pre-mutation retries`);
+ };
  const overlapInputs={...base,release_mode:'rotation-overlap',release_lifecycle:'strict',
   rotation_expected_current_task_definition_arn:completion.expectedCurrentTaskDefinitionArn,
   rotation_readiness_evidence_json:readinessJson,rotation_readiness_evidence_sha256:completion.readinessSha256,
   rotation_fixture_sha256:completion.rotationFixtureSha256};
- const overlapRunId=await dispatchOnce('OVERLAP',overlapInputs);
- const overlapChild=await waitChild(overlapRunId,'release-gate.yml',{allowFailure:true});
+ const stateClient=createProductionComponentDeploymentStateClient({run});
+ const overlapBefore=stateClient.read();
+ const {runId:overlapRunId,child:overlapChild}=await runGate('OVERLAP',overlapInputs,
+  {expectedBackendArn:completion.expectedCurrentTaskDefinitionArn,
+   expectedFrontendArn:overlapBefore.components.frontend.taskDefinitionArn,
+   targetBackendArn:completion.taskDefinitionArn,targetImageDigest:completion.imageDigest});
  await credentials.ensure();
  const resolved=resolveProductionOverlapDeploymentReceipt({workflowRunId:overlapRunId,workflowRunAttempt:String(overlapChild.run_attempt),sourceSha:env.TARGET_SHA,run:(command,args)=>execFileSync(command,args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],maxBuffer:8*1024*1024})});
  assert.equal(resolved.receipt.rotationStateSha256,completion.rotationStateSha256);
  assert.equal(resolved.receipt.readinessSha256,completion.readinessSha256);
- const stateClient=createProductionComponentDeploymentStateClient({run});
  const afterOverlap=stateClient.read();
  const alreadyNormal=await store.readOperation(operationId,'BRIDGE:GATE:NORMAL:RUN');
  if(!alreadyNormal){
@@ -184,7 +307,9 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   if(record)assert.deepEqual(record.inputs,inputs);
   else{
    const child=await dispatchSource({repository,token:env.GH_TOKEN,workflow:file,ref:'main',targetSha:env.TARGET_SHA,inputs,
-    dispatchJournal:{read:()=>store.readOperation(operationId,`${name}:DISPATCH`),write:value=>store.writeOperation(operationId,`${name}:DISPATCH`,value)}});
+    dispatchJournal:{read:()=>store.readOperation(operationId,`${name}:DISPATCH`),write:async value=>{
+     assert.equal(await store.writeOperation(operationId,`${name}:DISPATCH`,value),true,'Concurrent gate dispatch owns this attempt');
+    }}});
    record={inputs,runId:String(child.id)};await store.writeOperation(operationId,`${name}:RUN`,record);
   }
   await waitChild(record.runId,file);gateRunIds[file]=record.runId;
@@ -197,9 +322,10 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   required_gate_run_ids_json:JSON.stringify(gateRunIds),normal_image_authorization_json:transport.json,
   normal_image_authorization_sha256:transport.sha256,
   ...(env.WEB_IMAGE_AUTHORIZATION_JSON?{web_image_authorization_json:env.WEB_IMAGE_AUTHORIZATION_JSON}:{})};
- const normalRunId=await dispatchOnce('NORMAL',normalInputs);
+ const {runId:normalRunId,child:normalChild}=await runGate('NORMAL',normalInputs,
+  {expectedBackendArn:completion.taskDefinitionArn,expectedFrontendArn:afterOverlap.components.frontend.taskDefinitionArn,
+   expectedOverlapRunId:overlapRunId});
  // A failed workflow can still have a completed deployment job; native receipts decide reuse.
- const normalChild=await waitChild(normalRunId,'release-gate.yml',{allowFailure:true});
  await credentials.ensure();
  const jobs=await fetchJson(`actions/runs/${normalRunId}/attempts/${normalChild.run_attempt}/jobs?per_page=100`);
  const job=(jobs.jobs||[]).filter(item=>item.name==='Deploy production ECS'&&String(item.run_id)===String(normalRunId));
@@ -213,14 +339,49 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
   try{gh(['run','download',String(normalRunId),'--repo',repository,'--name',name,'--dir',directory]);return JSON.parse(fs.readFileSync(path.join(directory,file),'utf8'));}
   finally{fs.rmSync(directory,{recursive:true,force:true});}
  };
- const rlsReceipt=await artifact('production-rls-release-receipt','production-rls-release-receipt.json');
- const backendActivation=await artifact('production-normal-backend-activation-evidence','backend-deployment.json');
+ const rlsReceipt=await artifact(`production-rls-release-receipt-attempt-${normalChild.run_attempt}`,'production-rls-release-receipt.json');
+ const backendActivation=await artifact(`production-normal-backend-activation-evidence-attempt-${normalChild.run_attempt}`,'backend-deployment.json');
  const liveService=name=>json(run,['ecs','describe-services','--cluster','mscqr-prod-euw2-main','--services',name]).services?.[0];
  const componentState=stateClient.read();
  const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true;
+ const frontendActivation=webRequired?await artifact(`production-frontend-activation-evidence-attempt-${normalChild.run_attempt}`,'frontend-activation.json'):undefined;
  const deployed=assertNormalGateCompletion({run:normalChild,job:job[0],approvals,releaseTrainRunId:boundParentRunId,
-  sourceSha:env.TARGET_SHA,authorization:auth,rlsReceipt,backendActivation,componentState,
+  sourceSha:env.TARGET_SHA,authorization:auth,rlsReceipt,backendActivation,frontendActivation,componentState,
   backendService:liveService('mscqr-backend-servi-euw2'),frontendService:liveService('mscqr-frontend-servi-euw2'),webRequired});
+ const backendOperationId=gateEcsOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
+  releaseTrainRunId:boundParentRunId,authorizationSha256:auth.authorizationSha256,kind:'BACKEND'});
+ const backendJournal=await store.readOperation(backendOperationId,'BACKEND:UPDATE:COMPLETED');
+ assert.equal(backendJournal?.taskDefinitionArn,backendActivation.targetArn,'Backend native journal is incomplete');
+ assert.equal(backendJournal.intent?.authorizationSha256,auth.authorizationSha256);
+ const backendLive=liveService('mscqr-backend-servi-euw2');
+ assert.equal(backendJournal.nativeResult?.serviceArn,backendLive?.serviceArn);
+ assert.equal(backendJournal.nativeResult?.deploymentId,backendLive?.deployments?.[0]?.id);
+ if(webRequired){
+  const webAuthorization=JSON.parse(env.WEB_IMAGE_AUTHORIZATION_JSON);
+  const frontendOperationId=gateEcsOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
+   releaseTrainRunId:boundParentRunId,authorizationSha256:webAuthorization.authorizationSha256,kind:'FRONTEND'});
+  const registration=await store.readOperation(frontendOperationId,'FRONTEND:REGISTER:COMPLETED');
+  const frontendUpdate=await store.readOperation(frontendOperationId,'FRONTEND:UPDATE:COMPLETED');
+  const activation=await store.readOperation(frontendOperationId,'FRONTEND:ACTIVATION:COMPLETED');
+  assert.equal(registration?.taskDefinitionArn,frontendActivation.candidateTaskDefinitionArn,'Frontend native registration journal is incomplete');
+  const frontendLive=liveService('mscqr-frontend-servi-euw2');
+  assert.equal(frontendUpdate?.nativeResult?.serviceArn,frontendLive?.serviceArn);
+  assert.equal(frontendUpdate?.nativeResult?.deploymentId,frontendLive?.deployments?.[0]?.id);
+  assert.equal(frontendUpdate?.taskDefinitionArn,frontendActivation.candidateTaskDefinitionArn);
+  assert.equal(activation?.candidateTaskDefinitionArn,frontendActivation.candidateTaskDefinitionArn,'Frontend activation journal is incomplete');
+  assert.equal(activation?.imageRef,frontendActivation.imageRef);
+ }
+ const componentOperationId=componentCommitOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
+  releaseTrainRunId:boundParentRunId,authorizationSha256:auth.authorizationSha256});
+ const componentJournal=await store.readOperation(componentOperationId,'COMPONENT:STATE:COMPLETED');
+ assert.equal(componentJournal?.stateSha256,stateHash(componentState),'Component-state native journal is incomplete');
+ const smokeId=smokeOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
+  releaseTrainRunId:boundParentRunId});
+ const smokeReceipt=await store.readOperation(smokeId,`SMOKE:COMPLETED:${normalChild.run_attempt}`);
+ assert.equal(smokeReceipt?.intent?.childRunId,String(normalRunId),'Exact-run production smoke receipt is missing');
+ assert.equal(smokeReceipt.intent.sourceSha,env.TARGET_SHA);
+ assert.equal(smokeReceipt.services?.backend?.taskDefinition,backendActivation.targetArn);
+ assert.equal(smokeReceipt.services?.frontend?.taskDefinition,componentState.components.frontend.taskDefinitionArn);
  const receipt={name:'RELEASE_COMPLETE',releaseId:release.releaseId,sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
   requestSha256:verified.request.requestSha256,terminalEnvironmentApprovalSha256:verified.request.environmentApprovalSha256,
   terminalCompletionSha256:brokerDigest(completion),overlapGateReviewer:resolved.reviewer,

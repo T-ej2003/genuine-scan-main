@@ -1,0 +1,71 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadRegionalNativeMutationEvents",
+      "Effect": "Allow",
+      "Action": "cloudtrail:LookupEvents",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "ReadExactStageBTerraformState",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:GetObjectVersion"],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/terraform.tfstate"
+    },
+    {
+      "Sid": "ReadProductionRotationSecretVersionMetadata",
+      "Effect": "Allow",
+      "Action": ["secretsmanager:DescribeSecret", "secretsmanager:ListSecretVersionIds"],
+      "Resource": [
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/rotation/*",
+        "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/artifact-signing/*"
+      ],
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "ReadExactStageBExecutionPolicy",
+      "Effect": "Allow",
+      "Action": "iam:GetRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution"
+    },
+    {
+      "Sid": "ReadExactInventoryCompletion",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay",
+      "Condition": {
+        "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["inventory-completion#production-predeployment-rotation-inventory#*"] },
+        "StringEquals": { "aws:RequestedRegion": "eu-west-2" }
+      }
+    },
+    {
+      "Sid": "ReadFullRlsOneUseBrokerClaims",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-rls-stage-b-replay",
+      "Condition": {
+        "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["*#full-rls-*"] },
+        "StringEquals": { "aws:RequestedRegion": "eu-west-2" }
+      }
+    },
+    {
+      "Sid": "ReadStageBCandidateDefinitions",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "ReadStageBInventoryTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
+      "Condition": {
+        "StringEquals": { "aws:RequestedRegion": "eu-west-2" },
+        "ArnEquals": { "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main" }
+      }
+    }
+  ]
+}

@@ -32,3 +32,9 @@ resource "aws_iam_role_policy" "frontend_activation" {
   role   = data.aws_iam_role.release_deployer.id
   policy = file("${path.module}/frontend-activation-policy.json")
 }
+
+resource "aws_iam_role_policy" "stage_b_native_audit" {
+  name   = "MSCQRProductionStageBNativeAudit"
+  role   = data.aws_iam_role.release_deployer.id
+  policy = file("${path.module}/stage-b-native-audit-policy.json")
+}

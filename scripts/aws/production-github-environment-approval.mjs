@@ -240,7 +240,9 @@ export async function fetchProductionEnvironmentApprovalEvidence(input, { fetchI
     if (!approvalsResponse.ok) throw new Error(`Unable to authenticate GitHub environment approval event (${approvalsResponse.status}).`);
     const approvals = await approvalsResponse.json();
     const matches = (Array.isArray(approvals) ? approvals : []).flatMap((approval) => (approval?.state === "approved" ? (approval.environments || []).filter((item) => item?.id === environmentConfig.id && item?.name === environment).map(() => ({ state: "approved", environmentId: environmentConfig.id, environmentName: environment, userId: approval.user?.id, userLogin: approval.user?.login })) : []));
-    if (matches.length !== 1) throw new Error("Exactly one authenticated GitHub environment approval event is required.");
+    // GitHub retains prior approvals when the same protected run is rerun.
+    if (!matches.length || new Set(matches.map(({ userId, userLogin }) => `${userId}:${userLogin?.toLowerCase()}`)).size !== 1)
+      throw new Error("Authenticated GitHub environment approval event requires one unambiguous reviewer.");
     actualApproval = matches[0];
   }
   return createProductionEnvironmentApprovalEvidence({ ...input, environmentConfig, actualApproval, token: undefined });

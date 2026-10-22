@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -17,6 +18,9 @@ import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-
 import { BROKER_POLICY_OWNERSHIP_KEY } from "./stage-b-broker-policy-ownership.mjs";
 import { readStageBProtectedMainCheckout } from "./stage-b-deployment-identity.mjs";
 import { assertAuthenticatedStageBOutputOnlySuccessor, resolveStageBStateReconciliationEvidence } from "./production-green-stage-b-state-reconciliation-evidence.mjs";
+import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
+import { ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
+import { gateEcsOperationId, journalEcsServiceUpdate } from "./production-release-gate-ecs-journal.mjs";
 
 export { NORMAL_ACTIVATION, assertNormalActivationPolicy, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy } from "./production-normal-backend-activation-policy.mjs";
 
@@ -443,8 +447,71 @@ export function classifyNormalActivationLiveOutcome({ run, binding }) {
     if (!expectedDigest) return Object.freeze({ status: "UNEXPECTED_SERVICE_TARGET", currentArn });
     assertService(service, currentArn);
     assertRunningServiceTarget(run, { taskDefinitionArn: currentArn, digest: expectedDigest, desiredCount: binding.desiredCount });
-    return Object.freeze({ status: currentArn === binding.sourceArn ? "SOURCE_STABLE" : "TARGET_STABLE", currentArn, runningDigest: expectedDigest });
+    const targetActive = currentArn === binding.targetArn &&
+      (binding.sourceArn !== binding.targetArn || backendActivationServiceSettings(service));
+    return Object.freeze({ status: targetActive ? "TARGET_STABLE" : "SOURCE_STABLE", currentArn, runningDigest: expectedDigest });
   } catch (error) { return Object.freeze({ status: "LIVE_STATE_UNAUTHENTICATED", error: error.message }); }
+}
+const backendActivationServiceSettings = service => service?.enableExecuteCommand === true && service.propagateTags === "TASK_DEFINITION";
+const readBackendService = run => parseJson(run, ["ecs", "describe-services", "--cluster", NORMAL_ACTIVATION.cluster, "--services", NORMAL_ACTIVATION.service]).services?.[0];
+
+function writeNormalBackendMetadata({ metadataFile, sourceSha, imageAuthorization, binding, runIdentity }) {
+  fs.writeFileSync(metadataFile, `${JSON.stringify({ schemaVersion: 2, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, imageReleaseSha: binding.imageReleaseSha, stageBAuthorizationSha256: imageAuthorization.authorizationSha256, workflowRunId: runIdentity.workflowRunId, releaseTrainRunId: runIdentity.releaseTrainRunId, sourceArn: binding.sourceArn, targetArn: binding.targetArn, normalActivationSourceArn: binding.sourceArn, previousTaskDefinitionArn: binding.sourceArn, targetTaskDefinitionArn: binding.targetArn, newTaskDefinitionArn: binding.targetArn, observedTaskDefinitionArn: binding.targetArn, imageRef: binding.image, imageDigest: binding.digest, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: binding.desiredCount, runningCount: binding.desiredCount, pendingCount: 0 }, null, 2)}\n`, { mode: 0o600 });
+}
+
+export async function prepareJournaledNormalBackendActivation({ store, operationId, run, sourceSha, imageAuthorization, runIdentity, expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId }) {
+  const identity = { sourceSha, authorizationSha256: imageAuthorization.authorizationSha256, runIdentity: assertRunIdentity(runIdentity), expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId };
+  const saved = await store.readOperation(operationId, "BACKEND:BINDING");
+  if (!saved) {
+    const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId, runIdentity });
+    const record = { identity, binding };
+    await store.writeOperation(operationId, "BACKEND:BINDING", record);
+    assert.deepEqual(await store.readOperation(operationId, "BACKEND:BINDING"), record, "Backend durable binding readback differs");
+    return binding;
+  }
+  assert.deepEqual(saved.identity, identity, "Backend recovery identity differs from the original authorization");
+  const dispatch = await store.readOperation(operationId, "BACKEND:UPDATE:DISPATCH");
+  const live = classifyNormalActivationLiveOutcome({ run, binding: saved.binding });
+  if (live.status === "TARGET_STABLE" && dispatch) {
+    assert.ok(backendActivationServiceSettings(readBackendService(run)), "OUTCOME_UNKNOWN: backend service settings did not reach the authorized target");
+    return saved.binding;
+  }
+  if (live.status === "TARGET_STABLE" && saved.binding.sourceArn !== saved.binding.targetArn)
+    throw new Error("CONFLICTED: backend target became active without this operation dispatch");
+  if ((live.status !== "SOURCE_STABLE" && live.status !== "TARGET_STABLE") || dispatch)
+    throw new Error(`OUTCOME_UNKNOWN: backend binding recovery cannot reuse ${live.status}`);
+  const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId, runIdentity });
+  assertNormalActivationBinding(saved.binding, fresh);
+  return saved.binding;
+}
+
+export async function executeJournaledNormalBackendActivation({ store, operationId, run, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, runIdentity, credentialSource, runScript, env }) {
+  assertReleaseReceipt(releaseReceipt, { sourceSha, imageAuthorization });
+  const saved = await store.readOperation(operationId, "BACKEND:BINDING");
+  assert.ok(saved, "Missing durable backend preflight binding");
+  assert.deepEqual(saved.binding, binding, "Backend execution binding differs from durable preflight");
+  assert.equal(saved.identity.sourceSha, sourceSha); assert.equal(saved.identity.authorizationSha256, imageAuthorization.authorizationSha256);
+  assert.deepEqual(saved.identity.runIdentity, assertRunIdentity(runIdentity));
+  const intent = { operationId, sourceSha, authorizationSha256: imageAuthorization.authorizationSha256,
+    releaseReceiptSha256: sha256(canonical(releaseReceipt)), bindingSha256: sha256(canonical(binding)),
+    sourceTaskDefinitionArn: binding.sourceArn, targetTaskDefinitionArn: binding.targetArn };
+  const result = await journalEcsServiceUpdate({ store, operationId, phase: "BACKEND:UPDATE", intent,
+    read: async () => readBackendService(run),
+    isTarget: service => service?.taskDefinition === binding.targetArn && backendActivationServiceSettings(service),
+    isSource: service => service?.taskDefinition === binding.sourceArn,
+    allowPriorTarget: binding.sourceArn === binding.targetArn,
+    update: async () => executeNormalBackendActivation({ run, runScript, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, runIdentity, credentialSource, env }),
+    verify: async (_service, stage) => {
+      if (stage === "source") {
+        const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId, runIdentity });
+        assertNormalActivationBinding(binding, fresh);
+      } else {
+        assert.equal(classifyNormalActivationLiveOutcome({ run, binding }).status, "TARGET_STABLE", "Backend target did not stabilize with exact image digest");
+        assert.ok(backendActivationServiceSettings(readBackendService(run)), "Backend service settings did not reach the exact authorized target");
+      }
+    } });
+  if (result.reused) writeNormalBackendMetadata({ metadataFile, sourceSha, imageAuthorization, binding, runIdentity });
+  return result;
 }
 
 export function executeNormalBackendActivation({ run, runScript = execFileSync, sourceSha, imageAuthorization, releaseReceipt, binding, metadataFile, deployScript = path.resolve("scripts/aws/deploy-ecs-service.sh"), runIdentity, credentialSource, env = process.env } = {}) {
@@ -483,7 +550,8 @@ export function executeNormalBackendActivation({ run, runScript = execFileSync, 
       NORMAL_ACTIVATION_OUTCOME_FILE: outcomeFile,
     } });
     const metadata = JSON.parse(fs.readFileSync(metadataFile, "utf8"));
-    fs.writeFileSync(metadataFile, `${JSON.stringify({ schemaVersion: 2, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, imageReleaseSha: binding.imageReleaseSha, stageBAuthorizationSha256: imageAuthorization.authorizationSha256, workflowRunId: runIdentity.workflowRunId, releaseTrainRunId: runIdentity.releaseTrainRunId, sourceArn: binding.sourceArn, targetArn: binding.targetArn, normalActivationSourceArn: binding.sourceArn, previousTaskDefinitionArn: binding.sourceArn, targetTaskDefinitionArn: binding.targetArn, newTaskDefinitionArn: metadata.newTaskDefinitionArn, observedTaskDefinitionArn: metadata.newTaskDefinitionArn, imageRef: binding.image, imageDigest: binding.digest, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: binding.desiredCount, runningCount: binding.desiredCount, pendingCount: 0 }, null, 2)}\n`, { mode: 0o600 });
+    assert.equal(metadata.newTaskDefinitionArn, binding.targetArn, "Backend script returned another task definition");
+    writeNormalBackendMetadata({ metadataFile, sourceSha, imageAuthorization, binding, runIdentity });
     return Object.freeze({ status: binding.sourceArn === binding.targetArn ? "ALREADY_APPLIED_EXACT_TARGET" : "APPLIED_EXACT_TARGET", sourceArn: binding.sourceArn, targetArn: binding.targetArn, postSuccessAuthorityContractionRequired: true, exactNextAction: `RUN_GOVERNED_ADMIN_CONTRACTION_FOR_${binding.targetArn}` });
   } catch (error) {
     const outcome = classifyNormalActivationLiveOutcome({ run, binding });
@@ -552,7 +620,17 @@ export function runCli(argv = process.argv.slice(2)) {
   if (required(values, "--credential-source") !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Normal backend activation requires the GitHub OIDC release-deployer credential source.");
   const run = createProductionCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
   const runIdentity = { workflowRunId: required(values, "--workflow-run-id"), releaseTrainRunId: required(values, "--release-train-run-id") };
+  let journal, operationId;
+  if (values.has("--rotation-id")) {
+    operationId = gateEcsOperationId({ sourceSha, rotationId: required(values, "--rotation-id"), releaseTrainRunId: runIdentity.releaseTrainRunId, authorizationSha256: imageAuthorization.authorizationSha256, kind: "BACKEND" });
+    const directory = path.join(os.tmpdir(), `mscqr-backend-journal-${process.pid}`);
+    ensureStageBPrivateDirectory({ directory, repositoryRoot: process.cwd(), create: true });
+    journal = createReleaseCoordinatorStore({ run, directory, repositoryRoot: process.cwd() });
+  }
   if (mode === "prepare") {
+    if (journal) return prepareJournaledNormalBackendActivation({ store: journal, operationId, run, sourceSha, imageAuthorization, runIdentity,
+      expectedCurrentTaskDefinitionArn: values.get("--expected-current-task-definition"), expectedCurrentDeploymentId: values.get("--expected-current-deployment-id") })
+      .then(binding => { writePrivateJson(required(values, "--binding-out"), binding); process.stdout.write(`${JSON.stringify({ status: "AUTHORIZED", targetArn: binding.targetArn, stateSerial: binding.stateSerial })}\n`); return binding; });
     const binding = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: values.get("--expected-current-task-definition"), expectedCurrentDeploymentId: values.get("--expected-current-deployment-id"), runIdentity });
     writePrivateJson(required(values, "--binding-out"), binding);
     process.stdout.write(`${JSON.stringify({ status: "AUTHORIZED", targetArn: binding.targetArn, stateSerial: binding.stateSerial })}\n`);
@@ -560,6 +638,9 @@ export function runCli(argv = process.argv.slice(2)) {
   }
   if (mode === "verify") {
     const binding = readBoundStageBPrivateJson({ filePath: required(values, "--binding"), expectedSha256: required(values, "--binding-sha256"), label: "Normal backend activation binding" });
+    if (journal) return prepareJournaledNormalBackendActivation({ store: journal, operationId, run, sourceSha, imageAuthorization, runIdentity,
+      expectedCurrentTaskDefinitionArn: binding.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId })
+      .then(recovered => { assertNormalActivationBinding(binding, recovered); process.stdout.write(`${JSON.stringify({ status: "VERIFIED", sourceArn: binding.sourceArn, targetArn: binding.targetArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId })}\n`); return binding; });
     const fresh = collectNormalActivationLiveEvidence({ run, sourceSha, imageAuthorization, expectedCurrentTaskDefinitionArn: binding.expectedCurrentTaskDefinitionArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId, runIdentity });
     assertNormalActivationBinding(binding, fresh);
     process.stdout.write(`${JSON.stringify({ status: "VERIFIED", sourceArn: binding.sourceArn, targetArn: binding.targetArn, expectedCurrentDeploymentId: binding.expectedCurrentDeploymentId })}\n`);
@@ -568,6 +649,8 @@ export function runCli(argv = process.argv.slice(2)) {
   if (mode === "execute") {
     const binding = readBoundStageBPrivateJson({ filePath: required(values, "--binding"), expectedSha256: required(values, "--binding-sha256"), label: "Normal backend activation binding" });
     const receipt = readBoundStageBPrivateJson({ filePath: required(values, "--release-receipt"), expectedSha256: required(values, "--release-receipt-sha256"), label: "Production RLS release receipt" });
+    if (journal) return executeJournaledNormalBackendActivation({ store: journal, operationId, run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out"), runIdentity, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER })
+      .then(result => { process.stdout.write(`${JSON.stringify(result)}\n`); return result; });
     const result = executeNormalBackendActivation({ run, sourceSha, imageAuthorization, releaseReceipt: receipt, binding, metadataFile: required(values, "--metadata-out"), runIdentity, credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER });
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return result;
@@ -576,7 +659,7 @@ export function runCli(argv = process.argv.slice(2)) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {
-  try { runCli(); }
+  try { Promise.resolve(runCli()).catch(error => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }); }
   catch (error) {
     if (!(error instanceof NormalActivationPolicyConvergenceError) && !(error instanceof NormalActivationExecutionError)) throw error;
     process.stderr.write(`${JSON.stringify(error.report)}\n`);

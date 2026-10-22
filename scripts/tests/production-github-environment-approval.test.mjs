@@ -77,6 +77,17 @@ test("actual environment approval identity comes from GitHub approval records", 
   assert.throws(() => assertProductionEnvironmentActualReviewer({ ...actual, actualApproval: { ...actual.actualApproval, userLogin: "configured-only" } }, { sourceSha, repository: context.repository, executionActor: "alice" }), /hash|actual/i);
 });
 
+test('protected run retry accepts repeated approval by the same independent reviewer only',async()=>{
+  const approval={state:'approved',user:{id:2,login:'actual-reviewer'},environments:[{id:14514600120,name:'production'}]};
+  const fetchImpl=reviews=>async url=>({ok:true,json:async()=>url.endsWith('/approvals')?reviews:config()});
+  const retry={...context,workflowRunAttempt:'2',token:'fixture-token',requireActualApproval:true};
+  const actual=await fetchProductionEnvironmentApprovalEvidence(retry,{fetchImpl:fetchImpl([approval,approval])});
+  assert.equal(actual.workflowRunAttempt,'2');
+  assert.equal(actual.actualApproval.userLogin,'actual-reviewer');
+  await assert.rejects(fetchProductionEnvironmentApprovalEvidence(retry,{fetchImpl:fetchImpl([
+    approval,{...approval,user:{id:3,login:'another-reviewer'}}])}),/unambiguous/);
+});
+
 test("tamper, wrong bindings, and stale environment evidence fail closed", () => {
   const valid = evidence();
   for (const [changedEvidence, changedContext, pattern] of [

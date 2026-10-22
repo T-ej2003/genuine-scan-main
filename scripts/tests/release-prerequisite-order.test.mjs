@@ -25,6 +25,7 @@ test('both deployment routes retain rotation gates while prerequisite-only stops
  assert.equal(train.on.workflow_dispatch.inputs.prerequisites_only.default,false);
  assert.equal(train.jobs.orchestrate.environment,'production');
  assert.equal(train.jobs.orchestrate.needs,'gates');
+ assert.equal(train.jobs.orchestrate.env.RELEASE_PREREQUISITES_ONLY,'${{ inputs.prerequisites_only || inputs.trusted_terminal_cutover }}');
  const steps=train.jobs.orchestrate.steps;
  assert.ok(steps.findIndex(step=>step.name==='Require authenticated prerequisite closure')<steps.findIndex(step=>step.name==='Trigger final Release Gate'));
  assert.equal(steps.find(step=>step.name==='Trigger final Release Gate').if,'${{ !inputs.prerequisites_only && !inputs.trusted_terminal_cutover }}');

@@ -15,6 +15,9 @@ import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } fr
 import { assertNormalBackendActivationEvidence, NORMAL_ACTIVATION } from "./production-normal-backend-activation.mjs";
 import { assertProductionOverlapDeploymentReceipt, resolveProductionOverlapDeploymentReceipt } from "./production-overlap-deployment-receipt.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
+import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
+import { ensureStageBPrivateDirectory } from "./stage-b-artifact-contract.mjs";
+import { gateEcsOperationId } from "./production-release-gate-ecs-journal.mjs";
 
 export function createWebActivationAwsRunner({ env = process.env, exec = execFileSync } = {}) {
   if (env.MSCQR_AWS_CREDENTIAL_SOURCE !== PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER) throw new Error("Web activation requires the GitHub OIDC release-deployer credential source.");
@@ -37,6 +40,7 @@ export function createAwsFrontendActivationAdapters({ execute, env = process.env
     },
     readService: async () => awsJson(["ecs", "describe-services", "--cluster", WEB_RELEASE.cluster, "--services", WEB_RELEASE.serviceName]).services?.[0],
     describeTaskDefinition: async (taskDefinition) => { const response = awsJson(["ecs", "describe-task-definition", "--task-definition", taskDefinition, "--include", "TAGS"]); return { ...response.taskDefinition, tags: response.tags || [] }; },
+    listTaskDefinitions: async (family) => awsJson(["ecs", "list-task-definitions", "--family-prefix", family, "--status", "ACTIVE"]).taskDefinitionArns || [],
     registerTaskDefinition: async (candidate) => {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-web-task-")); const file = path.join(directory, "task.json");
       try { fs.writeFileSync(file, JSON.stringify(candidate), { mode: 0o600, flag: "wx" }); return awsJson(["ecs", "register-task-definition", "--cli-input-json", `file://${file}`]); }
@@ -84,7 +88,7 @@ export function assertOverlapReleaseLineage(ancestor, descendant, cwd = path.res
   return true;
 }
 
-export async function activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence, authenticatedOverlap, verifyWeb, verifyStageBImageEvidence, verifyCoordinated = verifyCoordinatedWebRelease, createAdapters = createAwsFrontendActivationAdapters, now } = {}) {
+export async function activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence, authenticatedOverlap, verifyWeb, verifyStageBImageEvidence, verifyCoordinated = verifyCoordinatedWebRelease, createAdapters = createAwsFrontendActivationAdapters, now, journal, operationId } = {}) {
   const coordinated = await verifyCoordinated({ sourceSha, stageBAuthorization, webAuthorization, verifyWeb, verifyStageBImageEvidence });
   assertFrontendActivationAuthorized(coordinated);
   if (authenticatedOverlap) {
@@ -95,14 +99,15 @@ export async function activateAuthenticatedWebRelease({ sourceSha, stageBAuthori
   const adapters = createAdapters();
   if (typeof adapters.verifyBackendActivation !== "function") throw new Error("Frontend activation requires the canonical backend activation readback.");
   await adapters.verifyBackendActivation({ sourceSha, stageBAuthorization, backendActivationEvidence });
-  return runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization: verifyWeb, ...adapters, ...(now ? { now } : {}) });
+  return runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization: verifyWeb, ...adapters, journal, operationId, ...(now ? { now } : {}) });
 }
 
 function required(argv, name) { const index = argv.indexOf(name); const value = index < 0 ? undefined : argv[index + 1]; if (!value || value.startsWith("--") || argv.indexOf(name, index + 1) !== -1) throw new Error(`${name} is required exactly once.`); return value; }
 
 export async function runCli(argv = process.argv.slice(2), deps = {}) {
   const overlap = argv.includes("--overlap-run-id");
-  const allowed = new Set(overlap ? ["--source-sha", "--web-authorization", "--web-authorization-sha256", "--stage-b-authorization", "--stage-b-authorization-sha256", "--overlap-run-id", "--overlap-run-attempt", "--overlap-release-sha", "--overlap-rotation-id", "--tooling-sha"] : ["--source-sha", "--web-authorization", "--web-authorization-sha256", "--stage-b-authorization", "--stage-b-authorization-sha256", "--backend-activation-evidence", "--backend-activation-evidence-sha256"]);
+  const journaled = !overlap && argv.includes("--rotation-id");
+  const allowed = new Set(overlap ? ["--source-sha", "--web-authorization", "--web-authorization-sha256", "--stage-b-authorization", "--stage-b-authorization-sha256", "--overlap-run-id", "--overlap-run-attempt", "--overlap-release-sha", "--overlap-rotation-id", "--tooling-sha"] : ["--source-sha", "--web-authorization", "--web-authorization-sha256", "--stage-b-authorization", "--stage-b-authorization-sha256", "--backend-activation-evidence", "--backend-activation-evidence-sha256", ...(journaled ? ["--rotation-id", "--release-train-run-id"] : [])]);
   if (argv.length !== allowed.size * 2 || argv.some((arg, i) => i % 2 === 0 && !allowed.has(arg))) throw new Error("Web activation options are incomplete or unexpected.");
   const sourceSha = required(argv, "--source-sha"); const webBytes = fs.readFileSync(required(argv, "--web-authorization")); const webHash = required(argv, "--web-authorization-sha256"); const stageBBytes = fs.readFileSync(required(argv, "--stage-b-authorization")); const stageBHash = required(argv, "--stage-b-authorization-sha256");
   if (crypto.createHash("sha256").update(webBytes).digest("hex") !== webHash || crypto.createHash("sha256").update(stageBBytes).digest("hex") !== stageBHash) throw new Error("Release authorization bytes do not match their SHA-256.");
@@ -119,7 +124,16 @@ export async function runCli(argv = process.argv.slice(2), deps = {}) {
     backendActivationEvidence = JSON.parse(backendBytes);
   }
   const webAuthorization = JSON.parse(webBytes); const stageBAuthorization = JSON.parse(stageBBytes); const verifyWeb = deps.verifyWebAuthorization || createPinnedRootAttestationVerifier(); const releaseRun = deps.releaseRun || createReleaseGateImageAuthorizationRunner();
-  return activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence, authenticatedOverlap, verifyWeb, verifyStageBImageEvidence: deps.verifyStageBImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run: releaseRun })), verifyCoordinated: deps.verifyCoordinated || verifyCoordinatedWebRelease, createAdapters: deps.createAdapters || createAwsFrontendActivationAdapters, now: deps.now });
+  let journal, operationId;
+  if (journaled) {
+    operationId = gateEcsOperationId({ sourceSha, rotationId: required(argv, "--rotation-id"), releaseTrainRunId: required(argv, "--release-train-run-id"), authorizationSha256: webAuthorization.authorizationSha256, kind: "FRONTEND" });
+    journal = deps.journal || (() => {
+      const directory = path.join(os.tmpdir(), `mscqr-frontend-journal-${process.pid}`);
+      ensureStageBPrivateDirectory({ directory, repositoryRoot: process.cwd(), create: true });
+      return createReleaseCoordinatorStore({ run: createWebActivationAwsRunner(), directory, repositoryRoot: process.cwd() });
+    })();
+  }
+  return activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization, backendActivationEvidence, authenticatedOverlap, verifyWeb, verifyStageBImageEvidence: deps.verifyStageBImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run: releaseRun })), verifyCoordinated: deps.verifyCoordinated || verifyCoordinatedWebRelease, createAdapters: deps.createAdapters || createAwsFrontendActivationAdapters, now: deps.now, journal, operationId });
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) runCli().then((result) => process.stdout.write(`${JSON.stringify(result)}\n`)).catch((error) => { process.stderr.write(`${error.message}\n`); process.exitCode = 1; });

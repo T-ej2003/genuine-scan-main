@@ -7,6 +7,7 @@ const SHA256=/^[a-f0-9]{64}$/;
 const RUN_ID=/^[1-9][0-9]*$/;
 const ROTATION=/^rotation-[a-z0-9-]+$/;
 export const BRIDGE_OPERATION='PREPARE_OVERLAP_LEGACY';
+export const bridgeOperatorClaimPhase=request=>request.authorizationRound===0?'BRIDGE:OPERATOR:DISPATCH':`BRIDGE:OPERATOR:DISPATCH:ROUND:${request.authorizationRound}`;
 
 export function bridgeOperationId({releaseId,sourceSha,rotationId}) {
  assert.match(releaseId||'',SHA256);assert.match(sourceSha||'',SHA40);assert.match(rotationId||'',ROTATION);
@@ -37,7 +38,7 @@ export function assertBridgeRequest(value,{releaseId,sourceSha,ticketId,rotation
  return value;
 }
 
-export function bridgeOperatorExpiryAction({request,operator,now=Date.now()}={}) {
+export function bridgeOperatorExpiryAction({request,operator,operatorCommittedAt,now=Date.now()}={}) {
  assertBridgeRequest(request,{releaseId:request?.releaseId,sourceSha:request?.sourceSha,ticketId:request?.ticketId,
   rotationId:request?.rotationId,manifestSha256:request?.manifestSha256,allowExpired:true});
  if(operator){
@@ -47,6 +48,14 @@ export function bridgeOperatorExpiryAction({request,operator,now=Date.now()}={})
   const claimed=Date.parse(operator.claimedAt);
   assert.ok(Number.isSafeInteger(claimed)&&claimed>=Date.parse(request.issuedAt)&&claimed<Date.parse(request.expiresAt),
    'Operator claim was not acquired during its authorization');
+  const committed=Date.parse(operatorCommittedAt);
+  // S3 LastModified has second precision. The whole reported second must precede expiry.
+  assert.ok(Number.isSafeInteger(committed)&&committed>=claimed-1000,'Operator claim has no authenticated S3 commit');
+  if(committed+1000>Date.parse(request.expiresAt)){
+   // The V2 executor checks this native timestamp before returning EXECUTE.
+   if(operator.executionContract==='S3_COMMIT_BEFORE_NATIVE_V2')return 'REAUTHORIZE';
+   assert.fail('Operator claim has no authenticated pre-expiry S3 commit');
+  }
   return 'RECONCILE';
  }
  return now>=Date.parse(request.expiresAt)?'REAUTHORIZE':'WAIT';
@@ -83,7 +92,6 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
  const result=await store.getArtifact(closure.result);
  assert.equal(result.status,'PREREQUISITES_CONVERGED');assert.equal(result.releaseId,release.releaseId);
  const operationId=bridgeOperationId({releaseId:release.releaseId,sourceSha,rotationId});
- const operator=await store.readOperation(operationId,'BRIDGE:OPERATOR:DISPATCH');
  let authorizationRound=0;
  for(;authorizationRound<32;authorizationRound++){
   const owner=await store.readOperation(operationId,`BRIDGE:REQUEST:ROUND:${authorizationRound}`);
@@ -92,13 +100,15 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
   assert.ok(prior,'Owned bridge request is missing; reconcile before retry');
   assertBridgeRequest(prior,{releaseId:release.releaseId,sourceSha,ticketId,rotationId,manifestSha256,allowExpired:true});
   assert.equal(prior.requestSha256,owner.requestSha256);
+  const operatorPhase=bridgeOperatorClaimPhase(prior);
+  const operator=await store.readOperation(operationId,operatorPhase);
   if(await store.readOperation(operationId,'BRIDGE:CUTOVER:COMPLETED'))return prior;
   if(now<Date.parse(prior.expiresAt))return prior;
   if(operator?.requestSha256===prior.requestSha256){
-   bridgeOperatorExpiryAction({request:prior,operator,now});
-   return prior;
-  }
-  if(operator)continue;
+   const action=bridgeOperatorExpiryAction({request:prior,operator,operatorCommittedAt:await store.readOperationCommittedAt(operationId,operatorPhase),now});
+   if(action==='RECONCILE')return prior;
+   assert.equal(action,'REAUTHORIZE');
+  }else assert.ok(!operator,'Operator claim belongs to another authorization');
   for(const phase of ['ROOT_DROP','INVENTORY_ADOPTION','ROTATION_SUCCESSOR']){
    const prefix=`BRIDGE:SIGN:${phase}`,dispatch=await store.readOperation(operationId,`${prefix}:DISPATCH`);
    if(!dispatch||dispatch.requestSha256!==prior.requestSha256)continue;
@@ -124,7 +134,6 @@ export async function requestTrustedTerminalCutover({store,sourceSha,ticketId,ro
    assert.ok(Number.isSafeInteger(rootIssued)&&now>=rootIssued&&now-rootIssued<780000,'Root freshness reserve is exhausted; separate recovery is required');
   }
  }
- assert.ok(!operator,'Operator claim has no authenticated authorization owner');
  assert.ok(authorizationRound<32,'Bridge authorization rounds exhausted');
  assertProductionEnvironmentApprovalIdentity(approval,{sourceSha,repository:PRODUCTION_ENVIRONMENT_APPROVAL.repository});
  assertProductionEnvironmentApprovalFreshness(approval,{now:new Date(now)});

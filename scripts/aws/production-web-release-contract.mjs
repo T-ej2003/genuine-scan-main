@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { canonicalizeEcsTaskDefinition, assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
+import {journalEcsRegistration,journalEcsServiceUpdate} from './production-release-gate-ecs-journal.mjs';
 
 export const WEB_RELEASE = Object.freeze({
   operation: "PRODUCTION_WEB_IMAGE_PUBLICATION",
@@ -178,9 +179,98 @@ export async function rollbackFrontendCandidate({ predecessor, candidateTaskDefi
   return predecessor.taskDefinitionArn;
 }
 
-export async function runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization, now, readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth } = {}) {
+async function runJournaledFrontendActivation({sourceSha,webAuthorization,authenticatedWebAuthorization,operationId,journal,
+ readService,describeTaskDefinition,listTaskDefinitions,registerTaskDefinition,updateService,waitStable,verifyHealth}){
+ if(!HASH.test(operationId||''))throw new Error('Frontend durable operation identity is missing');
+ if(typeof listTaskDefinitions!=='function')throw new Error('Durable frontend registration requires the native task-definition census');
+ const saved=await journal.readOperation(operationId,'FRONTEND:PREDECESSOR');
+ let predecessor;
+ if(saved){
+  if(saved.sourceSha!==sourceSha||saved.authorizationSha256!==webAuthorization.authorizationSha256)
+   throw new Error('Frontend predecessor is bound to another release');
+  const task=await describeTaskDefinition(saved.predecessor.taskDefinitionArn);
+  if(canonicalSha256(task)!==saved.predecessorTaskSha256)throw new Error('Frontend predecessor task definition changed');
+  predecessor={...saved.predecessor,taskDefinition:task};
+ }else{
+  const service=await readService(),task=await describeTaskDefinition(service?.taskDefinition);
+  predecessor=captureFrontendPredecessor(service,task);
+  const {taskDefinition,...identity}=predecessor;
+  const record={sourceSha,authorizationSha256:webAuthorization.authorizationSha256,
+   predecessor:identity,predecessorTaskSha256:canonicalSha256(task)};
+  await journal.writeOperation(operationId,'FRONTEND:PREDECESSOR',record);
+  if(canonicalSha256(await describeTaskDefinition(identity.taskDefinitionArn))!==record.predecessorTaskSha256||
+   JSON.stringify(await journal.readOperation(operationId,'FRONTEND:PREDECESSOR'))!==JSON.stringify(record))
+   throw new Error('Frontend predecessor durable readback differs');
+ }
+ const candidate=structuredClone(buildFrontendCandidate({predecessor,authenticatedWebAuthorization}));
+ const marker='MSCQRWebActivationOperation';
+ if(candidate.tags?.some(tag=>tag.key===marker))throw new Error('Frontend operation tag already exists');
+ candidate.tags=[...(candidate.tags||[]),{key:marker,value:operationId}];
+ const intent={operationId,sourceSha,authorizationSha256:webAuthorization.authorizationSha256,
+  predecessorTaskDefinitionArn:predecessor.taskDefinitionArn,imageRef:webAuthorization.imageRef,
+  payloadSha256:canonicalSha256(candidate)};
+ const verifyDefinition=async arn=>{
+  const definition=await describeTaskDefinition(arn);
+  assertFrontendCandidateReadback({definition,taskDefinitionArn:arn,candidate});
+  if(definition.tags?.filter(tag=>tag.key===marker&&tag.value===operationId).length!==1)
+   throw new Error('Frontend native registration is missing exact operation tag');
+ };
+ const registration=await journalEcsRegistration({store:journal,operationId,intent,
+  register:()=>registerTaskDefinition(candidate),
+  list:async()=>{
+   const revisions=await listTaskDefinitions(WEB_RELEASE.family);
+   if(!Array.isArray(revisions)||revisions.length>2000)throw new Error('Frontend task-definition census is unbounded');
+   const matches=[];
+   for(const arn of revisions){
+    if(!TASK_ARN.test(arn))continue;
+    const definition=await describeTaskDefinition(arn);
+    if(definition.tags?.some(tag=>tag.key===marker&&tag.value===operationId))matches.push(arn);
+   }
+   return matches;
+  },verify:verifyDefinition});
+ let health;
+ const updateIntent={operationId,sourceSha,authorizationSha256:webAuthorization.authorizationSha256,
+  sourceTaskDefinitionArn:predecessor.taskDefinitionArn,targetTaskDefinitionArn:registration.taskDefinitionArn,
+  registrationSha256:canonicalSha256(intent)};
+ await journalEcsServiceUpdate({store:journal,operationId,phase:'FRONTEND:UPDATE',intent:updateIntent,
+  read:readService,update:()=>updateService(buildFrontendUpdate({predecessor,candidateTaskDefinitionArn:registration.taskDefinitionArn})),
+  verify:async(service,stage)=>{
+   if(stage==='source'){
+    const currentTask=await describeTaskDefinition(service.taskDefinition);
+    assertFrontendPredecessorCas({predecessor,currentService:service,currentTaskDefinition:currentTask});return;
+   }
+   await waitStable({expectedTaskDefinitionArn:registration.taskDefinitionArn});
+   const settled=await readService();
+   if(settled?.taskDefinition!==registration.taskDefinitionArn||settled.desiredCount!==predecessor.desiredCount||
+    settled.runningCount!==predecessor.desiredCount||settled.pendingCount!==0||
+    settled.deployments?.length!==1||settled.deployments[0].status!=='PRIMARY'||
+    settled.deployments[0].taskDefinition!==registration.taskDefinitionArn||settled.deployments[0].rolloutState!=='COMPLETED')
+    throw new Error('Frontend ECS target is not stably authenticated');
+   health=await verifyHealth({expectedTaskDefinitionArn:registration.taskDefinitionArn,expectedImageRef:webAuthorization.imageRef});
+   if(health?.ready!==true||health.loginStatus!==200)throw new Error('Frontend post-deployment health failed');
+  }});
+ const result={sourceSha,predecessorTaskDefinitionArn:predecessor.taskDefinitionArn,
+  candidateTaskDefinitionArn:registration.taskDefinitionArn,imageRef:webAuthorization.imageRef,
+  updateCount:1,rollbackCount:0,health};
+ const previous=await journal.readOperation(operationId,'FRONTEND:ACTIVATION:COMPLETED');
+ if(previous){
+  if(previous.sourceSha!==result.sourceSha||previous.predecessorTaskDefinitionArn!==result.predecessorTaskDefinitionArn||
+   previous.candidateTaskDefinitionArn!==result.candidateTaskDefinitionArn||previous.imageRef!==result.imageRef||
+   previous.updateCount!==1||previous.rollbackCount!==0||previous.health?.ready!==true||
+   previous.health?.loginStatus!==200)throw new Error('Conflicting durable frontend activation receipt');
+  return Object.freeze(previous);
+ }
+ await journal.writeOperation(operationId,'FRONTEND:ACTIVATION:COMPLETED',result);
+ if(JSON.stringify(await journal.readOperation(operationId,'FRONTEND:ACTIVATION:COMPLETED'))!==JSON.stringify(result))
+  throw new Error('Frontend activation receipt readback differs');
+ return Object.freeze(result);
+}
+
+export async function runGovernedFrontendActivation({ sourceSha, webAuthorization, verifyWebAuthorization, now, readService, describeTaskDefinition, listTaskDefinitions, registerTaskDefinition, updateService, waitStable, verifyHealth, journal, operationId } = {}) {
   for (const [name, value] of Object.entries({ readService, describeTaskDefinition, registerTaskDefinition, updateService, waitStable, verifyHealth })) if (typeof value !== "function") throw new Error(`Frontend activation adapter is missing: ${name}.`);
   const authenticatedWebAuthorization = authenticateWebImageAuthorization({ sourceSha, webAuthorization, verify: verifyWebAuthorization, now });
+  if(journal)return runJournaledFrontendActivation({sourceSha,webAuthorization,authenticatedWebAuthorization,operationId,journal,
+   readService,describeTaskDefinition,listTaskDefinitions,registerTaskDefinition,updateService,waitStable,verifyHealth});
   const initialService = await readService(); const initialTask = await describeTaskDefinition(initialService?.taskDefinition);
   const predecessor = captureFrontendPredecessor(initialService, initialTask); const candidate = buildFrontendCandidate({ predecessor, authenticatedWebAuthorization });
   const registration = await registerTaskDefinition(candidate); const candidateArn = registration?.taskDefinition?.taskDefinitionArn || registration?.taskDefinitionArn;

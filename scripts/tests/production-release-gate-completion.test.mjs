@@ -52,11 +52,24 @@ test('normal Gate completion binds backend, frontend, database and smoke to one 
   componentProvenance:Object.fromEntries(Object.keys(components).map(name=>[name,{...provenance}]))};
  const backendService={taskDefinition:targetArn,desiredCount:2,runningCount:2,pendingCount:0};
  const frontendService={taskDefinition:webArn,desiredCount:2,runningCount:2,pendingCount:0};
- const input={run,job,approvals,releaseTrainRunId:'9',sourceSha:source,authorization,rlsReceipt,backendActivation,componentState,backendService,frontendService,webRequired:true};
+ const frontendActivation={sourceSha:source,candidateTaskDefinitionArn:webArn,
+  imageRef:`368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-web@${webDigest}`,health:{ready:true,loginStatus:200}};
+ const input={run,job,approvals,releaseTrainRunId:'9',sourceSha:source,authorization,rlsReceipt,backendActivation,
+  frontendActivation,componentState,backendService,frontendService,webRequired:true};
  assert.equal(assertNormalGateCompletion(input).frontendImageDigest,webDigest);
+ assert.equal(assertNormalGateCompletion({...input,run:{...run,run_attempt:2},job:{...job,run_attempt:2},
+  approvals:[...approvals,...approvals]}).frontendImageDigest,webDigest);
+ assert.throws(()=>assertNormalGateCompletion({...input,approvals:[...approvals,{
+  ...approvals[0],user:{type:'User',login:'other-reviewer',id:12}}]}),/conflicting protected environment reviewers/);
  assert.equal(assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'}}).frontendImageDigest,webDigest);
  assert.throws(()=>assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'},job:{...job,conclusion:'failure'}}));
+ const commitFailed={...job,conclusion:'failure',steps:job.steps.map(step=>step.name==='Commit authenticated security component state'
+  ?{...step,conclusion:'failure'}:step)};
+ assert.equal(assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'},job:commitFailed}).componentCommitReconciled,true);
+ assert.throws(()=>assertNormalGateCompletion({...input,run:{...run,conclusion:'failure'},job:commitFailed,
+  componentState:{...componentState,components:{...components,database:{...components.database,releaseIdentity:'wrong'}}}}));
  assert.throws(()=>assertNormalGateCompletion({...input,frontendService:{...frontendService,taskDefinition:'wrong'}}));
+ assert.throws(()=>assertNormalGateCompletion({...input,frontendActivation:undefined}));
  assert.throws(()=>assertNormalGateCompletion({...input,componentState:{...componentState,components:{...components,database:{...components.database,releaseIdentity:'wrong'}}}}));
  assert.throws(()=>assertNormalGateCompletion({...input,job:{...job,steps:job.steps.filter(step=>step.name!=='Verify production after frontend activation')}}));
 });

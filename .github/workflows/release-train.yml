@@ -310,7 +310,7 @@ jobs:
       RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
       COMPLETED_BROKER_CLOSURE_SOURCE_SHA: ${{ inputs.completed_broker_closure_source_sha }}
       RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
-      RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only }}
+      RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only || inputs.trusted_terminal_cutover }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
       NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
       REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}

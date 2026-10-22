@@ -112,7 +112,8 @@ const waitForTask = (taskArn, config, aws) => {
 const readReceipt = (mode, config, aws, directory, startedAt) => {
   const prefix = `rls-receipts/${config.releaseSha}/${mode}/`;
   const listed = { Contents: listProductionReceiptObjects({ run: aws, bucket: config.receiptBucket, prefix }) };
-  const item = [...(listed.Contents || [])].sort((left, right) => String(right.LastModified).localeCompare(String(left.LastModified)))[0];
+  if (listed.Contents.length > 1) throw new Error('Production executor receipt is ambiguous for a one-use approval mode.');
+  const item = listed.Contents[0];
   if (!item?.Key?.startsWith(prefix)) throw new Error("Production executor receipt is missing.");
   const file = path.join(directory, `${mode}-receipt.json`);
   aws(["s3api", "get-object", "--bucket", config.receiptBucket, "--key", item.Key, file]);
@@ -128,6 +129,7 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
       || value.packageChecksumSha256 !== config.packageChecksumSha256
       || value.approvalId !== config.approvalId
       || Date.parse(value.completedAt || 0) < startedAt - 300_000
+      || Date.parse(value.completedAt || 0) > Date.now() + 300_000
       || receiptSha256 !== sha256(`${JSON.stringify(value)}\n`)) {
     throw new Error("Production executor receipt binding is invalid.");
   }
@@ -138,6 +140,20 @@ const readReceipt = (mode, config, aws, directory, startedAt) => {
     approvalContractSha256: value.approvalContractSha256,
   };
 };
+
+function priorModeOutcome(mode, config, aws, directory) {
+  const prefix=`rls-receipts/${config.releaseSha}/${mode}/`;
+  const receipts=listProductionReceiptObjects({run:aws,bucket:config.receiptBucket,prefix});
+  if(receipts.length>1)throw new Error('OUTCOME_UNKNOWN: multiple native receipts for one broker mode');
+  if(receipts.length===1)return {status:'COMPLETED',receipt:readReceipt(mode,config,aws,directory,0)};
+  const key=`${config.approvalId}#${mode}`;
+  const response=aws(['dynamodb','get-item','--table-name',STAGE_B.replayTable,
+   '--key',JSON.stringify({approvalMode:{S:key}}),'--consistent-read']);
+  if(!response.Item)return {status:'INCOMPLETE'};
+  if(response.Item.approvalMode?.S!==key||response.Item.approvalNonce?.S===undefined)
+   throw new Error('OUTCOME_UNKNOWN: broker claim identity differs');
+  throw new Error(`OUTCOME_UNKNOWN: ${mode} broker claim exists without an authenticated executor receipt`);
+}
 
 export async function applyProductionFullRlsRelease({
   env = process.env,
@@ -176,15 +192,24 @@ export async function applyProductionFullRlsRelease({
   const receipts = [];
   let mutationStarted = false;
   try {
+    const rollback=priorModeOutcome('full-rls-rollback',config,aws,directory);
+    if(rollback.status!=='INCOMPLETE')throw new Error('REAUTHORIZATION_REQUIRED: a prior rollback closed this approval');
     for (const mode of APPLY_MODES) {
+      const prior=priorModeOutcome(mode,config,aws,directory);
+      if(prior.status==='COMPLETED'){receipts.push(prior.receipt);continue;}
       mutationStarted ||= Boolean(PRODUCTION_GREEN.confirmations[mode]);
       const startedAt = Date.now();
       const taskArn = invokeBroker(mode, config, aws, directory);
       waitForTask(taskArn, config, aws);
       receipts.push(readReceipt(mode, config, aws, directory, startedAt));
     }
-    const canaryTaskArn = invokeBroker("full-rls-application-canary", config, aws, directory);
-    waitForTask(canaryTaskArn, config, aws);
+    const canary=priorModeOutcome('full-rls-application-canary',config,aws,directory);
+    if(canary.status==='INCOMPLETE'){
+      const canaryStartedAt=Date.now();
+      const canaryTaskArn = invokeBroker("full-rls-application-canary", config, aws, directory);
+      waitForTask(canaryTaskArn, config, aws);
+      readReceipt('full-rls-application-canary',config,aws,directory,canaryStartedAt);
+    }
     if (new Set(receipts.map((item) => item.approvalContractSha256)).size !== 1) {
       throw new Error("Production executor receipts do not share one approval contract.");
     }

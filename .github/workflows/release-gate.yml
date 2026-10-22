@@ -830,6 +830,7 @@ jobs:
             fi
             activation_args+=(--expected-current-task-definition "$INITIAL_OVERLAP_TASK_DEFINITION_ARN" --expected-current-deployment-id "$initial_overlap_deployment_id")
           fi
+          if [ -n "${{ inputs.rotation_id }}" ]; then activation_args+=(--rotation-id "${{ inputs.rotation_id }}"); fi
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode prepare \
             --credential-source github-oidc-release-deployer \
@@ -911,12 +912,15 @@ jobs:
               --output "$RUNNER_TEMP/coordinated-web-authorization-reservation.json"
           fi
           node scripts/check-production-activation-rotation.mjs
+          journal_args=()
+          if [ -n "${{ inputs.rotation_id }}" ]; then journal_args+=(--rotation-id "${{ inputs.rotation_id }}"); fi
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode verify \
             --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
+            "${journal_args[@]}" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
             --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "$ACTIVATION_BINDING_FILE" \
@@ -927,7 +931,7 @@ jobs:
         if: ${{ inputs.release_mode == 'normal' }}
         uses: actions/upload-artifact@v7
         with:
-          name: production-rls-release-receipt
+          name: production-rls-release-receipt-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/production-rls-release-receipt.json
           if-no-files-found: error
           retention-days: 90
@@ -946,12 +950,15 @@ jobs:
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
           node scripts/check-production-activation-rotation.mjs
           receipt_sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)"
+          journal_args=()
+          if [ -n "${{ inputs.rotation_id }}" ]; then journal_args+=(--rotation-id "${{ inputs.rotation_id }}"); fi
           node scripts/aws/production-normal-backend-activation.mjs \
             --mode execute \
             --credential-source github-oidc-release-deployer \
             --source-sha "$SOURCE_SHA" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
+            "${journal_args[@]}" \
             --image-authorization "${{ steps.images.outputs.authorization_file }}" \
             --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "${{ steps.backend-activation.outputs.binding_file }}" \
@@ -996,7 +1003,7 @@ jobs:
         if: ${{ always() && inputs.release_mode == 'normal' && steps.normal-activation.outcome != 'skipped' }}
         uses: actions/upload-artifact@v7
         with:
-          name: production-normal-backend-activation-evidence
+          name: production-normal-backend-activation-evidence-attempt-${{ github.run_attempt }}
           path: ${{ steps.image-meta.outputs.backend_metadata_file }}
           if-no-files-found: error
           retention-days: 90
@@ -1227,8 +1234,13 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
+          journal_args=()
+          if [ -n "${{ inputs.rotation_id }}" ] && [ -n "${{ inputs.release_train_run_id }}" ]; then
+            journal_args=(--rotation-id "${{ inputs.rotation_id }}" --release-train-run-id "${{ inputs.release_train_run_id }}")
+          fi
           result="$(node scripts/aws/run-production-web-activation.mjs \
             --source-sha "$SOURCE_SHA" \
+            "${journal_args[@]}" \
             --stage-b-authorization "${{ steps.images.outputs.authorization_file }}" \
             --stage-b-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --web-authorization "$WEB_AUTHORIZATION_FILE" \
@@ -1244,6 +1256,15 @@ jobs:
           const bytes = fs.readFileSync(process.argv[3]); const result = JSON.parse(bytes);
           for (const [key, value] of Object.entries({ previous_task_definition: result.predecessorTaskDefinitionArn, task_definition: result.candidateTaskDefinitionArn, image_ref: result.imageRef, evidence_file: process.argv[3], evidence_sha256: crypto.createHash("sha256").update(bytes).digest("hex") })) fs.appendFileSync(process.argv[2], `${key}=${value}\n`);
           NODE
+
+      - name: Upload immutable frontend activation evidence
+        if: ${{ always() && inputs.release_mode == 'normal' && steps.frontend-activation.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-frontend-activation-evidence-attempt-${{ github.run_attempt }}
+          path: ${{ steps.frontend-activation.outputs.evidence_file }}
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Summarize ECS production deployment
         if: ${{ inputs.release_mode == 'normal' }}
@@ -1310,14 +1331,20 @@ jobs:
 
       - name: Verify production after frontend activation
         if: ${{ inputs.release_mode == 'normal' }}
+        env:
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
-          ./scripts/aws/verify-production-smoke.sh
+          node scripts/aws/run-production-release-gate-smoke.mjs
 
       - name: Commit authenticated security component state
         if: ${{ inputs.release_mode == 'normal' }}
         env:
+          ROTATION_ID: ${{ inputs.rotation_id }}
+          RELEASE_TRAIN_RUN_ID: ${{ inputs.release_train_run_id }}
           GH_TOKEN: ${{ github.token }}
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}

@@ -13,7 +13,8 @@ const signs={
  'BRIDGE:SIGN:ROOT_DROP:DISPATCH':dispatch,'BRIDGE:SIGN:ROOT_DROP:RESULT':native,
  'BRIDGE:SIGN:ROOT_DROP:COMPLETED':{dispatch,resultSha256:brokerDigest(native)}};
 const operator={operationId:request.operationId,requestSha256:request.requestSha256,inputSha256:'e'.repeat(64),claimedAt:new Date(29*60*1000).toISOString()};
-const input=(records,clock=()=>31*60*1000)=>({verify:async()=>null,ensureCredentials:async()=>{},store:{readOperation:async(_id,phase)=>records[phase]||null},
+const input=(records,clock=()=>31*60*1000)=>({verify:async()=>null,ensureCredentials:async()=>{},store:{readOperation:async(_id,phase)=>records[phase]||null,
+ readOperationCommittedAt:async()=>operator.claimedAt},
  request,now:clock,wait:async()=>{},maxPolls:2});
 
 test('expired completed signatures without an operator claim reauthorize immediately',async()=>{

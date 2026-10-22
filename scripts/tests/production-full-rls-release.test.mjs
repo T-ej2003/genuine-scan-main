@@ -139,6 +139,7 @@ for (const authority of ["initial transport", "retained without transport", "mat
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const outputPath = path.join(directory, "release-receipt.json");
   const modes = [];
+  const nativeReceipts=new Map();
   const historical = historicalRuntimeFixture();
   const historicalJson = JSON.stringify(historical.evidence);
   const retention = historicalRuntimeRetention({ evidence: historical.evidence, sourceSha: historical.release, current: historical.state, componentStateSha256: stateHash(historical.state), reader: historical.reader, verify: historical.verify, writerContext: historical.writerContext, now: historical.now });
@@ -173,12 +174,16 @@ for (const authority of ["initial transport", "retained without transport", "mat
     if (args[0] === "ecs" && args[1] === "describe-tasks") return { tasks: [{ containers: [{ exitCode: 0 }] }] };
     if (args[0] === "s3api" && args[1] === "list-objects-v2") {
       const prefix = args[args.indexOf("--prefix") + 1];
-      return { KeyCount: 1, IsTruncated: false, Contents: [{ Key: `${prefix}fixture.json`, LastModified: new Date().toISOString() }] };
+      const mode=prefix.split('/').at(-2);
+      const contents=modes.includes(mode)?[{Key:`${prefix}fixture.json`,LastModified:new Date().toISOString()}]:[];
+      return {KeyCount:contents.length,IsTruncated:false,Contents:contents};
     }
+    if(args[0]==='dynamodb'&&args[1]==='get-item')return {};
     if (args[0] === "s3api" && args[1] === "get-object") {
       const key = args[args.indexOf("--key") + 1];
       const mode = key.split("/").at(-2);
-      const value = {
+      let value=nativeReceipts.get(mode);
+      if(!value)value={
         schemaVersion: 1,
         environment: "production",
         database: PRODUCTION_GREEN.database,
@@ -199,7 +204,8 @@ for (const authority of ["initial transport", "retained without transport", "mat
         completedAt: new Date().toISOString(),
         nonce: crypto.randomUUID(),
       };
-      value.receiptSha256 = sha256(`${JSON.stringify(value)}\n`);
+      if(!value.receiptSha256)value.receiptSha256 = sha256(`${JSON.stringify(value)}\n`);
+      nativeReceipts.set(mode,value);
       fs.writeFileSync(args.at(-1), `${JSON.stringify(value)}\n`);
       return {};
     }
@@ -225,6 +231,10 @@ for (const authority of ["initial transport", "retained without transport", "mat
   assert.equal(bundle.applicationCanary, "passed");
   assert.equal(bundle.receipts.length, 7);
   assert.equal(JSON.parse(fs.readFileSync(outputPath, "utf8")).approvalId, approvalId);
+  const invoked=modes.length;
+  const resumed=await applyProductionFullRlsRelease({...releaseOptions,outputPath:`${outputPath}.recovered`});
+  assert.equal(modes.length,invoked,'authenticated executor receipts must not replay one-use broker modes');
+  assert.equal(resumed.receiptBundleSha256,bundle.receiptBundleSha256);
 });
 
 test("production workflow applies verified green and canaries before backend traffic switch", () => {
