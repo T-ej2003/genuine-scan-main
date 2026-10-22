@@ -106,11 +106,12 @@ export async function readBridgeNativeAudit({run,store,native,readiness,adoption
   '--policy-name','stage-b-exact-image-logs-and-secrets']);
  const document=normalizeIamPolicyDocument(policy.PolicyDocument);
  assert.equal(canonicalJson(state.executionPolicy),canonicalJson(document),'Terraform policy state differs from live IAM');
+ const secretArnPrefix=`arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:`;
  const secretRefs=[...new Set(definition.taskDefinition.containerDefinitions.flatMap(container=>
   (container.secrets||[]).filter(secret=>/^(JWT_|QR_|ARTIFACT_SIGN_)/.test(secret.name)).map(secret=>
    secret.valueFrom.replace(/:value::$|:[A-Za-z0-9_-]+::$/,'')).filter(value=>
-   [`arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/prod/rotation/`,
-    `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:mscqr/production/rls-green/artifact-signing/`]
+   [secretArnPrefix+'mscqr/prod/rotation/',
+    secretArnPrefix+'mscqr/production/rls-green/artifact-signing/']
     .some(prefix=>value.startsWith(prefix)))))];
  assert.ok(secretRefs.length>=7&&secretRefs.length<=20);
  for(const binding of Object.values(native.artifactSigning.bindings))

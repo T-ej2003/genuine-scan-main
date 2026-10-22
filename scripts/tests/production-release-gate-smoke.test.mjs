@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {runJournaledSmoke,smokeOperationId} from '../aws/run-production-release-gate-smoke.mjs';
+import {runCli,runJournaledSmoke,smokeOperationId} from '../aws/run-production-release-gate-smoke.mjs';
+
+test('strict normal Gate keeps its existing smoke path when only a parent run ID is supplied',async()=>{
+ let calls=0;
+ await runCli({env:{RELEASE_TRAIN_RUN_ID:'42'},runSmoke:()=>{calls++;return 'healthy';}});
+ assert.equal(calls,1);
+});
 
 test('smoke receipt loss is recovered by a fresh read-only smoke without an AWS mutation',async()=>{
  const sourceSha='a'.repeat(40),rotationId='rotation-test',releaseTrainRunId='42';

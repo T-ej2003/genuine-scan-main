@@ -42,7 +42,7 @@ export async function runJournaledSmoke({store,operationId,intent,readServices,s
 
 export async function runCli({env=process.env,runSmoke=()=>execFileSync('./scripts/aws/verify-production-smoke.sh',[],
  {encoding:'utf8',stdio:['ignore','pipe','pipe']})}={}){
- if(!env.ROTATION_ID&&!env.RELEASE_TRAIN_RUN_ID){runSmoke();return;}
+ if(!env.ROTATION_ID||!env.RELEASE_TRAIN_RUN_ID){runSmoke();return;}
  assert.equal(env.GITHUB_WORKFLOW_REF,
   'T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main');
  assert.match(String(env.GITHUB_RUN_ID||''),/^[1-9][0-9]*$/);

@@ -10,8 +10,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='8e3afa63146a6ffacdae3337b3adc161cbb106434064ce6536577cde4316fc4d'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:8e3afa63146a6ffacdae3337b3adc161cbb106434064ce6536577cde4316fc4d'
+    AND source_contract_sha256='ce9e682d5b2eb0e84a51b9a916d04ea30baed65b0487d01875d41c113cb61c17'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:ce9e682d5b2eb0e84a51b9a916d04ea30baed65b0487d01875d41c113cb61c17'
     AND administrator_role='certification-administrator'
 
     AND phase='roles-created'
@@ -26,7 +26,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8e3afa63146a6ffacdae3337b3adc161cbb106434064ce6536577cde4316fc4d')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ce9e682d5b2eb0e84a51b9a916d04ea30baed65b0487d01875d41c113cb61c17')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
