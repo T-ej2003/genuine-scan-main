@@ -42,10 +42,15 @@ export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
   env.GIT_CONFIG_VALUE_0 = root;
   env.GIT_CONFIG_KEY_1 = "core.fsmonitor";
   env.GIT_CONFIG_VALUE_1 = "false";
+  env.GIT_NO_REPLACE_OBJECTS = "1";
   env.PATH = "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin";
 }
 export function readPhase3IamProtectedSource({ sourceSha, cwd = root, execute = execFileSync,
-  executable = productionGithubExecutable(), env = process.env, readCheckout = readStageBProtectedMainCheckoutFromGitHub }) {
+  executable = productionGithubExecutable(), env = process.env, gitExecute = execFileSync,
+  readCheckout = readStageBProtectedMainCheckoutFromGitHub }) {
+  assert.equal(env.GIT_NO_REPLACE_OBJECTS, "1", "Git replacement objects must be disabled");
+  assert.equal(gitExecute("/usr/bin/git", ["for-each-ref", "--format=%(refname)", "refs/replace"],
+    { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(), "", "Git replacement refs are forbidden");
   const ghEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
   return readCheckout({ cwd, expectedSourceSha: sourceSha, githubRun: (_command, args) =>
     execute(executable, ["api", "--hostname", "github.com", args[1]],
