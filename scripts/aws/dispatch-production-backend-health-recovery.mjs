@@ -4,7 +4,11 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { BACKEND_HEALTH_RECOVERY, BACKEND_HEALTH_RECOVERY_TASK_ARN as TASK_DEFINITION } from "./production-backend-health-recovery-contract.mjs";
+import { GREEN_BACKEND_RECOVERY_KIND, GREEN_BACKEND_TASK_ARN } from "./production-green-backend-health-recovery.mjs";
+import { parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
+import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
+import { createPinnedRootAttestationVerifier } from "./production-root-attestation-key.mjs";
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertFailedRecoveryEvidenceReference } from "./production-backend-failed-recovery-evidence-reference.mjs";
@@ -24,6 +28,7 @@ const FAILED_HISTORY_APPROVAL_FIELD = "failedRecoveryEvidenceSha256";
 const FAILED_HISTORY_REFERENCE_APPROVAL_FIELD = "failedRecoveryEvidenceReferenceSha256";
 const BUNDLE_KIND = "BACKEND_HEALTH_RECOVERY_DISPATCH_BUNDLE";
 const COMPONENTS = ["imageAuthorization", "approval", "runtimeConsumability", "failedRecoveryEvidenceReference"];
+const GREEN_COMPONENTS = [...COMPONENTS, "databaseCompatibilityReference"];
 export { WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT };
 export const MAX_DECOMPRESSED_BUNDLE_BYTES = MAX_DECOMPRESSED_WORKFLOW_DISPATCH_BYTES;
 export const MAX_ENCODED_BUNDLE_CHARACTERS = WORKFLOW_DISPATCH_INTERNAL_BUDGET;
@@ -52,12 +57,13 @@ export function parseBackendHealthRecoveryDispatchBundle(bytes, suppliedSha256, 
   const transport = canonicalWorkflowJsonInput(bytes, "Recovery dispatch bundle");
   if (!transport.bytes.equals(bytes)) throw new Error("Recovery dispatch bundle is not canonical transport JSON.");
   const value = JSON.parse(transport.value);
-  if (value?.schemaVersion !== 3 || value.kind !== BUNDLE_KIND
+  const names = value?.releaseMode === GREEN_BACKEND_RECOVERY_KIND ? GREEN_COMPONENTS : COMPONENTS;
+  if (value?.schemaVersion !== (value?.releaseMode === GREEN_BACKEND_RECOVERY_KIND ? 4 : 3) || value.kind !== BUNDLE_KIND
     || JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(["components", "currentTaskDefinitionArn", "kind", "recoveryImageDigest", "releaseMode", "schemaVersion", "service", "sourceSha"])
-    || JSON.stringify(Object.keys(value.components || {}).sort()) !== JSON.stringify([...COMPONENTS].sort())) throw new Error("Recovery dispatch bundle schema is invalid.");
+    || JSON.stringify(Object.keys(value.components || {}).sort()) !== JSON.stringify([...names].sort())) throw new Error("Recovery dispatch bundle schema is invalid.");
   for (const [field, expectedValue] of Object.entries(expected)) if (expectedValue != null && value[field] !== expectedValue) throw new Error(`Recovery dispatch bundle ${field} binding differs from the workflow transaction.`);
   const components = {};
-  for (const name of COMPONENTS) {
+  for (const name of names) {
     const component = value.components[name];
     if (!component || JSON.stringify(Object.keys(component).sort()) !== JSON.stringify(["json", "sha256"]) || typeof component.json !== "string"
       || !/^[a-f0-9]{64}$/.test(component.sha256 || "") || sha256(Buffer.from(component.json)) !== component.sha256
@@ -67,14 +73,23 @@ export function parseBackendHealthRecoveryDispatchBundle(bytes, suppliedSha256, 
   return Object.freeze({ value: Object.freeze(value), components: Object.freeze(components), sha256: suppliedSha256, bytes });
 }
 
-function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization, imageValidation, approval, runtimeConsumability, failedRecoveryEvidenceReference }) {
+function assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization, imageValidation, approval, runtimeConsumability, failedRecoveryEvidenceReference, databaseCompatibilityReference }) {
   if (!SHA.test(sourceSha || "")) throw new Error("Recovery source SHA is invalid.");
-  if (!TASK_DEFINITION.test(currentTaskDefinitionArn || "")) throw new Error("Recovery task definition is invalid.");
+  const green = releaseMode === GREEN_BACKEND_RECOVERY_KIND;
+  if (!(green ? GREEN_BACKEND_TASK_ARN : TASK_DEFINITION).test(currentTaskDefinitionArn || "")) throw new Error("Recovery task definition is invalid.");
   if (!DIGEST.test(recoveryImageDigest || "")) throw new Error("Recovery image digest is invalid.");
   if (service !== BACKEND_HEALTH_RECOVERY.service) throw new Error("Recovery service differs from the protected contract.");
-  if (releaseMode !== MODE_KIND) throw new Error("Recovery mode differs from the protected contract.");
+  if (![MODE_KIND, GREEN_BACKEND_RECOVERY_KIND].includes(releaseMode)) throw new Error("Recovery mode differs from the protected contract.");
   assertImageAuthorization(imageAuthorization, sourceSha, imageValidation);
   if (authorizedBackendDigest(imageAuthorization) !== recoveryImageDigest) throw new Error("Recovery image authorization is bound to a different digest.");
+  if (green) {
+    if (imageAuthorization.imageReleaseSha !== sourceSha || failedRecoveryEvidenceReference !== null) throw new Error("Green recovery requires a current-source image and no legacy failed-revision history.");
+    const reference = parseAppOnlyArtifactReference(JSON.stringify(databaseCompatibilityReference));
+    if (reference.sourceSha !== sourceSha || approval?.kind !== GREEN_BACKEND_RECOVERY_KIND || approval?.sourceSha !== sourceSha
+      || approval?.taskDefinitionArn !== currentTaskDefinitionArn || approval?.recoveryImageDigest !== recoveryImageDigest
+      || approval?.runtimeConsumabilitySha256 !== runtimeConsumability?.evidence?.evidenceSha256) throw new Error("Green recovery inputs belong to another authorization or database result.");
+    return;
+  }
   const fields = JSON.stringify(Object.keys(approval || {}).sort());
   const historyFields = [FAILED_HISTORY_APPROVAL_FIELD, FAILED_HISTORY_REFERENCE_APPROVAL_FIELD];
   const allowedFields = [APPROVAL_FIELDS, [...APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS], [...APPROVAL_FIELDS, ...historyFields], [...APPROVAL_FIELDS, ...ROLLBACK_APPROVAL_FIELDS, ...historyFields]].map((value) => JSON.stringify([...value].sort()));
@@ -94,31 +109,35 @@ export function measureWorkflowDispatchInputs(inputs) {
   return measureBoundedWorkflowDispatchInputs(inputs, { label: "Recovery workflow_dispatch payload" });
 }
 
-export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, imageValidation, approvalBytes, runtimeConsumabilityBytes, failedRecoveryEvidenceReferenceBytes } = {}) {
+export function buildBackendHealthRecoveryDispatch({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorizationBytes, imageValidation, approvalBytes, runtimeConsumabilityBytes, failedRecoveryEvidenceReferenceBytes, databaseCompatibilityReferenceBytes } = {}) {
   const image = canonicalWorkflowJsonInput(imageAuthorizationBytes, "Recovery image authorization");
   const approval = canonicalWorkflowJsonInput(approvalBytes, "Recovery approval");
   const runtime = canonicalWorkflowJsonInput(runtimeConsumabilityBytes, "Recovery runtime consumability evidence");
   const failed = canonicalWorkflowJsonInput(failedRecoveryEvidenceReferenceBytes, "Immutable failed recovery evidence reference");
-  assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization: JSON.parse(image.value), imageValidation, approval: JSON.parse(approval.value), runtimeConsumability: JSON.parse(runtime.value), failedRecoveryEvidenceReference: JSON.parse(failed.value) });
-  const bundleBody = { schemaVersion: 3, kind: BUNDLE_KIND, sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, components: Object.fromEntries([["imageAuthorization", image], ["approval", approval], ["runtimeConsumability", runtime], ["failedRecoveryEvidenceReference", failed]].map(([name, component]) => [name, { json: component.value, sha256: component.sha256 }])) };
+  const green = releaseMode === GREEN_BACKEND_RECOVERY_KIND;
+  const database = green ? canonicalWorkflowJsonInput(databaseCompatibilityReferenceBytes, "Green recovery database compatibility reference") : null;
+  assertBindings({ sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, imageAuthorization: JSON.parse(image.value), imageValidation, approval: JSON.parse(approval.value), runtimeConsumability: JSON.parse(runtime.value), failedRecoveryEvidenceReference: JSON.parse(failed.value), databaseCompatibilityReference: database && JSON.parse(database.value) });
+  const bundleBody = { schemaVersion: green ? 4 : 3, kind: BUNDLE_KIND, sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode, components: Object.fromEntries([["imageAuthorization", image], ["approval", approval], ["runtimeConsumability", runtime], ["failedRecoveryEvidenceReference", failed], ...(database ? [["databaseCompatibilityReference", database]] : [])].map(([name, component]) => [name, { json: component.value, sha256: component.sha256 }])) };
   const bundle = canonicalWorkflowJsonInput(Buffer.from(JSON.stringify(bundleBody)), "Recovery dispatch bundle");
   parseBackendHealthRecoveryDispatchBundle(bundle.bytes, bundle.sha256, { sourceSha, currentTaskDefinitionArn, recoveryImageDigest, service, releaseMode });
   const inputs = { git_ref: "main", target_sha: sourceSha, release_mode: MODE, backend_recovery_current_task_definition_arn: currentTaskDefinitionArn, backend_recovery_image_digest: recoveryImageDigest, backend_recovery_evidence_bundle_gzip_base64: encodeBackendHealthRecoveryBundleTransport(bundle.bytes), backend_recovery_evidence_bundle_sha256: bundle.sha256 };
   const payload = measureWorkflowDispatchInputs(inputs);
   const args = ["workflow", "run", WORKFLOW, "--repo", REPOSITORY, "--ref", "main", ...Object.entries(inputs).flatMap(([name, value]) => ["-f", `${name}=${value}`])];
-  return Object.freeze({ args: Object.freeze(args), image, approval, runtime, failed, bundle, payload });
+  return Object.freeze({ args: Object.freeze(args), image, approval, runtime, failed, database, bundle, payload });
 }
 
 function options(argv) {
-  const allowed = new Set(["--source-sha", "--current-task-definition", "--recovery-image-digest", "--service", "--release-mode", "--image-authorization", "--approval", "--runtime-consumability", "--failed-recovery-evidence-reference"]);
+  const allowed = new Set(["--source-sha", "--current-task-definition", "--recovery-image-digest", "--service", "--release-mode", "--image-authorization", "--approval", "--runtime-consumability", "--failed-recovery-evidence-reference", "--database-compatibility-reference"]);
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index]; const value = argv[index + 1];
     if (!allowed.has(key) || !value || value.startsWith("--") || values.has(key)) throw new Error(`Invalid or duplicate recovery dispatch option: ${key || "<missing>"}`);
     values.set(key, value);
   }
-  if (values.size !== allowed.size) throw new Error("Recovery dispatch requires every protected binding exactly once.");
-  return Object.fromEntries([...values].map(([key, value]) => [key.slice(2), value]));
+  const parsed = Object.fromEntries([...values].map(([key, value]) => [key.slice(2), value]));
+  if (values.size !== allowed.size - (parsed["release-mode"] === GREEN_BACKEND_RECOVERY_KIND ? 0 : 1)
+    || (parsed["release-mode"] === GREEN_BACKEND_RECOVERY_KIND) !== Boolean(parsed["database-compatibility-reference"])) throw new Error("Recovery dispatch requires every protected binding exactly once.");
+  return parsed;
 }
 
 export function runCli(argv = process.argv.slice(2), { run = execFileSync, protectedMain = readFreshProtectedMainIdentity, imageValidation } = {}) {
@@ -128,7 +147,10 @@ export function runCli(argv = process.argv.slice(2), { run = execFileSync, prote
   const approvalBytes = readStageBPrivateFileBytes({ filePath: values.approval, repositoryRoot: REPOSITORY_ROOT, label: "Recovery approval" }).bytes;
   const runtimeConsumabilityBytes = readStageBPrivateFileBytes({ filePath: values["runtime-consumability"], repositoryRoot: REPOSITORY_ROOT, label: "Recovery runtime consumability evidence" }).bytes;
   const failedRecoveryEvidenceReferenceBytes = readStageBPrivateFileBytes({ filePath: values["failed-recovery-evidence-reference"], repositoryRoot: REPOSITORY_ROOT, label: "Immutable failed recovery evidence reference" }).bytes;
-  const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha: values["source-sha"], currentTaskDefinitionArn: values["current-task-definition"], recoveryImageDigest: values["recovery-image-digest"], service: values.service, releaseMode: values["release-mode"], imageAuthorizationBytes, imageValidation, approvalBytes, runtimeConsumabilityBytes, failedRecoveryEvidenceReferenceBytes });
+  const databaseCompatibilityReferenceBytes = values["database-compatibility-reference"] ? readStageBPrivateFileBytes({ filePath: values["database-compatibility-reference"], repositoryRoot: REPOSITORY_ROOT, label: "Green recovery database compatibility reference" }).bytes : undefined;
+  const validation = imageValidation || { verifyImageEvidence: (input) => verifyImageEvidenceSignature({ ...input,
+    verify: createPinnedRootAttestationVerifier() }) };
+  const dispatch = buildBackendHealthRecoveryDispatch({ sourceSha: values["source-sha"], currentTaskDefinitionArn: values["current-task-definition"], recoveryImageDigest: values["recovery-image-digest"], service: values.service, releaseMode: values["release-mode"], imageAuthorizationBytes, imageValidation: validation, approvalBytes, runtimeConsumabilityBytes, failedRecoveryEvidenceReferenceBytes, databaseCompatibilityReferenceBytes });
   run("gh", dispatch.args, { stdio: "inherit" });
   return { sourceSha: values["source-sha"], bundleTransportSha256: dispatch.bundle.sha256, imageTransportSha256: dispatch.image.sha256, approvalTransportSha256: dispatch.approval.sha256, runtimeTransportSha256: dispatch.runtime.sha256, failedRevisionReferenceTransportSha256: dispatch.failed.sha256, workflowDispatchPayloadCharacters: dispatch.payload.characters, dispatchCount: 1 };
 }

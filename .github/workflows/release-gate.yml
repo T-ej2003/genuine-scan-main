@@ -311,13 +311,15 @@ jobs:
               done
           node --input-type=module - <<'NODE'
           import { decodeBackendHealthRecoveryBundleTransport, parseBackendHealthRecoveryDispatchBundle } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          import { GREEN_BACKEND_RECOVERY_KIND, GREEN_BACKEND_TASK_ARN } from "./scripts/aws/production-green-backend-health-recovery.mjs";
           const bytes = decodeBackendHealthRecoveryBundleTransport(process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64, process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256);
           parseBackendHealthRecoveryDispatchBundle(bytes, process.env.BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256, {
             sourceSha: process.env.SOURCE_SHA,
             currentTaskDefinitionArn: process.env.BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN,
             recoveryImageDigest: process.env.BACKEND_RECOVERY_IMAGE_DIGEST,
             service: "mscqr-backend-servi-euw2",
-            releaseMode: "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
+            releaseMode: GREEN_BACKEND_TASK_ARN.test(process.env.BACKEND_RECOVERY_CURRENT_TASK_DEFINITION_ARN)
+              ? GREEN_BACKEND_RECOVERY_KIND : "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME",
           });
           NODE
               ;;
@@ -1069,7 +1071,7 @@ jobs:
 
       - name: Prepare governed legacy backend health recovery
         id: backend-recovery
-        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
@@ -1147,7 +1149,7 @@ jobs:
           echo "authorization_sha256=$(sha256sum "$authorization_file" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Execute governed legacy backend health recovery
-        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
           GITHUB_ACTOR: ${{ github.actor }}
@@ -1172,6 +1174,47 @@ jobs:
             --authorization-sha256 "${{ steps.backend-recovery.outputs.authorization_sha256 }}" \
             --health-url "${{ env.PUBLIC_BASE_URL }}/api/health/ready" \
             --evidence-out "$RUNNER_TEMP/backend-health-recovery/evidence.json"
+
+      - name: Execute governed green backend health recovery
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
+        env:
+          SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
+          RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
+          RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: ${{ inputs.backend_recovery_evidence_bundle_gzip_base64 }}
+          RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
+          recovery_dir="$RUNNER_TEMP/backend-health-recovery"
+          install -d -m 700 "$recovery_dir"
+          bundle_file="$recovery_dir/dispatch-bundle.json"
+          node --input-type=module - "$bundle_file" <<'NODE'
+          import fs from "node:fs";
+          import { decodeBackendHealthRecoveryBundleTransport } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          fs.writeFileSync(process.argv[2], decodeBackendHealthRecoveryBundleTransport(
+            process.env.RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64, process.env.RECOVERY_EVIDENCE_BUNDLE_SHA256), { flag: "wx", mode: 0o600 });
+          NODE
+          bundle_result="$(node scripts/aws/extract-production-backend-recovery-dispatch-bundle.mjs \
+            --bundle "$bundle_file" --bundle-sha256 "$RECOVERY_EVIDENCE_BUNDLE_SHA256" \
+            --source-sha "$SOURCE_SHA" --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" \
+            --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" --service mscqr-backend-servi-euw2 \
+            --release-mode BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE --output-directory "$recovery_dir")"
+          manifest_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).manifestFile)' "$bundle_result")"
+          component_sha() { node -e 'process.stdout.write(require(process.argv[1]).components[process.argv[2]].sha256)' "$manifest_file" "$1"; }
+          node scripts/aws/recover-production-green-backend-health.mjs \
+            --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" \
+            --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
+            --environment-approval "${{ steps.production-environment-approval.outputs.evidence_file }}" \
+            --environment-approval-sha256 "${{ steps.production-environment-approval.outputs.evidence_sha256 }}" \
+            --image-authorization "$recovery_dir/image-authorization.json" --image-authorization-sha256 "$(component_sha imageAuthorization)" \
+            --approval "$recovery_dir/approval.json" --approval-sha256 "$(component_sha approval)" \
+            --runtime-consumability "$recovery_dir/runtime-consumability.json" --runtime-consumability-sha256 "$(component_sha runtimeConsumability)" \
+            --database-compatibility-reference "$recovery_dir/database-compatibility-reference.json" \
+            --database-compatibility-reference-sha256 "$(component_sha databaseCompatibilityReference)" \
+            --journal-directory "$recovery_dir" --evidence-out "$recovery_dir/evidence.json"
 
       - name: Upload backend health recovery evidence
         if: ${{ always() && inputs.release_mode == 'backend-health-recovery' }}

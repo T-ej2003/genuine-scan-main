@@ -8,6 +8,7 @@ on:
       publication_reference: { description: Compact publication artifact identity JSON, required: true, type: string }
       image_authorization_reference: { description: Compact signed image authorization artifact identity JSON, required: true, type: string }
       requirements_reference: { description: Compact canonical requirements artifact identity JSON, required: true, type: string }
+      unavailable_backend_recovery: { description: Verify an exact missing-image green backend with zero serving tasks, required: false, type: boolean, default: false }
 
 permissions: { contents: read, actions: read }
 
@@ -33,12 +34,13 @@ jobs:
           PUBLICATION_REFERENCE: ${{ inputs.publication_reference }}
           IMAGE_AUTHORIZATION_REFERENCE: ${{ inputs.image_authorization_reference }}
           REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
+          UNAVAILABLE_BACKEND_RECOVERY: ${{ inputs.unavailable_backend_recovery }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import { parseAppOnlyVerifierPreparationArgs } from './scripts/aws/prepare-production-app-only-verifier.mjs';
-          parseAppOnlyVerifierPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--candidate-digest',process.env.CANDIDATE_DIGEST,'--publication-reference',process.env.PUBLICATION_REFERENCE,'--image-authorization-reference',process.env.IMAGE_AUTHORIZATION_REFERENCE,'--requirements-reference',process.env.REQUIREMENTS_REFERENCE]);
+          parseAppOnlyVerifierPreparationArgs(['--source-sha',process.env.SOURCE_SHA,'--candidate-digest',process.env.CANDIDATE_DIGEST,'--publication-reference',process.env.PUBLICATION_REFERENCE,'--image-authorization-reference',process.env.IMAGE_AUTHORIZATION_REFERENCE,'--requirements-reference',process.env.REQUIREMENTS_REFERENCE,...(process.env.UNAVAILABLE_BACKEND_RECOVERY === 'true' ? ['--unavailable-backend-recovery','true'] : [])]);
           NODE
           test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -56,11 +58,14 @@ jobs:
           PUBLICATION_REFERENCE: ${{ inputs.publication_reference }}
           IMAGE_AUTHORIZATION_REFERENCE: ${{ inputs.image_authorization_reference }}
           REQUIREMENTS_REFERENCE: ${{ inputs.requirements_reference }}
+          UNAVAILABLE_BACKEND_RECOVERY: ${{ inputs.unavailable_backend_recovery }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           umask 077
-          result="$(node scripts/aws/prepare-production-app-only-verifier.mjs --source-sha "$SOURCE_SHA" --candidate-digest "$CANDIDATE_DIGEST" --publication-reference "$PUBLICATION_REFERENCE" --image-authorization-reference "$IMAGE_AUTHORIZATION_REFERENCE" --requirements-reference "$REQUIREMENTS_REFERENCE")"
+          args=()
+          if [[ "$UNAVAILABLE_BACKEND_RECOVERY" == true ]]; then args+=(--unavailable-backend-recovery true); fi
+          result="$(node scripts/aws/prepare-production-app-only-verifier.mjs --source-sha "$SOURCE_SHA" --candidate-digest "$CANDIDATE_DIGEST" --publication-reference "$PUBLICATION_REFERENCE" --image-authorization-reference "$IMAGE_AUTHORIZATION_REFERENCE" --requirements-reference "$REQUIREMENTS_REFERENCE" "${args[@]}")"
           printf 'path=%s\n' "$(jq -r .artifactPath <<<"$result")" >> "$GITHUB_OUTPUT"
           jq '{artifactSha256,preparationSha256,predecessorTaskDefinition,predecessorDigest,candidateDigest}' <<<"$result" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4

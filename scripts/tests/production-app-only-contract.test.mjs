@@ -98,6 +98,25 @@ test("preparation and immediate pre-mutation CAS reject concurrent deployments",
   live.service.deployments.push({ id: "ecs-svc/400" });
   assert.throws(() => captureAppOnlyPredecessor(live));
 });
+test("unavailable verifier captures only an exact non-serving green predecessor", () => {
+  const live = fixture();
+  live.service.runningCount = 0;
+  live.tasks = [];
+  assert.throws(() => captureAppOnlyPredecessor(live));
+  const predecessor = captureAppOnlyPredecessor(live, { unavailable: true });
+  assert.equal(predecessor.unavailable, true);
+  assert.equal(predecessor.backendDigest, oldDigest);
+  for (const change of [
+    (value) => { value.service.runningCount = 1; },
+    (value) => { value.service.pendingCount = 1; },
+    (value) => { value.tasks.push({ taskArn: "unexpected" }); },
+    (value) => { value.service.deployments.push({ id: "ecs-svc/200" }); },
+    (value) => { value.service.taskDefinition = arn(15); },
+  ]) {
+    const changed = structuredClone(live); change(changed);
+    assert.throws(() => captureAppOnlyPredecessor(changed, { unavailable: true }));
+  }
+});
 test("rollback is only the recorded predecessor while deployment ownership remains", () => {
   const live = fixture();
   const predecessor = captureAppOnlyPredecessor(live);

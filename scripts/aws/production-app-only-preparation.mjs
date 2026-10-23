@@ -14,12 +14,15 @@ import { collectAppOnlyRuntimeCompatibility } from "./production-app-only-runtim
 import { downloadAppOnlyArtifact } from "./production-app-only-artifacts.mjs";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
+import { assertUnavailableGreenBackend } from "./production-green-backend-health-recovery.mjs";
+import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
+import { exactEcrImageResult } from "./production-ecs-rollback-viability.mjs";
 
 // Read-only composition: expectation files and compatibility reports are never
 // accepted from the caller. Only compact authenticated artifact references enter;
 // IAM/runtime observations are collected afresh under the preparation identity.
 export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDigest, publicationReference,
-  authorizationReference, requirementsReference, repositoryRoot, run, githubRun = createProductionGithubCommandRunner(), onStage = () => {} }) {
+  authorizationReference, requirementsReference, unavailable = false, repositoryRoot, run, githubRun = createProductionGithubCommandRunner(), onStage = () => {} }) {
   assert.equal(typeof run, "function"); assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.equal(requirementsReference.sourceSha, sourceSha);
   const source = () => {
@@ -33,13 +36,30 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
     return typeof value === "string" ? JSON.parse(value) : value;
   };
   const readers = createAppOnlyEcsReaders(run);
-  onStage("ECS_PREDECESSOR");
-  const live = readers.readLive(), predecessor = captureAppOnlyPredecessor(live);
   onStage("IMAGE_AUTHORIZATION");
   const images = authenticateAppOnlyImages({ sourceSha, candidateDigest, publicationReference, authorizationReference, repositoryRoot, run, githubRun });
+  if (unavailable) assert.equal(images.candidateSourceSha, sourceSha, "Unavailable backend verifier requires a current-source signed image");
+  onStage("ECS_PREDECESSOR");
+  const live = readers.readLive();
+  let outageProof;
+  if (unavailable) {
+    const oldDigest = live.definition.containerDefinitions.find(({ name }) => name === APP_ONLY.container)?.image.split("@")[1];
+    let oldImageExists;
+    try { oldImageExists = exactEcrImageResult({ repository: "mscqr-backend", digest: oldDigest,
+      response: aws(["ecr", "describe-images", "--repository-name", "mscqr-backend", "--image-ids", `imageDigest=${oldDigest}`]) }).exists; }
+    catch (error) { oldImageExists = exactEcrImageResult({ repository: "mscqr-backend", digest: oldDigest, error }).exists; }
+    const stoppedTaskFailures = (await collectEcsServiceTasks({ aws, cluster: APP_ONLY.cluster, service: APP_ONLY.service, desiredStatus: "STOPPED" }))
+      .map((task) => ({ ...task, containerReasons: (task.containers || []).map(({ reason }) => reason).filter(Boolean) }));
+    outageProof = assertUnavailableGreenBackend({ service: live.service, currentTaskDefinition: live.definition,
+      currentImageExists: oldImageExists, stoppedTaskFailures, recoveryImageDigest: candidateDigest,
+      replacementImage: { exists: true, immutable: true, signatureValid: true, attestationValid: true,
+        provenanceValid: true, criticalFindings: 0, repository: "mscqr-backend", digest: candidateDigest } }).proof;
+  }
+  const predecessor = captureAppOnlyPredecessor(live, { unavailable });
   onStage("VERIFIER_IMAGE");
   const verifierImage = authenticateProtectedMainBackendImage({ sourceSha, response: aws(["ecr", "describe-images", "--registry-id", APP_ONLY.account,
-    "--region", APP_ONLY.region, "--repository-name", "mscqr-backend", "--image-ids", `imageTag=${sourceSha}-backend-only`]) });
+    "--region", APP_ONLY.region, "--repository-name", "mscqr-backend", "--image-ids", `imageTag=${unavailable ? sourceSha : `${sourceSha}-backend-only`}`]), unavailable });
+  if (unavailable) assert.equal(verifierImage.digest, candidateDigest, "Unavailable verifier must execute the signed recovery image");
   onStage("REQUIREMENTS");
   const requirementArtifact = downloadAppOnlyArtifact({ kind: "requirements", reference: requirementsReference, repositoryRoot, githubRun });
   const requirements = assertAppOnlyRequirements(JSON.parse(requirementArtifact.bytes), { sourceSha, candidateSourceSha: images.candidateSourceSha, repositoryRoot });
@@ -58,9 +78,9 @@ export async function collectAppOnlyVerifierPreparation({ sourceSha, candidateDi
   onStage("VERIFIER_IAM");
   const verifierIam = collectAppOnlyVerifierIamCompatibility({ repositoryRoot, identity, databaseSecretArn: secret.ARN, run });
   onStage("FINAL_CAS");
-  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(readers.readLive())); source();
+  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(readers.readLive(), { unavailable })); source();
   onStage("PREPARATION_BINDING");
-  const preparation = prepareAppOnlyVerifier({ sourceSha, live, images, verifierImage, iam, verifierIam, runtime, requirements, repositoryRoot, databaseSecretArn: secret.ARN });
+  const preparation = prepareAppOnlyVerifier({ sourceSha, live, images, verifierImage, iam, verifierIam, runtime, requirements, repositoryRoot, databaseSecretArn: secret.ARN, unavailable, outageProof });
   return { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation,
     images, verifierImage, iam, verifierIam, runtime, requirements, requirementsReference: structuredClone(requirementsReference) };
 }
@@ -147,15 +167,21 @@ function authenticateHistoricalVerifierInputs({ inputs, sourceSha, live, reposit
 // first come from its canonical collector or authenticated workflow artifact.
 // The deployer consumes only the exact preparation producer's immutable artifact.
 function authenticatePreparationInputs({ sourceSha, live, images, verifierImage, iam, runtime,
-  requirements, repositoryRoot, now = Date.now() }) {
-  const predecessor = captureAppOnlyPredecessor(live);
+  requirements, repositoryRoot, unavailable = false, outageProof, now = Date.now() }) {
+  const predecessor = captureAppOnlyPredecessor(live, { unavailable });
+  if (unavailable) {
+    assert.equal(outageProof?.taskDefinitionArn, predecessor.taskDefinitionArn);
+    assert.equal(outageProof?.deploymentId, predecessor.deploymentId);
+    assert.equal(outageProof?.currentImageDigest, predecessor.backendDigest);
+    assert.equal(outageProof?.recoveryImageDigest, images.candidateDigest);
+  } else assert.equal(outageProof, undefined);
   const { evidenceSha256: imageHash, ...imageBody } = images;
   assert.equal(imageHash, canonicalSha256(imageBody));
   assert.equal(images.kind, "APP_ONLY_AUTHENTICATED_IMAGES"); assert.equal(images.schemaVersion, 1);
   assert.equal(images.sourceSha, sourceSha);
   assert.deepEqual(Object.keys(verifierImage || {}).sort(), ["digest", "sourceSha", "tag"]);
   assert.equal(verifierImage?.sourceSha, sourceSha, "Verifier runtime image is not bound to protected main");
-  assert.equal(verifierImage?.tag, `${sourceSha}-backend-only`, "Verifier runtime image tag is not source-bound");
+  assert.equal(verifierImage?.tag, unavailable ? sourceSha : `${sourceSha}-backend-only`, "Verifier runtime image tag is not source-bound");
   assert.match(verifierImage?.digest || "", /^sha256:[a-f0-9]{64}$/);
   assert.deepEqual(images.sessionRisk, APP_ONLY_SESSION_RISK_CONTRACT, "Session-risk source proof is missing");
   const identity = { sourceSha, candidateSourceSha: images.candidateSourceSha, candidateDigest: images.candidateDigest,
@@ -180,7 +206,7 @@ function authenticatePreparationInputs({ sourceSha, live, images, verifierImage,
 // Registration/launch re-derive the task from these authenticated inputs; no
 // dispatch input can replace its JSON, networking or command.
 export function prepareAppOnlyVerifier(input) {
-  const { sourceSha, live, images, verifierImage, iam, runtime, requirements, repositoryRoot, databaseSecretArn, now = Date.now() } = input;
+  const { sourceSha, live, images, verifierImage, iam, runtime, requirements, repositoryRoot, databaseSecretArn, unavailable = false, outageProof, now = Date.now() } = input;
   const { predecessor, identity, verifierIdentity, imageHash, verifierImageHash } = authenticatePreparationInputs(input);
   assertAppOnlyEvidenceIdentity(input.verifierIam, identity, now);
   assert.equal(input.verifierIam.kind, "APP_ONLY_LIVE_IAM_COMPATIBILITY");
@@ -194,7 +220,7 @@ export function prepareAppOnlyVerifier(input) {
     definitionSha256: canonicalSha256(definition), networkSha256: canonicalSha256(appOnlyVerifierNetwork()),
     databaseSecretArn, verificationContractSha256,
     evidence: { images: imageHash, verifierImage: verifierImageHash, iam: iam.evidenceSha256, verifierIam: input.verifierIam.evidenceSha256, runtime: runtime.evidenceSha256, requirements: requirements.requirementsSha256 },
-    eligible: false };
+    eligible: false, ...(unavailable ? { unavailable: true, outageProof } : {}) };
   // Also reject an unusable backend candidate before requesting production work.
   buildAppOnlyCandidate(live.definition, images.candidateDigest);
   return { ...body, preparationSha256: canonicalSha256(body) };
@@ -212,8 +238,9 @@ export function authenticateAppOnlyVerifierInputs({ inputs, sourceSha, live, rep
   assert.equal(approved.sourceSha, sourceSha);
   const age = now - Date.parse(approved.generatedAt);
   assert.ok(Number.isFinite(age) && age >= 0 && age <= APP_ONLY.maxEvidenceAgeMs, "Stale verifier producer artifact");
-  assertAppOnlyCas(approved.predecessor, captureAppOnlyPredecessor(live));
-  const actual = prepareAppOnlyVerifier({ ...inputs, sourceSha, live, repositoryRoot, databaseSecretArn: approved.databaseSecretArn, now });
+  assertAppOnlyCas(approved.predecessor, captureAppOnlyPredecessor(live, { unavailable: approved.unavailable === true }));
+  const actual = prepareAppOnlyVerifier({ ...inputs, sourceSha, live, repositoryRoot, databaseSecretArn: approved.databaseSecretArn,
+    unavailable: approved.unavailable === true, outageProof: approved.outageProof, now });
   const { preparationSha256: recomputed, ...body } = actual; void recomputed;
   body.generatedAt = approved.generatedAt;
   assert.deepEqual(body, approved, "Verifier producer closure was substituted");

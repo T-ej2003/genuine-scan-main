@@ -13,18 +13,18 @@ const nativeServiceResult=service=>{
   propagateTags:service.propagateTags||null};
 };
 
-export async function journalEcsRegistration({store,operationId,intent,register,list,verify}={}){
+export async function journalEcsRegistration({store,operationId,intent,register,list,verify,phase='FRONTEND:REGISTER',dispatchIntent=intent,verifyDispatch,beforeDispatch}={}){
  assert.equal(typeof store?.claimOperation,'function');
  for(const fn of [register,list,verify])assert.equal(typeof fn,'function');
  assert.match(operationId||'',/^[a-f0-9]{64}$/);
  assert.equal(intent?.operationId,operationId);
- const phase='FRONTEND:REGISTER';
+ assert.match(phase,/^(BACKEND|FRONTEND):REGISTER$/);
  const old=await store.readOperation(operationId,`${phase}:INTENT`);
  if(old)equal(old,intent,'Frontend registration intent');
  else await store.writeOperation(operationId,`${phase}:INTENT`,intent);
  equal(await store.readOperation(operationId,`${phase}:INTENT`),intent,'Frontend registration intent readback');
  const dispatch=await store.readOperation(operationId,`${phase}:DISPATCH`);
- if(dispatch)equal(dispatch,intent,'Frontend registration dispatch');
+ if(dispatch)verifyDispatch?await verifyDispatch(dispatch):equal(dispatch,intent,'Frontend registration dispatch');
  const complete=await store.readOperation(operationId,`${phase}:COMPLETED`);
  if(complete){assert.ok(dispatch,'CONFLICTED: frontend completion has no native dispatch');equal(complete.intent,intent,'Frontend registration completion');await verify(complete.taskDefinitionArn);return {taskDefinitionArn:complete.taskDefinitionArn,reused:true};}
  const matches=await list(operationId);
@@ -38,8 +38,9 @@ export async function journalEcsRegistration({store,operationId,intent,register,
   return {taskDefinitionArn:matches[0],reused:true};
  }
  if(dispatch)throw new Error('OUTCOME_UNKNOWN: frontend registration dispatched without a uniquely authenticated revision');
- assert.equal(await store.claimOperation(operationId,`${phase}:DISPATCH`,intent),true,'Frontend registration has another owner');
- equal(await store.readOperation(operationId,`${phase}:DISPATCH`),intent,'Frontend registration dispatch readback');
+ if(beforeDispatch)await beforeDispatch();
+ assert.equal(await store.claimOperation(operationId,`${phase}:DISPATCH`,dispatchIntent),true,'Frontend registration has another owner');
+ equal(await store.readOperation(operationId,`${phase}:DISPATCH`),dispatchIntent,'Frontend registration dispatch readback');
  const response=await register();
  const arn=response?.taskDefinition?.taskDefinitionArn||response?.taskDefinitionArn;
  await verify(arn);
@@ -50,7 +51,7 @@ export async function journalEcsRegistration({store,operationId,intent,register,
 }
 
 export async function journalEcsServiceUpdate({store,operationId,phase,intent,read,update,verify,
- isTarget=service=>service?.taskDefinition===intent.targetTaskDefinitionArn,
+ dispatchIntent=intent,verifyDispatch,beforeDispatch,isTarget=service=>service?.taskDefinition===intent.targetTaskDefinitionArn,
  isSource=service=>service?.taskDefinition===intent.sourceTaskDefinitionArn,
  allowPriorTarget=false}={}){
  assert.equal(typeof store?.claimOperation,'function');
@@ -64,7 +65,7 @@ export async function journalEcsServiceUpdate({store,operationId,phase,intent,re
  equal(await store.readOperation(operationId,`${phase}:INTENT`),intent,'ECS update intent readback');
  const completed=await store.readOperation(operationId,`${phase}:COMPLETED`);
  const dispatch=await store.readOperation(operationId,`${phase}:DISPATCH`);
- if(dispatch)equal(dispatch,intent,'ECS update dispatch');
+ if(dispatch)verifyDispatch?await verifyDispatch(dispatch):equal(dispatch,intent,'ECS update dispatch');
  if(completed){assert.ok(dispatch,'CONFLICTED: ECS completion has no native dispatch');equal(completed.intent,intent,'ECS update completion');}
  const current=await read();
  if(isTarget(current)&&(dispatch||completed)){
@@ -81,8 +82,9 @@ export async function journalEcsServiceUpdate({store,operationId,phase,intent,re
  if(!isSource(current))throw new Error('CONFLICTED: ECS service is neither the exact source nor target');
  if(dispatch)throw new Error('OUTCOME_UNKNOWN: ECS update dispatched but target is not stably authenticated');
  await verify(current,'source');
- assert.equal(await store.claimOperation(operationId,`${phase}:DISPATCH`,intent),true,'ECS update has another owner');
- equal(await store.readOperation(operationId,`${phase}:DISPATCH`),intent,'ECS update dispatch readback');
+ if(beforeDispatch)await beforeDispatch();
+ assert.equal(await store.claimOperation(operationId,`${phase}:DISPATCH`,dispatchIntent),true,'ECS update has another owner');
+ equal(await store.readOperation(operationId,`${phase}:DISPATCH`),dispatchIntent,'ECS update dispatch readback');
  await update();
  const after=await read();
  assert.ok(isTarget(after),'OUTCOME_UNKNOWN: ECS update target is not active');

@@ -238,6 +238,9 @@ test("verifier preparation accepts compact authenticated identities only on exac
   const env = { GITHUB_ACTIONS: "true", GITHUB_REPOSITORY: "T-ej2003/genuine-scan-main", GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_REF: "refs/heads/main", GITHUB_SHA: source,
     GITHUB_WORKFLOW_REF: "T-ej2003/genuine-scan-main/.github/workflows/prepare-production-app-only-verifier.yml@refs/heads/main" };
   assert.equal(parseAppOnlyVerifierPreparationArgs(args, env).publicationReference.artifactId, "34");
+  assert.equal(parseAppOnlyVerifierPreparationArgs(args, env).unavailable, false);
+  assert.equal(parseAppOnlyVerifierPreparationArgs([...args, "--unavailable-backend-recovery", "true"], env).unavailable, true);
+  assert.throws(() => parseAppOnlyVerifierPreparationArgs([...args, "--unavailable-backend-recovery", "false"], env));
   assert.ok(JSON.stringify(args).length < 2048);
   for (const field of Object.keys(env)) assert.throws(() => parseAppOnlyVerifierPreparationArgs(args, { ...env, [field]: "wrong" }), field);
   for (const replacement of ["x".repeat(2049), "null", "{}", JSON.stringify({ ...JSON.parse(reference), extractionRoot: "/tmp/attacker" }), reference.replace('"12"', '"0"'), reference.replace('"34"', '"$(id)"')]) {

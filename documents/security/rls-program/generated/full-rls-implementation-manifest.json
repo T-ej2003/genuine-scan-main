@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "b99f691422c1c02910c759616f247482641193de7fa096b59a5fcc2ac938e906",
+  "sourceContractSha256": "bc5ce9fb98dd528cac546135dacf2e2e23d048dc7777f364184918d837a173ba",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -276,7 +276,7 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "61f1c7699119b7cd73021902026d3074349ce640668b440411e7c7bdf3251885"
+      "sha256": "b64ff39a64d331d3c7de3df8043fe28bb11ba26df0b943ba3b6d25763e2db93c"
     },
     {
       "path": ".github/workflows/release-train.yml",
@@ -408,7 +408,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:b99f691422c1c02910c759616f247482641193de7fa096b59a5fcc2ac938e906",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:bc5ce9fb98dd528cac546135dacf2e2e23d048dc7777f364184918d837a173ba",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

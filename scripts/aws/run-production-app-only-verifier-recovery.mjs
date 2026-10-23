@@ -80,7 +80,8 @@ async function main() {
   const authorization = () => {
     source(); assertProductionEnvironmentApprovalEvidence(approval, context);
     assertProductionEnvironmentActualReviewer(approval, context);
-    assertAppOnlyCas(inputs.preparation.predecessor, captureAppOnlyPredecessor(createAppOnlyEcsReaders(run).readLive()));
+    assertAppOnlyCas(inputs.preparation.predecessor, captureAppOnlyPredecessor(createAppOnlyEcsReaders(run).readLive(),
+      { unavailable: inputs.preparation.unavailable === true }));
   };
   const previousApprovals = JSON.parse(githubRun("gh", ["api", `repos/${repository}/actions/runs/${options.journal.runId}/approvals`]));
   assert.ok(previousApprovals.some(({ state, environments, user }) => state === "approved"

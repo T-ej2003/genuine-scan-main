@@ -22,6 +22,11 @@ name: Prepare production app-only compatibility verifier
         description: Compact canonical requirements artifact identity JSON
         required: true
         type: string
+      unavailable_backend_recovery:
+        description: Verify an exact missing-image green backend with zero serving tasks
+        required: false
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -39,3 +44,4 @@ jobs:
       publication_reference: ${{ inputs.publication_reference }}
       image_authorization_reference: ${{ inputs.image_authorization_reference }}
       requirements_reference: ${{ inputs.requirements_reference }}
+      unavailable_backend_recovery: ${{ inputs.unavailable_backend_recovery }}

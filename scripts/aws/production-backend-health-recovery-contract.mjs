@@ -663,7 +663,7 @@ function legacyFailedDeploymentProof(service, stoppedTaskFailures, taskDefinitio
   });
 }
 
-function exactMissingImageFailureProof({ service, stoppedTaskFailures, taskDefinitionArn, currentImageDigest, currentImageExists, replacementImage, recoveryImageDigest }) {
+export function exactMissingImageFailureProof({ service, stoppedTaskFailures, taskDefinitionArn, currentImageDigest, currentImageExists, replacementImage, recoveryImageDigest }) {
   const expectedServiceArn = `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:service/${BACKEND_HEALTH_RECOVERY.cluster}/${BACKEND_HEALTH_RECOVERY.service}`;
   if (service?.serviceArn !== expectedServiceArn
     || service?.clusterArn !== `arn:aws:ecs:${BACKEND_HEALTH_RECOVERY.region}:${BACKEND_HEALTH_RECOVERY.account}:cluster/${BACKEND_HEALTH_RECOVERY.cluster}`

@@ -12,7 +12,8 @@ export function extractProductionBackendRecoveryDispatchBundle({ bundleFile, bun
   const bundle = readStageBPrivateFileBytes({ filePath: path.resolve(bundleFile), repositoryRoot: root, label: "Recovery dispatch bundle" });
   if (bundle.sha256 !== bundleSha256) throw new Error("Recovery dispatch bundle file changed before extraction.");
   const parsed = parseBackendHealthRecoveryDispatchBundle(bundle.bytes, bundleSha256, expected);
-  const names = { imageAuthorization: "image-authorization.json", approval: "approval.json", runtimeConsumability: "runtime-consumability.json", failedRecoveryEvidenceReference: "failed-recovery-evidence-reference.json" };
+  const names = { imageAuthorization: "image-authorization.json", approval: "approval.json", runtimeConsumability: "runtime-consumability.json", failedRecoveryEvidenceReference: "failed-recovery-evidence-reference.json",
+    ...(parsed.components.databaseCompatibilityReference ? { databaseCompatibilityReference: "database-compatibility-reference.json" } : {}) };
   const files = Object.entries(names).map(([name, filename]) => ({ filePath: path.join(outputDirectory, filename), bytes: parsed.components[name].bytes, label: `Recovery ${name}` }));
   const manifest = { schemaVersion: 1, kind: "BACKEND_HEALTH_RECOVERY_EXTRACTED_COMPONENTS", bundleSha256, components: Object.fromEntries(Object.entries(names).map(([name, filename]) => [name, { file: path.join(outputDirectory, filename), sha256: parsed.components[name].sha256 }])) };
   const manifestFile = path.join(outputDirectory, "bundle-manifest.json");
