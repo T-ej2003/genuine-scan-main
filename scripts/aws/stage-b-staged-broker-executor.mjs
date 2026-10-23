@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { STAGE_B, canonicalJson } from './production-green-stage-b-contract.mjs';
+import { STAGE_B, canonicalJson, assertStageBBrokerLambdaConfiguration } from './production-green-stage-b-contract.mjs';
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_STATE_REFRESH, brokerExecutionCheckout, assertBrokerOutputReconciliation, assertBrokerSuccessorReconciliation, BROKER_ALIAS, BROKER_FUNCTION, brokerDigest, brokerStateReservation, brokerAliasIdentity, brokerTargetIdentity, assertBrokerImageReuseCompatibility, assertBrokerAuthorization, assertBrokerPublicationPlan, assertBrokerRefreshPlan, assertRegistrationHandoff, assertHistoricalPolicyRegistrationHandoff, assertTerminalPolicyHandoff, assertTerminalPolicySuccessorState, createTerminalPolicySuccessorAdoption, assertReceiptBoundRegistrationAdoption, assertReceiptBoundRegistrationPredecessorReceipts, assertReceiptBoundPolicyAdoption, assertReceiptBoundRegistrationReceipts, assertReceiptBoundPolicyReceipts, assertPrepublicationRegistrationPredecessor, assertSamePrepublicationRegistrationPredecessor, assertBrokerPreparation, PREPUBLICATION_POLICY_OPERATIONS, registrationPolicyPredecessorRelease, assertPolicyPruningHandoff } from './stage-b-staged-broker-contract.mjs';
 import { assertStageBTfvarsBinding } from './generate-production-green-stage-b-tfvars.mjs';
 import { assertImageEvidence, assertImageEvidenceReuseBridge, verifyImageEvidenceSignature, imageEvidenceSha256 } from './production-green-stage-b-image-evidence.mjs';
@@ -1263,8 +1263,10 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       assert.ok(Number.isSafeInteger(Date.parse(intent.authorizedAt)));
       assert.equal(brokerDigest(bytes), preparation.savedPlanSha256); assert.ok(bytes.equals(fs.readFileSync(planPath)));
       assert.equal(currentArtifactSet(), preparation.artifactSetSha256);
-      assertBrokerPublicationPlan(JSON.parse(terraform(['show', '-json', planPath])), preparation);
+      const plan = JSON.parse(terraform(['show', '-json', planPath]));
+      assertBrokerPublicationPlan(plan, preparation);
       if (phase === 'PUBLICATION_RECOVERY') assert.equal(publicationPreDispatchAuthenticated, true, 'Pre-dispatch native proof is required');
+      await adapter.authenticatePublicationPreDispatchState(plan);
       consumeMutation(id);
       publicationPreDispatchAuthenticated = false;
       const dispatch = { kind: 'STAGED_BROKER_PUBLICATION_DISPATCH', authorizationSha256: id,
@@ -1533,20 +1535,32 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     },
     authenticatePublicationRecoveryState: async plan => adapter.authenticateRegistrationState(plan),
     authenticatePublicationPreDispatchState: async plan => {
-      assert.equal(phase, 'PUBLICATION_RECOVERY');
+      assert.ok(['PUBLICATION', 'PUBLICATION_RECOVERY'].includes(phase));
       assert.ok(ownedReservations.has(brokerDigest(authorization)), 'Publication recovery intent is not authenticated');
       assert.equal(brokerDigest(plan), preparation.logicalPlanSha256); assertBrokerPublicationPlan(plan, preparation);
       const prior = plan.prior_state?.values?.root_module;
       const current = JSON.parse(terraform(['show', '-json'])).values?.root_module;
       assert.ok(prior && current); equal(current, prior, 'Terraform publication predecessor changed');
+      equal(brokerAliasIdentity(await adapter.getAlias()), preparation.alias, 'Reviewed broker alias changed before publication dispatch');
       const state = stateResource(BROKER_FUNCTION);
       const latest = json(['lambda', 'get-function-configuration', '--function-name', STAGE_B.brokerFunctionArn]);
-      assert.equal(latest.Version, '$LATEST');
+      assert.equal(latest.State, 'Active', 'Broker Lambda is not active before publication dispatch');
+      assert.equal(latest.LastUpdateStatus, 'Successful', 'Broker Lambda update is not complete before publication dispatch');
+      const live = assertStageBBrokerLambdaConfiguration({ configuration: latest, latest: true,
+        brokerPackageRawSha256: Buffer.from(state.code_sha256, 'base64').toString('hex') });
+      assert.ok(live.configuration.RuntimeVersionConfig?.RuntimeVersionArn, 'Missing broker Lambda runtime identity before publication dispatch');
       assert.equal(latest.CodeSha256, state.code_sha256, 'Broker latest code differs from Terraform predecessor');
       assert.equal(latest.LastModified, state.last_modified, 'Broker latest configuration changed after Terraform predecessor');
       equal(latest.Environment?.Variables, state.environment?.[0]?.variables, 'Broker latest configuration differs from Terraform predecessor');
-      const versions = json(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn]).Versions;
+      const inventory = json(['lambda', 'list-versions-by-function', '--function-name', STAGE_B.brokerFunctionArn]);
+      assert.ok(!inventory.NextMarker && !inventory.NextToken && !inventory.Marker && !inventory.IsTruncated,
+        'Incomplete broker Lambda version inventory before publication dispatch');
+      const versions = inventory.Versions;
       assert.ok(Array.isArray(versions) && versions.length > 0);
+      assert.equal(versions.filter(v => v.Version === '$LATEST').length, 1);
+      assert.ok(versions.every(v => v.Version === '$LATEST' || /^[1-9][0-9]*$/.test(v.Version)),
+        'Broker version inventory contains an unknown version');
+      assert.equal(new Set(versions.map(v => v.Version)).size, versions.length, 'Duplicate broker version inventory');
       const published = versions.filter(v => /^[1-9][0-9]*$/.test(v.Version));
       assert.ok(published.some(v => v.Version === preparation.alias.FunctionVersion));
       assert.ok(published.every(v => BigInt(v.Version) <= BigInt(preparation.alias.FunctionVersion)), 'An unbound broker version exists');

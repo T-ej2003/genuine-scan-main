@@ -40,7 +40,7 @@ test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects id
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
 let files;
-async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicationPriorState = false } = {}) {
+async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicationPriorState = phase === 'PUBLICATION' } = {}) {
   if (!files) {
     const publication = preparation(), archive = path.join(directory, 'broker.zip');
     await packageStageBBroker({ outputPath: archive, toolingSha: sourceSha, toolingTreeSha256: publication.treeSha256, repositoryRoot: root });
@@ -64,12 +64,16 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
   if (phase !== 'PUBLICATION') { p.publication.authorizationSha256 = brokerDigest(pubAuth); p.publication.preparationSha256 = brokerDigest(source); p.publication.savedPlanSha256 = source.savedPlanSha256; p.publication.authorizedAt = now.toISOString(); }
   const auth = authorization(p); auth.issuedAt = new Date(now.getTime()-1000).toISOString(); auth.expiresAt = new Date(now.getTime()+600000).toISOString();
   const calls = [], objects = new Map();
+  if (publicationPriorState) objects.set(STAGE_B_TERRAFORM_BACKEND.stateKey, Buffer.from(JSON.stringify({ resources: [{
+    mode:'managed',type:'aws_lambda_function',name:'broker',instances:[{attributes:{
+      code_sha256:raw.CodeSha256,last_modified:plan.resource_changes[0].change.before.last_modified,
+      environment:plan.resource_changes[0].change.before.environment}}]}] })));
   if (phase !== 'PUBLICATION') {
     objects.set(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_SOURCE', sourceSha, preparation:source, authorization:pubAuth })));
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
   let mode = 'success', currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
-  let currentShow;
+  let currentShow = publicationPriorState ? { values: { root_module: structuredClone(plan.prior_state.values.root_module) } } : undefined;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
     calls.push({ command, args, options });
@@ -99,10 +103,21 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
       return '{}';
     }
     assert.equal(args[0], 'lambda');
-    if (args[1] === 'get-alias') return JSON.stringify(currentAlias);
-    if (args[1] === 'get-function-configuration') return JSON.stringify({Version:'$LATEST',CodeSha256:mode==='latest-conflict'?'wrong':raw.CodeSha256,
-      LastModified:plan.resource_changes[0].change.before.last_modified,
-      Environment:{Variables:plan.resource_changes[0].change.before.environment[0].variables}});
+    if (args[1] === 'get-alias') return JSON.stringify(mode==='alias-conflict'?{...currentAlias,RevisionId:'concurrent-update'}:currentAlias);
+    if (args[1] === 'get-function-configuration') {
+      const latest = { ...raw, FunctionArn: STAGE_B.brokerFunctionArn, Version:'$LATEST',
+        CodeSha256:mode==='latest-conflict'?'wrong':raw.CodeSha256,
+        LastModified:plan.resource_changes[0].change.before.last_modified,
+        Environment:{Variables:mode==='latest-env-conflict'?{}:plan.resource_changes[0].change.before.environment[0].variables},
+        State:mode==='lambda-inactive'?'Inactive':mode==='lambda-failed'?'Failed':mode==='lambda-pending'?'Pending':'Active',
+        LastUpdateStatus:mode==='lambda-updating'?'InProgress':mode==='lambda-update-failed'?'Failed':'Successful' };
+      if (mode==='lambda-missing-state') delete latest.State;
+      if (mode==='lambda-missing-update') delete latest.LastUpdateStatus;
+      if (mode==='lambda-missing-runtime') delete latest.RuntimeVersionConfig;
+      if (mode==='latest-identity-conflict') latest.FunctionArn += ':wrong';
+      if (mode==='latest-version-conflict') latest.Version = p.alias.FunctionVersion;
+      return JSON.stringify(latest);
+    }
     if (args[1] === 'list-versions-by-function') return JSON.stringify({Versions:[{Version:'$LATEST'},
       {Version:p.alias.FunctionVersion},...(mode==='unbound-version'?[{Version:String(BigInt(p.alias.FunctionVersion)+1n)}]:[])]});
     assert.equal(args[1], 'update-alias'); assert.equal(options.env.AWS_MAX_ATTEMPTS, '1'); assert.equal(value('--revision-id'), alias.RevisionId); assert.equal(value('--function-version'), p.target.version);
@@ -418,6 +433,29 @@ test('pre-dispatch publication recovery requires unchanged Terraform and Lambda 
  r.setMode('unbound-version');await assert.rejects(()=>adapter.authenticatePublicationPreDispatchState(plan));
  r.setMode('success');r.setShow({values:{root_module:{resources:[{...resource,values:{...before,role:'unexpected'}}]}}});
  await assert.rejects(()=>adapter.authenticatePublicationPreDispatchState(plan));
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
+});
+for (const mode of ['lambda-inactive','lambda-failed','lambda-pending','lambda-updating','lambda-update-failed',
+  'lambda-missing-state','lambda-missing-update','lambda-missing-runtime','latest-conflict','latest-env-conflict','latest-identity-conflict','latest-version-conflict','alias-conflict']) {
+ test(`publication rejects ${mode} before a durable dispatch claim`,async()=>{
+  const r=await native('PUBLICATION'),id=brokerDigest(r.auth);
+  await r.adapter.reserve(id,{purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)});
+  await r.adapter.record(id,'PUBLICATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256,authorizedAt:new Date().toISOString(),dispatchContractVersion:1});
+  r.setMode(mode);await assert.rejects(()=>r.adapter.applyPublication(r.binary));
+  assert.equal(await r.adapter.readPublicationDispatch(id),null);
+  assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
+ });
+}
+test('Lambda readiness changing between recovery proof and dispatch leaves the claim absent',async()=>{
+ const r=await native('PUBLICATION'),id=brokerDigest(r.auth);
+ await r.adapter.reserve(id,{purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)});
+ await r.adapter.record(id,'PUBLICATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256,authorizedAt:new Date().toISOString(),dispatchContractVersion:1});
+ const recovery=r.makeAdapter('PUBLICATION_RECOVERY');
+ await recovery.authenticateRecoveryIntent('PUBLICATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});
+ await recovery.authenticatePublicationPreDispatchState((await recovery.readPlan()).plan);
+ r.setMode('lambda-updating');
+ await assert.rejects(()=>recovery.applyPublication(r.binary),/not complete/);
+ assert.equal(await recovery.readPublicationDispatch(id),null);
  assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
 });
 for (const action of ['lambda:InvokeAsync', 'lambda:Invoke*', '*']) test(`alternate invocation authority ${action} cannot expose latest`, () => {

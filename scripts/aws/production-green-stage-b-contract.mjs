@@ -394,10 +394,17 @@ function assertStageBBrokerLambdaDefaults(configuration, expected) {
   return normalizeStageBBrokerRuntimeVersionConfig(configuration.RuntimeVersionConfig);
 }
 
-export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256, publishedVersion } = {}) {
+export function assertStageBBrokerLambdaConfiguration({ configuration, alias, brokerPackageRawSha256, publishedVersion, latest = false } = {}) {
   assertStageBBrokerLambdaResponseShape(configuration);
   let broker;
-  if (publishedVersion !== undefined) {
+  if (latest) {
+    if (alias !== undefined || publishedVersion !== undefined || configuration.Version !== '$LATEST'
+        || configuration.FunctionArn !== STAGE_B.brokerFunctionArn) {
+      throw new Error('Latest broker configuration requires the exact unqualified function identity.');
+    }
+    broker = { functionArn: STAGE_B.brokerFunctionArn, configurationFunctionArn: configuration.FunctionArn,
+      configurationVersion: '$LATEST', resolvedVersionArn: configuration.FunctionArn };
+  } else if (publishedVersion !== undefined) {
     if (alias !== undefined || !/^[1-9][0-9]*$/.test(publishedVersion)
         || configuration.Version !== publishedVersion
         || configuration.FunctionArn !== `${STAGE_B.brokerFunctionArn}:${publishedVersion}`) {
