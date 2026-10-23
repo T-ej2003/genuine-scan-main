@@ -40,7 +40,7 @@ test('receipt recovery pins exact versioned Stage-B receipt bytes and rejects id
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'staged-broker-native-test-')); fs.chmodSync(directory, 0o700);
 test.after(() => fs.rmSync(directory, { recursive: true }));
 let files;
-async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicationPriorState = phase === 'PUBLICATION' } = {}) {
+async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicationPriorState = phase === 'PUBLICATION', authorizationExpiresInMs = 600000 } = {}) {
   if (!files) {
     const publication = preparation(), archive = path.join(directory, 'broker.zip');
     await packageStageBBroker({ outputPath: archive, toolingSha: sourceSha, toolingTreeSha256: publication.treeSha256, repositoryRoot: root });
@@ -62,7 +62,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
   const source = preparation(); source.packageSha256 = p.packageSha256; source.savedPlanSha256 = brokerDigest(binary); source.logicalPlanSha256 = brokerDigest(plan); source.artifactSetSha256 = p.artifactSetSha256;
   const pubAuth = authorization(source); pubAuth.issuedAt = new Date(now.getTime()-1000).toISOString(); pubAuth.expiresAt = new Date(now.getTime()+600000).toISOString();
   if (phase !== 'PUBLICATION') { p.publication.authorizationSha256 = brokerDigest(pubAuth); p.publication.preparationSha256 = brokerDigest(source); p.publication.savedPlanSha256 = source.savedPlanSha256; p.publication.authorizedAt = now.toISOString(); }
-  const auth = authorization(p); auth.issuedAt = new Date(now.getTime()-1000).toISOString(); auth.expiresAt = new Date(now.getTime()+600000).toISOString();
+  const auth = authorization(p); auth.issuedAt = new Date(now.getTime()-1000).toISOString(); auth.expiresAt = new Date(now.getTime()+authorizationExpiresInMs).toISOString();
   const calls = [], objects = new Map();
   if (publicationPriorState) objects.set(STAGE_B_TERRAFORM_BACKEND.stateKey, Buffer.from(JSON.stringify({ resources: [{
     mode:'managed',type:'aws_lambda_function',name:'broker',instances:[{attributes:{
@@ -72,7 +72,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
     objects.set(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_SOURCE', sourceSha, preparation:source, authorization:pubAuth })));
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
-  let mode = 'success', currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
+  let mode = 'success', kmsVerifications = 0, currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
   let currentShow = publicationPriorState ? { values: { root_module: structuredClone(plan.prior_state.values.root_module) } } : undefined;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
@@ -93,7 +93,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
     }
     assert.equal(command, 'aws');
     const value = name => args[args.indexOf(name)+1];
-    if (args[0] === 'kms') { assert.equal(args[1], 'verify'); return JSON.stringify({ SignatureValid: true }); }
+    if (args[0] === 'kms') { assert.equal(args[1], 'verify'); if (mode === 'slow-final-kms' && ++kmsVerifications === 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2200); return JSON.stringify({ SignatureValid: mode !== 'invalid-kms' }); }
     if (args[0] === 's3api') {
       const key = value('--key');
       if (args[1] === 'put-object') { assert.equal(value('--if-none-match'), '*'); if (objects.has(key)) throw Object.assign(new Error('Occupied'),{stderr:'PreconditionFailed (412)'}); objects.set(key, fs.readFileSync(value('--body'))); }
@@ -105,6 +105,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
     assert.equal(args[0], 'lambda');
     if (args[1] === 'get-alias') return JSON.stringify(mode==='alias-conflict'?{...currentAlias,RevisionId:'concurrent-update'}:currentAlias);
     if (args[1] === 'get-function-configuration') {
+      if (mode === 'slow-lambda') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2200);
       const latest = { ...raw, FunctionArn: STAGE_B.brokerFunctionArn, Version:'$LATEST',
         CodeSha256:mode==='latest-conflict'?'wrong':raw.CodeSha256,
         LastModified:plan.resource_changes[0].change.before.last_modified,
@@ -128,7 +129,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
   const makeAdapter = (selectedPhase=phase, selectedAuth=auth, operation, environment={}) => createStagedBrokerExecutor({ phase:selectedPhase, operation, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default',...environment }, exec });
   const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
-  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; }, setAlias: v => { currentAlias=v; } };
+  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; kmsVerifications=0; }, getKmsVerifications:()=>kmsVerifications, setAlias: v => { currentAlias=v; } };
 }
 async function reserve(r) {
   const id = brokerDigest(r.auth);
@@ -415,6 +416,42 @@ test('authenticated pre-dispatch recovery may apply once while approval is fresh
  assert.ok(await recovery.readPublicationDispatch(id));
  await assert.rejects(()=>recovery.applyPublication(r.binary));
  assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,1);
+});
+async function publicationRecovery(expiresInMs = 600000) {
+ const r=await native('PUBLICATION',{publicationPriorState:true,authorizationExpiresInMs:expiresInMs}),id=brokerDigest(r.auth);
+ await r.adapter.reserve(id,{purpose:r.p.purpose,nonce:r.auth.nonce,preparationSha256:brokerDigest(r.p)});
+ await r.adapter.record(id,'PUBLICATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256,authorizedAt:new Date().toISOString(),dispatchContractVersion:1});
+ const recovery=r.makeAdapter('PUBLICATION_RECOVERY');
+ await recovery.authenticateRecoveryIntent('PUBLICATION_INTENT',{savedPlanSha256:r.p.savedPlanSha256});
+ await recovery.authenticatePublicationPreDispatchState((await recovery.readPlan()).plan);
+ return {r,id,recovery};
+}
+async function assertNoPublicationDispatch({r,id,recovery},match) {
+ await assert.rejects(()=>recovery.applyPublication(r.binary),match);
+ assert.equal(await recovery.readPublicationDispatch(id),null);
+ assert.equal(r.calls.filter(c=>c.command==='terraform'&&c.args.includes('apply')).length,0);
+}
+test('expired recovery approval cannot publish despite an authenticated historical intent',async()=>{
+ const context=await publicationRecovery(2000);
+ await new Promise(resolve=>setTimeout(resolve,2100));
+ await assertNoPublicationDispatch(context,/Approval expired\/invalid/);
+});
+test('approval expiring during native predecessor checks cannot claim publication dispatch',async()=>{
+ const context=await publicationRecovery(2000);
+ context.r.setMode('slow-lambda');
+ await assertNoPublicationDispatch(context,/Approval expired\/invalid/);
+ assert.ok(context.r.calls.some(c=>c.args[1]==='get-function-configuration'));
+});
+test('approval expiring during signature verification cannot claim publication dispatch',async()=>{
+ const context=await publicationRecovery(2000);
+ context.r.setMode('slow-final-kms');
+ await assertNoPublicationDispatch(context,/Approval expired/);
+ assert.equal(context.r.getKmsVerifications(),3);
+});
+test('recovery rechecks the signed authorization at dispatch and rejects invalid signature',async()=>{
+ const context=await publicationRecovery();
+ context.r.setMode('invalid-kms');
+ await assertNoPublicationDispatch(context,/Authorization is not independently authenticated/);
 });
 test('pre-dispatch publication recovery requires unchanged Terraform and Lambda predecessors',async()=>{
  const r=await native('PUBLICATION',{publicationPriorState:true}),id=brokerDigest(r.auth),adapter=r.makeAdapter('PUBLICATION_RECOVERY');

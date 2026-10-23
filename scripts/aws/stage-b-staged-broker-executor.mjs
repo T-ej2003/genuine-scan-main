@@ -1256,7 +1256,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     },
     applyPublication: async bytes => {
       assert.ok(['PUBLICATION', 'PUBLICATION_RECOVERY'].includes(phase)); assert.equal(preparation.purpose, BROKER_PUBLICATION);
-      const id = phase === 'PUBLICATION' ? await requireAuthorization(BROKER_PUBLICATION) : brokerDigest(authorization);
+      const id = await requireAuthorization(BROKER_PUBLICATION);
       const intent = readReceipt(id, 'PUBLICATION_INTENT');
       assert.equal(intent.dispatchContractVersion, 1, 'Legacy publication intent cannot be dispatched by the new contract');
       assert.equal(intent.savedPlanSha256, preparation.savedPlanSha256);
@@ -1267,6 +1267,8 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       assertBrokerPublicationPlan(plan, preparation);
       if (phase === 'PUBLICATION_RECOVERY') assert.equal(publicationPreDispatchAuthenticated, true, 'Pre-dispatch native proof is required');
       await adapter.authenticatePublicationPreDispatchState(plan);
+      assert.equal(await requireAuthorization(BROKER_PUBLICATION), id, 'Publication authorization changed before dispatch');
+      assert.equal(await assertBrokerAuthorization(authorization, preparation, { verify: kms.verify }), id);
       consumeMutation(id);
       publicationPreDispatchAuthenticated = false;
       const dispatch = { kind: 'STAGED_BROKER_PUBLICATION_DISPATCH', authorizationSha256: id,
