@@ -41,11 +41,11 @@ export async function executeBrokerPublication({ preparation, authorization }, d
   // Reservation failure is fatal, and the durable intent precedes Terraform reachability.
   await deps.reserve(authorizationSha256, { purpose: p.purpose, nonce: auth.nonce, preparationSha256: brokerDigest(p) });
   const authorizedAt = (deps.now?.() || new Date()).toISOString();
-  await deps.record(authorizationSha256, "PUBLICATION_INTENT", { savedPlanSha256: p.savedPlanSha256, authorizedAt });
+  await deps.record(authorizationSha256, "PUBLICATION_INTENT", { savedPlanSha256: p.savedPlanSha256, authorizedAt, dispatchContractVersion: 1 });
   await authenticate(p, auth, deps);
   equal(brokerAliasIdentity(await deps.getAlias()), p.alias, "Alias changed at publication boundary");
   try { await deps.applyPublication(artifacts.bytes); }
-  catch (error) { await deps.record(authorizationSha256, "PUBLICATION_UNKNOWN", {}); throw error; }
+  catch (error) { if (await deps.readPublicationDispatch(authorizationSha256)) await deps.record(authorizationSha256, "PUBLICATION_UNKNOWN", {}); throw error; }
   equal(brokerAliasIdentity(await deps.getAlias()), p.alias, "Publication changed alias");
   const published = await deps.readPublicationResult({ savedPlanSha256: p.savedPlanSha256, authorizationSha256 });
   // Version comes from this saved-plan execution/state result, never ListVersions' maximum.
@@ -186,13 +186,28 @@ export function brokerTransitionRequired({ desiredConfiguration, liveConfigurati
 
 export async function recoverBrokerPublication({ preparation: p, authorization }, deps) {
   context(p, BROKER_PUBLICATION);
-  const { id, authorizedAt } = await deps.authenticateRecoveryIntent('PUBLICATION_INTENT', { savedPlanSha256: p.savedPlanSha256 });
+  const { id, authorizedAt, dispatchContractVersion } = await deps.authenticateRecoveryIntent('PUBLICATION_INTENT', { savedPlanSha256: p.savedPlanSha256 });
   assert.equal(id, brokerDigest(authorization));
   const artifacts = await deps.readPlan(); assertPlanArtifacts(p, artifacts); assertBrokerPublicationPlan(artifacts.plan, p);
   equal(await deps.readCheckout(), brokerExecutionCheckout(p));
   if (p.prerequisiteChain) await deps.authenticatePrerequisiteChain(p.prerequisiteChain);
   equal(await deps.readPrerequisites(), p.prerequisites); equal(brokerAliasIdentity(await deps.getAlias()), p.alias);
-  const before = await deps.readStateIdentity(); assert.equal(before.lineage, p.state.lineage); assert.ok(before.serial > p.state.serial);
+  let before = await deps.readStateIdentity(); assert.equal(before.lineage, p.state.lineage);
+  if (before.serial === p.state.serial) {
+    // Only dispatch-contract intents guarantee that native apply cannot start without a durable marker.
+    assert.equal(dispatchContractVersion, 1, 'Legacy publication intent has an ambiguous native outcome');
+    equal(before, p.state, 'Publication predecessor state changed');
+    assert.equal(await deps.readPublicationDispatch(id), null, 'Dispatched publication cannot be replayed');
+    assert.equal(await deps.readRecoveryReceipt(id, 'PUBLICATION_UNKNOWN'), null, 'Unknown publication outcome cannot be replayed');
+    await deps.authenticatePublicationPreDispatchState(artifacts.plan);
+    try { await deps.applyPublication(artifacts.bytes); }
+    catch (error) { if (await deps.readPublicationDispatch(id)) await deps.record(id, 'PUBLICATION_UNKNOWN', {}); throw error; }
+    before = await deps.readStateIdentity();
+    assert.ok(before.serial > p.state.serial, 'Publication apply did not advance Terraform state');
+  } else {
+    assert.ok(before.serial > p.state.serial);
+    if (dispatchContractVersion === 1) assert.ok(await deps.readPublicationDispatch(id), 'Publication state advanced without its native dispatch claim');
+  }
   await deps.authenticatePublicationRecoveryState(artifacts.plan);
   const published = await deps.readPublicationResult({ savedPlanSha256: p.savedPlanSha256, authorizationSha256: id });
   assert.notEqual(published.version, p.alias.FunctionVersion); assert.equal(published.savedPlanSha256, p.savedPlanSha256); assert.equal(published.authorizationSha256, id);
