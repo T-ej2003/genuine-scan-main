@@ -206,7 +206,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    assert.equal(ownerItem.state.S,values[':current'].S);assert.equal(ownerItem.generation.N,values[':generation'].N);
    ownerItem.state=values[':next'];return JSON.stringify({Attributes:ownerItem});
   }});
-  let liveAlias=clone(current?current.preparation.alias:alias),published=false,publicationCalls=0,aliasCalls=0,refreshCalls=0,publishedConfiguration;
+  let liveAlias=clone(current?current.preparation.alias:alias),published=false,publicationCalls=0,publicationDispatch,aliasCalls=0,refreshCalls=0,publishedConfiguration;
   const policySnapshot=()=>({policy:clone(livePolicy),version:policyVersion,versions:clone(policyInventory)});
   const states=current?Object.fromEntries(Object.entries(current.result.definitions).map(([address,d])=>[address,{...clone(d.desired),arn:d.arn,revision:d.revision}])):Object.fromEntries(tasks.map(c=>[c.address,{...clone(c.change.after),arn:`arn:aws:ecs:eu-west-2:368992683803:task-definition/${c.change.after.family}:42`,revision:42}]));
   const describe=arn=>{const s=Object.values(states).find(s=>s.arn===arn);assert.ok(s);const platform=Array.isArray(s.runtime_platform)?s.runtime_platform[0]:s.runtime_platform;return {taskDefinitionArn:arn,revision:s.revision,status:'ACTIVE',family:s.family,taskRoleArn:s.task_role_arn,executionRoleArn:s.execution_role_arn,networkMode:s.network_mode,cpu:s.cpu,memory:s.memory,requiresCompatibilities:s.requires_compatibilities,runtimePlatform:{operatingSystemFamily:platform.operating_system_family,cpuArchitecture:platform.cpu_architecture},volumes:s.volume.map(({name})=>({name})),containerDefinitions:JSON.parse(s.container_definitions),tags:Object.entries(s.tags).map(([key,value])=>({key,value}))};};
@@ -288,7 +288,7 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
    },
    applyTaskRegistration:async()=>{assert.equal(writes++,0);registeredTaskDefinitionCalls+=TASK_REGISTRATION_ADDRESSES.length;registered=true;liveState={...liveState,serial:liveState.serial+1,stateSha256:'d'.repeat(64)};},
    readRegisteredTaskDefinition:async address=>{assert.ok(registered);return clone(states[address]);},describeTaskDefinition:async arn=>describe(arn),
-   authenticateRecoveryIntent:async(status,expected)=>{const r=receipts.find(r=>r[1]===status);assert.ok(r);const {authorizedAt,...fields}=r[2];assert.deepEqual(fields,expected);return {id:r[0],authorizedAt};},
+   authenticateRecoveryIntent:async(status,expected)=>{const r=receipts.find(r=>r[1]===status);assert.ok(r);const {authorizedAt,dispatchContractVersion,...fields}=r[2];assert.deepEqual(fields,expected);assert.ok(dispatchContractVersion===undefined||(status==='PUBLICATION_INTENT'&&dispatchContractVersion===1));return {id:r[0],authorizedAt,...(status==='PUBLICATION_INTENT'?{dispatchContractVersion}:{})};},
    readRecoveryStateIntent:async()=>{const r=receipts.find(r=>r[1]==='STATE_REFRESH_INTENT');assert.ok(r);return clone(r[2]);},
    authenticateRegistrationRecoveryIdentity:async()=>({mode:'READ_ONLY_EXACT_SUCCESSOR',transaction:{sourceSha:source,treeSha256:tree},tooling:{sourceSha:source,treeSha256:tree}}),
    authenticateRegistrationState:async()=>tasks.forEach(c=>assertRegisteredTaskDefinitionState(c.change.after,states[c.address],c.change.after_unknown)),
@@ -296,7 +296,8 @@ else if(!['status','merge-base','fetch'].includes(a[0]))throw new Error('Unexpec
   const packageCode=Buffer.from(brokerDigest(fs.readFileSync(archive)),'hex').toString('base64');
   deps.getVersion=async version=>({...configuration(version),CodeSha256:packageCode,
    Environment:{Variables:clone(version==='12'?fn.change.before.environment[0].variables:publishedConfiguration)}});
-  deps.applyPublication=async()=>{assert.equal(publicationCalls++,0);published=true;publishedConfiguration=clone(currentPreparation.configuration);liveState={...liveState,serial:liveState.serial+1,stateSha256:'f'.repeat(64)};};
+  deps.applyPublication=async()=>{assert.equal(publicationCalls++,0);publicationDispatch={authorizationSha256:brokerDigest(currentAuthorization)};published=true;publishedConfiguration=clone(currentPreparation.configuration);liveState={...liveState,serial:liveState.serial+1,stateSha256:'f'.repeat(64)};};
+  deps.readPublicationDispatch=async id=>publicationDispatch?.authorizationSha256===id?clone(publicationDispatch):null;
   deps.readPublicationResult=async()=>{assert.equal(published,true);return {version:'13',savedPlanSha256:currentPreparation.savedPlanSha256,authorizationSha256:brokerDigest(currentAuthorization)};};
   deps.authenticatePublicationResult=async result=>assert.deepEqual(receipts.find(r=>r[0]===result.authorizationSha256&&r[1]==='PUBLISHED')[2],result);
   deps.authenticatePublicationRecoveryState=async()=>assert.equal(published,true);
