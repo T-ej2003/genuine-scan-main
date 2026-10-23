@@ -189,6 +189,8 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
     assert.equal(pinned.selection.sourceSha,predecessorSourceSha,'Prepublication predecessor source changed');
     assert.equal(pinned.selection.ticketId,predecessorTicketId,'Prepublication predecessor ticket changed');
    }
+   if(phase==='registration'&&predecessorSourceSha&&(prepared||adopted))
+    assert.ok(pinned,'Prepared registration cannot adopt an unpinned prepublication predecessor');
    const directory=prepareDirectory(release,phase),terraformDataDir=path.join(directory,'terraform'),files=phaseFiles(directory);
    if(['cutover','closure'].includes(phase)&&(!prepared||prepared.brokerPackagePath)){
     const published=phaseFiles(phaseDirectory(release.releaseId,'publication'));

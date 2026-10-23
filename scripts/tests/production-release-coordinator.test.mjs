@@ -1221,6 +1221,31 @@ test('prepublication predecessor is pinned once to exact historical coordinator 
  assert.equal(writes,2);
 });
 
+test('prepared or adopted registration cannot silently ignore an explicit predecessor selection',async()=>{
+ const release={releaseId:'9'.repeat(64),sourceSha},historicalSha='c'.repeat(40),ticket='CHG-prior';
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'2',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp',
+  PREPUBLICATION_PREDECESSOR_SOURCE_SHA:historicalSha,PREPUBLICATION_PREDECESSOR_TICKET_ID:ticket};
+ let pinned=null;
+ const runtime=createHostedReleaseRuntime({sourceSha,ticketId:'CHG-new',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,
+  createStore:()=>({readStep:async(_id,name)=>name==='PREPUBLICATION_PREDECESSOR'?pinned:null})});
+ const directory=path.join(HOSTED_RELEASE_ROOT,release.releaseId,'registration');
+ try{
+  const prepared={planPath:path.join(directory,'saved.tfplan')};
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared}),/unpinned prepublication predecessor/);
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared:null,adopted:true}),/unpinned prepublication predecessor/);
+  pinned={releaseId:release.releaseId,sourceSha,name:'PREPUBLICATION_PREDECESSOR',selection:{sourceSha:historicalSha,ticketId:ticket}};
+  fs.mkdirSync(path.join(directory,'terraform'),{recursive:true,mode:0o700});
+  fs.writeFileSync(path.join(directory,'terraform','terraform.tfstate'),'{}',{mode:0o600});
+  assert.equal((await runtime.materializeInputs(release,{},{phase:'registration',prepared})).directory,directory);
+  assert.equal((await runtime.materializeInputs(release,{},{phase:'registration',prepared:null,adopted:true})).directory,directory);
+  pinned.selection.ticketId='CHG-other';
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared}),/ticket changed/);
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,release.releaseId),{recursive:true,force:true});}
+});
+
 test('Release Train binds an explicit predecessor and tolerates an inactive bridge credential output',()=>{
  const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
  for(const binding of ['PREPUBLICATION_PREDECESSOR_SOURCE_SHA: ${{ inputs.prepublication_predecessor_source_sha }}',
