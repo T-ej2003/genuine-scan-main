@@ -5,7 +5,7 @@ import { brokerDigest, assertRegistrationHandoff, assertBrokerAuthorization, ass
 import { createReleaseIdentity, selectReleasePolicyDeletion, createReleaseCoordinatorStore, authenticateReleaseGateRuns,captureReleasePhaseMaterial,hydrateReleasePhaseMaterial,releaseTransitionDispatchInputs,obtainReleaseTransitionAuthorization,readHostedReleaseSource,authenticateHostedStageBImages,HOSTED_RELEASE_ROOT } from '../aws/production-release-coordinator.mjs';
 import {requiredWorkflowFiles} from '../github/release-lifecycle-contract.mjs';
 import {readReleaseGateEvidence} from '../github/check-required-workflow-gates.mjs';
-import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration,registeredTaskStateFromBytes} from '../aws/run-production-release-coordinator.mjs';
+import {runHostedReleaseCoordinator,hostedReleaseTrainRequest,createHostedReleaseRuntime,readDurableCompletedRegistration,pinPrepublicationPredecessor,registeredTaskStateFromBytes} from '../aws/run-production-release-coordinator.mjs';
 import {deriveStageBToolingInputTreeSha256} from '../aws/validate-stage-b-image-reuse.mjs';
 
 function gateFixture(sourceSha,lifecycle='strict'){
@@ -49,7 +49,7 @@ test('hosted adopted registration resumes from its durable result without remate
   GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',GITHUB_RUN_ATTEMPT:'2',
   GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp'};
  const runtime=createHostedReleaseRuntime({sourceSha,ticketId:'current-release',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
-  requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>({}),
+  requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,createStore:()=>({readStep:()=>null}),
   materialize:rejectExternalAccess,refresh:rejectExternalAccess});
  try{
   const inputs=await runtime.materializeInputs({releaseId,sourceSha},{},{phase:'registration',prepared:null,adopted:true});
@@ -296,7 +296,7 @@ test('hosted cutover reuses the authenticated publication ZIP path and preserves
  let savedRecord=record,seen=0;
  const runtime=createHostedReleaseRuntime({sourceSha,ticketId:'CHG-test',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
   requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,
-  createStore:()=>({readStep:async()=>savedRecord,getArtifact:async()=>preparation}),verifyAuthorization:async()=>true,
+  createStore:()=>({readStep:async(_id,name)=>name==='publication:result'?savedRecord:null,getArtifact:async()=>preparation}),verifyAuthorization:async()=>true,
   materialize:()=>{seen++;throw new Error('MATERIALIZER_REACHED');}});
  const release={releaseId,sourceSha},authorizationJson='{}',artifacts={authorizationJson,authorizationRawSha256:createHash('sha256').update(authorizationJson).digest('hex')};
  try{
@@ -1198,6 +1198,66 @@ test('durable registration selector rejects missing, substituted and cross-relea
    readStep:()=>({...record,result:incompleteHash}),getArtifact:hash=>hash===incompleteHash?incomplete:f.coordinatorStore.getArtifact(hash)}}),/Incomplete predecessor/);
   assert.equal(release.sourceSha,sourceSha);assert.equal(f.snapshot().registrationApplyCalls,priorCalls);
  }finally{f.dispose();}
+});
+
+test('prepublication predecessor is pinned once to exact historical coordinator authority',async()=>{
+ const release={releaseId:'a'.repeat(64),sourceSha:'b'.repeat(40)},sourceSha='c'.repeat(40),ticketId='CHG-prior';
+ const selection={sourceSha,ticketId,registrationTransactionId:'1'.repeat(64),policyTransactionId:'2'.repeat(64)};
+ let recorded,reads=0,writes=0,lose=false;
+ const store={readStep:(_id,name)=>name==='PREPUBLICATION_PREDECESSOR'?recorded:null,
+  writeStep:value=>{writes++;recorded=structuredClone(value);if(lose){lose=false;throw Error('lost S3 response');}}};
+ const read=async()=>{reads++;return structuredClone(selection);};
+ const request={store,release,sourceSha,ticketId,verify:()=>true,read};
+ assert.deepEqual(await pinPrepublicationPredecessor(request),{registrationTransactionId:selection.registrationTransactionId,policyTransactionId:selection.policyTransactionId});
+ assert.deepEqual(await pinPrepublicationPredecessor(request),{registrationTransactionId:selection.registrationTransactionId,policyTransactionId:selection.policyTransactionId});
+ assert.equal(writes,1);assert.equal(reads,2);
+ await assert.rejects(()=>pinPrepublicationPredecessor({...request,ticketId:'wrong'}),/strictly equal/);
+ await assert.rejects(()=>pinPrepublicationPredecessor({...request,sourceSha:'d'.repeat(40)}),/strictly equal/);
+ await assert.rejects(()=>pinPrepublicationPredecessor({...request,read:async()=>({...selection,policyTransactionId:'3'.repeat(64)})}),/different|equal|Expected/);
+ await assert.rejects(()=>pinPrepublicationPredecessor({...request,read:async()=>({...selection,registrationTransactionId:'invalid'})}),/regular expression/);
+ recorded=undefined;lose=true;
+ await assert.rejects(()=>pinPrepublicationPredecessor(request),/lost S3 response/);
+ assert.deepEqual(await pinPrepublicationPredecessor(request),{registrationTransactionId:selection.registrationTransactionId,policyTransactionId:selection.policyTransactionId});
+ assert.equal(writes,2);
+});
+
+test('prepared or adopted registration cannot silently ignore an explicit predecessor selection',async()=>{
+ const release={releaseId:'9'.repeat(64),sourceSha},historicalSha='c'.repeat(40),ticket='CHG-prior';
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'2',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp',
+  PREPUBLICATION_PREDECESSOR_SOURCE_SHA:historicalSha,PREPUBLICATION_PREDECESSOR_TICKET_ID:ticket};
+ let pinned=null;
+ const runtime=createHostedReleaseRuntime({sourceSha,ticketId:'CHG-new',imageTransportJson:'fixture',imageTransportSha256:'0'.repeat(64),
+  requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,ghRun:rejectExternalAccess,
+  createStore:()=>({readStep:async(_id,name)=>name==='PREPUBLICATION_PREDECESSOR'?pinned:null})});
+ const directory=path.join(HOSTED_RELEASE_ROOT,release.releaseId,'registration');
+ try{
+  const prepared={planPath:path.join(directory,'saved.tfplan')};
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared}),/unpinned prepublication predecessor/);
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared:null,adopted:true}),/unpinned prepublication predecessor/);
+  pinned={releaseId:release.releaseId,sourceSha,name:'PREPUBLICATION_PREDECESSOR',selection:{sourceSha:historicalSha,ticketId:ticket}};
+  fs.mkdirSync(path.join(directory,'terraform'),{recursive:true,mode:0o700});
+  fs.writeFileSync(path.join(directory,'terraform','terraform.tfstate'),'{}',{mode:0o600});
+  assert.equal((await runtime.materializeInputs(release,{},{phase:'registration',prepared})).directory,directory);
+  assert.equal((await runtime.materializeInputs(release,{},{phase:'registration',prepared:null,adopted:true})).directory,directory);
+  pinned.selection.ticketId='CHG-other';
+  await assert.rejects(()=>runtime.materializeInputs(release,{},{phase:'registration',prepared}),/ticket changed/);
+ }finally{fs.rmSync(path.join(HOSTED_RELEASE_ROOT,release.releaseId),{recursive:true,force:true});}
+});
+
+test('Release Train binds an explicit predecessor and tolerates an inactive bridge credential output',()=>{
+ const workflow=fs.readFileSync('.github/workflows/release-train.yml','utf8');
+ for(const binding of ['PREPUBLICATION_PREDECESSOR_SOURCE_SHA: ${{ inputs.prepublication_predecessor_source_sha }}',
+  'PREPUBLICATION_PREDECESSOR_TICKET_ID: ${{ inputs.prepublication_predecessor_ticket_id }}'])assert.ok(workflow.includes(binding));
+ assert.ok(workflow.includes("steps.bridge_credentials.outputs.aws-expiration && fromJSON(steps.bridge_credentials.outputs.aws-expiration) || ''"));
+ const env={GITHUB_ACTIONS:'true',GITHUB_EVENT_NAME:'workflow_dispatch',GITHUB_REPOSITORY:'T-ej2003/genuine-scan-main',
+  GITHUB_WORKFLOW_REF:'T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main',
+  GITHUB_RUN_ATTEMPT:'1',GITHUB_RUN_ID:'700',GITHUB_SHA:sourceSha,RUNNER_TEMP:'/tmp',
+  PREPUBLICATION_PREDECESSOR_SOURCE_SHA:'c'.repeat(40)};
+ assert.throws(()=>createHostedReleaseRuntime({sourceSha,ticketId:'CHG-new',imageTransportJson:'fixture',
+  imageTransportSha256:'0'.repeat(64),requiredGateRunIdsJson:'{}',env,awsRun:rejectExternalAccess,
+  ghRun:rejectExternalAccess}),/supplied together/);
 });
 
 test('hosted durable selection authenticates signature/native receipt and binds the predecessor across retries',async()=>{

@@ -73,6 +73,52 @@ export async function readDurableCompletedRegistration({store,sourceSha,ticketId
  return entry;
 }
 
+// Select only a completed, signed predecessor. The native receipt and live
+// policy/runtime split are reauthenticated by the existing registration path.
+export async function readDurablePrepublicationPredecessor({store,sourceSha,ticketId,currentSourceSha,verify}) {
+ assertReceiptBoundGitAncestry({historicalSourceSha:sourceSha,consumerSourceSha:currentSourceSha,cwd:root});
+ assert.notEqual(sourceSha,currentSourceSha,'Prepublication predecessor must be historical');
+ const registration=await readDurableCompletedRegistration({store,sourceSha,ticketId});
+ await assertBrokerAuthorization(registration.authorization,registration.preparation,
+  {verify,now:new Date(registration.result.authorizedAt)});
+ const start=await store.readStart({sourceSha,ticketId});
+ const release=await store.getArtifact(start.release);
+ const record=await store.readStep(release.releaseId,'policy:result');
+ assert.ok(record,'Missing completed predecessor policy');
+ assert.equal(record.releaseId,release.releaseId);assert.equal(record.sourceSha,sourceSha);
+ assert.equal(record.name,'policy:result');
+ const prepared=await store.getArtifact(record.prepared),authorization=await store.getArtifact(record.authorization);
+ const result=await store.getArtifact(record.result);
+ assert.equal(result.status,'BROKER_POLICY_CONVERGED_NONTERMINAL');assert.equal(result.sourceSha,sourceSha);
+ assert.equal(authorization.schemaVersion,2,'Predecessor policy requires release-bound authorization');
+ assert.ok(Number.isSafeInteger(authorization.release?.authorizationRound)&&authorization.release.authorizationRound>=0);
+ assert.deepEqual(authorization.release,{releaseId:release.releaseId,phase:'policy',
+  preparationReference:record.prepared,authorizationRound:authorization.release.authorizationRound});
+ assert.equal(result.authorizationSha256,brokerDigest(authorization));
+ assert.equal(result.preparationSha256,brokerDigest(prepared.preparation));
+ exact(result.successorIdentity.policy,result.policy);
+ exact(result.successorIdentity.taskMap,registration.result.taskMap);
+ await assertBrokerAuthorization(authorization,prepared.preparation,{verify,now:new Date(result.authorizedAt)});
+ return {sourceSha,ticketId,registrationTransactionId:brokerDigest(registration.authorization),
+  policyTransactionId:brokerDigest(authorization)};
+}
+
+export async function pinPrepublicationPredecessor({store,release,sourceSha,ticketId,verify,
+ read=readDurablePrepublicationPredecessor}) {
+ assert.match(sourceSha||'',/^[a-f0-9]{40}$/);
+ assert.match(ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+ const selection=await read({store,sourceSha,ticketId,currentSourceSha:release.sourceSha,verify});
+ assert.deepEqual(Object.keys(selection).sort(),['sourceSha','ticketId','registrationTransactionId','policyTransactionId'].sort());
+ assert.equal(selection.sourceSha,sourceSha);assert.equal(selection.ticketId,ticketId);
+ for(const id of [selection.registrationTransactionId,selection.policyTransactionId])assert.match(id||'',/^[a-f0-9]{64}$/);
+ const name='PREPUBLICATION_PREDECESSOR',existing=await store.readStep(release.releaseId,name);
+ if(existing){
+  assert.equal(existing.releaseId,release.releaseId);assert.equal(existing.sourceSha,release.sourceSha);
+  assert.equal(existing.name,name);exact(existing.selection,selection);
+ }else await store.writeStep({releaseId:release.releaseId,sourceSha:release.sourceSha,name,selection});
+ return {registrationTransactionId:selection.registrationTransactionId,policyTransactionId:selection.policyTransactionId};
+}
+
 // All business writes remain inside runStagedBrokerRequest. This adapter only
 // creates authenticated inputs and selects the next public operation.
 export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJson,imageTransportSha256,
@@ -83,6 +129,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  imageReader=authenticateHostedStageBImages,gateReader=readReleaseGateEvidence,
  materialize=materializeStageBPrerequisiteFiles,refresh=runRefreshOnly,
  createStore=createReleaseCoordinatorStore,verifyAuthorization,readReceipt=readStagedBrokerReceipt,
+ readPrepublicationPredecessor=readDurablePrepublicationPredecessor,
  readClosure=readStagedBrokerClosure,protectedCheckout=readStageBProtectedMainCheckout,
  imageImpact=deriveStageBImageImpactReport,
  completedRegistrationPath=path.join(root,'documents/ops/iam/MSCQRProductionStageBCompletedRegistration-2026-10-08.json')}={}) {
@@ -94,6 +141,10 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  assert.match(sourceSha||'',/^[a-f0-9]{40}$/);assert.match(ticketId||'',/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
  const completedClosureSourceSha=completedBrokerClosureSourceSha??env.COMPLETED_BROKER_CLOSURE_SOURCE_SHA;
  if(completedClosureSourceSha!==undefined&&completedClosureSourceSha!=='')assert.match(completedClosureSourceSha,/^[a-f0-9]{40}$/);
+ const predecessorSourceSha=env.PREPUBLICATION_PREDECESSOR_SOURCE_SHA||undefined;
+ const predecessorTicketId=env.PREPUBLICATION_PREDECESSOR_TICKET_ID||undefined;
+ assert.equal(Boolean(predecessorSourceSha),Boolean(predecessorTicketId),'Prepublication predecessor source and ticket must be supplied together');
+ if(predecessorSourceSha){assert.match(predecessorSourceSha,/^[a-f0-9]{40}$/);assert.match(predecessorTicketId,/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);}
  assert.ok(path.isAbsolute(env.RUNNER_TEMP||''));assert.ok(/^\d+$/.test(env.GITHUB_RUN_ID||''));
  assert.equal(typeof awsRun,'function');assert.equal(typeof ghRun,'function');
  ensureStageBPrivateDirectory({directory:HOSTED_RELEASE_ROOT,repositoryRoot:root,create:true});
@@ -131,6 +182,15 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
   resolveGates:async()=>gateReader({sourceSha,lifecycle,expectedWorkflowRunIds:gateIds,githubJson}),
   authenticateGates:async(release,evidence)=>{assert.equal(evidence.lifecycle,lifecycle,'Gate lifecycle substitution');return authenticateReleaseGateRuns(release,evidence);},
   materializeInputs:async(release,artifacts,{phase,prepared,adopted=false})=>{
+   const pinned=await store.readStep(release.releaseId,'PREPUBLICATION_PREDECESSOR');
+   if(pinned){
+    assert.equal(pinned.releaseId,release.releaseId);assert.equal(pinned.sourceSha,release.sourceSha);
+    assert.equal(pinned.name,'PREPUBLICATION_PREDECESSOR');
+    assert.equal(pinned.selection.sourceSha,predecessorSourceSha,'Prepublication predecessor source changed');
+    assert.equal(pinned.selection.ticketId,predecessorTicketId,'Prepublication predecessor ticket changed');
+   }
+   if(phase==='registration'&&predecessorSourceSha&&(prepared||adopted))
+    assert.ok(pinned,'Prepared registration cannot adopt an unpinned prepublication predecessor');
    const directory=prepareDirectory(release,phase),terraformDataDir=path.join(directory,'terraform'),files=phaseFiles(directory);
    if(['cutover','closure'].includes(phase)&&(!prepared||prepared.brokerPackagePath)){
     const published=phaseFiles(phaseDirectory(release.releaseId,'publication'));
@@ -182,8 +242,14 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    const predecessor=historical.preparation.registrationPredecessor;
    const live=readBrokerPolicyInventory(awsRun);
    const alias=JSON.parse(awsRun(['lambda','get-alias','--function-name',historical.preparation.alias.AliasArn.split(':').slice(0,-1).join(':'),'--name','reviewed','--output','json','--no-cli-pager']));
-   const predecessorReceiptRecovery=phase==='registration'&&live.version==='v13'&&alias.FunctionVersion==='12'&&predecessor
-    ? {registrationTransactionId:predecessor.registrationTransactionId,policyTransactionId:predecessor.policyTransactionId}:undefined;
+   let predecessorReceiptRecovery;
+   if(phase==='registration'&&predecessorSourceSha){
+    predecessorReceiptRecovery=await pinPrepublicationPredecessor({store,release,sourceSha:predecessorSourceSha,
+     ticketId:predecessorTicketId,verify,read:readPrepublicationPredecessor});
+   }else if(phase==='registration'&&live.version==='v13'&&alias.FunctionVersion==='12'&&predecessor){
+    predecessorReceiptRecovery={registrationTransactionId:predecessor.registrationTransactionId,
+     policyTransactionId:predecessor.policyTransactionId};
+   }
    return {files,directory,terraformDataDir,planningOptions,...(predecessorReceiptRecovery?{predecessorReceiptRecovery}:{})};
   },
   capturePreparation:(context,phase,prepared)=>captureReleasePhaseMaterial({prepared,files:context.inputs.files,store,repositoryRoot:root})

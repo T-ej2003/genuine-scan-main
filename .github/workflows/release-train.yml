@@ -20,6 +20,14 @@ on:
         description: "Optional original release SHA of an independently authenticated completed broker closure; no broker or Terraform write."
         required: false
         type: string
+      prepublication_predecessor_source_sha:
+        description: "Exact historical source with authenticated registration and policy receipts when IAM is ahead of the reviewed broker alias."
+        required: false
+        type: string
+      prepublication_predecessor_ticket_id:
+        description: "Exact historical coordinator ticket for the prepublication predecessor."
+        required: false
+        type: string
       prerequisites_only:
         description: "Prepare governed current-main broker/image prerequisites only; never dispatch Release Gate. Rotation eligibility remains mandatory for subsequent deployment."
         required: false
@@ -309,6 +317,8 @@ jobs:
       TARGET_SHA: ${{ needs.gates.outputs.target_sha }}
       RELEASE_TICKET_ID: ${{ inputs.ticket_id }}
       COMPLETED_BROKER_CLOSURE_SOURCE_SHA: ${{ inputs.completed_broker_closure_source_sha }}
+      PREPUBLICATION_PREDECESSOR_SOURCE_SHA: ${{ inputs.prepublication_predecessor_source_sha }}
+      PREPUBLICATION_PREDECESSOR_TICKET_ID: ${{ inputs.prepublication_predecessor_ticket_id }}
       RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
       RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only || inputs.trusted_terminal_cutover }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
@@ -396,7 +406,7 @@ jobs:
           TARGET_REF: ${{ needs.gates.outputs.target_ref }}
           BRIDGE_ROTATION_ID: ${{ inputs.rotation_id }}
           BRIDGE_MANIFEST_SHA256: ${{ inputs.bridge_manifest_sha256 }}
-          AWS_CREDENTIAL_EXPIRATION: ${{ fromJSON(steps.bridge_credentials.outputs.aws-expiration) }}
+          AWS_CREDENTIAL_EXPIRATION: ${{ steps.bridge_credentials.outputs.aws-expiration && fromJSON(steps.bridge_credentials.outputs.aws-expiration) || '' }}
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
           HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ inputs.historical_runtime_evidence_sha256 }}
           WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
