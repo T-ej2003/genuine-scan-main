@@ -103,8 +103,8 @@ const renameBatchSchema = z.object({
 
 const bulkDeleteQRCodesSchema = z
   .object({
-    ids: z.array(z.string().uuid()).optional(),
-    codes: z.array(z.string().min(1)).optional(),
+    ids: z.array(z.string().uuid()).max(2000).optional(),
+    codes: z.array(z.string().min(1)).max(2000).optional(),
   })
   .strict()
   .refine((d) => (d.ids && d.ids.length) || (d.codes && d.codes.length), {
@@ -112,7 +112,7 @@ const bulkDeleteQRCodesSchema = z
   });
 
 const bulkDeleteBatchesSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1, "Provide batch ids"),
+  ids: z.array(z.string().uuid()).min(1, "Provide batch ids").max(2000),
 }).strict();
 
 const generateQRCodesSchema = z.object({
@@ -191,7 +191,7 @@ export const allocateQRRange = async (req: AuthRequest, res: Response) => {
 
     const parsed = allocateRangeSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const { licenseeId, startNumber, endNumber, receivedBatchName } = parsed.data;
@@ -231,13 +231,13 @@ export const allocateQRRangeForLicensee = async (req: AuthRequest, res: Response
 
     const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licenseeId" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid licenseeId" });
     }
     const { licenseeId } = paramsParsed.data;
 
     const parsed = allocateLicenseeTopupSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const startNumber = parsed.data.quantity != null ? 0 : parsed.data.startNumber as number;
@@ -282,7 +282,7 @@ export const bulkDeleteQRCodes = async (req: AuthRequest, res: Response) => {
 
     const parsed = bulkDeleteQRCodesSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const deleted = await deleteQrCodesBoundary({
@@ -305,7 +305,7 @@ export const createBatch = async (req: AuthRequest, res: Response) => {
 
     const parsed = createBatchSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const { name, quantity, manufacturerId } = parsed.data;
@@ -348,7 +348,7 @@ export const deleteBatch = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
     const result = await mutateQrBatch<Record<string, unknown>>({
       capability: String(req.databaseSessionCapability || ""),
@@ -371,7 +371,7 @@ export const bulkDeleteBatches = async (req: AuthRequest, res: Response) => {
 
     const parsed = bulkDeleteBatchesSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const txResult = await mutateQrBatch<Record<string, unknown>>({
@@ -396,12 +396,12 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
 
     const parsed = assignManufacturerSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
     const batchId = paramsParsed.data.id;
 
@@ -478,12 +478,12 @@ export const renameBatch = async (req: AuthRequest, res: Response) => {
 
     const parsed = renameBatchSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
     const batchId = paramsParsed.data.id;
 
@@ -558,7 +558,7 @@ export const generateQRCodes = async (req: AuthRequest, res: Response) => {
 
     const parsed = generateQRCodesSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const { licenseeId, quantity } = parsed.data;
@@ -625,12 +625,12 @@ export const blockQRCode = async (req: AuthRequest, res: Response) => {
 
     const parsed = blockQRSschema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = qrCodeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid QR id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid QR id" });
     }
     const id = paramsParsed.data.id;
     const qr = await getCodeScope<{ id: string; licenseeId: string; batchId: string | null }>({
@@ -686,12 +686,12 @@ export const blockBatch = async (req: AuthRequest, res: Response) => {
 
     const parsed = blockQRSschema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
     const id = paramsParsed.data.id;
 
@@ -890,7 +890,7 @@ export const getPrintValidationEvidence = async (req: AuthRequest, res: Response
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
 
     const report = await generatePrintValidationEvidenceReport({
@@ -923,7 +923,7 @@ export const releaseBatch = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = batchIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid batch id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid batch id" });
     }
 
     const boundary = {

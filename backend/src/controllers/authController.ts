@@ -66,7 +66,7 @@ export const login = async (req: Request, res: Response) => {
     if (!validation.success) {
       return res.status(400).json({
         success: false,
-        error: validation.error.errors[0]?.message ?? "Invalid request",
+        error: validation.error.issues[0]?.message ?? "Invalid request",
       });
     }
 
@@ -184,7 +184,7 @@ export const refresh = async (req: Request, res: Response) => {
   try {
     const selection = refreshSessionSchema.safeParse(req.body || {});
     if (!selection.success) {
-      return res.status(400).json({ success: false, error: selection.error.errors[0]?.message || "Invalid scope selection" });
+      return res.status(400).json({ success: false, error: selection.error.issues[0]?.message || "Invalid scope selection" });
     }
     const rawRefresh = getRefreshTokenFromRequest(req);
     if (!rawRefresh) return res.status(401).json({ success: false, error: "No refresh token" });
@@ -254,7 +254,7 @@ export const logout = async (req: Request, res: Response) => {
 export const forgotPassword = async (req: Request, res: Response) => {
   const parsed = forgotPasswordSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -273,7 +273,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
 export const resetPassword = async (req: Request, res: Response) => {
   const parsed = resetPasswordSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -292,7 +292,7 @@ export const resetPassword = async (req: Request, res: Response) => {
 export const invite = async (req: Request, res: Response) => {
   const parsed = inviteSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   const claims = getAuthClaims(req);
@@ -364,7 +364,7 @@ export const invite = async (req: Request, res: Response) => {
 export const acceptInviteController = async (req: Request, res: Response) => {
   const parsed = acceptInviteSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -431,7 +431,7 @@ export const resendInviteActivationController = async (req: Request, res: Respon
 export const verifyEmailController = async (req: Request, res: Response) => {
   const parsed = verifyEmailSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {

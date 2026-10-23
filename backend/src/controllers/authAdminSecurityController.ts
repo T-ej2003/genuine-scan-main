@@ -164,7 +164,7 @@ export const confirmAdminMfaSetupController = async (req: Request, res: Response
   if (!claims?.userId) return res.status(401).json({ success: false, error: "Not authenticated" });
   const parsed = mfaSessionCodeSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
   try {
     const ipHash = hashIp(req.ip);
@@ -229,7 +229,7 @@ export const completeAdminWebAuthnSetupController = async (req: Request, res: Re
 
   const parsed = webAuthnRegistrationCompleteSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid WebAuthn payload" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid WebAuthn payload" });
   }
 
   try {
@@ -319,7 +319,7 @@ export const completeAdminMfaChallengeController = async (req: Request, res: Res
   if (!claims?.userId || !claims.sessionId) return res.status(401).json({ success: false, error: "Not authenticated" });
   const parsed = mfaChallengeCompleteSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -413,7 +413,7 @@ export const completeAdminWebAuthnChallengeController = async (req: Request, res
 
   const parsed = webAuthnChallengeCompleteSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid WebAuthn payload" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid WebAuthn payload" });
   }
 
   try {
@@ -490,7 +490,7 @@ export const rotateAdminMfaBackupCodesController = async (req: Request, res: Res
 
   const parsed = mfaCodeSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -517,7 +517,7 @@ export const disableAdminMfaController = async (req: Request, res: Response) => 
 
   const parsed = disableMfaSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {
@@ -591,7 +591,7 @@ export const deleteAdminWebAuthnCredentialController = async (req: Request, res:
   if (!paramsParsed.success) {
     return res.status(400).json({
       success: false,
-      error: paramsParsed.error.errors[0]?.message || "Invalid WebAuthn credential id",
+      error: paramsParsed.error.issues[0]?.message || "Invalid WebAuthn credential id",
     });
   }
 

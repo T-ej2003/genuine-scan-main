@@ -79,7 +79,7 @@ export const readNotification = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = notificationIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Notification ID is required" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Notification ID is required" });
     }
     const id = paramsParsed.data.id;
     const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);

@@ -211,7 +211,7 @@ export const passwordStepUpController = async (req: Request, res: Response) => {
 
   const parsed = passwordStepUpSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   const ipHash = hashIp(req.ip);
@@ -294,7 +294,7 @@ export const adminMfaStepUpController = async (req: Request, res: Response) => {
 
   const parsed = mfaCodeSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
   }
 
   try {

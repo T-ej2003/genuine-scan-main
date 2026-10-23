@@ -69,7 +69,7 @@ export const createQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     const parsed = createRequestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const licenseeId =
@@ -167,12 +167,12 @@ export const approveQrAllocationRequest = async (req: AuthRequest, res: Response
 
     const parsed = approveSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = requestIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid request id" });
     }
     const id = paramsParsed.data.id;
     const result = await approveAllocationRequest<{
@@ -267,12 +267,12 @@ export const rejectQrAllocationRequest = async (req: AuthRequest, res: Response)
 
     const parsed = rejectSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = requestIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid request id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid request id" });
     }
     const id = paramsParsed.data.id;
     const updated = await rejectAllocationRequest({ ...boundary(req), allocationRequestId: id, ...parsed.data, ipHash: hashIp(req.ip) });

@@ -81,7 +81,7 @@ export const startCustomerVerificationSession = async (req: CustomerVerifyReques
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid verification session request",
+        error: parsed.error.issues[0]?.message || "Invalid verification session request",
       });
     }
 
@@ -117,7 +117,7 @@ export const getCustomerVerificationSessionState = async (req: CustomerVerifyReq
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid session id",
+        error: parsed.error.issues[0]?.message || "Invalid session id",
       });
     }
 
@@ -151,7 +151,7 @@ export const submitCustomerVerificationIntake = async (req: CustomerVerifyReques
     const params = sessionParamsSchema.safeParse(req.params || {});
     const parsed = intakeSchema.safeParse(req.body || {});
     if (!params.success || !parsed.success) {
-      const error = !params.success ? params.error.errors[0] : !parsed.success ? parsed.error.errors[0] : undefined;
+      const error = !params.success ? params.error.issues[0] : !parsed.success ? parsed.error.issues[0] : undefined;
       return res.status(400).json({
         success: false,
         error: error?.message || "Invalid verification intake",
@@ -207,7 +207,7 @@ export const revealCustomerVerificationResult = async (req: CustomerVerifyReques
     if (!params.success) {
       return res.status(400).json({
         success: false,
-        error: params.error.errors[0]?.message || "Invalid session id",
+        error: params.error.issues[0]?.message || "Invalid session id",
       });
     }
 

@@ -17,7 +17,7 @@ export const claimSchema = agentAuthSchema
     protocolVersion: z.string().trim().max(80).optional().nullable(),
     buildVersion: z.string().trim().max(80).optional().nullable(),
     transportDiagnosticsVersion: z.string().trim().max(80).optional().nullable(),
-    capabilities: z.record(z.boolean()).optional().nullable(),
+    capabilities: z.record(z.string(), z.boolean()).optional().nullable(),
     selectedPrinterId: z.string().trim().max(180).optional().nullable(),
     selectedPrinterName: z.string().trim().max(180).optional().nullable(),
     deviceName: z.string().trim().max(180).optional(),
@@ -31,7 +31,7 @@ const localAgentProtocolFields = {
 };
 
 const nullableTrimmedString = (max: number) => z.union([z.string().trim().max(max), z.null()]).optional();
-const metadataSchema = z.record(z.any()).optional().nullable();
+const metadataSchema = z.record(z.string(), z.any()).optional().nullable();
 
 export const confirmSchema = agentAuthSchema
   .extend({
@@ -96,7 +96,7 @@ export type LocalAgentRequestPayload =
 export const getLocalAgentRequestId = (req: Request) =>
   String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || "").trim() || null;
 
-const issuePath = (issue: { path: Array<string | number> }) =>
+const issuePath = (issue: { path: PropertyKey[] }) =>
   issue.path.map((part) => String(part)).filter(Boolean).join(".");
 
 export const buildLocalAgentValidationErrorPayload = (params: {
@@ -104,12 +104,12 @@ export const buildLocalAgentValidationErrorPayload = (params: {
   body?: any;
   errorCode: string;
   message: string;
-  issues?: Array<z.ZodIssue | { code?: string; path: Array<string | number>; message: string; received?: string }>;
+  issues?: Array<z.ZodIssue | { code?: string; path: PropertyKey[]; message: string; received?: string }>;
 }) => {
   const issues = params.issues || [];
   const validationIssuePaths = issues.map(issuePath).filter(Boolean);
   const missingFields = issues
-    .filter((issue) => issue.code === "invalid_type" && (issue as z.ZodInvalidTypeIssue).received === "undefined")
+    .filter((issue) => issue.code === "invalid_type" && ("received" in issue ? issue.received === "undefined" : issue.message.endsWith("received undefined")))
     .map(issuePath)
     .filter(Boolean);
   return {

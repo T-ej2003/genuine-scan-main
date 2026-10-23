@@ -174,7 +174,7 @@ export const createUser = async (req: AuthRequest, res: Response) => {
 
     const parsed = createUserSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const email = parsed.data.email;
@@ -310,12 +310,12 @@ export const updateUser = async (req: AuthRequest, res: Response) => {
 
     const parsed = updateUserSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const paramsParsed = userIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
 
@@ -367,11 +367,11 @@ export const deleteUser = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = userIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid user id" });
     }
     const queryParsed = deleteUserQuerySchema.safeParse(req.query || {});
     if (!queryParsed.success) {
-      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid delete query" });
+      return res.status(400).json({ success: false, error: queryParsed.error.issues[0]?.message || "Invalid delete query" });
     }
 
     const targetId = paramsParsed.data.id;
@@ -412,7 +412,7 @@ export const restoreManufacturer = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = userIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid user id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid user id" });
     }
     const targetId = paramsParsed.data.id;
     const targetLicenseeId = String(req.user?.licenseeId || "").trim() || null;

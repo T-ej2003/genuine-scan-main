@@ -53,7 +53,7 @@ export const updateMyProfile = async (req: AuthRequest, res: Response) => {
 
     const parsed = updateProfileSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const data: any = {};
@@ -134,7 +134,7 @@ export const changeMyPassword = async (req: AuthRequest, res: Response) => {
 
     const parsed = changePasswordSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const user = await withAccountSession(req, "account-password-credential-read", loadAuthenticatedPasswordActor);

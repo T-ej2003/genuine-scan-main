@@ -108,7 +108,7 @@ export const getFeatureFlags = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = governanceQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -151,7 +151,7 @@ export const upsertFeatureFlag = async (req: AuthRequest, res: Response) => {
 
     const parsed = flagUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -207,7 +207,7 @@ export const getRetentionPolicyController = async (req: AuthRequest, res: Respon
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = governanceQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -249,7 +249,7 @@ export const patchRetentionPolicyController = async (req: AuthRequest, res: Resp
 
     const parsed = retentionPatchSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -308,7 +308,7 @@ export const runRetentionJobController = async (req: AuthRequest, res: Response)
 
     const parsed = retentionRunSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -392,7 +392,7 @@ export const exportIncidentEvidenceBundleController = async (req: AuthRequest, r
 
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Incident ID is required" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Incident ID is required" });
     }
     const incidentId = paramsParsed.data.id;
 
@@ -439,7 +439,7 @@ export const generateComplianceReportController = async (req: AuthRequest, res: 
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = complianceReportQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -492,7 +492,7 @@ export const runCompliancePackController = async (req: AuthRequest, res: Respons
 
     const parsed = compliancePackRunSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const licenseeId = resolveLicenseeScope(req, parsed.data.licenseeId);
@@ -530,7 +530,7 @@ export const listCompliancePackJobsController = async (req: AuthRequest, res: Re
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = compliancePackJobsQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const limit = parsed.data.limit ?? 20;
@@ -571,7 +571,7 @@ export const downloadCompliancePackJobController = async (req: AuthRequest, res:
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = compliancePackJobParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Compliance pack job ID is required" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Compliance pack job ID is required" });
     }
 
     const snapshot = await withC03ResourceTransaction(

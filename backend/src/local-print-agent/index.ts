@@ -537,7 +537,7 @@ app.post("/backend/config", async (req, res) => {
   try {
     const parsed = backendConfigSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "backendUrl is required" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "backendUrl is required" });
     }
 
     const state = await loadAgentState();

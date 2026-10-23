@@ -43,7 +43,7 @@ export const startCustomerOAuth = async (req: Request, res: Response) => {
 
   const parsed = startSchema.safeParse(req.query || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid return URL" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid return URL" });
   }
 
   try {
@@ -115,7 +115,7 @@ export const completeCustomerOAuth = async (req: Request, res: Response) => {
 export const exchangeCustomerOAuth = async (req: Request, res: Response) => {
   const parsed = exchangeSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid exchange request" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid exchange request" });
   }
 
   try {

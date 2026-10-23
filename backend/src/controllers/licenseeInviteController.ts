@@ -35,12 +35,12 @@ export const resendLicenseeAdminInvite = async (req: AuthRequest, res: Response)
 
     const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid licensee id" });
     }
     const { id } = paramsParsed.data;
     const parsed = resendInviteSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
     }
     const requestId = String((req as AuthRequest & { requestId?: string }).requestId || req.get("x-request-id") || "").trim();
     const invite = await createInvite({

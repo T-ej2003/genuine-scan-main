@@ -179,7 +179,7 @@ const quarantinedLegacyPrinterHeartbeat = async (req: AuthRequest, res: Response
 
     const parsed = heartbeatSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid heartbeat payload" });
     }
     const scope = await resolveScopedLicenseeAccess(req.user, parsed.data.licenseeId || null);
     const scopedLicenseeId = scope.scopeLicenseeId || req.user.licenseeId || null;
@@ -369,7 +369,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     }
     const parsed = heartbeatSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid heartbeat payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid heartbeat payload" });
     }
     const agentId = String(parsed.data.agentId || "").trim();
     const deviceFingerprint = String(parsed.data.deviceFingerprint || "").trim();

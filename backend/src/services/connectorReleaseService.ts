@@ -51,9 +51,9 @@ const connectorPlatformSchema = z.object({
   buildVersion: z.string().min(3).optional(),
   transportDiagnosticsVersion: z.string().min(3).optional(),
   capabilities: connectorCapabilitiesSchema.optional(),
-  legalDocumentsIncluded: z.array(z.string().min(2)).optional(),
+  legalDocumentsIncluded: z.array(z.string().min(2)).max(100).optional(),
   releaseNotesIncluded: z.boolean().optional(),
-  notes: z.array(z.string().min(2)).default([]),
+  notes: z.array(z.string().min(2)).max(100).default([]),
 });
 
 const connectorReleaseSchema = z.object({
@@ -64,7 +64,7 @@ const connectorReleaseSchema = z.object({
   transportDiagnosticsVersion: z.string().min(3).optional(),
   capabilities: connectorCapabilitiesSchema.optional(),
   summary: z.string().min(8),
-  notes: z.array(z.string().min(2)).default([]),
+  notes: z.array(z.string().min(2)).max(100).default([]),
   platforms: z.object({
     macos: connectorPlatformSchema.optional(),
     windows: connectorPlatformSchema.optional(),
@@ -82,7 +82,7 @@ const connectorManifestSchema = z.object({
   supportPath: z.string().min(1).default("/help/manufacturer"),
   helpPath: z.string().min(1).default("/connector-download"),
   setupGuidePath: z.string().min(1).default("/help/manufacturer"),
-  releases: z.array(connectorReleaseSchema).min(1),
+  releases: z.array(connectorReleaseSchema).min(1).max(100),
 });
 
 type ConnectorManifest = z.infer<typeof connectorManifestSchema>;

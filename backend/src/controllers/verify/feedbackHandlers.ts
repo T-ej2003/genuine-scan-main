@@ -26,7 +26,7 @@ const requestId = (req: Request) =>
 
 export const reportFraud = async (req: Request, res: Response) => {
   const parsed = reportFraudSchema.safeParse(req.body || {});
-  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid report payload" });
+  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid report payload" });
   const payload = parsed.data;
   const sessionId = String(payload.sessionId || req.get("x-verification-session-id") || "").trim();
   const sessionProof = String(req.get("x-verification-session-proof") || "").trim();
@@ -71,7 +71,7 @@ export const reportFraud = async (req: Request, res: Response) => {
 
 export const submitProductFeedback = async (req: Request, res: Response) => {
   const parsed = productFeedbackSchema.safeParse(req.body || {});
-  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid feedback payload" });
+  if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid feedback payload" });
   const payload = parsed.data;
   const code = normalizeCode(payload.code);
   const limit = await enforceIncidentRateLimit({

@@ -89,7 +89,7 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
 
     const parsed = createSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -189,7 +189,7 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = listQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
@@ -254,7 +254,7 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
 
     const parsed = responseSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid response payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid response payload" });
     }
 
     const existing = await prisma.supportIssueReport.findUnique({

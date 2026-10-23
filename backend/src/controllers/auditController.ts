@@ -87,7 +87,7 @@ export const getLogs = async (req: AuthRequest, res: Response) => {
 
     const parsed = auditLogQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const filters = { ...parsed.data, limit: parsed.data.limit ?? 50, offset: parsed.data.offset ?? 0 };
@@ -135,7 +135,7 @@ export const exportLogsCsv = async (req: AuthRequest, res: Response) => {
 
     const parsed = auditExportQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const limit = parsed.data.limit ?? 5000;
@@ -240,7 +240,7 @@ export const getFraudReports = async (req: AuthRequest, res: Response) => {
     }
 
     const parsed = fraudReportQuerySchema.safeParse(req.query || {});
-    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     const statusRaw = String(parsed.data.status || "ALL").toUpperCase();
     const status = (["ALL", "OPEN", "REVIEWED", "RESOLVED", "DISMISSED"].includes(statusRaw) ? statusRaw : "ALL") as FraudReportStatus;
     const query = {
@@ -276,7 +276,7 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = fraudReportIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid report id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid report id" });
     }
     const reportId = paramsParsed.data.id;
 
@@ -284,7 +284,7 @@ export const respondToFraudReport = async (req: AuthRequest, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid response payload",
+        error: parsed.error.issues[0]?.message || "Invalid response payload",
       });
     }
 

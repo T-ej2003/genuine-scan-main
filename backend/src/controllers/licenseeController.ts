@@ -220,7 +220,7 @@ export const createLicensee = async (req: AuthRequest, res: Response) => {
 
     const parsed = createLicenseeSchema.safeParse(req.body);
     if (!parsed.success) {
-      const first = parsed.error.errors[0];
+      const first = parsed.error.issues[0];
       const fieldPath = first?.path?.join(".") || "";
       const errorMessage =
         fieldPath.endsWith("supportEmail")
@@ -340,7 +340,7 @@ export const getLicensee = async (req: AuthRequest, res: Response) => {
   try {
     const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid licensee id" });
     }
     const { id } = paramsParsed.data;
 
@@ -364,13 +364,13 @@ export const updateLicensee = async (req: AuthRequest, res: Response) => {
   try {
     const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid licensee id" });
     }
     const { id } = paramsParsed.data;
 
     const parsed = updateLicenseeSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const data: any = {};
@@ -417,7 +417,7 @@ export const deleteLicensee = async (req: AuthRequest, res: Response) => {
   try {
     const paramsParsed = licenseeIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid licensee id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid licensee id" });
     }
     const { id } = paramsParsed.data;
 

@@ -91,7 +91,7 @@ const actionSchema = z.object({
   qrCodeId: z.string().uuid().optional(),
   batchId: z.string().uuid().optional(),
   licenseeId: z.string().uuid().optional(),
-  manufacturerUserIds: z.array(z.string().uuid()).optional(),
+  manufacturerUserIds: z.array(z.string().uuid()).max(100).optional(),
 }).strict();
 
 const commSchema = z.object({
@@ -227,7 +227,7 @@ export const createIrIncident = async (req: AuthRequest, res: Response) => {
 
     const parsed = createIncidentSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const normalizedCode = normalizeCode(parsed.data.qrCodeValue);
@@ -320,7 +320,7 @@ export const getIrIncident = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid incident id" });
     }
     const id = paramsParsed.data.id;
 
@@ -378,13 +378,13 @@ export const patchIrIncident = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid incident id" });
     }
     const id = paramsParsed.data.id;
 
     const parsed = patchIncidentSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const existing = await prisma.incident.findUnique({
@@ -520,13 +520,13 @@ export const addIrIncidentEvent = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid incident id" });
     }
     const id = paramsParsed.data.id;
 
     const parsed = noteSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid note payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid note payload" });
     }
 
     const incident = await prisma.incident.findUnique({ where: { id }, select: { id: true, licenseeId: true } });
@@ -562,12 +562,12 @@ export const reviewIrIncidentCustomerTrust = async (req: AuthRequest, res: Respo
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid incident id" });
     }
 
     const parsed = customerTrustReviewSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid trust review payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid trust review payload" });
     }
 
     const incident = await prisma.incident.findUnique({
@@ -636,13 +636,13 @@ export const applyIrIncidentAction = async (req: AuthRequest, res: Response) => 
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = incidentIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid incident id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid incident id" });
     }
     const id = paramsParsed.data.id;
 
     const parsed = actionSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const result = await applyContainmentAction({
@@ -696,7 +696,7 @@ export const sendIrIncidentCommunication = async (req: AuthRequest, res: Respons
 
     const parsed = commSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const incident = await prisma.incident.findUnique({

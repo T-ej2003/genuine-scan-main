@@ -1,7 +1,17 @@
-# Green backend recovery OSV reachability review
+# Green backend recovery dependency and OSV review
 
-The guarded backend recovery change touches protected Node deployment/verifier scripts, workflow YAML, tests, and operational documentation. It does not change frontend source, build patterns, npm lockfiles, database migrations, RLS policy logic, or container packaging. The generated certification SQL changed only source-contract markers and checksums. The canonical executable-input fingerprint is `ff4c4902bb37d779d42674b0af945c033eecd7da84e573853dd4f628c371b85e`.
+PR #725 changes the governed backend recovery path and updates dependencies after the 2026-10-24 audit found newly published advisories. The recovery design, Terraform, database migrations, and RLS policy logic are unchanged. `npm run rls:full-generate` produced no tracked artifact diff; the migration-set digest remains `b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9`.
 
-OSV Scanner 2.6.0 scanned the exact worktree on 2026-10-24 UTC. The unfiltered report SHA-256 is `5232bb6a686b236f473b2f2b9e8766b533847b358bfb028c6be908fe62983f90`. The canonical browser build compiled 3,993 modules in 96 chunks and attributed 204 packages. It contains no `braces@3.0.3`; the backend lockfile also contains no `braces`. Runtime packaging validation passed. The scanner no longer reports the previously accepted braces advisory, so the canonical gate correctly rejects the now stale acceptance. The acceptance was removed. If that advisory reappears, the gate will fail until a new review; no permanent exclusion remains.
+## Runtime reachability and remediation
 
-The fresh scan also found newly published advisories in unchanged lockfiles: `body-parser` 1.20.6 (`GHSA-27r3-jxmh-p828`), `multer` 2.4.0 (`GHSA-q7qp-rjg7-q26m`), `nodemailer` 10.0.12 (`GHSA-85x2-q946-cp5h`, `GHSA-8c8m-p3m8-cjg8`, `GHSA-m943-m63m-w62w`), `zod` 3.25.76 (`GHSA-mrhx-c7xc-m3w5`), and root-lock `undici` 7.30.0 (`GHSA-4qv8-2p9j-2685`, `GHSA-f72v-6w45-q472`, `GHSA-xjj6-f33q-929c`). These are **not accepted** by this review. The canonical OSV gate must continue to fail for runtime or unknown reachability. Dependency remediation requires its own compatibility assessment; in particular, the reported `zod` fix crosses a major version boundary. No exclusion or audit bypass was added.
+| Package | Before | After | Dependency path and exposure |
+| --- | --- | --- | --- |
+| `zod` | 3.25.76 | 4.6.7 | Direct in root and backend. Backend validates attacker-controlled API payloads, so the reported excessive-work path was reachable. The v4 migration uses `issues` and explicit record keys; affected externally controlled arrays gained finite limits. |
+| `body-parser` | 1.20.6 | 1.20.9 | Transitive through backend Express. Request bodies are attacker controlled. Express 4.22.3 still requests the older `~1.20.5` line, so a narrow npm override pins the patched version. |
+| `multer` | 2.4.0 | 2.5.0 | Direct backend upload parser; attacker-controlled uploads are possible. Patched release installed. |
+| `nodemailer` | 10.0.12 | 10.2.1 | Direct backend mail transport. Application-controlled message construction does not justify retaining an advisory-bearing runtime package. Patched release installed. |
+| `undici` | 7.30.0 | 7.30.1 | Transitive root tooling dependency via jsdom. The patched lock version removes the reported findings. |
+
+The root and backend `npm audit --audit-level=high` runs each report zero vulnerabilities. Fresh OSV Scanner 2.6.0 `scan source -r .` returned zero findings; the unfiltered JSON report SHA-256 is `54345d5194d238b6017d0f3181f392109ce35023cc6b4bdfa8c134943dcb578e`. The canonical OSV gate accepts zero exceptions. The reviewed executable-input fingerprint is `6edea35724dbc7432d85ad9c1c08def8fb077deaa28a877ab5b79489647c9386`.
+
+The browser build, backend build, root typecheck, trust-critical compiled suite, and focused request-parser, MFA, mail, incident, and local-agent protocol tests passed locally. The parser regression test checks bounded Zod validation and that malformed compressed input cannot terminate the HTTP server. Production has not been mutated. If source or lockfiles change again, regenerate the fingerprint and rerun the scanner and canonical gate before relying on this review.

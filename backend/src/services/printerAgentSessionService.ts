@@ -67,7 +67,7 @@ export const sessionHelloSchema = z.object({
   nonce: z.string().trim().min(8).max(180),
   issuedAt: z.string().trim().min(10).max(80),
   signature: z.string().trim().min(16).max(4096),
-  printerHealth: z.record(z.any()).optional().nullable(),
+  printerHealth: z.record(z.string(), z.json()).optional().nullable(),
 }).strict();
 
 export const sessionClientMessageSchema = z.object({
@@ -100,7 +100,7 @@ export const sessionClientMessageSchema = z.object({
   labelLanguage: z.string().trim().max(80).optional().nullable(),
   payloadType: z.string().trim().max(80).optional().nullable(),
   error: z.string().trim().max(1000).optional().nullable(),
-  printerHealth: z.record(z.any()).optional().nullable(),
+  printerHealth: z.record(z.string(), z.json()).optional().nullable(),
 }).strict();
 
 export type SessionHello = z.infer<typeof sessionHelloSchema>;
