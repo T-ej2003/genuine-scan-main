@@ -551,11 +551,12 @@ for (const purpose of ['publication', 'cutover']) test(`${purpose} signing authe
 import { recoverBrokerPublication, recoverBrokerAliasCas, recoverBrokerReconciliation } from '../aws/stage-b-staged-broker.mjs';
 import { authenticateBrokerAliasCasEvent } from '../aws/stage-b-broker-writer-session.mjs';
 function recoveryReaders(r) {
+  r.deps.readPublicationDispatch ||= async()=>({authorizationSha256:brokerDigest(r.auth)});
   r.deps.authenticateRecoveryIntent = async (status, expected) => {
     const entry = r.entries.find(e => e[1] === status); assert.ok(entry);
-    const { authorizedAt, ...fields } = entry[2]; assert.deepEqual(fields, expected);
+    const { authorizedAt, dispatchContractVersion, ...fields } = entry[2]; assert.deepEqual(fields, expected);
     const id = await assertBrokerAuthorization(r.auth, r.p, { verify: r.deps.verifyAuthorization, now: new Date(authorizedAt) });
-    assert.equal(id, entry[0]); return { id, authorizedAt };
+    assert.equal(id, entry[0]); return { id, authorizedAt, dispatchContractVersion };
   };
   r.deps.readRecoveryReceipt = async (id, status) => r.entries.find(e => e[0] === id && e[1] === status)?.[2] || null;
   r.deps.readRecoveryStateIntent = async () => r.entries.find(e => e[1] === 'STATE_REFRESH_INTENT')?.[2];
@@ -569,6 +570,46 @@ async function publicationRecovery() {
   r.deps.authenticatePublicationRecoveryState=async plan=>assert.deepEqual(plan,publicationPlan());
   return {...r,recover:()=>recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps)};
 }
+async function preDispatchPublicationRecovery() {
+  const r=rig(), apply=r.deps.applyPublication;
+  let dispatched=false;
+  r.deps.readPublicationDispatch=async()=>dispatched?{authorizationSha256:brokerDigest(r.auth)}:null;
+  r.deps.applyPublication=async()=>{throw Error('Injected crash before native apply');};
+  await assert.rejects(()=>executeBrokerPublication(r,r.deps),/before native apply/);
+  recoveryReaders(r);
+  r.deps.authenticatePublicationPreDispatchState=async plan=>assert.deepEqual(plan,r.boundPlan(publicationPlan()));
+  r.deps.authenticatePublicationRecoveryState=async plan=>assert.deepEqual(plan,r.boundPlan(publicationPlan()));
+  r.deps.applyPublication=async bytes=>{dispatched=true;return apply(bytes);};
+  return r;
+}
+test('publication intent without dispatch resumes the same operation once',async()=>{
+  const r=await preDispatchPublicationRecovery();
+  const result=await recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps);
+  assert.equal(result.status,'PUBLISHED');assert.deepEqual(r.calls,['publish']);
+  assert.deepEqual(await recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps),result);
+  assert.deepEqual(r.calls,['publish']);
+});
+test('legacy, dispatched or unknown publication cannot reuse an unchanged predecessor',async()=>{
+  for(const change of [r=>delete r.entries.find(e=>e[1]==='PUBLICATION_INTENT')[2].dispatchContractVersion,
+    r=>r.deps.readPublicationDispatch=async()=>({authorizationSha256:brokerDigest(r.auth)}),
+    r=>r.entries.push([brokerDigest(r.auth),'PUBLICATION_UNKNOWN',{}])]){
+    const r=await preDispatchPublicationRecovery();change(r);
+    await assert.rejects(()=>recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps));
+    assert.deepEqual(r.calls,[]);
+  }
+});
+test('pre-dispatch recovery cannot mutate after approval expiry',async()=>{
+  const r=await preDispatchPublicationRecovery();
+  r.deps.applyPublication=async()=>{throw Error('Approval expired at mutation boundary');};
+  await assert.rejects(()=>recoverBrokerPublication({preparation:r.p,authorization:r.auth},r.deps),/Approval expired/);
+  assert.deepEqual(r.calls,[]);assert.equal(r.entries.some(e=>e[1]==='PUBLICATION_UNKNOWN'),false);
+});
+test('lost response after publication dispatch records unknown outcome without retry',async()=>{
+  const r=rig();r.deps.readPublicationDispatch=async()=>({authorizationSha256:brokerDigest(r.auth)});
+  r.deps.applyPublication=async()=>{r.calls.push('publish');throw Error('Lost Terraform response');};
+  await assert.rejects(()=>executeBrokerPublication(r,r.deps),/Lost Terraform response/);
+  assert.ok(r.entries.some(e=>e[1]==='PUBLICATION_UNKNOWN'));assert.deepEqual(r.calls,['publish']);
+});
 function casEvent(r, observed) {
   return {eventID:'a1111111-1111-4111-8111-111111111111',eventTime:now.toISOString(),eventSource:'lambda.amazonaws.com',eventName:'UpdateAlias20150331',awsRegion:'eu-west-2',recipientAccountId:STAGE_B.account,
     userAgent:`aws-cli/2 exec-env/mscqr-broker-cutover-${brokerDigest(r.auth)}`,
@@ -599,6 +640,7 @@ for(const [phase,fixture] of [['publication',publicationRecovery],['alias CAS',c
   ]) test(`${phase} recovery rejects ${name} without replay`,async()=>{const r=await fixture(),calls=structuredClone(r.calls);mutate(r);await assert.rejects(r.recover);assert.deepEqual(r.calls,calls);});
 }
 test('publication recovery rejects wrong persisted Terraform identity',async()=>{const r=await publicationRecovery();r.deps.authenticatePublicationRecoveryState=async()=>{throw Error('unexpected state');};await assert.rejects(r.recover);assert.deepEqual(r.calls,['publish']);});
+test('publication recovery rejects an advanced state without its dispatch claim',async()=>{const r=await publicationRecovery();r.deps.readPublicationDispatch=async()=>null;await assert.rejects(r.recover,/without its native dispatch claim/);assert.deepEqual(r.calls,['publish']);});
 test('publication recovery rejects unchanged predecessor or unrelated state version',async()=>{for(const version of ['12','99']){const r=await publicationRecovery();r.deps.readPublicationResult=async()=>({version,savedPlanSha256:r.p.savedPlanSha256,authorizationSha256:brokerDigest(r.auth)});if(version==='99')r.deps.getVersion=async()=>configuration('13');await assert.rejects(r.recover);assert.deepEqual(r.calls,['publish']);}});
 for(const [name,mutate] of [
  ['wrong operation marker',r=>r.events[0].userAgent='aws-cli/2 exec-env/mscqr-broker-cutover-'+ 'f'.repeat(64)],['missing operation marker',r=>delete r.events[0].userAgent],
