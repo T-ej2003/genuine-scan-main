@@ -12,7 +12,7 @@ import { createPinnedRootAttestationVerifier } from "./production-root-attestati
 import { readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { assertFailedRecoveryEvidenceReference } from "./production-backend-failed-recovery-evidence-reference.mjs";
-import { decodeWorkflowDispatchGzip, encodeWorkflowDispatchGzip, MAX_DECOMPRESSED_WORKFLOW_DISPATCH_BYTES, measureWorkflowDispatchInputs as measureBoundedWorkflowDispatchInputs, WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT } from "./workflow-dispatch-gzip-transport.mjs";
+import { decodeWorkflowDispatchGzip, encodeWorkflowDispatchGzip, measureWorkflowDispatchInputs as measureBoundedWorkflowDispatchInputs, WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT } from "./workflow-dispatch-gzip-transport.mjs";
 
 const REPOSITORY = "T-ej2003/genuine-scan-main";
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -30,7 +30,9 @@ const BUNDLE_KIND = "BACKEND_HEALTH_RECOVERY_DISPATCH_BUNDLE";
 const COMPONENTS = ["imageAuthorization", "approval", "runtimeConsumability", "failedRecoveryEvidenceReference"];
 const GREEN_COMPONENTS = [...COMPONENTS, "databaseCompatibilityReference"];
 export { WORKFLOW_DISPATCH_INTERNAL_BUDGET, WORKFLOW_DISPATCH_PLATFORM_LIMIT };
-export const MAX_DECOMPRESSED_BUNDLE_BYTES = MAX_DECOMPRESSED_WORKFLOW_DISPATCH_BYTES;
+// Signed inline runtime-policy evidence exceeds the generic 60 KB transport cap.
+// The encoded GitHub input remains subject to its separate 60 KB limit.
+export const MAX_DECOMPRESSED_BUNDLE_BYTES = 96 * 1024;
 export const MAX_ENCODED_BUNDLE_CHARACTERS = WORKFLOW_DISPATCH_INTERNAL_BUDGET;
 
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
