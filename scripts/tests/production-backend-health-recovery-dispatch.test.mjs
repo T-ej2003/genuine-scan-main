@@ -114,6 +114,17 @@ test("green recovery bundle requires an exact-source database verifier reference
     databaseCompatibilityReferenceBytes: Buffer.from(JSON.stringify({ ...database, sourceSha: "0".repeat(40) })) }), /different|source|another authorization/);
   assert.throws(() => buildBackendHealthRecoveryDispatch({ ...request,
     currentTaskDefinitionArn: currentTaskDefinitionArn }), /task definition/);
+
+  // Inline execution-policy readbacks make the signed runtime envelope larger
+  // than the generic 60 KB decompression cap, even while the GitHub input fits.
+  const withRuntimePolicy = buildBackendHealthRecoveryDispatch({ ...request,
+    runtimeConsumabilityBytes: Buffer.from(JSON.stringify({ ...runtimeConsumability,
+      policyReadback: "x".repeat(70_000) })) });
+  const transported = fields(withRuntimePolicy);
+  assert.ok(bundleBytesFrom(transported).length > 60_000);
+  assert.ok(bundleBytesFrom(transported).length <= MAX_DECOMPRESSED_BUNDLE_BYTES);
+  assert.ok(withRuntimePolicy.payload.characters < WORKFLOW_DISPATCH_INTERNAL_BUDGET);
+  assert.equal(bundleFrom(transported).value.releaseMode, GREEN_BACKEND_RECOVERY_KIND);
 });
 
 test("Release Gate routes the green candidate through its concrete governed CLI", () => {
