@@ -1,8 +1,13 @@
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { canonicalSha256, taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM } from "./production-green-stage-b-contract.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { deriveEcsRuntimeDependencies, RUNTIME_ACCOUNT as ACCOUNT, RUNTIME_REGION as REGION, RUNTIME_ROLE_ARN as ROLE_ARN } from "./production-ecs-runtime-dependencies.mjs";
+import { APP_ONLY } from "./production-app-only-contract.mjs";
+import { evaluateAppOnlySourceIam } from "./production-app-only-iam-source.mjs";
+import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
+import { canonicalizeStageAProductionArtifactsPolicy } from "./production-stage-a-control-plane.mjs";
 export { deriveEcsRuntimeDependencies } from "./production-ecs-runtime-dependencies.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
@@ -11,7 +16,20 @@ export const RUNTIME_AUTHORIZATION_MAX_AGE_MS = 35 * 24 * 60 * 60 * 1000;
 export const LIVE_RUNTIME_EVIDENCE_MAX_AGE_MS = 60 * 1000;
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 const AWS_MANAGED_EXECUTION_POLICY = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy";
+const GREEN_EXECUTION_POLICY_NAME = "stage-b-exact-image-logs-and-secrets";
 const LEGACY_RUNTIME_POLICY_NAME = "mscqr-ecs-secrets-read";
+const sourcePolicySha256 = (document) => canonicalSha256(canonicalizeStageAProductionArtifactsPolicy(normalizeIamPolicyDocument(document, "Stage-B execution policy")));
+let greenExecutionPolicy;
+function sourceGreenExecutionPolicy(candidate) {
+  if (candidate?.family === APP_ONLY.family && candidate.executionRoleArn !== APP_ONLY.executionRoleArn) throw new Error("Green runtime execution role differs from protected source.");
+  if (candidate?.executionRoleArn !== APP_ONLY.executionRoleArn) return null;
+  if (candidate.family !== APP_ONLY.family || candidate.taskRoleArn !== APP_ONLY.taskRoleArn) throw new Error("Green runtime candidate identity differs from protected source.");
+  if (!greenExecutionPolicy) {
+    const document = evaluateAppOnlySourceIam({ repositoryRoot: fileURLToPath(new URL("../..", import.meta.url)) }).policies.execution;
+    greenExecutionPolicy = Object.freeze({ document, policySha256: sourcePolicySha256(document) });
+  }
+  return greenExecutionPolicy;
+}
 const ECR_REPOSITORY_ARN = new RegExp(`^arn:aws:ecr:${REGION}:${ACCOUNT}:repository/([a-z0-9][a-z0-9._/-]*)$`);
 const ECS_TASK_TRUST = Object.freeze({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Service: "ecs-tasks.amazonaws.com" }, Action: "sts:AssumeRole" }] });
 const ECS_TASK_TRUST_SHA256 = canonicalSha256(ECS_TASK_TRUST);
@@ -119,18 +137,24 @@ const resourceMayIntersect = (pattern, namespace) => {
 const denyMayIntersect = (statement, claim) => actionAppliesToDeny(statement, claim.action)
   && (Object.hasOwn(statement, "NotResource") || [statement.Resource].flat().some((resource) => resourceMayIntersect(resource, claim.futureStreamNamespace)));
 
-function loggingPolicyAuthorizations(role, policyDocuments, claims) {
+function loggingPolicyAuthorizations(role, policyDocuments, claims, greenPolicy) {
   if (!claims.length) return null;
   if (role.PermissionsBoundary?.PermissionsBoundaryArn) throw new Error(`Runtime logging proof does not support a permissions boundary for ${role.Arn}.`);
-  const managed = policyDocuments.filter(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY);
-  if (managed.length !== 1) throw new Error(`Runtime logging proof requires the exact AWS-managed ECS execution policy for ${role.Arn}.`);
   const parsed = policyDocuments.map((record) => ({ ...record, statements: identityPolicyStatements(record.document, `Runtime identity policy ${record.policyArn || record.policyName}`).statements }));
-  const authority = parsed.find(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY);
+  const authority = greenPolicy ? parsed.find(({ policyName }) => policyName === GREEN_EXECUTION_POLICY_NAME)
+    : parsed.find(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY);
+  if (!authority || (!greenPolicy && parsed.filter(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY).length !== 1)) {
+    throw new Error(`Runtime logging proof requires the exact ${greenPolicy ? "Terraform-owned inline" : "AWS-managed ECS"} execution policy for ${role.Arn}.`);
+  }
+  if (greenPolicy && authority.policySha256 !== greenPolicy.policySha256) throw new Error("Green runtime logging policy differs from protected Terraform source.");
   for (const claim of claims) {
-    const wildcardAllow = authority.statements.some((statement) => statement.Effect === "Allow" && !statement.Condition
+    const allowed = authority.statements.some((statement) => statement.Effect === "Allow" && !statement.Condition
       && Object.hasOwn(statement, "Action") && actionMatches(statement.Action, claim.action)
-      && Object.hasOwn(statement, "Resource") && [statement.Resource].flat().includes("*"));
-    if (!wildcardAllow) throw new Error(`Runtime logging wildcard authority is unproven for ${claim.dependencyId}.`);
+      && Object.hasOwn(statement, "Resource") && [statement.Resource].flat().includes(greenPolicy ? claim.resource : "*"));
+    if (!allowed || (greenPolicy && (!claim.resource.endsWith(":log-stream:*")
+      || !claim.futureStreamNamespace.startsWith(claim.resource.slice(0, -1))))) {
+      throw new Error(`Runtime logging ${greenPolicy ? "namespace" : "wildcard"} authority is unproven for ${claim.dependencyId}.`);
+    }
     for (const record of parsed) for (const statement of record.statements) {
       if (statement.Effect !== "Deny" || !actionAppliesToDeny(statement, claim.action)) continue;
       if (hasPolicyVariable(statement)) throw new Error(`UNSUPPORTED_VARIABLE_BEARING_LOGGING_DENY: ${claim.dependencyId}.`);
@@ -141,8 +165,20 @@ function loggingPolicyAuthorizations(role, policyDocuments, claims) {
   }
   const namespaces = [...new Map(claims.map(({ logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }) =>
     [futureStreamNamespace, { logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }])).values()];
-  return Object.freeze({ claimsSha256: canonicalSha256(claims), namespaces, positivePolicyArn: authority.policyArn, defaultVersionId: authority.defaultVersionId,
+  return Object.freeze({ claimsSha256: canonicalSha256(claims), namespaces,
+    ...(greenPolicy ? { positivePolicyName: GREEN_EXECUTION_POLICY_NAME } : { positivePolicyArn: authority.policyArn, defaultVersionId: authority.defaultVersionId }),
     positivePolicySha256: authority.policySha256, identityPolicyDenyAnalysis: "NO_INTERSECTING_DENY", permissionsBoundary: "ABSENT" });
+}
+
+function expectedLoggingAuthorization(claims, role, owner) {
+  const namespaces = [...new Map(claims.map(({ logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }) =>
+    [futureStreamNamespace, { logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }])).values()];
+  const green = owner?.policyName === GREEN_EXECUTION_POLICY_NAME;
+  const managed = role?.attachedPolicies?.find(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY);
+  return { claimsSha256: canonicalSha256(claims), namespaces,
+    ...(green ? { positivePolicyName: GREEN_EXECUTION_POLICY_NAME } : { positivePolicyArn: AWS_MANAGED_EXECUTION_POLICY, defaultVersionId: managed?.defaultVersionId }),
+    positivePolicySha256: green ? owner.sourcePolicySha256 : managed?.policySha256,
+    identityPolicyDenyAnalysis: "NO_INTERSECTING_DENY", permissionsBoundary: "ABSENT" };
 }
 
 export function assertResourcePolicyAllowsRuntime({ policy, principalArn, action, resource, label }) {
@@ -349,12 +385,9 @@ export function buildRuntimeConsumabilityEvidence({ sourceSha, candidate, resour
     if (!liveRole || liveRole.trustPolicySha256 !== ECS_TASK_TRUST_SHA256 || (owner.policyName && !liveRole.inlinePolicies?.some(({ policyName, policySha256 }) => policyName === owner.policyName && policySha256 === owner.sourcePolicySha256))
       || (owner.policyArn && !liveRole.attachedPolicies?.some(({ policyArn }) => policyArn === owner.policyArn))) throw new Error(`Runtime dependency source policy is not present on the exact live principal: ${dependency.dependencyId}.`);
     const roleClaims = expectedLogging.filter(({ principalArn }) => principalArn === dependency.principalArn);
-    const namespaces = [...new Map(roleClaims.map(({ logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }) =>
-      [futureStreamNamespace, { logGroupArn, logGroupName, streamPrefix, containerName, futureStreamNamespace }])).values()];
-    if (logging && (liveRole.permissionsBoundary !== null || canonicalSha256(liveRole.loggingAuthorization) !== canonicalSha256({ claimsSha256: canonicalSha256(roleClaims), namespaces,
-      positivePolicyArn: AWS_MANAGED_EXECUTION_POLICY, defaultVersionId: liveRole.attachedPolicies.find(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY)?.defaultVersionId,
-      positivePolicySha256: liveRole.attachedPolicies.find(({ policyArn }) => policyArn === AWS_MANAGED_EXECUTION_POLICY)?.policySha256,
-      identityPolicyDenyAnalysis: "NO_INTERSECTING_DENY", permissionsBoundary: "ABSENT" }))) throw new Error(`Runtime logging policy proof is incomplete for ${dependency.dependencyId}.`);
+    if (logging && (liveRole.permissionsBoundary !== null || canonicalSha256(liveRole.loggingAuthorization) !== canonicalSha256(expectedLoggingAuthorization(roleClaims, liveRole, owner)))) {
+      throw new Error(`Runtime logging policy proof is incomplete for ${dependency.dependencyId}.`);
+    }
     if (!simulation || simulation.principalArn !== dependency.principalArn || simulation.action !== dependency.action || simulation.resource !== dependency.resource || simulation.decision !== "allowed") throw new Error(`Runtime dependency is not allowed by live IAM simulation: ${dependency.dependencyId}.`);
     return { dependencyId: dependency.dependencyId, sourcePolicySha256: owner.sourcePolicySha256, liveSimulation: "allowed" };
   });
@@ -378,7 +411,7 @@ export function assertRuntimeConsumabilityEvidence(evidence, { sourceSha, candid
       const role = livePolicyIdentity.roles.find(({ principalArn }) => principalArn === dependency.principalArn);
       const logging = expectedLogging.some(({ dependencyId }) => dependencyId === dependency.dependencyId);
       return result.dependencyId !== dependency.dependencyId || result.liveSimulation !== "allowed" || result.sourcePolicySha256 !== owner?.sourcePolicySha256
-        || logging && (role?.permissionsBoundary !== null || !role?.loggingAuthorization)
+        || logging && (role?.permissionsBoundary !== null || canonicalSha256(role?.loggingAuthorization) !== canonicalSha256(expectedLoggingAuthorization(expectedLogging.filter(({ principalArn }) => principalArn === dependency.principalArn), role, owner)))
         || role?.trustPolicySha256 !== ECS_TASK_TRUST_SHA256
         || (owner?.policyName && !role.inlinePolicies?.some(({ policyName, policySha256 }) => policyName === owner.policyName && policySha256 === owner.sourcePolicySha256))
         || (owner?.policyArn && !role.attachedPolicies?.some(({ policyArn }) => policyArn === owner.policyArn));
@@ -446,6 +479,19 @@ export function buildLegacyExecutionRuntimePolicy(candidate, resourceMetadata) {
 
 export function sourceRuntimePolicyOwnership(candidate, resourceMetadata) {
   const dependencies = addEncryptionDependencies(candidate, deriveEcsRuntimeDependencies(candidate), resourceMetadata);
+  const green = sourceGreenExecutionPolicy(candidate);
+  if (green) {
+    const statements = identityPolicyStatements(green.document, "Protected Stage-B execution policy").statements;
+    return Object.fromEntries(dependencies.map((dependency) => {
+      if (dependency.principalArn !== APP_ONLY.executionRoleArn || !statements.some((statement) => statement.Effect === "Allow" && !statement.Condition
+        && Object.hasOwn(statement, "Action") && [statement.Action].flat().includes(dependency.action)
+        && Object.hasOwn(statement, "Resource") && [statement.Resource].flat().includes(dependency.resource))) {
+        throw new Error(`Protected Stage-B execution policy does not own ${dependency.dependencyId}.`);
+      }
+      return [dependency.dependencyId, { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource,
+        sourcePolicyPresent: true, sourcePolicySha256: green.policySha256, policyName: GREEN_EXECUTION_POLICY_NAME }];
+    }));
+  }
   const generated = buildLegacyExecutionRuntimePolicy(candidate, resourceMetadata);
   const generatedSha256 = canonicalSha256(generated);
   const managedSha256 = canonicalSha256({ policyArn: AWS_MANAGED_EXECUTION_POLICY, contract: "AWS ECS task execution image pull and log stream delivery" });
@@ -606,23 +652,33 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws, candidat
   if (typeof aws !== "function") throw new Error("Runtime closure requires an authenticated IAM reader.");
   const dependencies = candidate ? deriveEcsRuntimeDependencies(candidate) : [];
   const claims = candidate ? loggingClaims(candidate, dependencies) : [];
+  const green = sourceGreenExecutionPolicy(candidate);
   const roles = [];
   for (const principalArn of [...new Set(principalArns)].sort()) {
     if (!ROLE_ARN.test(principalArn || "")) throw new Error("Runtime closure principal ARN is invalid.");
     const roleName = principalArn.split("/").at(-1);
     const role = (await aws(["iam", "get-role", "--role-name", roleName]))?.Role;
-    if (role?.Arn !== principalArn || ecsTaskTrustSha256(role.AssumeRolePolicyDocument) !== ECS_TASK_TRUST_SHA256) throw new Error(`Runtime role identity or ECS task trust is incomplete for ${principalArn}.`);
-    const inlineNames = (await aws(["iam", "list-role-policies", "--role-name", roleName]))?.PolicyNames;
-    const attached = (await aws(["iam", "list-attached-role-policies", "--role-name", roleName]))?.AttachedPolicies;
+    if (role?.Arn !== principalArn || (green && principalArn === APP_ONLY.executionRoleArn && (typeof role.RoleId !== "string" || !role.RoleId))
+      || ecsTaskTrustSha256(role.AssumeRolePolicyDocument) !== ECS_TASK_TRUST_SHA256) throw new Error(`Runtime role identity or ECS task trust is incomplete for ${principalArn}.`);
+    const inlineResponse = await aws(["iam", "list-role-policies", "--role-name", roleName]);
+    const attachedResponse = await aws(["iam", "list-attached-role-policies", "--role-name", roleName]);
+    const inlineNames = inlineResponse?.PolicyNames;
+    const attached = attachedResponse?.AttachedPolicies;
     if (!Array.isArray(inlineNames) || !Array.isArray(attached) || new Set(inlineNames).size !== inlineNames.length
-      || new Set(attached.map(({ PolicyArn }) => PolicyArn)).size !== attached.length) throw new Error(`Runtime role policy census is incomplete for ${principalArn}.`);
+      || new Set(attached.map(({ PolicyArn }) => PolicyArn)).size !== attached.length
+      || inlineResponse.IsTruncated === true || attachedResponse.IsTruncated === true) throw new Error(`Runtime role policy census is incomplete for ${principalArn}.`);
+    if (green && principalArn === APP_ONLY.executionRoleArn && (inlineNames.length !== 1 || inlineNames[0] !== GREEN_EXECUTION_POLICY_NAME || attached.length !== 0)) {
+      throw new Error("Green runtime IAM policy topology differs from protected Terraform source.");
+    }
     const inlinePolicies = [];
     const policyDocuments = [];
     for (const policyName of [...inlineNames].sort()) {
       const response = await aws(["iam", "get-role-policy", "--role-name", roleName, "--policy-name", policyName]);
       if (response?.RoleName !== roleName || response?.PolicyName !== policyName || !response.PolicyDocument) throw new Error(`Runtime inline policy readback is incomplete for ${principalArn}.`);
-      inlinePolicies.push({ policyName, policySha256: canonicalSha256(response.PolicyDocument) });
-      policyDocuments.push({ policyName, policySha256: canonicalSha256(response.PolicyDocument), document: response.PolicyDocument });
+      const policySha256 = green && principalArn === APP_ONLY.executionRoleArn ? sourcePolicySha256(response.PolicyDocument) : canonicalSha256(response.PolicyDocument);
+      if (green && principalArn === APP_ONLY.executionRoleArn && policySha256 !== green.policySha256) throw new Error("Green runtime IAM document differs from protected Terraform source.");
+      inlinePolicies.push({ policyName, policySha256 });
+      policyDocuments.push({ policyName, policySha256, document: response.PolicyDocument });
     }
     const attachedPolicies = [];
     for (const item of [...attached].sort((left, right) => left.PolicyArn.localeCompare(right.PolicyArn))) {
@@ -642,7 +698,7 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws, candidat
       if (!version?.Document) throw new Error(`Runtime permissions boundary document is incomplete for ${principalArn}.`);
       permissionsBoundary = { policyArn, defaultVersionId: policy.DefaultVersionId, policySha256: canonicalSha256(version.Document) };
     }
-    const loggingAuthorization = loggingPolicyAuthorizations(role, policyDocuments, claims.filter((claim) => claim.principalArn === principalArn));
+    const loggingAuthorization = loggingPolicyAuthorizations(role, policyDocuments, claims.filter((claim) => claim.principalArn === principalArn), green && principalArn === APP_ONLY.executionRoleArn ? green : null);
     roles.push({ principalArn, trustPolicySha256: ECS_TASK_TRUST_SHA256, permissionsBoundary, inlinePolicies, attachedPolicies, loggingAuthorization });
   }
   const body = { roles };
@@ -689,7 +745,11 @@ export async function collectRuntimeConsumabilityEvidence({ sourceSha, candidate
   const resourceMetadata = await collectRuntimeResourceMetadata(candidate, aws, { readKmsKey });
   const dependencies = addEncryptionDependencies(candidate, deriveEcsRuntimeDependencies(candidate), resourceMetadata);
   const livePolicyIdentity = await collectLiveRolePolicyIdentity(dependencies.map(({ principalArn }) => principalArn), aws, candidate);
-  const simulations = await simulateRuntimeDependencies(dependencies, aws);
+  const green = Boolean(sourceGreenExecutionPolicy(candidate));
+  const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: green ? "exact-dependency" : "managed-wildcard" });
+  if (green && canonicalSha256(await collectLiveRolePolicyIdentity(dependencies.map(({ principalArn }) => principalArn), aws, candidate)) !== canonicalSha256(livePolicyIdentity)) {
+    throw new Error("Green runtime IAM changed during dependency simulation.");
+  }
   return buildRuntimeConsumabilityEvidence({ sourceSha, candidate, resourceMetadata, sourcePolicyOwnership: sourceRuntimePolicyOwnership(candidate, resourceMetadata), livePolicyIdentity, simulations, generatedAt });
 }
 

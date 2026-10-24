@@ -1,0 +1,9 @@
+# Green backend runtime policy closure
+
+The green backend ECS execution role is owned by `infra/aws/terraform/production-green-stage-b/main.tf`. Its only expected identity policy is the inline `stage-b-exact-image-logs-and-secrets` policy. It must have no attached managed policies or permissions boundary. The legacy `converge-production-ecs-runtime-policy.mjs` command targets a different execution role and must not be used to change this role.
+
+`prepare-production-ecs-runtime-consumability.mjs --mode consumability` now evaluates the protected Terraform policy expression, compares its complete normalized document with IAM readback, verifies the exact ECS task trust and role identity, and simulates every candidate-derived ECR, logging, secret, and applicable KMS dependency. The logging checks use the candidate's future log-stream namespace and exact log-stream policy resource. Any missing, broader, denied, drifted, or incomplete IAM result fails before root signing. The backend recovery CLI repeats the live IAM policy readback before mutation and requires it to match the signed closure.
+
+For the incident on source `50c7e1b71f058e0d3a72c3703d5bda49505fc4fe`, the signed runtime inventory remains separate from consumability. After this source fix merges, source-bound inventory, image authorization, database compatibility, operator approval, and runtime consumability must be checked against the **new** protected-main SHA before deployment. Do not attach `AmazonECSTaskExecutionRolePolicy`, reuse an expired approval, or treat this code change as authorization to dispatch recovery.
+
+The verifier proves IAM and dependency metadata at collection time. ECS/ALB health and the exact replacement image are verified by the governed recovery workflow after deployment. A concurrent IAM change after the final readback is an operational risk; preserve the protected IAM change process during recovery.
