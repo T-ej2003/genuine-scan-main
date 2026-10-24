@@ -1175,7 +1175,14 @@ jobs:
             --health-url "${{ env.PUBLIC_BASE_URL }}/api/health/ready" \
             --evidence-out "$RUNNER_TEMP/backend-health-recovery/evidence.json"
 
-      - name: Execute governed green backend health recovery
+      - name: Install pinned Terraform for green runtime policy verification
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Execute governed green backend health recovery with verified Terraform source
         if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}

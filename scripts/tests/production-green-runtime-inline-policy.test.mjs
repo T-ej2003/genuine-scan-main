@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
+import yaml from "js-yaml";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { evaluateAppOnlySourceIam } from "../aws/production-app-only-iam-source.mjs";
 import { canonicalSha256, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
@@ -132,4 +134,17 @@ test("Terraform owns exact injected-secret reads and refuses unowned customer KM
   customerManaged.metadataSha256 = canonicalSha256({ ARN: resource, KmsKeyId: customerManaged.kmsKeyArn,
     availability: secret.availability, deletedDate: null, versionIdsToStages, secretVersions, selectorResolutions });
   assert.throws(() => sourceRuntimePolicyOwnership(value, { ...resources, [resource]: customerManaged }), /does not own/);
+});
+
+test("production Release Gate installs pinned Terraform before green recovery source evaluation", () => {
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
+  const steps = workflow.jobs["deploy-production-ecs"].steps;
+  const setup = steps.findIndex(({ name }) => name === "Install pinned Terraform for green runtime policy verification");
+  const recovery = steps.findIndex(({ name }) => name === "Execute governed green backend health recovery with verified Terraform source");
+  assert.ok(setup >= 0 && recovery > setup);
+  assert.equal(steps[setup].uses, "hashicorp/setup-terraform@v3");
+  assert.equal(steps[setup].with.terraform_version, "1.15.8");
+  assert.equal(steps[setup].with.terraform_wrapper, false);
+  assert.equal(steps[setup].if, steps[recovery].if);
+  assert.match(steps[recovery].run, /recover-production-green-backend-health\.mjs/);
 });
