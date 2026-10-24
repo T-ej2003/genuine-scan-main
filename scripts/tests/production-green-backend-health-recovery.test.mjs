@@ -4,6 +4,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { assertUnavailableGreenBackend, runGreenBackendHealthRecovery } from "../aws/production-green-backend-health-recovery.mjs";
 import { assertCompletedBackendRecoveryEvidence, commitBackendRecoveryComponentState } from "../aws/commit-production-component-recovery-state.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
 
 const oldDigest = `sha256:${"1".repeat(64)}`;
 const newDigest = `sha256:${"2".repeat(64)}`;
@@ -91,8 +92,106 @@ function scenario({ loseRegisterResponse = false, loseUpdateResponse = false } =
     authorizePhase: async () => {},
     verifyDispatchedAuthorization: async () => {},
   };
-  return { input, adapters, counts: () => ({ registrations, updates }), entries };
+  return { input, adapters, counts: () => ({ registrations, updates }), entries,
+    live: () => ({ service: structuredClone(service), definition: structuredClone(targetDefinition),
+      tasks: ["a", "b"].map((id) => ({ taskArn: `task-${id}`, clusterArn: APP_ONLY.clusterArn,
+        group: `service:${APP_ONLY.service}`, taskDefinitionArn: targetArn, lastStatus: "RUNNING",
+        healthStatus: "HEALTHY", startedBy: service.deployments[0].id,
+        containers: [{ name: "backend", imageDigest: newDigest }] })) }) };
 }
+
+async function componentCommitScenario() {
+  const run = scenario();
+  const result = await runGreenBackendHealthRecovery(run.input, run.adapters);
+  const body = { schemaVersion: 1, kind: "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE",
+    sourceSha: run.input.sourceSha, imageDigest: newDigest, originalTaskDefinitionArn: arn,
+    targetTaskDefinitionArn: result.targetArn, operationId: result.operationId,
+    candidateFingerprint: run.input.candidateFingerprint,
+    completionSha256: canonicalSha256(result.completion), completion: result.completion };
+  const evidence = { ...body, evidenceSha256: canonicalSha256(body) };
+  for (const phase of ["BACKEND:REGISTER", "BACKEND:UPDATE"]) {
+    const dispatch = run.entries.get(`${result.operationId}:${phase}:DISPATCH`);
+    run.entries.set(`${result.operationId}:BACKEND:AUTHORIZATION:${phase}:${dispatch.authorizationSha256}`, {
+      phase, input: { sourceSha: run.input.sourceSha, recoveryImageDigest: newDigest,
+        serviceConfigurationSha256: run.input.serviceConfigurationSha256,
+        approval: { authorizationSha256: dispatch.authorizationSha256,
+          serviceConfigurationSha256: run.input.serviceConfigurationSha256 } },
+    });
+  }
+  const store = { readOperation: (operationId, phase) => run.entries.get(`${operationId}:${phase}`) || null };
+  let state = createProductionComponentDeploymentState({ components: {
+    backend: { sourceSha: "b".repeat(40), establishedThroughSha: "b".repeat(40), imageDigest: oldDigest,
+      taskDefinitionArn: arn, desiredCount: 2 },
+    frontend: { sourceSha: "b".repeat(40), establishedThroughSha: "b".repeat(40), imageDigest: oldDigest,
+      taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:1", desiredCount: 2 },
+    database: null, security: null } });
+  let writes = 0;
+  const client = { read: () => state, advance: (_before, next) => { writes++; state = next; } };
+  let snapshot = run.live();
+  const readers = { readLive: () => structuredClone(snapshot), readBackendImageSource: () => run.input.sourceSha };
+  const commit = () => commitBackendRecoveryComponentState({ evidence, store, readers, client,
+    isProtectedMainAncestor: () => true });
+  return { run, evidence, store, readers, client, commit,
+    change: (mutate) => mutate(snapshot), writes: () => writes };
+}
+
+test("component commit accepts only the exact authorized green service and is repeatable", async () => {
+  const run = await componentCommitScenario();
+  assert.equal(run.commit().state.components.backend.desiredCount, 2);
+  assert.equal(run.writes(), 1);
+  assert.equal(run.commit().alreadyCurrent, true);
+  assert.equal(run.writes(), 1);
+});
+
+for (const [name, change] of [
+  ["desired count", (value) => { value.service.desiredCount = 3; value.service.runningCount = 3;
+    value.tasks.push({ ...value.tasks[0], taskArn: "task-c" }); }],
+  ["deployment configuration", (value) => { value.service.deploymentConfiguration = { maximumPercent: 300 }; }],
+  ["network configuration", (value) => { value.service.networkConfiguration = { awsvpcConfiguration: { subnets: ["subnet-unapproved"] } }; }],
+  ["load balancers", (value) => { value.service.loadBalancers = [{ targetGroupArn: "unapproved" }]; }],
+  ["new service field", (value) => { value.service.enableExecuteCommand = true; }],
+  ["task definition", (value) => { value.service.taskDefinition = arn; }],
+  ["image digest", (value) => { value.tasks[0].containers[0].imageDigest = oldDigest; }],
+  ["unhealthy task", (value) => { value.tasks[0].healthStatus = "UNHEALTHY"; }],
+]) test(`component commit rejects healthy-looking ${name} drift before state write`, async () => {
+  const run = await componentCommitScenario();
+  run.change(change);
+  assert.throws(run.commit);
+  assert.equal(run.writes(), 0);
+});
+
+test("component commit rejects malformed durable fingerprints and missing native receipt", async () => {
+  for (const change of [
+    (run) => { run.store.readOperation = (read => (id, phase) => phase === "BACKEND:PREDECESSOR"
+      ? { ...read(id, phase), serviceConfigurationSha256: null } : read(id, phase))(run.store.readOperation); },
+    (run) => { run.store.readOperation = (read => (id, phase) => phase === "BACKEND:UPDATE:COMPLETED"
+      ? null : read(id, phase))(run.store.readOperation); },
+  ]) {
+    const run = await componentCommitScenario(); change(run);
+    assert.throws(run.commit); assert.equal(run.writes(), 0);
+  }
+});
+
+test("component commit rechecks ECS on concurrent mutation before CAS and after lost response", async () => {
+  const concurrent = await componentCommitScenario();
+  const original = concurrent.readers.readLive;
+  let reads = 0;
+  concurrent.readers.readLive = () => {
+    const value = original();
+    if (++reads > 1) value.service.networkConfiguration = { awsvpcConfiguration: { subnets: ["subnet-raced"] } };
+    return value;
+  };
+  assert.throws(concurrent.commit, /service configuration changed/);
+  assert.equal(concurrent.writes(), 0);
+
+  const lost = await componentCommitScenario();
+  const advance = lost.client.advance;
+  lost.client.advance = (...args) => { advance(...args); throw new Error("component-state response lost"); };
+  assert.throws(lost.commit, /response lost/);
+  assert.equal(lost.writes(), 1);
+  assert.equal(lost.commit().alreadyCurrent, true);
+  assert.equal(lost.writes(), 1);
+});
 
 for (const loss of [{}, { loseRegisterResponse: true }, { loseUpdateResponse: true }])
   test(`green recovery reconciles native response loss ${JSON.stringify(loss)}`, async () => {

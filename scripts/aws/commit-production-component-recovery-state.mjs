@@ -54,6 +54,8 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
   assertCompletedBackendRecoveryEvidence(evidence);
   const green = evidence.kind === "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE";
   readers ||= createAppOnlyEcsReaders(run, { assertDefinitionArn: green ? (arn) => assert.match(arn, GREEN_BACKEND_TASK_ARN) : assertBackendHealthRecoveryTaskArn });
+  let authorizedConfiguration;
+  let authorizedDesiredCount;
   if (green) {
     assert.ok(store && typeof store.readOperation === "function", "Green recovery requires authoritative durable journal readback");
     const complete = store.readOperation(evidence.operationId, "BACKEND:RECOVERY:COMPLETE");
@@ -63,25 +65,43 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
     assert.equal(predecessor?.taskDefinitionArn, evidence.originalTaskDefinitionArn);
     assert.equal(predecessor?.candidateFingerprint, evidence.candidateFingerprint);
     assert.equal(predecessor?.failureProofSha256, canonicalSha256(predecessor.failureProof));
+    authorizedConfiguration = predecessor.serviceConfigurationSha256;
+    authorizedDesiredCount = predecessor.failureProof.desiredCount;
+    assert.match(authorizedConfiguration || "", /^[a-f0-9]{64}$/, "Durable recovery service fingerprint is missing");
+    assert.equal(authorizedDesiredCount, 2, "Durable recovery desired count is not authorized");
+    assert.equal(complete.serviceConfigurationSha256, authorizedConfiguration);
     for (const phase of ["BACKEND:REGISTER", "BACKEND:UPDATE"]) {
       const dispatch = store.readOperation(evidence.operationId, `${phase}:DISPATCH`);
       assert.equal(dispatch?.sourceSha, evidence.sourceSha); assert.equal(dispatch?.imageDigest, evidence.imageDigest);
       assert.match(dispatch?.authorizationSha256 || "", /^[a-f0-9]{64}$/);
       assert.equal(dispatch?.operationId, evidence.operationId);
       assert.equal(dispatch?.candidateFingerprint, evidence.candidateFingerprint);
+      assert.equal(dispatch?.serviceConfigurationSha256, authorizedConfiguration);
       const authorization = store.readOperation(evidence.operationId, `BACKEND:AUTHORIZATION:${phase}:${dispatch.authorizationSha256}`);
       assert.equal(authorization?.phase, phase);
       assert.equal(authorization?.input?.approval?.authorizationSha256, dispatch.authorizationSha256);
       assert.equal(authorization?.input?.sourceSha, evidence.sourceSha);
       assert.equal(authorization?.input?.recoveryImageDigest, evidence.imageDigest);
+      assert.equal(authorization?.input?.serviceConfigurationSha256, authorizedConfiguration);
+      assert.equal(authorization?.input?.approval?.serviceConfigurationSha256, authorizedConfiguration);
       const native = store.readOperation(evidence.operationId, `${phase}:COMPLETED`);
       assert.ok(native, `${phase} native completion is missing`);
       assert.equal(native.taskDefinitionArn, evidence.targetTaskDefinitionArn);
       assert.equal(native.intent?.operationId, evidence.operationId);
       assert.equal(native.intent?.candidateFingerprint, evidence.candidateFingerprint);
+      assert.equal(native.intent?.serviceConfigurationSha256, authorizedConfiguration);
     }
   }
+  const assertAuthorizedGreenSnapshot = (snapshot) => {
+    const live = captureBackendServiceSnapshot(snapshot, evidence.imageDigest);
+    assert.equal(live.taskDefinitionArn, evidence.targetTaskDefinitionArn, "Recovered backend task definition changed");
+    assert.equal(live.desiredCount, authorizedDesiredCount, "Recovered backend desired count changed");
+    assert.equal(live.serviceConfigurationSha256, authorizedConfiguration, "Recovered backend service configuration changed");
+    assert.equal(live.definitionSha256, evidence.candidateFingerprint, "Recovered backend definition changed");
+    return live;
+  };
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
+  if (green) assert.ok(state.components?.backend, "Green recovery requires a bootstrapped backend component");
   const snapshot = readers.readLive();
   if (green) assert.match(snapshot.definition.taskDefinitionArn, GREEN_BACKEND_TASK_ARN);
   else assertBackendHealthRecoveryTaskArn(snapshot.definition.taskDefinitionArn);
@@ -93,7 +113,7 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
   assert.equal(containers.length, 1);
   const digest = green ? evidence.imageDigest : evidence.recoveryImageDigest;
   assert.equal(containers[0].image, `${BACKEND_HEALTH_RECOVERY.account}.dkr.ecr.${BACKEND_HEALTH_RECOVERY.region}.amazonaws.com/${BACKEND_HEALTH_RECOVERY.repository}@${digest}`);
-  const live = captureBackendServiceSnapshot(snapshot, digest);
+  const live = green ? assertAuthorizedGreenSnapshot(snapshot) : captureBackendServiceSnapshot(snapshot, digest);
   const sourceSha = readers.readBackendImageSource(live.backendDigest);
   assert.equal(sourceSha, green ? evidence.sourceSha : evidence.imageReleaseSha);
   const component = green ? { sourceSha, establishedThroughSha: evidence.sourceSha, imageDigest: digest,
@@ -103,7 +123,10 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
   return advanceProductionComponentDeploymentStateWithRetry({ client, current: state, lane: "EMERGENCY_RECOVERY", recovery: true,
     changes: { backend: component },
     emergencyCompletion: { mode: "backend-health-recovery", sourceSha: evidence.sourceSha, evidenceSha256: evidence.evidenceSha256 },
-    authenticateRecovery: ({ next }) => { assert.equal(next.sourceSha, sourceSha); assert.equal(next.establishedThroughSha, evidence.sourceSha); }, ...writerContext });
+    authenticateRecovery: ({ next }) => {
+      assert.equal(next.sourceSha, sourceSha); assert.equal(next.establishedThroughSha, evidence.sourceSha);
+      if (green) assertAuthorizedGreenSnapshot(readers.readLive());
+    }, ...writerContext });
 }
 
 function main() {
