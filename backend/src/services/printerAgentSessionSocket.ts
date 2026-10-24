@@ -216,7 +216,7 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
               connectorVersionAccepted: false,
               httpStatus: 403,
             });
-            sendJson(ws, { type: "error", error: parsed.error.errors[0]?.message || "Invalid session hello.", errorCode: "invalid_session_hello" });
+            sendJson(ws, { type: "error", error: parsed.error.issues[0]?.message || "Invalid session hello.", errorCode: "invalid_session_hello" });
             closeWithReason(ws, 4002, "invalid_session_hello");
             return;
           }
@@ -280,7 +280,7 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
 
         const parsed = sessionClientMessageSchema.safeParse(payload);
         if (!parsed.success) {
-          sendJson(ws, { type: "error", error: parsed.error.errors[0]?.message || "Invalid session message.", errorCode: "invalid_session_message" });
+          sendJson(ws, { type: "error", error: parsed.error.issues[0]?.message || "Invalid session message.", errorCode: "invalid_session_message" });
           return;
         }
 

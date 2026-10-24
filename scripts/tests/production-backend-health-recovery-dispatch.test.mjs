@@ -10,6 +10,7 @@ import { buildBackendHealthRecoveryDispatch, canonicalWorkflowJsonInput, decodeB
 import { extractProductionBackendRecoveryDispatchBundle } from "../aws/extract-production-backend-recovery-dispatch-bundle.mjs";
 import { createFailedRecoveryEvidenceReference } from "../aws/production-backend-failed-recovery-evidence-reference.mjs";
 import { buildLegacyBackendRecoveryCandidate } from "../aws/production-backend-health-recovery-contract.mjs";
+import { GREEN_BACKEND_RECOVERY_KIND } from "../aws/production-green-backend-health-recovery.mjs";
 import { imageAuthorizationSha256 } from "../aws/production-image-authorization.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { makeCanonicalImageAuthorization } from "./fixtures/canonical-image-authorization.mjs";
@@ -91,6 +92,43 @@ test("canonical recovery bundle binds every component and transaction field", ()
   tampered.components.approval.json = `${tampered.components.approval.json} `;
   const tamperedBytes = Buffer.from(JSON.stringify(tampered));
   assert.throws(() => parseBackendHealthRecoveryDispatchBundle(tamperedBytes, hash(tamperedBytes)), /component is invalid/);
+});
+
+test("green recovery bundle requires an exact-source database verifier reference", () => {
+  const sourceSha = fresh.authorization.sourceSha;
+  const greenArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:24";
+  const database = { sourceSha, runId: 39315288379, runAttempt: 1, artifactId: 12217757286,
+    artifactDigest: `sha256:${"a".repeat(64)}`, fileSha256: "b".repeat(64) };
+  const request = { ...input(fresh), currentTaskDefinitionArn: greenArn, releaseMode: GREEN_BACKEND_RECOVERY_KIND,
+    approvalBytes: Buffer.from(JSON.stringify({ kind: GREEN_BACKEND_RECOVERY_KIND, sourceSha,
+      taskDefinitionArn: greenArn, recoveryImageDigest: fresh.authorization.backendDigest,
+      runtimeConsumabilitySha256 })),
+    databaseCompatibilityReferenceBytes: Buffer.from(JSON.stringify(database)) };
+  const dispatch = buildBackendHealthRecoveryDispatch(request);
+  const sent = fields(dispatch);
+  const parsed = bundleFrom(sent);
+  assert.equal(parsed.value.schemaVersion, 4);
+  assert.equal(parsed.value.releaseMode, GREEN_BACKEND_RECOVERY_KIND);
+  assert.deepEqual(JSON.parse(parsed.components.databaseCompatibilityReference.value), database);
+  assert.throws(() => buildBackendHealthRecoveryDispatch({ ...request,
+    databaseCompatibilityReferenceBytes: Buffer.from(JSON.stringify({ ...database, sourceSha: "0".repeat(40) })) }), /different|source|another authorization/);
+  assert.throws(() => buildBackendHealthRecoveryDispatch({ ...request,
+    currentTaskDefinitionArn: currentTaskDefinitionArn }), /task definition/);
+});
+
+test("Release Gate routes the green candidate through its concrete governed CLI", () => {
+  const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
+  const start = workflow.indexOf("- name: Execute governed green backend health recovery");
+  const end = workflow.indexOf("- name: Upload backend health recovery evidence", start);
+  assert.ok(start > 0 && end > start);
+  const step = workflow.slice(start, end);
+  assert.match(step, /recover-production-green-backend-health\.mjs/);
+  for (const option of ["--source-sha", "--current-task-definition", "--recovery-image-digest",
+    "--environment-approval", "--image-authorization", "--runtime-consumability",
+    "--database-compatibility-reference", "--journal-directory", "--evidence-out"])
+    assert.ok(step.includes(option), `Green Release Gate omits ${option}`);
+  assert.match(step, /BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE/);
+  assert.doesNotMatch(step, /update-service|register-task-definition|terraform apply/);
 });
 
 test("workflow extractor writes the bundle's exact authenticated component bytes", (context) => {

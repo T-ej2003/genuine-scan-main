@@ -27,9 +27,9 @@ export function authenticateAppOnlySessionRiskSource(repositoryRoot, candidateSo
   return { ...APP_ONLY_SESSION_RISK_CONTRACT };
 }
 
-export function authenticateProtectedMainBackendImage({ sourceSha, response }) {
+export function authenticateProtectedMainBackendImage({ sourceSha, response, unavailable = false }) {
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  const tag = `${sourceSha}-backend-only`, details = response?.imageDetails;
+  const tag = unavailable ? sourceSha : `${sourceSha}-backend-only`, details = response?.imageDetails;
   assert.ok(Array.isArray(details) && details.length === 1, "Protected-main backend image must resolve exactly once");
   const image = details[0]; assert.equal(image.registryId, APP_ONLY.account); assert.equal(image.repositoryName, "mscqr-backend");
   assert.match(image.imageDigest || "", /^sha256:[a-f0-9]{64}$/); assert.ok(Array.isArray(image.imageTags) && image.imageTags.includes(tag));

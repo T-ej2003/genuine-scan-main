@@ -62,7 +62,7 @@ export const listSupportTickets = async (req: AuthRequest, res: Response) => {
 
     const parsed = listSchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
     const limit = parsed.data.limit ?? fallbackLimit;
     const offset = parsed.data.offset ?? fallbackOffset;
@@ -120,7 +120,7 @@ export const getSupportTicket = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
-    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
     const boundary = b03BoundaryForRequest(req, "support-ticket-read");
@@ -157,12 +157,12 @@ export const patchSupportTicket = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
-    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
     const parsed = patchSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
     const boundary = b03BoundaryForRequest(req, "support-ticket-update");
@@ -203,12 +203,12 @@ export const addSupportMessage = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const paramsParsed = supportTicketIdParamSchema.safeParse(req.params || {});
-    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Ticket ID is required" });
+    if (!paramsParsed.success) return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Ticket ID is required" });
     const id = paramsParsed.data.id;
 
     const parsed = messageSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid message" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid message" });
     }
 
     const boundary = b03BoundaryForRequest(req, "support-ticket-message");
@@ -242,7 +242,7 @@ export const trackSupportTicketPublic = async (req: Request, res: Response) => {
     const paramsParsed = publicTrackParamsSchema.safeParse(req.params || {});
     const queryParsed = publicTrackQuerySchema.safeParse(req.query || {});
     if (!paramsParsed.success || !queryParsed.success) {
-      const firstError = paramsParsed.success ? queryParsed.error?.errors[0] : paramsParsed.error?.errors[0];
+      const firstError = paramsParsed.success ? queryParsed.error?.issues[0] : paramsParsed.error?.issues[0];
       return res.status(400).json({ success: false, error: firstError?.message || "Invalid tracking request" });
     }
 

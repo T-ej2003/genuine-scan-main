@@ -114,7 +114,7 @@ export const getBatchSlaAnalyticsController = async (req: AuthRequest, res: Resp
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = batchSlaQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
@@ -134,7 +134,7 @@ export const getRiskAnalyticsController = async (req: AuthRequest, res: Response
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = riskAnalyticsQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const requestId = String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
@@ -163,7 +163,7 @@ export const getPolicyConfigController = async (req: AuthRequest, res: Response)
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = policyConfigQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
     const licenseeId = requirePolicyLicenseeId(req, undefined, parsed.data.licenseeId);
     if (!licenseeId) {
@@ -197,12 +197,12 @@ export const updatePolicyConfigController = async (req: AuthRequest, res: Respon
 
     const parsed = policyUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0].message });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0].message });
     }
 
     const queryParsed = policyConfigQuerySchema.safeParse(req.query || {});
     if (!queryParsed.success) {
-      return res.status(400).json({ success: false, error: queryParsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: queryParsed.error.issues[0]?.message || "Invalid filters" });
     }
     const licenseeId = requirePolicyLicenseeId(req, parsed.data.licenseeId, queryParsed.data.licenseeId);
     if (!licenseeId) {
@@ -245,7 +245,7 @@ export const getPolicyAlertsController = async (req: AuthRequest, res: Response)
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = policyAlertsQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const licenseeId = resolveScopedLicenseeId(req, parsed.data.licenseeId);
@@ -298,7 +298,7 @@ export const acknowledgePolicyAlertController = async (req: AuthRequest, res: Re
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const paramsParsed = alertIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid alert id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid alert id" });
     }
     const id = paramsParsed.data.id;
 
@@ -383,7 +383,7 @@ export const exportBatchAuditPackageController = async (req: AuthRequest, res: R
   try {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = batchAuditExportParamSchema.safeParse(req.params || {});
-    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid batch id" });
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid batch id" });
 
     const pkg = await buildImmutableBatchAuditPackage(parsed.data.id,{
       capability:String(req.databaseSessionCapability || ""),

@@ -27,7 +27,7 @@ export const relinkLocalAgentPrinter = async (req: AuthRequest, res: Response) =
     if (!req.user || !isOpsRole(req.user.role)) return res.status(403).json({ success: false, error: "Access denied" });
     const parsedParams = printerIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid printer id" });
     }
 
     const capability = String(req.databaseSessionCapability || "");

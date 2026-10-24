@@ -20,10 +20,10 @@ const routeTransitionSchema = z.object({
 
 const cspReportEnvelopeSchema = z.union([
   z.object({
-    "csp-report": z.record(z.unknown()),
+    "csp-report": z.record(z.string(), z.unknown()),
   }).strict(),
-  z.array(z.record(z.unknown())).min(1),
-  z.record(z.unknown()),
+  z.array(z.record(z.string(), z.unknown())).min(1).max(100),
+  z.record(z.string(), z.unknown()),
 ]);
 
 const telemetryUnavailable = (res: Response) => {
@@ -39,7 +39,7 @@ const telemetryUnavailable = (res: Response) => {
 export const captureRouteTransitionMetric = async (req: AuthRequest, res: Response) => {
   const parsed = routeTransitionSchema.safeParse(req.body || {});
   if (!parsed.success) {
-    return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid telemetry payload" });
+    return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid telemetry payload" });
   }
   // No direct protected-table access until a certified persistence boundary exists.
   return telemetryUnavailable(res);

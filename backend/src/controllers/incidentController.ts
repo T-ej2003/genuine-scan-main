@@ -55,8 +55,8 @@ const publicIncidentRawSchema = z.object({
   productBatchNo: z.string().trim().max(120).optional(),
   locationLat: z.union([z.number(), z.string().trim().max(40)]).optional().nullable(),
   locationLng: z.union([z.number(), z.string().trim().max(40)]).optional().nullable(),
-  tags: z.union([z.string(), z.array(z.string().trim().max(40))]).optional(),
-  photoUrls: z.union([z.string(), z.array(z.string().trim().max(1000))]).optional(),
+  tags: z.union([z.string(), z.array(z.string().trim().max(40)).max(20)]).optional(),
+  photoUrls: z.union([z.string(), z.array(z.string().trim().max(1000)).max(20)]).optional(),
   captchaToken: z.string().trim().max(4000).optional(),
 }).strict();
 
@@ -75,8 +75,8 @@ const publicIncidentSchema = z.object({
   productBatchNo: z.string().trim().max(120).optional(),
   locationLat: z.number().min(-90).max(90).optional().nullable(),
   locationLng: z.number().min(-180).max(180).optional().nullable(),
-  tags: z.array(z.string().trim().max(40)).optional(),
-  photoUrls: z.array(z.string().trim().url().max(1000)).optional(),
+  tags: z.array(z.string().trim().max(40)).max(20).optional(),
+  photoUrls: z.array(z.string().trim().url().max(1000)).max(20).optional(),
 }).strict();
 
 const incidentPatchSchema = z.object({
@@ -95,7 +95,7 @@ const incidentPatchSchema = z.object({
     .optional(),
   assignedToUserId: z.string().trim().uuid().nullable().optional(),
   internalNotes: z.string().trim().max(5000).optional(),
-  tags: z.array(z.string().trim().max(40)).optional(),
+  tags: z.array(z.string().trim().max(40)).max(20).optional(),
   severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).optional(),
   resolutionSummary: z.string().trim().max(3000).optional(),
   resolutionOutcome: z.enum(["CONFIRMED_FRAUD", "NOT_FRAUD", "INCONCLUSIVE"]).nullable().optional(),
@@ -197,7 +197,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     if (!rawParsed.success) {
       return res.status(400).json({
         success: false,
-        error: rawParsed.error.errors[0]?.message || "Invalid incident payload",
+        error: rawParsed.error.issues[0]?.message || "Invalid incident payload",
       });
     }
 
@@ -205,7 +205,7 @@ export const reportIncident = async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid incident payload",
+        error: parsed.error.issues[0]?.message || "Invalid incident payload",
       });
     }
 
@@ -290,7 +290,7 @@ export const listIncidents = async (req: AuthRequest, res: Response) => {
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = incidentListQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid incident filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid incident filters" });
     }
 
     const limit = parsed.data.limit ?? 50;
@@ -418,7 +418,7 @@ export const patchIncident = async (req: AuthRequest, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid update payload",
+        error: parsed.error.issues[0]?.message || "Invalid update payload",
       });
     }
 
@@ -461,7 +461,7 @@ export const addIncidentEventNote = async (req: AuthRequest, res: Response) => {
 
     const parsed = incidentNoteSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid note payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid note payload" });
     }
 
     const evt = await withC03ResourceTransaction(
@@ -576,7 +576,7 @@ export const notifyIncidentCustomer = async (req: AuthRequest, res: Response) =>
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid customer notify payload",
+        error: parsed.error.issues[0]?.message || "Invalid customer notify payload",
       });
     }
 

@@ -39,7 +39,7 @@ const registrationCredentialSchema = z
         authenticatorData: z.string().trim().min(1),
         publicKey: z.string().trim().min(1),
         publicKeyAlgorithm: z.number(),
-        transports: z.array(z.string().trim().min(1)).optional(),
+        transports: z.array(z.string().trim().min(1)).max(12).optional(),
       })
       .strict(),
   })
@@ -120,7 +120,7 @@ export const beginCustomerPasskeyRegistration = async (req: CustomerVerifyReques
 
     const parsed = beginRegistrationSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid passkey request" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid passkey request" });
     }
 
     const options = await beginCustomerWebAuthnRegistration({
@@ -160,7 +160,7 @@ export const finishCustomerPasskeyRegistration = async (req: CustomerVerifyReque
 
     const parsed = finishRegistrationSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid passkey payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid passkey payload" });
     }
 
     const result = await completeCustomerWebAuthnRegistration({
@@ -217,7 +217,7 @@ export const beginCustomerPasskeyAssertion = async (req: CustomerVerifyRequest, 
   try {
     const parsed = beginAssertionSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid passkey request" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid passkey request" });
     }
 
     const email = req.customer?.email || normalizeCustomerVerifyEmail(parsed.data.email || "");
@@ -258,7 +258,7 @@ export const finishCustomerPasskeyAssertion = async (req: CustomerVerifyRequest,
   try {
     const parsed = finishAssertionSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid passkey payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid passkey payload" });
     }
 
     const result = await completeCustomerWebAuthnAssertion({

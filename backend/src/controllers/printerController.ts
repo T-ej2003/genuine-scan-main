@@ -50,8 +50,8 @@ const networkDirectPrinterSchema = z.object({
   port: z.number().int().min(1).max(65535).default(9100),
   deliveryMode: z.enum([PrinterDeliveryMode.DIRECT, PrinterDeliveryMode.SITE_GATEWAY]).default(PrinterDeliveryMode.DIRECT),
   rotateGatewaySecret: z.boolean().optional(),
-  capabilitySummary: z.record(z.any()).optional(),
-  calibrationProfile: z.record(z.any()).optional(),
+  capabilitySummary: z.record(z.string(), z.any()).optional(),
+  calibrationProfile: z.record(z.string(), z.any()).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
 }).strict();
@@ -68,8 +68,8 @@ const networkIppPrinterSchema = z.object({
   printerUri: z.string().trim().min(8).max(512).optional(),
   deliveryMode: z.enum([PrinterDeliveryMode.DIRECT, PrinterDeliveryMode.SITE_GATEWAY]).default(PrinterDeliveryMode.DIRECT),
   rotateGatewaySecret: z.boolean().optional(),
-  capabilitySummary: z.record(z.any()).optional(),
-  calibrationProfile: z.record(z.any()).optional(),
+  capabilitySummary: z.record(z.string(), z.any()).optional(),
+  calibrationProfile: z.record(z.string(), z.any()).optional(),
   isActive: z.boolean().optional(),
   isDefault: z.boolean().optional(),
 }).strict();
@@ -216,7 +216,7 @@ export const createNetworkPrinter = async (req: AuthRequest, res: Response) => {
 
     const parsed = networkPrinterSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid printer payload" });
     }
 
     const licenseeId = getEffectiveLicenseeId(req);
@@ -263,13 +263,13 @@ export const updateNetworkPrinter = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid printer id" });
     }
     const printerId = paramsParsed.data.id;
 
     const parsed = networkPrinterUpdateSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid printer payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid printer payload" });
     }
 
     const current = await readPrintingProjection({
@@ -357,7 +357,7 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid printer id" });
     }
     const printerId = paramsParsed.data.id;
 
@@ -394,7 +394,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid printer id" });
     }
     const printerId = paramsParsed.data.id;
 
@@ -552,7 +552,7 @@ export const discoverPrinter = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid printer id" });
     }
     const printerId = paramsParsed.data.id;
 
@@ -615,7 +615,7 @@ export const deleteNetworkPrinter = async (req: AuthRequest, res: Response) => {
 
     const paramsParsed = printerIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid printer id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid printer id" });
     }
     const printerId = paramsParsed.data.id;
 

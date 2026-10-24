@@ -90,7 +90,7 @@ export const submitPublicRequestAccess = async (req: Request, res: Response) => 
   try {
     const parsed = parseBody(requestAccessSchema, req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request" });
     }
 
     const data = parsed.data;
@@ -185,7 +185,7 @@ export const submitPublicSupportIssue = async (req: Request, res: Response) => {
   try {
     const parsed = parseBody(publicSupportSchema, req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid support request" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid support request" });
     }
 
     const data = parsed.data;
@@ -285,7 +285,7 @@ export const listRequestAccessRecords = async (req: Request, res: Response) => {
   try {
     const parsed = requestAccessListSchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
@@ -325,7 +325,7 @@ export const patchRequestAccessRecord = async (req: Request, res: Response) => {
     if (!id) return res.status(400).json({ success: false, error: "Request access ID is required" });
     const parsed = requestAccessStatusSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid request access update" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid request access update" });
     }
 
     const updated = await withB02AuthenticatedRequest(

@@ -25,7 +25,7 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
     const parsed = traceTimelineQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const limit = parsed.data.limit ?? 50;

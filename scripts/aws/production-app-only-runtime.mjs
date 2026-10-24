@@ -149,7 +149,7 @@ export function assertAppOnlyRuntimeSimulations(dependencies, simulations) {
 export async function collectAppOnlyRuntimeCompatibility({ identity, candidate, predecessor, readLive, aws, repositoryRoot, now = Date.now, onStage = () => {} }) {
   onStage("RUNTIME_ECS");
   const before = await readLive();
-  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(before));
+  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(before, { unavailable: predecessor.unavailable === true }));
   assert.equal(identity.predecessorTaskDefinition, predecessor.taskDefinitionArn);
   assert.equal(identity.predecessorBackendDigest, predecessor.backendDigest);
   assertAppOnlyCandidate(before.definition, candidate, identity.candidateDigest);
@@ -170,7 +170,7 @@ export async function collectAppOnlyRuntimeCompatibility({ identity, candidate, 
   const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: "exact-dependency" });
   assertAppOnlyRuntimeSimulations(dependencies, simulations);
   onStage("RUNTIME_FINAL_CAS");
-  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(await readLive()));
+  assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(await readLive(), { unavailable: predecessor.unavailable === true }));
   assert.deepEqual(await collectAppOnlyNetworkDatabaseRuntime({ aws, service: before.service, repositoryRoot }), networkDatabase, "Network/database changed during compatibility collection");
   const body = { schemaVersion: 1, kind: "APP_ONLY_RUNTIME_COMPATIBILITY", identity, generatedAt: new Date(now()).toISOString(),
     requirements, networkDatabase, resourceMetadata, dependencies, simulations, status: "ALREADY_APPLIED_COMPATIBLE" };

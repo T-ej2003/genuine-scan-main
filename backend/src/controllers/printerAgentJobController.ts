@@ -81,7 +81,7 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
   try {
     const parsed = claimSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent claim payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent claim payload" });
     }
     const registration = await verifyLocalAgentRequest(parsed.data, "claim", undefined, { skipReadiness: true });
     const runtimeBlock = buildLocalAgentClaimRuntimeBlock(parsed.data, registration);
@@ -213,7 +213,7 @@ export const confirmLocalAgentPrintJob = async (req: Request, res: Response) => 
   try {
     const parsed = confirmSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent confirm payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent confirm payload" });
     }
     const registration = await verifyLocalAgentRequest(parsed.data, "confirm", {
       printJobId: parsed.data.printJobId,
@@ -232,7 +232,7 @@ export const failLocalAgentPrintJob = async (req: Request, res: Response) => {
   try {
     const parsed = failSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent failure payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent failure payload" });
     }
     const registration = await verifyLocalAgentRequest(parsed.data, "fail", {
       printJobId: parsed.data.printJobId,

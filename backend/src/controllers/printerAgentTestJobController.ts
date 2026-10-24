@@ -29,7 +29,7 @@ export const ackLocalAgentPrinterTestJob = async (req: Request, res: Response) =
   try {
     const parsed = localAgentTestAckSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test ACK payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent test ACK payload" });
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "ack");
@@ -69,7 +69,7 @@ export const confirmLocalAgentPrinterTestJob = async (req: Request, res: Respons
   try {
     const parsed = localAgentTestAckSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test confirm payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent test confirm payload" });
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "confirm");
@@ -111,7 +111,7 @@ export const failLocalAgentPrinterTestJob = async (req: Request, res: Response) 
   try {
     const parsed = localAgentTestFailSchema.safeParse(req.body || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid local agent test failure payload" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid local agent test failure payload" });
     }
 
     const registration = await verifyLocalAgentRequest(parsed.data, "fail");

@@ -17,6 +17,10 @@ test("protected-main verifier image resolves only the exact source tag in the ex
   const digest = `sha256:${"a".repeat(64)}`;
   const response = { imageDetails: [{ registryId: APP_ONLY.account, repositoryName: "mscqr-backend", imageDigest: digest, imageTags: [`${sourceSha}-backend-only`] }] };
   assert.deepEqual(authenticateProtectedMainBackendImage({ sourceSha, response }), { sourceSha, digest, tag: `${sourceSha}-backend-only` });
+  const recovery = { imageDetails: [{ ...response.imageDetails[0], imageTags: [sourceSha] }] };
+  assert.deepEqual(authenticateProtectedMainBackendImage({ sourceSha, response: recovery, unavailable: true }),
+    { sourceSha, digest, tag: sourceSha });
+  assert.throws(() => authenticateProtectedMainBackendImage({ sourceSha, response, unavailable: true }));
   for (const bad of [
     { imageDetails: [] },
     { imageDetails: [...response.imageDetails, ...response.imageDetails] },

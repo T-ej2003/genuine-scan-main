@@ -37,7 +37,7 @@ export const requestCustomerEmailOtp = async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid email address",
+        error: parsed.error.issues[0]?.message || "Invalid email address",
       });
     }
 
@@ -108,7 +108,7 @@ export const verifyCustomerEmailOtp = async (req: Request, res: Response) => {
     if (!parsed.success) {
       return res.status(400).json({
         success: false,
-        error: parsed.error.errors[0]?.message || "Invalid OTP payload",
+        error: parsed.error.issues[0]?.message || "Invalid OTP payload",
       });
     }
 

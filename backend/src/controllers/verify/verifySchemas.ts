@@ -81,7 +81,7 @@ export const reportFraudSchema = z
     pageUrl: z.string().trim().max(1000).optional(),
     sessionId: z.string().uuid(),
     decisionId: z.string().trim().max(128).optional(),
-    tags: z.union([z.string(), z.array(z.string())]).optional(),
+    tags: z.union([z.string(), z.array(z.string()).max(20)]).optional(),
     captchaToken: z.string().trim().max(4000).optional(),
   })
   .strict();

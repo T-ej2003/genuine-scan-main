@@ -124,7 +124,8 @@ async function main() {
     } });
   if (execution.failed) { process.exitCode = 1; return; }
   const database = await readAppOnlyVerifierResult({ run, execution, verifier });
-  authenticate(); assertAppOnlyCas(preparation.predecessor, captureAppOnlyPredecessor(readers.readLive()));
+  authenticate(); assertAppOnlyCas(preparation.predecessor,
+    captureAppOnlyPredecessor(readers.readLive(), { unavailable: preparation.unavailable === true }));
   await journal.writeEvidence({ status: "COMPATIBILITY_VERIFIED", taskArn: execution.task.taskArn, databaseEvidenceSha256: database.evidenceSha256 });
   publish("app-only-compatibility.json", { schemaVersion: 1, kind: "APP_ONLY_VERIFIED_COMPATIBILITY", sourceSha,
     generatedAt: new Date().toISOString(), inputs, authorization, registration: registered.registration,

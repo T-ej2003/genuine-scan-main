@@ -96,9 +96,30 @@ export function assertRegisteredAppOnlyCandidate(predecessor, candidate, candida
   return assertAppOnlyCandidate(predecessor, candidate, candidateDigest);
 }
 
-export function captureAppOnlyPredecessor({ service, definition, tasks }) {
+export function captureAppOnlyPredecessor({ service, definition, tasks }, { unavailable = false } = {}) {
   const backend = assertAppOnlyDefinition(definition);
   assert.equal(service?.desiredCount, 2);
+  if (unavailable) {
+    assert.equal(service.runningCount, 0, "Unavailable verifier requires a non-serving predecessor");
+    assert.equal(service.pendingCount, 0);
+    assert.equal(tasks?.length, 0);
+    assert.equal(service.deployments?.length, 1);
+    const deployment = service.deployments[0];
+    assertAppOnlyDeploymentId(deployment.id);
+    assert.equal(deployment.status, "PRIMARY");
+    assert.ok(["COMPLETED", "FAILED"].includes(deployment.rolloutState));
+    assert.equal(deployment.taskDefinition, definition.taskDefinitionArn);
+    assert.equal(service.clusterArn, APP_ONLY.clusterArn);
+    assert.equal(service.serviceArn, APP_ONLY.serviceArn);
+    assert.equal(service.serviceName, APP_ONLY.service);
+    assert.equal(service.status, "ACTIVE");
+    assert.equal(service.taskDefinition, definition.taskDefinitionArn);
+    return { clusterArn: service.clusterArn, serviceArn: service.serviceArn,
+      taskDefinitionArn: service.taskDefinition, backendDigest: backend.image.split("@")[1],
+      desiredCount: 2, deploymentId: deployment.id, deploymentStatus: deployment.rolloutState,
+      definitionSha256: appOnlyDefinitionSha256(definition),
+      serviceConfigurationSha256: appOnlyServiceConfigurationSha256(service), unavailable: true };
+  }
   return captureBackendServiceSnapshot({ service, definition, tasks }, backend.image.split("@")[1]);
 }
 

@@ -45,7 +45,7 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
 
     const parsed = listPrintJobsQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid query" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid query" });
     }
 
     const rows = await getOrComputeVersionedCache(
@@ -74,7 +74,7 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
 
     const view = await getOrComputeVersionedCache(
@@ -123,11 +123,11 @@ export const pauseManufacturerPrintJob = async (req: AuthRequest, res: Response)
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
     const parsedBody = printOperationReasonSchema.safeParse(req.body || {});
     if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear reason is required." });
+      return res.status(400).json({ success: false, error: parsedBody.error.issues[0]?.message || "A clear reason is required." });
     }
 
     const result = await pausePrintJob({
@@ -150,7 +150,7 @@ export const resumeManufacturerPrintJob = async (req: AuthRequest, res: Response
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
 
     const result = await resumePrintJob({
@@ -172,11 +172,11 @@ export const stopManufacturerPrintJob = async (req: AuthRequest, res: Response) 
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
     const parsedBody = printOperationReasonSchema.safeParse(req.body || {});
     if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear reason is required." });
+      return res.status(400).json({ success: false, error: parsedBody.error.issues[0]?.message || "A clear reason is required." });
     }
 
     const result = await stopPrintJob({
@@ -229,11 +229,11 @@ export const createManufacturerPrintReissueRequest = async (req: AuthRequest, re
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
     const parsedBody = createReissueRequestSchema.safeParse(req.body || {});
     if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "Invalid reissue request" });
+      return res.status(400).json({ success: false, error: parsedBody.error.issues[0]?.message || "Invalid reissue request" });
     }
 
     const result = await createScopedPrintReissueRequest({
@@ -259,7 +259,7 @@ export const listManufacturerPrintReissueRequests = async (req: AuthRequest, res
 
     const parsedQuery = listReissueRequestsQuerySchema.safeParse(req.query || {});
     if (!parsedQuery.success) {
-      return res.status(400).json({ success: false, error: parsedQuery.error.errors[0]?.message || "Invalid query" });
+      return res.status(400).json({ success: false, error: parsedQuery.error.issues[0]?.message || "Invalid query" });
     }
 
     const rows = await listScopedPrintReissueRequests({
@@ -285,11 +285,11 @@ export const approveManufacturerPrintReissueRequest = async (req: AuthRequest, r
 
     const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid reissue request id" });
     }
     const parsedBody = reissueRequestDecisionSchema.safeParse(req.body || {});
     if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear decision note is required." });
+      return res.status(400).json({ success: false, error: parsedBody.error.issues[0]?.message || "A clear decision note is required." });
     }
 
     const result = await decideScopedPrintReissueRequest({
@@ -315,7 +315,7 @@ export const printApprovedManufacturerPrintReissueRequest = async (req: AuthRequ
 
     const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid reissue request id" });
     }
 
     const result = await startApprovedPrintReissueRequest({
@@ -380,11 +380,11 @@ export const rejectManufacturerPrintReissueRequest = async (req: AuthRequest, re
 
     const parsedParams = reissueRequestIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid reissue request id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid reissue request id" });
     }
     const parsedBody = reissueRequestDecisionSchema.safeParse(req.body || {});
     if (!parsedBody.success) {
-      return res.status(400).json({ success: false, error: parsedBody.error.errors[0]?.message || "A clear decision note is required." });
+      return res.status(400).json({ success: false, error: parsedBody.error.issues[0]?.message || "A clear decision note is required." });
     }
 
     const result = await decideScopedPrintReissueRequest({
@@ -410,7 +410,7 @@ export const abandonManufacturerPrintJob = async (req: AuthRequest, res: Respons
 
     const parsedParams = printJobIdParamSchema.safeParse(req.params || {});
     if (!parsedParams.success) {
-      return res.status(400).json({ success: false, error: parsedParams.error.errors[0]?.message || "Invalid print job id" });
+      return res.status(400).json({ success: false, error: parsedParams.error.issues[0]?.message || "Invalid print job id" });
     }
 
     const scope = {

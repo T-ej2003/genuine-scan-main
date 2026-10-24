@@ -29,15 +29,17 @@ export function observeAppOnlyVerifierAwsFailure(run, markFailure) {
 }
 export function parseAppOnlyVerifierPreparationArgs(args, env = process.env) {
   const { values } = parseArgs({ args, strict: true, allowPositionals: false,
-    options: Object.fromEntries(["source-sha", "candidate-digest", "publication-reference", "image-authorization-reference", "requirements-reference"].map((key) => [key, { type: "string" }])) });
+    options: Object.fromEntries(["source-sha", "candidate-digest", "publication-reference", "image-authorization-reference", "requirements-reference", "unavailable-backend-recovery"].map((key) => [key, { type: "string" }])) });
   assert.equal(env.GITHUB_ACTIONS, "true"); assert.equal(env.GITHUB_REPOSITORY, "T-ej2003/genuine-scan-main");
   assert.equal(env.GITHUB_EVENT_NAME, "workflow_dispatch"); assert.equal(env.GITHUB_REF, "refs/heads/main");
   assert.equal(env.GITHUB_WORKFLOW_REF, "T-ej2003/genuine-scan-main/.github/workflows/prepare-production-app-only-verifier.yml@refs/heads/main");
   assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.equal(values["source-sha"], env.GITHUB_SHA);
   assert.match(values["candidate-digest"] || "", /^sha256:[a-f0-9]{64}$/);
+  assert.ok(values["unavailable-backend-recovery"] === undefined || values["unavailable-backend-recovery"] === "true", "Unavailable backend mode requires an explicit true binding");
   const reference = (name) => parseAppOnlyArtifactReference(values[name]);
   return { sourceSha: values["source-sha"], candidateDigest: values["candidate-digest"], publicationReference: reference("publication-reference"),
-    authorizationReference: reference("image-authorization-reference"), requirementsReference: reference("requirements-reference") };
+    authorizationReference: reference("image-authorization-reference"), requirementsReference: reference("requirements-reference"),
+    unavailable: values["unavailable-backend-recovery"] === "true" };
 }
 
 async function main() {

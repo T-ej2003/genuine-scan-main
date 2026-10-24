@@ -42,10 +42,10 @@ export const createPrintJob = async (req: AuthRequest, res: any) => {
 
     const parsed = createPrintJobSchema.safeParse(req.body);
     if (!parsed.success) {
-      const missingFields = parsed.error.errors
+      const missingFields = parsed.error.issues
         .map((issue) => String(issue.path[0] || "").trim())
         .filter(Boolean);
-      const validationIssuePaths = parsed.error.errors.map((issue) => issue.path.join(".") || "<root>");
+      const validationIssuePaths = parsed.error.issues.map((issue) => issue.path.join(".") || "<root>");
       const requestShape = getRequestShape(req);
       const diagnostics = await buildAndLogPrintJobCreateFailure(req, {
         status: 400,

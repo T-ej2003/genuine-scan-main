@@ -44,7 +44,7 @@ export const listApprovalsController = async (req: AuthRequest, res: Response) =
 
     const parsed = approvalListQuerySchema.safeParse(req.query || {});
     if (!parsed.success) {
-      return res.status(400).json({ success: false, error: parsed.error.errors[0]?.message || "Invalid filters" });
+      return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
 
     const rows = await listSensitiveActionApprovals({
@@ -79,12 +79,12 @@ export const approveApprovalController = async (req: AuthRequest, res: Response)
 
     const paramsParsed = approvalIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid approval id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid approval id" });
     }
 
     const bodyParsed = approvalDecisionSchema.safeParse(req.body || {});
     if (!bodyParsed.success) {
-      return res.status(400).json({ success: false, error: bodyParsed.error.errors[0]?.message || "Invalid approval note" });
+      return res.status(400).json({ success: false, error: bodyParsed.error.issues[0]?.message || "Invalid approval note" });
     }
 
     const result = await approveSensitiveActionApproval({
@@ -116,12 +116,12 @@ export const rejectApprovalController = async (req: AuthRequest, res: Response) 
 
     const paramsParsed = approvalIdParamSchema.safeParse(req.params || {});
     if (!paramsParsed.success) {
-      return res.status(400).json({ success: false, error: paramsParsed.error.errors[0]?.message || "Invalid approval id" });
+      return res.status(400).json({ success: false, error: paramsParsed.error.issues[0]?.message || "Invalid approval id" });
     }
 
     const bodyParsed = approvalDecisionSchema.safeParse(req.body || {});
     if (!bodyParsed.success) {
-      return res.status(400).json({ success: false, error: bodyParsed.error.errors[0]?.message || "Invalid approval note" });
+      return res.status(400).json({ success: false, error: bodyParsed.error.issues[0]?.message || "Invalid approval note" });
     }
 
     const result = await rejectSensitiveActionApproval({
