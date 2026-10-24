@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM public.ecr.aws/docker/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS builder
+FROM docker.io/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS builder
 
 WORKDIR /app
 ENV NPM_CONFIG_UPDATE_NOTIFIER=false

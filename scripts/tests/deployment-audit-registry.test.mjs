@@ -110,6 +110,16 @@ test("routine mirror reads require immutable approved amd64 and arm64 content, w
   assert.ok(!f.requests.some(url => url.endsWith("/manifests/1.29-alpine")));
   for (const platform of Object.values(f.image.platforms)) assert.ok(f.requests.some(url => url.endsWith(platform.configDigest)));
 });
+test("approved Node production reads use Docker Hub at the same immutable digest", async () => {
+  const f = fixture();
+  f.image.upstream = "node:24-bookworm-slim";
+  f.image.reference = `docker.io/library/node@${f.image.digest}`;
+  await verifyApprovedImage(f.image, { fetcher: f.fetcher });
+  assert.ok(f.requests.every(url => url.startsWith("https://auth.docker.io/") || url.startsWith("https://registry-1.docker.io/")));
+  assert.ok(f.requests.some(url => url.endsWith(`/manifests/${f.image.digest}`)));
+  assert.equal(ciImageReference(f.image), f.image.reference);
+  assert.throws(() => ciImageReference({ ...f.image, upstream: "nginx:1.29-alpine" }));
+});
 test("CI reads Docker Hub by immutable digest and authenticates both architectures", async () => {
   const f = fixture(); await verifyApprovedImage(f.image, { fetcher: f.fetcher, ci: true });
   assert.ok(f.requests.every(url => url.startsWith("https://auth.docker.io/") || url.startsWith("https://registry-1.docker.io/")));
