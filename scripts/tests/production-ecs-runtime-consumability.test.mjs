@@ -744,7 +744,7 @@ test("Secrets Manager selectors resolve complete real version metadata and refre
   for (const [reference, mode, resolved] of [
     [base, "AWSCURRENT", secretVersionId], [`${base}::AWSCURRENT:`, "VERSION_STAGE", secretVersionId],
     [`${base}::AWSPREVIOUS:`, "VERSION_STAGE", previous], [`${base}::CUSTOM:`, "VERSION_STAGE", custom],
-    [`${base}:::${previous}`, "VERSION_ID", previous], [`${base}::AWSCURRENT:${secretVersionId}`, "STAGE_AND_VERSION", secretVersionId],
+    [`${base}:::${previous}`, "VERSION_ID", previous],
   ]) {
     const value = selected(reference); const result = await collectRuntimeResourceMetadata(value, awsFor());
     const resolution = result[base].selectorResolutions.find(({ selector }) => selector.selectorMode === mode);
@@ -757,7 +757,8 @@ test("Secrets Manager selectors resolve complete real version metadata and refre
     [base, { [previous]: ["AWSPREVIOUS"] }], [`${base}::MISSING:`, baseVersions], [`${base}:::${"2".repeat(32)}`, baseVersions],
     [`${base}::AWSCURRENT:${previous}`, baseVersions], [base, { [secretVersionId]: ["AWSCURRENT"], [previous]: ["AWSCURRENT"] }],
     [base, { short: ["AWSCURRENT"] }], [base, { [secretVersionId]: "AWSCURRENT" }],
-  ]) await assert.rejects(() => collectRuntimeResourceMetadata(selected(reference), awsFor(versions)), /version metadata|version census|selector is not resolvable/);
+  ]) await assert.rejects(() => collectRuntimeResourceMetadata(selected(reference), awsFor(versions)), /version metadata|version census|selector is not resolvable|selector is malformed/);
+  assert.throws(() => deriveEcsRuntimeDependencies(selected(`${base}::AWSCURRENT:${secretVersionId}`)), /selector is malformed/);
   await assert.rejects(() => collectRuntimeResourceMetadata(selected(base), awsFor(baseVersions, `${base}-wrong`)), /metadata is incomplete/);
 
   const value = selected(base); const authenticated = await collectRuntimeResourceMetadata(value, awsFor());

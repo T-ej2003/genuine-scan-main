@@ -16,7 +16,7 @@ import { createRootAttestationKmsVerifier } from "./production-root-attestation-
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
 import { exactEcrImageResult } from "./production-ecs-rollback-viability.mjs";
-import { assertSignedRuntimeConsumabilityEvidence } from "./production-ecs-runtime-consumability.mjs";
+import { assertSignedRuntimeConsumabilityEvidence, collectLiveRolePolicyIdentity, deriveEcsRuntimeDependencies } from "./production-ecs-runtime-consumability.mjs";
 import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { readStageBPrivateFileBytes, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
@@ -141,10 +141,12 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   const store = (deps.createStore || createReleaseCoordinatorStore)({ run: (args) => awsText(args, { singleAttempt: args[0] === "s3api" && args[1] === "put-object" }),
     directory, repositoryRoot: root });
   const verifyRuntime = async (candidate) => {
-    // The protected compatibility verifier performs fresh IAM and runtime reads;
-    // Release Gate verifies the separately signed, exact-candidate closure.
+    const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
+    const livePolicyIdentity = await collectLiveRolePolicyIdentity(principals, aws, candidate);
+    assert.deepEqual(await collectLiveRolePolicyIdentity(principals, aws, candidate), livePolicyIdentity,
+      "Runtime IAM changed during recovery authorization");
     return assertSignedRuntimeConsumabilityEvidence(runtime, { sourceSha, candidate,
-      livePolicyIdentity: runtime.evidence?.livePolicyIdentity,
+      livePolicyIdentity,
       resourceMetadata: runtime.evidence?.resourceMetadata,
       now: now(), verify: createRootAttestationKmsVerifier({ run: aws }) });
   };
