@@ -17,7 +17,7 @@ export function readApprovedImages(repository = root) {
     digest(image.digest);
     assert.match(image.upstream, /^(?:alpine|nginx|node|postgres|redis):[a-zA-Z0-9._-]+(?:@sha256:[a-f0-9]{64})?$/);
     assert.ok(image.upstream.startsWith(`${name.split("-")[0]}:`), "Image family substitution");
-    assert.equal(image.reference, `public.ecr.aws/docker/library/${image.upstream.split(":")[0]}@${image.digest}`);
+    assert.equal(image.reference, `${name === "node" ? "docker.io/library" : "public.ecr.aws/docker/library"}/${image.upstream.split(":")[0]}@${image.digest}`);
     assert.deepEqual(Object.keys(image.platforms).sort(), ["amd64", "arm64"]);
     for (const platform of Object.values(image.platforms)) {
       digest(platform.manifestDigest); digest(platform.configDigest);
@@ -29,8 +29,9 @@ export function readApprovedImages(repository = root) {
 }
 
 export function ciImageReference(image) {
-  assert.match(image.reference, /^public\.ecr\.aws\/docker\/library\/[a-z]+@sha256:[a-f0-9]{64}$/);
-  assert.ok(image.reference.endsWith(image.digest));
+  const name = image.upstream.split(":")[0];
+  digest(image.digest);
+  assert.equal(image.reference, `${name === "node" ? "docker.io/library" : "public.ecr.aws/docker/library"}/${name}@${image.digest}`);
   return `docker.io/library/${image.upstream.split(":")[0]}@${image.digest}`;
 }
 
@@ -164,8 +165,9 @@ export function assertImageManifest(bytes, expectedDigest) {
 export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, ci = false, wait = pause } = {}) {
   assert.ok(!(upstream && ci));
   const name = image.upstream.split(":")[0];
-  const host = upstream || ci ? "registry-1.docker.io" : "public.ecr.aws";
-  const repository = upstream || ci ? `library/${name}` : `docker/library/${name}`;
+  const dockerHub = upstream || ci || image.reference.startsWith("docker.io/");
+  const host = dockerHub ? "registry-1.docker.io" : "public.ecr.aws";
+  const repository = dockerHub ? `library/${name}` : `docker/library/${name}`;
   const get = async (url, headers = {}) => {
     for (let attempt = 0; attempt < 4; attempt++) {
       const response = await fetcher(url, { headers, signal: AbortSignal.timeout(30000) });
@@ -179,7 +181,7 @@ export async function verifyApprovedImage(image, { fetcher = fetch, upstream = f
       await wait(Math.max(1000 * 2 ** attempt, Math.min(30000, Number.isFinite(retryAfter) ? retryAfter * 1000 : 0)));
     }
   };
-  const tokenUrl = upstream || ci
+  const tokenUrl = dockerHub
     ? `https://auth.docker.io/token?service=registry.docker.io&scope=repository:${repository}:pull`
     : `https://public.ecr.aws/token/?service=public.ecr.aws&scope=repository:${repository}:pull`;
   const token = JSON.parse(await get(tokenUrl)).token;
