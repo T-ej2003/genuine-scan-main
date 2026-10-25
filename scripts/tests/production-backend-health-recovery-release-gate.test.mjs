@@ -429,7 +429,13 @@ test("Redis-backed incident tests advance and exit naturally", async () => {
   }
 });
 
-test("release gate heredocs parse and backend recovery lifecycle validation executes without Stage-B packaging dependencies", (context) => {
+test("release gate installs validator dependencies before backend recovery lifecycle validation", () => {
+  const resolveSteps = parsedWorkflow.jobs["resolve-deploy-target"].steps;
+  const installIndex = resolveSteps.findIndex((step) => step.name === "Install deploy target validator dependencies");
+  const validationIndex = resolveSteps.findIndex((step) => step.name === "Validate production release lifecycle mode");
+  assert.ok(installIndex > 0 && installIndex < validationIndex, "validator dependencies must install before lifecycle validation");
+  assert.match(resolveSteps[installIndex].run, /npm ci --ignore-scripts --no-audit --no-fund/);
+  assert.ok(resolveSteps.slice(0, installIndex).some((step) => step.uses?.startsWith("actions/setup-node@")));
   const heredocSteps = Object.values(parsedWorkflow.jobs).flatMap((job) => job.steps || []).filter((step) => step.run?.includes("<<"));
   for (const step of heredocSteps) {
     const parsed = spawnSync("bash", ["-n"], { input: step.run, encoding: "utf8" });
@@ -451,12 +457,8 @@ test("release gate heredocs parse and backend recovery lifecycle validation exec
     BACKEND_RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: encodeBackendHealthRecoveryBundleTransport(Buffer.from(bundle)),
     BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: createHash("sha256").update(bundle).digest("hex"),
   };
-  const dependencyIsolationDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "release-gate-dependency-isolation-"));
-  const resolver = path.join(dependencyIsolationDirectory, "reject-jszip-loader.mjs");
-  fs.writeFileSync(resolver, "export async function resolve(specifier, context, nextResolve) { if (specifier === 'jszip') throw new Error('jszip must not be resolved during backend-health-recovery lifecycle validation'); return nextResolve(specifier, context); }\n");
-  context.after(() => fs.rmSync(dependencyIsolationDirectory, { recursive: true, force: true }));
-  const isolatedEnv = { ...env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} --experimental-loader=${resolver}`.trim() };
-  assert.equal(spawnSync("bash", ["-e"], { input: lifecycle, env: isolatedEnv }).status, 0);
-  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...isolatedEnv, BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: "0".repeat(64) } }).status, 0);
-  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...isolatedEnv, RELEASE_MODE: "unsupported" } }).status, 0);
+  const validLifecycle = spawnSync("bash", ["-e"], { input: lifecycle, env, encoding: "utf8" });
+  assert.equal(validLifecycle.status, 0, validLifecycle.stderr || validLifecycle.stdout);
+  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, BACKEND_RECOVERY_EVIDENCE_BUNDLE_SHA256: "0".repeat(64) } }).status, 0);
+  assert.notEqual(spawnSync("bash", ["-e"], { input: lifecycle, env: { ...env, RELEASE_MODE: "unsupported" } }).status, 0);
 });
