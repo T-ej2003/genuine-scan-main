@@ -127,7 +127,8 @@ async function main() {
     databaseSecretArn: inputs.preparation.databaseSecretArn };
   const image = JSON.parse(run(["ecr", "describe-images", "--registry-id", APP_ONLY.account, "--repository-name", "mscqr-backend",
     "--image-ids", `imageDigest=${verifier.identity.verifierImageDigest}`, "--output", "json", "--no-cli-pager"]));
-  assert.equal(authenticateProtectedMainBackendImage({ sourceSha, response: image }).digest,
+  assert.equal(authenticateProtectedMainBackendImage({ sourceSha, response: image,
+    unavailable: inputs.preparation.unavailable === true }).digest,
     verifier.identity.verifierImageDigest, "Verifier image is no longer available or source-bound");
   const journal = createAppOnlyEvidenceWriter({ repositoryRoot, sourceSha: currentSourceSha,
     preparationSha256: inputs.preparation.preparationSha256 });
