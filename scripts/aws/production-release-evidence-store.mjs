@@ -20,7 +20,7 @@ const runAwsWithResult = (run, args) => {
 
 export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run, objectKey } = {}) {
   if (typeof run !== "function") throw new Error("Stage B shared apply reservation requires an explicit credential-bound AWS command runner.");
-  const key = (objectKey || stageBApplyAttemptS3Key)(artifactSetIdentity);
+  const key = (objectKey === undefined ? stageBApplyAttemptS3Key : objectKey)(artifactSetIdentity);
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage B shared apply reservation bytes are missing.");
   const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".shared-reservation-"));
   fs.chmodSync(temporaryDirectory, 0o700);
