@@ -95,6 +95,8 @@ for (const [name, change] of [
     [steps[commit], steps[smoke]] = [steps[smoke], steps[commit]]; }],
   ["green lane disabled", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Prepare governed green backend recovery handoff").if = "${{ false }}"; }],
   ["normal deployer environment changed", (gate) => { gate.jobs["execute-green-backend-recovery"].environment = "production"; }],
+  ["normal deployer Terraform missing", (gate) => { gate.jobs["execute-green-backend-recovery"].steps = gate.jobs["execute-green-backend-recovery"].steps.filter((step) => step.name !== "Install pinned Terraform for approved runtime policy recheck"); }],
+  ["normal deployer Terraform unpinned", (gate) => { gate.jobs["execute-green-backend-recovery"].steps.find((step) => step.name === "Install pinned Terraform for approved runtime policy recheck").with.terraform_version = "latest"; }],
   ["normal deployer role changed", (gate) => { gate.jobs["execute-green-backend-recovery"].steps.find((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment").with["role-to-assume"] = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; }],
 ]) test(`backend recovery certification rejects ${name}`, () => {
   const gate = copy(); change(gate);

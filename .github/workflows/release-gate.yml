@@ -1496,6 +1496,12 @@ jobs:
       - name: Install reviewed Node dependencies before credentials
         run: npm ci --ignore-scripts --no-audit --no-fund
 
+      - name: Install pinned Terraform for approved runtime policy recheck
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
       - name: Download exact preparation approval
         uses: actions/download-artifact@v7
         with:

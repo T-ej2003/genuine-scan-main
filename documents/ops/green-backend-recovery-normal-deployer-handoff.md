@@ -53,8 +53,10 @@ After the reviewed policy is installed, use the governed Release Gate
 The preparation job runs in `production` as release-deployer. Its S3 writes
 remain under `prepare/`; it can register a task definition but cannot update
 the service. The execution job runs in `production-normal-deploy` as
-normal-deployer. It reads the immutable preparation and original approval,
-compares live runtime policy and execution-role RoleId with the signed runtime evidence,
+normal-deployer. It installs the same pinned Terraform version as preparation
+before receiving AWS credentials, then reads the immutable preparation and
+original approval. It compares live runtime policy and execution-role RoleId
+with the signed runtime evidence,
 reads its own exact source-owned policy, and simulates the authorized
 `ecs:UpdateService` request. These checks, approval freshness, database verdict,
 component generation, image digest and ECS predecessor are rechecked before

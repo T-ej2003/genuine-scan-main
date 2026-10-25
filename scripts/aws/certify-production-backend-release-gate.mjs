@@ -74,11 +74,15 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
   assert.equal(execution.environment, "production-normal-deploy");
   assert.equal(execution.permissions["id-token"], "write");
   const executeSteps = execution.steps || [];
+  const terraform = executeSteps.findIndex((step) => step.name === "Install pinned Terraform for approved runtime policy recheck");
   const assume = executeSteps.findIndex((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment");
   const activate = executeSteps.findIndex((step) => step.name === "Execute one-use green backend recovery under normal-deployer");
   const smoke = executeSteps.findIndex((step) => step.name === "Verify recovered backend health");
   const commit = executeSteps.findIndex((step) => step.name === "Commit authenticated green recovery component state");
-  assert.ok(assume >= 0 && activate > assume && smoke > activate && commit > smoke);
+  assert.ok(terraform >= 0 && terraform < assume && activate > assume && smoke > activate && commit > smoke);
+  assert.equal(executeSteps[terraform].uses, "hashicorp/setup-terraform@v3");
+  assert.equal(executeSteps[terraform].with.terraform_version, "1.15.8");
+  assert.equal(executeSteps[terraform].with.terraform_wrapper, false);
   assert.equal(executeSteps[assume].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer");
   assert.match(executeSteps[activate].run || "", /--execute-handoff --credential-source github-oidc-normal-deployer/);
   assert.match(executeSteps[activate].run || "", /assumed-role\/mscqr-production-normal-deployer\/GitHubActions/);
