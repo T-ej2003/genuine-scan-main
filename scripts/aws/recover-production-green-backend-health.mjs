@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY, appOnlyDefinitionSha256, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest } from "./production-app-only-contract.mjs";
@@ -23,6 +24,8 @@ import { GREEN_RECOVERY_PREPARED_PHASE, assertGreenRecoveryHandoff, prepareGreen
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { readStageBPrivateFileBytes, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { NORMAL_DEPLOYER_POLICY, readNormalDeployerPolicyState } from "./converge-production-normal-deployer-policy.mjs";
+import { PRODUCTION_CLIENT_IP_TRUST } from "./production-client-ip-trust-runtime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const at = argv.indexOf(name); const value = at < 0 ? null : argv[at + 1]; assert.ok(value && !value.startsWith("--"), `${name} is required`); return value; };
@@ -32,6 +35,59 @@ const read = (file, expected, label) => {
   assert.equal(capture.sha256, expected, `${label} bytes changed`);
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture.bytes));
 };
+
+export async function collectCurrentGreenRecoveryRuntimeIdentity(candidate, aws, preparedIdentity, collect = collectLiveRolePolicyIdentity) {
+  const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
+  const current = await collect(principals, aws, candidate);
+  if (preparedIdentity) assert.deepEqual(current, preparedIdentity, "Runtime IAM changed after preparation approval");
+  assert.deepEqual(await collect(principals, aws, candidate), current, "Runtime IAM changed during recovery authorization");
+  return current;
+}
+
+export function assertNormalDeployerUpdateAuthority(targetArn, aws) {
+  assert.match(targetArn || "", GREEN_BACKEND_TASK_ARN);
+  const response = aws(["iam", "simulate-principal-policy", "--policy-source-arn", NORMAL_DEPLOYER_POLICY.roleArn,
+    "--action-names", "ecs:UpdateService", "--resource-arns", APP_ONLY.serviceArn, "--context-entries",
+    `ContextKeyName=aws:RequestedRegion,ContextKeyValues=${APP_ONLY.region},ContextKeyType=string`,
+    `ContextKeyName=ecs:cluster,ContextKeyValues=${APP_ONLY.clusterArn},ContextKeyType=string`,
+    `ContextKeyName=ecs:task-definition,ContextKeyValues=${targetArn},ContextKeyType=string`]);
+  const [result] = response?.EvaluationResults || [];
+  assert.notEqual(response?.IsTruncated, true, "Normal deployer update simulation is truncated");
+  assert.equal(response?.EvaluationResults?.length, 1, "Normal deployer update simulation is incomplete");
+  assert.equal(result.EvalActionName?.toLowerCase(), "ecs:updateservice");
+  assert.equal(result.EvalResourceName, APP_ONLY.serviceArn);
+  assert.deepEqual(result.MissingContextValues || [], [], "Normal deployer update simulation lacks context");
+  assert.notEqual(result.PermissionsBoundaryDecisionDetail?.AllowedByPermissionsBoundary, false);
+  assert.notEqual(result.OrganizationsDecisionDetail?.AllowedByOrganizations, false);
+  assert.equal(result.EvalDecision, "allowed", "Normal deployer cannot update the exact backend service");
+  if (result.ResourceSpecificResults !== undefined) {
+    assert.equal(result.ResourceSpecificResults.length, 1, "Normal deployer resource simulation is incomplete");
+    assert.equal(result.ResourceSpecificResults[0].EvalResourceName, APP_ONLY.serviceArn);
+    assert.deepEqual(result.ResourceSpecificResults[0].MissingContextValues || [], []);
+    assert.equal(result.ResourceSpecificResults[0].EvalResourceDecision, "allowed");
+  }
+  return true;
+}
+
+export function assertGreenRecoveryAlbTargets(live, response) {
+  assert.deepEqual(live.service?.loadBalancers, [{ targetGroupArn: PRODUCTION_CLIENT_IP_TRUST.targetGroupArn,
+    containerName: APP_ONLY.container, containerPort: 4000 }]);
+  assert.equal(live.tasks?.length, 2);
+  assert.ok(Array.isArray(response?.TargetHealthDescriptions));
+  const addresses = live.tasks.map((task) => {
+    const values = (task.attachments || []).flatMap(({ details = [] }) => details.filter(({ name }) => name === "privateIPv4Address").map(({ value }) => value));
+    assert.equal(values.length, 1, "Recovered task has no unique network address");
+    assert.equal(isIP(values[0]), 4, "Recovered task network address is invalid");
+    return values[0];
+  });
+  assert.equal(new Set(addresses).size, 2, "Recovered tasks share a network address");
+  for (const address of addresses) {
+    const targets = response.TargetHealthDescriptions.filter(({ Target }) => Target?.Id === address && Target.Port === 4000);
+    assert.equal(targets.length, 1, "Recovered task is not uniquely registered in the backend target group");
+    assert.equal(targets[0].TargetHealth?.State, "healthy", "Recovered backend ALB target is unhealthy");
+  }
+  return true;
+}
 
 export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   const sourceSha = required(argv, "--source-sha");
@@ -59,6 +115,12 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   assert.match(caller.Arn || "", mode === "execute"
     ? /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-normal-deployer\/[^/]+$/
     : /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  const assertExecutionPolicy = () => {
+    const current = readNormalDeployerPolicyState({ run: (args) => awsText(args) });
+    assert.equal(current.policySha256, NORMAL_DEPLOYER_POLICY.targetSha256,
+      "Normal deployer policy differs from the exact reviewed recovery authority");
+  };
+  if (mode === "execute") assertExecutionPolicy();
   assert.equal(operatorEnvironment.GITHUB_WORKFLOW_REF,
     "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main");
   assert.equal(operatorEnvironment.GITHUB_ACTIONS, "true");
@@ -157,12 +219,8 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   const handoffPhase = `${GREEN_RECOVERY_PREPARED_PHASE}:${approval.authorizationSha256}`;
   let preparedHandoff, livePolicyIdentity;
   const verifyRuntime = async (candidate) => {
-    const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
-    const identity = mode === "execute" ? preparedHandoff?.livePolicyIdentity
-      : await collectLiveRolePolicyIdentity(principals, aws, candidate);
-    assert.ok(identity, "Authenticated preparation lacks runtime IAM identity");
-    if (mode !== "execute") assert.deepEqual(await collectLiveRolePolicyIdentity(principals, aws, candidate), identity,
-      "Runtime IAM changed during recovery authorization");
+    const identity = await collectCurrentGreenRecoveryRuntimeIdentity(candidate, aws,
+      mode === "execute" ? preparedHandoff?.livePolicyIdentity : undefined);
     livePolicyIdentity = identity;
     return assertSignedRuntimeConsumabilityEvidence(runtime, { sourceSha, candidate,
       livePolicyIdentity: identity,
@@ -177,6 +235,8 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   const authorizePhase = async (record, phase) => {
     assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() });
     if (mode === "execute" && phase === "BACKEND:UPDATE") {
+      assertExecutionPolicy();
+      assertNormalDeployerUpdateAuthority(preparedHandoff.registeredTaskDefinitionArn, aws);
       const identity = aws(["sts", "get-caller-identity"]);
       assert.equal(String(identity.Account), APP_ONLY.account);
       assert.match(identity.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-normal-deployer\/[^/]+$/);
@@ -274,6 +334,8 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
         assert.equal(task.taskDefinitionArn, arn); assert.equal(task.healthStatus, "HEALTHY");
         assert.equal(task.containers?.find(({ name }) => name === "backend")?.imageDigest, digest);
       }
+      assertGreenRecoveryAlbTargets(live, aws(["elbv2", "describe-target-health",
+        "--target-group-arn", PRODUCTION_CLIENT_IP_TRUST.targetGroupArn]));
     },
     verifyHealth: (expectedReleaseSha) => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready",
       (command, args) => invoke(command, args), expectedReleaseSha),

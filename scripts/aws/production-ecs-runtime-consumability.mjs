@@ -699,7 +699,8 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws, candidat
       permissionsBoundary = { policyArn, defaultVersionId: policy.DefaultVersionId, policySha256: canonicalSha256(version.Document) };
     }
     const loggingAuthorization = loggingPolicyAuthorizations(role, policyDocuments, claims.filter((claim) => claim.principalArn === principalArn), green && principalArn === APP_ONLY.executionRoleArn ? green : null);
-    roles.push({ principalArn, trustPolicySha256: ECS_TASK_TRUST_SHA256, permissionsBoundary, inlinePolicies, attachedPolicies, loggingAuthorization });
+    roles.push({ principalArn, ...(green && principalArn === APP_ONLY.executionRoleArn ? { roleId: role.RoleId } : {}),
+      trustPolicySha256: ECS_TASK_TRUST_SHA256, permissionsBoundary, inlinePolicies, attachedPolicies, loggingAuthorization });
   }
   const body = { roles };
   return Object.freeze({ ...body, identitySha256: canonicalSha256(body) });
