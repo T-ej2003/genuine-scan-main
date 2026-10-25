@@ -45,6 +45,15 @@ const parsedWorkflow = yaml.load(workflow);
 const rateLimitEnforcementTest = fs.readFileSync("backend/tests/rateLimitEnforcement.test.js", "utf8");
 const permissionManifest = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json", "utf8"));
 
+test("Release Gate runner services use the repository's pinned Docker Hub images", () => {
+  const quality = fs.readFileSync(".github/workflows/quality-gate.yml", "utf8");
+  for (const name of ["postgres", "redis"]) {
+    const image = parsedWorkflow.jobs["deploy-production-ecs"].services[name].image;
+    assert.match(image, new RegExp(`^docker\\.io/library/${name}@sha256:[a-f0-9]{64}$`));
+    assert.ok(quality.includes(`image: ${image}`));
+  }
+});
+
 test("Release Gate uses the exact production environment OIDC identity", () => {
   assert.equal(assertProductionReleaseOidcSourceContract(permissionManifest), true);
   assert.deepEqual(assertProductionReleaseOidcSubjectConfiguration(), { repository: "T-ej2003/genuine-scan-main", environment: "production", subject: PRODUCTION_RELEASE_OIDC_SUBJECT, useDefault: true, immutableSubjects: false });
@@ -292,12 +301,16 @@ test("release gate certifies the same disposable PostgreSQL database used by int
   fs.chmodSync(path.join(bin, "npm"), 0o700);
   fs.writeFileSync(path.join(bin, "git"), "#!/bin/sh\nprintf '%s' \"${GIT_STATUS_OUTPUT:-}\"\n");
   fs.chmodSync(path.join(bin, "git"), 0o700);
+  // Keep this disposable-database shell test scoped to its own contract; OSV has separate coverage.
+  fs.writeFileSync(path.join(bin, "node"), `#!/bin/sh\nif [ "$1" = "scripts/github/osv-acceptance-window.mjs" ]; then exit 0; fi\nexec "${process.execPath}" "$@"\n`);
+  fs.chmodSync(path.join(bin, "node"), 0o700);
 
   const env = {
     ...process.env,
     PATH: `${bin}:${process.env.PATH}`,
     GITHUB_ENV: githubEnv,
     INVOCATION_LOG: invocations,
+    DEPLOY_SHA: "a".repeat(40),
     P2_TEST_DB_PROTOCOL: "postgresql",
     P2_TEST_DB_USER: "mscqr_rls_cert_admin",
     P2_TEST_DB_HOST: "127.0.0.1",
