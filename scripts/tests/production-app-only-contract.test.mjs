@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import vm from "node:vm";
 import ts from "typescript";
-import { APP_ONLY, APP_ONLY_DOMAINS, buildAppOnlyCandidate, assertAppOnlyCandidate, assertRegisteredAppOnlyCandidate, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyEvidenceIdentity, evaluateAppOnlyDomains, assertAppOnlyRollbackOwnership, appOnlyExpectedHealthSourceSha } from "../aws/production-app-only-contract.mjs";
+import { APP_ONLY, APP_ONLY_DOMAINS, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest, assertAppOnlyCandidate, assertRegisteredAppOnlyCandidate, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyEvidenceIdentity, evaluateAppOnlyDomains, assertAppOnlyRollbackOwnership, appOnlyExpectedHealthSourceSha } from "../aws/production-app-only-contract.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const oldDigest = `sha256:${"1".repeat(64)}`;
@@ -64,6 +65,46 @@ test("only the backend image changes, and AWS defaults are normalized on readbac
   candidate.containerDefinitions[0].cpu = 0;
   candidate.containerDefinitions[0].logConfiguration.secretOptions = [];
   assert.equal(assertRegisteredAppOnlyCandidate(definition, candidate, newDigest), true);
+});
+test("the actual green registration serializer omits only empty tags and passes the ECS CLI input model", () => {
+  const { definition } = fixture();
+  definition.tags = [];
+  definition.volumes = [{ name: "uploads", host: {} }];
+  definition.placementConstraints = [];
+  definition.containerDefinitions[0].mountPoints = [];
+  definition.containerDefinitions[0].resourceRequirements = [{ type: "GPU", value: "1" }];
+  definition.containerDefinitions[0].secrets = [{ name: "DATABASE_URL", valueFrom: `arn:aws:secretsmanager:${APP_ONLY.region}:${APP_ONLY.account}:secret:reviewed` }];
+  definition.containerDefinitions[0].logConfiguration = { logDriver: "awslogs", options: { "awslogs-group": "/ecs/reviewed", "awslogs-region": APP_ONLY.region, "awslogs-stream-prefix": "backend" } };
+  const candidate = buildAppOnlyCandidate(definition, newDigest);
+  const request = buildAppOnlyRegistrationRequest(candidate);
+  assert.equal(Object.hasOwn(request, "tags"), false);
+  assert.deepEqual(request.volumes, definition.volumes);
+  assert.deepEqual(request.placementConstraints, []);
+  assert.deepEqual(request.containerDefinitions[0].resourceRequirements, definition.containerDefinitions[0].resourceRequirements);
+  assert.deepEqual(request.containerDefinitions[0].secrets, definition.containerDefinitions[0].secrets);
+  assert.deepEqual(request.containerDefinitions[0].logConfiguration, definition.containerDefinitions[0].logConfiguration);
+  assert.equal(request.containerDefinitions[0].image, `${APP_ONLY.backendRepository}@${newDigest}`);
+  assert.equal(request.taskRoleArn, definition.taskRoleArn);
+  assert.equal(request.executionRoleArn, definition.executionRoleArn);
+  assert.deepEqual(candidate.tags, [], "Signed candidate remains unchanged");
+  const validate = (payload) => execFileSync("aws", ["ecs", "register-task-definition", "--region", APP_ONLY.region,
+    "--endpoint-url", "http://127.0.0.1:9", "--cli-input-json", JSON.stringify(payload),
+    "--generate-cli-skeleton", "output", "--query", "taskDefinition.family", "--output", "text"],
+  { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "fake", AWS_SECRET_ACCESS_KEY: "fake", AWS_EC2_METADATA_DISABLED: "true" } });
+  assert.equal(validate(request).trim(), "family");
+  for (const tags of [undefined, [{ key: "Environment", value: "production" }], [{ key: "Owner" }]]) {
+    const changed = structuredClone(candidate);
+    if (tags === undefined) delete changed.tags; else changed.tags = tags;
+    const serialized = buildAppOnlyRegistrationRequest(changed);
+    assert.deepEqual(serialized.tags, tags);
+    assert.equal(validate(serialized).trim(), "family");
+  }
+  for (const tags of [null, {}, [{ key: "", value: "x" }], [{ key: "x", value: 1 }], [{ key: "x", value: "y", extra: true }], [{ key: "x", value: "1" }, { key: "x", value: "2" }], [{ key: "aws:owner", value: "x" }]]) {
+    assert.throws(() => buildAppOnlyRegistrationRequest({ ...candidate, tags }));
+  }
+  for (const [field, value] of [["registeredAt", "now"], ["revision", 25], ["taskDefinitionArn", arn(25)], ["proxyConfiguration", null]])
+    assert.throws(() => buildAppOnlyRegistrationRequest({ ...candidate, [field]: value }));
+  assert.throws(() => validate({ ...request, unsupportedField: true }));
 });
 for (const field of ["taskRoleArn", "executionRoleArn", "networkMode", "family", "runtimePlatform", "cpu", "memory", "volumes", "ephemeralStorage", "pidMode", "ipcMode", "proxyConfiguration", "inferenceAccelerators", "placementConstraints", "requiresCompatibilities", "enableFaultInjection", "tags"]) {
   test(`rejects root task-definition change: ${field}`, () => {
