@@ -11,6 +11,6 @@ The RLS package was regenerated with `npm run rls:full-generate`. No Prisma migr
 
 ## Verification and recovery
 
-`npm run rls:full-verify` and the full disposable PostgreSQL 18 certification passed locally on PostgreSQL 18.6. The certification reported 78 FORCE RLS targets, 374 generated policies, 11 application-path workflows, exact catalog-tamper rejection, rollback verification, and zero green-database or managed-role residue. Exact PostgreSQL 18.4 verification remains a required PR CI result.
+`npm run rls:full-verify` and the full disposable PostgreSQL 18 certification passed locally on PostgreSQL 18.6. The certification reported 78 FORCE RLS targets, 374 generated policies, 11 application-path workflows, exact catalog-tamper rejection, rollback verification, and zero green-database or managed-role residue. The existing PostgreSQL 18 CI certification loop now also runs `manufacturer-scope`, so this failure is exercised before merge on the pinned CI database image.
 
 After this PR merges, authenticate the new protected-main SHA, reconcile run `40193506815` and live ECS before any new dispatch, and renew source-bound image, runtime, database, ticket, operator, and protected-environment evidence as their contracts require. Resume the existing `backend-health-recovery` Release Gate lane. Verify ECS 2/2, ALB target health, database connectivity, smoke tests, and component-state commit before declaring recovery complete.

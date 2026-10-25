@@ -99,7 +99,7 @@ jobs:
           node scripts/rls/certify-clean-room-database.mjs
           test "$(psql "$MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_stat_activity WHERE datname LIKE 'mscqr_full_rls_cert_%'")" = "0"
           node --test backend/tests/rls-wave-b/b03/repositoryFunctions.test.js backend/tests/rls-wave-b/b03/systemContext.test.js backend/tests/rls-wave-b/b03/serviceActivation.test.js
-      - name: Certify Startex QR and printing application paths on PostgreSQL 18
+      - name: Certify authentication, QR and printing application paths on PostgreSQL 18
         env:
           TZ: UTC
           PGTZ: UTC
@@ -107,7 +107,7 @@ jobs:
           MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql://mscqr_rls_cert_admin@127.0.0.1:55434/mscqr_full_rls_admin
         run: |
           mkdir -m 700 "$RUNNER_TEMP/startex-evidence"
-          for family in qr-system printing-lifecycle; do
+          for family in manufacturer-scope qr-system printing-lifecycle; do
             export MSCQR_FULL_RLS_CERTIFICATION_FAMILY="$family"
             export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/startex-evidence/$family.json"
             node scripts/rls/certify-clean-room-database.mjs
