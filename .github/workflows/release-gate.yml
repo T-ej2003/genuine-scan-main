@@ -379,7 +379,7 @@ jobs:
     name: Deploy production ECS
     needs: resolve-deploy-target
     if: ${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     environment: production
     permissions:
