@@ -16,7 +16,7 @@ import {
   runCli,
 } from "../aws/production-green-stage-b-image-evidence.mjs";
 import { buildStageBImagePublicationIdentity, publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
-import { STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 import { STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS } from "../aws/stage-b-deployment-contract.mjs";
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "../aws/production-cutover-production-adapters.mjs";
@@ -159,6 +159,20 @@ test("administrator evidence proves all four exact release tag-to-digest binding
     { service: "rls-executor", repository: "mscqr-backend", tag: `${imageReleaseSha}-rls-executor`, digest: `sha256:${"3".repeat(64)}` },
     { service: "worker", repository: "mscqr-worker", tag: imageReleaseSha, digest: `sha256:${"2".repeat(64)}` },
   ]);
+});
+
+test("root-signed publication identity survives the existing canonical S3 recovery journal", () => {
+  const report = reportFixture();
+  const signature = signatureFixture(report);
+  const journalReport = JSON.parse(canonicalJson(report));
+  const originalBytesHash = crypto.createHash("sha256").update(`${JSON.stringify(report.publicationIdentity)}\n`).digest("hex");
+  assert.equal(publicationIdentitySha256(report.publicationIdentity), originalBytesHash);
+  assert.notDeepEqual(Object.keys(journalReport.publicationIdentity), Object.keys(report.publicationIdentity));
+  assert.equal(publicationIdentitySha256(journalReport.publicationIdentity), originalBytesHash);
+  assert.equal(assertValid(journalReport, signature), true);
+  journalReport.publicationIdentity.artifactId = "502";
+  assert.throws(() => assertValid(journalReport, signature), /publication identity hash is wrong/);
+  assert.throws(() => publicationIdentitySha256({ ...report.publicationIdentity, unexpected: true }), /fields are invalid/);
 });
 
 test("production-default image verification uses the release profile runner", () => {
