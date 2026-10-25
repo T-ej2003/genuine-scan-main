@@ -24,6 +24,12 @@ for (const change of [
   (gate) => { gate.jobs["backend-recovery-certification"].steps[0].with["persist-credentials"] = true; },
   (gate) => { gate.jobs["backend-recovery-certification"].services.postgres.image = "postgres:17"; },
   (gate) => { gate.jobs["backend-recovery-certification"].steps.find((step) => step.name === "Certify full RLS on disposable PostgreSQL 18.4").run = "echo passed"; },
+  (gate) => { gate.jobs["backend-recovery-certification"].if = "${{ false }}"; },
+  (gate) => { gate.jobs["backend-recovery-certification"].steps.find((step) => step.name === "Certify full RLS on disposable PostgreSQL 18.4").if = "${{ false }}"; },
+  (gate) => { gate.jobs.backend.if = "${{ false }}"; },
+  (gate) => { gate.jobs.backend.steps.find((step) => step.name === "Backend quality contract").run = "echo passed"; },
+  (gate) => { gate.jobs.frontend.steps.find((step) => step.name === "Frontend quality contract").if = "${{ false }}"; },
+  (gate) => { gate.jobs.integration.steps.find((step) => step.name === "Disposable system integration suite").run = "echo passed"; },
 ]) test("source certification refuses weakened CI isolation or missing exact-head proof", () => {
   const gate = structuredClone(quality); change(gate);
   assert.throws(() => assertSourceCertificationWorkflowGraph(gate));
@@ -81,6 +87,8 @@ for (const [name, change] of [
   ["malformed Redis digest", (gate) => { gate.jobs["deploy-production-ecs"].services.redis.image = "docker.io/library/redis@sha256:abc"; }],
   ["RLS certification skipped", (gate) => { gate.jobs["deploy-production-ecs"].steps = gate.jobs["deploy-production-ecs"].steps.filter((step) => step.name !== "Full RLS verification and PostgreSQL 18.4 certification"); }],
   ["RLS certification made conditional", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Full RLS verification and PostgreSQL 18.4 certification").if = "${{ false }}"; }],
+  ["CI attestation removed", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Full RLS verification and PostgreSQL 18.4 certification").run = "npm run rls:full-certify"; }],
+  ["backend build skipped for normal release", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Backend build and tests").if = "${{ false }}"; }],
   ["component commit before smoke", (gate) => { const steps = gate.jobs["deploy-production-ecs"].steps;
     const commit = steps.findIndex((step) => step.name === "Commit authenticated backend recovery component state");
     const smoke = steps.findIndex((step) => step.name === "Verify backend health");
