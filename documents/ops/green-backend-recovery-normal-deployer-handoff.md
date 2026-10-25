@@ -70,3 +70,9 @@ No source test can prove a future protected environment approval, policy
 installation, current database verdict or the production service's health.
 After merge, verify the installed policy and exact-principal simulation before
 dispatch; renew source-bound and expired evidence through its existing producer.
+
+The audit's historical Gitleaks finding at commit `7b849647` is a source
+identifier default parameter, not a credential. The
+current expression no longer matches the rule. The exact historical finding is
+recorded in `.gitleaks-baseline.json`; current-tree scanning and the branch's
+full reachable history must both remain clean under the unchanged scanner.

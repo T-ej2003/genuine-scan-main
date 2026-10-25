@@ -270,5 +270,26 @@
   "Message": "fix(audit): preserve SSE compatibility and structural RF7 references",
   "Tags": [],
   "Fingerprint": "616f94c69e7fef0a6090d86567100d40aad11f7a:documents/ops/g06-g11-local-remediation.md:generic-api-key:8"
+ },
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 21,
+  "EndLine": 21,
+  "StartColumn": 102,
+  "EndColumn": 137,
+  "Match": "objectKey = REDACTED ",
+  "Secret": "REDACTED",
+  "File": "scripts/aws/production-release-evidence-store.mjs",
+  "SymlinkFile": "",
+  "Commit": "7b849647398725266836afd7214d5bd56465efaf",
+  "Link": "https://github.com/T-ej2003/genuine-scan-main/blob/7b849647398725266836afd7214d5bd56465efaf/scripts/aws/production-release-evidence-store.mjs#L21",
+  "Entropy": 3.5883543,
+  "Author": "T-ej2003",
+  "Email": "karatlapallyabhiramteja@gmail.com",
+  "Date": "2026-10-25T20:30:31Z",
+  "Message": "Route green backend recovery update through normal deployer",
+  "Tags": [],
+  "Fingerprint": "7b849647398725266836afd7214d5bd56465efaf:scripts/aws/production-release-evidence-store.mjs:generic-api-key:21"
  }
 ]
