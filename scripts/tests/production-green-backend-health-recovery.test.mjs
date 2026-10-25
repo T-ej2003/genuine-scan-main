@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
-import { assertUnavailableGreenBackend, runGreenBackendHealthRecovery } from "../aws/production-green-backend-health-recovery.mjs";
+import { assertUnavailableGreenBackend, certifyGreenBackendRecoveryPreDispatch, runGreenBackendHealthRecovery } from "../aws/production-green-backend-health-recovery.mjs";
 import { assertCompletedBackendRecoveryEvidence, commitBackendRecoveryComponentState } from "../aws/commit-production-component-recovery-state.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { createProductionComponentDeploymentState } from "../aws/production-component-deployment-state.mjs";
@@ -75,7 +75,7 @@ function scenario({ loseRegisterResponse = false, loseUpdateResponse = false } =
   let service = structuredClone(failure.service);
   const input = { sourceSha: "a".repeat(40), taskDefinitionArn: arn, recoveryImageDigest: newDigest,
     candidateFingerprint: checked.fingerprint, serviceConfigurationSha256: checked.serviceConfigurationSha256,
-    deploymentId, approval: { authorizationSha256: "f".repeat(64) } };
+    deploymentId, runtimeConsumabilitySha256: "8".repeat(64), approval: { authorizationSha256: "f".repeat(64) } };
   const adapters = {
     store,
     readFailure: async () => ({ ...failure, service: structuredClone(service) }),
@@ -99,6 +99,43 @@ function scenario({ loseRegisterResponse = false, loseUpdateResponse = false } =
         healthStatus: "HEALTHY", startedBy: service.deployments[0].id,
         containers: [{ name: "backend", imageDigest: newDigest }] })) }) };
 }
+
+test("read-only certification authenticates fresh predecessor and never claims or mutates", async () => {
+  const run = scenario();
+  let checks = 0;
+  const result = await certifyGreenBackendRecoveryPreDispatch(run.input, {
+    readFailure: run.adapters.readFailure, readDefinition: run.adapters.describe,
+    readOperation: run.adapters.store.readOperation,
+    verifyAuthorization: async () => { checks++; },
+    verifyRuntime: async () => ({ evidenceSha256: run.input.runtimeConsumabilitySha256 }),
+  });
+  assert.equal(result.status, "READ_ONLY_PRE_DISPATCH_VERIFIED");
+  assert.equal(checks, 3);
+  assert.equal(run.entries.size, 0);
+  assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });
+});
+
+for (const [name, change, expected] of [
+  ["expired approval", (value) => { value.verifyAuthorization = async () => { throw new Error("approval expired"); }; }, /approval expired/],
+  ["lost image", (value) => { value.readFailure = async () => ({ ...await value.originalRead(), replacementImage: { exists: false } }); }, /replacement|image/i],
+  ["service drift", (value) => { let count = 0; value.readFailure = async () => { const failure = await value.originalRead(); if (++count === 2) failure.service.networkConfiguration = { changed: true }; return failure; }; }, /changed during certification/],
+  ["existing dispatch", (value) => { value.readOperation = async (_id, phase) => phase === "BACKEND:REGISTER:DISPATCH" ? { owner: "other" } : null; }, /requires governed native reconciliation/],
+  ["runtime evidence substitution", (value) => { value.verifyRuntime = async () => ({ evidenceSha256: "9".repeat(64) }); }, /Runtime consumability evidence differs/],
+  ["task-definition substitution", (value) => { value.readDefinition = async () => ({ ...await value.originalDefinition(arn), taskDefinitionArn: arn.replace(":24", ":23") }); }, /Expected values to be strictly equal/],
+]) test(`read-only certification fails closed on ${name}`, async () => {
+  const run = scenario();
+  const value = { originalRead: run.adapters.readFailure, readFailure: run.adapters.readFailure,
+    originalDefinition: run.adapters.describe, readDefinition: run.adapters.describe,
+    readOperation: run.adapters.store.readOperation, verifyAuthorization: async () => {},
+    verifyRuntime: async () => ({ evidenceSha256: run.input.runtimeConsumabilitySha256 }) };
+  change(value);
+  await assert.rejects(certifyGreenBackendRecoveryPreDispatch(run.input, {
+    readFailure: value.readFailure, readDefinition: value.readDefinition, readOperation: value.readOperation,
+    verifyAuthorization: value.verifyAuthorization, verifyRuntime: value.verifyRuntime,
+  }), expected);
+  assert.equal(run.entries.size, 0);
+  assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });
+});
 
 async function componentCommitScenario() {
   const run = scenario();

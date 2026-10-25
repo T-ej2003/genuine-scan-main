@@ -103,6 +103,40 @@ export function assertUnavailableGreenBackend(input) {
     serviceConfigurationSha256: appOnlyServiceConfigurationSha256(service) };
 }
 
+// This is a read-only gate. It never reserves coordinator ownership or dispatches ECS.
+export async function certifyGreenBackendRecoveryPreDispatch(input, { readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime }) {
+  for (const fn of [readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime]) assert.equal(typeof fn, "function");
+  const operationId = canonicalSha256({ kind: GREEN_BACKEND_RECOVERY_KIND, sourceSha: input.sourceSha,
+    taskDefinitionArn: input.taskDefinitionArn, imageDigest: input.recoveryImageDigest });
+  await verifyAuthorization(input);
+  const first = assertUnavailableGreenBackend(await readFailure());
+  assert.equal(first.fingerprint, input.candidateFingerprint);
+  assert.equal(first.serviceConfigurationSha256, input.serviceConfigurationSha256);
+  assert.equal(first.proof.deploymentId, input.deploymentId);
+  assert.equal(first.definition.taskDefinitionArn, input.taskDefinitionArn);
+  const definition = await readDefinition(input.taskDefinitionArn);
+  assert.equal(definition?.taskDefinitionArn, input.taskDefinitionArn);
+  const candidate = buildAppOnlyCandidate(definition, input.recoveryImageDigest);
+  assertAppOnlyCandidate(first.definition, candidate, input.recoveryImageDigest);
+  assert.equal(appOnlyDefinitionSha256(candidate), input.candidateFingerprint);
+  const runtime = await verifyRuntime(candidate);
+  assert.equal(runtime?.evidenceSha256, input.runtimeConsumabilitySha256,
+    "Runtime consumability evidence differs from the recovery authorization");
+  await verifyAuthorization(input);
+  for (const phase of ["BACKEND:PREDECESSOR", "BACKEND:REGISTER:INTENT", "BACKEND:REGISTER:DISPATCH",
+    "BACKEND:REGISTER:COMPLETED", "BACKEND:UPDATE:INTENT", "BACKEND:UPDATE:DISPATCH",
+    "BACKEND:UPDATE:COMPLETED", "BACKEND:RECOVERY:COMPLETE"])
+    assert.equal(await readOperation(operationId, phase), null, `Existing ${phase} requires governed native reconciliation`);
+  const second = assertUnavailableGreenBackend(await readFailure());
+  assert.equal(canonicalSha256(second.proof), canonicalSha256(first.proof), "ECS predecessor changed during certification");
+  assert.equal(second.fingerprint, first.fingerprint);
+  assert.equal(second.serviceConfigurationSha256, first.serviceConfigurationSha256, "ECS service configuration changed during certification");
+  await verifyAuthorization(input);
+  return { status: "READ_ONLY_PRE_DISPATCH_VERIFIED", operationId, sourceSha: input.sourceSha,
+    imageDigest: input.recoveryImageDigest, candidateFingerprint: first.fingerprint,
+    serviceConfigurationSha256: first.serviceConfigurationSha256 };
+}
+
 export async function runGreenBackendHealthRecovery(input, adapters) {
   for (const key of ["store", "readFailure", "census", "register", "describe", "readService", "updateService", "verifyStable", "verifyHealth", "authorizePhase", "verifyDispatchedAuthorization", "verifyRegisteredRevision"])
     assert.ok(adapters?.[key], `Green recovery requires ${key}`);
