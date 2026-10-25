@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY, appOnlyDefinitionSha256, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest } from "./production-app-only-contract.mjs";
@@ -12,15 +13,19 @@ import { verifyProductionBackendHealth } from "./recover-production-backend-heal
 import { GREEN_BACKEND_TASK_ARN, assertGreenBackendRecoveryAuthorization, assertUnavailableGreenBackend, certifyGreenBackendRecoveryPreDispatch,
   runGreenBackendHealthRecovery } from "./production-green-backend-health-recovery.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
-import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
+import { createPinnedRootAttestationVerifier, createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { collectEcsServiceTasks } from "./production-ecs-task-census.mjs";
 import { exactEcrImageResult } from "./production-ecs-rollback-viability.mjs";
 import { assertSignedRuntimeConsumabilityEvidence, collectLiveRolePolicyIdentity, deriveEcsRuntimeDependencies } from "./production-ecs-runtime-consumability.mjs";
 import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
+import { createProductionComponentDeploymentStateClient } from "./production-component-deployment-state.mjs";
+import { GREEN_RECOVERY_PREPARED_PHASE, assertGreenRecoveryHandoff, prepareGreenRecoveryHandoff } from "./production-green-backend-recovery-handoff.mjs";
 import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
 import { readStageBPrivateFileBytes, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { createProductionAwsCredentialEnvironment, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { NORMAL_DEPLOYER_POLICY, readNormalDeployerPolicyState } from "./converge-production-normal-deployer-policy.mjs";
+import { PRODUCTION_CLIENT_IP_TRUST } from "./production-client-ip-trust-runtime.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const at = argv.indexOf(name); const value = at < 0 ? null : argv[at + 1]; assert.ok(value && !value.startsWith("--"), `${name} is required`); return value; };
@@ -31,17 +36,74 @@ const read = (file, expected, label) => {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture.bytes));
 };
 
+export async function collectCurrentGreenRecoveryRuntimeIdentity(candidate, aws, preparedIdentity, collect = collectLiveRolePolicyIdentity) {
+  const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
+  const current = await collect(principals, aws, candidate);
+  if (preparedIdentity) assert.deepEqual(current, preparedIdentity, "Runtime IAM changed after preparation approval");
+  assert.deepEqual(await collect(principals, aws, candidate), current, "Runtime IAM changed during recovery authorization");
+  return current;
+}
+
+export function assertNormalDeployerUpdateAuthority(targetArn, aws) {
+  assert.match(targetArn || "", GREEN_BACKEND_TASK_ARN);
+  const response = aws(["iam", "simulate-principal-policy", "--policy-source-arn", NORMAL_DEPLOYER_POLICY.roleArn,
+    "--action-names", "ecs:UpdateService", "--resource-arns", APP_ONLY.serviceArn, "--context-entries",
+    `ContextKeyName=aws:RequestedRegion,ContextKeyValues=${APP_ONLY.region},ContextKeyType=string`,
+    `ContextKeyName=ecs:cluster,ContextKeyValues=${APP_ONLY.clusterArn},ContextKeyType=string`,
+    `ContextKeyName=ecs:task-definition,ContextKeyValues=${targetArn},ContextKeyType=string`]);
+  const [result] = response?.EvaluationResults || [];
+  assert.notEqual(response?.IsTruncated, true, "Normal deployer update simulation is truncated");
+  assert.equal(response?.EvaluationResults?.length, 1, "Normal deployer update simulation is incomplete");
+  assert.equal(result.EvalActionName?.toLowerCase(), "ecs:updateservice");
+  assert.equal(result.EvalResourceName, APP_ONLY.serviceArn);
+  assert.deepEqual(result.MissingContextValues || [], [], "Normal deployer update simulation lacks context");
+  assert.notEqual(result.PermissionsBoundaryDecisionDetail?.AllowedByPermissionsBoundary, false);
+  assert.notEqual(result.OrganizationsDecisionDetail?.AllowedByOrganizations, false);
+  assert.equal(result.EvalDecision, "allowed", "Normal deployer cannot update the exact backend service");
+  if (result.ResourceSpecificResults !== undefined) {
+    assert.equal(result.ResourceSpecificResults.length, 1, "Normal deployer resource simulation is incomplete");
+    assert.equal(result.ResourceSpecificResults[0].EvalResourceName, APP_ONLY.serviceArn);
+    assert.deepEqual(result.ResourceSpecificResults[0].MissingContextValues || [], []);
+    assert.equal(result.ResourceSpecificResults[0].EvalResourceDecision, "allowed");
+  }
+  return true;
+}
+
+export function assertGreenRecoveryAlbTargets(live, response) {
+  assert.deepEqual(live.service?.loadBalancers, [{ targetGroupArn: PRODUCTION_CLIENT_IP_TRUST.targetGroupArn,
+    containerName: APP_ONLY.container, containerPort: 4000 }]);
+  assert.equal(live.tasks?.length, 2);
+  assert.ok(Array.isArray(response?.TargetHealthDescriptions));
+  const addresses = live.tasks.map((task) => {
+    const values = (task.attachments || []).flatMap(({ details = [] }) => details.filter(({ name }) => name === "privateIPv4Address").map(({ value }) => value));
+    assert.equal(values.length, 1, "Recovered task has no unique network address");
+    assert.equal(isIP(values[0]), 4, "Recovered task network address is invalid");
+    return values[0];
+  });
+  assert.equal(new Set(addresses).size, 2, "Recovered tasks share a network address");
+  for (const address of addresses) {
+    const targets = response.TargetHealthDescriptions.filter(({ Target }) => Target?.Id === address && Target.Port === 4000);
+    assert.equal(targets.length, 1, "Recovered task is not uniquely registered in the backend target group");
+    assert.equal(targets[0].TargetHealth?.State, "healthy", "Recovered backend ALB target is unhealthy");
+  }
+  return true;
+}
+
 export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice(2), deps = {}) {
   const sourceSha = required(argv, "--source-sha");
   const taskDefinitionArn = required(argv, "--current-task-definition");
   const recoveryImageDigest = required(argv, "--recovery-image-digest");
   assert.match(sourceSha, /^[a-f0-9]{40}$/); assert.match(taskDefinitionArn, GREEN_BACKEND_TASK_ARN);
   assert.match(recoveryImageDigest, /^sha256:[a-f0-9]{64}$/);
-  assert.equal(required(argv, "--credential-source"), PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER);
+  const mode = argv.includes("--prepare-handoff") ? "prepare" : argv.includes("--execute-handoff") ? "execute" : argv.includes("--certify-only") ? "certify" : null;
+  assert.ok(mode && ["--prepare-handoff", "--execute-handoff", "--certify-only"].filter((flag) => argv.includes(flag)).length === 1,
+    "Green recovery requires exactly one execution phase");
+  const credentialSource = mode === "execute" ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_NORMAL_DEPLOYER : PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER;
+  assert.equal(required(argv, "--credential-source"), credentialSource);
   const operatorEnvironment = deps.env || process.env;
   const protectedMain = (deps.readProtectedMain || readFreshProtectedMainIdentity)({ cwd: root, expectedSourceSha: sourceSha });
   assert.equal(protectedMain.headSha, sourceSha); assert.equal(protectedMain.freshRemoteMainSha, sourceSha);
-  const environment = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER,
+  const environment = createProductionAwsCredentialEnvironment({ credentialSource,
     env: operatorEnvironment, region: APP_ONLY.region });
   const invoke = deps.exec || ((command, args, options = {}) => execFileSync(command, args, { cwd: root,
     env: { ...environment, ...(options.singleAttempt ? { AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : {}) },
@@ -50,7 +112,18 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   const aws = (args, options) => JSON.parse(awsText(args, options));
   const caller = aws(["sts", "get-caller-identity"]);
   assert.equal(String(caller.Account), APP_ONLY.account);
-  assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  assert.match(caller.Arn || "", mode === "execute"
+    ? /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-normal-deployer\/[^/]+$/
+    : /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
+  const assertExecutionPolicy = () => {
+    const current = readNormalDeployerPolicyState({ run: (args) => awsText(args) });
+    assert.equal(current.policySha256, NORMAL_DEPLOYER_POLICY.targetSha256,
+      "Normal deployer policy differs from the exact reviewed recovery authority");
+  };
+  if (mode === "execute") assertExecutionPolicy();
+  assert.equal(operatorEnvironment.GITHUB_WORKFLOW_REF,
+    "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main");
+  assert.equal(operatorEnvironment.GITHUB_ACTIONS, "true");
   const imageAuthorization = read(required(argv, "--image-authorization"), required(argv, "--image-authorization-sha256"), "Green recovery image authorization");
   const environmentApproval = read(required(argv, "--environment-approval"), required(argv, "--environment-approval-sha256"), "Green recovery environment approval");
   const rawApproval = read(required(argv, "--approval"), required(argv, "--approval-sha256"), "Green recovery operator approval");
@@ -101,7 +174,8 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
     workflowRunAttempt: operatorEnvironment.GITHUB_RUN_ATTEMPT, executionActor: operatorEnvironment.GITHUB_ACTOR,
     githubActions: operatorEnvironment.GITHUB_ACTIONS };
   const now = () => deps.now?.() ?? Date.now();
-  const imageVerifier = (value) => verifyImageEvidenceSignature({ ...value, run: (args) => awsText(args) });
+  const imageVerifier = (value) => verifyImageEvidenceSignature({ ...value, ...(mode === "execute"
+    ? { verify: createPinnedRootAttestationVerifier() } : { run: (args) => awsText(args) }) });
   const imageValidation = { verifyImageEvidence: imageVerifier, githubContext };
   const approval = { ...rawApproval, environmentApprovalSha256: environmentApproval.evidenceSha256,
     imageAuthorizationSha256: imageAuthorization.evidenceSha256,
@@ -139,16 +213,19 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   const directory = path.resolve(required(argv, "--journal-directory"));
   ensureStageBPrivateDirectory({ directory, repositoryRoot: root, create: false });
   const store = (deps.createStore || createReleaseCoordinatorStore)({ run: (args) => awsText(args, { singleAttempt: args[0] === "s3api" && args[1] === "put-object" }),
-    directory, repositoryRoot: root });
+    directory, repositoryRoot: root, namespace: "green-backend-recovery" });
+  const operationId = canonicalSha256({ kind: "BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE", sourceSha, taskDefinitionArn,
+    imageDigest: recoveryImageDigest });
+  const handoffPhase = `${GREEN_RECOVERY_PREPARED_PHASE}:${approval.authorizationSha256}`;
+  let preparedHandoff, livePolicyIdentity;
   const verifyRuntime = async (candidate) => {
-    const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
-    const livePolicyIdentity = await collectLiveRolePolicyIdentity(principals, aws, candidate);
-    assert.deepEqual(await collectLiveRolePolicyIdentity(principals, aws, candidate), livePolicyIdentity,
-      "Runtime IAM changed during recovery authorization");
+    const identity = await collectCurrentGreenRecoveryRuntimeIdentity(candidate, aws,
+      mode === "execute" ? preparedHandoff?.livePolicyIdentity : undefined);
+    livePolicyIdentity = identity;
     return assertSignedRuntimeConsumabilityEvidence(runtime, { sourceSha, candidate,
-      livePolicyIdentity,
+      livePolicyIdentity: identity,
       resourceMetadata: runtime.evidence?.resourceMetadata,
-      now: now(), verify: createRootAttestationKmsVerifier({ run: aws }) });
+      now: now(), verify: mode === "execute" ? createPinnedRootAttestationVerifier() : createRootAttestationKmsVerifier({ run: aws }) });
   };
   const validateRegistrationRequest = (request) => {
     // AWS CLI's own ECS input model validates the exact serialized request without a network call.
@@ -157,12 +234,21 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   };
   const authorizePhase = async (record, phase) => {
     assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() });
+    if (mode === "execute" && phase === "BACKEND:UPDATE") {
+      assertExecutionPolicy();
+      assertNormalDeployerUpdateAuthority(preparedHandoff.registeredTaskDefinitionArn, aws);
+      const identity = aws(["sts", "get-caller-identity"]);
+      assert.equal(String(identity.Account), APP_ONLY.account);
+      assert.match(identity.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-normal-deployer\/[^/]+$/);
+      assertGreenRecoveryHandoff(preparedHandoff, { input: record, operationId,
+        registeredTaskDefinitionArn: preparedHandoff.registeredTaskDefinitionArn,
+        githubContext, componentState: stateClient.read(), now: now() });
+    }
     const candidate = buildAppOnlyCandidate(readers.readDefinition(taskDefinitionArn), recoveryImageDigest);
     assert.equal(appOnlyDefinitionSha256(candidate), record.candidateFingerprint);
     const closure = await verifyRuntime(candidate);
     assert.equal(closure.evidenceSha256, record.runtimeConsumabilitySha256);
     assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() });
-    const operationId = canonicalSha256({ kind: "BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE", sourceSha, taskDefinitionArn, imageDigest: recoveryImageDigest });
     const recordKey = `BACKEND:AUTHORIZATION:${phase}:${record.approval.authorizationSha256}`;
     const durable = { input: record, githubContext, databaseReference, phase };
     const prior = await store.readOperation(operationId, recordKey);
@@ -201,12 +287,33 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
     } while (token);
     return matches;
   };
-  if (argv.includes("--certify-only")) return certifyGreenBackendRecoveryPreDispatch(input, {
+  const certification = () => certifyGreenBackendRecoveryPreDispatch(input, {
     readFailure, readDefinition: readers.readDefinition, readOperation: store.readOperation,
     verifyAuthorization: (record) => assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() }),
     verifyRuntime, validateRegistrationRequest,
   });
+  if (mode === "certify") return certification();
+  const stateClient = createProductionComponentDeploymentStateClient({ run: (args) => awsText(args) });
+  if (mode === "prepare") {
+    if (!await store.readOperation(operationId, "BACKEND:REGISTER:COMPLETED")) await certification();
+    else {
+      assertGreenBackendRecoveryAuthorization(input, { ...imageValidation, now: now() });
+      const live = assertUnavailableGreenBackend(await readFailure());
+      assert.equal(live.fingerprint, input.candidateFingerprint);
+      assert.equal(live.serviceConfigurationSha256, input.serviceConfigurationSha256);
+      assert.equal(live.proof.deploymentId, input.deploymentId);
+      await verifyRuntime(live.candidate);
+    }
+  }
+  else {
+    preparedHandoff = await store.readOperation(operationId, handoffPhase);
+    const registered = await store.readOperation(operationId, "BACKEND:REGISTER:COMPLETED");
+    assertGreenRecoveryHandoff(preparedHandoff, { input, operationId,
+      registeredTaskDefinitionArn: registered?.taskDefinitionArn, githubContext,
+      componentState: stateClient.read(), now: now() });
+  }
   const result = await runGreenBackendHealthRecovery(input, {
+    stopAfterRegistration: mode === "prepare",
     store, now, readFailure, census, describe: readers.readDefinition, readService: readers.readService, validateRegistrationRequest,
     register: (candidate) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(buildAppOnlyRegistrationRequest(candidate))], { singleAttempt: true }),
     verifyRegisteredRevision: async (operationId, definition) => {
@@ -227,11 +334,24 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
         assert.equal(task.taskDefinitionArn, arn); assert.equal(task.healthStatus, "HEALTHY");
         assert.equal(task.containers?.find(({ name }) => name === "backend")?.imageDigest, digest);
       }
+      assertGreenRecoveryAlbTargets(live, aws(["elbv2", "describe-target-health",
+        "--target-group-arn", PRODUCTION_CLIENT_IP_TRUST.targetGroupArn]));
     },
     verifyHealth: (expectedReleaseSha) => verifyProductionBackendHealth("https://www.mscqr.com/api/health/ready",
       (command, args) => invoke(command, args), expectedReleaseSha),
     authorizePhase, verifyDispatchedAuthorization,
   });
+  if (mode === "prepare") {
+    const handoff = prepareGreenRecoveryHandoff({ input, operationId, registeredTaskDefinitionArn: result.targetArn,
+      githubContext, livePolicyIdentity, componentState: stateClient.read(), now: now() });
+    const prior = await store.readOperation(operationId, handoffPhase);
+    if (prior) assertGreenRecoveryHandoff(prior, { input, operationId, registeredTaskDefinitionArn: result.targetArn,
+      githubContext, componentState: stateClient.read(), now: now() });
+    else await store.writeOperation(operationId, handoffPhase, handoff);
+    assert.deepEqual(await store.readOperation(operationId, handoffPhase), prior || handoff);
+    return { status: "GREEN_RECOVERY_PREPARED", operationId, handoffSha256: (prior || handoff).handoffSha256,
+      registeredTaskDefinitionArn: result.targetArn };
+  }
   const evidence = { schemaVersion: 1, kind: "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE", sourceSha,
     imageDigest: recoveryImageDigest, originalTaskDefinitionArn: taskDefinitionArn,
     targetTaskDefinitionArn: result.targetArn, operationId: result.operationId,

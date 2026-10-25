@@ -76,7 +76,8 @@ test("normal and recovery smoke use the one public Nginx-proxied readiness path"
   assert.match(nginx, /rewrite \^\/api\/health\/\?\(\.\*\)\$ \/health\/\$1 break;/);
   assert.doesNotMatch(nginx, /location[^\n]*\/health\/ready/);
   assert.match(workflow, /--health-url "\$\{\{ env\.PUBLIC_BASE_URL \}\}\/api\/health\/ready"/);
-  assert.deepEqual([...workflow.matchAll(/SMOKE_PATHS:\s*([^\n]+)/g)].map((match) => match[1].trim()), ["/api/health/ready"]);
+  assert.deepEqual([...workflow.matchAll(/SMOKE_PATHS:\s*([^\n]+)/g)].map((match) => match[1].trim()),
+    ["/api/health/ready", "/api/health/ready"]);
   assert.doesNotMatch(workflow, /`\/health\/ready` passed/);
   assert.match(verifier, /\[\[ "\$path" == "\/api\/health\/ready" \]\]/);
   assert.doesNotMatch(verifier, /--location|\s-L(?:\s|\\)/);

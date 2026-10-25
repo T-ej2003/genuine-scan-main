@@ -378,6 +378,8 @@ jobs:
   deploy-production-ecs:
     name: Deploy production ECS
     needs: resolve-deploy-target
+    outputs:
+      green_approval_sha256: ${{ steps.production-environment-approval.outputs.evidence_sha256 }}
     if: ${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -1200,7 +1202,7 @@ jobs:
           terraform_version: 1.15.8
           terraform_wrapper: false
 
-      - name: Execute governed green backend health recovery with verified Terraform source
+      - name: Prepare governed green backend recovery handoff
         if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
@@ -1230,6 +1232,7 @@ jobs:
           manifest_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).manifestFile)' "$bundle_result")"
           component_sha() { node -e 'process.stdout.write(require(process.argv[1]).components[process.argv[2]].sha256)' "$manifest_file" "$1"; }
           node scripts/aws/recover-production-green-backend-health.mjs \
+            --prepare-handoff \
             --credential-source github-oidc-release-deployer --source-sha "$SOURCE_SHA" \
             --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
             --environment-approval "${{ steps.production-environment-approval.outputs.evidence_file }}" \
@@ -1241,6 +1244,15 @@ jobs:
             --database-compatibility-reference-sha256 "$(component_sha databaseCompatibilityReference)" \
             --journal-directory "$recovery_dir" --evidence-out "$recovery_dir/evidence.json"
 
+      - name: Upload authenticated green recovery preparation
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: green-recovery-preparation-attempt-${{ github.run_attempt }}
+          path: ${{ steps.production-environment-approval.outputs.evidence_file }}
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Upload backend health recovery evidence
         if: ${{ always() && inputs.release_mode == 'backend-health-recovery' }}
         uses: actions/upload-artifact@v7
@@ -1251,6 +1263,7 @@ jobs:
           retention-days: 90
 
       - name: Verify backend health
+        if: ${{ inputs.release_mode != 'backend-health-recovery' || !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           SMOKE_PATHS: /api/health/ready
         run: |
@@ -1259,7 +1272,7 @@ jobs:
           ./scripts/aws/verify-production-smoke.sh
 
       - name: Commit authenticated backend recovery component state
-        if: ${{ inputs.release_mode == 'backend-health-recovery' }}
+        if: ${{ inputs.release_mode == 'backend-health-recovery' && !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
         env:
           MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer
           RECOVERY_EVIDENCE: ${{ runner.temp }}/backend-health-recovery/evidence.json
@@ -1437,3 +1450,132 @@ jobs:
             args+=(--historical-runtime-evidence="$RUNNER_TEMP/historical-runtime-evidence.json" --historical-runtime-evidence-sha256="$HISTORICAL_RUNTIME_EVIDENCE_SHA256")
           fi
           node scripts/aws/commit-production-component-security-state.mjs "${args[@]}"
+
+  execute-green-backend-recovery:
+    name: Activate authorized green backend
+    needs: [resolve-deploy-target, deploy-production-ecs]
+    if: ${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: production-normal-deploy
+    permissions:
+      contents: read
+      actions: read
+      deployments: read
+      id-token: write
+    env:
+      AWS_REGION: eu-west-2
+      SOURCE_SHA: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+      CURRENT_TASK_DEFINITION_ARN: ${{ inputs.backend_recovery_current_task_definition_arn }}
+      RECOVERY_IMAGE_DIGEST: ${{ inputs.backend_recovery_image_digest }}
+      RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64: ${{ inputs.backend_recovery_evidence_bundle_gzip_base64 }}
+      RECOVERY_EVIDENCE_BUNDLE_SHA256: ${{ inputs.backend_recovery_evidence_bundle_sha256 }}
+      GH_TOKEN: ${{ github.token }}
+      PUBLIC_BASE_URL: https://www.mscqr.com
+    steps:
+      - name: Checkout exact prepared protected main
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Authenticate execution source before credentials
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1)"
+
+      - name: Set up Node before credentials
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install reviewed Node dependencies before credentials
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install pinned Terraform for approved runtime policy recheck
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+
+      - name: Download exact preparation approval
+        uses: actions/download-artifact@v7
+        with:
+          name: green-recovery-preparation-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/green-recovery-approval
+
+      - name: Authenticate preparation bytes
+        run: |
+          set -euo pipefail
+          approval_dir="$RUNNER_TEMP/green-recovery-approval"
+          test -d "$approval_dir" && test ! -L "$approval_dir"
+          chmod 700 "$approval_dir"
+          approval="$approval_dir/production-environment-approval.json"
+          test -f "$approval" && test ! -L "$approval"
+          test "$(sha256sum "$approval" | cut -d' ' -f1)" = "${{ needs.deploy-production-ecs.outputs.green_approval_sha256 }}"
+          chmod 600 "$approval"
+
+      - name: Assume exact normal-deployer role through protected OIDC environment
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-normal-deployer
+          unset-current-credentials: true
+
+      - name: Execute one-use green backend recovery under normal-deployer
+        run: |
+          set -euo pipefail
+          source scripts/aws/production-credential-source.sh
+          MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-normal-deployer
+          configure_production_aws_credential_source
+          test "$(aws sts get-caller-identity --query Arn --output text)" = "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/GitHubActions"
+          recovery_dir="$RUNNER_TEMP/backend-health-recovery"
+          install -d -m 700 "$recovery_dir"
+          bundle_file="$recovery_dir/dispatch-bundle.json"
+          node --input-type=module - "$bundle_file" <<'NODE'
+          import fs from "node:fs";
+          import { decodeBackendHealthRecoveryBundleTransport } from "./scripts/aws/dispatch-production-backend-health-recovery.mjs";
+          fs.writeFileSync(process.argv[2], decodeBackendHealthRecoveryBundleTransport(
+            process.env.RECOVERY_EVIDENCE_BUNDLE_GZIP_BASE64, process.env.RECOVERY_EVIDENCE_BUNDLE_SHA256), { flag: "wx", mode: 0o600 });
+          NODE
+          bundle_result="$(node scripts/aws/extract-production-backend-recovery-dispatch-bundle.mjs \
+            --bundle "$bundle_file" --bundle-sha256 "$RECOVERY_EVIDENCE_BUNDLE_SHA256" \
+            --source-sha "$SOURCE_SHA" --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" \
+            --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" --service mscqr-backend-servi-euw2 \
+            --release-mode BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE --output-directory "$recovery_dir")"
+          manifest_file="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).manifestFile)' "$bundle_result")"
+          component_sha() { node -e 'process.stdout.write(require(process.argv[1]).components[process.argv[2]].sha256)' "$manifest_file" "$1"; }
+          node scripts/aws/recover-production-green-backend-health.mjs \
+            --execute-handoff --credential-source github-oidc-normal-deployer --source-sha "$SOURCE_SHA" \
+            --current-task-definition "$CURRENT_TASK_DEFINITION_ARN" --recovery-image-digest "$RECOVERY_IMAGE_DIGEST" \
+            --environment-approval "$RUNNER_TEMP/green-recovery-approval/production-environment-approval.json" \
+            --environment-approval-sha256 "${{ needs.deploy-production-ecs.outputs.green_approval_sha256 }}" \
+            --image-authorization "$recovery_dir/image-authorization.json" --image-authorization-sha256 "$(component_sha imageAuthorization)" \
+            --approval "$recovery_dir/approval.json" --approval-sha256 "$(component_sha approval)" \
+            --runtime-consumability "$recovery_dir/runtime-consumability.json" --runtime-consumability-sha256 "$(component_sha runtimeConsumability)" \
+            --database-compatibility-reference "$recovery_dir/database-compatibility-reference.json" \
+            --database-compatibility-reference-sha256 "$(component_sha databaseCompatibilityReference)" \
+            --journal-directory "$recovery_dir" --evidence-out "$recovery_dir/evidence.json"
+
+      - name: Preserve green recovery receipt
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-health-recovery-evidence-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/backend-health-recovery/evidence.json
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Verify recovered backend health
+        env:
+          SMOKE_PATHS: /api/health/ready
+        run: ./scripts/aws/verify-production-smoke.sh
+
+      - name: Commit authenticated green recovery component state
+        env:
+          MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-normal-deployer
+        run: node scripts/aws/commit-production-component-recovery-state.mjs --evidence="$RUNNER_TEMP/backend-health-recovery/evidence.json"

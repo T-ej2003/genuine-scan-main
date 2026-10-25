@@ -129,8 +129,8 @@ test("green recovery bundle requires an exact-source database verifier reference
 
 test("Release Gate routes the green candidate through its concrete governed CLI", () => {
   const workflow = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
-  const start = workflow.indexOf("- name: Execute governed green backend health recovery");
-  const end = workflow.indexOf("- name: Upload backend health recovery evidence", start);
+  const start = workflow.indexOf("- name: Execute one-use green backend recovery under normal-deployer");
+  const end = workflow.indexOf("- name: Preserve green recovery receipt", start);
   assert.ok(start > 0 && end > start);
   const step = workflow.slice(start, end);
   assert.match(step, /recover-production-green-backend-health\.mjs/);
@@ -138,7 +138,7 @@ test("Release Gate routes the green candidate through its concrete governed CLI"
     "--environment-approval", "--image-authorization", "--runtime-consumability",
     "--database-compatibility-reference", "--journal-directory", "--evidence-out"])
     assert.ok(step.includes(option), `Green Release Gate omits ${option}`);
-  assert.match(step, /BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE/);
+  assert.match(workflow, /BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE/);
   assert.doesNotMatch(step, /update-service|register-task-definition|terraform apply/);
 });
 

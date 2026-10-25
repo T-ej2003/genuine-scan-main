@@ -200,6 +200,7 @@ export async function runGreenBackendHealthRecovery(input, adapters) {
       await adapters.verifyRegisteredRevision(operationId, definition);
     } });
   const targetArn = registered.taskDefinitionArn;
+  if (adapters.stopAfterRegistration) return { operationId, targetArn, registrationReused: registered.reused };
   const updateIntent = { ...intent, targetTaskDefinitionArn: targetArn };
   const updateDispatch = { ...updateIntent, phase: "BACKEND:UPDATE", authorizationSha256: input.approval.authorizationSha256 };
   const verifyUpdateDispatch = async (dispatch) => {

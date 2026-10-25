@@ -6,6 +6,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { evaluateAppOnlySourceIam } from "../aws/production-app-only-iam-source.mjs";
 import { canonicalSha256, STAGE_B } from "../aws/production-green-stage-b-contract.mjs";
 import { parseEcsSecretsManagerReference } from "../aws/production-ecs-runtime-dependencies.mjs";
+import { collectCurrentGreenRecoveryRuntimeIdentity } from "../aws/recover-production-green-backend-health.mjs";
 import {
   RUNTIME_CONSUMABILITY, assertRuntimeConsumabilityEvidence, buildRuntimeConsumabilityEvidence,
   collectLiveRolePolicyIdentity, deriveEcsRuntimeDependencies, simulateRuntimeDependencies,
@@ -71,6 +72,20 @@ test("exact Terraform inline policy proves every green runtime dependency withou
   const changed = candidate(); changed.containerDefinitions[0].image = `${APP_ONLY.backendRepository}@sha256:${"2".repeat(64)}`;
   assert.throws(() => assertRuntimeConsumabilityEvidence(evidence, { sourceSha, candidate: changed,
     livePolicyIdentity, resourceMetadata: resources }));
+});
+
+test("approved recovery reads live IAM through the production collector after environment wait", async () => {
+  const value = candidate();
+  const prepared = await collectLiveRolePolicyIdentity([APP_ONLY.executionRoleArn], iam(), value);
+  assert.deepEqual(await collectCurrentGreenRecoveryRuntimeIdentity(value, iam(), prepared), prepared);
+  let reads = 0;
+  await assert.rejects(() => collectCurrentGreenRecoveryRuntimeIdentity(value, iam((response) => {
+    if (response.PolicyDocument && ++reads === 1)
+      response.PolicyDocument.Statement.find(({ Sid }) => Sid === "WriteOnlyExactTaskLogs").Resource = "*";
+  }), prepared), /differs from protected Terraform source/);
+  await assert.rejects(() => collectCurrentGreenRecoveryRuntimeIdentity(value, iam((response) => {
+    if (response.Role) response.Role.RoleId = "AROA_CHANGED_DURING_APPROVAL";
+  }), prepared), /changed after preparation approval/);
 });
 
 test("green runtime refuses missing, broad, drifted, or incomplete IAM", async () => {
@@ -140,7 +155,7 @@ test("production Release Gate installs pinned Terraform before green recovery so
   const workflow = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
   const steps = workflow.jobs["deploy-production-ecs"].steps;
   const setup = steps.findIndex(({ name }) => name === "Install pinned Terraform for green runtime policy verification");
-  const recovery = steps.findIndex(({ name }) => name === "Execute governed green backend health recovery with verified Terraform source");
+  const recovery = steps.findIndex(({ name }) => name === "Prepare governed green backend recovery handoff");
   assert.ok(setup >= 0 && recovery > setup);
   assert.equal(steps[setup].uses, "hashicorp/setup-terraform@v3");
   assert.equal(steps[setup].with.terraform_version, "1.15.8");

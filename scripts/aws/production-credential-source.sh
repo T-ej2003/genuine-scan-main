@@ -14,7 +14,7 @@ clear_production_aws_credential_overrides() {
 
 configure_production_aws_credential_source() {
   case "${MSCQR_AWS_CREDENTIAL_SOURCE:-}" in
-    github-oidc-release-deployer)
+    github-oidc-release-deployer|github-oidc-normal-deployer)
       : "${AWS_ACCESS_KEY_ID:?GitHub OIDC AWS_ACCESS_KEY_ID is required}"
       : "${AWS_SECRET_ACCESS_KEY:?GitHub OIDC AWS_SECRET_ACCESS_KEY is required}"
       : "${AWS_SESSION_TOKEN:?GitHub OIDC AWS_SESSION_TOKEN is required}"
@@ -34,7 +34,7 @@ configure_production_aws_credential_source() {
       export AWS_PROFILE="$MSCQR_AWS_NAMED_PROFILE"
       ;;
     *)
-      echo "MSCQR_AWS_CREDENTIAL_SOURCE must explicitly select github-oidc-release-deployer, github-access-keys, or named-profile." >&2
+      echo "MSCQR_AWS_CREDENTIAL_SOURCE must explicitly select a reviewed GitHub OIDC role, github-access-keys, or named-profile." >&2
       return 1
       ;;
   esac

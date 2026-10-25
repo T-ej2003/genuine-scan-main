@@ -337,7 +337,7 @@ test("workflow shell AWS calls select their authenticated credential mode before
   const releaseGate = fs.readFileSync(".github/workflows/release-gate.yml", "utf8");
   for (const section of releaseGate.split(/^\s*- name:/m).filter((value) => /\baws\s+(?:sts|ecs)\b/.test(value))) {
     assert.match(section, /source scripts\/aws\/production-credential-source\.sh/);
-    assert.match(section, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer/);
+    assert.match(section, /MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-(?:release|normal)-deployer/);
     assert.match(section, /configure_production_aws_credential_source/);
   }
   const publisher = fs.readFileSync(".github/workflows/publish-ecs-images.yml", "utf8");

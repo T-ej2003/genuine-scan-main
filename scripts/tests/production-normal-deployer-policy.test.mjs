@@ -6,7 +6,7 @@ import { NORMAL_DEPLOYER_POLICY, convergeNormalDeployerPolicy } from "../aws/con
 
 const target = JSON.parse(fs.readFileSync("infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json", "utf8"));
 const predecessor = structuredClone(target);
-predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !["ReadRetainedWorkerNetworkOnly"].includes(Sid));
+predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !Sid?.includes("GreenRecoveryJournal") && !["ReadExactGreenRuntimeRoles", "SimulateExactNormalRecoveryUpdate", "ReadGreenBackendTargetHealth"].includes(Sid));
 assert.equal(digest(predecessor), NORMAL_DEPLOYER_POLICY.predecessorSha256);
 assert.equal(digest(target), NORMAL_DEPLOYER_POLICY.targetSha256);
 const discoveryActions = [
@@ -74,16 +74,40 @@ test("exact reviewed predecessor converges once to the exact component-state wri
   });
 });
 
-test("historical retention adds only regional network read authority", () => {
+test("green recovery adds exact conditional journal and scoped runtime IAM read authority", () => {
   const targetActions = target.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const predecessorActions = predecessor.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), ["ec2:DescribeNetworkInterfaces"]);
+  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), ["elasticloadbalancing:DescribeTargetHealth", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:SimulatePrincipalPolicy", "s3:GetObject", "s3:ListBucket", "s3:PutObject"]);
   for (const action of [
     "ec2:RunInstances", "ec2:CreateSubnet", "ec2:AuthorizeSecurityGroupIngress", "ec2:CreateManagedPrefixList", "ec2:ModifyManagedPrefixList",
     "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:ModifyTargetGroup",
     "iam:PutRolePolicy", "iam:AttachRolePolicy",
   ]) assert.equal(targetActions.includes(action), false, `${action} must remain denied.`);
-  assert.deepEqual(target.Statement.filter(({ Sid }) => !["ReadRetainedWorkerNetworkOnly"].includes(Sid)), predecessor.Statement, "existing bounded permissions changed");
+  assert.deepEqual(target.Statement.filter(({ Sid }) => !Sid?.includes("GreenRecoveryJournal") && !["ReadExactGreenRuntimeRoles", "SimulateExactNormalRecoveryUpdate", "ReadGreenBackendTargetHealth"].includes(Sid)), predecessor.Statement, "existing bounded permissions changed");
+  const prefix = "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*";
+  const bucket = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2";
+  assert.deepEqual(target.Statement.filter(({ Sid }) => Sid?.includes("GreenRecoveryJournal")), [
+    { Sid: "ListExactGreenRecoveryJournal", Effect: "Allow", Action: "s3:ListBucket", Resource: bucket,
+      Condition: { StringLike: { "s3:prefix": prefix } } },
+    { Sid: "ReadExactGreenRecoveryJournal", Effect: "Allow", Action: "s3:GetObject", Resource: `${bucket}/${prefix}` },
+    { Sid: "ClaimExactGreenRecoveryJournal", Effect: "Allow", Action: "s3:PutObject", Resource: `${bucket}/${prefix.replaceAll("*", "execute/*")}`,
+      Condition: { StringEquals: { "s3:x-amz-server-side-encryption": "AES256" }, Null: { "s3:if-none-match": "false" } } },
+  ]);
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadExactGreenRuntimeRoles"), {
+    Sid: "ReadExactGreenRuntimeRoles", Effect: "Allow",
+    Action: ["iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"],
+    Resource: ["arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-execution",
+      "arn:aws:iam::368992683803:role/mscqr-production-rls-green-backend-task",
+      "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer"],
+  });
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "SimulateExactNormalRecoveryUpdate"), {
+    Sid: "SimulateExactNormalRecoveryUpdate", Effect: "Allow", Action: "iam:SimulatePrincipalPolicy",
+    Resource: "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer",
+  });
+  assert.deepEqual(target.Statement.find(({ Sid }) => Sid === "ReadGreenBackendTargetHealth"), {
+    Sid: "ReadGreenBackendTargetHealth", Effect: "Allow", Action: "elasticloadbalancing:DescribeTargetHealth",
+    Resource: "*", Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } },
+  });
 });
 
 test("already-converged policy is read-only and still verifies", () => {
