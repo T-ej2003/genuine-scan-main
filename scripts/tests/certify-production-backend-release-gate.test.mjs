@@ -1,15 +1,66 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import yaml from "js-yaml";
-import { assertBackendRecoveryWorkflowGraph, disposablePostgresConnection, verifyDisposablePostgresVersion } from "../aws/certify-production-backend-release-gate.mjs";
+import { assertBackendRecoveryWorkflowGraph, assertSourceCertificationWorkflowGraph, assertUnprivilegedSourceContext,
+  certificationSourceEnvironment, disposablePostgresConnection, verifyDisposablePostgresVersion } from "../aws/certify-production-backend-release-gate.mjs";
 import { ciImageReference, readApprovedImages } from "../lib/container-image-identity.mjs";
 
 const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/release-gate.yml", import.meta.url), "utf8"));
+const quality = yaml.load(fs.readFileSync(new URL("../../.github/workflows/quality-gate.yml", import.meta.url), "utf8"));
 const copy = () => structuredClone(workflow);
 
 test("backend recovery certification accepts the actual protected workflow", () => {
   assert.equal(assertBackendRecoveryWorkflowGraph(copy()), true);
+  assert.equal(assertSourceCertificationWorkflowGraph(structuredClone(quality)), true);
+});
+
+for (const change of [
+  (gate) => { gate.jobs["backend-recovery-certification"].needs.pop(); },
+  (gate) => { gate.jobs["backend-recovery-certification"].permissions["id-token"] = "write"; },
+  (gate) => { gate.jobs["backend-recovery-certification"].steps[0].with["persist-credentials"] = true; },
+  (gate) => { gate.jobs["backend-recovery-certification"].services.postgres.image = "postgres:17"; },
+  (gate) => { gate.jobs["backend-recovery-certification"].steps.find((step) => step.name === "Certify full RLS on disposable PostgreSQL 18.4").run = "echo passed"; },
+]) test("source certification refuses weakened CI isolation or missing exact-head proof", () => {
+  const gate = structuredClone(quality); change(gate);
+  assert.throws(() => assertSourceCertificationWorkflowGraph(gate));
+});
+
+test("source certification refuses privileged execution and gives children only allowlisted variables", () => {
+  const context = { GITHUB_ACTIONS: "true", GITHUB_WORKFLOW: "Quality Gate", GITHUB_EVENT_NAME: "pull_request" };
+  assert.doesNotThrow(() => assertUnprivilegedSourceContext(context));
+  for (const key of ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_PROFILE",
+    "AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE", "GITHUB_TOKEN", "GH_TOKEN", "GITHUB_APP_PRIVATE_KEY",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN"])
+    assert.throws(() => assertUnprivilegedSourceContext({ ...context, [key]: "fixture" }), /release credentials/);
+  assert.throws(() => assertUnprivilegedSourceContext({ ...context, GITHUB_WORKFLOW: "Release Gate" }), /Quality Gate/);
+  const env = certificationSourceEnvironment({ ...context, PATH: process.env.PATH, HOME: "/private/credential-home",
+    AWS_ACCESS_KEY_ID: "fixture", GITHUB_TOKEN: "fixture", UNEXPECTED_RELEASE_SECRET: "fixture",
+    NODE_OPTIONS: "--require=untrusted.js", GIT_CONFIG_GLOBAL: "/private/credential-home/config" });
+  assert.deepEqual(env, { PATH: process.env.PATH, GITHUB_ACTIONS: "true" });
+});
+
+test("source child cannot discover inherited home credentials or an extra file descriptor", () => {
+  const parentHome = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-parent-credential-fixture-"));
+  const childHome = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-child-empty-home-"));
+  try {
+    fs.mkdirSync(path.join(parentHome, ".aws"));
+    const credential = path.join(parentHome, ".aws", "credentials");
+    fs.writeFileSync(credential, "fixture-only");
+    const fd = fs.openSync(credential, "r");
+    try {
+      const child = spawnSync(process.execPath, ["-e", "const fs=require('node:fs');const path=require('node:path');let inherited=false;try{inherited=fs.fstatSync(3).ino===Number(process.argv[1])}catch{};if(process.env.AWS_ACCESS_KEY_ID||fs.existsSync(path.join(process.env.HOME,'.aws','credentials'))||inherited)process.exit(1)", String(fs.fstatSync(fd).ino)],
+        { env: { ...certificationSourceEnvironment({ PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "fixture" }), HOME: childHome },
+          stdio: ["ignore", "pipe", "pipe"] });
+      assert.equal(child.status, 0, child.stderr.toString());
+    } finally { fs.closeSync(fd); }
+  } finally {
+    fs.rmSync(parentHome, { recursive: true, force: true });
+    fs.rmSync(childHome, { recursive: true, force: true });
+  }
 });
 
 for (const [name, change] of [
