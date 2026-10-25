@@ -90,7 +90,17 @@ export function assertStageBImagePublicationIdentity(identity, { expectedPublica
 }
 
 export function publicationIdentitySha256(identity) {
-  return sha256(Buffer.from(`${JSON.stringify(identity)}\n`));
+  // S3 journals sort object keys; retain the signed producer's field order.
+  const fields = ["schemaVersion", "workflowRunId", "workflowDatabaseId", "workflowFile", "workflowName", "event",
+    "workflowDefinitionSha", "imageReleaseSha", "headBranch", "conclusion", "artifactId", "artifactName",
+    "artifactExpired", "artifactArchiveFilename", "canonicalFilename", "canonicalArtifactSha256", "recordCount",
+    "services", "observedAt"];
+  if (!identity || typeof identity !== "object" || Array.isArray(identity)
+    || JSON.stringify(Object.keys(identity).sort()) !== JSON.stringify([...fields].sort())) {
+    throw new Error("Stage B publication identity fields are invalid.");
+  }
+  const producerOrderedIdentity = Object.fromEntries(fields.map((field) => [field, identity[field]]));
+  return sha256(Buffer.from(`${JSON.stringify(producerOrderedIdentity)}\n`));
 }
 
 export function readStageBImagePublicationIdentity(identityPath, { identitySha256, expectedPublicationSourceSha, expectedReleaseSha, canonicalArtifactBytes } = {}) {
