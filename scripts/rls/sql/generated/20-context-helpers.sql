@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='580a9dc515832c2e2cdbfc6fe15beafd3e62919d2a5aab13c50129bad920b820'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:580a9dc515832c2e2cdbfc6fe15beafd3e62919d2a5aab13c50129bad920b820'
+    AND source_contract_sha256='e91c0601be40c0606e9fd5e7d4664dc081c518b9422eea42e41bae436f525d13'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:e91c0601be40c0606e9fd5e7d4664dc081c518b9422eea42e41bae436f525d13'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:580a9dc515832c2e2cdbfc6fe15beafd3e62919d2a5aab13c50129bad920b820')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e91c0601be40c0606e9fd5e7d4664dc081c518b9422eea42e41bae436f525d13')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7107,7 +7107,7 @@ BEGIN
     page_limit:=coalesce((p_filters->>'limit')::integer,100);
     page_offset:=coalesce((p_filters->>'offset')::integer,0);
     to_at:=coalesce((p_filters->>'to')::timestamptz,clock_timestamp()) AT TIME ZONE 'UTC';
-    from_at:=coalesce((p_filters->>'from')::timestamptz,to_at AT TIME ZONE 'UTC'-interval '90 days') AT TIME ZONE 'UTC';
+    from_at:=coalesce((p_filters->>'from')::timestamptz AT TIME ZONE 'UTC',to_at-interval '90 days');
   EXCEPTION WHEN invalid_text_representation OR invalid_datetime_format OR datetime_field_overflow OR numeric_value_out_of_range THEN
     RAISE EXCEPTION 'QR_INVALID_INPUT';
   END;
