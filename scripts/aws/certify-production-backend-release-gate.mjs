@@ -46,9 +46,14 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
     assert.ok(at > prior, `Release Gate step is missing or out of order: ${name}`);
     prior = at;
   }
-  for (const name of ["Disposable integration tests", "Full RLS verification and PostgreSQL 18.4 certification",
+  for (const name of ["Full RLS verification and PostgreSQL 18.4 certification",
     "Authenticate production environment approval boundary", "Verify backend health"])
     assert.equal(steps.find((step) => step.name === name).if, undefined, `${name} must remain mandatory`);
+  for (const name of ["Backend build and tests", "Frontend typecheck, tests, and build",
+    "Install Playwright browser", "Disposable integration tests"])
+    assert.equal(steps.find((step) => step.name === name)?.if,
+      "${{ inputs.release_mode != 'backend-health-recovery' }}",
+      `${name} may be reused only by authenticated backend recovery`);
   const recovery = steps.find((step) => step.name === requiredSteps.at(-3));
   assert.equal(recovery.if, "${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}");
   assert.equal(steps.find((step) => step.name === requiredSteps.at(-1)).if,
@@ -65,21 +70,38 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
   assert.match(fs.readFileSync(path.join(root, "scripts/aws/recover-production-green-backend-health.mjs"), "utf8"),
     /argv\.includes\("--certify-only"\)[\s\S]*certifyGreenBackendRecoveryPreDispatch/);
   assert.match(steps.find((step) => step.name === "Full RLS verification and PostgreSQL 18.4 certification").run || "",
-    /npm run rls:full-verify[\s\S]*npm run rls:full-certify/);
+    /backend-health-recovery[\s\S]*assert-backend-recovery-ci-certification\.mjs[\s\S]*else[\s\S]*npm run rls:full-verify[\s\S]*npm run rls:full-certify/);
+  assert.ok(fs.statSync(path.join(root, "scripts/github/assert-backend-recovery-ci-certification.mjs")).isFile());
   return true;
 }
 
 export function assertSourceCertificationWorkflowGraph(workflow) {
   const job = workflow?.jobs?.["backend-recovery-certification"];
   assert.ok(job, "Source certification job is missing");
+  assert.equal(job.if, undefined, "Source certification cannot be skipped");
   assert.deepEqual(job.needs, requiredSameRunJobs);
   assert.deepEqual(job.permissions, { contents: "read" });
   assert.equal(job["runs-on"], "ubuntu-24.04");
   assert.equal(job.services?.postgres?.image, ciImageReference(readApprovedImages().postgres));
   assert.equal(job.services?.redis, undefined, "Duplicate Redis service is not required for RLS certification");
   assert.equal(job.steps?.find((step) => step.uses?.startsWith("actions/checkout@"))?.with?.["persist-credentials"], false);
-  assert.match(job.steps?.find((step) => step.name === "Certify full RLS on disposable PostgreSQL 18.4")?.run || "",
+  const fullRls = job.steps?.find((step) => step.name === "Certify full RLS on disposable PostgreSQL 18.4");
+  assert.equal(fullRls?.if, undefined, "Disposable PostgreSQL certification cannot be skipped");
+  assert.match(fullRls?.run || "",
     /timeout --kill-after=30s 120m npm run rls:full-certify/);
+  for (const name of ["backend", "frontend", "integration", "full-rls-package"])
+    assert.equal(workflow?.jobs?.[name]?.if, undefined, `${name} cannot be skipped by source certification`);
+  for (const [jobName, stepName, command] of [
+    ["backend", "Backend quality contract", "npm run verify:ci:backend"],
+    ["frontend", "Frontend quality contract", "npm run verify:ci:frontend"],
+    ["frontend", "Playwright smoke suite", "npm run verify:ci:frontend:e2e"],
+    ["integration", "Disposable system integration suite", "npm run test:integration:ci"],
+    ["full-rls-package", "Full RLS verification", "npm run rls:full-verify"],
+  ]) {
+    const step = workflow.jobs[jobName].steps?.find((item) => item.name === stepName);
+    assert.equal(step?.if, undefined, `${stepName} cannot be skipped`);
+    assert.ok(step?.run?.includes(command), `${stepName} no longer runs ${command}`);
+  }
   return true;
 }
 
