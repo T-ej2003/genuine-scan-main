@@ -28,6 +28,12 @@ export function assertAppOnlyDeploymentId(value) {
 }
 const tags = (value) => {
   assert.ok(Array.isArray(value));
+  for (const tag of value) {
+    assert.ok(tag && Object.getPrototypeOf(tag) === Object.prototype, "Malformed task-definition tag");
+    assert.ok(["key", "key,value"].includes(Object.keys(tag).sort().join(",")), "Malformed task-definition tag");
+    assert.ok(typeof tag.key === "string" && tag.key.length > 0 && tag.key.length <= 128, "Invalid task-definition tag key");
+    assert.ok(!Object.hasOwn(tag, "value") || typeof tag.value === "string" && tag.value.length <= 256, "Invalid task-definition tag value");
+  }
   assert.equal(new Set(value.map(({ key }) => key)).size, value.length, "Duplicate task-definition tag");
   return [...value].sort((a, b) => a.key.localeCompare(b.key));
 };
@@ -50,6 +56,22 @@ const READBACK_FIELDS = Object.freeze([
   "taskDefinitionArn", "revision", "status", "registeredAt", "registeredBy",
   "deregisteredAt", "deleteRequestedAt", "requiresAttributes", "compatibilities",
 ]);
+export function buildAppOnlyRegistrationRequest(candidate) {
+  const request = structuredClone(candidate);
+  for (const [field, value] of Object.entries(request)) {
+    assert.ok(!READBACK_FIELDS.includes(field) && value !== null, `Invalid ECS registration field: ${field}`);
+  }
+  if (Object.hasOwn(request, "tags")) {
+    tags(request.tags);
+    assert.ok(request.tags.length <= 50, "Too many task-definition tags");
+    for (const tag of request.tags) {
+      assert.ok(!/^aws:/i.test(tag.key) && !/^aws:/i.test(tag.value || ""), "Reserved task-definition tag prefix");
+    }
+    // ECS DescribeTaskDefinition returns an empty list, but RegisterTaskDefinition rejects it.
+    if (request.tags.length === 0) delete request.tags;
+  }
+  return request;
+}
 
 export function assertAppOnlyDefinition(definition) {
   assert.ok(NORMAL_CANDIDATE_ARN.test(definition?.taskDefinitionArn || ""), "Unexpected predecessor family");

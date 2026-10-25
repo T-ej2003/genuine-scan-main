@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_ONLY, appOnlyDefinitionSha256, buildAppOnlyCandidate } from "./production-app-only-contract.mjs";
+import { APP_ONLY, appOnlyDefinitionSha256, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest } from "./production-app-only-contract.mjs";
 import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
 import { authenticateAppOnlyVerifierResult } from "./production-app-only-verifier-command.mjs";
 import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
@@ -150,6 +150,11 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
       resourceMetadata: runtime.evidence?.resourceMetadata,
       now: now(), verify: createRootAttestationKmsVerifier({ run: aws }) });
   };
+  const validateRegistrationRequest = (request) => {
+    // AWS CLI's own ECS input model validates the exact serialized request without a network call.
+    awsText(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(request),
+      "--generate-cli-skeleton", "output", "--endpoint-url", "http://127.0.0.1:9"]);
+  };
   const authorizePhase = async (record, phase) => {
     assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() });
     const candidate = buildAppOnlyCandidate(readers.readDefinition(taskDefinitionArn), recoveryImageDigest);
@@ -199,11 +204,11 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   if (argv.includes("--certify-only")) return certifyGreenBackendRecoveryPreDispatch(input, {
     readFailure, readDefinition: readers.readDefinition, readOperation: store.readOperation,
     verifyAuthorization: (record) => assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() }),
-    verifyRuntime,
+    verifyRuntime, validateRegistrationRequest,
   });
   const result = await runGreenBackendHealthRecovery(input, {
-    store, now, readFailure, census, describe: readers.readDefinition, readService: readers.readService,
-    register: (candidate) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(candidate)], { singleAttempt: true }),
+    store, now, readFailure, census, describe: readers.readDefinition, readService: readers.readService, validateRegistrationRequest,
+    register: (candidate) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(buildAppOnlyRegistrationRequest(candidate))], { singleAttempt: true }),
     verifyRegisteredRevision: async (operationId, definition) => {
       assert.match(definition.registeredBy || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
       const dispatchedAt = Date.parse(await store.readOperationCommittedAt(operationId, "BACKEND:REGISTER:DISPATCH"));

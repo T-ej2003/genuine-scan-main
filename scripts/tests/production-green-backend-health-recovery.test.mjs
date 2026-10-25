@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
+import { APP_ONLY, buildAppOnlyRegistrationRequest } from "../aws/production-app-only-contract.mjs";
 import { assertUnavailableGreenBackend, certifyGreenBackendRecoveryPreDispatch, runGreenBackendHealthRecovery } from "../aws/production-green-backend-health-recovery.mjs";
 import { assertCompletedBackendRecoveryEvidence, commitBackendRecoveryComponentState } from "../aws/commit-production-component-recovery-state.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
@@ -91,6 +91,7 @@ function scenario({ loseRegisterResponse = false, loseUpdateResponse = false } =
     verifyHealth: async () => ({ healthy: true, dependencies: { database: "ready" } }),
     authorizePhase: async () => {},
     verifyDispatchedAuthorization: async () => {},
+    validateRegistrationRequest: async (request) => { assert.deepEqual(request, buildAppOnlyRegistrationRequest(checked.candidate)); },
   };
   return { input, adapters, counts: () => ({ registrations, updates }), entries,
     live: () => ({ service: structuredClone(service), definition: structuredClone(targetDefinition),
@@ -108,10 +109,18 @@ test("read-only certification authenticates fresh predecessor and never claims o
     readOperation: run.adapters.store.readOperation,
     verifyAuthorization: async () => { checks++; },
     verifyRuntime: async () => ({ evidenceSha256: run.input.runtimeConsumabilitySha256 }),
+    validateRegistrationRequest: run.adapters.validateRegistrationRequest,
   });
   assert.equal(result.status, "READ_ONLY_PRE_DISPATCH_VERIFIED");
   assert.equal(checks, 3);
   assert.equal(run.entries.size, 0);
+  assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });
+});
+test("invalid production ECS request fails before a durable registration dispatch claim", async () => {
+  const run = scenario();
+  run.adapters.validateRegistrationRequest = async () => { throw new Error("ECS input model rejected registration request"); };
+  await assert.rejects(runGreenBackendHealthRecovery(run.input, run.adapters), /ECS input model rejected/);
+  assert.equal([...run.entries.keys()].some((key) => key.endsWith("BACKEND:REGISTER:DISPATCH")), false);
   assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });
 });
 
@@ -127,11 +136,13 @@ for (const [name, change, expected] of [
   const value = { originalRead: run.adapters.readFailure, readFailure: run.adapters.readFailure,
     originalDefinition: run.adapters.describe, readDefinition: run.adapters.describe,
     readOperation: run.adapters.store.readOperation, verifyAuthorization: async () => {},
-    verifyRuntime: async () => ({ evidenceSha256: run.input.runtimeConsumabilitySha256 }) };
+    verifyRuntime: async () => ({ evidenceSha256: run.input.runtimeConsumabilitySha256 }),
+    validateRegistrationRequest: run.adapters.validateRegistrationRequest };
   change(value);
   await assert.rejects(certifyGreenBackendRecoveryPreDispatch(run.input, {
     readFailure: value.readFailure, readDefinition: value.readDefinition, readOperation: value.readOperation,
     verifyAuthorization: value.verifyAuthorization, verifyRuntime: value.verifyRuntime,
+    validateRegistrationRequest: value.validateRegistrationRequest,
   }), expected);
   assert.equal(run.entries.size, 0);
   assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });

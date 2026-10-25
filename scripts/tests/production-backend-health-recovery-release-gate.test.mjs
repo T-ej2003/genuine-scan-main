@@ -292,6 +292,7 @@ test("release gate certifies the same disposable PostgreSQL database used by int
   const steps = parsedWorkflow.jobs["deploy-production-ecs"].steps;
   const integration = steps.find((step) => step.name === "Disposable integration tests").run;
   const certification = steps.find((step) => step.name === "Full RLS verification and PostgreSQL 18.4 certification").run;
+  const renderedCertification = certification.replaceAll("${{ inputs.release_mode }}", "normal");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-release-gate-rls-"));
   const bin = path.join(directory, "bin");
   const githubEnv = path.join(directory, "github-env");
@@ -328,7 +329,7 @@ test("release gate certifies the same disposable PostgreSQL database used by int
     assert.match(parsedWorkflow.jobs["deploy-production-ecs"].services.postgres.options, /pg_isready -U mscqr_rls_cert_admin/);
 
     const certificationResult = spawnSync("bash", ["-e"], {
-      input: certification,
+      input: renderedCertification,
       env: { ...env, [name]: adminUrl },
       encoding: "utf8",
     });
@@ -337,7 +338,7 @@ test("release gate certifies the same disposable PostgreSQL database used by int
     assert.deepEqual(calls.map(([command]) => command), ["run test:integration:ci", "run rls:full-verify", "run rls:full-certify"]);
     assert.deepEqual(calls.at(-1), ["run rls:full-certify", CONFIRM_VALUE, adminUrl, adminUrl]);
 
-    const dirtyCertification = spawnSync("bash", ["-e"], { input: certification, env: { ...env, [name]: adminUrl, GIT_STATUS_OUTPUT: " M tracked.json" }, encoding: "utf8" });
+    const dirtyCertification = spawnSync("bash", ["-e"], { input: renderedCertification, env: { ...env, [name]: adminUrl, GIT_STATUS_OUTPUT: " M tracked.json" }, encoding: "utf8" });
     assert.notEqual(dirtyCertification.status, 0);
     assert.match(dirtyCertification.stdout, /Disposable certification modified the protected deployment checkout/);
     assert.doesNotMatch(certification, /\|\|\s*true/);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { APP_ONLY, appOnlyDefinitionSha256, appOnlyServiceConfigurationSha256, assertAppOnlyCandidate, assertAppOnlyDefinition, assertRegisteredAppOnlyCandidate, buildAppOnlyCandidate } from "./production-app-only-contract.mjs";
+import { APP_ONLY, appOnlyDefinitionSha256, appOnlyServiceConfigurationSha256, assertAppOnlyCandidate, assertAppOnlyDefinition, assertRegisteredAppOnlyCandidate, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest } from "./production-app-only-contract.mjs";
 import { BACKEND_HEALTH_RECOVERY, exactMissingImageFailureProof } from "./production-backend-health-recovery-contract.mjs";
 import { assertImageAuthorization, authorizedBackendDigest } from "./production-cutover-control-plane.mjs";
 import { assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalEvidence } from "./production-github-environment-approval.mjs";
@@ -104,8 +104,8 @@ export function assertUnavailableGreenBackend(input) {
 }
 
 // This is a read-only gate. It never reserves coordinator ownership or dispatches ECS.
-export async function certifyGreenBackendRecoveryPreDispatch(input, { readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime }) {
-  for (const fn of [readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime]) assert.equal(typeof fn, "function");
+export async function certifyGreenBackendRecoveryPreDispatch(input, { readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime, validateRegistrationRequest }) {
+  for (const fn of [readFailure, readDefinition, readOperation, verifyAuthorization, verifyRuntime, validateRegistrationRequest]) assert.equal(typeof fn, "function");
   const operationId = canonicalSha256({ kind: GREEN_BACKEND_RECOVERY_KIND, sourceSha: input.sourceSha,
     taskDefinitionArn: input.taskDefinitionArn, imageDigest: input.recoveryImageDigest });
   await verifyAuthorization(input);
@@ -119,6 +119,7 @@ export async function certifyGreenBackendRecoveryPreDispatch(input, { readFailur
   const candidate = buildAppOnlyCandidate(definition, input.recoveryImageDigest);
   assertAppOnlyCandidate(first.definition, candidate, input.recoveryImageDigest);
   assert.equal(appOnlyDefinitionSha256(candidate), input.candidateFingerprint);
+  await validateRegistrationRequest(buildAppOnlyRegistrationRequest(candidate));
   const runtime = await verifyRuntime(candidate);
   assert.equal(runtime?.evidenceSha256, input.runtimeConsumabilitySha256,
     "Runtime consumability evidence differs from the recovery authorization");
@@ -138,7 +139,7 @@ export async function certifyGreenBackendRecoveryPreDispatch(input, { readFailur
 }
 
 export async function runGreenBackendHealthRecovery(input, adapters) {
-  for (const key of ["store", "readFailure", "census", "register", "describe", "readService", "updateService", "verifyStable", "verifyHealth", "authorizePhase", "verifyDispatchedAuthorization", "verifyRegisteredRevision"])
+  for (const key of ["store", "readFailure", "census", "register", "describe", "readService", "updateService", "verifyStable", "verifyHealth", "authorizePhase", "verifyDispatchedAuthorization", "verifyRegisteredRevision", "validateRegistrationRequest"])
     assert.ok(adapters?.[key], `Green recovery requires ${key}`);
   const operationId = canonicalSha256({ kind: GREEN_BACKEND_RECOVERY_KIND, sourceSha: input.sourceSha,
     taskDefinitionArn: input.taskDefinitionArn, imageDigest: input.recoveryImageDigest });
@@ -191,7 +192,7 @@ export async function runGreenBackendHealthRecovery(input, adapters) {
   const registered = await journalEcsRegistration({ store: adapters.store, operationId, phase: "BACKEND:REGISTER", intent,
     list: async () => (await adapters.census(checked.fingerprint)).filter((arn) => arn !== input.taskDefinitionArn),
     dispatchIntent: phaseDispatch("BACKEND:REGISTER"), verifyDispatch: verifyDispatch("BACKEND:REGISTER"),
-    beforeDispatch: async () => { await verifyPredecessor(); await adapters.authorizePhase(input, "BACKEND:REGISTER"); },
+    beforeDispatch: async () => { await verifyPredecessor(); await adapters.validateRegistrationRequest(buildAppOnlyRegistrationRequest(checked.candidate)); await adapters.authorizePhase(input, "BACKEND:REGISTER"); },
     register: () => adapters.register(checked.candidate),
     verify: async (arn) => {
       const definition = await adapters.describe(arn);
