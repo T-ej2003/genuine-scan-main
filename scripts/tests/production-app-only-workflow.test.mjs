@@ -186,6 +186,7 @@ test("verifier workflow previews exact preparation then separates protected prov
   assert.ok(job.steps.some((step) => step.with?.name?.includes("production-app-only-compatibility-recovered")));
   const recoveryRunner = fs.readFileSync("scripts/aws/run-production-app-only-verifier-recovery.mjs", "utf8");
   const recoveryReader = fs.readFileSync("scripts/aws/production-app-only-verifier-recovery.mjs", "utf8");
+  assert.match(recoveryRunner, /authenticateProtectedMainBackendImage\(\{ sourceSha, response: image,\s*unavailable: inputs\.preparation\.unavailable === true \}\)/);
   assert.doesNotMatch(recoveryRunner, /verifyAppOnlyEffectivePermissions/);
   assert.match(recoveryReader, /verifyAppOnlyEffectivePermissions/);
   assert.doesNotMatch(source, /app-only-deployer|release-gate|terraform apply|update-service|execute-command/);
