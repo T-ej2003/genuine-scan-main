@@ -5,6 +5,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import yaml from "js-yaml";
+import { ciImageReference, readApprovedImages } from "../lib/container-image-identity.mjs";
+import { assertSafeAdminUrl } from "../rls/certify-clean-room-database.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const workflowPath = path.join(root, ".github/workflows/release-gate.yml");
@@ -27,8 +29,9 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
   assert.equal(deploy.environment, "production");
   assert.equal(deploy.permissions["id-token"], "write");
   assert.equal(deploy["runs-on"], "ubuntu-24.04");
-  assert.match(deploy.services?.postgres?.image || "", /^docker\.io\/library\/postgres@sha256:[a-f0-9]{64}$/);
-  assert.match(deploy.services?.redis?.image || "", /^docker\.io\/library\/redis@sha256:[a-f0-9]{64}$/);
+  const images = readApprovedImages();
+  assert.equal(deploy.services?.postgres?.image, ciImageReference(images.postgres));
+  assert.equal(deploy.services?.redis?.image, ciImageReference(images.redis));
   assert.equal(deploy.env.AWS_ACCOUNT_ID_EXPECTED, "368992683803");
   assert.equal(deploy.env.AWS_REGION, "eu-west-2");
   assert.equal(deploy.env.PRODUCTION_RELEASE_ROLE_ARN, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
@@ -65,6 +68,27 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
 const run = (command, args, env = process.env) => execFileSync(command, args, { cwd: root, env,
   stdio: "inherit", timeout: 30 * 60_000 });
 
+export function disposablePostgresConnection(input, ambient = process.env) {
+  // Accept only a literal TCP loopback endpoint; libpq URL options can redirect destructive certification.
+  const match = /^postgresql:\/\/([a-z][a-z0-9_]*)@(localhost|127\.0\.0\.1|\[::1\]):([0-9]{1,5})\/([a-z][a-z0-9_]*)$/.exec(input || "");
+  assert.ok(match, "Disposable PostgreSQL URL must be a literal loopback TCP endpoint with explicit user, port and database");
+  const [, user, host, portText, name] = match;
+  const port = Number(portText);
+  assert.ok(port >= 1 && port <= 65535 && String(port) === portText, "Disposable PostgreSQL port is invalid");
+  const url = `postgresql://${user}@${host === "localhost" ? "127.0.0.1" : host}:${port}/${name}`;
+  // The existing full RLS guard compares an unbracketed IPv6 hostname; scope-check its IPv4 loopback equivalent.
+  assertSafeAdminUrl(host === "[::1]" ? url.replace("@[::1]", "@127.0.0.1") : url);
+  const env = Object.fromEntries(Object.entries(ambient).filter(([key]) => !/^PG[A-Z_]/i.test(key)
+    && !/(?:DATABASE|POSTGRES|RLS).*URL$/i.test(key)));
+  return { url, user, host: host === "localhost" ? "127.0.0.1" : host, port: portText, name, env };
+}
+
+export function verifyDisposablePostgresVersion(connection, execute = execFileSync) {
+  const version = execute("psql", [connection.url, "-X", "-Atqc", "SHOW server_version"],
+    { cwd: root, env: connection.env, encoding: "utf8", timeout: 15_000 }).trim();
+  assert.match(version, /^18\.4(?:\s|$)/, "Certification requires PostgreSQL 18.4");
+}
+
 export function main(argv = process.argv.slice(2)) {
   const separator = argv.indexOf("--");
   const options = separator < 0 ? argv : argv.slice(0, separator);
@@ -77,24 +101,19 @@ export function main(argv = process.argv.slice(2)) {
   assertBackendRecoveryWorkflowGraph(yaml.load(fs.readFileSync(workflowPath, "utf8")));
   const adminUrl = value("--disposable-postgres-admin-url");
   assert.ok(adminUrl, "A disposable PostgreSQL 18.4 admin URL is required; database certification is NOT VERIFIED");
-  const database = new URL(adminUrl);
-  assert.equal(database.protocol, "postgresql:");
-  assert.ok(["localhost", "127.0.0.1", "::1"].includes(database.hostname), "Certification database must be loopback-local");
-  assert.equal(database.password, "", "Certification URL must not contain a password");
-  const postgresVersion = execFileSync("psql", [adminUrl, "-Atqc", "SHOW server_version"],
-    { cwd: root, encoding: "utf8", timeout: 15_000 }).trim();
-  assert.match(postgresVersion, /^18\.4(?:\s|$)/, "Certification requires PostgreSQL 18.4");
+  const database = disposablePostgresConnection(adminUrl);
+  verifyDisposablePostgresVersion(database);
   const evidencePath = process.env.MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH;
   const evidenceRelative = evidencePath ? path.relative(root, evidencePath) : "";
   assert.ok(evidencePath && path.isAbsolute(evidencePath)
     && (evidenceRelative === ".." || evidenceRelative.startsWith(`..${path.sep}`)),
   "An absolute RLS evidence path outside the repository is required");
-  const env = { ...process.env, P2_TEST_DATABASE_REQUIRED: "true", P2_TEST_DB_PROTOCOL: "postgresql",
-    P2_TEST_DB_USER: decodeURIComponent(database.username), P2_TEST_DB_HOST: database.hostname,
-    P2_TEST_DB_PORT: database.port || "5432", P2_TEST_DB_NAME: database.pathname.slice(1),
-    P2_TEST_DATABASE_ADMIN_URL: adminUrl, REDIS_URL: "redis://127.0.0.1:6379/0", REDIS_TLS: "false",
+  const env = { ...database.env, P2_TEST_DATABASE_REQUIRED: "true", P2_TEST_DB_PROTOCOL: "postgresql",
+    P2_TEST_DB_USER: database.user, P2_TEST_DB_HOST: database.host.replace(/^\[|\]$/g, ""),
+    P2_TEST_DB_PORT: database.port, P2_TEST_DB_NAME: database.name,
+    P2_TEST_DATABASE_ADMIN_URL: database.url, REDIS_URL: "redis://127.0.0.1:6379/0", REDIS_TLS: "false",
     MSCQR_FULL_RLS_CERTIFICATION_CONFIRM: "MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION",
-    MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: adminUrl };
+    MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: database.url };
   for (const args of [
     ["run", "check:workflow-yaml"], ["--prefix", "backend", "run", "build"],
     ["--prefix", "backend", "test"], ["run", "typecheck"], ["test"], ["run", "build"],
