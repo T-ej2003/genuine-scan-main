@@ -84,6 +84,11 @@ export function main(argv = process.argv.slice(2)) {
   const postgresVersion = execFileSync("psql", [adminUrl, "-Atqc", "SHOW server_version"],
     { cwd: root, encoding: "utf8", timeout: 15_000 }).trim();
   assert.match(postgresVersion, /^18\.4(?:\s|$)/, "Certification requires PostgreSQL 18.4");
+  const evidencePath = process.env.MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH;
+  const evidenceRelative = evidencePath ? path.relative(root, evidencePath) : "";
+  assert.ok(evidencePath && path.isAbsolute(evidencePath)
+    && (evidenceRelative === ".." || evidenceRelative.startsWith(`..${path.sep}`)),
+  "An absolute RLS evidence path outside the repository is required");
   const env = { ...process.env, P2_TEST_DATABASE_REQUIRED: "true", P2_TEST_DB_PROTOCOL: "postgresql",
     P2_TEST_DB_USER: decodeURIComponent(database.username), P2_TEST_DB_HOST: database.hostname,
     P2_TEST_DB_PORT: database.port || "5432", P2_TEST_DB_NAME: database.pathname.slice(1),

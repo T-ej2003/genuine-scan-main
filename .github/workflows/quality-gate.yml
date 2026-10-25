@@ -53,6 +53,70 @@ permissions:
   contents: read
 
 jobs:
+  backend-recovery-certification:
+    name: Backend recovery Release Gate certification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        env:
+          POSTGRES_DB: mscqr_p2_integration_test
+          POSTGRES_USER: mscqr_rls_cert_admin
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mscqr_rls_cert_admin -d mscqr_p2_integration_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - run: npm ci
+      - run: npm --prefix backend ci
+      - run: npx playwright install --with-deps chromium
+      - name: Certify exact-source backend recovery without production credentials
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/backend-recovery-certification"
+          npm run release-gate:certify-backend-recovery -- \
+            --source-sha "$SOURCE_SHA" \
+            --disposable-postgres-admin-url postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test \
+            --source-only
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: backend-recovery-source-certification-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
+          if-no-files-found: ignore
+          retention-days: 90
+
   app-only-deployment-contract:
     name: App-only deployment contract and real PostgreSQL
     runs-on: ubuntu-latest
