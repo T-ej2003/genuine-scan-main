@@ -76,7 +76,7 @@ for (const url of [
   "postgresql://cert_admin@localhost:0/cert_db",
   "postgresql://cert_admin@localhost:65536/cert_db",
   "postgresql://cert_admin@127.1:5432/cert_db",
-  "postgresql://cert_admin:password@localhost:5432/cert_db",
+  (() => { const url = new URL("postgresql://cert_admin@localhost:5432/cert_db"); url.password = "fixture-only"; return url.href; })(),
   "postgresql://cert_admin@localhost:5432/cert_db#fragment",
   "postgresql://cert_admin@localhost:5432/cert_db/extra",
   "postgresql://cert_admin@localhost:5432/cert_db%2Fother",
