@@ -135,8 +135,8 @@ export function assertPinnedImageInputs(repository = root) {
   for (const [file, count] of [[".github/workflows/auth-security-tests.yml", 1], [".github/workflows/quality-gate.yml", 2], ["docker-compose.p2-test.yml", 1]]) {
     counts(file, /^\s+image:\s+(\S+)\s*$/gm, "postgres", count, ciImageReference(images.postgres));
   }
-  counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "postgres", 1);
-  counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "redis", 1);
+  counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "postgres", 1, ciImageReference(images.postgres));
+  counts(".github/workflows/release-gate.yml", /^\s+image:\s+(\S+)\s*$/gm, "redis", 1, ciImageReference(images.redis));
   for (const [file, key, count] of [[".github/workflows/quality-gate.yml", "redis", 2], ["docker-compose.p2-test.yml", "redis", 1], ["docker-compose.production-read-only-rls-canary-test.yml", "postgres-canary", 1], ["docker-compose.rls-certification.yml", "postgres-certification", 1]]) {
     counts(file, /^\s+image:\s+(\S+)\s*$/gm, key, count, ciImageReference(images[key]));
   }
