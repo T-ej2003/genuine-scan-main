@@ -353,6 +353,9 @@ async function main(){
     ('40000000-0000-4000-8000-000000000895','local-secret-own','40000000-0000-4000-8000-000000000893','${ids.licenseeA}','40000000-0000-4000-8000-000000000891','PRINTED',true,true,7,'192.0.2.1','private-test-agent',1,1),
     ('40000000-0000-4000-8000-000000000896','local-secret-foreign','40000000-0000-4000-8000-000000000894','${ids.licenseeB}','40000000-0000-4000-8000-000000000892','PRINTED',true,false,2,'192.0.2.2','private-test-agent',2,2)`);
   const a=JSON.parse(last(app,analytics(caps.tenant,ids.licenseeA,{code:"SAFE",limit:1})));
+  const dstDefault=JSON.parse(last(app,`BEGIN; SET LOCAL TIME ZONE 'Europe/London'; ${analytics(caps.tenant,ids.licenseeA,{to:"2026-10-25T12:00:00Z"})}; ROLLBACK;`));
+  const dstExplicit=JSON.parse(last(app,`BEGIN; SET LOCAL TIME ZONE 'Europe/London'; ${analytics(caps.tenant,ids.licenseeA,{from:"2026-07-27T12:00:00Z",to:"2026-10-25T12:00:00Z"})}; ROLLBACK;`));
+  assert.deepEqual(dstDefault,dstExplicit,"default 90-day UTC window must survive daylight-saving changes");
   assert.equal(a.eventSummary.totalScanEvents,1); assert.equal(a.logs.length,1); assert.equal(a.logs[0].code,"SAFE1");
   assert.equal(a.logs[0].isTrustedOwnerContext,true); assert.equal(a.logs[0].scanCount,7);
   assert(!/ipAddress|userAgent|customerUserId|ownershipId|latitude|longitude|local-secret|private-test-agent/.test(JSON.stringify(a)));
