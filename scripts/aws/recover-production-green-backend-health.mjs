@@ -9,7 +9,7 @@ import { authenticateAppOnlyVerifierResult } from "./production-app-only-verifie
 import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 import { createAppOnlyEcsReaders } from "./production-app-only-adapters.mjs";
 import { verifyProductionBackendHealth } from "./recover-production-backend-health.mjs";
-import { GREEN_BACKEND_TASK_ARN, assertGreenBackendRecoveryAuthorization, assertUnavailableGreenBackend,
+import { GREEN_BACKEND_TASK_ARN, assertGreenBackendRecoveryAuthorization, assertUnavailableGreenBackend, certifyGreenBackendRecoveryPreDispatch,
   runGreenBackendHealthRecovery } from "./production-green-backend-health-recovery.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { createRootAttestationKmsVerifier } from "./production-root-attestation-key.mjs";
@@ -196,6 +196,11 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
     } while (token);
     return matches;
   };
+  if (argv.includes("--certify-only")) return certifyGreenBackendRecoveryPreDispatch(input, {
+    readFailure, readDefinition: readers.readDefinition, readOperation: store.readOperation,
+    verifyAuthorization: (record) => assertGreenBackendRecoveryAuthorization(record, { ...imageValidation, now: now() }),
+    verifyRuntime,
+  });
   const result = await runGreenBackendHealthRecovery(input, {
     store, now, readFailure, census, describe: readers.readDefinition, readService: readers.readService,
     register: (candidate) => aws(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(candidate)], { singleAttempt: true }),

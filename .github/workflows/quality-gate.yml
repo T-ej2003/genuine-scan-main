@@ -225,6 +225,9 @@ jobs:
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 
+      - name: Certify backend recovery graph and read-only pre-dispatch contract
+        run: node --test scripts/tests/certify-production-backend-release-gate.test.mjs scripts/tests/production-green-backend-health-recovery.test.mjs
+
       - name: Test durable overlap registration recovery
         run: node --test scripts/tests/production-overlap-task-definition.test.mjs
 

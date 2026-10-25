@@ -62,6 +62,7 @@
     "test:production-rotation-coordinator": "npm --prefix backend run test:production-rotation-coordinator",
     "check:security-guardrails": "node scripts/check-security-guardrails.mjs",
     "check:workflow-yaml": "node scripts/check-workflow-yaml.mjs",
+    "release-gate:certify-backend-recovery": "node scripts/aws/certify-production-backend-release-gate.mjs",
     "check:prisma-scope-guardrails": "node scripts/check-prisma-scope-guardrails.mjs",
     "check:rls-prototype-boundaries": "node scripts/check-rls-prototype-boundaries.mjs",
     "rls:context-plan": "node scripts/rls/context-boundary-plan.mjs",
