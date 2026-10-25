@@ -53,6 +53,73 @@ permissions:
   contents: read
 
 jobs:
+  backend-recovery-certification:
+    name: Backend recovery Release Gate certification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    needs: [app-only-deployment-contract, full-rls-package, stage-b-deployment-closure, security, frontend, backend, integration, docker]
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: docker.io/library/postgres@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+        env:
+          POSTGRES_DB: mscqr_p2_integration_test
+          POSTGRES_USER: mscqr_rls_cert_admin
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mscqr_rls_cert_admin -d mscqr_p2_integration_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+      - run: npm ci
+      - run: npm --prefix backend ci
+      - name: Certify exact-source graph without production credentials
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          npm run release-gate:certify-backend-recovery -- \
+            --source-sha "$SOURCE_SHA" \
+            --disposable-postgres-admin-url postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test \
+            --source-only
+      - name: Certify full RLS on disposable PostgreSQL 18.4
+        env:
+          MSCQR_FULL_RLS_CERTIFICATION_CONFIRM: MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION
+          MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test
+          MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
+        run: |
+          mkdir -m 700 "$RUNNER_TEMP/backend-recovery-certification"
+          started="$(date +%s)"
+          if timeout --kill-after=30s 120m npm run rls:full-certify; then
+            echo "Full RLS certification passed in $(( $(date +%s) - started )) seconds."
+          else
+            status="$?"
+            echo "::error::Full RLS certification failed or timed out after $(( $(date +%s) - started )) seconds (exit $status)."
+            exit "$status"
+          fi
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() }}
+        with:
+          name: backend-recovery-source-certification-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
+          if-no-files-found: ignore
+          retention-days: 90
+
   app-only-deployment-contract:
     name: App-only deployment contract and real PostgreSQL
     runs-on: ubuntu-latest
@@ -224,6 +291,9 @@ jobs:
 
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
+
+      - name: Certify backend recovery graph and read-only pre-dispatch contract
+        run: node --test scripts/tests/certify-production-backend-release-gate.test.mjs scripts/tests/production-green-backend-health-recovery.test.mjs
 
       - name: Test durable overlap registration recovery
         run: node --test scripts/tests/production-overlap-task-definition.test.mjs
