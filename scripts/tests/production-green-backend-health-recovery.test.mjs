@@ -263,6 +263,22 @@ test("crash after registration dispatch with no native revision fails closed", a
   assert.deepEqual(run.counts(), { registrations: 0, updates: 0 });
 });
 
+test("preparation registers once and normal-deployer resumes without list or registration rights", async () => {
+  const run = scenario();
+  const prepared = await runGreenBackendHealthRecovery(run.input, { ...run.adapters, stopAfterRegistration: true });
+  assert.equal(prepared.targetArn, arn.replace(":24", ":25"));
+  assert.deepEqual(run.counts(), { registrations: 1, updates: 0 });
+  const execute = { ...run.adapters,
+    census: async () => { throw new Error("normal-deployer may not list revisions"); },
+    register: async () => { throw new Error("normal-deployer may not register"); } };
+  const result = await runGreenBackendHealthRecovery(run.input, execute);
+  assert.equal(result.registrationReused, true);
+  assert.deepEqual(run.counts(), { registrations: 1, updates: 1 });
+  const repeated = await runGreenBackendHealthRecovery(run.input, execute);
+  assert.equal(repeated.updateReused, true);
+  assert.deepEqual(run.counts(), { registrations: 1, updates: 1 });
+});
+
 test("a fresh phase authorization resumes a completed registration without replay", async () => {
   const run = scenario();
   let stop = true;

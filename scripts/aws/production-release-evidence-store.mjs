@@ -18,9 +18,9 @@ const runAwsWithResult = (run, args) => {
   }
 };
 
-export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run } = {}) {
+export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, privateDirectory, run, objectKey = stageBApplyAttemptS3Key } = {}) {
   if (typeof run !== "function") throw new Error("Stage B shared apply reservation requires an explicit credential-bound AWS command runner.");
-  const key = stageBApplyAttemptS3Key(artifactSetIdentity);
+  const key = objectKey(artifactSetIdentity);
   if (!Buffer.isBuffer(bytes) || bytes.length === 0) throw new Error("Stage B shared apply reservation bytes are missing.");
   const temporaryDirectory = fs.mkdtempSync(path.join(privateDirectory, ".shared-reservation-"));
   fs.chmodSync(temporaryDirectory, 0o700);
@@ -43,14 +43,21 @@ export function reserveStageBSharedApplyAttempt({ artifactSetIdentity, bytes, pr
   }
 }
 
-export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
+export function createReleaseCoordinatorStore({run,directory,repositoryRoot,namespace}) {
  ensureStageBPrivateDirectory({directory,repositoryRoot,create:false});
  assert.equal(typeof run,'function');
+ assert.ok(namespace===undefined||namespace==='green-backend-recovery','Unreviewed coordinator namespace');
+ const preparePhase=(phase)=>phase?.startsWith('BACKEND:HANDOFF:PREPARED:')||phase==='BACKEND:PREDECESSOR'||
+  phase?.startsWith('BACKEND:REGISTER:')||phase?.startsWith('BACKEND:AUTHORIZATION:PREDECESSOR:')||
+  phase?.startsWith('BACKEND:AUTHORIZATION:BACKEND:REGISTER:');
+ const objectKey=(identity,kind,key)=>namespace===undefined?stageBApplyAttemptS3Key(identity):
+  `${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/${namespace}/${kind==='OPERATION'&&preparePhase(key.phase)?'prepare':'execute'}/${identity}.json`;
  const id=(kind,key)=>brokerDigest({kind:`PRODUCTION_RELEASE_COORDINATOR_${kind}`,key});
+ const location=(kind,key)=>objectKey(id(kind,key),kind,key);
  const read=(kind,key)=>{
   const file=path.join(directory,`coordinator-read-${randomUUID()}.json`);
   try {
-   if(!readProductionReceiptObject({run,bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key:stageBApplyAttemptS3Key(id(kind,key)),file}))return undefined;
+   if(!readProductionReceiptObject({run,bucket:STAGE_B_TERRAFORM_BACKEND.bucketName,key:location(kind,key),file}))return undefined;
    const value=JSON.parse(fs.readFileSync(file));
    assert.deepEqual(Object.keys(value).sort(),['key','kind','value']);
    assert.equal(value.kind,`PRODUCTION_RELEASE_COORDINATOR_${kind}`);assert.deepEqual(value.key,key);
@@ -59,7 +66,8 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
  };
  const write=(kind,key,value)=>{
   const bytes=Buffer.from(canonicalJson({kind:`PRODUCTION_RELEASE_COORDINATOR_${kind}`,key,value}));
-  try {reserveStageBSharedApplyAttempt({artifactSetIdentity:id(kind,key),bytes,privateDirectory:directory,run});return true;}
+  try {reserveStageBSharedApplyAttempt({artifactSetIdentity:id(kind,key),bytes,privateDirectory:directory,run,
+   objectKey:()=>location(kind,key)});return true;}
   catch(error){
    // A lost create response or repeated content-addressed write is safe only
    // after exact readback. Neither condition authorizes an AWS business write.
@@ -72,7 +80,7 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
   writeStep:value=>write('STEP',{releaseId:value.releaseId,name:value.name},value),
   readOperation:(operationId,phase)=>read('OPERATION',{operationId,phase})??null,
   readOperationCommittedAt:(operationId,phase)=>{
-   const key=stageBApplyAttemptS3Key(id('OPERATION',{operationId,phase}));
+   const key=location('OPERATION',{operationId,phase});
    const head=JSON.parse(run(['s3api','head-object','--bucket',STAGE_B_TERRAFORM_BACKEND.bucketName,'--key',key,
     '--expected-bucket-owner','368992683803','--region',STAGE_B_TERRAFORM_BACKEND.region,'--output','json','--no-cli-pager']));
    assert.ok(Number.isSafeInteger(Date.parse(head.LastModified)),'Coordinator claim has no native S3 commit time');
@@ -83,7 +91,8 @@ export function createReleaseCoordinatorStore({run,directory,repositoryRoot}) {
   claimOperation:(operationId,phase,value)=>{
    const key={operationId,phase};
    const bytes=Buffer.from(canonicalJson({kind:'PRODUCTION_RELEASE_COORDINATOR_OPERATION',key,value}));
-   reserveStageBSharedApplyAttempt({artifactSetIdentity:id('OPERATION',key),bytes,privateDirectory:directory,run});
+   reserveStageBSharedApplyAttempt({artifactSetIdentity:id('OPERATION',key),bytes,privateDirectory:directory,run,
+    objectKey:()=>location('OPERATION',key)});
    return true;
   },
   putArtifact:(sha256,value)=>{assert.equal(brokerDigest(value),sha256);write('ARTIFACT',{sha256},value);},

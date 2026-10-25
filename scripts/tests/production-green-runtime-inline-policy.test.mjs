@@ -140,7 +140,7 @@ test("production Release Gate installs pinned Terraform before green recovery so
   const workflow = yaml.load(fs.readFileSync(".github/workflows/release-gate.yml", "utf8"));
   const steps = workflow.jobs["deploy-production-ecs"].steps;
   const setup = steps.findIndex(({ name }) => name === "Install pinned Terraform for green runtime policy verification");
-  const recovery = steps.findIndex(({ name }) => name === "Execute governed green backend health recovery with verified Terraform source");
+  const recovery = steps.findIndex(({ name }) => name === "Prepare governed green backend recovery handoff");
   assert.ok(setup >= 0 && recovery > setup);
   assert.equal(steps[setup].uses, "hashicorp/setup-terraform@v3");
   assert.equal(steps[setup].with.terraform_version, "1.15.8");

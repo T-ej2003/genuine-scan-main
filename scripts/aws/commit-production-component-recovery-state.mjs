@@ -14,7 +14,7 @@ import { appOnlyDefinitionSha256 } from "./production-app-only-contract.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { createReleaseCoordinatorStore } from "./production-release-evidence-store.mjs";
 import { taskDefinitionFingerprint } from "./stage-b-task-definition-recovery-contract.mjs";
-import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCredentialEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 
 export function assertCompletedBackendRecoveryEvidence(value) {
   if (value?.kind === "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE") {
@@ -132,14 +132,20 @@ export function commitBackendRecoveryComponentState({ evidence, client, run, rea
 function main() {
   const evidencePath = process.argv.slice(2).find((value) => value.startsWith("--evidence="))?.slice("--evidence=".length);
   assert.ok(evidencePath && path.isAbsolute(evidencePath)); assert.deepEqual(process.argv.slice(2), [`--evidence=${evidencePath}`]);
-  assertGithubOidcReleaseDeployerEnvironment();
-  assert.match(process.env.GITHUB_WORKFLOW_REF || "", /^T-ej2003\/genuine-scan-main\/.github\/workflows\/release-gate\.yml@refs\/heads\/main$/); assert.match(process.env.GITHUB_RUN_ID || "", /^[1-9][0-9]*$/);
-  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, region: PRODUCTION_COMPONENT_STATE.region });
-  const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
-  assert.equal(String(caller.Account), PRODUCTION_COMPONENT_STATE.account); assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."); const evidence = readEvidence(evidencePath);
+  const green = evidence.kind === "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE";
+  const credentialSource = green ? PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_NORMAL_DEPLOYER
+    : PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER;
+  assert.equal(process.env.MSCQR_AWS_CREDENTIAL_SOURCE, credentialSource);
+  createProductionAwsCredentialEnvironment({ credentialSource });
+  assert.match(process.env.GITHUB_WORKFLOW_REF || "", /^T-ej2003\/genuine-scan-main\/.github\/workflows\/release-gate\.yml@refs\/heads\/main$/); assert.match(process.env.GITHUB_RUN_ID || "", /^[1-9][0-9]*$/);
+  const run = createProductionAwsCommandRunner({ credentialSource, region: PRODUCTION_COMPONENT_STATE.region });
+  const caller = JSON.parse(run(["sts", "get-caller-identity", "--output", "json", "--no-cli-pager"]));
+  assert.equal(String(caller.Account), PRODUCTION_COMPONENT_STATE.account); assert.match(caller.Arn || "", green
+    ? /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-normal-deployer\/[^/]+$/
+    : /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-release-deployer\/[^/]+$/);
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-green-recovery-commit-")); fs.chmodSync(directory, 0o700);
-  const store = evidence.kind === "GREEN_BACKEND_HEALTH_RECOVERY_EVIDENCE" ? createReleaseCoordinatorStore({ run, directory, repositoryRoot: root }) : undefined;
+  const store = green ? createReleaseCoordinatorStore({ run, directory, repositoryRoot: root, namespace: "green-backend-recovery" }) : undefined;
   const result = commitBackendRecoveryComponentState({ evidence, run, store, client: createProductionComponentDeploymentStateClient({ run }), writerContext: { updatedByWorkflow: process.env.GITHUB_WORKFLOW_REF, githubRunId: process.env.GITHUB_RUN_ID }, isProtectedMainAncestor: (sourceSha) => {
     try { execFileSync("git", ["merge-base", "--is-ancestor", sourceSha, "refs/remotes/origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; }
   } });

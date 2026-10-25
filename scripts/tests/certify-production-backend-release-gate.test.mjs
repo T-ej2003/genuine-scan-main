@@ -93,7 +93,9 @@ for (const [name, change] of [
     const commit = steps.findIndex((step) => step.name === "Commit authenticated backend recovery component state");
     const smoke = steps.findIndex((step) => step.name === "Verify backend health");
     [steps[commit], steps[smoke]] = [steps[smoke], steps[commit]]; }],
-  ["green lane disabled", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Execute governed green backend health recovery with verified Terraform source").if = "${{ false }}"; }],
+  ["green lane disabled", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Prepare governed green backend recovery handoff").if = "${{ false }}"; }],
+  ["normal deployer environment changed", (gate) => { gate.jobs["execute-green-backend-recovery"].environment = "production"; }],
+  ["normal deployer role changed", (gate) => { gate.jobs["execute-green-backend-recovery"].steps.find((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment").with["role-to-assume"] = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; }],
 ]) test(`backend recovery certification rejects ${name}`, () => {
   const gate = copy(); change(gate);
   assert.throws(() => assertBackendRecoveryWorkflowGraph(gate));

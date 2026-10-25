@@ -19,7 +19,7 @@ const requiredSteps = [
   "Backend build and tests", "Frontend typecheck, tests, and build", "Disposable integration tests",
   "Full RLS verification and PostgreSQL 18.4 certification", "Authenticate production environment approval boundary",
   "Require enabled production OIDC source phase", "Configure AWS credentials via OIDC", "Verify AWS account",
-  "Execute governed green backend health recovery with verified Terraform source", "Verify backend health",
+  "Prepare governed green backend recovery handoff", "Verify backend health",
   "Commit authenticated backend recovery component state",
 ];
 
@@ -47,7 +47,7 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
     prior = at;
   }
   for (const name of ["Full RLS verification and PostgreSQL 18.4 certification",
-    "Authenticate production environment approval boundary", "Verify backend health"])
+    "Authenticate production environment approval boundary"])
     assert.equal(steps.find((step) => step.name === name).if, undefined, `${name} must remain mandatory`);
   for (const name of ["Backend build and tests", "Frontend typecheck, tests, and build",
     "Install Playwright browser", "Disposable integration tests"])
@@ -57,7 +57,9 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
   const recovery = steps.find((step) => step.name === requiredSteps.at(-3));
   assert.equal(recovery.if, "${{ inputs.release_mode == 'backend-health-recovery' && contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}");
   assert.equal(steps.find((step) => step.name === requiredSteps.at(-1)).if,
-    "${{ inputs.release_mode == 'backend-health-recovery' }}");
+    "${{ inputs.release_mode == 'backend-health-recovery' && !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}");
+  assert.equal(steps.find((step) => step.name === "Verify backend health").if,
+    "${{ inputs.release_mode != 'backend-health-recovery' || !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}");
   assert.equal(steps.find((step) => step.name === "Configure AWS credentials via OIDC").with["role-to-assume"],
     "${{ env.PRODUCTION_RELEASE_ROLE_ARN }}");
   assert.match(steps.find((step) => step.name === "Authenticate production environment approval boundary").run || "",
@@ -66,7 +68,21 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
     "scripts/aws/recover-production-green-backend-health.mjs", "scripts/aws/verify-production-smoke.sh",
     "scripts/aws/commit-production-component-recovery-state.mjs"])
     assert.ok(fs.statSync(path.join(root, file)).isFile(), `Release Gate consumer is missing: ${file}`);
-  assert.match(recovery.run || "", /extract-production-backend-recovery-dispatch-bundle\.mjs[\s\S]*recover-production-green-backend-health\.mjs/);
+  assert.match(recovery.run || "", /extract-production-backend-recovery-dispatch-bundle\.mjs[\s\S]*recover-production-green-backend-health\.mjs[\s\S]*--prepare-handoff/);
+  const execution = workflow.jobs["execute-green-backend-recovery"];
+  assert.deepEqual(execution?.needs, ["resolve-deploy-target", "deploy-production-ecs"]);
+  assert.equal(execution.environment, "production-normal-deploy");
+  assert.equal(execution.permissions["id-token"], "write");
+  const executeSteps = execution.steps || [];
+  const assume = executeSteps.findIndex((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment");
+  const activate = executeSteps.findIndex((step) => step.name === "Execute one-use green backend recovery under normal-deployer");
+  const smoke = executeSteps.findIndex((step) => step.name === "Verify recovered backend health");
+  const commit = executeSteps.findIndex((step) => step.name === "Commit authenticated green recovery component state");
+  assert.ok(assume >= 0 && activate > assume && smoke > activate && commit > smoke);
+  assert.equal(executeSteps[assume].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer");
+  assert.match(executeSteps[activate].run || "", /--execute-handoff --credential-source github-oidc-normal-deployer/);
+  assert.match(executeSteps[activate].run || "", /assumed-role\/mscqr-production-normal-deployer\/GitHubActions/);
+  assert.equal(executeSteps[commit].env.MSCQR_AWS_CREDENTIAL_SOURCE, "github-oidc-normal-deployer");
   assert.match(fs.readFileSync(path.join(root, "scripts/aws/recover-production-green-backend-health.mjs"), "utf8"),
     /argv\.includes\("--certify-only"\)[\s\S]*certifyGreenBackendRecoveryPreDispatch/);
   assert.match(steps.find((step) => step.name === "Full RLS verification and PostgreSQL 18.4 certification").run || "",
