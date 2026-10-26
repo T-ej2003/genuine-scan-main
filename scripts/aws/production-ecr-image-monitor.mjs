@@ -20,6 +20,15 @@ const IMAGE = /^368992683803\.dkr\.ecr\.eu-west-2\.amazonaws\.com\/(mscqr-backen
 const METRIC = "MSCQR/ProductionEcrProtection";
 const JOURNAL_PREFIX = `${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/green-backend-recovery/`;
 const AWS_ACTIONS = new Set(["sts get-caller-identity", "dynamodb get-item", "ecs describe-services", "ecs list-tasks", "ecs describe-tasks", "ecs describe-task-definition", "ecr describe-images", "ecr batch-get-image", "ecr describe-repositories", "ecr get-lifecycle-policy", "ecr get-repository-policy", "s3api list-objects-v2", "s3api get-object", "cloudwatch put-metric-data"]);
+const INVENTORY_ROLES = ["mscqr-production-ecr-monitor", "mscqr-production-ecr-infrastructure-plan", "mscqr-production-ecr-infrastructure-apply"];
+
+export function assertEcrAssumedRole(caller, role) {
+  assert.ok(INVENTORY_ROLES.includes(role), "Unreviewed inventory principal");
+  assert.equal(caller.Account, ECR_PROTECTION.account);
+  const prefix = `arn:aws:sts::${ECR_PROTECTION.account}:assumed-role/${role}/`;
+  const session = typeof caller.Arn === "string" && caller.Arn.startsWith(prefix) ? caller.Arn.slice(prefix.length) : "";
+  assert.ok(session && !session.includes("/"), "Wrong inventory principal");
+}
 
 export function addProtectedImage(inventory, { image, reason, owner, sourceSha = null, taskDefinition = null, operation = null }) {
   const match = IMAGE.exec(image || "");
@@ -47,7 +56,7 @@ export function finalizeProtectedInventory(inventory, checkedAt) {
 export function appendOpenRecoveryJournals(inventory, records) {
   const operations = new Map();
   for (const { key, body } of records) {
-    assert.match(key, new RegExp(`^${JOURNAL_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:prepare|execute)/[a-f0-9]{64}\\.json$`));
+    assert.ok(key.startsWith(JOURNAL_PREFIX) && /^(?:prepare|execute)\/[a-f0-9]{64}\.json$/.test(key.slice(JOURNAL_PREFIX.length)), "Wrong recovery journal key");
     assert.equal(body?.kind, "PRODUCTION_RELEASE_COORDINATOR_OPERATION");
     assert.match(body.key?.operationId || "", /^[a-f0-9]{64}$/);
     assert.match(body.key?.phase || "", /^BACKEND:[A-Z:0-9a-f]+$/);
@@ -191,10 +200,9 @@ export function addRetainedHistoricalWorker(inventory, retention, run, verify) {
   addProtectedImage(inventory, { image, reason: "RETAINED_HISTORICAL_RUNTIME", owner: "component-state", sourceSha: runtime.sourceSha, taskDefinition: runtime.taskDefinitionArn, operation: retention.closure.githubRunId });
 }
 
-export function collectProtectedInventory(run, now = new Date().toISOString()) {
+export function collectProtectedInventory(run, now = new Date().toISOString(), role = "mscqr-production-ecr-monitor") {
   const caller = json(run, ["sts", "get-caller-identity"]);
-  assert.equal(caller.Account, ECR_PROTECTION.account);
-  assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-ecr-monitor\/[^/]+$/, "Wrong monitoring principal");
+  assertEcrAssumedRole(caller, role);
   const state = createProductionComponentDeploymentStateClient({ run }).read();
   assert.ok(state, "Missing production component state");
   const inventory = new Map();

@@ -1,0 +1,116 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteExactState",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/ecr-protection/terraform.tfstate"
+    },
+    {
+      "Sid": "CreateBoundedMonitorRole",
+      "Effect": "Allow",
+      "Action": "iam:CreateRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+        }
+      }
+    },
+    {
+      "Sid": "TagExactMonitorRole",
+      "Effect": "Allow",
+      "Action": "iam:TagRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor"
+    },
+    {
+      "Sid": "WriteBoundedMonitorPolicy",
+      "Effect": "Allow",
+      "Action": "iam:PutRolePolicy",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+        }
+      }
+    },
+    {
+      "Sid": "SetExactRepositoryGuards",
+      "Effect": "Allow",
+      "Action": "ecr:SetRepositoryPolicy",
+      "Resource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "UpdateExistingTopicPolicy",
+      "Effect": "Allow",
+      "Action": "sns:SetTopicAttributes",
+      "Resource": "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "InstallExactEvents",
+      "Effect": "Allow",
+      "Action": [
+        "events:PutRule",
+        "events:PutTargets",
+        "events:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-protection-change",
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-image-action"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "InstallExactAlarms",
+      "Effect": "Allow",
+      "Action": [
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-critical",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-high",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-warning",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-unknown"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "DenyDeploymentAndImageRetirement",
+      "Effect": "Deny",
+      "Action": [
+        "ecs:UpdateService",
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask",
+        "ecr:BatchDeleteImage",
+        "ecr:DeleteRepository",
+        "ecr:PutLifecyclePolicy",
+        "ecr:UpdateImageStorageClass"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

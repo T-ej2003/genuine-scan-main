@@ -380,16 +380,19 @@ test("every GitHub workflow credential root is classified by its authenticated m
     ".github/workflows/produce-production-green-stage-b-prerequisite-bundle.yml",
     ".github/workflows/production-deploy.yml",
     ".github/workflows/production-ecr-image-monitor.yml",
+    ".github/workflows/production-ecr-protection-infrastructure.yml",
     ".github/workflows/recover-production-stage-b-successor.yml",
     ".github/workflows/resolve-production-qr-version-selector.yml",
     ".github/workflows/bootstrap-production-component-deployment-state.yml",
     ".github/workflows/auto-failover-monitor.yml", ".github/workflows/authorize-production-initial-activation-lifecycle-policy-reconciliation.yml", ".github/workflows/authorize-production-initial-activation-policy-reconciler-installation.yml", ".github/workflows/authorize-production-stage-a-production-artifacts-continuation-rebind.yml", ".github/workflows/authorize-production-stage-a-production-artifacts-reconciliation.yml", ".github/workflows/aws-dr-alb-apply.yml", ".github/workflows/aws-dr-cleanup-apply.yml", ".github/workflows/aws-dr-db-apply.yml", ".github/workflows/aws-dr-dns-apply.yml", ".github/workflows/aws-dr-hardening-apply.yml", ".github/workflows/aws-dr-object-storage-apply.yml", ".github/workflows/aws-dr-operations.yml", ".github/workflows/aws-dr-regional-readiness.yml", ".github/workflows/aws-dr-snapshot-apply.yml", ".github/workflows/execute-production-green-stage-b-state-reconciliation.yml", ".github/workflows/execute-production-initial-activation-exact-complete-state-reconciliation.yml", ".github/workflows/execute-production-initial-activation-exact-complete-state-reconciliation-recovery.yml", ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation.yml", ".github/workflows/execute-production-initial-activation-reconciler-state-reconciliation-recovery.yml", ".github/workflows/execute-production-initial-activation-signer-state-reconciliation.yml", ".github/workflows/execute-production-initial-activation-signer-state-reconciliation-recovery.yml", ".github/workflows/execute-production-mixed-dual-slot-topology-recovery.yml", ".github/workflows/execute-production-provider-readonly-policy-reconciliation.yml", ".github/workflows/prepare-production-green-stage-b-state-reconciliation.yml", ".github/workflows/production-green-backend-image-publish.yml", ".github/workflows/production-green-stage-b-image-build.yml", ".github/workflows/production-web-activation.yml", ".github/workflows/production-web-image.yml", ".github/workflows/release-gate.yml", ".github/workflows/release-train.yml", ".github/workflows/staging-terraform-remote-state-drift.yml",
   ];
-  const configured = fs.readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") && fs.readFileSync(`.github/workflows/${name}`, "utf8").includes("aws-actions/configure-aws-credentials@v6")).sort();
+  const configured = fs.readdirSync(".github/workflows").filter((name) => name.endsWith(".yml") && (fs.readFileSync(`.github/workflows/${name}`, "utf8").includes("aws-actions/configure-aws-credentials@v6") || name === "production-ecr-protection-infrastructure.yml")).sort();
   assert.deepEqual(configured, [...oidcWorkflows, ".github/workflows/publish-ecs-images.yml"].map((file) => file.split("/").at(-1)).sort());
   for (const file of oidcWorkflows) {
     const workflow = fs.readFileSync(file, "utf8");
-    assert.match(workflow, /aws-actions\/configure-aws-credentials@v6[\s\S]{0,360}role-to-assume:/, file);
+    assert.match(workflow, file.endsWith("production-ecr-protection-infrastructure.yml") ?
+      /aws-actions\/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd[\s\S]{0,360}role-to-assume:/ :
+      /aws-actions\/configure-aws-credentials@v6[\s\S]{0,360}role-to-assume:/, file);
     assert.doesNotMatch(workflow, /aws-access-key-id:/, file);
   }
   const publisher = fs.readFileSync(".github/workflows/publish-ecs-images.yml", "utf8");
@@ -506,7 +509,7 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-identity-bootstrap-cli.mjs",
     "scripts/aws/component-installation-session.mjs",
     "scripts/aws/production-signer-broker-transition-cli.mjs",
-    "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-ecr-image-monitor.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-ecr-repository-protection.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
+    "scripts/aws/apply-production-full-rls-release.mjs", "scripts/aws/deploy-ecs-service.sh", "scripts/aws/discover-staging-endpoints.mjs", "scripts/aws/exact-ecs-rollout-state.mjs", "scripts/aws/prepare-production-backend-failed-recovery-evidence.mjs", "scripts/aws/produce-production-security-rebaseline-preparation.mjs", "scripts/aws/production-cutover-production-adapters.mjs", "scripts/aws/production-dual-slot-rebaseline-contract.mjs", "scripts/aws/production-ecr-image-monitor.mjs", "scripts/aws/production-ecr-infrastructure-gate.mjs", "scripts/aws/production-identity-adapters.mjs", "scripts/aws/production-initial-activation-lifecycle.mjs", "scripts/aws/publish-ecs-images.sh", "scripts/aws/reconcile-production-stage-a-temporary-kms-capability.mjs", "scripts/aws/reconcile-production-signer-temporary-capability.mjs", "scripts/aws/recover-production-backend-health.mjs", "scripts/aws/recover-production-green-stage-a-root-drop-orphan.mjs", "scripts/aws/rollback-ecs-service.sh", "scripts/aws/staging-database-role-credentials.mjs", "scripts/aws/verify-production-dependency-closure.mjs", "scripts/aws/verify-production-ecr-repository-protection.mjs", "scripts/aws/verify-production-rotation-via-ecs-exec.mjs", "scripts/aws/verify-production-security-rebaseline-signer.mjs",
   ].sort();
   assert.deepEqual(direct, classified);
   const boundaries = {
@@ -516,7 +519,8 @@ test("every direct AWS source in scripts/aws has an explicit audited credential 
     "scripts/aws/component-identity-bootstrap-cli.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/component-installation-session.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/production-signer-broker-transition-cli.mjs": /createProductionAwsCredentialEnvironment/,
-    "scripts/aws/production-ecr-image-monitor.mjs": /assumed-role\\\/mscqr-production-ecr-monitor/,
+    "scripts/aws/production-ecr-image-monitor.mjs": /assertEcrAssumedRole\(caller, role\)/,
+    "scripts/aws/production-ecr-infrastructure-gate.mjs": /assertEcrAssumedRole\(caller, role\)/,
     "scripts/aws/verify-production-ecr-repository-protection.mjs": /assertEcrRepositoryProtection/,
     "scripts/aws/apply-production-full-rls-release.mjs": /createProductionAwsCredentialEnvironment/,
     "scripts/aws/deploy-ecs-service.sh": /configure_production_aws_credential_source/,

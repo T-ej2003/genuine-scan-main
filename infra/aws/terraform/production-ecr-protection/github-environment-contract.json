@@ -1,0 +1,22 @@
+{
+  "repository": "T-ej2003/genuine-scan-main",
+  "branch": "main",
+  "concurrencyGroup": "production-deploy",
+  "environments": {
+    "production-ecr-infrastructure-plan": {
+      "requiredReviewers": false,
+      "role": "mscqr-production-ecr-infrastructure-plan"
+    },
+    "production-ecr-infrastructure-apply": {
+      "requiredReviewers": true,
+      "requiredReviewer": { "type": "User", "login": "T-ej2003", "id": 183396573 },
+      "preventSelfReview": false,
+      "canAdminsBypass": false,
+      "role": "mscqr-production-ecr-infrastructure-apply"
+    }
+  },
+  "deploymentBranchPolicy": { "protected_branches": false, "custom_branch_policies": true },
+  "deploymentBranchPolicies": [{ "name": "main", "type": "branch" }],
+  "staticAwsCredentialsAllowed": false,
+  "activation": "repository administrator configures both environments after separate bootstrap authorization; Terraform does not manage GitHub"
+}

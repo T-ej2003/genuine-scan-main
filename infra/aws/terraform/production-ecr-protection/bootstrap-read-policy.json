@@ -1,0 +1,214 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "StateAndJournalPrefixes",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "mscqr/production/ecr-protection/terraform.tfstate",
+            "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadStateBucketRegion",
+      "Effect": "Allow",
+      "Action": "s3:GetBucketLocation",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2"
+    },
+    {
+      "Sid": "ReadExactState",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/ecr-protection/terraform.tfstate"
+    },
+    {
+      "Sid": "ReadAndClaimExactStateLock",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/ecr-protection/terraform.tfstate.tflock"
+    },
+    {
+      "Sid": "ReadExistingRecoveryJournals",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"
+    },
+    {
+      "Sid": "ReadExactEcrRepositories",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:DescribeRepositories",
+        "ecr:DescribeImages",
+        "ecr:BatchGetImage",
+        "ecr:GetRepositoryPolicy",
+        "ecr:GetLifecyclePolicy"
+      ],
+      "Resource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags",
+        "iam:ListAttachedRolePolicies"
+      ],
+      "Resource": [
+        "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor",
+        "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy"
+      ]
+    },
+    {
+      "Sid": "ReadMonitorPermissionsBoundary",
+      "Effect": "Allow",
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+    },
+    {
+      "Sid": "ReadExactEvents",
+      "Effect": "Allow",
+      "Action": [
+        "events:DescribeRule",
+        "events:ListTargetsByRule",
+        "events:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-protection-change",
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-image-action"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactTopic",
+      "Effect": "Allow",
+      "Action": "sns:GetTopicAttributes",
+      "Resource": "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "LocateExistingAlertTopic",
+      "Effect": "Allow",
+      "Action": "sns:ListTopics",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadAlarmState",
+      "Effect": "Allow",
+      "Action": "cloudwatch:DescribeAlarms",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactComponentState",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+      "Condition": {
+        "ForAllValues:StringEquals": {
+          "dynamodb:LeadingKeys": [
+            "production#T-ej2003/genuine-scan-main"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactEcsServices",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-frontend-servi-euw2"
+      ],
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "ListExactEcsTasks",
+      "Effect": "Allow",
+      "Action": "ecs:ListTasks",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        },
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactEcsTasks",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTasks",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/*",
+      "Condition": {
+        "ArnEquals": {
+          "ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"
+        }
+      }
+    },
+    {
+      "Sid": "ReadTaskDefinitions",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeTaskDefinition",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2"
+        }
+      }
+    },
+    {
+      "Sid": "ReadExactAlarmTags",
+      "Effect": "Allow",
+      "Action": "cloudwatch:ListTagsForResource",
+      "Resource": [
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-critical",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-high",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-warning",
+        "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:mscqr-production-ecr-unknown"
+      ]
+    }
+  ]
+}

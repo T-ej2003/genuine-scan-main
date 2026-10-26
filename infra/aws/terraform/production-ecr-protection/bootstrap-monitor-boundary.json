@@ -1,0 +1,115 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyEveryOtherOperationIncludingRoleDelegation",
+      "Effect": "Deny",
+      "NotAction": [
+        "sts:GetCallerIdentity",
+        "ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:BatchGetImage", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy",
+        "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTaskDefinition", "ecs:DescribeTasks",
+        "dynamodb:GetItem", "s3:ListBucket", "s3:GetObject", "cloudwatch:PutMetricData"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyOtherEcrRepositoriesEvenWithResourceGrant",
+      "Effect": "Deny",
+      "Action": ["ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:BatchGetImage", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy"],
+      "NotResource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ]
+    },
+    {
+      "Sid": "DenyOtherComponentTablesEvenWithResourceGrant",
+      "Effect": "Deny",
+      "Action": "dynamodb:GetItem",
+      "NotResource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state"
+    },
+    {
+      "Sid": "DenyOtherComponentKeysEvenWithResourceGrant",
+      "Effect": "Deny",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+      "Condition": {"ForAnyValue:StringNotEquals": {"dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"]}}
+    },
+    {
+      "Sid": "DenyOtherS3LocationsEvenWithResourceGrant",
+      "Effect": "Deny",
+      "Action": ["s3:ListBucket", "s3:GetObject"],
+      "NotResource": [
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+        "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"
+      ]
+    },
+    {
+      "Sid": "DenyOtherJournalPrefixesEvenWithResourceGrant",
+      "Effect": "Deny",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {"StringNotLikeIfExists": {"s3:prefix": "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"}}
+    },
+    {
+      "Sid": "IdentifyCaller",
+      "Effect": "Allow",
+      "Action": "sts:GetCallerIdentity",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadExactEcrRepositories",
+      "Effect": "Allow",
+      "Action": ["ecr:DescribeRepositories", "ecr:DescribeImages", "ecr:BatchGetImage", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy"],
+      "Resource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ]
+    },
+    {
+      "Sid": "ReadExactEcsServices",
+      "Effect": "Allow",
+      "Action": "ecs:DescribeServices",
+      "Resource": [
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-backend-servi-euw2",
+        "arn:aws:ecs:eu-west-2:368992683803:service/mscqr-prod-euw2-main/mscqr-frontend-servi-euw2"
+      ],
+      "Condition": {"ArnEquals": {"ecs:cluster": "arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"}}
+    },
+    {
+      "Sid": "ReadEcsTasksAndDefinitions",
+      "Effect": "Allow",
+      "Action": ["ecs:ListTasks", "ecs:DescribeTasks", "ecs:DescribeTaskDefinition"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"aws:RequestedRegion": "eu-west-2"}}
+    },
+    {
+      "Sid": "ReadExactComponentState",
+      "Effect": "Allow",
+      "Action": "dynamodb:GetItem",
+      "Resource": "arn:aws:dynamodb:eu-west-2:368992683803:table/mscqr-production-component-deployment-state",
+      "Condition": {"ForAllValues:StringEquals": {"dynamodb:LeadingKeys": ["production#T-ej2003/genuine-scan-main"]}}
+    },
+    {
+      "Sid": "ReadExactRecoveryJournal",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2",
+      "Condition": {"StringLike": {"s3:prefix": "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"}}
+    },
+    {
+      "Sid": "ReadExactRecoveryObjects",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*"
+    },
+    {
+      "Sid": "PublishExactMonitorMetrics",
+      "Effect": "Allow",
+      "Action": "cloudwatch:PutMetricData",
+      "Resource": "*",
+      "Condition": {"StringEquals": {"cloudwatch:namespace": "MSCQR/ProductionEcrProtection", "aws:RequestedRegion": "eu-west-2"}}
+    }
+  ]
+}

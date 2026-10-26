@@ -8,23 +8,6 @@ locals {
     var.tags
   )
 
-  # Retirement is disabled until a source-bound inventory and one-use deletion
-  # authorization exist. A count-based ECR rule can expire a live digest.
-  ecr_delete_guard = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Sid       = "DenyUnreviewedProductionImageRetirement"
-      Effect    = "Deny"
-      Principal = "*"
-      Resource  = "*"
-      Action = [
-        "ecr:BatchDeleteImage",
-        "ecr:DeleteRepository",
-        "ecr:PutLifecyclePolicy",
-        "ecr:UpdateImageStorageClass"
-      ]
-    }]
-  })
   backend_container_definitions = var.backend_container_definitions_json
   worker_container_definitions  = var.worker_container_definitions_json
 }
@@ -44,11 +27,6 @@ resource "aws_ecr_repository" "backend" {
   tags = merge(local.common_tags, { Component = "backend" })
 }
 
-resource "aws_ecr_repository_policy" "backend_delete_guard" {
-  repository = aws_ecr_repository.backend.name
-  policy     = local.ecr_delete_guard
-}
-
 resource "aws_ecr_repository" "worker" {
   name                 = "${var.name_prefix}-worker"
   image_tag_mutability = "IMMUTABLE"
@@ -62,16 +40,6 @@ resource "aws_ecr_repository" "worker" {
   }
 
   tags = merge(local.common_tags, { Component = "worker" })
-}
-
-resource "aws_ecr_repository_policy" "worker_delete_guard" {
-  repository = aws_ecr_repository.worker.name
-  policy     = local.ecr_delete_guard
-}
-
-resource "aws_ecr_repository_policy" "web_delete_guard" {
-  repository = "mscqr-web"
-  policy     = local.ecr_delete_guard
 }
 
 resource "aws_cloudwatch_log_group" "backend" {
