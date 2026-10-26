@@ -88,6 +88,7 @@ export default function BatchesPage() {
     rows: operations.rows,
     stableRows: operations.stableRows,
     isManufacturer,
+    currentLicenseeScope: role === "super_admin" ? selectedLicenseeId : user?.licenseeId,
     toast,
     onWorkspaceBatchChange: operations.setAssignBatch,
     onWorkspaceDraftReset: operations.resetAssignDraft,
@@ -434,6 +435,7 @@ export default function BatchesPage() {
         canDelete={canDelete}
         exportingAudit={workspace.exportingBatchId === workspace.workspaceBatch?.sourceBatchRow?.id}
         historyLoading={workspace.workspaceHistoryLoading}
+        historyError={workspace.workspaceHistoryError}
         historyLogs={workspace.workspaceHistoryLogs}
         historyLastUpdatedAt={workspace.workspaceHistoryLastUpdatedAt}
         onRefreshHistory={() => {

@@ -79,6 +79,7 @@ type LicenseeBatchWorkspaceDialogProps = {
   canDelete: boolean;
   exportingAudit: boolean;
   historyLoading: boolean;
+  historyError?: string | null;
   historyLogs: TraceEventRow[];
   historyLastUpdatedAt: Date | null;
   onRefreshHistory: () => void;
@@ -356,6 +357,7 @@ export function LicenseeBatchWorkspaceDialog({
   canDelete,
   exportingAudit,
   historyLoading,
+  historyError,
   historyLogs,
   historyLastUpdatedAt,
   onRefreshHistory,
@@ -795,6 +797,8 @@ export function LicenseeBatchWorkspaceDialog({
                     </div>
                     {historyLoading ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError ? (
+                      <div role="alert" className="rounded-lg border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No manufacturer-safe history found for this batch.</div>
                     ) : (
@@ -964,6 +968,8 @@ export function LicenseeBatchWorkspaceDialog({
                     </div>
                     {historyLoading ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError ? (
+                      <div role="alert" className="rounded-lg border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No audit history found for this batch.</div>
                     ) : (
@@ -1480,6 +1486,8 @@ export function LicenseeBatchWorkspaceDialog({
 
                     {historyLoading ? (
                       <div className="rounded-2xl border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError ? (
+                      <div role="alert" className="rounded-2xl border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-2xl border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No history found for this source batch and its allocations.</div>
                     ) : (

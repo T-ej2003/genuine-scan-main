@@ -5,6 +5,8 @@ import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib
 import apiClient from "@/lib/api-client";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
+import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
+import { queryKeys } from "@/lib/query-keys";
 
 import { useAssignableManufacturers, useBatches } from "./hooks";
 import type { BatchRow, ManufacturerRow } from "./types";
@@ -441,9 +443,24 @@ export function useBatchOperationsController({
       });
       resetAssignDraft();
       try {
+        clearDashboardReadCache([
+          "dashboard:stats:",
+          "qr:stats:",
+          "qr:batches:",
+          "trace:timeline:",
+          "audit:logs:",
+        ]);
         await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ["batches", "allocation-map"] }),
-          queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats(licenseeScope) }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.batches.list(licenseeScope) }),
+          queryClient.invalidateQueries({
+            predicate: (query) => query.queryKey[0] === "dashboard" && query.queryKey[1] === "audit" &&
+              query.queryKey[3] === (licenseeScope || null),
+          }),
+          queryClient.invalidateQueries({
+            predicate: (query) => query.queryKey[0] === "batches" && query.queryKey[1] === "allocation-map" &&
+              query.queryKey[3] === (licenseeScope || null),
+          }),
         ]);
         await fetchBatches();
         await onAssignmentComplete?.();

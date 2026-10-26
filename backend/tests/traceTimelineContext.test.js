@@ -6,6 +6,7 @@ const { TraceEventType, UserRole } = require("@prisma/client");
 process.env.NODE_ENV = "test";
 
 const { withCanonicalDbContext } = require("../dist/lib/canonicalDbContext");
+const { traceTimelineQuerySchema } = require("../dist/controllers/traceTimelineController");
 const {
   TraceTimelineAccessError,
   buildTraceTimelineBoundary,
@@ -125,15 +126,24 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert(tenant.fake.calls.find[0].select && !tenant.fake.calls.find[0].include, "trace rows require an explicit projection");
   assert.doesNotMatch(JSON.stringify(tenant.result), /secret|secret-key/);
   assert.match(JSON.stringify(tenant.result), /retained/);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: `${ids.actor},${ids.manufacturer}` }).success, true);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: "not-a-uuid" }).success, false);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchId: ids.actor, batchIds: ids.manufacturer }).success, false);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: Array(101).fill(ids.actor).join(",") }).success, false);
+
+  const bulk = await read(actor(), query({ batchIds: [ids.actor, ids.manufacturer] }));
+  assert.deepStrictEqual(bulk.fake.calls.find[0].where.batchId, { in: [ids.actor, ids.manufacturer] });
+  assert.strictEqual(bulk.fake.calls.find[0].where.licenseeId, ids.tenant);
 
   const manufacturer = await read(actor({
     userId: ids.manufacturer,
     role: UserRole.MANUFACTURER,
     licenseeId: null,
     linkedLicenseeIds: [ids.tenant],
-  }), query({ licenseeId: ids.tenant }));
+  }), query({ licenseeId: ids.tenant, batchIds: [ids.actor, ids.manufacturer] }));
   assert.strictEqual(manufacturer.boundary.query.manufacturerId, ids.manufacturer);
   assert.strictEqual(manufacturer.fake.calls.find[0].where.manufacturerId, ids.manufacturer);
+  assert.deepStrictEqual(manufacturer.fake.calls.find[0].where.batchId, { in: [ids.actor, ids.manufacturer] });
 
   const platform = await read(actor({
     userId: ids.platform,

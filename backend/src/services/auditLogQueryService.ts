@@ -13,6 +13,7 @@ export type AuditLogQueryFilters = {
   cursor?: string;
   entityType?: string;
   entityId?: string;
+  entityIds?: string[];
   action?: string;
   userId?: string;
   licenseeId?: string;
@@ -134,6 +135,7 @@ export const queryAuditLogs = async (
   if (filters.userId) clauses.push({ userId: filters.userId });
   if (filters.entityType) clauses.push({ entityType: filters.entityType });
   if (filters.entityId) clauses.push({ entityId: filters.entityId });
+  if (filters.entityIds) clauses.push({ entityId: { in: filters.entityIds } });
   if (filters.action) clauses.push({ action: filters.action });
   else if (!boundary.isPlatformAdmin) clauses.push({ action: { notIn: hiddenActionsForNonSuper } });
   if (!boundary.isPlatformAdmin && filters.action && hiddenActionsForNonSuper.includes(filters.action)) clauses.push({ id: { in: [] } });

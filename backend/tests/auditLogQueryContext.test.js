@@ -178,11 +178,17 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert.match(JSON.stringify(tenant.result), /retained/);
   assert.strictEqual(tenant.fake.calls.create[0].values[3], "00000000-0000-4000-8000-0000000000a1");
 
+  const bulk = await read(actor(), filters({ entityType: "Batch", entityIds: [ids.tenantAdmin, ids.manufacturer] }));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => clause.licenseeId === ids.tenant));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => clause.entityType === "Batch"));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => JSON.stringify(clause.entityId) === JSON.stringify({ in: [ids.tenantAdmin, ids.manufacturer] })));
+
   const manufacturer = await read(
     actor({ userId: ids.manufacturer, role: UserRole.MANUFACTURER, linkedLicenseeIds: [ids.tenant] }),
-    filters({ licenseeId: ids.tenant, manufacturerId: ids.manufacturer })
+    filters({ licenseeId: ids.tenant, manufacturerId: ids.manufacturer, entityIds: [ids.tenantAdmin] })
   );
   assert(manufacturer.fake.calls.find[0].where.AND.some((clause) => clause.userId === ids.manufacturer));
+  assert(manufacturer.fake.calls.find[0].where.AND.some((clause) => JSON.stringify(clause.entityId) === JSON.stringify({ in: [ids.tenantAdmin] })));
   assert.strictEqual(manufacturer.fake.calls.contextValues[0][4], ids.manufacturer);
 
   const platform = await read(
@@ -237,6 +243,9 @@ const denied = (user, input, message, requestId = "request-denied") => {
 
   assert.strictEqual(auditLogQuerySchema.safeParse({ organizationId: ids.foreignOrg, unknownScope: ids.tenant }).success, false);
   assert.strictEqual(auditLogQuerySchema.safeParse({ licenseeId: "not-a-uuid" }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityIds: "not-a-uuid" }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityId: ids.tenantAdmin, entityIds: ids.manufacturer }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityIds: Array(101).fill(ids.tenantAdmin).join(",") }).success, false);
 
   const root = path.resolve(__dirname, "..");
   const serviceSource = fs.readFileSync(path.join(root, "src/services/auditLogQueryService.ts"), "utf8");

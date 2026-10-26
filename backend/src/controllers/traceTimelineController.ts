@@ -8,17 +8,18 @@ import { createAuditLogInTransaction } from "../services/auditService";
 import { buildTraceTimelineBoundary, getTraceTimeline, TraceTimelineAccessError } from "../services/traceEventService";
 import { decodeDateCursor } from "../utils/cursorPagination";
 
-const traceTimelineQuerySchema = z.object({
+export const traceTimelineQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).max(100000).optional(),
   cursor: z.string().trim().max(512).optional(),
   licenseeId: z.string().uuid().optional(),
   eventType: z.nativeEnum(TraceEventType).optional(),
   batchId: z.string().uuid().optional(),
+  batchIds: z.string().transform((value) => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)).optional(),
   manufacturerId: z.string().uuid().optional(),
   qrCodeId: z.string().uuid().optional(),
   purpose: z.string().trim().min(1).max(240).optional(),
-}).strict();
+}).strict().refine((query) => !(query.batchId && query.batchIds), "Choose one batch filter");
 
 export const getTraceTimelineController = async (req: AuthRequest, res: Response) => {
   try {
@@ -38,6 +39,7 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
       licenseeId: parsed.data.licenseeId,
       eventType: parsed.data.eventType,
       batchId: parsed.data.batchId,
+      batchIds: parsed.data.batchIds,
       manufacturerId: parsed.data.manufacturerId,
       qrCodeId: parsed.data.qrCodeId,
       limit,
