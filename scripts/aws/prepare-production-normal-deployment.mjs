@@ -30,7 +30,7 @@ const imageInputs = Object.freeze({
   ],
 });
 export const isNormalImageInput = (name, file) => imageInputs[name].some((pattern) => pattern.test(file));
-export const isNormalHostTooling = (file) => /^(?:\.github\/workflows\/production-deploy\.yml$|\.github\/actions\/|scripts\/(?:aws\/|lib\/|security\/|rls\/lib\/|smoke-release\.mjs$)|infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/|backend\/scripts\/security\/)/.test(file);
+export const isNormalHostTooling = (file) => /^(?:\.github\/workflows\/(?:production-deploy|production-normal-deployment-operation|production-green-backend-recovery-operation|production-historical-green-completion-operation)\.yml$|\.github\/actions\/|scripts\/(?:aws\/|lib\/|security\/|rls\/lib\/|smoke-release\.mjs$)|infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/|backend\/scripts\/security\/)/.test(file);
 
 const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const assertAncestor = (ancestor, candidate, cwd) => {

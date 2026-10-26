@@ -23,7 +23,7 @@ const requiredSteps = [
   "Commit authenticated backend recovery component state",
 ];
 
-export function assertBackendRecoveryWorkflowGraph(workflow) {
+export function assertBackendRecoveryWorkflowGraph(workflow, operation = yaml.load(fs.readFileSync(path.join(root, ".github/workflows/production-green-backend-recovery-operation.yml"), "utf8"))) {
   assert.deepEqual(workflow?.on?.workflow_dispatch?.inputs?.release_mode?.options,
     ["normal", "backend-health-recovery", "rotation-overlap", "rotation-cleanup"]);
   assert.deepEqual(workflow?.concurrency, { group: "production-deploy", "cancel-in-progress": false });
@@ -71,16 +71,22 @@ export function assertBackendRecoveryWorkflowGraph(workflow) {
   assert.match(recovery.run || "", /extract-production-backend-recovery-dispatch-bundle\.mjs[\s\S]*recover-production-green-backend-health\.mjs[\s\S]*--prepare-handoff/);
   const execution = workflow.jobs["execute-green-backend-recovery"];
   assert.deepEqual(execution?.needs, ["resolve-deploy-target", "deploy-production-ecs"]);
-  assert.equal(execution.environment, "production-normal-deploy");
+  const trust = JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-component-deployment-state/normal-deployer-trust-policy.json"), "utf8"));
+  assert.equal(execution.uses, trust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:job_workflow_ref"][1]);
+  assert.equal(execution.steps, undefined);
   assert.equal(execution.permissions["id-token"], "write");
-  const executeSteps = execution.steps || [];
+  assert.equal(execution.with.source_sha, "${{ needs.resolve-deploy-target.outputs.deploy_sha }}");
+  assert.equal(execution.with.approval_sha256, "${{ needs.deploy-production-ecs.outputs.green_approval_sha256 }}");
+  const executeJob = operation.jobs?.["execute-green-backend-recovery"];
+  assert.equal(executeJob?.environment, "production-normal-deploy");
+  const executeSteps = executeJob.steps || [];
   const terraform = executeSteps.findIndex((step) => step.name === "Install pinned Terraform for approved runtime policy recheck");
   const assume = executeSteps.findIndex((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment");
   const activate = executeSteps.findIndex((step) => step.name === "Execute one-use green backend recovery under normal-deployer");
   const smoke = executeSteps.findIndex((step) => step.name === "Verify recovered backend health");
   const commit = executeSteps.findIndex((step) => step.name === "Commit authenticated green recovery component state");
   assert.ok(terraform >= 0 && terraform < assume && activate > assume && smoke > activate && commit > smoke);
-  assert.equal(executeSteps[terraform].uses, "hashicorp/setup-terraform@v3");
+  assert.equal(executeSteps[terraform].uses, "hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd");
   assert.equal(executeSteps[terraform].with.terraform_version, "1.15.8");
   assert.equal(executeSteps[terraform].with.terraform_wrapper, false);
   assert.equal(executeSteps[assume].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-normal-deployer");
