@@ -365,6 +365,7 @@ test("every GitHub workflow credential root is classified by its authenticated m
     ".github/workflows/authorize-component-broker-recovery-successor.yml",
     ".github/workflows/authorize-production-stage-b-release-transition.yml",
     ".github/workflows/component-iam-authorization-publisher.yml",
+    ".github/workflows/complete-historical-green-backend-recovery.yml",
     ".github/workflows/prepare-production-app-only-verifier-operation.yml",
     ".github/workflows/prepare-production-app-only-deployment-operation.yml",
     ".github/workflows/provision-production-app-only-deployer-operation.yml",

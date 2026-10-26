@@ -70,6 +70,22 @@ test("P2 regression: configured reviewer text is not actual approval evidence", 
   assert.throws(() => assertProductionEnvironmentActualReviewer(evidence(), { sourceSha, repository: context.repository, executionActor: "alice" }), /actual approval/i);
 });
 
+test("historical green completion requires a fresh actual normal-deploy approval on current main", () => {
+  const historical = { ...context, environment: "production-normal-deploy",
+    workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.historicalGreenCompletionWorkflowRef };
+  const approved = createProductionEnvironmentApprovalEvidence({ ...historical,
+    environmentConfig: config({ name: historical.environment }), observedAt: now.toISOString(),
+    actualApproval: { state: "approved", environmentId: 14514600120, environmentName: historical.environment,
+      userId: 1, userLogin: "bob" } });
+  assert.equal(assertProductionEnvironmentApprovalEvidence(approved, historical), approved);
+  assert.equal(assertProductionEnvironmentActualReviewer(approved, { sourceSha, repository: historical.repository,
+    executionActor: historical.executionActor }), "bob");
+  assert.throws(() => assertProductionEnvironmentApprovalEvidence(approved, { ...historical,
+    sourceSha: "a".repeat(40) }), /protected recovery run/);
+  assert.throws(() => assertProductionEnvironmentApprovalEvidence(approved, { ...historical,
+    now: new Date(now.getTime() + 31 * 60_000) }), /stale/);
+});
+
 test("actual environment approval identity comes from GitHub approval records", async () => {
   const actual = await fetchProductionEnvironmentApprovalEvidence({ ...context, token: "fixture-token", requireActualApproval: true }, { fetchImpl: async (url) => ({ ok: true, json: async () => url.endsWith("/approvals") ? [{ state: "approved", user: { id: 2, login: "actual-reviewer" }, environments: [{ id: 14514600120, name: "production" }] }] : config() }) });
   assert.equal(actual.schemaVersion, 3);

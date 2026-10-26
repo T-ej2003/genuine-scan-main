@@ -341,7 +341,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /mscqr-production-normal-deployer/);
   assert.match(workflow, /environment: production-normal-deploy/);
   const normalEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-normal-deploy/));
-  assert.deepEqual(normalEnvironmentUsers, ["production-deploy.yml", "release-gate.yml"]);
+  assert.deepEqual(normalEnvironmentUsers, ["complete-historical-green-backend-recovery.yml", "production-deploy.yml", "release-gate.yml"]);
   assert.equal((workflow.match(/environment: production-normal-deploy/g) || []).length, 1);
   assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\).*PRIVILEGED_PREREQUISITE_BACKEND/);
   assert.match(workflow, /rollback_failed=0[\s\S]*if ! CLUSTER_NAME=[\s\S]*rollback_failed=1[\s\S]*exit "\$rollback_failed"/);
