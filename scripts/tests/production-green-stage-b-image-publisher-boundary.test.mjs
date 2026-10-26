@@ -333,11 +333,11 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
     assert.equal(allows("ecr:UploadLayerPart", repository), true);
     assert.equal(allows("ecr:BatchGetImage", repository), true);
     assert.equal(allows("ecr:DescribeImageScanFindings", repository), true);
-    assert.equal(allows("ecr:PutImageTagMutability", repository), true);
-    assert.equal(allows("ecr:PutImageScanningConfiguration", repository), true);
-    assert.equal(allows("ecr:PutLifecyclePolicy", repository), true);
+    assert.equal(allows("ecr:GetLifecyclePolicy", repository), true);
+    assert.equal(allows("ecr:GetRepositoryPolicy", repository), true);
+    for (const action of ["ecr:BatchDeleteImage", "ecr:PutLifecyclePolicy", "ecr:PutImageTagMutability", "ecr:PutImageScanningConfiguration"]) assert.equal(allows(action, repository), false);
   }
-  for (const action of ["ecr:PutImage", "ecr:PutImageTagMutability", "ecr:PutImageScanningConfiguration", "ecr:PutLifecyclePolicy"]) assert.equal(allows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"), false, action);
+  for (const action of ["ecr:PutImage", "ecr:GetLifecyclePolicy", "ecr:GetRepositoryPolicy"]) assert.equal(allows(action, "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web"), false, action);
   for (const action of ["ecs:UpdateService", "ecs:RunTask", "lambda:InvokeFunction", "secretsmanager:GetSecretValue", "rds:ModifyDBInstance", "iam:CreateRole"]) {
     assert.equal(allows(action, "*"), false);
     assert.equal(denies(action), true);

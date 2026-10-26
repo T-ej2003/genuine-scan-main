@@ -8,34 +8,22 @@ locals {
     var.tags
   )
 
-  ecr_lifecycle_policy = jsonencode({
-    rules = [
-      {
-        rulePriority = 1
-        description  = "Expire untagged images older than configured threshold"
-        selection = {
-          tagStatus   = "untagged"
-          countType   = "sinceImagePushed"
-          countUnit   = "days"
-          countNumber = var.ecr_untagged_expiry_days
-        }
-        action = {
-          type = "expire"
-        }
-      },
-      {
-        rulePriority = 2
-        description  = "Keep only the newest release images"
-        selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
-          countNumber = var.ecr_keep_release_images
-        }
-        action = {
-          type = "expire"
-        }
-      }
-    ]
+  # Retirement is disabled until a source-bound inventory and one-use deletion
+  # authorization exist. A count-based ECR rule can expire a live digest.
+  ecr_delete_guard = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyUnreviewedProductionImageRetirement"
+      Effect    = "Deny"
+      Principal = "*"
+      Resource  = "*"
+      Action = [
+        "ecr:BatchDeleteImage",
+        "ecr:DeleteRepository",
+        "ecr:PutLifecyclePolicy",
+        "ecr:UpdateImageStorageClass"
+      ]
+    }]
   })
   backend_container_definitions = var.backend_container_definitions_json
   worker_container_definitions  = var.worker_container_definitions_json
@@ -56,9 +44,9 @@ resource "aws_ecr_repository" "backend" {
   tags = merge(local.common_tags, { Component = "backend" })
 }
 
-resource "aws_ecr_lifecycle_policy" "backend" {
+resource "aws_ecr_repository_policy" "backend_delete_guard" {
   repository = aws_ecr_repository.backend.name
-  policy     = local.ecr_lifecycle_policy
+  policy     = local.ecr_delete_guard
 }
 
 resource "aws_ecr_repository" "worker" {
@@ -76,9 +64,14 @@ resource "aws_ecr_repository" "worker" {
   tags = merge(local.common_tags, { Component = "worker" })
 }
 
-resource "aws_ecr_lifecycle_policy" "worker" {
+resource "aws_ecr_repository_policy" "worker_delete_guard" {
   repository = aws_ecr_repository.worker.name
-  policy     = local.ecr_lifecycle_policy
+  policy     = local.ecr_delete_guard
+}
+
+resource "aws_ecr_repository_policy" "web_delete_guard" {
+  repository = "mscqr-web"
+  policy     = local.ecr_delete_guard
 }
 
 resource "aws_cloudwatch_log_group" "backend" {

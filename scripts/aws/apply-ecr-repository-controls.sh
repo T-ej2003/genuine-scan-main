@@ -5,10 +5,10 @@ usage() {
   cat <<'EOF'
 Usage: scripts/aws/apply-ecr-repository-controls.sh <backend|frontend|worker|both|all>
 
-Apply production ECR hardening controls for the MSCQR ECS images:
-- immutable tags
-- scan on push
-- lifecycle policy for stale images
+Verify production ECR retention controls before publishing:
+- immutable tags and scan on push
+- no automatic lifecycle expiration
+- repository-level deletion guard
 
 Environment:
   MSCQR_AWS_CREDENTIAL_SOURCE Required: github-oidc-release-deployer, github-access-keys, or named-profile.
@@ -17,8 +17,6 @@ Environment:
   BACKEND_ECR_REPO    Optional. Default: mscqr-backend
   FRONTEND_ECR_REPO   Optional. Default: mscqr-web
   WORKER_ECR_REPO     Optional. Default: mscqr-worker
-  KEEP_TAGGED_COUNT   Optional. Default: 120
-  UNTAGGED_DAYS       Optional. Default: 7
 
 Examples:
   MSCQR_AWS_CREDENTIAL_SOURCE=named-profile MSCQR_AWS_NAMED_PROFILE=mscqr-production-release-deployer AWS_REGION=eu-west-2 ./scripts/aws/apply-ecr-repository-controls.sh all
@@ -56,15 +54,13 @@ fi
 
 AWS_REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 if [[ -z "$AWS_REGION" ]]; then
-  echo "Set AWS_REGION (or AWS_DEFAULT_REGION) before applying ECR controls." >&2
+  echo "Set AWS_REGION (or AWS_DEFAULT_REGION) before checking ECR controls." >&2
   exit 1
 fi
 
 BACKEND_ECR_REPO="${BACKEND_ECR_REPO:-mscqr-backend}"
 FRONTEND_ECR_REPO="${FRONTEND_ECR_REPO:-mscqr-web}"
 WORKER_ECR_REPO="${WORKER_ECR_REPO:-mscqr-worker}"
-KEEP_TAGGED_COUNT="${KEEP_TAGGED_COUNT:-120}"
-UNTAGGED_DAYS="${UNTAGGED_DAYS:-7}"
 
 declare -a REPOSITORIES=()
 case "$SERVICE_SCOPE" in
@@ -75,75 +71,10 @@ case "$SERVICE_SCOPE" in
   all) REPOSITORIES=("$BACKEND_ECR_REPO" "$FRONTEND_ECR_REPO" "$WORKER_ECR_REPO") ;;
 esac
 
-POLICY_FILE="$(mktemp)"
-trap 'rm -f "$POLICY_FILE"' EXIT
-
-node --input-type=module - "$KEEP_TAGGED_COUNT" "$UNTAGGED_DAYS" >"$POLICY_FILE" <<'NODE'
-const [keepTaggedCountText, untaggedDaysText] = process.argv.slice(2);
-const keepTaggedCount = Number(keepTaggedCountText);
-const untaggedDays = Number(untaggedDaysText);
-
-if (!Number.isInteger(keepTaggedCount) || keepTaggedCount < 1) {
-  throw new Error("KEEP_TAGGED_COUNT must be a positive integer.");
-}
-if (!Number.isInteger(untaggedDays) || untaggedDays < 1) {
-  throw new Error("UNTAGGED_DAYS must be a positive integer.");
-}
-
-const policy = {
-  rules: [
-    {
-      rulePriority: 1,
-      description: `Expire untagged images older than ${untaggedDays} days`,
-      selection: {
-        tagStatus: "untagged",
-        countType: "sinceImagePushed",
-        countUnit: "days",
-        countNumber: untaggedDays,
-      },
-      action: { type: "expire" },
-    },
-    {
-      rulePriority: 2,
-      description: `Keep only the newest ${keepTaggedCount} release manifests overall`,
-      selection: {
-        tagStatus: "any",
-        countType: "imageCountMoreThan",
-        countNumber: keepTaggedCount,
-      },
-      action: { type: "expire" },
-    },
-  ],
-};
-
-process.stdout.write(JSON.stringify(policy));
-NODE
-
 for repository_name in "${REPOSITORIES[@]}"; do
-  echo "Applying immutable tag policy to ${repository_name}"
-  aws ecr put-image-tag-mutability \
-    --region "$AWS_REGION" \
-    --repository-name "$repository_name" \
-    --image-tag-mutability IMMUTABLE \
-    >/dev/null
-
-  echo "Applying scan-on-push policy to ${repository_name}"
-  aws ecr put-image-scanning-configuration \
-    --region "$AWS_REGION" \
-    --repository-name "$repository_name" \
-    --image-scanning-configuration scanOnPush=true \
-    >/dev/null
-
-  echo "Applying lifecycle policy to ${repository_name}"
-  aws ecr put-lifecycle-policy \
-    --region "$AWS_REGION" \
-    --repository-name "$repository_name" \
-    --lifecycle-policy-text "file://${POLICY_FILE}" \
-    >/dev/null
+  node "$SCRIPT_DIR/verify-production-ecr-repository-protection.mjs" "$repository_name" "$AWS_REGION"
 done
 
-echo "Applied ECR controls in ${AWS_REGION}:"
+echo "Verified ECR retention controls in ${AWS_REGION}:"
 printf '  - %s\n' "${REPOSITORIES[@]}"
-echo "  - imageTagMutability=IMMUTABLE"
-echo "  - scanOnPush=true"
-echo "  - lifecycle keeps the newest ${KEEP_TAGGED_COUNT} release images and expires untagged images older than ${UNTAGGED_DAYS} days"
+echo "  - immutable tags, scan on push, no lifecycle expiration, deletion guard"
