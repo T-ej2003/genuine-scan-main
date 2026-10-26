@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialAlarm, assertPartialMonitorTrust, assertPartialOwnershipState, assertPartialRefresh, assertPartialRule, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialAlarm, assertPartialMonitorTrust, assertPartialOwnershipState, assertPartialRefresh, assertPartialRule, assertPartialTarget, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
 import { assertEcrAssumedRole } from "../aws/production-ecr-image-monitor.mjs";
 
 const stack = "infra/aws/terraform/production-ecr-protection";
@@ -105,6 +105,16 @@ test("partial apply rejects changed live EventBridge rules and alarm settings", 
   assert.doesNotThrow(() => assertPartialAlarm(savedAlarm, liveAlarm));
   assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, ActionsEnabled: false }), /alarm changed/);
   assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, MetricName: "OtherMetric" }), /alarm changed/);
+});
+
+test("partial apply rejects an EventBridge target with changed delivery controls", () => {
+  const saved = { target_id: "existing-production-alerts", arn: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts",
+    input_transformer: [{ input_paths: { event: "$.detail.eventName" }, input_template: '{"event":"<event>"}' }] };
+  const live = { Id: saved.target_id, Arn: saved.arn,
+    InputTransformer: { InputPathsMap: saved.input_transformer[0].input_paths, InputTemplate: saved.input_transformer[0].input_template } };
+  assert.doesNotThrow(() => assertPartialTarget(saved, live));
+  assert.throws(() => assertPartialTarget(saved, { ...live, RetryPolicy: { MaximumRetryAttempts: 0 } }), /target changed/);
+  assert.throws(() => assertPartialTarget(saved, { ...live, DeadLetterConfig: { Arn: "arn:aws:sqs:eu-west-2:368992683803:other" } }), /target changed/);
 });
 
 test("only the provider's observed partial-apply normalization may accompany three ECR creates", () => {

@@ -103,6 +103,13 @@ export function assertPartialAlarm(saved, live) {
   }, "CloudWatch alarm changed since partial apply");
 }
 
+export function assertPartialTarget(saved, live) {
+  assert.deepEqual(live, {
+    Id: saved.target_id, Arn: saved.arn,
+    InputTransformer: { InputPathsMap: saved.input_transformer[0].input_paths, InputTemplate: saved.input_transformer[0].input_template },
+  }, "EventBridge target changed since partial apply");
+}
+
 function checkPartialLiveOwnership(state) {
   const read = (name, args) => {
     const result = aws(args);
@@ -128,11 +135,7 @@ function checkPartialLiveOwnership(state) {
     assert.equal(targets?.length, 1, "EventBridge target changed since partial apply");
     const target = targets[0];
     const savedTarget = state.resources.find(resource => resource.type === "aws_cloudwatch_event_target" && resource.name === key).instances[0].attributes;
-    assert.deepEqual({ id: target.Id, arn: target.Arn, role: target.RoleArn || "", input: target.Input || "", inputPath: target.InputPath || "",
-      transformer: target.InputTransformer ? { paths: target.InputTransformer.InputPathsMap, template: target.InputTransformer.InputTemplate } : null },
-    { id: savedTarget.target_id, arn: savedTarget.arn, role: savedTarget.role_arn, input: savedTarget.input, inputPath: savedTarget.input_path,
-      transformer: savedTarget.input_transformer?.length ? { paths: savedTarget.input_transformer[0].input_paths, template: savedTarget.input_transformer[0].input_template } : null },
-    "EventBridge target changed since partial apply");
+    assertPartialTarget(savedTarget, target);
   }
   const names = [...alarmNames].map(name => `mscqr-production-ecr-${name}`);
   const alarms = read("alarms", ["cloudwatch", "describe-alarms", "--alarm-names", ...names]);
