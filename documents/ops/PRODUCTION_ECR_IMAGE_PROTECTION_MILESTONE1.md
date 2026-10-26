@@ -2,7 +2,7 @@
 
 Status: source implementation only. No production policy, IAM, alarm, EventBridge rule, or ECS resource changes are authorized by this document.
 
-Deployment foundation: [`infra/aws/terraform/production-ecr-protection/README.md`](../../infra/aws/terraform/production-ecr-protection/README.md). Its isolated state, dedicated non-root OIDC roles, and saved-plan approval workflow supersede root-stack rollout instructions. The roles and protected environments require a separate authorized bootstrap before a production plan can run.
+Deployment foundation: [`PRODUCTION_ECR_PROTECTION_DEPLOYMENT_FOUNDATION.md`](PRODUCTION_ECR_PROTECTION_DEPLOYMENT_FOUNDATION.md). Its isolated state, dedicated non-root OIDC roles, and saved-plan approval workflow supersede root-stack rollout instructions. The roles and protected environments require a separate authorized bootstrap before a production plan can run.
 
 ## Why this change exists
 
