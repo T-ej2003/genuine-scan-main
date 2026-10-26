@@ -20,5 +20,5 @@ export function readProductionGitChanges(base, target, cwd, run = git) {
   };
   const structural = parse(["--no-renames"]);
   const paired = parse(["--find-renames", "--find-copies-harder"]);
-  return { paths: [...new Set([...structural, ...paired].flatMap((change) => change.paths))], structural };
+  return { paths: [...new Set([...structural, ...paired].flatMap((change) => change.paths))], structural, paired };
 }

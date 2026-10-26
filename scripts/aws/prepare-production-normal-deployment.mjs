@@ -37,9 +37,7 @@ const assertAncestor = (ancestor, candidate, cwd) => {
   assert.match(ancestor || "", SHA); assert.match(candidate || "", SHA);
   try { git(["merge-base", "--is-ancestor", ancestor, candidate], cwd); } catch { throw new Error(`Component state source ${ancestor} is not protected-main history of ${candidate}.`); }
 };
-const rangeFiles = (baseline, candidate, cwd) => readProductionGitChanges(baseline, candidate, cwd).paths;
-
-export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, readStructural, isAncestor, pushFiles } = {}) {
+export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, readStructural, isAncestor, pushFiles, pushChangedFiles, pushPaired } = {}) {
   assert.match(sourceSha || "", SHA); assertProductionComponentDeploymentState(state); assert.equal(typeof readRange, "function"); assert.equal(typeof isAncestor, "function");
   const baselineOf = (component) => component?.establishedThroughSha || component?.sourceSha;
   for (const name of COMPONENTS) {
@@ -90,11 +88,16 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
   let push;
   if (pushFiles !== undefined) {
     assert.equal(typeof readStructural, "function", "Normal deployment requires Git structural-change evidence.");
+    assert.ok(Array.isArray(pushChangedFiles) && pushChangedFiles.every((file) => pushFiles.includes(file)), "Normal deployment requires independently observed current-push changes.");
+    assert.ok(Array.isArray(pushPaired), "Normal deployment requires current-push rename and copy evidence.");
+    assert.equal(pushPaired.some((change) => change.status === "R"), false, "Current-push renames require stronger-lane completion.");
+    assert.equal(pushPaired.some((change) => change.status === "C" && ["backend", "frontend"].some((name) => isNormalImageInput(name, change.paths[0]) && !isNormalImageInput(name, change.paths[1]))), false,
+      "Cross-component copies require stronger-lane completion.");
     push = classifyProductionChanges(pushFiles);
     assert.equal(push.releaseClass, PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION, "The protected-main push is not eligible for normal deployment.");
     assert.equal(push.worker, false, "Worker changes require the stronger lane.");
     for (const name of ["backend", "frontend"].filter((component) => push[component])) {
-      const currentPush = new Set(pushFiles);
+      const currentPush = new Set(pushChangedFiles);
       const structural = readStructural(baselineOf(state.components[name]), sourceSha);
       assert.equal(structural.some((change) => ["A", "D"].includes(change.status) && change.paths.some((file) => isNormalImageInput(name, file) && !currentPush.has(file))), false,
         "Historical image input addition or deletion requires stronger-lane completion.");
@@ -132,7 +135,7 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
     componentFiles: Object.freeze({ backendFiles: files.backend, frontendFiles: files.frontend, securityFiles: files.security, databaseFiles: files.database }), classification });
 }
 
-export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, client, gitRun = git, pushFiles } = {}) {
+export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, client, gitRun = git, pushFiles, pushChangedFiles, pushPaired } = {}) {
   assert.match(sourceSha || "", SHA); assert.equal(typeof repositoryRoot, "string");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
   const changes = new Map();
@@ -141,7 +144,7 @@ export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, c
     if (!changes.has(key)) changes.set(key, readProductionGitChanges(baseline, candidate, repositoryRoot, gitRun));
     return changes.get(key);
   };
-  return buildProductionNormalDeploymentPlan({ sourceSha, state, pushFiles,
+  return buildProductionNormalDeploymentPlan({ sourceSha, state, pushFiles, pushChangedFiles, pushPaired,
     isAncestor: (ancestor, candidate) => { try { gitRun(["merge-base", "--is-ancestor", ancestor, candidate], repositoryRoot); return true; } catch { return false; } },
     readRange: (baseline, candidate) => range(baseline, candidate).paths,
     readStructural: (baseline, candidate) => range(baseline, candidate).structural,
@@ -178,7 +181,9 @@ function main() {
   assert.equal(event.after, process.env.GITHUB_SHA);
   const before = SHA.test(event.before || "") && !/^0+$/.test(event.before) ? event.before : git(["rev-parse", "HEAD^"], repositoryRoot);
   assertAncestor(before, process.env.GITHUB_SHA, repositoryRoot);
-  const plan = prepareProductionNormalDeployment({ sourceSha: process.env.GITHUB_SHA, repositoryRoot, client: createProductionComponentDeploymentStateClient({ run }), pushFiles: rangeFiles(before, process.env.GITHUB_SHA, repositoryRoot) });
+  const push = readProductionGitChanges(before, process.env.GITHUB_SHA, repositoryRoot);
+  const plan = prepareProductionNormalDeployment({ sourceSha: process.env.GITHUB_SHA, repositoryRoot, client: createProductionComponentDeploymentStateClient({ run }),
+    pushFiles: push.paths, pushChangedFiles: [...new Set(push.structural.flatMap((change) => change.paths))], pushPaired: push.paired });
   fs.writeFileSync(output, `${JSON.stringify(plan)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
   process.stdout.write(`${JSON.stringify({ sourceSha: plan.sourceSha, classification: plan.classification })}\n`);
 }
