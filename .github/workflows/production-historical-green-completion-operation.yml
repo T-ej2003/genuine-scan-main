@@ -6,30 +6,39 @@ name: Governed Historical Green Completion Operation
       operation_id:
         description: Original S3 recovery operation ID
         required: true
+        type: string
       original_source_sha:
         description: Protected main SHA at the original recovery
         required: true
+        type: string
       original_run_id:
         description: Original Release Gate run ID
         required: true
+        type: string
       ticket:
         description: Original recovery ticket
         required: true
+        type: string
       original_task_definition:
         description: Original backend task definition ARN
         required: true
+        type: string
       target_task_definition:
         description: Already deployed backend task definition ARN
         required: true
+        type: string
       image_digest:
         description: Authorized backend image digest
         required: true
+        type: string
       cloudtrail_event_id:
         description: Successful original UpdateService event ID
         required: true
+        type: string
       expected_component_generation:
         description: Original component-state generation
         required: true
+        type: string
 
 jobs:
   complete:
