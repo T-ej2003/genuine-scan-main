@@ -305,10 +305,12 @@ test("Lane A accepts application changes and rejects infrastructure, RLS, schema
 });
 
 test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-tested", () => {
-  const workflow = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
-  assert.match(workflow, /name: Normal Production Deployment/);
-  assert.match(workflow, /branches: \[main\]/);
-  assert.match(workflow, /workflow_dispatch:[\s\S]*baseline:/);
+  const caller = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/production-normal-deployment-operation.yml", "utf8");
+  assert.match(caller, /name: Normal Production Deployment/);
+  assert.match(caller, /branches: \[main\]/);
+  assert.match(caller, /workflow_dispatch:[\s\S]*baseline:/);
+  assert.match(caller, /production-normal-deployment-operation\.yml@[a-f0-9]{40}/);
   assert.match(workflow, /test "\$GITHUB_RUN_ATTEMPT" = "1"/);
   assert.match(workflow, /GH_HOST=github\.com gh api --hostname github\.com repos\/T-ej2003\/genuine-scan-main\/pulls\/558/);
   assert.match(workflow, /\.merged_at != null and \.base\.ref == "main" and \.base\.repo\.full_name == "T-ej2003\/genuine-scan-main" and \.head\.repo\.full_name == "T-ej2003\/genuine-scan-main"/);
@@ -319,7 +321,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.doesNotMatch(workflow, /test "\$GITHUB_SHA" = "\$baseline_merge_sha"/);
   assert.doesNotMatch(workflow, /pulls\/556/);
   assert.match(workflow, /test "\$GITHUB_SHA" = "\$\(git rev-parse refs\/remotes\/origin\/main\)"/);
-  assert.match(workflow, /configure-aws-credentials@v6/);
+  assert.match(workflow, /configure-aws-credentials@[a-f0-9]{40}/);
   assert.match(workflow, /MSCQR_AWS_CREDENTIAL_SOURCE: github-oidc-release-deployer/);
   assert.match(workflow, /SMOKE_AUTHENTICATED_REQUIRED: "true"/);
   assert.match(workflow, /SMOKE_EXPECTED_IDENTITY_REQUIRED: "true"/);
@@ -341,7 +343,7 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /mscqr-production-normal-deployer/);
   assert.match(workflow, /environment: production-normal-deploy/);
   const normalEnvironmentUsers = fs.readdirSync(".github/workflows").filter((file) => file.endsWith(".yml") && fs.readFileSync(`.github/workflows/${file}`, "utf8").match(/environment:\s*production-normal-deploy/));
-  assert.deepEqual(normalEnvironmentUsers, ["complete-historical-green-backend-recovery.yml", "production-deploy.yml", "release-gate.yml"]);
+  assert.deepEqual(normalEnvironmentUsers, ["production-green-backend-recovery-operation.yml", "production-historical-green-completion-operation.yml", "production-normal-deployment-operation.yml"]);
   assert.equal((workflow.match(/environment: production-normal-deploy/g) || []).length, 1);
   assert.match(workflow, /Roll back exact predecessors after failure[\s\S]*if: failure\(\).*PRIVILEGED_PREREQUISITE_BACKEND/);
   assert.match(workflow, /rollback_failed=0[\s\S]*if ! CLUSTER_NAME=[\s\S]*rollback_failed=1[\s\S]*exit "\$rollback_failed"/);
@@ -355,11 +357,11 @@ test("normal production workflow is fixed, OIDC-only, gated by main, and smoke-t
   assert.match(workflow, /backend_digest=sha256:d2a6f641f44e27454a80d502914a9e168c61cdace1201f9d7af9d85a87ea208c/);
   assert.match(workflow, /frontend_base=d355a77675d4320c2bfa975ebf3682995ba54a2f/);
   assert.match(workflow, /frontend_digest=sha256:5053d6a6481b3bcacb414adf82c41d7504c4a91a93c8c52dd3b11aae0e01c277/);
-  assert.doesNotMatch(workflow, /terraform|broker/i);
+  assert.doesNotMatch(workflow, /\bterraform (?:apply|init|plan)\b|aws iam|PutRolePolicy/i);
 });
 
 test("one-time baseline separates current protected main from its reviewed historical lineage", (t) => {
-  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-normal-deployment-operation.yml", "utf8"));
   const step = workflow.jobs.classify.steps.find(({ name }) => name === "Classify Lane A eligibility");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-baseline-binding-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -398,7 +400,7 @@ printf '%s\\n' "$FIXTURE_HISTORICAL_SHA"
 });
 
 test("one-time baseline retains exact historical backend and frontend image guards", (t) => {
-  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
+  const workflow = yaml.load(fs.readFileSync(".github/workflows/production-normal-deployment-operation.yml", "utf8"));
   const step = workflow.jobs.deploy.steps.find(({ name }) => name === "Authenticate live deployment baseline");
   const start = step.run.indexOf('if [[ "$BASELINE_MODE" == "true" ]]; then');
   const end = step.run.indexOf("\nelif ", start);

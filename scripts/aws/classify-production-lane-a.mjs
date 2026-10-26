@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
 import { classifyProductionChanges, PRODUCTION_RELEASE_CLASS } from "./production-deployment-classification.mjs";
+import { readProductionGitChanges } from "./production-git-source-range.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 
@@ -21,12 +22,10 @@ export function classifyLaneAComponentRanges({ backendFiles = [], frontendFiles 
   });
 }
 
-const git = (args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 const filesBetween = (base, target) => {
   assert.match(base, SHA); assert.match(target, SHA);
   execFileSync("git", ["merge-base", "--is-ancestor", base, target], { stdio: "ignore" });
-  const output = git(["diff", "--name-only", `${base}..${target}`]);
-  return output ? output.split("\n") : [];
+  return readProductionGitChanges(base, target, process.cwd()).paths;
 };
 
 export function classifyLaneACommitRanges({ backendBaseSha, frontendBaseSha, targetSha }) {

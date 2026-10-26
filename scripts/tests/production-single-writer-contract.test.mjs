@@ -7,7 +7,8 @@ const read = (file) => fs.readFileSync(file, "utf8");
 const legacyText = read(".github/workflows/deploy-ecs-release.yml");
 const legacy = yaml.load(legacyText);
 const releaseGateText = read(".github/workflows/release-gate.yml");
-const productionReadinessText = read(".github/workflows/production-deploy.yml");
+const productionCallerText = read(".github/workflows/production-deploy.yml");
+const productionReadinessText = productionCallerText + read(".github/workflows/production-normal-deployment-operation.yml");
 const releaseTrainText = read(".github/workflows/release-train.yml");
 
 test("release-gate and the normal application lane are the only enabled production mutation writers", () => {
@@ -18,6 +19,7 @@ test("release-gate and the normal application lane are the only enabled producti
   assert.equal(legacy.jobs["legacy-disabled"].if, "${{ false }}");
   assert.doesNotMatch(legacyText, /configure-aws-credentials|AWS_ACCESS_KEY_ID|terraform apply|register-task-definition|update-service|deregister-task-definition/i);
   assert.match(productionReadinessText, /configure-aws-credentials/);
+  assert.doesNotMatch(productionCallerText, /configure-aws-credentials|production-normal-release\.mjs/);
   assert.match(productionReadinessText, /Normal Production Deployment/);
   assert.match(productionReadinessText, /production-normal-release\.mjs/);
   assert.match(productionReadinessText, /smoke-release\.mjs/);

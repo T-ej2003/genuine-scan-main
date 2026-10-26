@@ -10,6 +10,7 @@ import { assertBackendRecoveryWorkflowGraph, assertSourceCertificationWorkflowGr
 import { ciImageReference, readApprovedImages } from "../lib/container-image-identity.mjs";
 
 const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/release-gate.yml", import.meta.url), "utf8"));
+const recoveryOperation = yaml.load(fs.readFileSync(new URL("../../.github/workflows/production-green-backend-recovery-operation.yml", import.meta.url), "utf8"));
 const quality = yaml.load(fs.readFileSync(new URL("../../.github/workflows/quality-gate.yml", import.meta.url), "utf8"));
 const copy = () => structuredClone(workflow);
 
@@ -94,13 +95,19 @@ for (const [name, change] of [
     const smoke = steps.findIndex((step) => step.name === "Verify backend health");
     [steps[commit], steps[smoke]] = [steps[smoke], steps[commit]]; }],
   ["green lane disabled", (gate) => { gate.jobs["deploy-production-ecs"].steps.find((step) => step.name === "Prepare governed green backend recovery handoff").if = "${{ false }}"; }],
-  ["normal deployer environment changed", (gate) => { gate.jobs["execute-green-backend-recovery"].environment = "production"; }],
-  ["normal deployer Terraform missing", (gate) => { gate.jobs["execute-green-backend-recovery"].steps = gate.jobs["execute-green-backend-recovery"].steps.filter((step) => step.name !== "Install pinned Terraform for approved runtime policy recheck"); }],
-  ["normal deployer Terraform unpinned", (gate) => { gate.jobs["execute-green-backend-recovery"].steps.find((step) => step.name === "Install pinned Terraform for approved runtime policy recheck").with.terraform_version = "latest"; }],
-  ["normal deployer role changed", (gate) => { gate.jobs["execute-green-backend-recovery"].steps.find((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment").with["role-to-assume"] = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; }],
 ]) test(`backend recovery certification rejects ${name}`, () => {
   const gate = copy(); change(gate);
   assert.throws(() => assertBackendRecoveryWorkflowGraph(gate));
+});
+
+for (const [name, change] of [
+  ["normal deployer environment changed", (job) => { job.environment = "production"; }],
+  ["normal deployer Terraform missing", (job) => { job.steps = job.steps.filter((step) => step.name !== "Install pinned Terraform for approved runtime policy recheck"); }],
+  ["normal deployer Terraform unpinned", (job) => { job.steps.find((step) => step.name === "Install pinned Terraform for approved runtime policy recheck").with.terraform_version = "latest"; }],
+  ["normal deployer role changed", (job) => { job.steps.find((step) => step.name === "Assume exact normal-deployer role through protected OIDC environment").with["role-to-assume"] = "arn:aws:iam::368992683803:role/mscqr-production-release-deployer"; }],
+]) test(`backend recovery certification rejects ${name}`, () => {
+  const operation = structuredClone(recoveryOperation); change(operation.jobs["execute-green-backend-recovery"]);
+  assert.throws(() => assertBackendRecoveryWorkflowGraph(copy(), operation));
 });
 
 for (const host of ["localhost", "127.0.0.1", "[::1]"]) test(`disposable database accepts exact ${host} endpoint`, () => {

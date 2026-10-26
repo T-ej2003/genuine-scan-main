@@ -1,0 +1,35 @@
+# Normal production baseline reconciliation
+
+Protected-main reference: `dc7623302ddbfe4f92108a1f6e4b2fed43d8ac39`.
+
+## Objective
+
+Prepare eligible application pushes from component-specific sources without treating a merged commit as proof of deployment or of privileged tooling authorization.
+
+## Authenticated starting point
+
+The strongly consistent production component-state readback is generation 2. Backend task definition `mscqr-production-rls-green-backend-candidate:37` is bound to source `d785aa7f1e154f37c0dc621082e3f6c46d5d5aec` by historical-completion run `40301022385`. Frontend task definition `mscqr-frontend:22` remains bound to `b7e0f171c716d5ba6d5a13da096bd87d9b638867` by bootstrap run `37054699578`. The only completed emergency marker is backend-health-recovery. There is no pending normal release receipt.
+
+The current frontend source range includes later STARtex auth/API changes. No authenticated frontend deployment receipt for those changes was found. They remain pending and cannot enter the normal lane. The backend range since its deployed source contains control-plane, test, and RLS-executor inputs, but no changed backend runtime input. The fixture in `scripts/tests/fixtures/production-normal-generation2.json` records the exact state and source ranges used for regression tests.
+
+## Correction
+
+The protected-main push still determines normal-lane eligibility. Preparation considers accumulated changes only for components selected by that push. It retains both sides of renames and copies for cumulative classification, but derives current changed paths independently from Git structural records without rename detection. A copy source does not count as changed merely because Git names it in a copy pair. Current renames and cross-component copies require the stronger lane; historical additions or deletions of selected image inputs remain blocked unless the exact source changed in the current eligible push. Sensitive runtime inputs remain pending until their own deployment evidence advances that component. Unselected components keep their prior state.
+
+Privileged workflow and host-executed tooling changes cannot be silently discarded. The planner accepts historical tooling only when the existing security component state records a later `SECURITY_INFRASTRUCTURE` Release Gate completion with an exact source and authorization identity, and no tooling edit follows that source. A tooling file copied into a selected runtime image still requires that component's deployment evidence. The preparation and execution state hashes bind the authorization through the transaction. The job checks its checkout before OIDC; that check alone does not authenticate a changed workflow. Existing recovery filtering, live ECS verification, ECR protection, image authorization, receipt reconciliation, rollback, and DynamoDB compare-and-swap remain in place.
+
+No component-state advancement is performed by preparation. No new historical-completion mechanism is added because the outstanding frontend work has no authenticated deployment completion to adopt.
+
+## Hostile review
+
+Review found that an earlier script-tree hash was declared by the same workflow it purported to authenticate, and omitted the workflow YAML itself. That hash is removed. The planner now fails closed on pending privileged workflow or tooling changes. Real Git tests cover rename, copy, cross-component move, and deletion identities. A Docker `COPY` contract test covers image inputs. The existing transaction tests cover wrong image identity, denied ECR protection, partial ECS mutation, rollback, receipt reconciliation, health failure, and generation conflicts. No AWS or component-state write is performed by this correction.
+
+## Acceptance and operational limit
+
+The live generation-2 state has no security component completion for the accumulated workflow/tooling changes, so an application push remains blocked until the existing stronger Release Gate records that authorization. An authorized synthetic state prepares backend-only, frontend-only, and combined ordinary releases; the actual frontend remains blocked by undeployed STARtex auth/API code until its own authenticated deployment. The ECR repository-protection check is a separate enforced prerequisite.
+
+The normal-deployer role is shared by normal deployment, Release Gate backend recovery, and historical completion. Their credentialed jobs now run in three immutable, SHA-pinned reusable workflows. The source-owned trust policy requires their exact `job_workflow_ref`, repository and owner IDs, main ref, audience, and protected environment. Each immutable job checks its caller and the reviewed host-tooling tree before running repository code or requesting AWS credentials. AWS supports `job_workflow_ref` as a GitHub OIDC trust condition; a direct caller or a different reusable workflow cannot satisfy the target trust. The caller files and all three operation files remain pending host tooling in cumulative normal-release classification until authenticated stronger-lane completion.
+
+**Governed IAM migration.** The role is owned by `infra/aws/terraform/production-component-deployment-state/normal-deployer-trust-policy.json`; the existing installation broker does not update an installed role's trust. After this PR is merged with a **merge commit preserving the pinned operation commit**, obtain separate scoped infrastructure-owner approval for `iam:UpdateAssumeRolePolicy` on `mscqr-production-normal-deployer`. Pause normal and recovery dispatches. From a clean exact protected-main checkout, use the existing non-root `mscqr-ops-admin` identity and `node scripts/aws/converge-production-normal-deployer-trust.mjs --source-sha FULL_MAIN_SHA --admin-profile mscqr-ops-admin`. The command accepts only the exact reviewed broad predecessor or target, verifies the pinned operation files against protected-main history, writes only the target role trust, and reads it back after an ambiguous response. Confirm the old broad statement is absent and that a direct caller cannot match the new trust before resuming dispatch. Do not use a squash or rebase merge that drops the pinned commit; rotate all three pins and repeat review if the pinned operation tree changes.
+
+The target trust denies all three consumers until their SHA-pinned callers are on protected main. If migration must be rolled back, pause dispatch and obtain a separate scoped approval for an exact predecessor trust restore after checking live role trust and source state; do not automatically re-enable the broad statement. A later tooling revision requires a newly reviewed immutable operation commit, caller pins, and exact trust convergence before its credentialed path can run. Ordinary application-only merges do not change the reviewed host-tooling tree and need no IAM rotation. No production IAM, ECS, or component-state mutation is performed by this PR, and normal deployment remains operationally unverified until IAM convergence and a governed live release succeed.

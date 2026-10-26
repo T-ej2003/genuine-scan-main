@@ -37,104 +37,20 @@ on:
 
 jobs:
   complete:
-    name: Reconcile claimed green recovery without ECS mutation
-    if: ${{ github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: production-normal-deploy
+    if: github.ref == 'refs/heads/main'
     permissions:
       contents: read
       actions: read
       deployments: read
       id-token: write
-    env:
-      AWS_REGION: eu-west-2
-      SOURCE_SHA: ${{ github.sha }}
-      GITHUB_TOKEN: ${{ github.token }}
-    steps:
-      - name: Checkout exact protected main
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Authenticate current protected main before credentials
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-          git fetch origin main
-          test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
-          test -z "$(git status --porcelain=v1)"
-
-      - name: Set up reviewed Node runtime
-        uses: actions/setup-node@v6
-        with:
-          node-version: 24
-
-      - name: Install reviewed dependencies before credentials
-        run: npm ci --ignore-scripts --no-audit --no-fund
-
-      - name: Authenticate fresh independent environment approval
-        run: |
-          set -euo pipefail
-          approval_dir="$RUNNER_TEMP/historical-green-approval"
-          install -d -m 700 "$approval_dir"
-          node scripts/aws/production-github-environment-approval.mjs \
-            --repository "$GITHUB_REPOSITORY" --environment production-normal-deploy \
-            --source-sha "$SOURCE_SHA" --workflow-ref "$GITHUB_WORKFLOW_REF" \
-            --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \
-            --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" \
-            --require-actual-approval --output "$approval_dir/approval.json" > /dev/null
-
-      - name: Assume exact normal-deployer role
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          aws-region: eu-west-2
-          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-normal-deployer
-          unset-current-credentials: true
-
-      - name: Complete the original claim and component state
-        env:
-          OPERATION_ID: ${{ inputs.operation_id }}
-          ORIGINAL_SOURCE_SHA: ${{ inputs.original_source_sha }}
-          ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
-          RECOVERY_TICKET: ${{ inputs.ticket }}
-          ORIGINAL_TASK_DEFINITION: ${{ inputs.original_task_definition }}
-          TARGET_TASK_DEFINITION: ${{ inputs.target_task_definition }}
-          IMAGE_DIGEST: ${{ inputs.image_digest }}
-          CLOUDTRAIL_EVENT_ID: ${{ inputs.cloudtrail_event_id }}
-          EXPECTED_COMPONENT_GENERATION: ${{ inputs.expected_component_generation }}
-        run: |
-          set -euo pipefail
-          source scripts/aws/production-credential-source.sh
-          export MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-normal-deployer
-          configure_production_aws_credential_source
-          test "$(aws sts get-caller-identity --query Arn --output text)" = \
-            "arn:aws:sts::368992683803:assumed-role/mscqr-production-normal-deployer/GitHubActions"
-          receipt_dir="$RUNNER_TEMP/historical-green-receipt"
-          install -d -m 700 "$receipt_dir"
-          approval="$RUNNER_TEMP/historical-green-approval/approval.json"
-          node scripts/aws/complete-production-historical-green-backend-recovery.mjs \
-            --current-source-sha "$SOURCE_SHA" \
-            --operation-id "$OPERATION_ID" \
-            --original-source-sha "$ORIGINAL_SOURCE_SHA" \
-            --original-run-id "$ORIGINAL_RUN_ID" \
-            --ticket "$RECOVERY_TICKET" \
-            --original-task-definition "$ORIGINAL_TASK_DEFINITION" \
-            --target-task-definition "$TARGET_TASK_DEFINITION" \
-            --image-digest "$IMAGE_DIGEST" \
-            --cloudtrail-event-id "$CLOUDTRAIL_EVENT_ID" \
-            --expected-component-generation "$EXPECTED_COMPONENT_GENERATION" \
-            --environment-approval "$approval" \
-            --environment-approval-sha256 "$(sha256sum "$approval" | cut -d' ' -f1)" \
-            --evidence-out "$receipt_dir/evidence.json"
-
-      - name: Preserve authenticated completion receipt
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: historical-green-recovery-completion-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/historical-green-receipt/evidence.json
-          if-no-files-found: ignore
-          retention-days: 90
+    uses: T-ej2003/genuine-scan-main/.github/workflows/production-historical-green-completion-operation.yml@05501eedcf0e38ef0108326eefd7b3230f067ff8
+    with:
+      operation_id: ${{ inputs.operation_id }}
+      original_source_sha: ${{ inputs.original_source_sha }}
+      original_run_id: ${{ inputs.original_run_id }}
+      ticket: ${{ inputs.ticket }}
+      original_task_definition: ${{ inputs.original_task_definition }}
+      target_task_definition: ${{ inputs.target_task_definition }}
+      image_digest: ${{ inputs.image_digest }}
+      cloudtrail_event_id: ${{ inputs.cloudtrail_event_id }}
+      expected_component_generation: ${{ inputs.expected_component_generation }}

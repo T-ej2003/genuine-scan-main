@@ -5,12 +5,14 @@ import yaml from "js-yaml";
 import { PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 
 const file = ".github/workflows/complete-historical-green-backend-recovery.yml";
-const source = fs.readFileSync(file, "utf8");
+const caller = yaml.load(fs.readFileSync(file, "utf8"));
+const source = fs.readFileSync(".github/workflows/production-historical-green-completion-operation.yml", "utf8");
 const workflow = yaml.load(source);
 
 test("historical completion uses an independently approved normal-deployer job on protected main", () => {
   assert.deepEqual(Object.keys(workflow.jobs), ["complete"]);
-  assert.deepEqual(workflow.concurrency, { group: "production-deploy", "cancel-in-progress": false });
+  assert.deepEqual(caller.concurrency, { group: "production-deploy", "cancel-in-progress": false });
+  assert.match(caller.jobs.complete.uses, /production-historical-green-completion-operation\.yml@[a-f0-9]{40}$/);
   const job = workflow.jobs.complete;
   assert.equal(job.environment, "production-normal-deploy");
   assert.equal(job.if, "${{ github.ref == 'refs/heads/main' }}");

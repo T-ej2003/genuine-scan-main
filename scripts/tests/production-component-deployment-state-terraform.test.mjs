@@ -12,7 +12,13 @@ test("component deployment state Terraform fixes the table, key, and exact write
   assert.match(source, /billing_mode\s*=\s*"PAY_PER_REQUEST"/); assert.match(source, /hash_key\s*=\s*"stateKey"/);
   const trust = read("normal-deployer-trust-policy.json").Statement[0].Condition.StringEquals;
   assert.equal(trust["token.actions.githubusercontent.com:sub"], "repo:T-ej2003/genuine-scan-main:environment:production-normal-deploy");
-  assert.deepEqual(Object.keys(trust).sort(), ["token.actions.githubusercontent.com:aud", "token.actions.githubusercontent.com:sub"]);
+  assert.equal(trust["token.actions.githubusercontent.com:repository_id"], "1145608538");
+  assert.equal(trust["token.actions.githubusercontent.com:repository_owner_id"], "183396573");
+  assert.equal(trust["token.actions.githubusercontent.com:ref"], "refs/heads/main");
+  assert.deepEqual(Object.keys(trust).sort(), ["token.actions.githubusercontent.com:aud", "token.actions.githubusercontent.com:sub", "token.actions.githubusercontent.com:repository_id", "token.actions.githubusercontent.com:repository_owner_id", "token.actions.githubusercontent.com:ref", "token.actions.githubusercontent.com:job_workflow_ref"].sort());
+  const pinned = trust["token.actions.githubusercontent.com:job_workflow_ref"][0].split("@")[1];
+  assert.match(pinned, /^[a-f0-9]{40}$/);
+  assert.deepEqual(trust["token.actions.githubusercontent.com:job_workflow_ref"], ["production-normal-deployment-operation.yml", "production-green-backend-recovery-operation.yml", "production-historical-green-completion-operation.yml"].map((name) => `T-ej2003/genuine-scan-main/.github/workflows/${name}@${pinned}`));
   const policy = read("normal-deployer-policy.json");
   assert.deepEqual(policy.Statement.find(({ Sid }) => Sid === "ReadAndAdvanceExactComponentState"), {
     Sid: "ReadAndAdvanceExactComponentState", Effect: "Allow", Action: ["dynamodb:GetItem", "dynamodb:UpdateItem"], Resource: table,
