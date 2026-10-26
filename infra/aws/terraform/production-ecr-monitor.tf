@@ -107,32 +107,37 @@ resource "aws_cloudwatch_event_rule" "ecr_protection_change" {
   tags = local.common_tags
 }
 
-resource "aws_iam_role" "ecr_alert_event_target" {
-  name = "mscqr-production-ecr-alert-events"
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "events.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-      Condition = {
-        StringEquals = { "aws:SourceAccount" = "368992683803" }
-        ArnEquals = { "aws:SourceArn" = [
-          aws_cloudwatch_event_rule.ecr_protection_change.arn,
-          aws_cloudwatch_event_rule.ecr_image_action.arn,
-        ] }
-      }
-    }]
-  })
-  tags = local.common_tags
+import {
+  to = aws_sns_topic_policy.ecr_alerts
+  id = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts"
 }
 
-resource "aws_iam_role_policy" "ecr_alert_event_target" {
-  name = "mscqr-production-ecr-alert-publish"
-  role = aws_iam_role.ecr_alert_event_target.id
+resource "aws_sns_topic_policy" "ecr_alerts" {
+  arn = local.ecr_alert_topic_arn
   policy = jsonencode({
-    Version   = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = "sns:Publish", Resource = local.ecr_alert_topic_arn }]
+    Version = "2008-10-17"
+    Id      = "__default_policy_ID"
+    Statement = [
+      {
+        Sid       = "__default_statement_ID"
+        Effect    = "Allow"
+        Principal = { AWS = "*" }
+        Action    = ["SNS:Publish", "SNS:RemovePermission", "SNS:SetTopicAttributes", "SNS:DeleteTopic", "SNS:ListSubscriptionsByTopic", "SNS:GetTopicAttributes", "SNS:AddPermission", "SNS:Subscribe"]
+        Resource  = local.ecr_alert_topic_arn
+        Condition = { StringEquals = { "AWS:SourceAccount" = "368992683803" } }
+      },
+      {
+        Sid       = "AllowExactEcrProtectionRules"
+        Effect    = "Allow"
+        Principal = { Service = "events.amazonaws.com" }
+        Action    = "sns:Publish"
+        Resource  = local.ecr_alert_topic_arn
+        Condition = {
+          ArnEquals    = { "aws:SourceArn" = [aws_cloudwatch_event_rule.ecr_protection_change.arn, aws_cloudwatch_event_rule.ecr_image_action.arn] }
+          StringEquals = { "aws:SourceAccount" = "368992683803" }
+        }
+      }
+    ]
   })
 }
 
@@ -140,8 +145,7 @@ resource "aws_cloudwatch_event_target" "ecr_protection_change" {
   rule       = aws_cloudwatch_event_rule.ecr_protection_change.name
   target_id  = "existing-production-alerts"
   arn        = local.ecr_alert_topic_arn
-  role_arn   = aws_iam_role.ecr_alert_event_target.arn
-  depends_on = [aws_iam_role_policy.ecr_alert_event_target]
+  depends_on = [aws_sns_topic_policy.ecr_alerts]
   input_transformer {
     input_paths = {
       event      = "$.detail.eventName"
@@ -168,8 +172,7 @@ resource "aws_cloudwatch_event_target" "ecr_image_action" {
   rule       = aws_cloudwatch_event_rule.ecr_image_action.name
   target_id  = "existing-production-alerts"
   arn        = local.ecr_alert_topic_arn
-  role_arn   = aws_iam_role.ecr_alert_event_target.arn
-  depends_on = [aws_iam_role_policy.ecr_alert_event_target]
+  depends_on = [aws_sns_topic_policy.ecr_alerts]
   input_transformer {
     input_paths = {
       action     = "$.detail.action-type"

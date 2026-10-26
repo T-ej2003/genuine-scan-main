@@ -9,6 +9,9 @@ import { createProductionComponentDeploymentStateClient } from "./production-com
 import { ECR_PROTECTION, verifyRepository } from "./verify-production-ecr-repository-protection.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "./stage-b-terraform-backend-contract.mjs";
 import { brokerDigest } from "./stage-b-staged-broker-contract.mjs";
+import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { assertHistoricalRuntimeRetention } from "./production-historical-runtime-contract.mjs";
+import { authenticateHistoricalRuntimeEvidence } from "./production-historical-runtime-evidence.mjs";
 
 const CLUSTER = "mscqr-prod-euw2-main";
 const SERVICES = ["mscqr-backend-servi-euw2", "mscqr-frontend-servi-euw2"];
@@ -169,6 +172,25 @@ const imageFromTask = (task) => {
   return images[0];
 };
 
+export function addRetainedHistoricalWorker(inventory, retention, run, verify) {
+  assertHistoricalRuntimeRetention(retention);
+  const { reference, authority } = retention;
+  authenticateHistoricalRuntimeEvidence({ evidence: { schemaVersion: 1, reference, binding: authority.binding, signatureBase64: authority.signatureBase64 }, retained: true, verify });
+  const runtime = reference.runtime;
+  const definition = json(run, ["ecs", "describe-task-definition", "--task-definition", runtime.taskDefinitionArn]).taskDefinition;
+  assert.equal(definition?.taskDefinitionArn, runtime.taskDefinitionArn);
+  assert.equal(definition.family, "mscqr-production-rls-green-worker-candidate");
+  const { registeredAt, registeredBy, status, ...contents } = definition;
+  assert.equal(canonicalSha256(contents), runtime.taskDefinitionSha256, "Retained worker task definition changed");
+  const worker = definition.containerDefinitions?.find(({ name }) => name === "worker");
+  assert.ok(worker);
+  const sources = worker.environment?.filter(({ name }) => ["RELEASE_GIT_SHA", "GIT_SHA"].includes(name)).map(({ value }) => value) || [];
+  assert.ok(sources.length > 0 && sources.every((value) => value === runtime.sourceSha), "Retained worker source changed");
+  const image = imageFromTask(definition);
+  assert.equal(image, `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-worker@${runtime.imageDigest}`);
+  addProtectedImage(inventory, { image, reason: "RETAINED_HISTORICAL_RUNTIME", owner: "component-state", sourceSha: runtime.sourceSha, taskDefinition: runtime.taskDefinitionArn, operation: retention.closure.githubRunId });
+}
+
 export function collectProtectedInventory(run, now = new Date().toISOString()) {
   const caller = json(run, ["sts", "get-caller-identity"]);
   assert.equal(caller.Account, ECR_PROTECTION.account);
@@ -221,6 +243,7 @@ export function collectProtectedInventory(run, now = new Date().toISOString()) {
     for (const [name, image] of Object.entries(receipt.images)) addProtectedImage(inventory, { image, reason: "PENDING_RELEASE", owner: "normal-deploy", sourceSha: receipt.sourceSha, operation: receipt.githubRunId });
   }
   appendOpenRecoveryJournals(inventory, readRecoveryJournals(run));
+  if (state.historicalRuntimeRetention) addRetainedHistoricalWorker(inventory, state.historicalRuntimeRetention, run);
   const worker = json(run, ["ecs", "describe-task-definition", "--task-definition", WORKER]).taskDefinition;
   assert.equal(worker?.family, "mscqr-worker");
   addProtectedImage(inventory, { image: imageFromTask(worker), reason: "HISTORICAL_WORKER", owner: "release-security", taskDefinition: worker.taskDefinitionArn });

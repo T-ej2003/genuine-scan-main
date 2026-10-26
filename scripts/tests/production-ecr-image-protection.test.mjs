@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { addProtectedImage, appendOpenRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
+import { addProtectedImage, addRetainedHistoricalWorker, appendOpenRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
 import { assertEcrRepositoryProtection, ECR_PROTECTION, verifyRepository } from "../aws/verify-production-ecr-repository-protection.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { brokerDigest } from "../aws/stage-b-staged-broker-contract.mjs";
+import { historicalRuntimeFixture } from "./fixtures/historical-runtime.mjs";
+import { historicalRuntimeRetention } from "../aws/production-historical-runtime-evidence.mjs";
+import { stateHash } from "../aws/production-component-deployment-state.mjs";
 
 const sha = "a".repeat(40), digest = `sha256:${"b".repeat(64)}`;
 const image = (repo = "mscqr-backend") => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repo}@${digest}`;
@@ -49,6 +52,32 @@ test("multiple active, rollback, pending and worker reasons deduplicate by exact
   assert.ok(inventory.every((entry) => entry.retentionEligibility === "DISABLED"));
   assert.throws(() => finalizeProtectedInventory(new Map(), "now"), /Empty/);
   assert.throws(() => addProtectedImage(values, { image: image("other"), reason: "ACTIVE_SERVICE", owner: "ecs" }));
+});
+
+test("signed historical retention protects its exact worker candidate alongside the reviewed legacy worker", () => {
+  const f = historicalRuntimeFixture();
+  const retention = historicalRuntimeRetention({ evidence: f.evidence, sourceSha: f.release, current: f.state, componentStateSha256: stateHash(f.state), reader: f.reader, verify: f.verify, writerContext: f.writerContext, now: f.now });
+  const values = new Map();
+  const run = (args) => {
+    assert.deepEqual(args.slice(0, 2), ["ecs", "describe-task-definition"]);
+    assert.equal(args[3], f.definitionArn);
+    return JSON.stringify({ taskDefinition: f.definition });
+  };
+  addRetainedHistoricalWorker(values, retention, run, f.verify);
+  addProtectedImage(values, { image: image("mscqr-worker"), reason: "HISTORICAL_WORKER", owner: "release-security", taskDefinition: "mscqr-worker:4" });
+  const inventory = finalizeProtectedInventory(values, f.now);
+  assert.equal(inventory.length, 2);
+  const retained = inventory.find(({ digest: value }) => value === f.imageDigest);
+  assert.deepEqual(retained.reasons, ["RETAINED_HISTORICAL_RUNTIME"]);
+  assert.deepEqual(retained.sourceShas, [f.source]);
+  const findings = inspectProtectedImages(inventory, (_, imageDigest) => imageDigest === f.imageDigest ? undefined : { registryId: ECR_PROTECTION.account, repositoryName: "mscqr-worker", imageDigest, imageTags: [] });
+  assert.equal(findings.find(({ digest: value }) => value === f.imageDigest).severity, "HIGH");
+  assert.throws(() => addRetainedHistoricalWorker(new Map(), retention, () => JSON.stringify({ taskDefinition: { ...f.definition, family: "mscqr-worker" } }), f.verify));
+  for (const replacement of [
+    { ...f.definition, containerDefinitions: [{ ...f.definition.containerDefinitions[0], image: image("mscqr-worker") }] },
+    { ...f.definition, containerDefinitions: [{ ...f.definition.containerDefinitions[0], environment: [{ name: "RELEASE_GIT_SHA", value: "9".repeat(40) }] }] },
+  ]) assert.throws(() => addRetainedHistoricalWorker(new Map(), retention, () => JSON.stringify({ taskDefinition: replacement }), f.verify));
+  assert.throws(() => addRetainedHistoricalWorker(new Map(), { ...retention, authority: { ...retention.authority, signatureBase64: Buffer.from("wrong").toString("base64") } }, run, f.verify));
 });
 
 test("missing active is critical, missing rollback or pending is high, unreadable ECR is unknown", () => {
@@ -126,6 +155,19 @@ test("Terraform and publishers cannot restore count-based expiration", () => {
   }
 });
 
+test("EventBridge targets use exact-rule SNS topic policy without an execution role", () => {
+  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-monitor.tf", "utf8");
+  assert.match(terraform, /import \{\s*to = aws_sns_topic_policy\.ecr_alerts\s*id = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts"\s*\}/);
+  assert.match(terraform, /resource "aws_sns_topic_policy" "ecr_alerts"/);
+  assert.doesNotMatch(terraform, /resource "aws_sns_topic"/);
+  assert.match(terraform, /Sid\s*=\s*"__default_statement_ID"/);
+  assert.match(terraform, /Principal\s*=\s*\{ Service = "events\.amazonaws\.com" \}/);
+  assert.match(terraform, /"aws:SourceArn"\s*=\s*\[aws_cloudwatch_event_rule\.ecr_protection_change\.arn, aws_cloudwatch_event_rule\.ecr_image_action\.arn\]/);
+  assert.match(terraform, /"aws:SourceAccount"\s*=\s*"368992683803"/);
+  assert.equal((terraform.match(/depends_on = \[aws_sns_topic_policy\.ecr_alerts\]/g) || []).length, 2);
+  assert.doesNotMatch(terraform, /role_arn\s*=|ecr_alert_event_target/);
+});
+
 test("scheduled monitor has exact main OIDC trust, scoped reads and no ECS mutation grant", () => {
   const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-monitor.tf", "utf8");
   const workflow = fs.readFileSync(".github/workflows/production-ecr-image-monitor.yml", "utf8");
@@ -140,7 +182,6 @@ test("scheduled monitor has exact main OIDC trust, scoped reads and no ECS mutat
   assert.match(terraform, /events\.amazonaws\.com/);
   assert.match(terraform, /aws:SourceArn/);
   assert.match(terraform, /sns:Publish/);
-  assert.match(terraform, /role_arn\s*=\s*aws_iam_role\.ecr_alert_event_target\.arn/);
   assert.doesNotMatch(terraform, /"ecs:UpdateService"|"ecs:RegisterTaskDefinition"|"ecs:RunTask"/);
   assert.equal(monitor.name, "Production ECR Image Monitor");
   assert.ok(monitor.on.schedule?.[0]?.cron);
