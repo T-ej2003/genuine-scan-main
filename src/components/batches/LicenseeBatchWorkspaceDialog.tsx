@@ -61,6 +61,8 @@ type LicenseeBatchWorkspaceDialogProps = {
   onOpenChange: (open: boolean) => void;
   role?: string | null;
   workspace: StableBatchOverviewRow | null;
+  workspaceLoading?: boolean;
+  workspaceError?: string | null;
   manufacturers: ManufacturerRow[];
   manufacturerPageControls?: React.ReactNode;
   assignManufacturerId: string;
@@ -336,6 +338,8 @@ export function LicenseeBatchWorkspaceDialog({
   onOpenChange,
   role,
   workspace,
+  workspaceLoading,
+  workspaceError,
   manufacturers,
   manufacturerPageControls,
   assignManufacturerId,
@@ -435,7 +439,12 @@ export function LicenseeBatchWorkspaceDialog({
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="batch-workspace-dialog" className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
-        {!workspace ? null : isManufacturerMode ? (
+        {!workspace ? (
+          <DialogHeader className="border-b px-6 py-5">
+            <DialogTitle>Batch workspace</DialogTitle>
+            <DialogDescription>{workspaceError || (workspaceLoading ? "Loading complete allocation details…" : "Allocation details are unavailable.")}</DialogDescription>
+          </DialogHeader>
+        ) : isManufacturerMode ? (
           <>
             <DialogHeader className="border-b px-6 py-5">
               <div className="flex flex-wrap items-start justify-between gap-4">

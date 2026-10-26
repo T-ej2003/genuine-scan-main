@@ -985,11 +985,21 @@ BEGIN
       FROM public."Batch" b
      WHERE checkpoint_at IS NULL
     UNION
+    SELECT b.id
+      FROM public."Batch" b
+     WHERE checkpoint_at IS NOT NULL
+       AND b."updatedAt">=checkpoint_at-interval '10 minutes'
+    UNION
     SELECT DISTINCT q."batchId"
       FROM public."QRCode" q
      WHERE checkpoint_at IS NOT NULL
        AND q."batchId" IS NOT NULL
        AND q."updatedAt">=checkpoint_at-interval '10 minutes'
+    UNION
+    SELECT b.id
+      FROM public."Batch" b
+      JOIN public."InventoryStatusRollup" r ON r."batchId"=b.id
+     WHERE r."totalCodes"<>b."totalCodes"
   ), counts AS (
     SELECT b.id AS "batchId",b."licenseeId",b."manufacturerId",b."totalCodes",
       count(q.id) FILTER (WHERE q.status='DORMANT'::public."QRStatus")::integer AS dormant,

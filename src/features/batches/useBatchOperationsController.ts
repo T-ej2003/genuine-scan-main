@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 import apiClient from "@/lib/api-client";
@@ -7,6 +8,20 @@ import { onMutationEvent } from "@/lib/mutation-events";
 
 import { useAssignableManufacturers, useBatches } from "./hooks";
 import type { BatchRow, ManufacturerRow } from "./types";
+
+type CommittedAllocation = {
+  allocated?: number;
+  startCode?: string;
+  endCode?: string;
+  sourceRemainingCodes?: number;
+};
+
+export const allocationSuccessHint = (data: CommittedAllocation, manufacturerName: string) => ({
+  title: "Allocation successful",
+  body: typeof data.allocated === "number" && typeof data.sourceRemainingCodes === "number"
+    ? `${data.allocated.toLocaleString()} QR labels assigned to ${manufacturerName}. ${data.startCode && data.endCode ? `First label: ${data.startCode}; last label: ${data.endCode}. ` : ""}Remaining available: ${data.sourceRemainingCodes.toLocaleString()}.`
+    : `QR labels assigned to ${manufacturerName}. Refresh the batch to view the committed label details.`,
+});
 
 const LARGE_ALLOCATION_THRESHOLD = 25_000;
 
@@ -53,6 +68,7 @@ export function useBatchOperationsController({
   onAssignmentComplete,
 }: UseBatchOperationsControllerParams) {
   const isManufacturer = role === "manufacturer";
+  const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<BatchRow[]>([]);
@@ -390,9 +406,12 @@ export function useBatchOperationsController({
         if (showLargeAllocationProgress) progress.close();
         const raw = String(response.error || "Error").toLowerCase();
         const isBusy = raw.includes("busy") || raw.includes("retry") || raw.includes("conflict");
+        const uncertain = Number(response.status) >= 500;
         toast({
-          title: isBusy ? "Batch busy" : "Assign failed",
-          description: isBusy
+          title: uncertain ? "Allocation status uncertain" : isBusy ? "Batch busy" : "Assign failed",
+          description: uncertain
+            ? "Refresh inventory and check the allocation map before trying again."
+            : isBusy
             ? "These codes were just allocated by another action. Please retry."
             : response.error || "Error",
           variant: "destructive",
@@ -402,36 +421,44 @@ export function useBatchOperationsController({
 
       const data = (response.data || {}) as {
         newBatchName?: string;
-        message?: { title?: string; body?: string };
+        allocated?: number;
+        startCode?: string;
+        endCode?: string;
+        sourceRemainingCodes?: number;
       };
-
-      if (showLargeAllocationProgress) {
-        await progress.complete(
-          `Allocated ${quantity.toLocaleString()} codes. The new manufacturer batch is ready for print.`
-        );
+      if (data.allocated !== quantity || !Number.isInteger(data.sourceRemainingCodes) || !data.startCode || !data.endCode) {
+        if (showLargeAllocationProgress) progress.close();
+        toast({ title: "Allocation status uncertain", description: "Refresh inventory and check the allocation map before trying again." });
+        return;
       }
 
-      if (data.message?.title || data.message?.body) {
-        setAllocationHint({
-          title: data.message?.title || "Allocation complete",
-          body:
-            data.message?.body ||
-            "The source batch retains the remainder and the allocated batch is ready for print.",
-        });
-      }
+      const manufacturerName = manufacturers.find((manufacturer) => manufacturer.id === assignManufacturerId)?.name || "the selected manufacturer";
+      setAllocationHint(allocationSuccessHint(data, manufacturerName));
 
       toast({
         title: "Assigned",
         description: `${data.newBatchName || "Allocated batch"} was created for controlled printing.`,
       });
       resetAssignDraft();
-      await fetchBatches();
-      await onAssignmentComplete?.();
-    } catch (error) {
+      try {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["batches", "allocation-map"] }),
+          queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] }),
+        ]);
+        await fetchBatches();
+        await onAssignmentComplete?.();
+        if (showLargeAllocationProgress) {
+          await progress.complete(`Allocated ${data.allocated?.toLocaleString() || quantity.toLocaleString()} codes.`);
+        }
+      } catch {
+        if (showLargeAllocationProgress) progress.close();
+        toast({ title: "Allocation completed", description: "The inventory view could not refresh. Refresh the page to see the latest totals." });
+      }
+    } catch {
       if (showLargeAllocationProgress) progress.close();
       toast({
-        title: "Assign failed",
-        description: error instanceof Error ? error.message : "Error",
+        title: "Allocation status uncertain",
+        description: "Refresh inventory and check the allocation map before trying again.",
         variant: "destructive",
       });
     } finally {

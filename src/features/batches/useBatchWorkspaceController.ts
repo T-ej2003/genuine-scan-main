@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { saveAs } from "file-saver";
 
 import type { AllocationMapPayload } from "@/components/batches/BatchAllocationMapDialog";
 import apiClient from "@/lib/api-client";
-import type { StableBatchOverviewRow } from "@/lib/batch-workspace";
+import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 
+import { useBatchAllocationMap } from "./hooks";
 import type { AuditLogRow, BatchRow, TraceEventRow, TraceEventType } from "./types";
 
 type ToastLike = (options: {
@@ -17,6 +18,7 @@ type UseBatchWorkspaceControllerParams = {
   rows: BatchRow[];
   stableRows: StableBatchOverviewRow[];
   toast: ToastLike;
+  isManufacturer: boolean;
   onWorkspaceBatchChange?: (batch: BatchRow | null) => void;
   onWorkspaceDraftReset?: () => void;
 };
@@ -48,6 +50,7 @@ export function useBatchWorkspaceController({
   rows,
   stableRows,
   toast,
+  isManufacturer,
   onWorkspaceBatchChange,
   onWorkspaceDraftReset,
 }: UseBatchWorkspaceControllerParams) {
@@ -56,6 +59,17 @@ export function useBatchWorkspaceController({
   const [allocationMap, setAllocationMap] = useState<AllocationMapPayload | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [workspaceBatch, setWorkspaceBatch] = useState<StableBatchOverviewRow | null>(null);
+  const lastPageRows = useRef(stableRows);
+  const workspaceMapQuery = useBatchAllocationMap(
+    workspaceBatch?.focusBatchId,
+    workspaceOpen && !isManufacturer,
+    workspaceBatch?.licensee?.id || workspaceBatch?.sourceBatchRow?.licenseeId
+  );
+  const completeWorkspace = useMemo(() => {
+    const map = workspaceMapQuery.data;
+    if (!map?.sourceBatch) return null;
+    return buildStableBatchOverviewRows([map.sourceBatch, ...map.allocations] as BatchRow[])[0] || null;
+  }, [workspaceMapQuery.data]);
   const [workspaceHistoryLogs, setWorkspaceHistoryLogs] = useState<TraceEventRow[]>([]);
   const [workspaceHistoryLoading, setWorkspaceHistoryLoading] = useState(false);
   const [workspaceHistoryLastUpdatedAt, setWorkspaceHistoryLastUpdatedAt] = useState<Date | null>(null);
@@ -146,9 +160,9 @@ export function useBatchWorkspaceController({
   const openWorkspace = async (workspace: StableBatchOverviewRow) => {
     setWorkspaceBatch(workspace);
     setWorkspaceOpen(true);
-    onWorkspaceBatchChange?.(workspace.sourceBatchRow || null);
+    onWorkspaceBatchChange?.(isManufacturer ? workspace.sourceBatchRow || null : null);
     onWorkspaceDraftReset?.();
-    await fetchWorkspaceHistory(workspace);
+    if (isManufacturer) await fetchWorkspaceHistory(workspace);
   };
 
   const closeWorkspace = () => {
@@ -166,6 +180,10 @@ export function useBatchWorkspaceController({
     setAllocationMap(null);
 
     try {
+      if (workspaceMapQuery.data && workspaceBatch?.sourceBatchId === (batch.rootBatchId || batch.parentBatchId || batch.id)) {
+        setAllocationMap(workspaceMapQuery.data as AllocationMapPayload);
+        return;
+      }
       const response = await apiClient.getBatchAllocationMap(batch.id, batch.licenseeId);
       if (!response.success || !response.data) {
         toast({
@@ -231,6 +249,13 @@ export function useBatchWorkspaceController({
   };
 
   useEffect(() => {
+    if (!workspaceOpen || isManufacturer || !completeWorkspace) return;
+    onWorkspaceBatchChange?.(completeWorkspace.sourceBatchRow || null);
+    if (workspaceBatch) void fetchWorkspaceHistory(workspaceBatch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completeWorkspace, isManufacturer, workspaceOpen]);
+
+  useEffect(() => {
     if (!workspaceOpen || !workspaceBatch) return;
     const timer = window.setInterval(() => {
       void fetchWorkspaceHistory(workspaceBatch, { silent: true });
@@ -240,6 +265,8 @@ export function useBatchWorkspaceController({
   }, [workspaceBatch, workspaceOpen]);
 
   useEffect(() => {
+    if (lastPageRows.current === stableRows) return;
+    lastPageRows.current = stableRows;
     if (!workspaceOpen || !workspaceBatch) return;
     const refreshed = stableRows.find((row) => row.sourceBatchId === workspaceBatch.sourceBatchId) || null;
     if (!refreshed) {
@@ -247,11 +274,15 @@ export function useBatchWorkspaceController({
       return;
     }
 
-    setWorkspaceBatch(refreshed);
-    onWorkspaceBatchChange?.(refreshed.sourceBatchRow || null);
-    void fetchWorkspaceHistory(refreshed, { silent: true });
+    if (isManufacturer) {
+      setWorkspaceBatch(refreshed);
+      onWorkspaceBatchChange?.(refreshed.sourceBatchRow || null);
+      void fetchWorkspaceHistory(refreshed, { silent: true });
+    } else {
+      void workspaceMapQuery.refetch();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stableRows, workspaceBatch, workspaceOpen]);
+  }, [stableRows, workspaceOpen]);
 
   const downloadAuditPackage = async (batch: BatchRow) => {
     if (exportingBatchId) return;
@@ -279,7 +310,9 @@ export function useBatchWorkspaceController({
     allocationMapLoading,
     allocationMap,
     workspaceOpen,
-    workspaceBatch,
+    workspaceBatch: isManufacturer ? workspaceBatch : completeWorkspace,
+    workspaceLoading: !isManufacturer && workspaceOpen && workspaceMapQuery.isPending,
+    workspaceError: !isManufacturer && workspaceOpen ? workspaceMapQuery.error?.message || null : null,
     workspaceHistoryLogs,
     workspaceHistoryLoading,
     workspaceHistoryLastUpdatedAt,
