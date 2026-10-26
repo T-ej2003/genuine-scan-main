@@ -142,6 +142,7 @@ test("open authenticated recovery journal protects its digest; completion releas
   appendOpenRecoveryJournals(finished, [dispatch, complete]);
   assert.equal(finished.size, 0);
   assert.throws(() => appendOpenRecoveryJournals(new Map(), [{ ...dispatch, key: dispatch.key.replace(/a/g, "b") }]));
+  assert.throws(() => appendOpenRecoveryJournals(new Map(), [{ ...dispatch, key: `${dispatch.key}/extra` }]));
 });
 
 test("Terraform and publishers cannot restore count-based expiration", () => {

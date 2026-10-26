@@ -12,6 +12,8 @@ The repository does not currently have a production Terraform execution role or 
 
 The repository administrator must configure `production-ecr-infrastructure-plan` for protected `main` without static AWS secrets and `production-ecr-infrastructure-apply` for protected `main` with the required human reviewer and no admin bypass, exactly as `github-environment-contract.json` describes. Confirm both OIDC trusts against a live job token and simulate the exact role actions before approving an apply. The separate unattended `production-ecr-monitor` environment must also be configured before enabling monitoring. This PR creates none of these AWS or GitHub objects. Do not use root, the normal release-deployer, or a role with broader privileges as a fallback.
 
+The monitor and infrastructure inventory gates check the exact AWS account, allowlisted assumed role, and a single nonempty session segment. The infrastructure SNS gate additionally excludes the monitor role. Focused tests reject wrong accounts, similar role names, empty sessions and unexpected ARN paths; live role assumption still requires post-bootstrap verification.
+
 ## Governed plan and apply
 
 Dispatch `.github/workflows/production-ecr-protection-infrastructure.yml` only from protected main with its exact 40-character `source_sha`. The plan job verifies current main, assumes the plan role, authenticates the live protected-image inventory and SNS predecessor, initializes only this root, then publishes a saved binary plan and JSON review view. It rejects modules, provisioners, drift, destroy/replace actions, unexpected managed addresses, and any lifecycle policy. The workflow holds the established `production-deploy` concurrency group.

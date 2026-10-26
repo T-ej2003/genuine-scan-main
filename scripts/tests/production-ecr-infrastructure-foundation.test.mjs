@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertPlan, assertSnsPolicyPredecessor, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertPlan, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertEcrAssumedRole } from "../aws/production-ecr-image-monitor.mjs";
 
 const stack = "infra/aws/terraform/production-ecr-protection";
 const read = name => fs.readFileSync(`${stack}/${name}`, "utf8");
@@ -20,6 +21,25 @@ const basePlan = () => ({
     ...["backend", "web", "worker"].map(name => ({ address: `data.aws_ecr_repository.${name}`, mode: "data" })),
     { address: "data.aws_sns_topic.alerts", mode: "data" }] } },
   resource_changes: [], prior_state: { values: { root_module: { resources: [] } } },
+});
+
+test("ECR inventory and infrastructure gates require the exact assumed role and one session segment", () => {
+  for (const role of ["mscqr-production-ecr-monitor", "mscqr-production-ecr-infrastructure-plan", "mscqr-production-ecr-infrastructure-apply"]) {
+    const valid = { Account: STATE.account, Arn: `arn:aws:sts::${STATE.account}:assumed-role/${role}/run-123` };
+    assert.doesNotThrow(() => assertEcrAssumedRole(valid, role));
+    for (const caller of [
+      { ...valid, Account: "000000000000" },
+      { ...valid, Arn: valid.Arn.replace(STATE.account, "000000000000") },
+      { ...valid, Arn: valid.Arn.replace(`/${role}/`, "/mscqr-production-ecr-other/") },
+      { ...valid, Arn: valid.Arn.replace(`/${role}/`, `/${role}-extra/`) },
+      { ...valid, Arn: valid.Arn.replace("/run-123", "/") },
+      { ...valid, Arn: `${valid.Arn}/extra` },
+      { ...valid, Arn: `arn:aws:iam::${STATE.account}:role/${role}` },
+      { ...valid, Arn: null },
+    ]) assert.throws(() => assertEcrAssumedRole(caller, role));
+  }
+  assert.throws(() => assertEcrAssumedRole({ Account: STATE.account, Arn: `arn:aws:sts::${STATE.account}:assumed-role/mscqr-production-ecr-monitor/run` }, "mscqr-production-ecr-monitor/other"), /Unreviewed/);
+  assert.throws(() => checkSnsPolicy("mscqr-production-ecr-monitor"), /Wrong SNS inspection role/);
 });
 
 test("isolated backend and ownership exclude the broad root and existing repositories", () => {

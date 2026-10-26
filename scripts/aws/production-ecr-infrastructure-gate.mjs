@@ -4,7 +4,7 @@ import fs from "node:fs";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { collectProtectedInventory, createAwsRunner, inspectProtectedImages, verifyEcrManifestChildren } from "./production-ecr-image-monitor.mjs";
+import { assertEcrAssumedRole, collectProtectedInventory, createAwsRunner, inspectProtectedImages, verifyEcrManifestChildren } from "./production-ecr-image-monitor.mjs";
 
 export const STACK = "infra/aws/terraform/production-ecr-protection";
 export const STATE = Object.freeze({
@@ -80,7 +80,7 @@ export function assertSnsPolicyPredecessor(policy) {
 export function checkSnsPolicy(role) {
   assert.ok(["mscqr-production-ecr-infrastructure-plan", "mscqr-production-ecr-infrastructure-apply"].includes(role), "Wrong SNS inspection role");
   const caller = JSON.parse(createAwsRunner()(["sts", "get-caller-identity"]));
-  assert.match(caller.Arn || "", new RegExp(`^arn:aws:sts::368992683803:assumed-role/${role}/[^/]+$`), "Wrong SNS inspection principal");
+  assertEcrAssumedRole(caller, role);
   const result = spawnSync("aws", ["sns", "get-topic-attributes", "--topic-arn", "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts", "--region", STATE.region, "--output", "json", "--no-cli-pager"],
     { encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024, env: { ...process.env, AWS_MAX_ATTEMPTS: "2", AWS_CLI_AUTO_PROMPT: "off" } });
   assert.ok(!result.error && result.status === 0, `SNS policy read failed: ${result.error?.code || result.status}`);
