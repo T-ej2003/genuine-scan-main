@@ -10,6 +10,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
   repository: "T-ej2003/genuine-scan-main",
   environment: "production",
   workflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main",
+  historicalGreenCompletionWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/complete-historical-green-backend-recovery.yml@refs/heads/main",
   releaseTrainWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/release-train.yml@refs/heads/main",
   stageAReconciliationWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-reconciliation.yml@refs/heads/main",
   stageAProductionArtifactsRecoveryWorkflowRef: "T-ej2003/genuine-scan-main/.github/workflows/authorize-production-stage-a-production-artifacts-recovery.yml@refs/heads/main",
@@ -53,6 +54,7 @@ export const PRODUCTION_ENVIRONMENT_APPROVAL = Object.freeze({
 
 const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.workflowRef,
+  PRODUCTION_ENVIRONMENT_APPROVAL.historicalGreenCompletionWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.releaseTrainWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageAReconciliationWorkflowRef,
   PRODUCTION_ENVIRONMENT_APPROVAL.stageAProductionArtifactsRecoveryWorkflowRef,
@@ -89,7 +91,9 @@ const approvedWorkflowRefs = new Set([
   PRODUCTION_ENVIRONMENT_APPROVAL.signerLedgerAbsenceWorkflowRef,
 ]);
 
-const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef
+const environmentForWorkflow = (workflowRef) => workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.historicalGreenCompletionWorkflowRef
+  ? "production-normal-deploy"
+  : workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef
   || workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.qrVersionSelectorResolutionWorkflowRef
   ? PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyAuthorizationEnvironment
   : workflowRef === PRODUCTION_ENVIRONMENT_APPROVAL.signerPolicyTransitionWorkflowRef

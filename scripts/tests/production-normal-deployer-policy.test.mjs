@@ -6,7 +6,7 @@ import { NORMAL_DEPLOYER_POLICY, convergeNormalDeployerPolicy } from "../aws/con
 
 const target = JSON.parse(fs.readFileSync("infra/aws/terraform/production-component-deployment-state/normal-deployer-policy.json", "utf8"));
 const predecessor = structuredClone(target);
-predecessor.Statement = predecessor.Statement.filter(({ Sid }) => !Sid?.includes("GreenRecoveryJournal") && !["ReadExactGreenRuntimeRoles", "SimulateExactNormalRecoveryUpdate", "ReadGreenBackendTargetHealth"].includes(Sid));
+predecessor.Statement = predecessor.Statement.filter(({ Sid }) => Sid !== "ReadHistoricalGreenUpdateEvent");
 assert.equal(digest(predecessor), NORMAL_DEPLOYER_POLICY.predecessorSha256);
 assert.equal(digest(target), NORMAL_DEPLOYER_POLICY.targetSha256);
 const discoveryActions = [
@@ -74,16 +74,16 @@ test("exact reviewed predecessor converges once to the exact component-state wri
   });
 });
 
-test("green recovery adds exact conditional journal and scoped runtime IAM read authority", () => {
+test("historical completion adds only regional CloudTrail read while retaining bounded recovery authority", () => {
   const targetActions = target.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
   const predecessorActions = predecessor.Statement.flatMap(({ Action }) => Array.isArray(Action) ? Action : [Action]);
-  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), ["elasticloadbalancing:DescribeTargetHealth", "iam:GetRole", "iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies", "iam:SimulatePrincipalPolicy", "s3:GetObject", "s3:ListBucket", "s3:PutObject"]);
+  assert.deepEqual(targetActions.filter((action) => !predecessorActions.includes(action)).sort(), ["cloudtrail:LookupEvents"]);
   for (const action of [
     "ec2:RunInstances", "ec2:CreateSubnet", "ec2:AuthorizeSecurityGroupIngress", "ec2:CreateManagedPrefixList", "ec2:ModifyManagedPrefixList",
     "elasticloadbalancing:CreateLoadBalancer", "elasticloadbalancing:ModifyLoadBalancerAttributes", "elasticloadbalancing:CreateTargetGroup", "elasticloadbalancing:ModifyTargetGroup",
     "iam:PutRolePolicy", "iam:AttachRolePolicy",
   ]) assert.equal(targetActions.includes(action), false, `${action} must remain denied.`);
-  assert.deepEqual(target.Statement.filter(({ Sid }) => !Sid?.includes("GreenRecoveryJournal") && !["ReadExactGreenRuntimeRoles", "SimulateExactNormalRecoveryUpdate", "ReadGreenBackendTargetHealth"].includes(Sid)), predecessor.Statement, "existing bounded permissions changed");
+  assert.deepEqual(target.Statement.filter(({ Sid }) => Sid !== "ReadHistoricalGreenUpdateEvent"), predecessor.Statement, "existing bounded permissions changed");
   const prefix = "env:/production/mscqr/production/rls-green/stage-b/apply-attempts/green-backend-recovery/*";
   const bucket = "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2";
   assert.deepEqual(target.Statement.filter(({ Sid }) => Sid?.includes("GreenRecoveryJournal")), [
