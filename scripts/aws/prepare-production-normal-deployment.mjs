@@ -12,6 +12,23 @@ import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work
 const SHA = /^[a-f0-9]{40}$/;
 const COMPONENTS = Object.freeze(["backend", "frontend", "database", "security"]);
 const normalDependencies = Object.freeze({ backend: [], frontend: [] });
+// Only inputs of the selected production image can be carried from its old
+// component SHA into a normal release. Other components keep their old baseline.
+const imageInputs = Object.freeze({
+  backend: [
+    /^backend\/(?:src\/|prisma\/|scripts\/|tests\/|local-print-agent\/releases\/|docker\/start-runtime\.sh$)/,
+    /^backend\/(?:Dockerfile|package(?:-lock)?\.json|prisma\.config\.ts|tsconfig\.json)$/,
+    /^shared\/|^\.dockerignore$|^docker\/base-image-identities\.json$/,
+    /^scripts\/(?:smoke-release\.mjs|lib\/staging-smoke-totp\.mjs|security\/production-rotation-state-inventory\.mjs|aws\/(?:production-green-stage-b-contract|production-app-only-(?:database-verifier|verifier-runtime|requirements-runtime)|production-security-rebaseline-transport|production-rls-catalogue-probe-(?:config|runtime))\.mjs)$/,
+    /^documents\/security\/mscqr_staging_rls_shared_batch_phase_(?:apply|rollback|verify)_2026-07-15\.sql$/,
+  ],
+  frontend: [
+    /^(?:src|public|shared|scripts)\//,
+    /^\.dockerignore$|^docker\/base-image-identities\.json$|^docker\/nginx-entrypoint\.sh$/,
+    /^(?:Dockerfile\.ecs-frontend|components\.json|eslint\.config\.js|index\.html|postcss\.config\.js|tailwind\.config\.ts|nginx\.ecs-frontend\.conf|package(?:-lock)?\.json|vite\.config\.[^/]+|vitest\.config\.[^/]+|tsconfig[^/]*\.json)$/,
+  ],
+});
+export const isNormalImageInput = (name, file) => imageInputs[name].some((pattern) => pattern.test(file));
 
 const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const assertAncestor = (ancestor, candidate, cwd) => {
@@ -20,7 +37,7 @@ const assertAncestor = (ancestor, candidate, cwd) => {
 };
 const rangeFiles = (baseline, candidate, cwd) => git(["diff", "--name-only", "-z", `${baseline}..${candidate}`], cwd).split("\0").filter(Boolean);
 
-export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, isAncestor } = {}) {
+export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, isAncestor, pushFiles } = {}) {
   assert.match(sourceSha || "", SHA); assertProductionComponentDeploymentState(state); assert.equal(typeof readRange, "function"); assert.equal(typeof isAncestor, "function");
   const baselineOf = (component) => component?.establishedThroughSha || component?.sourceSha;
   for (const name of COMPONENTS) {
@@ -64,7 +81,23 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
         && (establishedComponent === "security" || (establishedComponent === "database" && classification.database)));
     });
   }
+  // A protected-main push selects the components; historical changes to the
+  // other image remain pending and cannot authorize their deployment here.
+  let push;
+  if (pushFiles !== undefined) {
+    push = classifyProductionChanges(pushFiles);
+    assert.equal(push.releaseClass, PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION, "The protected-main push is not eligible for normal deployment.");
+    assert.equal(push.worker, false, "Worker changes require the stronger lane.");
+    for (const name of ["backend", "frontend"])
+      files[name] = push[name] ? files[name].filter((file) => isNormalImageInput(name, file)) : [];
+    const selectedImageInput = (file) => (push.backend && isNormalImageInput("backend", file)) || (push.frontend && isNormalImageInput("frontend", file));
+    files.security = files.security.filter(selectedImageInput);
+    files.database = files.database.filter((file) => selectedImageInput(file) || /\.sql$/i.test(file));
+  }
   const classification = classifyProductionComponentRanges({ backendFiles: files.backend, frontendFiles: files.frontend, securityFiles: files.security, databaseFiles: files.database });
+  if (push) {
+    for (const name of ["backend", "frontend"]) assert.equal(classification[name], push[name], `The ${name} source range does not match the protected-main push.`);
+  }
   for (const component of ["backend", "frontend"].filter((name) => classification[name])) {
     for (const dependency of normalDependencies[component]) {
       assert.ok(state.components[dependency], `${component} deployment requires authenticated ${dependency} component state.`);
@@ -78,10 +111,10 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
     componentFiles: Object.freeze({ backendFiles: files.backend, frontendFiles: files.frontend, securityFiles: files.security, databaseFiles: files.database }), classification });
 }
 
-export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, client, gitRun = git } = {}) {
+export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, client, gitRun = git, pushFiles } = {}) {
   assert.match(sourceSha || "", SHA); assert.equal(typeof repositoryRoot, "string");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
-  return buildProductionNormalDeploymentPlan({ sourceSha, state,
+  return buildProductionNormalDeploymentPlan({ sourceSha, state, pushFiles,
     isAncestor: (ancestor, candidate) => { try { gitRun(["merge-base", "--is-ancestor", ancestor, candidate], repositoryRoot); return true; } catch { return false; } },
     readRange: (baseline, candidate) => gitRun(["diff", "--name-only", "-z", `${baseline}..${candidate}`], repositoryRoot).split("\0").filter(Boolean),
   });
@@ -106,12 +139,18 @@ function main() {
   assert.ok(output && path.isAbsolute(output), "A fixed absolute output path is required.");
   assert.deepEqual(process.argv.slice(2), [`--output=${output}`]);
   assert.match(process.env.GITHUB_SHA || "", SHA);
+  assert.equal(process.env.GITHUB_EVENT_NAME, "push", "Normal preparation requires a protected-main push.");
   assertGithubOidcReleaseDeployerEnvironment();
   const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, region: "eu-west-2" });
   const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
   assert.equal(git(["rev-parse", "HEAD"], repositoryRoot), process.env.GITHUB_SHA);
   assert.equal(git(["rev-parse", "refs/remotes/origin/main"], repositoryRoot), process.env.GITHUB_SHA);
-  const plan = prepareProductionNormalDeployment({ sourceSha: process.env.GITHUB_SHA, repositoryRoot, client: createProductionComponentDeploymentStateClient({ run }) });
+  const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+  assert.equal(event.ref, "refs/heads/main");
+  assert.equal(event.after, process.env.GITHUB_SHA);
+  const before = SHA.test(event.before || "") && !/^0+$/.test(event.before) ? event.before : git(["rev-parse", "HEAD^"], repositoryRoot);
+  assertAncestor(before, process.env.GITHUB_SHA, repositoryRoot);
+  const plan = prepareProductionNormalDeployment({ sourceSha: process.env.GITHUB_SHA, repositoryRoot, client: createProductionComponentDeploymentStateClient({ run }), pushFiles: rangeFiles(before, process.env.GITHUB_SHA, repositoryRoot) });
   fs.writeFileSync(output, `${JSON.stringify(plan)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
   process.stdout.write(`${JSON.stringify({ sourceSha: plan.sourceSha, classification: plan.classification })}\n`);
 }
