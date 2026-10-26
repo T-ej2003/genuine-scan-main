@@ -1,5 +1,9 @@
 name: Complete historical green backend recovery
 
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
 on:
   workflow_dispatch:
     inputs:

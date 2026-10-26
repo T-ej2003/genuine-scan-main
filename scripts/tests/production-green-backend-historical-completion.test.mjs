@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { APP_ONLY, appOnlyServiceConfigurationSha256 } from "../aws/production-app-only-contract.mjs";
 import { completeHistoricalGreenBackendRecovery } from "../aws/production-green-backend-historical-completion.mjs";
+import { assertHistoricalLiveService } from "../aws/complete-production-historical-green-backend-recovery.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const source = "a".repeat(40), imageDigest = `sha256:${"b".repeat(64)}`;
@@ -88,6 +89,17 @@ test("historical completion adopts the claimed update and commits state without 
   assert.equal(run.entries.get("BACKEND:RECOVERY:COMPLETE").completedAt.endsWith("Z"), true);
   assert.deepEqual(run.counts(), { writes: 2, commits: 1, approvals: run.counts().approvals });
   assert.ok(run.counts().approvals >= 3);
+});
+
+test("final native service guard rejects a competing deployment and configuration drift", () => {
+  const run = fixture();
+  const expected = { targetArn: targetTask, deploymentId: "ecs-svc/101",
+    configurationSha256: run.entries.get("BACKEND:PREDECESSOR").serviceConfigurationSha256 };
+  assert.equal(assertHistoricalLiveService(run.service, expected), expected.deploymentId);
+  assert.throws(() => assertHistoricalLiveService({ ...run.service,
+    deployments: [{ ...run.service.deployments[0], id: "ecs-svc/102" }] }, expected), /deployment changed/);
+  assert.throws(() => assertHistoricalLiveService({ ...run.service, desiredCount: 1 }, expected));
+  assert.throws(() => assertHistoricalLiveService({ ...run.service, networkConfiguration: { changed: true } }, expected));
 });
 
 for (const [name, change, expected] of [

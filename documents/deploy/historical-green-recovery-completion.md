@@ -12,6 +12,8 @@ After merge and a separately authorized Terraform policy convergence, dispatch `
 
 The normal-deployer policy adds only regional `cloudtrail:LookupEvents` read access. Its existing exact-prefix S3 conditional write, ECS readback, ALB readback and exact-key DynamoDB CAS permissions remain unchanged. No IAM apply is part of this PR; live policy must match the reviewed source before the completion command can run.
 
+This workflow joins the shared `production-deploy` concurrency group with cancellation disabled. It cannot overlap a Release Gate or web activation run. The command also rechecks the exact deployment ID, service configuration, task and ALB health, public readiness, approval, and component predecessor immediately before the DynamoDB CAS. External AWS principals are outside GitHub's concurrency lock, so there is no atomic transaction spanning ECS and DynamoDB; a drift readback fails closed.
+
 ## Verification and transaction sequence
 
 1. Authenticate current protected main and prove the original source is its ancestor. Authenticate the original GitHub run and exact operation identity.

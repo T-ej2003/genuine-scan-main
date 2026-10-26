@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { APP_ONLY, appOnlyDefinitionSha256, assertRegisteredAppOnlyCandidate } from "./production-app-only-contract.mjs";
+import { APP_ONLY, appOnlyDefinitionSha256, appOnlyServiceConfigurationSha256, assertRegisteredAppOnlyCandidate } from "./production-app-only-contract.mjs";
 import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
 import { authenticateAppOnlyVerifierResult } from "./production-app-only-verifier-command.mjs";
 import { createAppOnlyEcsReaders } from "./production-app-only-adapters.mjs";
@@ -28,6 +28,21 @@ import { readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mj
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const required = (argv, name) => { const at = argv.indexOf(name); const value = at < 0 ? null : argv[at + 1]; assert.ok(value && !value.startsWith("--"), `${name} is required`); return value; };
 const ancestor = (sha) => { try { execFileSync("git", ["merge-base", "--is-ancestor", sha, "origin/main"], { cwd: root, stdio: "ignore" }); return true; } catch { return false; } };
+
+export function assertHistoricalLiveService(service, { targetArn, deploymentId, configurationSha256 }) {
+  assert.equal(service.serviceArn, APP_ONLY.serviceArn);
+  assert.equal(service.taskDefinition, targetArn);
+  assert.equal(service.deployments?.length, 1);
+  const currentDeploymentId = service.deployments[0].id;
+  assert.match(currentDeploymentId || "", /^ecs-svc\/[0-9]+$/);
+  if (deploymentId) assert.equal(currentDeploymentId, deploymentId, "Historical backend deployment changed before component commit");
+  assert.equal(service.deployments[0].rolloutState, "COMPLETED");
+  assert.equal(service.desiredCount, 2);
+  assert.equal(service.runningCount, 2);
+  assert.equal(service.pendingCount, 0);
+  assert.equal(appOnlyServiceConfigurationSha256(service), configurationSha256);
+  return currentDeploymentId;
+}
 
 export async function runHistoricalGreenCompletionCli(argv = process.argv.slice(2), deps = {}) {
   const names = ["--current-source-sha", "--operation-id", "--original-source-sha", "--original-run-id", "--ticket",
@@ -102,9 +117,14 @@ export async function runHistoricalGreenCompletionCli(argv = process.argv.slice(
       assertGreenBackendRecoveryAuthorization(record.input, { now: dispatchAt, verifyImageEvidence: imageVerifier,
         githubContext: record.githubContext });
     };
+    let targetDeploymentId;
     const verifyCurrent = (_input, service) => {
+      targetDeploymentId = assertHistoricalLiveService(service, { targetArn: input.targetTaskDefinitionArn,
+        deploymentId: targetDeploymentId,
+        configurationSha256: store.readOperation(input.operationId, "BACKEND:PREDECESSOR").serviceConfigurationSha256 });
       const live = readers.readLive();
       assert.equal(live.service.taskDefinition, input.targetTaskDefinitionArn);
+      assert.equal(live.service.deployments?.[0]?.id, targetDeploymentId, "Historical backend deployment changed during health readback");
       assert.deepEqual(live.service.deployments, service.deployments, "Backend deployment changed during health readback");
       assert.equal(live.tasks.length, 2);
       assert.equal(appOnlyDefinitionSha256(live.definition), store.readOperation(input.operationId, "BACKEND:PREDECESSOR").candidateFingerprint);

@@ -10,6 +10,7 @@ const workflow = yaml.load(source);
 
 test("historical completion uses an independently approved normal-deployer job on protected main", () => {
   assert.deepEqual(Object.keys(workflow.jobs), ["complete"]);
+  assert.deepEqual(workflow.concurrency, { group: "production-deploy", "cancel-in-progress": false });
   const job = workflow.jobs.complete;
   assert.equal(job.environment, "production-normal-deploy");
   assert.equal(job.if, "${{ github.ref == 'refs/heads/main' }}");
