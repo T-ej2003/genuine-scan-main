@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { addProtectedImage, addRetainedHistoricalWorker, appendOpenRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
+import { addProtectedImage, addRetainedHistoricalWorker, appendOpenRecoveryJournals, readRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
 import { assertEcrRepositoryProtection, ECR_PROTECTION, verifyRepository } from "../aws/verify-production-ecr-repository-protection.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "../aws/stage-b-terraform-backend-contract.mjs";
 import { brokerDigest } from "../aws/stage-b-staged-broker-contract.mjs";
@@ -143,6 +143,27 @@ test("open authenticated recovery journal protects its digest; completion releas
   assert.equal(finished.size, 0);
   assert.throws(() => appendOpenRecoveryJournals(new Map(), [{ ...dispatch, key: dispatch.key.replace(/a/g, "b") }]));
   assert.throws(() => appendOpenRecoveryJournals(new Map(), [{ ...dispatch, key: `${dispatch.key}/extra` }]));
+});
+
+test("recovery inventory accepts real-sized authorization evidence while bounding total journal data", () => {
+  const kind = "PRODUCTION_RELEASE_COORDINATOR_OPERATION", key = { operationId: "c".repeat(64), phase: "BACKEND:UPDATE:DISPATCH" };
+  const objectKey = `${STAGE_B_TERRAFORM_BACKEND.applyAttemptPrefix}/green-backend-recovery/execute/${brokerDigest({ kind, key })}.json`;
+  const body = JSON.stringify({ kind, key, value: { imageDigest: digest, sourceSha: sha, input: { databaseCompatibility: "x".repeat(225000) } } });
+  const listing = { Contents: [{ Key: objectKey, ETag: '"reviewed"', Size: Buffer.byteLength(body) }], IsTruncated: false };
+  const run = args => {
+    if (args[1] === "list-objects-v2") return JSON.stringify(listing);
+    assert.equal(args[1], "get-object");
+    fs.writeFileSync(args.at(-1), body);
+    return JSON.stringify({ ETag: '"reviewed"' });
+  };
+  const records = readRecoveryJournals(run);
+  const protectedImages = new Map();
+  appendOpenRecoveryJournals(protectedImages, records);
+  assert.deepEqual(finalizeProtectedInventory(protectedImages, "now")[0].reasons, ["OPEN_RECOVERY_JOURNAL"]);
+  listing.Contents[0].Size = 512 * 1024 + 1;
+  assert.throws(() => readRecoveryJournals(run), /object is outside/);
+  listing.Contents = Array.from({ length: 33 }, () => ({ Key: objectKey, ETag: '"reviewed"', Size: 512 * 1024 }));
+  assert.throws(() => readRecoveryJournals(run), /total size bound/);
 });
 
 test("Terraform and publishers cannot restore count-based expiration", () => {
