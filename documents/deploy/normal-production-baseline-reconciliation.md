@@ -4,7 +4,7 @@ Protected-main reference: `dc7623302ddbfe4f92108a1f6e4b2fed43d8ac39`.
 
 ## Objective
 
-Allow an eligible backend-only application push to use the existing normal deployment workflow while retaining the older frontend baseline and its undeployed changes. No historical deployment is inferred from a merged commit.
+Prepare eligible application pushes from component-specific sources without treating a merged commit as proof of deployment or of privileged tooling authorization.
 
 ## Authenticated starting point
 
@@ -14,14 +14,18 @@ The current frontend source range includes later STARtex auth/API changes. No au
 
 ## Correction
 
-The protected-main push still determines normal-lane eligibility. Preparation now considers accumulated changes only for components selected by that push. For a selected component it evaluates its production image inputs since the authenticated component-state source. A security-sensitive or unknown selected image input still fails closed. Unselected components keep their prior state and their pending source ranges for a future governed release. The privileged job authenticates the reviewed host-executed script tree before assuming AWS credentials; a later tooling edit requires an explicit hash update and review. Existing recovery completion filtering, live ECS verification, ECR protection, image authorization, receipt reconciliation, rollback, and DynamoDB compare-and-swap remain in place.
+The protected-main push still determines normal-lane eligibility. Preparation considers accumulated changes only for components selected by that push. It retains both sides of renames and copies and rejects historical additions or deletions of selected image inputs unless they belong to the current eligible push. Sensitive runtime inputs remain pending until their own deployment evidence advances that component. Unselected components keep their prior state.
+
+Privileged workflow and host-executed tooling changes cannot be silently discarded. The planner accepts historical tooling only when the existing security component state records a later `SECURITY_INFRASTRUCTURE` Release Gate completion with an exact source and authorization identity, and no tooling edit follows that source. A tooling file copied into a selected runtime image still requires that component's deployment evidence. The preparation and execution state hashes bind the authorization through the transaction. The job checks its checkout before OIDC; that check alone does not authenticate a changed workflow. Existing recovery filtering, live ECS verification, ECR protection, image authorization, receipt reconciliation, rollback, and DynamoDB compare-and-swap remain in place.
 
 No component-state advancement is performed by preparation. No new historical-completion mechanism is added because the outstanding frontend work has no authenticated deployment completion to adopt.
 
 ## Hostile review
 
-The first input map missed verifier scripts copied into the backend runtime stage; the final map includes them, and a Docker `COPY` contract test fails if a future direct input is omitted. Review also found that omitted historical deployment scripts could otherwise execute with normal-deployer credentials on a later application push. The new pre-credential script-tree check fixes that path. A push that touches auth, schema, worker, infrastructure, or an unknown path still fails the normal lane. A selected component's accumulated sensitive runtime input fails preparation. An unselected component retains its old state and is reverified live by the existing transaction. Existing tests cover wrong image identity, denied ECR protection, partial ECS mutation, rollback, receipt reconciliation, health failure, and generation conflicts. No AWS or component-state write is performed by this correction.
+Review found that an earlier script-tree hash was declared by the same workflow it purported to authenticate, and omitted the workflow YAML itself. That hash is removed. The planner now fails closed on pending privileged workflow or tooling changes. Real Git tests cover rename, copy, cross-component move, and deletion identities. A Docker `COPY` contract test covers image inputs. The existing transaction tests cover wrong image identity, denied ECR protection, partial ECS mutation, rollback, receipt reconciliation, health failure, and generation conflicts. No AWS or component-state write is performed by this correction.
 
 ## Acceptance and operational limit
 
-An eligible backend-only push must prepare a backend-only transaction from generation 2. A frontend push must reject the undeployed sensitive frontend range until a governed stronger-lane release authenticates and deploys it. The current production ECR repository-protection check is a separate enforced prerequisite: backend/web lifecycle policies and repository guards must satisfy it before any normal image can be published. A successful source test or PR does not establish live deployment readiness.
+The live generation-2 state has no security component completion for the accumulated workflow/tooling changes, so an application push remains blocked until the existing stronger Release Gate records that authorization. An authorized synthetic state prepares backend-only, frontend-only, and combined ordinary releases; the actual frontend remains blocked by undeployed STARtex auth/API code until its own authenticated deployment. The ECR repository-protection check is a separate enforced prerequisite.
+
+The remaining execution-identity boundary is external to the planner: the live normal-deployer OIDC trust checks the `production-normal-deploy` environment subject but does not bind the workflow revision. The environment currently allows self review, and protected main requires zero approving PR reviews. Therefore an altered workflow can skip its own source checks. Independently enforced workflow identity or governance is required before claiming the P1 workflow-trust finding closed. No normal production deployment is claimed restored.

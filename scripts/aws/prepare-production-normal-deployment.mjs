@@ -8,6 +8,7 @@ import { classifyProductionChanges, classifyProductionComponentRanges, PRODUCTIO
 import { assertProductionComponentDeploymentState, createProductionComponentDeploymentStateClient, stateHash } from "./production-component-deployment-state.mjs";
 import { assertGithubOidcReleaseDeployerEnvironment, createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { COMPLETED_EMERGENCY_PATHS } from "./production-completed-emergency-work.mjs";
+import { readProductionGitChanges } from "./production-git-source-range.mjs";
 
 const SHA = /^[a-f0-9]{40}$/;
 const COMPONENTS = Object.freeze(["backend", "frontend", "database", "security"]);
@@ -29,15 +30,16 @@ const imageInputs = Object.freeze({
   ],
 });
 export const isNormalImageInput = (name, file) => imageInputs[name].some((pattern) => pattern.test(file));
+export const isNormalHostTooling = (file) => /^(?:\.github\/workflows\/production-deploy\.yml$|\.github\/actions\/|scripts\/(?:aws\/|lib\/|security\/|rls\/lib\/|smoke-release\.mjs$)|infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/|backend\/scripts\/security\/)/.test(file);
 
 const git = (args, cwd) => execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const assertAncestor = (ancestor, candidate, cwd) => {
   assert.match(ancestor || "", SHA); assert.match(candidate || "", SHA);
   try { git(["merge-base", "--is-ancestor", ancestor, candidate], cwd); } catch { throw new Error(`Component state source ${ancestor} is not protected-main history of ${candidate}.`); }
 };
-const rangeFiles = (baseline, candidate, cwd) => git(["diff", "--name-only", "-z", `${baseline}..${candidate}`], cwd).split("\0").filter(Boolean);
+const rangeFiles = (baseline, candidate, cwd) => readProductionGitChanges(baseline, candidate, cwd).paths;
 
-export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, isAncestor, pushFiles } = {}) {
+export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRange, readStructural, isAncestor, pushFiles } = {}) {
   assert.match(sourceSha || "", SHA); assertProductionComponentDeploymentState(state); assert.equal(typeof readRange, "function"); assert.equal(typeof isAncestor, "function");
   const baselineOf = (component) => component?.establishedThroughSha || component?.sourceSha;
   for (const name of COMPONENTS) {
@@ -57,7 +59,7 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
       const baseline = baselineOf(state.components[component]);
       if (!baseline || !isAncestor(baseline, established)) continue;
       const completedFiles = new Set(readRange(baseline, established));
-      files[component] = files[component].filter((file) => !(COMPLETED_EMERGENCY_PATHS[mode].includes(file)
+      files[component] = files[component].filter((file) => (pushFiles !== undefined && isNormalHostTooling(file)) || !(COMPLETED_EMERGENCY_PATHS[mode].includes(file)
         && completedFiles.has(file) && !newerFiles.has(file)
         && [PRODUCTION_RELEASE_CLASS.EMERGENCY_RECOVERY, PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE].includes(classifyProductionChanges([file]).releaseClass)));
     }
@@ -74,8 +76,10 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
     if (!baseline || !established || !isAncestor(baseline, established) || !isAncestor(established, sourceSha)) continue;
     const establishedFiles = new Set(readRange(baseline, established)); const newerFiles = new Set(readRange(established, sourceSha));
     files[component] = files[component].filter((file) => {
+      if (pushFiles !== undefined && (isNormalHostTooling(file) || (["backend", "frontend"].includes(component) && isNormalImageInput(component, file)))) return true;
       if (!establishedFiles.has(file) || newerFiles.has(file)) return true;
-      const classification = classifyProductionChanges([file]);
+      let classification;
+      try { classification = classifyProductionChanges([file]); } catch { return true; }
       const releaseClass = classification.releaseClass;
       return !(releaseClass === PRODUCTION_RELEASE_CLASS.SECURITY_INFRASTRUCTURE
         && (establishedComponent === "security" || (establishedComponent === "database" && classification.database)));
@@ -85,9 +89,26 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
   // other image remain pending and cannot authorize their deployment here.
   let push;
   if (pushFiles !== undefined) {
+    assert.equal(typeof readStructural, "function", "Normal deployment requires Git structural-change evidence.");
     push = classifyProductionChanges(pushFiles);
     assert.equal(push.releaseClass, PRODUCTION_RELEASE_CLASS.NORMAL_APPLICATION, "The protected-main push is not eligible for normal deployment.");
     assert.equal(push.worker, false, "Worker changes require the stronger lane.");
+    for (const name of ["backend", "frontend"].filter((component) => push[component])) {
+      const currentPush = new Set(pushFiles);
+      const structural = readStructural(baselineOf(state.components[name]), sourceSha);
+      assert.equal(structural.some((change) => ["A", "D"].includes(change.status) && change.paths.some((file) => isNormalImageInput(name, file) && !currentPush.has(file))), false,
+        "Historical image input addition or deletion requires stronger-lane completion.");
+      const pending = files[name].filter(isNormalHostTooling);
+      if (!pending.length) continue;
+      const established = state.components.security?.sourceSha;
+      const provenance = state.componentProvenance?.security;
+      assert.ok(established && provenance?.lane === "SECURITY_INFRASTRUCTURE" && provenance.workflow === "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main"
+        && /^[a-f0-9]{64}$/.test(state.components.security.releaseIdentity || "") && isAncestor(baselineOf(state.components[name]), established), "Pending deployment workflow or tooling requires authenticated stronger-lane completion.");
+      const completed = new Set(readRange(baselineOf(state.components[name]), established));
+      const newer = new Set(readRange(established, sourceSha));
+      assert.equal(pending.some((file) => !completed.has(file) || newer.has(file)), false, "Deployment workflow or tooling changed after stronger-lane authorization.");
+      files[name] = files[name].filter((file) => !isNormalHostTooling(file) || isNormalImageInput(name, file));
+    }
     for (const name of ["backend", "frontend"])
       files[name] = push[name] ? files[name].filter((file) => isNormalImageInput(name, file)) : [];
     const selectedImageInput = (file) => (push.backend && isNormalImageInput("backend", file)) || (push.frontend && isNormalImageInput("frontend", file));
@@ -114,9 +135,16 @@ export function buildProductionNormalDeploymentPlan({ sourceSha, state, readRang
 export function prepareProductionNormalDeployment({ sourceSha, repositoryRoot, client, gitRun = git, pushFiles } = {}) {
   assert.match(sourceSha || "", SHA); assert.equal(typeof repositoryRoot, "string");
   const state = client.read(); assert.ok(state, "Production component deployment state is not bootstrapped.");
+  const changes = new Map();
+  const range = (baseline, candidate) => {
+    const key = `${baseline}..${candidate}`;
+    if (!changes.has(key)) changes.set(key, readProductionGitChanges(baseline, candidate, repositoryRoot, gitRun));
+    return changes.get(key);
+  };
   return buildProductionNormalDeploymentPlan({ sourceSha, state, pushFiles,
     isAncestor: (ancestor, candidate) => { try { gitRun(["merge-base", "--is-ancestor", ancestor, candidate], repositoryRoot); return true; } catch { return false; } },
-    readRange: (baseline, candidate) => gitRun(["diff", "--name-only", "-z", `${baseline}..${candidate}`], repositoryRoot).split("\0").filter(Boolean),
+    readRange: (baseline, candidate) => range(baseline, candidate).paths,
+    readStructural: (baseline, candidate) => range(baseline, candidate).structural,
   });
 }
 
