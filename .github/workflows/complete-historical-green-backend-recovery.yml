@@ -43,7 +43,7 @@ jobs:
       actions: read
       deployments: read
       id-token: write
-    uses: T-ej2003/genuine-scan-main/.github/workflows/production-historical-green-completion-operation.yml@14d910dbeea5c3da12eea136738e1a1146c20d51
+    uses: T-ej2003/genuine-scan-main/.github/workflows/production-historical-green-completion-operation.yml@05501eedcf0e38ef0108326eefd7b3230f067ff8
     with:
       operation_id: ${{ inputs.operation_id }}
       original_source_sha: ${{ inputs.original_source_sha }}

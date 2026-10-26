@@ -36,6 +36,30 @@ test("only three immutable approved operations match the reviewed IAM OIDC trust
   ]) assert.equal(permitted({ ...caller, "token.actions.githubusercontent.com:job_workflow_ref": refs[0], ...changed }), false);
 });
 
+test("privileged reusable workflow inputs, secrets, and permissions match their callers", () => {
+  for (const [callerFile, jobName, operationFile] of [
+    ["production-deploy.yml", "deploy", "production-normal-deployment-operation.yml"],
+    ["release-gate.yml", "execute-green-backend-recovery", "production-green-backend-recovery-operation.yml"],
+    ["complete-historical-green-backend-recovery.yml", "complete", "production-historical-green-completion-operation.yml"],
+  ]) {
+    const callerWorkflow = yaml.load(fs.readFileSync(`.github/workflows/${callerFile}`, "utf8"));
+    const operationText = fs.readFileSync(`.github/workflows/${operationFile}`, "utf8");
+    const operation = yaml.load(operationText);
+    const callerJob = callerWorkflow.jobs[jobName];
+    const inputs = operation.on.workflow_call.inputs;
+    assert.deepEqual(Object.keys(callerJob.with).sort(), Object.keys(inputs).sort(), `${callerFile} input names drifted`);
+    for (const [name, spec] of Object.entries(inputs)) {
+      assert.ok(["string", "boolean", "number"].includes(spec.type), `${operationFile}: ${name} has no valid workflow_call type`);
+      if (spec.required) assert.ok(callerJob.with[name], `${callerFile}: ${name} is required`);
+      if (operationFile === "production-historical-green-completion-operation.yml") assert.equal(spec.type, "string");
+    }
+    const operationJob = Object.values(operation.jobs).find((job) => job.environment === "production-normal-deploy");
+    assert.equal(operationJob.permissions["id-token"], "write");
+    assert.equal(callerJob.permissions?.["id-token"] || callerWorkflow.permissions?.["id-token"], "write");
+    if (/\$\{\{\s*secrets\./.test(operationText)) assert.equal(callerJob.secrets, "inherit", `${callerFile} must pass required smoke secrets`);
+  }
+});
+
 test("all role consumers authenticate immutable tooling before repository code or OIDC assumption", () => {
   for (const [callerFile, jobName, index] of [["production-deploy.yml", "deploy", 0], ["release-gate.yml", "execute-green-backend-recovery", 1], ["complete-historical-green-backend-recovery.yml", "complete", 2]]) {
     const callerWorkflow = yaml.load(fs.readFileSync(`.github/workflows/${callerFile}`, "utf8"));
