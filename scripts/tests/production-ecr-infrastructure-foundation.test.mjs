@@ -148,6 +148,12 @@ test("plan and apply OIDC roles preserve environment and operation separation", 
   }
   const readPolicy = JSON.parse(read("bootstrap-read-policy.json"));
   const applyPolicy = JSON.parse(read("bootstrap-apply-policy.json"));
+  const repositoryRead = readPolicy.Statement.find(item => item.Sid === "ReadExactEcrRepositories");
+  assert.ok(repositoryRead.Action.includes("ecr:ListTagsForResource"));
+  assert.deepEqual(repositoryRead.Resource, ["mscqr-backend", "mscqr-web", "mscqr-worker"].map(name => `arn:aws:ecr:eu-west-2:368992683803:repository/${name}`));
+  const topicRead = readPolicy.Statement.find(item => item.Sid === "ReadExactTopic");
+  assert.deepEqual(topicRead.Action, ["sns:GetTopicAttributes", "sns:ListTagsForResource"]);
+  assert.equal(topicRead.Resource, "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts");
   assert.ok(readPolicy.Statement.some(item => item.Action === "s3:GetObject" && item.Resource.endsWith(STATE.key)));
   assert.ok(applyPolicy.Statement.some(item => item.Action === "s3:PutObject" && item.Resource.endsWith(STATE.key)));
   assert.ok(!JSON.stringify(readPolicy).includes("ecr:SetRepositoryPolicy"));

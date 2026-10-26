@@ -51,7 +51,8 @@
         "ecr:DescribeImages",
         "ecr:BatchGetImage",
         "ecr:GetRepositoryPolicy",
-        "ecr:GetLifecyclePolicy"
+        "ecr:GetLifecyclePolicy",
+        "ecr:ListTagsForResource"
       ],
       "Resource": [
         "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
@@ -106,7 +107,7 @@
     {
       "Sid": "ReadExactTopic",
       "Effect": "Allow",
-      "Action": "sns:GetTopicAttributes",
+      "Action": ["sns:GetTopicAttributes", "sns:ListTagsForResource"],
       "Resource": "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts",
       "Condition": {
         "StringEquals": {
