@@ -51,7 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_WORKFLOW_REF" = "T-ej2003/genuine-scan-main/.github/workflows/release-gate.yml@refs/heads/main"
-          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = 'b0cc1ee371f317405b3e3077614bffa0c106e352ff129400dd748d45c312dda7'
+          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = '6cc21716e82cb4f9f40c44fcfbf73acc5933cbba0f00f335a2fa2817e9ea0f9e'
 
       - name: Set up Node before credentials
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
