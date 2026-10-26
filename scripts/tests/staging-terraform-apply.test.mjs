@@ -344,6 +344,21 @@ test("staging Terraform apply boundary does not deny required staging IAM role p
   assert.equal(result.status, 0, combinedOutput(result));
 });
 
+test("staging boundary denies lifecycle restoration on untagged production ECR repositories", () => {
+  const boundary = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_STAGING_TERRAFORM_APPLY_PERMISSIONS_BOUNDARY_2026-07-08.json", "utf8"));
+  const deny = boundary.Statement.find((statement) => statement.Sid === "DenyProductionEcrLifecycleRestoration");
+  assert.equal(deny?.Effect, "Deny");
+  assert.equal(deny.Action, "ecr:PutLifecyclePolicy");
+  assert.equal(deny.Condition, undefined);
+  assert.deepEqual(deny.Resource, ["mscqr-backend", "mscqr-web", "mscqr-worker"].map((name) =>
+    `arn:aws:ecr:eu-west-2:368992683803:repository/${name}`));
+  const missing = runIamPolicyCheckWithFixtures({ boundaryMutator: (value) => {
+    value.Statement = value.Statement.filter((statement) => statement.Sid !== "DenyProductionEcrLifecycleRestoration");
+  } });
+  assert.notEqual(missing.status, 0);
+  assert.match(combinedOutput(missing), /must deny lifecycle restoration/);
+});
+
 test("staging Terraform apply boundary rejects denies on required staging IAM role actions", () => {
   const result = runIamPolicyCheckWithFixtures({
     boundaryMutator: (boundary) => {
