@@ -96,6 +96,7 @@ test("protected push workflow preserves approval, ECR guard, publication, attest
   const tree = execFileSync("git", ["ls-tree", "-r", "HEAD", "--", "scripts/aws", "scripts/lib", "scripts/security", "scripts/smoke-release.mjs", "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs"], { cwd: root });
   assert.match(tooling.run, new RegExp(createHash("sha256").update(tree).digest("hex")));
   assert.match(tooling.run, /test "\$GITHUB_SHA" = "\$\(git rev-parse HEAD\)"/);
+  assert.match(tooling.run, /git status --porcelain --untracked-files=all/);
   const expected = ["Reconcile and prepare component-state transaction", "Authenticate live deployment baseline", "Bind authoritative deployment route", "Require protected ECR repositories before publication", "Publish immutable backend image", "Bind backend digest", "Scan published images", "Sign and attest published images", "Execute coordinated normal component transaction", "Preserve normal transaction journal"];
   assert.ok(expected.every((name) => position(name) >= 0), "Normal workflow is missing a required stage");
   assert.deepEqual(expected.map(position), [...expected.map(position)].sort((a, b) => a - b));

@@ -118,6 +118,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=all)"
           # Includes the complete host-executed script tree reviewed with the generation-2 baseline.
           test "$(git ls-tree -r HEAD -- scripts/aws scripts/lib scripts/security scripts/smoke-release.mjs infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs | sha256sum | cut -d' ' -f1)" = '27f485da3157ca7dacdf040ca93a0c034e73ad76c417f0d095c12d7d80a5996e'
       - uses: aws-actions/configure-aws-credentials@v6
