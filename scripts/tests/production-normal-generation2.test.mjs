@@ -93,7 +93,7 @@ test("protected push workflow preserves approval, ECR guard, publication, attest
   assert.ok(tooling && position("Authenticate reviewed normal deployment tooling") < steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@")));
   assert.equal(tooling.if, "needs.classify.outputs.release_class == 'NORMAL_APPLICATION'");
   const root = new URL("../../", import.meta.url);
-  const tree = execFileSync("git", ["ls-tree", "-r", "HEAD", "--", "scripts/aws", "scripts/lib", "scripts/security", "scripts/smoke-release.mjs", "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs"], { cwd: root });
+  const tree = execFileSync("git", ["ls-tree", "-r", "HEAD", "--", "scripts/aws", "scripts/lib", "scripts/security", "scripts/rls/lib", "scripts/smoke-release.mjs", "infra/aws/terraform/lambda/production-rls-approval-broker", "backend/scripts/security"], { cwd: root });
   assert.match(tooling.run, new RegExp(createHash("sha256").update(tree).digest("hex")));
   assert.match(tooling.run, /test "\$GITHUB_SHA" = "\$\(git rev-parse HEAD\)"/);
   assert.match(tooling.run, /git status --porcelain --untracked-files=all/);
