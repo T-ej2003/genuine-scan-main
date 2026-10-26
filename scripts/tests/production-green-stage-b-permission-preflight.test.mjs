@@ -1534,6 +1534,8 @@ test("live release inline-policy collection validates complete enumeration and c
       if (!match) throw new Error("unexpected inline policy requested");
       const doc = match.policyName === "MSCQRProductionComponentStateTerminalWriter"
         ? readJsonFile("infra/aws/terraform/production-component-deployment-state/release-terminal-state-policy.json")
+        : match.policyName === "MSCQRProductionWebEvidenceRegistryRead"
+          ? readJsonFile("infra/aws/terraform/production-web-release/web-evidence-registry-read-policy.json")
         : readJsonFile("infra/aws/terraform/production-web-release/frontend-activation-policy.json");
       if (match.policyName === "MSCQRProductionFrontendActivation" && mutateFrontendDocument) mutateFrontendDocument(doc);
       return JSON.stringify({ PolicyDocument: match.policyName === "MSCQRProductionFrontendActivation" ? encodeURIComponent(JSON.stringify(doc)) : doc });

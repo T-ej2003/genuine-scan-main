@@ -256,9 +256,17 @@ export function sourceReleaseRoleInlinePolicyEvidence() {
     || !/^\s*policy\s*=\s*file\("\$\{path\.module\}\/frontend-activation-policy\.json"\)\s*$/m.test(frontendResource)) {
     throw new Error("Canonical Terraform frontend-activation policy ownership is missing or ambiguous.");
   }
+  const registryResource = frontendTerraform.match(/resource\s+"aws_iam_role_policy"\s+"web_evidence_registry_read"\s*\{([\s\S]*?)^\}/m)?.[1];
+  const registryPolicyName = registryResource?.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
+  if (registryPolicyName !== "MSCQRProductionWebEvidenceRegistryRead"
+    || !/^\s*role\s*=\s*data\.aws_iam_role\.release_deployer\.id\s*$/m.test(registryResource)
+    || !/^\s*policy\s*=\s*file\("\$\{path\.module\}\/web-evidence-registry-read-policy\.json"\)\s*$/m.test(registryResource)) {
+    throw new Error("Canonical Terraform web-evidence registry policy ownership is missing or ambiguous.");
+  }
   const documents = [
     { policyName: terminalWriter.policyName, document: terminalWriter.policy },
     { policyName: frontendPolicyName, document: JSON.parse(fs.readFileSync(path.join(stageBRoot, frontendPath), "utf8")) },
+    { policyName: registryPolicyName, document: JSON.parse(fs.readFileSync(path.join(stageBRoot, "infra/aws/terraform/production-web-release/web-evidence-registry-read-policy.json"), "utf8")) },
   ];
   if (new Set(documents.map(({ policyName }) => policyName)).size !== documents.length) throw new Error("Canonical release-role inline-policy names are ambiguous.");
   return documents.map(({ policyName, document }) => ({
