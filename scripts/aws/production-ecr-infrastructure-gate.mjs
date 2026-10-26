@@ -68,6 +68,11 @@ export function assertPartialOwnershipState(state) {
   assert.ok((state.resources || []).every(resource => resource.mode === "managed" || dataSources.has(`data.${resource.type}.${resource.name}`)), "ECR state has an unrelated data source");
 }
 
+export function assertPartialMonitorTrust(state, role) {
+  const saved = state.resources.find(resource => resource.type === "aws_iam_role" && resource.name === "ecr_monitor").instances[0].attributes.assume_role_policy;
+  assert.equal(canonical(role.AssumeRolePolicyDocument), canonical(JSON.parse(saved)), "Monitor OIDC trust changed since partial apply");
+}
+
 function checkPartialLiveOwnership(state) {
   const read = (name, args) => {
     const result = aws(args);
@@ -77,6 +82,7 @@ function checkPartialLiveOwnership(state) {
   const role = read("monitor role", ["iam", "get-role", "--role-name", "mscqr-production-ecr-monitor"]).Role;
   assert.equal(role.Arn, "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor");
   assert.equal(role.PermissionsBoundary?.PermissionsBoundaryArn, MONITOR_BOUNDARY_ARN);
+  assertPartialMonitorTrust(state, role);
   const policy = read("monitor policy", ["iam", "get-role-policy", "--role-name", "mscqr-production-ecr-monitor", "--policy-name", "mscqr-production-ecr-monitor"]);
   assert.equal(policy.RoleName, role.RoleName);
   const statePolicy = state.resources.find(resource => resource.type === "aws_iam_role_policy" && resource.name === "ecr_monitor").instances[0].attributes.policy;

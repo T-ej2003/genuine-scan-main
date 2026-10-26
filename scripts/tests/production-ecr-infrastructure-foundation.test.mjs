@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialOwnershipState, assertPartialRefresh, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialMonitorTrust, assertPartialOwnershipState, assertPartialRefresh, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
 import { assertEcrAssumedRole } from "../aws/production-ecr-image-monitor.mjs";
 
 const stack = "infra/aws/terraform/production-ecr-protection";
@@ -82,6 +82,13 @@ test("the exact failed apply may continue, while substituted or ambiguous state 
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: state.resources.map(item => item.type === "aws_sns_topic_policy" ? resource(item.type, item.name, [[null, "other-topic"]]) : item) }), /identities/);
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: state.resources.map(item => item.type === "aws_cloudwatch_metric_alarm" ? resource(item.type, item.name, [["critical", "mscqr-production-ecr-critical"]]) : item) }), /instance count/);
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: state.resources.map(item => item.type === "aws_iam_role" ? { ...item, module: "rogue" } : item) }), /unexpected instance/);
+});
+
+test("partial apply readback rejects a changed live monitor OIDC trust", () => {
+  const trust = { Version: "2012-10-17", Statement: [{ Effect: "Allow", Principal: { Federated: "arn:aws:iam::368992683803:oidc-provider/token.actions.githubusercontent.com" }, Action: "sts:AssumeRoleWithWebIdentity", Condition: { StringEquals: { "token.actions.githubusercontent.com:sub": "repo:T-ej2003/genuine-scan-main:environment:production-ecr-monitor" } } }] };
+  const state = { resources: [{ type: "aws_iam_role", name: "ecr_monitor", instances: [{ attributes: { assume_role_policy: JSON.stringify(trust) } }] }] };
+  assert.doesNotThrow(() => assertPartialMonitorTrust(state, { AssumeRolePolicyDocument: trust }));
+  assert.throws(() => assertPartialMonitorTrust(state, { AssumeRolePolicyDocument: { ...trust, Statement: [{ ...trust.Statement[0], Principal: "*" }] } }), /trust changed/);
 });
 
 test("only the provider's observed partial-apply normalization may accompany three ECR creates", () => {
