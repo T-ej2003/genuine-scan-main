@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialMonitorTrust, assertPartialOwnershipState, assertPartialRefresh, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPartialAlarm, assertPartialMonitorTrust, assertPartialOwnershipState, assertPartialRefresh, assertPartialRule, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
 import { assertEcrAssumedRole } from "../aws/production-ecr-image-monitor.mjs";
 
 const stack = "infra/aws/terraform/production-ecr-protection";
@@ -89,6 +89,22 @@ test("partial apply readback rejects a changed live monitor OIDC trust", () => {
   const state = { resources: [{ type: "aws_iam_role", name: "ecr_monitor", instances: [{ attributes: { assume_role_policy: JSON.stringify(trust) } }] }] };
   assert.doesNotThrow(() => assertPartialMonitorTrust(state, { AssumeRolePolicyDocument: trust }));
   assert.throws(() => assertPartialMonitorTrust(state, { AssumeRolePolicyDocument: { ...trust, Statement: [{ ...trust.Statement[0], Principal: "*" }] } }), /trust changed/);
+});
+
+test("partial apply rejects changed live EventBridge rules and alarm settings", () => {
+  const pattern = { source: ["aws.ecr"], detail: { eventName: ["DeleteRepository"] } };
+  const savedRule = { arn: "arn:aws:events:eu-west-2:368992683803:rule/test", event_bus_name: "default", description: "", state: "ENABLED", event_pattern: JSON.stringify(pattern), role_arn: "", schedule_expression: "" };
+  const liveRule = { Arn: savedRule.arn, EventBusName: "default", State: "ENABLED", EventPattern: JSON.stringify(pattern) };
+  assert.doesNotThrow(() => assertPartialRule(savedRule, liveRule));
+  assert.throws(() => assertPartialRule(savedRule, { ...liveRule, EventPattern: JSON.stringify({ source: ["aws.ec2"] }) }), /rule changed/);
+  const topic = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts";
+  const savedAlarm = { arn: "arn:aws:cloudwatch:eu-west-2:368992683803:alarm:test", actions_enabled: true, alarm_actions: [topic], ok_actions: [topic], insufficient_data_actions: null,
+    comparison_operator: "GreaterThanThreshold", evaluation_periods: 1, threshold: 0, datapoints_to_alarm: 0, dimensions: null, metric_name: "CRITICALFindings", namespace: "MSCQR/ProductionEcrProtection", period: 900, statistic: "Maximum", treat_missing_data: "breaching", alarm_description: "", metric_query: [], threshold_metric_id: "", unit: "", extended_statistic: "", evaluate_low_sample_count_percentiles: "" };
+  const liveAlarm = { AlarmArn: savedAlarm.arn, ActionsEnabled: true, AlarmActions: [topic], OKActions: [topic], ComparisonOperator: "GreaterThanThreshold",
+    EvaluationPeriods: 1, Threshold: 0, MetricName: savedAlarm.metric_name, Namespace: savedAlarm.namespace, Period: 900, Statistic: "Maximum", TreatMissingData: "breaching" };
+  assert.doesNotThrow(() => assertPartialAlarm(savedAlarm, liveAlarm));
+  assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, ActionsEnabled: false }), /alarm changed/);
+  assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, MetricName: "OtherMetric" }), /alarm changed/);
 });
 
 test("only the provider's observed partial-apply normalization may accompany three ECR creates", () => {

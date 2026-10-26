@@ -73,6 +73,36 @@ export function assertPartialMonitorTrust(state, role) {
   assert.equal(canonical(role.AssumeRolePolicyDocument), canonical(JSON.parse(saved)), "Monitor OIDC trust changed since partial apply");
 }
 
+export function assertPartialRule(saved, live) {
+  assert.deepEqual({
+    arn: live.Arn, bus: live.EventBusName, description: live.Description || "", state: live.State,
+    pattern: JSON.parse(live.EventPattern || "null"), role: live.RoleArn || "", schedule: live.ScheduleExpression || "",
+  }, {
+    arn: saved.arn, bus: saved.event_bus_name, description: saved.description, state: saved.state,
+    pattern: JSON.parse(saved.event_pattern), role: saved.role_arn, schedule: saved.schedule_expression,
+  }, "EventBridge rule changed since partial apply");
+}
+
+export function assertPartialAlarm(saved, live) {
+  assert.deepEqual({
+    arn: live.AlarmArn, actionsEnabled: live.ActionsEnabled, alarmActions: live.AlarmActions || [], okActions: live.OKActions || [],
+    insufficientActions: live.InsufficientDataActions || [], comparison: live.ComparisonOperator, evaluations: live.EvaluationPeriods,
+    threshold: live.Threshold, datapoints: live.DatapointsToAlarm || 0, dimensions: live.Dimensions || [],
+    metric: live.MetricName, namespace: live.Namespace, period: live.Period, statistic: live.Statistic,
+    missing: live.TreatMissingData, description: live.AlarmDescription || "", metrics: live.Metrics || [],
+    thresholdMetric: live.ThresholdMetricId || "", unit: live.Unit || "", extendedStatistic: live.ExtendedStatistic || "",
+    lowSampleCount: live.EvaluateLowSampleCountPercentile || "",
+  }, {
+    arn: saved.arn, actionsEnabled: saved.actions_enabled, alarmActions: saved.alarm_actions, okActions: saved.ok_actions,
+    insufficientActions: saved.insufficient_data_actions || [], comparison: saved.comparison_operator, evaluations: saved.evaluation_periods,
+    threshold: saved.threshold, datapoints: saved.datapoints_to_alarm || 0, dimensions: saved.dimensions || [],
+    metric: saved.metric_name, namespace: saved.namespace, period: saved.period, statistic: saved.statistic,
+    missing: saved.treat_missing_data, description: saved.alarm_description, metrics: saved.metric_query || [],
+    thresholdMetric: saved.threshold_metric_id, unit: saved.unit, extendedStatistic: saved.extended_statistic,
+    lowSampleCount: saved.evaluate_low_sample_count_percentiles,
+  }, "CloudWatch alarm changed since partial apply");
+}
+
 function checkPartialLiveOwnership(state) {
   const read = (name, args) => {
     const result = aws(args);
@@ -91,16 +121,27 @@ function checkPartialLiveOwnership(state) {
   assertSnsPolicyForOwnership(JSON.parse(topic.Attributes.Policy), "PARTIAL_EXISTING_STATE");
   for (const name of ["mscqr-production-ecr-protection-change", "mscqr-production-ecr-image-action"]) {
     const rule = read(name, ["events", "describe-rule", "--name", name]);
-    assert.equal(rule.Arn, `arn:aws:events:eu-west-2:368992683803:rule/${name}`);
-    assert.equal(rule.State, "ENABLED");
-    assert.deepEqual(read(`${name} targets`, ["events", "list-targets-by-rule", "--rule", name]).Targets?.map(target => [target.Id, target.Arn]),
-      [["existing-production-alerts", partialIds.get("aws_sns_topic_policy.ecr_alerts")]]);
+    const key = name === "mscqr-production-ecr-protection-change" ? "ecr_protection_change" : "ecr_image_action";
+    const savedRule = state.resources.find(resource => resource.type === "aws_cloudwatch_event_rule" && resource.name === key).instances[0].attributes;
+    assertPartialRule(savedRule, rule);
+    const targets = read(`${name} targets`, ["events", "list-targets-by-rule", "--rule", name]).Targets;
+    assert.equal(targets?.length, 1, "EventBridge target changed since partial apply");
+    const target = targets[0];
+    const savedTarget = state.resources.find(resource => resource.type === "aws_cloudwatch_event_target" && resource.name === key).instances[0].attributes;
+    assert.deepEqual({ id: target.Id, arn: target.Arn, role: target.RoleArn || "", input: target.Input || "", inputPath: target.InputPath || "",
+      transformer: target.InputTransformer ? { paths: target.InputTransformer.InputPathsMap, template: target.InputTransformer.InputTemplate } : null },
+    { id: savedTarget.target_id, arn: savedTarget.arn, role: savedTarget.role_arn, input: savedTarget.input, inputPath: savedTarget.input_path,
+      transformer: savedTarget.input_transformer?.length ? { paths: savedTarget.input_transformer[0].input_paths, template: savedTarget.input_transformer[0].input_template } : null },
+    "EventBridge target changed since partial apply");
   }
   const names = [...alarmNames].map(name => `mscqr-production-ecr-${name}`);
   const alarms = read("alarms", ["cloudwatch", "describe-alarms", "--alarm-names", ...names]);
   assert.deepEqual(new Set((alarms.MetricAlarms || []).map(alarm => alarm.AlarmName)), new Set(names));
-  assert.ok(alarms.MetricAlarms.every(alarm => alarm.AlarmArn === `arn:aws:cloudwatch:eu-west-2:368992683803:alarm:${alarm.AlarmName}` &&
-    alarm.AlarmActions?.length === 1 && alarm.AlarmActions[0] === partialIds.get("aws_sns_topic_policy.ecr_alerts")));
+  for (const alarm of alarms.MetricAlarms) {
+    const saved = state.resources.find(resource => resource.type === "aws_cloudwatch_metric_alarm" && resource.name === "ecr_protection")
+      .instances.find(instance => instance.attributes.alarm_name === alarm.AlarmName).attributes;
+    assertPartialAlarm(saved, alarm);
+  }
   for (const name of ["mscqr-backend", "mscqr-web", "mscqr-worker"]) {
     const policy = aws(["ecr", "get-repository-policy", "--repository-name", name]);
     assert.ok(!policy.error && policy.status !== 0 && /RepositoryPolicyNotFoundException/.test(policy.stderr || ""), `ECR policy ${name} changed during partial apply`);
