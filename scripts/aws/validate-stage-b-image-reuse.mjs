@@ -60,7 +60,7 @@ const WEB_IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/(?:workflows\/|actions\/converge-stage-b-prerequisites\/action\.yml$)/;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:(?:main|variables)\.tf$|production-ecr-protection\/(?:main|monitor|providers|versions)\.tf$|production-ecr-protection\/(?:bootstrap-(?:plan-trust|apply-trust|read-policy|apply-policy)|github-environment-contract)\.json$|production-ecr-protection\/\.terraform\.lock\.hcl$|ecr-protection-handoff\.tf$|(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\/)/;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:(?:main|variables)\.tf$|production-ecr-protection\/(?:main|monitor|providers|versions)\.tf$|production-ecr-protection\/(?:bootstrap-(?:plan-trust|apply-trust|read-policy|apply-policy|monitor-boundary)|github-environment-contract)\.json$|production-ecr-protection\/\.terraform\.lock\.hcl$|ecr-protection-handoff\.tf$|(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\/)/;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;

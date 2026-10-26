@@ -19,6 +19,12 @@ locals {
         "ecr:PutLifecyclePolicy",
         "ecr:UpdateImageStorageClass"
       ]
+      }, {
+      Sid       = "AllowLegacyPublisherProtectionRead"
+      Effect    = "Allow"
+      Principal = { AWS = "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" }
+      Resource  = "*"
+      Action    = "ecr:GetRepositoryPolicy"
     }]
   })
 }

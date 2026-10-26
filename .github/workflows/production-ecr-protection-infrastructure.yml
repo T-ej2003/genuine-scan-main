@@ -25,14 +25,14 @@ jobs:
     outputs:
       plan_sha256: ${{ steps.save.outputs.plan_sha256 }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
@@ -48,7 +48,7 @@ jobs:
           test "$SOURCE_SHA" = "$GITHUB_SHA"
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
           aws-region: eu-west-2
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-ecr-infrastructure-plan
@@ -57,8 +57,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(aws sts get-caller-identity --query Arn --output text)" = "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecr-infrastructure-plan/$GITHUB_RUN_ID"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs boundary
           node scripts/aws/production-ecr-infrastructure-gate.mjs inventory mscqr-production-ecr-infrastructure-plan
-          node scripts/aws/production-ecr-infrastructure-gate.mjs sns mscqr-production-ecr-infrastructure-plan
       - name: Save and validate exact ECR infrastructure plan
         id: save
         run: |
@@ -67,12 +67,13 @@ jobs:
           terraform -chdir=infra/aws/terraform/production-ecr-protection init -input=false -lockfile=readonly
           test "$(terraform -chdir=infra/aws/terraform/production-ecr-protection workspace show)" = default
           node scripts/aws/production-ecr-infrastructure-gate.mjs ownership
+          node scripts/aws/production-ecr-infrastructure-gate.mjs sns mscqr-production-ecr-infrastructure-plan
           terraform -chdir=infra/aws/terraform/production-ecr-protection plan -input=false -lock-timeout=0s -out="$RUNNER_TEMP/ecr-plan/plan.bin"
           terraform -chdir=infra/aws/terraform/production-ecr-protection show -json "$RUNNER_TEMP/ecr-plan/plan.bin" > "$RUNNER_TEMP/ecr-plan/plan.json"
           node scripts/aws/production-ecr-infrastructure-gate.mjs plan "$RUNNER_TEMP/ecr-plan/plan.json"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           echo "plan_sha256=$(sha256sum "$RUNNER_TEMP/ecr-plan/plan.bin" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: reviewed-ecr-infrastructure-plan
           path: ${{ runner.temp }}/ecr-plan/
@@ -85,14 +86,14 @@ jobs:
     environment: production-ecr-infrastructure-apply
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: 1.15.8
           terraform_wrapper: false
@@ -106,11 +107,11 @@ jobs:
           test "$SOURCE_SHA" = "$GITHUB_SHA"
           test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
           test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: reviewed-ecr-infrastructure-plan
           path: ${{ runner.temp }}/ecr-plan
-      - uses: aws-actions/configure-aws-credentials@v6
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
           aws-region: eu-west-2
           role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-ecr-infrastructure-apply
@@ -121,6 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(aws sts get-caller-identity --query Arn --output text)" = "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecr-infrastructure-apply/$GITHUB_RUN_ID"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs boundary
           test "$PLAN_SHA256" = "$(sha256sum "$RUNNER_TEMP/ecr-plan/plan.bin" | cut -d' ' -f1)"
           terraform -chdir=infra/aws/terraform/production-ecr-protection init -input=false -lockfile=readonly
           test "$(terraform -chdir=infra/aws/terraform/production-ecr-protection workspace show)" = default
@@ -137,7 +139,7 @@ jobs:
           node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync(process.env.RUNNER_TEMP + "/ecr-plan/receipt.json", JSON.stringify({status:"APPLY_STARTED",sourceSha:process.env.GITHUB_SHA,planSha256:process.env.PLAN_SHA256,runId:process.env.GITHUB_RUN_ID,observedAt:new Date().toISOString()}))'
           terraform -chdir=infra/aws/terraform/production-ecr-protection apply -input=false -lock-timeout=0s "$RUNNER_TEMP/ecr-plan/plan.bin"
           node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync(process.env.RUNNER_TEMP + "/ecr-plan/receipt.json", JSON.stringify({status:"APPLIED",sourceSha:process.env.GITHUB_SHA,planSha256:process.env.PLAN_SHA256,runId:process.env.GITHUB_RUN_ID,observedAt:new Date().toISOString()}))'
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
         with:
           name: ecr-infrastructure-execution-receipt

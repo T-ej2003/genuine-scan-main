@@ -15,7 +15,7 @@ export const STATE = Object.freeze({
 });
 const managed = new Set([
   "aws_ecr_repository_policy.backend_delete_guard", "aws_ecr_repository_policy.web_delete_guard", "aws_ecr_repository_policy.worker_delete_guard",
-  "aws_iam_role.ecr_monitor", "aws_iam_role_policy.ecr_monitor", "aws_iam_role_policy.legacy_image_publisher_protection_read",
+  "aws_iam_role.ecr_monitor", "aws_iam_role_policy.ecr_monitor",
   "aws_sns_topic_policy.ecr_alerts", "aws_cloudwatch_event_rule.ecr_protection_change", "aws_cloudwatch_event_rule.ecr_image_action",
   "aws_cloudwatch_event_target.ecr_protection_change", "aws_cloudwatch_event_target.ecr_image_action", "aws_cloudwatch_metric_alarm.ecr_protection",
 ]);
@@ -25,7 +25,7 @@ const digest = bytes => crypto.createHash("sha256").update(bytes).digest("hex");
 const canonical = value => JSON.stringify(value, (_, item) => item && !Array.isArray(item) && typeof item === "object" ? Object.fromEntries(Object.entries(item).sort()) : item);
 const SNS_PREDECESSOR_SHA256 = "565388f4a06bcbbab56e98208d9ec00f92f8610977d55b91b83c2e6b92d667ad";
 const SNS_DEFAULT_STATEMENT_SHA256 = "2baebecb71ebecd47e4418929ba0ee9fc2b6d96c3bb59362a34fe2f9eb245cfa";
-const repoArns = ["backend", "web", "worker"].map(name => `arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-${name}`);
+const MONITOR_BOUNDARY_ARN = "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary";
 const managedInstances = new Set([...managed].flatMap(address => address === "aws_cloudwatch_metric_alarm.ecr_protection" ?
   [...alarmNames].map(name => `${address}["${name}"]`) : [address]));
 
@@ -61,7 +61,6 @@ export function checkStateOwnership() {
   for (const name of ["mscqr-backend", "mscqr-web", "mscqr-worker"])
     resources[`repository-policy:${name}`] = absent(name, ["ecr", "get-repository-policy", "--repository-name", name], /RepositoryPolicyNotFoundException/);
   resources.monitorRole = absent("monitor-role", ["iam", "get-role", "--role-name", "mscqr-production-ecr-monitor"], /NoSuchEntity/);
-  resources.legacyPolicy = absent("legacy-publisher-policy", ["iam", "get-role-policy", "--role-name", "github-actions-mscqr-deploy", "--policy-name", "mscqr-production-ecr-protection-read"], /NoSuchEntity/);
   for (const name of ["mscqr-production-ecr-protection-change", "mscqr-production-ecr-image-action"])
     resources[`event-rule:${name}`] = absent(name, ["events", "describe-rule", "--name", name], /ResourceNotFoundException/);
   const alarms = aws(["cloudwatch", "describe-alarms", "--alarm-names", ...[...alarmNames].map(name => `mscqr-production-ecr-${name}`)]);
@@ -77,14 +76,49 @@ export function assertSnsPolicyPredecessor(policy) {
   assert.deepEqual(policy.Statement.map(item => item.Sid), ["__default_statement_ID"]);
 }
 
-export function checkSnsPolicy(role) {
+export function assertSnsPolicyForOwnership(policy, ownership) {
+  if (ownership === "ABSENT_AND_UNOWNED") return assertSnsPolicyPredecessor(policy);
+  assert.equal(ownership, "COMPLETE_EXISTING_STATE", "Unrecognized ECR state ownership");
+  assert.equal(policy.Version, "2008-10-17");
+  assert.equal(policy.Id, "__default_policy_ID");
+  assert.deepEqual(policy.Statement.map(item => item.Sid), ["__default_statement_ID", "AllowExactEcrProtectionRules"]);
+  assert.equal(digest(canonical(policy.Statement[0])), SNS_DEFAULT_STATEMENT_SHA256, "Managed SNS default permission changed");
+  assert.deepEqual(policy.Statement[1], {
+    Sid: "AllowExactEcrProtectionRules", Effect: "Allow", Principal: { Service: "events.amazonaws.com" },
+    Action: "sns:Publish", Resource: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts",
+    Condition: {
+      ArnEquals: { "aws:SourceArn": [
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-protection-change",
+        "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-image-action",
+      ] },
+      StringEquals: { "aws:SourceAccount": STATE.account },
+    },
+  }, "Managed SNS EventBridge permission changed");
+}
+
+export function assertMonitorBoundaryDocument(document) {
+  assert.deepEqual(document, JSON.parse(fs.readFileSync(`${STACK}/bootstrap-monitor-boundary.json`, "utf8")), "Monitor permissions boundary changed");
+}
+
+export function checkMonitorBoundary() {
+  const policy = aws(["iam", "get-policy", "--policy-arn", MONITOR_BOUNDARY_ARN]);
+  assert.ok(!policy.error && policy.status === 0, "Monitor permissions boundary is not installed");
+  const metadata = JSON.parse(policy.stdout).Policy;
+  assert.equal(metadata?.Arn, MONITOR_BOUNDARY_ARN);
+  const version = aws(["iam", "get-policy-version", "--policy-arn", MONITOR_BOUNDARY_ARN, "--version-id", metadata.DefaultVersionId]);
+  assert.ok(!version.error && version.status === 0, "Monitor permissions boundary version cannot be read");
+  assertMonitorBoundaryDocument(JSON.parse(version.stdout).PolicyVersion?.Document);
+}
+
+export function checkSnsPolicy(role, ownership) {
   assert.ok(["mscqr-production-ecr-infrastructure-plan", "mscqr-production-ecr-infrastructure-apply"].includes(role), "Wrong SNS inspection role");
+  ownership ??= checkStateOwnership();
   const caller = JSON.parse(createAwsRunner()(["sts", "get-caller-identity"]));
   assertEcrAssumedRole(caller, role);
   const result = spawnSync("aws", ["sns", "get-topic-attributes", "--topic-arn", "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts", "--region", STATE.region, "--output", "json", "--no-cli-pager"],
     { encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024, env: { ...process.env, AWS_MAX_ATTEMPTS: "2", AWS_CLI_AUTO_PROMPT: "off" } });
   assert.ok(!result.error && result.status === 0, `SNS policy read failed: ${result.error?.code || result.status}`);
-  assertSnsPolicyPredecessor(JSON.parse(JSON.parse(result.stdout).Attributes.Policy));
+  assertSnsPolicyForOwnership(JSON.parse(JSON.parse(result.stdout).Attributes.Policy), ownership);
 }
 
 export function assertBackendMetadata(metadata) {
@@ -119,12 +153,12 @@ export function assertPlan(plan) {
     assert.ok(managed.has(address), `Unrelated Terraform resource: ${change.address}`);
     if (address === "aws_cloudwatch_metric_alarm.ecr_protection") assert.ok(alarmNames.has(change.index), "Unexpected alarm");
     assert.ok(["create", "update", "no-op"].includes(change.change.actions?.join(",")), `Destructive ECR plan action: ${change.address}`);
-    if (change.importing) assert.equal(change.address, "aws_sns_topic_policy.ecr_alerts", "Only existing SNS policy may be imported");
+    if (change.change.importing) assert.equal(change.address, "aws_sns_topic_policy.ecr_alerts", "Only existing SNS policy may be imported");
     if (address === "aws_sns_topic_policy.ecr_alerts") {
       const after = JSON.parse(change.change.after?.policy || "null");
       assert.equal(change.change.after?.arn, "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts");
       assert.ok(Array.isArray(after?.Statement), "SNS policy successor is not authenticated");
-      if (change.importing) assert.equal(change.importing.id, "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts");
+      if (change.change.importing) assert.equal(change.change.importing.id, "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts");
       else {
         const before = JSON.parse(change.change.before?.policy || "null");
         assert.ok(Array.isArray(before?.Statement), "SNS policy predecessor is not authenticated");
@@ -147,16 +181,22 @@ export function assertPlan(plan) {
       const expected = address.split(".").at(-1).replace("_delete_guard", "");
       assert.equal(change.change.after?.repository, expected === "web" ? "mscqr-web" : `mscqr-${expected}`);
       const policy = JSON.parse(change.change.after?.policy || "null");
-      assert.equal(policy?.Statement?.length, 1, "Repository policy adds unrelated permissions");
+      assert.equal(policy?.Statement?.length, 2, "Repository policy adds unrelated permissions");
       const guard = policy.Statement[0];
       assert.equal(guard.Effect, "Deny");
       assert.equal(guard.Principal, "*");
       assert.equal(guard.Resource, "*");
       assert.deepEqual(guard.Action, ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy", "ecr:UpdateImageStorageClass"]);
       assert.ok(!guard.Condition && !guard.NotAction && !guard.NotResource && !guard.NotPrincipal, "Conditional deletion guard is unsafe");
+      assert.deepEqual(policy.Statement[1], {
+        Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow",
+        Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" },
+        Resource: "*", Action: "ecr:GetRepositoryPolicy",
+      }, "Publisher repository-policy read is not exact");
     }
     if (address === "aws_iam_role.ecr_monitor") {
       assert.equal(change.change.after?.name, "mscqr-production-ecr-monitor");
+      assert.equal(change.change.after?.permissions_boundary, MONITOR_BOUNDARY_ARN);
       const trust = JSON.parse(change.change.after?.assume_role_policy || "null");
       assert.equal(trust?.Statement?.length, 1);
       const statement = trust.Statement[0];
@@ -178,17 +218,6 @@ export function assertPlan(plan) {
         "ecs:DescribeServices", "ecs:ListTasks", "ecs:DescribeTaskDefinition", "ecs:DescribeTasks", "dynamodb:GetItem", "s3:ListBucket", "s3:GetObject", "cloudwatch:PutMetricData"]);
       assert.ok(policy?.Statement?.every(item => item.Effect === "Allow" && [item.Action].flat().every(action => allowed.has(action))), "Monitor IAM gained an unreviewed operation");
       assert.ok(policy.Statement.some(item => item.Action === "cloudwatch:PutMetricData" && item.Condition?.StringEquals?.["cloudwatch:namespace"] === "MSCQR/ProductionEcrProtection"));
-    }
-    if (address === "aws_iam_role_policy.legacy_image_publisher_protection_read") {
-      assert.equal(change.change.after?.role, "github-actions-mscqr-deploy");
-      const policy = JSON.parse(change.change.after?.policy || "null");
-      assert.equal(policy?.Statement?.length, 2);
-      assert.equal(policy.Statement[0].Effect, "Allow");
-      assert.equal(policy.Statement[0].Action, "ecr:GetRepositoryPolicy");
-      assert.deepEqual(policy.Statement[0].Resource, repoArns);
-      assert.equal(policy.Statement[1].Effect, "Deny");
-      assert.deepEqual(policy.Statement[1].Resource, repoArns);
-      assert.deepEqual(policy.Statement[1].Action, ["ecr:PutLifecyclePolicy", "ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:UpdateImageStorageClass"]);
     }
     if (address.startsWith("aws_cloudwatch_event_target.")) {
       assert.equal(change.change.after?.arn, "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts");
@@ -233,7 +262,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   } else if (mode === "sns") {
     assert.equal(role, undefined);
     checkSnsPolicy(file);
-    process.stdout.write(`${JSON.stringify({ snsPolicyPredecessorSha256: SNS_PREDECESSOR_SHA256 })}\n`);
+    process.stdout.write(`${JSON.stringify({ snsPolicy: "AUTHENTICATED" })}\n`);
+  } else if (mode === "boundary") {
+    assert.equal(file, undefined);
+    assert.equal(role, undefined);
+    checkMonitorBoundary();
+    process.stdout.write(`${JSON.stringify({ monitorBoundaryArn: MONITOR_BOUNDARY_ARN })}\n`);
   } else if (mode === "ownership") {
     assert.equal(file, undefined);
     assert.equal(role, undefined);

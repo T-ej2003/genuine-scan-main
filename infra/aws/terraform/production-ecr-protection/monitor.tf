@@ -12,29 +12,9 @@ locals {
   ]
 }
 
-resource "aws_iam_role_policy" "legacy_image_publisher_protection_read" {
-  name = "mscqr-production-ecr-protection-read"
-  role = "github-actions-mscqr-deploy"
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Action    = "ecr:GetRepositoryPolicy"
-        Resource  = local.ecr_monitor_repositories
-        Condition = { StringEquals = { "aws:RequestedRegion" = "eu-west-2" } }
-      },
-      {
-        Effect   = "Deny"
-        Action   = ["ecr:PutLifecyclePolicy", "ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:UpdateImageStorageClass"]
-        Resource = local.ecr_monitor_repositories
-      }
-    ]
-  })
-}
-
 resource "aws_iam_role" "ecr_monitor" {
-  name = "mscqr-production-ecr-monitor"
+  name                 = "mscqr-production-ecr-monitor"
+  permissions_boundary = "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{

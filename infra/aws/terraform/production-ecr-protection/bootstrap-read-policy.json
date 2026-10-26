@@ -80,6 +80,12 @@
       ]
     },
     {
+      "Sid": "ReadMonitorPermissionsBoundary",
+      "Effect": "Allow",
+      "Action": ["iam:GetPolicy", "iam:GetPolicyVersion"],
+      "Resource": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+    },
+    {
       "Sid": "ReadExactEvents",
       "Effect": "Allow",
       "Action": [

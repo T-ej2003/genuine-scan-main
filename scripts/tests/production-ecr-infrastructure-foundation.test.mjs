@@ -2,14 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import yaml from "js-yaml";
-import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertPlan, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
+import { assertBackendMetadata, assertInitialOwnership, assertInventoryReady, assertMonitorBoundaryDocument, assertPlan, assertSnsPolicyForOwnership, assertSnsPolicyPredecessor, checkSnsPolicy, STATE } from "../aws/production-ecr-infrastructure-gate.mjs";
 import { assertEcrAssumedRole } from "../aws/production-ecr-image-monitor.mjs";
 
 const stack = "infra/aws/terraform/production-ecr-protection";
 const read = name => fs.readFileSync(`${stack}/${name}`, "utf8");
 const managed = [
   "aws_ecr_repository_policy.backend_delete_guard", "aws_ecr_repository_policy.web_delete_guard", "aws_ecr_repository_policy.worker_delete_guard",
-  "aws_iam_role.ecr_monitor", "aws_iam_role_policy.ecr_monitor", "aws_iam_role_policy.legacy_image_publisher_protection_read",
+  "aws_iam_role.ecr_monitor", "aws_iam_role_policy.ecr_monitor",
   "aws_sns_topic_policy.ecr_alerts", "aws_cloudwatch_event_rule.ecr_protection_change", "aws_cloudwatch_event_rule.ecr_image_action",
   "aws_cloudwatch_event_target.ecr_protection_change", "aws_cloudwatch_event_target.ecr_image_action", "aws_cloudwatch_metric_alarm.ecr_protection",
 ];
@@ -57,7 +57,7 @@ test("isolated backend and ownership exclude the broad root and existing reposit
   assert.doesNotMatch(root, /aws_ecr_lifecycle_policy/);
   const handoff = fs.readFileSync("infra/aws/terraform/ecr-protection-handoff.tf", "utf8");
   for (const address of managed) assert.ok(handoff.includes(`from = ${address}`));
-  assert.equal((handoff.match(/destroy = false/g) || []).length, managed.length);
+  assert.equal((handoff.match(/destroy = false/g) || []).length, managed.length + 1); // Legacy publisher policy is relinquished without new IAM ownership.
 });
 
 test("protected inventory cannot authorize an empty or unreadable rollout", () => {
@@ -79,7 +79,7 @@ test("SNS import preserves the reviewed default statement and exact EventBridge 
     Condition: { StringEquals: { "AWS:SourceAccount": STATE.account } },
   };
   const grant = {
-    Sid: "AllowExactEcrProtectionRules", Principal: { Service: "events.amazonaws.com" }, Action: "sns:Publish",
+    Sid: "AllowExactEcrProtectionRules", Effect: "Allow", Principal: { Service: "events.amazonaws.com" }, Action: "sns:Publish",
     Condition: { ArnEquals: { "aws:SourceArn": [
       "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-protection-change",
       "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-image-action",
@@ -87,21 +87,38 @@ test("SNS import preserves the reviewed default statement and exact EventBridge 
   };
   const plan = basePlan();
   plan.resource_changes = [{ address: "aws_sns_topic_policy.ecr_alerts", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
-    importing: { id: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts" },
-    change: { actions: ["update"], before: null, after: { arn: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts", policy: JSON.stringify({ Statement: [original, grant] }) } } }];
+    change: { actions: ["update"], importing: { id: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts" }, before: null, after: { arn: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts", policy: JSON.stringify({ Statement: [original, grant] }) } } }];
   assert.doesNotThrow(() => assertPlan(plan));
+  assert.throws(() => assertPlan({ ...plan, resource_changes: [{ ...plan.resource_changes[0], change: { ...plan.resource_changes[0].change, importing: { id: "other" } } }] }));
+  assert.throws(() => assertPlan({ ...plan, resource_changes: [{ ...plan.resource_changes[0], address: "aws_ecr_repository_policy.backend_delete_guard" }] }), /Only existing SNS/);
+  const managedPolicy = { Version: "2008-10-17", Id: "__default_policy_ID", Statement: [original, { ...grant, Resource: "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts" }] };
+  assert.doesNotThrow(() => assertSnsPolicyForOwnership(managedPolicy, "COMPLETE_EXISTING_STATE"));
+  assert.throws(() => assertSnsPolicyForOwnership(managedPolicy, "ABSENT_AND_UNOWNED"), /changed/);
+  assert.throws(() => assertSnsPolicyForOwnership({ ...managedPolicy, Statement: [original, { ...managedPolicy.Statement[1], Action: "sns:*" }] }, "COMPLETE_EXISTING_STATE"));
   plan.resource_changes[0].change.after.policy = JSON.stringify({ Statement: [original, { ...grant, Action: "s3:*" }] });
   assert.throws(() => assertPlan(plan));
 });
 
 test("plan rejects weaker ECR guards and monitor privilege expansion", () => {
   const plan = basePlan();
+  const guard = { Statement: [
+    { Effect: "Deny", Principal: "*", Resource: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy", "ecr:UpdateImageStorageClass"] },
+    { Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" }, Resource: "*", Action: "ecr:GetRepositoryPolicy" },
+  ] };
+  plan.resource_changes = [{ address: "aws_ecr_repository_policy.backend_delete_guard", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["create"], after: { repository: "mscqr-backend", policy: JSON.stringify(guard) } } }];
+  assert.doesNotThrow(() => assertPlan(plan));
+  plan.resource_changes[0].change.after.policy = JSON.stringify({ Statement: [guard.Statement[0], { ...guard.Statement[1], Action: "ecr:*" }] });
+  assert.throws(() => assertPlan(plan), /Publisher repository-policy read/);
   plan.resource_changes = [{ address: "aws_ecr_repository_policy.backend_delete_guard", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
     change: { actions: ["create"], after: { repository: "mscqr-backend", policy: JSON.stringify({ Statement: [{ Effect: "Allow", Action: ["ecr:BatchDeleteImage"], Principal: "*", Resource: "*" }] }) } } }];
   assert.throws(() => assertPlan(plan));
   plan.resource_changes = [{ address: "aws_iam_role_policy.ecr_monitor", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
     change: { actions: ["create"], after: { role: "mscqr-production-ecr-monitor", policy: JSON.stringify({ Statement: [{ Effect: "Allow", Action: "ecr:BatchDeleteImage", Resource: "*" }] }) } } }];
   assert.throws(() => assertPlan(plan), /unreviewed operation/);
+  plan.resource_changes = [{ address: "aws_iam_role.ecr_monitor", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
+    change: { actions: ["create"], after: { name: "mscqr-production-ecr-monitor", permissions_boundary: null } } }];
+  assert.throws(() => assertPlan(plan), /MSCQRProductionEcrMonitorBoundary/);
 });
 
 test("plan and apply OIDC roles preserve environment and operation separation", () => {
@@ -112,6 +129,8 @@ test("plan and apply OIDC roles preserve environment and operation separation", 
   assert.equal(workflow.jobs.apply.environment, "production-ecr-infrastructure-apply");
   assert.equal(workflow.jobs.apply.needs, "plan");
   const source = fs.readFileSync(".github/workflows/production-ecr-protection-infrastructure.yml", "utf8");
+  for (const action of source.matchAll(/^\s*- uses: ([^\s#]+)/gm)) assert.match(action[1], /^[\w-]+\/[\w-]+@[a-f0-9]{40}$/);
+  assert.match(source, /production-ecr-infrastructure-gate\.mjs boundary/g);
   assert.match(source, /terraform .* plan .* -out=/);
   assert.match(source, /terraform .* apply .*plan\.bin/);
   assert.match(source, /needs\.plan\.outputs\.plan_sha256/);
@@ -134,4 +153,25 @@ test("plan and apply OIDC roles preserve environment and operation separation", 
   assert.ok(!JSON.stringify(readPolicy).includes("ecr:SetRepositoryPolicy"));
   assert.ok(!JSON.stringify(applyPolicy).includes("ecr:PutLifecyclePolicy\",\"Resource\":\"arn:aws:ecr"));
   assert.ok(applyPolicy.Statement.some(item => item.Effect === "Deny" && item.Action.includes("ecs:UpdateService")));
+});
+
+test("monitor creation requires a fixed boundary and infrastructure cannot rewrite the legacy publisher role", () => {
+  const apply = JSON.parse(read("bootstrap-apply-policy.json"));
+  const boundary = JSON.parse(read("bootstrap-monitor-boundary.json"));
+  assert.doesNotThrow(() => assertMonitorBoundaryDocument(boundary));
+  assert.throws(() => assertMonitorBoundaryDocument({ ...boundary, Statement: boundary.Statement.slice(1) }), /changed/);
+  const role = "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor";
+  const boundaryArn = "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary";
+  assert.ok(apply.Statement.filter(statement => [statement.Action].flat().some(action => action.startsWith("iam:")))
+    .every(statement => statement.Resource === role));
+  for (const action of ["iam:CreateRole", "iam:PutRolePolicy"])
+    assert.equal(apply.Statement.find(statement => statement.Action === action)?.Condition?.ArnEquals?.["iam:PermissionsBoundary"], boundaryArn);
+  assert.ok(!JSON.stringify(apply).includes("iam:UpdateAssumeRolePolicy") && !JSON.stringify(apply).includes("iam:PassRole") && !JSON.stringify(apply).includes("iam:PutRolePermissionsBoundary"));
+  assert.ok(!JSON.stringify(apply).includes("github-actions-mscqr-deploy"));
+  assert.ok(boundary.Statement.some(statement => statement.Effect === "Deny" && statement.NotAction && statement.Resource === "*"));
+  for (const action of ["ecr:DescribeImages", "dynamodb:GetItem", "s3:GetObject"])
+    assert.ok(boundary.Statement.some(statement => statement.Effect === "Deny" && [statement.Action].flat().includes(action) && statement.NotResource));
+  assert.ok(boundary.Statement.every(statement => !JSON.stringify(statement).includes("iam:PassRole") && !JSON.stringify(statement).includes("iam:CreateRole")));
+  assert.match(read("monitor.tf"), /permissions_boundary\s*=\s*"arn:aws:iam::368992683803:policy\/MSCQRProductionEcrMonitorBoundary"/);
+  assert.doesNotMatch(read("monitor.tf"), /legacy_image_publisher_protection_read/);
 });

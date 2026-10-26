@@ -8,20 +8,32 @@
       "Resource": "arn:aws:s3:::mscqr-production-terraform-state-368992683803-eu-west-2/mscqr/production/ecr-protection/terraform.tfstate"
     },
     {
-      "Sid": "InstallMonitorRole",
+      "Sid": "CreateBoundedMonitorRole",
       "Effect": "Allow",
-      "Action": [
-        "iam:CreateRole",
-        "iam:TagRole",
-        "iam:PutRolePolicy"
-      ],
+      "Action": "iam:CreateRole",
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+        }
+      }
+    },
+    {
+      "Sid": "TagExactMonitorRole",
+      "Effect": "Allow",
+      "Action": "iam:TagRole",
       "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor"
     },
     {
-      "Sid": "UpdateLegacyPublisherReadBoundary",
+      "Sid": "WriteBoundedMonitorPolicy",
       "Effect": "Allow",
       "Action": "iam:PutRolePolicy",
-      "Resource": "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy"
+      "Resource": "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor",
+      "Condition": {
+        "ArnEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary"
+        }
+      }
     },
     {
       "Sid": "SetExactRepositoryGuards",
