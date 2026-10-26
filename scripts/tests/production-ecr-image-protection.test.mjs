@@ -12,7 +12,7 @@ import { stateHash } from "../aws/production-component-deployment-state.mjs";
 
 const sha = "a".repeat(40), digest = `sha256:${"b".repeat(64)}`;
 const image = (repo = "mscqr-backend") => `368992683803.dkr.ecr.eu-west-2.amazonaws.com/${repo}@${digest}`;
-const guard = { Statement: [{ Effect: "Deny", Principal: "*", Resource: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy", "ecr:UpdateImageStorageClass"] }] };
+const guard = { Statement: [{ Effect: "Deny", Principal: "*", Resource: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"] }] };
 const protectedRepository = (repository = "mscqr-backend") => ({ repository, caller: { Account: ECR_PROTECTION.account }, lifecyclePolicy: null,
   description: { repositoryName: repository, registryId: ECR_PROTECTION.account, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, imageTagMutability: "IMMUTABLE", imageScanningConfiguration: { scanOnPush: true } }, repositoryPolicy: guard });
 

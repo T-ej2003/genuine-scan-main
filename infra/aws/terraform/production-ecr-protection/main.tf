@@ -16,8 +16,7 @@ locals {
       Action = [
         "ecr:BatchDeleteImage",
         "ecr:DeleteRepository",
-        "ecr:PutLifecyclePolicy",
-        "ecr:UpdateImageStorageClass"
+        "ecr:PutLifecyclePolicy"
       ]
       }, {
       Sid       = "AllowLegacyPublisherProtectionRead"

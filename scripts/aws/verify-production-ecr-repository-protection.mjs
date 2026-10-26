@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 export const ECR_PROTECTION = Object.freeze({ account: "368992683803", region: "eu-west-2", repositories: ["mscqr-backend", "mscqr-web", "mscqr-worker"] });
-const denied = ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy", "ecr:UpdateImageStorageClass"];
+const denied = ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"];
 
 export function assertEcrRepositoryProtection({ repository, description, lifecyclePolicy, repositoryPolicy, caller }) {
   assert.ok(ECR_PROTECTION.repositories.includes(repository), "Unreviewed ECR repository");

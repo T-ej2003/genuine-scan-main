@@ -28,6 +28,18 @@ const SNS_DEFAULT_STATEMENT_SHA256 = "2baebecb71ebecd47e4418929ba0ee9fc2b6d96c3b
 const MONITOR_BOUNDARY_ARN = "arn:aws:iam::368992683803:policy/MSCQRProductionEcrMonitorBoundary";
 const managedInstances = new Set([...managed].flatMap(address => address === "aws_cloudwatch_metric_alarm.ecr_protection" ?
   [...alarmNames].map(name => `${address}["${name}"]`) : [address]));
+const PARTIAL_LINEAGE = "578568c5-ffb1-aa44-c941-6f2a4a17c838";
+const PARTIAL_STATE_VERSION = "mK.Oem0.JG8kyunwI9oI25W0Arqz44FF";
+const partialIds = new Map([
+  ["aws_iam_role.ecr_monitor", "mscqr-production-ecr-monitor"],
+  ["aws_iam_role_policy.ecr_monitor", "mscqr-production-ecr-monitor:mscqr-production-ecr-monitor"],
+  ["aws_sns_topic_policy.ecr_alerts", "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts"],
+  ...["ecr_protection_change", "ecr_image_action"].flatMap((key, index) => {
+    const name = ["mscqr-production-ecr-protection-change", "mscqr-production-ecr-image-action"][index];
+    return [[`aws_cloudwatch_event_rule.${key}`, name], [`aws_cloudwatch_event_target.${key}`, `${name}-existing-production-alerts`]];
+  }),
+  ...[...alarmNames].map(name => [`aws_cloudwatch_metric_alarm.ecr_protection["${name}"]`, `mscqr-production-ecr-${name}`]),
+]);
 
 function aws(args) {
   return spawnSync("aws", [...args, "--region", STATE.region, "--output", "json", "--no-cli-pager"],
@@ -40,14 +52,125 @@ export function assertInitialOwnership(readbacks) {
     assert.equal(result, "ABSENT", `Unowned ECR infrastructure already exists: ${name}`);
 }
 
+export function assertPartialOwnershipState(state) {
+  assert.equal(state.version, 4);
+  assert.equal(state.lineage, PARTIAL_LINEAGE, "ECR Terraform state lineage changed");
+  assert.equal(state.serial, 1, "ECR partial state serial changed");
+  const resources = (state.resources || []).filter(resource => resource.mode === "managed");
+  assert.equal(resources.length, 8, "ECR partial state resource count changed");
+  assert.ok(resources.every(resource => !resource.module && resource.instances?.length && resource.instances.every(instance => !instance.deposed)), "ECR partial state has an unexpected instance");
+  const instances = resources.flatMap(resource => (resource.instances || []).map(instance => [
+    `${resource.type}.${resource.name}${instance.index_key === undefined ? "" : `["${instance.index_key}"]`}`,
+    instance.attributes?.id,
+  ]));
+  assert.equal(instances.length, partialIds.size, "ECR partial state instance count changed");
+  assert.deepEqual(new Map(instances), partialIds, "ECR partial state owns unexpected resources or identities");
+  assert.ok((state.resources || []).every(resource => resource.mode === "managed" || dataSources.has(`data.${resource.type}.${resource.name}`)), "ECR state has an unrelated data source");
+}
+
+export function assertPartialMonitorTrust(state, role) {
+  const saved = state.resources.find(resource => resource.type === "aws_iam_role" && resource.name === "ecr_monitor").instances[0].attributes.assume_role_policy;
+  assert.equal(canonical(role.AssumeRolePolicyDocument), canonical(JSON.parse(saved)), "Monitor OIDC trust changed since partial apply");
+}
+
+export function assertPartialRule(saved, live) {
+  assert.deepEqual({
+    arn: live.Arn, bus: live.EventBusName, description: live.Description || "", state: live.State,
+    pattern: JSON.parse(live.EventPattern || "null"), role: live.RoleArn || "", schedule: live.ScheduleExpression || "",
+  }, {
+    arn: saved.arn, bus: saved.event_bus_name, description: saved.description, state: saved.state,
+    pattern: JSON.parse(saved.event_pattern), role: saved.role_arn, schedule: saved.schedule_expression,
+  }, "EventBridge rule changed since partial apply");
+}
+
+export function assertPartialAlarm(saved, live) {
+  assert.deepEqual({
+    arn: live.AlarmArn, actionsEnabled: live.ActionsEnabled, alarmActions: live.AlarmActions || [], okActions: live.OKActions || [],
+    insufficientActions: live.InsufficientDataActions || [], comparison: live.ComparisonOperator, evaluations: live.EvaluationPeriods,
+    threshold: live.Threshold, datapoints: live.DatapointsToAlarm || 0, dimensions: live.Dimensions || [],
+    metric: live.MetricName, namespace: live.Namespace, period: live.Period, statistic: live.Statistic,
+    missing: live.TreatMissingData, description: live.AlarmDescription || "", metrics: live.Metrics || [],
+    thresholdMetric: live.ThresholdMetricId || "", unit: live.Unit || "", extendedStatistic: live.ExtendedStatistic || "",
+    lowSampleCount: live.EvaluateLowSampleCountPercentile || "",
+  }, {
+    arn: saved.arn, actionsEnabled: saved.actions_enabled, alarmActions: saved.alarm_actions, okActions: saved.ok_actions,
+    insufficientActions: saved.insufficient_data_actions || [], comparison: saved.comparison_operator, evaluations: saved.evaluation_periods,
+    threshold: saved.threshold, datapoints: saved.datapoints_to_alarm || 0, dimensions: saved.dimensions || [],
+    metric: saved.metric_name, namespace: saved.namespace, period: saved.period, statistic: saved.statistic,
+    missing: saved.treat_missing_data, description: saved.alarm_description, metrics: saved.metric_query || [],
+    thresholdMetric: saved.threshold_metric_id, unit: saved.unit, extendedStatistic: saved.extended_statistic,
+    lowSampleCount: saved.evaluate_low_sample_count_percentiles,
+  }, "CloudWatch alarm changed since partial apply");
+}
+
+export function assertPartialTarget(saved, live) {
+  assert.deepEqual(live, {
+    Id: saved.target_id, Arn: saved.arn,
+    InputTransformer: { InputPathsMap: saved.input_transformer[0].input_paths, InputTemplate: saved.input_transformer[0].input_template },
+  }, "EventBridge target changed since partial apply");
+}
+
+function checkPartialLiveOwnership(state) {
+  const read = (name, args) => {
+    const result = aws(args);
+    assert.ok(!result.error && result.status === 0, `ECR partial-state ${name} read failed`);
+    return JSON.parse(result.stdout);
+  };
+  const role = read("monitor role", ["iam", "get-role", "--role-name", "mscqr-production-ecr-monitor"]).Role;
+  assert.equal(role.Arn, "arn:aws:iam::368992683803:role/mscqr-production-ecr-monitor");
+  assert.equal(role.PermissionsBoundary?.PermissionsBoundaryArn, MONITOR_BOUNDARY_ARN);
+  assertPartialMonitorTrust(state, role);
+  const policy = read("monitor policy", ["iam", "get-role-policy", "--role-name", "mscqr-production-ecr-monitor", "--policy-name", "mscqr-production-ecr-monitor"]);
+  assert.equal(policy.RoleName, role.RoleName);
+  const statePolicy = state.resources.find(resource => resource.type === "aws_iam_role_policy" && resource.name === "ecr_monitor").instances[0].attributes.policy;
+  assert.equal(canonical(policy.PolicyDocument), canonical(JSON.parse(statePolicy)), "Monitor IAM policy changed since partial apply");
+  const topic = read("SNS policy", ["sns", "get-topic-attributes", "--topic-arn", partialIds.get("aws_sns_topic_policy.ecr_alerts")]);
+  assertSnsPolicyForOwnership(JSON.parse(topic.Attributes.Policy), "PARTIAL_EXISTING_STATE");
+  for (const name of ["mscqr-production-ecr-protection-change", "mscqr-production-ecr-image-action"]) {
+    const rule = read(name, ["events", "describe-rule", "--name", name]);
+    const key = name === "mscqr-production-ecr-protection-change" ? "ecr_protection_change" : "ecr_image_action";
+    const savedRule = state.resources.find(resource => resource.type === "aws_cloudwatch_event_rule" && resource.name === key).instances[0].attributes;
+    assertPartialRule(savedRule, rule);
+    const targets = read(`${name} targets`, ["events", "list-targets-by-rule", "--rule", name]).Targets;
+    assert.equal(targets?.length, 1, "EventBridge target changed since partial apply");
+    const target = targets[0];
+    const savedTarget = state.resources.find(resource => resource.type === "aws_cloudwatch_event_target" && resource.name === key).instances[0].attributes;
+    assertPartialTarget(savedTarget, target);
+  }
+  const names = [...alarmNames].map(name => `mscqr-production-ecr-${name}`);
+  const alarms = read("alarms", ["cloudwatch", "describe-alarms", "--alarm-names", ...names]);
+  assert.deepEqual(new Set((alarms.MetricAlarms || []).map(alarm => alarm.AlarmName)), new Set(names));
+  for (const alarm of alarms.MetricAlarms) {
+    const saved = state.resources.find(resource => resource.type === "aws_cloudwatch_metric_alarm" && resource.name === "ecr_protection")
+      .instances.find(instance => instance.attributes.alarm_name === alarm.AlarmName).attributes;
+    assertPartialAlarm(saved, alarm);
+  }
+  for (const name of ["mscqr-backend", "mscqr-web", "mscqr-worker"]) {
+    const policy = aws(["ecr", "get-repository-policy", "--repository-name", name]);
+    assert.ok(!policy.error && policy.status !== 0 && /RepositoryPolicyNotFoundException/.test(policy.stderr || ""), `ECR policy ${name} changed during partial apply`);
+  }
+}
+
 export function checkStateOwnership() {
   const head = aws(["s3api", "head-object", "--bucket", STATE.bucket, "--key", STATE.key, "--expected-bucket-owner", STATE.account]);
   if (head.error) throw head.error;
   if (head.status === 0) {
+    const pulled = spawnSync("terraform", [`-chdir=${STACK}`, "state", "pull"], { encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024 });
+    assert.ok(!pulled.error && pulled.status === 0, "Existing ECR Terraform state cannot be authenticated");
+    const current = JSON.parse(pulled.stdout);
+    assert.equal(current.lineage, PARTIAL_LINEAGE, "ECR Terraform state lineage changed");
     const state = spawnSync("terraform", [`-chdir=${STACK}`, "state", "list"], { encoding: "utf8", timeout: 45000, maxBuffer: 1024 * 1024 });
     assert.ok(!state.error && state.status === 0, "Existing ECR Terraform state cannot be authenticated");
-    assert.deepEqual(new Set(state.stdout.trim().split("\n").filter(line => line && !line.startsWith("data."))), managedInstances,
-      "Existing ECR Terraform state is partial or owns an unrelated resource");
+    const addresses = new Set(state.stdout.trim().split("\n").filter(line => line && !line.startsWith("data.")));
+    if (addresses.size === partialIds.size && [...addresses].every(address => partialIds.has(address))) {
+      assert.equal(JSON.parse(head.stdout).VersionId, PARTIAL_STATE_VERSION, "ECR partial state object was replaced");
+      assertPartialOwnershipState(current);
+      checkPartialLiveOwnership(current);
+      const after = aws(["s3api", "head-object", "--bucket", STATE.bucket, "--key", STATE.key, "--expected-bucket-owner", STATE.account]);
+      assert.ok(!after.error && after.status === 0 && JSON.parse(after.stdout).VersionId === PARTIAL_STATE_VERSION, "ECR partial state changed during readback");
+      return "PARTIAL_EXISTING_STATE";
+    }
+    assert.deepEqual(addresses, managedInstances, "Existing ECR Terraform state owns an unrelated resource");
     return "COMPLETE_EXISTING_STATE";
   }
   assert.match(head.stderr || "", /(?:404|Not Found)/, "ECR state read failed ambiguously");
@@ -78,7 +201,7 @@ export function assertSnsPolicyPredecessor(policy) {
 
 export function assertSnsPolicyForOwnership(policy, ownership) {
   if (ownership === "ABSENT_AND_UNOWNED") return assertSnsPolicyPredecessor(policy);
-  assert.equal(ownership, "COMPLETE_EXISTING_STATE", "Unrecognized ECR state ownership");
+  assert.ok(["COMPLETE_EXISTING_STATE", "PARTIAL_EXISTING_STATE"].includes(ownership), "Unrecognized ECR state ownership");
   assert.equal(policy.Version, "2008-10-17");
   assert.equal(policy.Id, "__default_policy_ID");
   assert.deepEqual(policy.Statement.map(item => item.Sid), ["__default_statement_ID", "AllowExactEcrProtectionRules"]);
@@ -131,10 +254,42 @@ export function assertBackendMetadata(metadata) {
     assert.ok(!config[key], `Unexpected backend credential or endpoint: ${key}`);
 }
 
+export function assertPartialRefresh(plan) {
+  const prior = plan.prior_state?.values?.root_module?.resources || [];
+  const owned = prior.filter(resource => resource.mode === "managed");
+  assert.equal(owned.length, partialIds.size, "Partial refresh is not bound to the recorded apply");
+  assert.deepEqual(new Set(owned.map(resource => resource.address)), new Set(partialIds.keys()));
+  const drifts = plan.resource_drift || [];
+  assert.equal(drifts.length, 5, "Unexpected ECR partial-state drift");
+  const expected = new Set(["aws_iam_role.ecr_monitor", ...[...alarmNames].map(name => `aws_cloudwatch_metric_alarm.ecr_protection["${name}"]`)]);
+  assert.deepEqual(new Set(drifts.map(drift => drift.address)), expected);
+  for (const drift of drifts) {
+    assert.deepEqual(drift.change.actions, ["update"]);
+    const before = drift.change.before;
+    const after = drift.change.after;
+    if (drift.address === "aws_iam_role.ecr_monitor") {
+      const policy = owned.find(resource => resource.address === "aws_iam_role_policy.ecr_monitor").values.policy;
+      assert.deepEqual(before.inline_policy, []);
+      assert.deepEqual(after.inline_policy?.map(item => item.name), ["mscqr-production-ecr-monitor"]);
+      assert.equal(canonical(JSON.parse(after.inline_policy[0].policy)), canonical(JSON.parse(policy)));
+      assert.deepEqual(after, { ...before, inline_policy: after.inline_policy }, "Unexpected monitor role drift");
+    } else {
+      assert.equal(before.dimensions, null);
+      assert.equal(before.insufficient_data_actions, null);
+      assert.deepEqual(after, { ...before, dimensions: {}, insufficient_data_actions: [] }, "Unexpected alarm drift");
+    }
+  }
+  const changes = (plan.resource_changes || []).filter(change => change.mode === "managed" && change.change.actions.join(",") !== "no-op");
+  assert.deepEqual(new Set(changes.map(change => change.address)), new Set([
+    "aws_ecr_repository_policy.backend_delete_guard", "aws_ecr_repository_policy.web_delete_guard", "aws_ecr_repository_policy.worker_delete_guard",
+  ]), "Partial continuation would change already applied resources");
+  assert.ok(changes.every(change => change.change.actions.join(",") === "create"), "Partial continuation would replace a resource");
+}
+
 export function assertPlan(plan) {
   assert.equal(plan.errored, false);
   assert.equal(plan.applyable, true);
-  assert.equal((plan.resource_drift || []).length, 0, "Live drift requires a new review");
+  if ((plan.resource_drift || []).length) assertPartialRefresh(plan);
   const providers = plan.configuration?.provider_config;
   assert.deepEqual(Object.keys(providers || {}), ["aws"]);
   assert.equal(providers.aws.full_name, "registry.terraform.io/hashicorp/aws");
@@ -186,7 +341,7 @@ export function assertPlan(plan) {
       assert.equal(guard.Effect, "Deny");
       assert.equal(guard.Principal, "*");
       assert.equal(guard.Resource, "*");
-      assert.deepEqual(guard.Action, ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy", "ecr:UpdateImageStorageClass"]);
+      assert.deepEqual(guard.Action, ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"]);
       assert.ok(!guard.Condition && !guard.NotAction && !guard.NotResource && !guard.NotPrincipal, "Conditional deletion guard is unsafe");
       assert.deepEqual(policy.Statement[1], {
         Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow",
