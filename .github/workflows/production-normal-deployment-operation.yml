@@ -113,7 +113,7 @@ jobs:
           test "$GITHUB_WORKFLOW_REF" = "T-ej2003/genuine-scan-main/.github/workflows/production-deploy.yml@refs/heads/main"
           test "$GITHUB_SHA" = "$(git rev-parse HEAD)"
           test -z "$(git status --porcelain --untracked-files=all)"
-          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = '3205cb5a8b43c85a151784eb5d786d15ec866bfd8bec0d963ad0fc14e45fda2f'
+          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = 'b0cc1ee371f317405b3e3077614bffa0c106e352ff129400dd748d45c312dda7'
       - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
         with:
           aws-region: eu-west-2

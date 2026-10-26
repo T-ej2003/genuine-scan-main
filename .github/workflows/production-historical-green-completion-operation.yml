@@ -63,6 +63,12 @@ jobs:
           test "$(git rev-parse origin/main)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain=v1)"
 
+      - name: Authenticate caller and reviewed host tooling before credentials
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "T-ej2003/genuine-scan-main/.github/workflows/complete-historical-green-backend-recovery.yml@refs/heads/main"
+          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = 'b0cc1ee371f317405b3e3077614bffa0c106e352ff129400dd748d45c312dda7'
+
       - name: Set up reviewed Node runtime
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -82,12 +88,6 @@ jobs:
             --event-name "$GITHUB_EVENT_NAME" --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" --execution-actor "$GITHUB_ACTOR" \
             --require-actual-approval --output "$approval_dir/approval.json" > /dev/null
-
-      - name: Authenticate caller and reviewed host tooling before credentials
-        run: |
-          set -euo pipefail
-          test "$GITHUB_WORKFLOW_REF" = "T-ej2003/genuine-scan-main/.github/workflows/complete-historical-green-backend-recovery.yml@refs/heads/main"
-          test "$(git ls-tree -r HEAD -- .github/actions scripts/aws scripts/lib scripts/security scripts/rls/lib scripts/smoke-release.mjs backend/scripts/security infra/aws/terraform/lambda/production-rls-approval-broker package.json package-lock.json | sha256sum | cut -d' ' -f1)" = '3205cb5a8b43c85a151784eb5d786d15ec866bfd8bec0d963ad0fc14e45fda2f'
 
       - name: Assume exact normal-deployer role
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6
