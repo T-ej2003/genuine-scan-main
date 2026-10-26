@@ -1460,7 +1460,7 @@ jobs:
       actions: read
       deployments: read
       id-token: write
-    uses: T-ej2003/genuine-scan-main/.github/workflows/production-green-backend-recovery-operation.yml@26dcfb180fd3fbbe7715f496c6a322386b206764
+    uses: T-ej2003/genuine-scan-main/.github/workflows/production-green-backend-recovery-operation.yml@14d910dbeea5c3da12eea136738e1a1146c20d51
     with:
       source_sha: ${{ needs.resolve-deploy-target.outputs.deploy_sha }}
       current_task_definition_arn: ${{ inputs.backend_recovery_current_task_definition_arn }}

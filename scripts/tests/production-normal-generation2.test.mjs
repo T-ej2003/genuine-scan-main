@@ -38,7 +38,7 @@ const range = (base, source) => {
   return source === target ? [...fixture.sourceRanges[name], changed] : fixture.sourceRanges[name];
 };
 const prepare = (pushFiles, readRange = range, current = authorizedState()) => buildProductionNormalDeploymentPlan({
-  sourceSha: target, state: current, pushFiles, readRange, readStructural: () => [], isAncestor: (ancestor, candidate) => lineage.indexOf(ancestor) >= 0 && lineage.indexOf(ancestor) <= lineage.indexOf(candidate),
+  sourceSha: target, state: current, pushFiles, pushChangedFiles: pushFiles, pushPaired: [], readRange, readStructural: () => [], isAncestor: (ancestor, candidate) => lineage.indexOf(ancestor) >= 0 && lineage.indexOf(ancestor) <= lineage.indexOf(candidate),
 });
 
 test("authenticated generation-2 snapshot retains exact deployed sources and recovery identity", () => {
@@ -99,7 +99,7 @@ test("authorized component baselines permit later backend, frontend, and combine
   current.componentProvenance.frontend = { ...current.componentProvenance.security };
   assertProductionComponentDeploymentState(current);
   for (const push of [[changed], ["src/App.tsx"], [changed, "src/App.tsx"]]) {
-    const plan = buildProductionNormalDeploymentPlan({ sourceSha: target, state: current, pushFiles: push,
+    const plan = buildProductionNormalDeploymentPlan({ sourceSha: target, state: current, pushFiles: push, pushChangedFiles: push, pushPaired: [],
       readRange: (base, source) => source === target && base === fixture.sourceSha ? push : range(base, source),
       readStructural: () => [], isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right),
     });
@@ -113,8 +113,53 @@ test("a reviewed current-push runtime deletion remains eligible while an older d
   const changes = [{ status: "D", paths: [deleted] }];
   const options = { sourceSha: target, state: authorizedState(), readRange: (base, source) => source === target ? [...range(base, source), deleted] : range(base, source),
     readStructural: () => changes, isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right) };
-  assert.equal(buildProductionNormalDeploymentPlan({ ...options, pushFiles: [deleted] }).classification.backend, true);
-  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, pushFiles: [changed] }), /Historical image input addition or deletion/);
+  assert.equal(buildProductionNormalDeploymentPlan({ ...options, pushFiles: [deleted], pushChangedFiles: [deleted], pushPaired: [] }).classification.backend, true);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, pushFiles: [changed], pushChangedFiles: [changed], pushPaired: [] }), /Historical image input addition or deletion/);
+});
+
+test("normal preparation rejects missing independent push evidence", () => {
+  const options = { sourceSha: target, state: authorizedState(), pushFiles: [changed], readRange: range, readStructural: () => [],
+    isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right) };
+  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, pushPaired: [] }), /independently observed current-push changes/);
+  assert.throws(() => buildProductionNormalDeploymentPlan({ ...options, pushChangedFiles: [changed] }), /rename and copy evidence/);
+});
+
+test("real Git copies distinguish unchanged sources, authenticated sources, and current modifications", () => {
+  for (const [component, source, destination] of [
+    ["backend", "backend/src/services/batchService.ts", "backend/src/services/qrService.ts"],
+    ["frontend", "src/App.tsx", "src/main.tsx"],
+  ]) for (const caseName of ["historical", "authenticated", "modified"]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-normal-copy-"));
+    const git = (args) => execFileSync("git", args, { cwd: directory, encoding: "utf8" }).trim();
+    const write = (file, content) => { const location = path.join(directory, file); fs.mkdirSync(path.dirname(location), { recursive: true }); fs.writeFileSync(location, content); };
+    try {
+      git(["init", "-q"]); git(["config", "user.email", "test@mscqr.invalid"]); git(["config", "user.name", "MSCQR Test"]);
+      write("README.md", "baseline\n");
+      if (caseName === "authenticated") write(source, "export const runtime = 'authenticated';\n");
+      git(["add", "-A"]); git(["commit", "-qm", "baseline"]); const base = git(["rev-parse", "HEAD"]);
+      if (caseName !== "authenticated") { write(source, "export const runtime = 'historical';\n"); git(["add", "-A"]); git(["commit", "-qm", "undeployed historical addition"]); }
+      const historical = git(["rev-parse", "HEAD"]);
+      write(destination, fs.readFileSync(path.join(directory, source)));
+      if (caseName === "modified") write(source, "export const runtime = 'modified in current push';\n");
+      git(["add", "-A"]); git(["commit", "-qm", "copy source"]); const current = git(["rev-parse", "HEAD"]);
+      const cumulative = readProductionGitChanges(base, current, directory);
+      const push = readProductionGitChanges(historical, current, directory);
+      assert.deepEqual(new Set(push.paths), new Set([source, destination]), "Git copy detection must expose both identities");
+      assert.deepEqual(new Set(push.structural.flatMap((change) => change.paths)), new Set(caseName === "modified" ? [source, destination] : [destination]), "Only changed paths belong to the current push");
+      const currentState = authorizedState();
+      if (component === "frontend") {
+        currentState.components.frontend.sourceSha = fixture.sourceSha;
+        currentState.components.frontend.establishedThroughSha = fixture.sourceSha;
+        currentState.componentProvenance.frontend = { ...currentState.componentProvenance.security };
+      }
+      const build = () => buildProductionNormalDeploymentPlan({ sourceSha: target, state: currentState, pushFiles: push.paths, pushChangedFiles: push.structural.flatMap((change) => change.paths), pushPaired: push.paired,
+        readRange: (left, right) => right === target && (component === "backend" || left === fixture.sourceSha) ? [...range(left, right), ...cumulative.paths] : range(left, right),
+        readStructural: () => cumulative.structural, isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right),
+      });
+      if (caseName === "historical") assert.throws(build, /Historical image input addition or deletion/, component);
+      else assert.equal(build().classification[component], true, `${component} ${caseName}`);
+    } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  }
 });
 
 test("real Git rename, copy, and deletion ranges retain both identities and block historical structural image changes", () => {
@@ -125,6 +170,7 @@ test("real Git rename, copy, and deletion ranges retain both identities and bloc
     { name: "cross component", from: "backend/src/services/qrService.ts", to: "src/pages/Batches.tsx", operation: "rename" },
     { name: "backend deletion", from: "backend/src/services/qrService.ts", operation: "delete" },
     { name: "unknown frontend copy", from: "archive/legacy.ts", to: "src/pages/Batches.tsx", operation: "copy" },
+    { name: "cross component copy", from: "backend/src/services/qrService.ts", to: "src/pages/Batches.tsx", operation: "copy" },
   ];
   for (const scenario of scenarios) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-normal-rename-"));
@@ -140,13 +186,18 @@ test("real Git rename, copy, and deletion ranges retain both identities and bloc
       const observed = readProductionGitChanges(base, changedSha, directory);
       assert.ok(observed.paths.includes(scenario.from), scenario.name);
       if (scenario.to) assert.ok(observed.paths.includes(scenario.to), scenario.name);
+      if (scenario.operation === "rename" || scenario.name === "cross component copy")
+        assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: target, state: authorizedState(), pushFiles: observed.paths,
+          pushChangedFiles: observed.structural.flatMap((change) => change.paths), pushPaired: observed.paired,
+          readRange: range, readStructural: () => observed.structural, isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right),
+        }), scenario.operation === "rename" ? /Current-push renames/ : /Cross-component copies/, scenario.name);
       if (scenario.to?.startsWith("archive/")) assert.throws(() => classifyProductionChanges(observed.paths), /Ambiguous production change paths/, scenario.name);
-      if (scenario.operation === "copy") assert.ok(observed.paths.includes("archive/legacy.ts"), "Copied source path is required");
+      if (scenario.operation === "copy") assert.ok(observed.paths.includes(scenario.from), "Copied source path is required");
       const selected = scenario.from.startsWith("src/") || scenario.to?.startsWith("src/") ? "frontend" : "backend";
       const pushed = selected === "frontend" ? ["src/main.tsx"] : [changed];
       const structural = observed.structural;
       assert.equal(structural.some(({ status, paths }) => ["A", "D"].includes(status) && paths.some((file) => isNormalImageInput(selected, file) && !pushed.includes(file))), true, scenario.name);
-      assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: target, state: authorizedState(), pushFiles: pushed,
+      assert.throws(() => buildProductionNormalDeploymentPlan({ sourceSha: target, state: authorizedState(), pushFiles: pushed, pushChangedFiles: pushed, pushPaired: [],
         readRange: (left, right) => selected === "frontend" && right === target ? [...range(left, right), "src/main.tsx"] : range(left, right),
         readStructural: () => structural, isAncestor: (left, right) => lineage.indexOf(left) >= 0 && lineage.indexOf(left) <= lineage.indexOf(right),
       }), /Historical image input addition or deletion/, scenario.name);

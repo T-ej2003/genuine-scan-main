@@ -26,7 +26,7 @@ concurrency:
 jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
-    uses: T-ej2003/genuine-scan-main/.github/workflows/production-normal-deployment-operation.yml@26dcfb180fd3fbbe7715f496c6a322386b206764
+    uses: T-ej2003/genuine-scan-main/.github/workflows/production-normal-deployment-operation.yml@14d910dbeea5c3da12eea136738e1a1146c20d51
     with:
       baseline: ${{ inputs.baseline || false }}
       b01_prerequisite_receipt_base64: ${{ inputs.b01_prerequisite_receipt_base64 || '' }}
