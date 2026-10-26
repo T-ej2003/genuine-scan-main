@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareGreenRecoveryHandoff, assertGreenRecoveryHandoff } from "../aws/production-green-backend-recovery-handoff.mjs";
-import { assertGreenRecoveryAlbTargets, assertNormalDeployerUpdateAuthority, collectCurrentGreenRecoveryRuntimeIdentity } from "../aws/recover-production-green-backend-health.mjs";
+import { assertGreenRecoveryAlbTargets, assertNormalDeployerUpdateAuthority, collectCurrentGreenRecoveryRuntimeIdentity,
+  runGreenRecoveryCommand, waitForGreenBackendService } from "../aws/recover-production-green-backend-health.mjs";
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { PRODUCTION_CLIENT_IP_TRUST } from "../aws/production-client-ip-trust-runtime.mjs";
 
@@ -84,4 +85,56 @@ test("recovered ECS tasks must each own a healthy target in the exact backend AL
     { ...response, TargetHealthDescriptions: response.TargetHealthDescriptions.map((target) => ({ ...target, TargetHealth: { State: "unhealthy" } })) },
   ]) assert.throws(() => assertGreenRecoveryAlbTargets(live, changed));
   assert.throws(() => assertGreenRecoveryAlbTargets({ ...live, service: { loadBalancers: [] } }, response));
+});
+
+test("green recovery classifies AWS timeouts without retrying or exposing command arguments", () => {
+  const target = context.registeredTaskDefinitionArn;
+  let calls = 0;
+  const execute = (_command, _args, options) => {
+    calls++;
+    assert.equal(options.timeout, 120_000);
+    assert.equal(options.env.AWS_MAX_ATTEMPTS, "1");
+    const error = new Error("spawnSync aws ETIMEDOUT"); error.code = "ETIMEDOUT"; throw error;
+  };
+  assert.throws(() => runGreenRecoveryCommand("aws", ["ecs", "update-service", "--task-definition", target],
+    { execute, environment: {}, singleAttempt: true }), (error) => {
+    assert.equal(error.code, "ETIMEDOUT");
+    assert.match(error.message, /ecs update-service timed out after 120s; mutation outcome unknown/);
+    assert.ok(!error.message.includes(target));
+    return true;
+  });
+  assert.equal(calls, 1);
+  assert.equal(runGreenRecoveryCommand("aws", ["ecs", "describe-services"], {
+    execute: (_command, _args, options) => { assert.equal(options.env.AWS_MAX_ATTEMPTS, undefined); return "slow read succeeded"; },
+    environment: {},
+  }), "slow read succeeded");
+});
+
+test("green recovery waits for native ECS convergence beyond the former two-minute subprocess limit", async () => {
+  let time = 0, reads = 0;
+  const targetArn = context.registeredTaskDefinitionArn;
+  const result = await waitForGreenBackendService({ targetArn, now: () => time,
+    delay: async (ms) => { time += ms; }, readService: () => {
+      reads++;
+      if (reads === 2) { const error = new Error("slow read"); error.code = "ETIMEDOUT"; throw error; }
+      const ready = time >= 4 * 60_000;
+      return { status: "ACTIVE", taskDefinition: targetArn, desiredCount: 2,
+        runningCount: ready ? 2 : 0, pendingCount: ready ? 0 : 2,
+        deployments: [{ status: "PRIMARY", taskDefinition: reads === 1 ? input.taskDefinitionArn : targetArn,
+          rolloutState: ready ? "COMPLETED" : "IN_PROGRESS" }] };
+    } });
+  assert.equal(result.runningCount, 2);
+  assert.ok(time >= 4 * 60_000 && reads > 2);
+});
+
+test("green recovery stops on competing deployment, failed rollout, and bounded stabilization expiry", async () => {
+  const targetArn = context.registeredTaskDefinitionArn;
+  const service = { status: "ACTIVE", taskDefinition: targetArn, desiredCount: 2,
+    runningCount: 0, pendingCount: 2, deployments: [{ status: "PRIMARY", taskDefinition: targetArn, rolloutState: "IN_PROGRESS" }] };
+  await assert.rejects(waitForGreenBackendService({ targetArn, readService: () => ({ ...service, taskDefinition: input.taskDefinitionArn }) }), /Competing ECS deployment/);
+  await assert.rejects(waitForGreenBackendService({ targetArn, readService: () => ({ ...service,
+    deployments: [{ ...service.deployments[0], rolloutState: "FAILED" }] }) }), /rollout failed/);
+  let time = 0;
+  await assert.rejects(waitForGreenBackendService({ targetArn, now: () => time,
+    delay: async (ms) => { time += ms; }, readService: () => service, timeoutMs: 30_000 }), /stabilization exceeded 30s/);
 });

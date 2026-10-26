@@ -255,6 +255,38 @@ for (const loss of [{}, { loseRegisterResponse: true }, { loseUpdateResponse: tr
     assert.deepEqual(run.counts(), { registrations: 1, updates: 1 });
   });
 
+test("stabilization timeout keeps the one-use update claim and adopts later native convergence", async () => {
+  const run = scenario();
+  const originalVerifyStable = run.adapters.verifyStable;
+  run.adapters.verifyStable = async () => { const error = new Error("ECS read-only stabilization timed out"); error.code = "ETIMEDOUT"; throw error; };
+  await assert.rejects(runGreenBackendHealthRecovery(run.input, run.adapters), /stabilization timed out/);
+  const operationId = canonicalSha256({ kind: "BACKEND_HEALTH_RECOVERY_GREEN_CANDIDATE", sourceSha: run.input.sourceSha,
+    taskDefinitionArn: run.input.taskDefinitionArn, imageDigest: run.input.recoveryImageDigest });
+  assert.ok(run.entries.has(`${operationId}:BACKEND:UPDATE:DISPATCH`));
+  assert.ok(!run.entries.has(`${operationId}:BACKEND:UPDATE:COMPLETED`));
+  assert.equal(run.counts().updates, 1);
+  run.adapters.verifyStable = originalVerifyStable;
+  const result = await runGreenBackendHealthRecovery(run.input, run.adapters);
+  assert.equal(result.updateReused, true);
+  assert.equal(run.counts().updates, 1);
+  assert.ok(run.entries.has(`${operationId}:BACKEND:UPDATE:COMPLETED`));
+  assert.ok(run.entries.has(`${operationId}:BACKEND:RECOVERY:COMPLETE`));
+});
+
+test("timed-out UpdateService response never causes a second ECS mutation", async () => {
+  const run = scenario();
+  const update = run.adapters.updateService;
+  run.adapters.updateService = async (...args) => {
+    await update(...args);
+    const error = new Error("ecs update-service timed out; outcome unknown"); error.code = "ETIMEDOUT"; throw error;
+  };
+  await assert.rejects(runGreenBackendHealthRecovery(run.input, run.adapters), /outcome unknown/);
+  assert.equal(run.counts().updates, 1);
+  const result = await runGreenBackendHealthRecovery(run.input, run.adapters);
+  assert.equal(result.updateReused, true);
+  assert.equal(run.counts().updates, 1);
+});
+
 test("crash after registration dispatch with no native revision fails closed", async () => {
   const run = scenario();
   run.adapters.register = async () => { throw new Error("Unknown RegisterTaskDefinition outcome"); };

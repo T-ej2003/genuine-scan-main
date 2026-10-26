@@ -2,6 +2,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { isIP } from "node:net";
+import { performance } from "node:perf_hooks";
+import { setTimeout as sleep } from "node:timers/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { APP_ONLY, appOnlyDefinitionSha256, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest } from "./production-app-only-contract.mjs";
@@ -35,6 +37,47 @@ const read = (file, expected, label) => {
   assert.equal(capture.sha256, expected, `${label} bytes changed`);
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(capture.bytes));
 };
+
+export function runGreenRecoveryCommand(command, args, { execute = execFileSync, environment, cwd = root, singleAttempt = false } = {}) {
+  const timeout = 120_000;
+  try {
+    return execute(command, args, { cwd,
+      env: { ...environment, ...(singleAttempt ? { AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : {}) },
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout, maxBuffer: 8 * 1024 * 1024 });
+  } catch (error) {
+    if (error.code !== "ETIMEDOUT") throw error;
+    const operation = command === "aws" ? `${args[0]} ${args[1]}` : command;
+    const result = new Error(`${operation} timed out after ${timeout / 1000}s; ${singleAttempt ? "mutation outcome unknown, reconcile the durable claim and native AWS state before continuation" : "read-only result unavailable"}`);
+    result.code = "ETIMEDOUT";
+    throw result;
+  }
+}
+
+export async function waitForGreenBackendService({ readService, targetArn, now = () => performance.now(), delay = sleep,
+  timeoutMs = 10 * 60_000, pollMs = 15_000 } = {}) {
+  assert.match(targetArn || "", GREEN_BACKEND_TASK_ARN);
+  const deadline = now() + timeoutMs;
+  let lastState = "unread";
+  do {
+    let service;
+    try { service = await readService(); }
+    catch (error) { if (error.code !== "ETIMEDOUT") throw error; }
+    if (service) {
+      assert.equal(service.taskDefinition, targetArn, "Competing ECS deployment replaced the authorized backend target");
+      assert.equal(service.status, "ACTIVE");
+      assert.equal(service.desiredCount, 2, "Backend desired count changed during stabilization");
+      const primary = service.deployments?.find(({ status }) => status === "PRIMARY");
+      assert.ok(primary, "ECS backend has no primary deployment");
+      if (primary.taskDefinition === targetArn) assert.notEqual(primary.rolloutState, "FAILED", "ECS backend rollout failed");
+      lastState = `${primary.rolloutState}:${service.runningCount}/${service.desiredCount}:pending=${service.pendingCount}`;
+      if (service.deployments.length === 1 && primary.taskDefinition === targetArn && primary.rolloutState === "COMPLETED"
+        && service.runningCount === 2 && service.pendingCount === 0) return service;
+    }
+    if (now() >= deadline) break;
+    await delay(Math.min(pollMs, deadline - now()));
+  } while (now() < deadline);
+  throw new Error(`ECS backend stabilization exceeded ${timeoutMs / 1000}s (last native state: ${lastState}); reconcile the claimed update before continuation`);
+}
 
 export async function collectCurrentGreenRecoveryRuntimeIdentity(candidate, aws, preparedIdentity, collect = collectLiveRolePolicyIdentity) {
   const principals = deriveEcsRuntimeDependencies(candidate).map(({ principalArn }) => principalArn);
@@ -105,9 +148,8 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
   assert.equal(protectedMain.headSha, sourceSha); assert.equal(protectedMain.freshRemoteMainSha, sourceSha);
   const environment = createProductionAwsCredentialEnvironment({ credentialSource,
     env: operatorEnvironment, region: APP_ONLY.region });
-  const invoke = deps.exec || ((command, args, options = {}) => execFileSync(command, args, { cwd: root,
-    env: { ...environment, ...(options.singleAttempt ? { AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } : {}) },
-    encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], timeout: 120_000, maxBuffer: 8 * 1024 * 1024 }));
+  const invoke = (command, args, options = {}) => runGreenRecoveryCommand(command, args, {
+    execute: deps.exec || execFileSync, environment, singleAttempt: options.singleAttempt });
   const awsText = (args, options) => invoke("aws", [...args, "--region", APP_ONLY.region, "--output", "json", "--no-cli-pager"], options);
   const aws = (args, options) => JSON.parse(awsText(args, options));
   const caller = aws(["sts", "get-caller-identity"]);
@@ -326,7 +368,7 @@ export async function runGreenBackendHealthRecoveryCli(argv = process.argv.slice
     updateService: (arn) => aws(["ecs", "update-service", "--cluster", APP_ONLY.clusterArn,
       "--service", APP_ONLY.serviceArn, "--task-definition", arn], { singleAttempt: true }),
     verifyStable: async (arn, digest) => {
-      awsText(["ecs", "wait", "services-stable", "--cluster", APP_ONLY.clusterArn, "--services", APP_ONLY.serviceArn]);
+      await waitForGreenBackendService({ readService: readers.readService, targetArn: arn });
       const live = readers.readLive();
       assert.equal(live.service.taskDefinition, arn); assert.equal(live.service.runningCount, 2);
       assert.equal(live.tasks.length, 2);
