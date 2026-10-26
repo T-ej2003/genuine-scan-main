@@ -77,7 +77,7 @@ export function appendOpenRecoveryJournals(inventory, records) {
   }
 }
 
-function readRecoveryJournals(run) {
+export function readRecoveryJournals(run) {
   const objects = [], tokens = new Set();
   let continuation;
   do {
@@ -91,10 +91,14 @@ function readRecoveryJournals(run) {
     continuation = listing.IsTruncated ? listing.NextContinuationToken : undefined;
     if (listing.IsTruncated) { assert.ok(continuation && !tokens.has(continuation), "Recovery journal pagination is inconsistent"); tokens.add(continuation); }
   } while (continuation);
+  const sizes = objects.map(({ Size }) => {
+    assert.ok(Number.isSafeInteger(Size) && Size > 0 && Size <= 512 * 1024, "Recovery journal object is outside the reviewed size bound");
+    return Size;
+  });
+  assert.ok(sizes.reduce((total, size) => total + size, 0) <= 16 * 1024 * 1024, "Recovery journal inventory is outside the reviewed total size bound");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-ecr-monitor-"));
   try {
-    return objects.map(({ Key, ETag, Size }, index) => {
-      assert.ok(Number.isSafeInteger(Size) && Size > 0 && Size <= 131072, "Recovery journal object is outside the reviewed size bound");
+    return objects.map(({ Key, ETag }, index) => {
       const file = path.join(directory, `${index}.json`);
       const readback = json(run, ["s3api", "get-object", "--bucket", STAGE_B_TERRAFORM_BACKEND.bucketName, "--key", Key,
         "--expected-bucket-owner", ECR_PROTECTION.account, file]);
