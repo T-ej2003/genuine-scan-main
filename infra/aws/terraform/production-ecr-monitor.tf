@@ -39,10 +39,11 @@ resource "aws_iam_role" "ecr_monitor" {
       Action    = "sts:AssumeRoleWithWebIdentity"
       Condition = { StringEquals = {
         "token.actions.githubusercontent.com:aud"                 = "sts.amazonaws.com"
-        "token.actions.githubusercontent.com:sub"                 = "repo:T-ej2003/genuine-scan-main:ref:refs/heads/main"
+        "token.actions.githubusercontent.com:sub"                 = "repo:T-ej2003/genuine-scan-main:environment:production-ecr-monitor"
         "token.actions.githubusercontent.com:repository_id"       = "1145608538"
         "token.actions.githubusercontent.com:repository_owner_id" = "183396573"
-        "token.actions.githubusercontent.com:job_workflow_ref"    = "T-ej2003/genuine-scan-main/.github/workflows/production-ecr-image-monitor.yml@refs/heads/main"
+        "token.actions.githubusercontent.com:ref"                 = "refs/heads/main"
+        "token.actions.githubusercontent.com:workflow"            = "Production ECR Image Monitor"
       } }
     }]
   })

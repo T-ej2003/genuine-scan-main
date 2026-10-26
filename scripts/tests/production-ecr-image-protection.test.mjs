@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import yaml from "js-yaml";
 import { addProtectedImage, appendOpenRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
 import { assertEcrRepositoryProtection, ECR_PROTECTION, verifyRepository } from "../aws/verify-production-ecr-repository-protection.mjs";
 import { STAGE_B_TERRAFORM_BACKEND } from "../aws/stage-b-terraform-backend-contract.mjs";
@@ -128,8 +129,11 @@ test("Terraform and publishers cannot restore count-based expiration", () => {
 test("scheduled monitor has exact main OIDC trust, scoped reads and no ECS mutation grant", () => {
   const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-monitor.tf", "utf8");
   const workflow = fs.readFileSync(".github/workflows/production-ecr-image-monitor.yml", "utf8");
-  assert.match(terraform, /repo:T-ej2003\/genuine-scan-main:ref:refs\/heads\/main/);
-  assert.match(terraform, /production-ecr-image-monitor\.yml@refs\/heads\/main/);
+  const monitor = yaml.load(workflow);
+  for (const claim of ["repo:T-ej2003/genuine-scan-main:environment:production-ecr-monitor", "refs/heads/main", "Production ECR Image Monitor", "1145608538", "183396573"])
+    assert.ok(terraform.includes(claim));
+  assert.match(terraform, /token\.actions\.githubusercontent\.com:workflow"/);
+  assert.doesNotMatch(terraform, /job_workflow_ref|workflow_ref/);
   assert.match(terraform, /s3:ListBucket[\s\S]*green-backend-recovery/);
   assert.match(terraform, /ecr:GetRepositoryPolicy/);
   assert.match(terraform, /cloudwatch:PutMetricData/);
@@ -138,7 +142,11 @@ test("scheduled monitor has exact main OIDC trust, scoped reads and no ECS mutat
   assert.match(terraform, /sns:Publish/);
   assert.match(terraform, /role_arn\s*=\s*aws_iam_role\.ecr_alert_event_target\.arn/);
   assert.doesNotMatch(terraform, /"ecs:UpdateService"|"ecs:RegisterTaskDefinition"|"ecs:RunTask"/);
-  assert.match(workflow, /schedule:[\s\S]*cron:/);
+  assert.equal(monitor.name, "Production ECR Image Monitor");
+  assert.ok(monitor.on.schedule?.[0]?.cron);
+  assert.ok(Object.hasOwn(monitor.on, "workflow_dispatch"));
+  assert.equal(monitor.jobs.monitor.environment, "production-ecr-monitor");
+  assert.equal(monitor.jobs.monitor.permissions, undefined);
   assert.match(workflow, /mscqr-production-ecr-monitor/);
   assert.doesNotMatch(workflow, /production-normal-deploy|production-stage-b-image-publish/);
 });

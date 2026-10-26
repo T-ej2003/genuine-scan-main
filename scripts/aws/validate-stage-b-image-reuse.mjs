@@ -9,7 +9,7 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
-export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v7";
+export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v8";
 export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
@@ -60,7 +60,7 @@ const WEB_IMAGE_INPUTS = [
 ];
 const DOCUMENTATION = /(?:^|\/)(?:documents|README|CHANGELOG|.*\.md)(?:\/|$)/;
 const CI = /^\.github\/(?:workflows\/|actions\/converge-stage-b-prerequisites\/action\.yml$)/;
-const TERRAFORM = /^infra\/aws\/terraform\/(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\//;
+const TERRAFORM = /^infra\/aws\/terraform\/(?:(?:main|variables|production-ecr-monitor)\.tf$|(?:production-green-stage-(?:a|b(?:-image-publisher|-publisher-bootstrap)?)|production-initial-activation-policy-reconciler|production-web-release|production-component-deployment-state|production-security-rebaseline-signer)\/)/;
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;

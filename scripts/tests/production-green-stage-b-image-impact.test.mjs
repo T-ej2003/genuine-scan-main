@@ -222,6 +222,12 @@ test("isolated app-only IAM source is infrastructure-only without waiving neighb
 });
 
 test("Terraform classification stays bounded and runtime image behavior remains fail-closed", () => {
+  const ecrTerraform = ["infra/aws/terraform/main.tf", "infra/aws/terraform/variables.tf", "infra/aws/terraform/production-ecr-monitor.tf"];
+  for (const file of ecrTerraform)
+    assert.deepEqual(classifyStageBImageReusePath(file), { file, category: "terraformOnly", imageAffecting: false });
+  const ecrReport = imageImpactReportFor({ imageReleaseSha, toolingSha, toolingInputTreeSha256, changedFiles: ecrTerraform });
+  assert.deepEqual(ecrReport.imageAffectingFiles, []);
+  assert.equal(ecrReport.imageReuseCompatible, true);
   for (const file of [
     "infra/aws/terraform/production-green-stage-b/main.tf",
     "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",
