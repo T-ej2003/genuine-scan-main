@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
 import yaml from "js-yaml";
@@ -73,7 +75,7 @@ test("normal image input map covers every direct COPY in both production targets
     const sources = dockerfile.split("\n").filter((line) => line.startsWith("COPY ") && !line.includes("--from=")).map((line) => line.match(/^COPY (?:--\S+ )*(\S+)/)?.[1]);
     assert.ok(sources.length > 10 && sources.every(Boolean));
     for (const entry of sources) {
-      const example = entry.replace("*", "-lock") + (entry.includes(".") || entry.endsWith("json") ? "" : "/fixture");
+      const example = entry.replaceAll("*", "-lock") + (entry.includes(".") || entry.endsWith("json") ? "" : "/fixture");
       assert.equal(isNormalImageInput(name, example), true, `${name} COPY source is absent from the normal image map: ${entry}`);
     }
   }
@@ -87,6 +89,13 @@ test("protected push workflow preserves approval, ECR guard, publication, attest
   assert.equal(workflow.jobs.deploy.environment, "production-normal-deploy");
   const steps = workflow.jobs.deploy.steps;
   const position = (name) => steps.findIndex((step) => step.name === name);
+  const tooling = steps[position("Authenticate reviewed normal deployment tooling")];
+  assert.ok(tooling && position("Authenticate reviewed normal deployment tooling") < steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@")));
+  assert.equal(tooling.if, "needs.classify.outputs.release_class == 'NORMAL_APPLICATION'");
+  const root = new URL("../../", import.meta.url);
+  const tree = execFileSync("git", ["ls-tree", "-r", "HEAD", "--", "scripts/aws", "scripts/lib", "scripts/security", "scripts/smoke-release.mjs", "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs"], { cwd: root });
+  assert.match(tooling.run, new RegExp(createHash("sha256").update(tree).digest("hex")));
+  assert.match(tooling.run, /test "\$GITHUB_SHA" = "\$\(git rev-parse HEAD\)"/);
   const expected = ["Reconcile and prepare component-state transaction", "Authenticate live deployment baseline", "Bind authoritative deployment route", "Require protected ECR repositories before publication", "Publish immutable backend image", "Bind backend digest", "Scan published images", "Sign and attest published images", "Execute coordinated normal component transaction", "Preserve normal transaction journal"];
   assert.ok(expected.every((name) => position(name) >= 0), "Normal workflow is missing a required stage");
   assert.deepEqual(expected.map(position), [...expected.map(position)].sort((a, b) => a - b));
