@@ -731,7 +731,9 @@ test("handoff accepts only observed inert DescribeTasks materialization and reje
 });
 
 test("workflow keeps security classification and reuses the existing backend-only deploy job", () => {
-  const workflow = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
+  const caller = fs.readFileSync(".github/workflows/production-deploy.yml", "utf8");
+  const workflow = fs.readFileSync(".github/workflows/production-normal-deployment-operation.yml", "utf8");
+  assert.match(caller, /production-normal-deployment-operation\.yml@[a-f0-9]{40}/);
   assert.match(workflow, /PRIVILEGED_PREREQUISITE_BACKEND/); assert.match(workflow, /verify-production-b01-prerequisite-handoff\.mjs/);
   assert.match(workflow, /frontend=false/); assert.match(workflow, /\.\/scripts\/aws\/deploy-ecs-service\.sh/);
   assert.doesNotMatch(workflow, /terraform apply|DynamoDB|transition UUID/i);

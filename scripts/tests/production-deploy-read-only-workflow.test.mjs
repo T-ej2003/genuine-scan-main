@@ -14,7 +14,8 @@ import {
   runReadOnlyReadiness,
 } from "../ci/production-readiness-orchestrator.mjs";
 
-const workflowPath = path.resolve(".github/workflows/production-deploy.yml");
+const caller = yaml.load(fs.readFileSync(".github/workflows/production-deploy.yml", "utf8"));
+const workflowPath = path.resolve(".github/workflows/production-normal-deployment-operation.yml");
 const workflowText = fs.readFileSync(workflowPath, "utf8");
 const workflow = yaml.load(workflowText);
 const sha = "a".repeat(40);
@@ -30,7 +31,7 @@ test("normal deployment has one protected mutation job and leaves stronger lanes
     // GitHub evaluates required reviewers before starting any environment job,
     // not through an application-created approval token or fabricated receipt.
     assert.equal(job.environment, environment);
-    const credentials = job.steps.findIndex((step) => step.uses === "aws-actions/configure-aws-credentials@v6");
+    const credentials = job.steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@"));
     const mutation = job.steps.findIndex((step) => step.run?.includes(command));
     assert(credentials >= 0 && mutation > credentials);
     assert.equal(job.steps[credentials].with["unset-current-credentials"], true);
@@ -54,7 +55,8 @@ test("normal deployment has one protected mutation job and leaves stronger lanes
 });
 
 test("normal production deployment is automatically triggered from protected main", () => {
-  assert.ok(workflow.on?.push?.branches?.includes("main") || workflow[true]?.push?.branches?.includes("main"));
+  assert.ok(caller.on?.push?.branches?.includes("main") || caller[true]?.push?.branches?.includes("main"));
+  assert.match(caller.jobs.deploy.uses, /production-normal-deployment-operation\.yml@[a-f0-9]{40}$/);
   assert.match(workflowText, /ref: '\$\{\{ github\.sha \}\}'/);
   assert.match(workflowText, /classify-production-lane-a\.mjs/);
 });
@@ -70,15 +72,15 @@ test("normal workflow rejects non-main dispatch and verifies exact protected sou
 test("workflow is OIDC-only, serialized, and uses fixed production boundaries", () => {
   assert.deepEqual(workflow.permissions, { contents: "read", "pull-requests": "read" });
   assert.deepEqual(workflow.jobs.deploy.permissions, { contents: "read", "id-token": "write" });
-  assert.equal(workflow.concurrency["cancel-in-progress"], false);
-  assert.equal(workflow.concurrency.group, "production-deploy");
-  assert.match(workflowText, /configure-aws-credentials@v6/);
+  assert.equal(caller.concurrency["cancel-in-progress"], false);
+  assert.equal(caller.concurrency.group, "production-deploy");
+  assert.match(workflowText, /configure-aws-credentials@[a-f0-9]{40}/);
   assert.doesNotMatch(workflowText, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/);
   assert.doesNotMatch(workflowText, /role-to-assume:\s*\$\{\{/);
   assert.match(workflowText, /368992683803/);
   assert.match(workflowText, /eu-west-2/);
   assert.match(workflowText, /environment: production/);
-  assert.match(workflowText, /actions\/upload-artifact@v7/);
+  assert.match(workflowText, /actions\/upload-artifact@[a-f0-9]{40}/);
 });
 
 test("normal workflow uses the canonical component transaction and no parallel authorization protocol", () => {

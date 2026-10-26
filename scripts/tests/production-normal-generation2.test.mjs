@@ -75,9 +75,9 @@ test("undeployed frontend security code remains pending and cannot enter normal 
 });
 
 test("pending privileged workflow and imported tooling require exact stronger-lane source", () => {
-  for (const file of [".github/workflows/production-deploy.yml", "scripts/aws/publish-ecs-images.sh", "scripts/rls/lib/clean-room-source-contract.mjs", ".github/actions/local/action.yml"])
+  for (const file of [".github/workflows/production-deploy.yml", ".github/workflows/production-normal-deployment-operation.yml", ".github/workflows/production-green-backend-recovery-operation.yml", ".github/workflows/production-historical-green-completion-operation.yml", "scripts/aws/publish-ecs-images.sh", "scripts/rls/lib/clean-room-source-contract.mjs", ".github/actions/local/action.yml"])
     assert.equal(isNormalHostTooling(file), true);
-  for (const [file, push] of [[".github/workflows/production-deploy.yml", [changed]], [".github/workflows/production-deploy.yml", ["src/App.tsx"]], ["scripts/aws/publish-ecs-images.sh", [changed]]]) {
+  for (const [file, push] of [[".github/workflows/production-deploy.yml", [changed]], [".github/workflows/production-deploy.yml", ["src/App.tsx"]], [".github/workflows/production-normal-deployment-operation.yml", [changed]], [".github/workflows/production-green-backend-recovery-operation.yml", [changed]], [".github/workflows/production-historical-green-completion-operation.yml", [changed]], ["scripts/aws/publish-ecs-images.sh", [changed]]]) {
     const later = (base, source) => source === target ? [...range(base, source), ...push, file] : range(base, source);
     assert.throws(() => prepare(push, later), /changed after stronger-lane authorization/, `${file}: ${push.join(",")}`);
   }
@@ -177,16 +177,19 @@ test("normal image input map covers every direct COPY in both production targets
 });
 
 test("protected push workflow preserves approval, ECR guard, publication, attestation and terminal receipt order", () => {
-  const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/production-deploy.yml", import.meta.url), "utf8"));
-  assert.deepEqual(workflow.on.push.branches, ["main"]);
-  assert.equal(workflow.concurrency.group, "production-deploy");
+  const caller = yaml.load(fs.readFileSync(new URL("../../.github/workflows/production-deploy.yml", import.meta.url), "utf8"));
+  const workflow = yaml.load(fs.readFileSync(new URL("../../.github/workflows/production-normal-deployment-operation.yml", import.meta.url), "utf8"));
+  assert.deepEqual(caller.on.push.branches, ["main"]);
+  assert.equal(caller.concurrency.group, "production-deploy");
+  assert.match(caller.jobs.deploy.uses, /production-normal-deployment-operation\.yml@[a-f0-9]{40}$/);
   assert.equal(workflow.jobs.deploy.environment, "production-normal-deploy");
   const steps = workflow.jobs.deploy.steps;
   const position = (name) => steps.findIndex((step) => step.name === name);
-  const tooling = steps[position("Verify exact clean source checkout")];
-  assert.ok(tooling && position("Verify exact clean source checkout") < steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@")));
-  assert.equal(tooling.if, "needs.classify.outputs.release_class == 'NORMAL_APPLICATION'");
-  assert.doesNotMatch(tooling.run, /sha256sum|git ls-tree/);
+  const tooling = steps[position("Authenticate caller and reviewed host tooling before credentials")];
+  assert.ok(tooling && position("Authenticate caller and reviewed host tooling before credentials") < steps.findIndex((step) => step.uses?.startsWith("aws-actions/configure-aws-credentials@")));
+  assert.equal(tooling.if, undefined);
+  assert.match(tooling.run, /git ls-tree -r HEAD[\s\S]*sha256sum/);
+  assert.match(tooling.run, /production-deploy\.yml@refs\/heads\/main/);
   assert.match(tooling.run, /test "\$GITHUB_SHA" = "\$\(git rev-parse HEAD\)"/);
   assert.match(tooling.run, /git status --porcelain --untracked-files=all/);
   const expected = ["Reconcile and prepare component-state transaction", "Authenticate live deployment baseline", "Bind authoritative deployment route", "Require protected ECR repositories before publication", "Publish immutable backend image", "Bind backend digest", "Scan published images", "Sign and attest published images", "Execute coordinated normal component transaction", "Preserve normal transaction journal"];
