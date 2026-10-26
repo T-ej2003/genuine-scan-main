@@ -1,11 +1,15 @@
 locals {
   ecr_monitor_repositories = [
-    aws_ecr_repository.backend.arn,
-    "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
-    aws_ecr_repository.worker.arn,
+    data.aws_ecr_repository.backend.arn,
+    data.aws_ecr_repository.web.arn,
+    data.aws_ecr_repository.worker.arn,
   ]
   ecr_monitor_metric_namespace = "MSCQR/ProductionEcrProtection"
-  ecr_alert_topic_arn          = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts"
+  ecr_alert_topic_arn          = data.aws_sns_topic.alerts.arn
+  ecr_event_rule_arns = [
+    "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-protection-change",
+    "arn:aws:events:eu-west-2:368992683803:rule/mscqr-production-ecr-image-action",
+  ]
 }
 
 resource "aws_iam_role_policy" "legacy_image_publisher_protection_read" {
@@ -52,7 +56,7 @@ resource "aws_iam_role" "ecr_monitor" {
 
 resource "aws_iam_role_policy" "ecr_monitor" {
   name = "mscqr-production-ecr-monitor"
-  role = aws_iam_role.ecr_monitor.id
+  role = aws_iam_role.ecr_monitor.name
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -133,7 +137,7 @@ resource "aws_sns_topic_policy" "ecr_alerts" {
         Action    = "sns:Publish"
         Resource  = local.ecr_alert_topic_arn
         Condition = {
-          ArnEquals    = { "aws:SourceArn" = [aws_cloudwatch_event_rule.ecr_protection_change.arn, aws_cloudwatch_event_rule.ecr_image_action.arn] }
+          ArnEquals    = { "aws:SourceArn" = local.ecr_event_rule_arns }
           StringEquals = { "aws:SourceAccount" = "368992683803" }
         }
       }

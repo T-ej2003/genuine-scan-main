@@ -1,0 +1,146 @@
+name: Production ECR Protection Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact reviewed protected-main commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production-ecr-infrastructure-plan
+    timeout-minutes: 30
+    outputs:
+      plan_sha256: ${{ steps.save.outputs.plan_sha256 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Authenticate reviewed protected main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = T-ej2003/genuine-scan-main
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          [[ "$SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-ecr-infrastructure-plan
+          role-session-name: ${{ github.run_id }}
+      - name: Authenticate plan principal and protected inventory
+        run: |
+          set -euo pipefail
+          test "$(aws sts get-caller-identity --query Arn --output text)" = "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecr-infrastructure-plan/$GITHUB_RUN_ID"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs inventory mscqr-production-ecr-infrastructure-plan
+          node scripts/aws/production-ecr-infrastructure-gate.mjs sns mscqr-production-ecr-infrastructure-plan
+      - name: Save and validate exact ECR infrastructure plan
+        id: save
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ecr-plan"
+          terraform -chdir=infra/aws/terraform/production-ecr-protection init -input=false -lockfile=readonly
+          test "$(terraform -chdir=infra/aws/terraform/production-ecr-protection workspace show)" = default
+          node scripts/aws/production-ecr-infrastructure-gate.mjs ownership
+          terraform -chdir=infra/aws/terraform/production-ecr-protection plan -input=false -lock-timeout=0s -out="$RUNNER_TEMP/ecr-plan/plan.bin"
+          terraform -chdir=infra/aws/terraform/production-ecr-protection show -json "$RUNNER_TEMP/ecr-plan/plan.bin" > "$RUNNER_TEMP/ecr-plan/plan.json"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs plan "$RUNNER_TEMP/ecr-plan/plan.json"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "plan_sha256=$(sha256sum "$RUNNER_TEMP/ecr-plan/plan.bin" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: reviewed-ecr-infrastructure-plan
+          path: ${{ runner.temp }}/ecr-plan/
+          if-no-files-found: error
+          retention-days: 7
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: production-ecr-infrastructure-apply
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.8
+          terraform_wrapper: false
+      - name: Reauthenticate source after approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_RUN_ATTEMPT" = 1
+          test "$SOURCE_SHA" = "$GITHUB_SHA"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq '.commit.sha')"
+      - uses: actions/download-artifact@v7
+        with:
+          name: reviewed-ecr-infrastructure-plan
+          path: ${{ runner.temp }}/ecr-plan
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-ecr-infrastructure-apply
+          role-session-name: ${{ github.run_id }}
+      - name: Authenticate approved principal, plan, inventory and SNS predecessor
+        env:
+          PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          set -euo pipefail
+          test "$(aws sts get-caller-identity --query Arn --output text)" = "arn:aws:sts::368992683803:assumed-role/mscqr-production-ecr-infrastructure-apply/$GITHUB_RUN_ID"
+          test "$PLAN_SHA256" = "$(sha256sum "$RUNNER_TEMP/ecr-plan/plan.bin" | cut -d' ' -f1)"
+          terraform -chdir=infra/aws/terraform/production-ecr-protection init -input=false -lockfile=readonly
+          test "$(terraform -chdir=infra/aws/terraform/production-ecr-protection workspace show)" = default
+          node scripts/aws/production-ecr-infrastructure-gate.mjs ownership
+          terraform -chdir=infra/aws/terraform/production-ecr-protection show -json "$RUNNER_TEMP/ecr-plan/plan.bin" > "$RUNNER_TEMP/ecr-plan/apply-plan.json"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs plan "$RUNNER_TEMP/ecr-plan/apply-plan.json"
+          node scripts/aws/production-ecr-infrastructure-gate.mjs inventory mscqr-production-ecr-infrastructure-apply
+          node scripts/aws/production-ecr-infrastructure-gate.mjs sns mscqr-production-ecr-infrastructure-apply
+      - name: Apply only the reviewed saved plan
+        env:
+          PLAN_SHA256: ${{ needs.plan.outputs.plan_sha256 }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync(process.env.RUNNER_TEMP + "/ecr-plan/receipt.json", JSON.stringify({status:"APPLY_STARTED",sourceSha:process.env.GITHUB_SHA,planSha256:process.env.PLAN_SHA256,runId:process.env.GITHUB_RUN_ID,observedAt:new Date().toISOString()}))'
+          terraform -chdir=infra/aws/terraform/production-ecr-protection apply -input=false -lock-timeout=0s "$RUNNER_TEMP/ecr-plan/plan.bin"
+          node --input-type=module -e 'import fs from "node:fs"; fs.writeFileSync(process.env.RUNNER_TEMP + "/ecr-plan/receipt.json", JSON.stringify({status:"APPLIED",sourceSha:process.env.GITHUB_SHA,planSha256:process.env.PLAN_SHA256,runId:process.env.GITHUB_RUN_ID,observedAt:new Date().toISOString()}))'
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ecr-infrastructure-execution-receipt
+          path: ${{ runner.temp }}/ecr-plan/receipt.json
+          if-no-files-found: warn
+          retention-days: 30

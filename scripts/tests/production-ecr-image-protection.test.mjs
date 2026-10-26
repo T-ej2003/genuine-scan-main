@@ -145,7 +145,7 @@ test("open authenticated recovery journal protects its digest; completion releas
 });
 
 test("Terraform and publishers cannot restore count-based expiration", () => {
-  const terraform = fs.readFileSync("infra/aws/terraform/main.tf", "utf8");
+  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-protection/main.tf", "utf8");
   const publisher = fs.readFileSync("scripts/aws/apply-ecr-repository-controls.sh", "utf8");
   assert.doesNotMatch(terraform, /aws_ecr_lifecycle_policy|tagStatus\s*=\s*"any"/);
   assert.doesNotMatch(publisher, /aws ecr put-lifecycle-policy|aws ecr batch-delete-image/);
@@ -156,20 +156,22 @@ test("Terraform and publishers cannot restore count-based expiration", () => {
 });
 
 test("EventBridge targets use exact-rule SNS topic policy without an execution role", () => {
-  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-monitor.tf", "utf8");
+  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-protection/monitor.tf", "utf8");
   assert.match(terraform, /import \{\s*to = aws_sns_topic_policy\.ecr_alerts\s*id = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts"\s*\}/);
   assert.match(terraform, /resource "aws_sns_topic_policy" "ecr_alerts"/);
   assert.doesNotMatch(terraform, /resource "aws_sns_topic"/);
   assert.match(terraform, /Sid\s*=\s*"__default_statement_ID"/);
   assert.match(terraform, /Principal\s*=\s*\{ Service = "events\.amazonaws\.com" \}/);
-  assert.match(terraform, /"aws:SourceArn"\s*=\s*\[aws_cloudwatch_event_rule\.ecr_protection_change\.arn, aws_cloudwatch_event_rule\.ecr_image_action\.arn\]/);
+  assert.match(terraform, /"aws:SourceArn"\s*=\s*local\.ecr_event_rule_arns/);
+  assert.match(terraform, /arn:aws:events:eu-west-2:368992683803:rule\/mscqr-production-ecr-protection-change/);
+  assert.match(terraform, /arn:aws:events:eu-west-2:368992683803:rule\/mscqr-production-ecr-image-action/);
   assert.match(terraform, /"aws:SourceAccount"\s*=\s*"368992683803"/);
   assert.equal((terraform.match(/depends_on = \[aws_sns_topic_policy\.ecr_alerts\]/g) || []).length, 2);
   assert.doesNotMatch(terraform, /role_arn\s*=|ecr_alert_event_target/);
 });
 
 test("scheduled monitor has exact main OIDC trust, scoped reads and no ECS mutation grant", () => {
-  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-monitor.tf", "utf8");
+  const terraform = fs.readFileSync("infra/aws/terraform/production-ecr-protection/monitor.tf", "utf8");
   const workflow = fs.readFileSync(".github/workflows/production-ecr-image-monitor.yml", "utf8");
   const monitor = yaml.load(workflow);
   for (const claim of ["repo:T-ej2003/genuine-scan-main:environment:production-ecr-monitor", "refs/heads/main", "Production ECR Image Monitor", "1145608538", "183396573"])

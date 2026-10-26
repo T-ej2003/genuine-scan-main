@@ -289,6 +289,14 @@ jobs:
       - name: Verify initial-activation reconciler installation lifecycle
         run: npm run test:production-initial-activation-reconciler
 
+      - name: Validate isolated ECR protection ownership and workflow
+        run: |
+          node --test scripts/tests/production-ecr-infrastructure-foundation.test.mjs scripts/tests/production-ecr-image-protection.test.mjs
+          terraform -chdir=infra/aws/terraform/production-ecr-protection fmt -check
+          export TF_DATA_DIR="$(mktemp -d)"
+          terraform -chdir=infra/aws/terraform/production-ecr-protection init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/terraform/production-ecr-protection validate -no-color
+
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 

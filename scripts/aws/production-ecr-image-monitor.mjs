@@ -191,10 +191,11 @@ export function addRetainedHistoricalWorker(inventory, retention, run, verify) {
   addProtectedImage(inventory, { image, reason: "RETAINED_HISTORICAL_RUNTIME", owner: "component-state", sourceSha: runtime.sourceSha, taskDefinition: runtime.taskDefinitionArn, operation: retention.closure.githubRunId });
 }
 
-export function collectProtectedInventory(run, now = new Date().toISOString()) {
+export function collectProtectedInventory(run, now = new Date().toISOString(), role = "mscqr-production-ecr-monitor") {
+  assert.ok(["mscqr-production-ecr-monitor", "mscqr-production-ecr-infrastructure-plan", "mscqr-production-ecr-infrastructure-apply"].includes(role), "Unreviewed inventory principal");
   const caller = json(run, ["sts", "get-caller-identity"]);
   assert.equal(caller.Account, ECR_PROTECTION.account);
-  assert.match(caller.Arn || "", /^arn:aws:sts::368992683803:assumed-role\/mscqr-production-ecr-monitor\/[^/]+$/, "Wrong monitoring principal");
+  assert.match(caller.Arn || "", new RegExp(`^arn:aws:sts::368992683803:assumed-role/${role}/[^/]+$`), "Wrong inventory principal");
   const state = createProductionComponentDeploymentStateClient({ run }).read();
   assert.ok(state, "Missing production component state");
   const inventory = new Map();
