@@ -17,12 +17,11 @@
         "ecr:DescribeImages",
         "ecr:DescribeImageScanFindings",
         "ecr:DescribeRepositories",
+        "ecr:GetLifecyclePolicy",
+        "ecr:GetRepositoryPolicy",
         "ecr:GetDownloadUrlForLayer",
         "ecr:InitiateLayerUpload",
         "ecr:PutImage",
-        "ecr:PutImageScanningConfiguration",
-        "ecr:PutImageTagMutability",
-        "ecr:PutLifecyclePolicy",
         "ecr:UploadLayerPart"
       ],
       "Resource": [

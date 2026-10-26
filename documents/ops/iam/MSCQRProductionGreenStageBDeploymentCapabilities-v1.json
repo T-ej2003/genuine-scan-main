@@ -12875,7 +12875,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d18600ceb495bae01e599f604e870bf07608758aef2898674756cf1664368da"
+        "expectedPolicySha256": "5b453e529e4355fc0883760dff6f25e377e7bfbc123d68c4552b330774ca2d6e"
       },
       "required": true,
       "mutation": false
@@ -12904,7 +12904,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d18600ceb495bae01e599f604e870bf07608758aef2898674756cf1664368da"
+        "expectedPolicySha256": "5b453e529e4355fc0883760dff6f25e377e7bfbc123d68c4552b330774ca2d6e"
       },
       "required": true,
       "mutation": false
@@ -12933,7 +12933,7 @@
         "sid": "ReadCloudFrontOriginPrefixListEntries",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d18600ceb495bae01e599f604e870bf07608758aef2898674756cf1664368da"
+        "expectedPolicySha256": "5b453e529e4355fc0883760dff6f25e377e7bfbc123d68c4552b330774ca2d6e"
       },
       "required": true,
       "mutation": false
@@ -12962,7 +12962,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d18600ceb495bae01e599f604e870bf07608758aef2898674756cf1664368da"
+        "expectedPolicySha256": "5b453e529e4355fc0883760dff6f25e377e7bfbc123d68c4552b330774ca2d6e"
       },
       "required": true,
       "mutation": false
@@ -12991,7 +12991,7 @@
         "sid": "ReadClientIpTrustTopology",
         "livePolicyArn": null,
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "4d18600ceb495bae01e599f604e870bf07608758aef2898674756cf1664368da"
+        "expectedPolicySha256": "5b453e529e4355fc0883760dff6f25e377e7bfbc123d68c4552b330774ca2d6e"
       },
       "required": true,
       "mutation": false
@@ -14418,7 +14418,7 @@
         "sid": "DenyNonPublishingProductionActions",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": false
@@ -14442,7 +14442,7 @@
         "sid": "DenyNonPublishingProductionActions",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": false
@@ -14466,7 +14466,7 @@
         "sid": "DenyNonPublishingProductionActions",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": false
@@ -14490,7 +14490,7 @@
         "sid": "DenyNonPublishingProductionActions",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": false
@@ -14514,7 +14514,7 @@
         "sid": "DenyNonPublishingProductionActions",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": false
@@ -14538,7 +14538,7 @@
         "sid": "EcrAuthorizationTokenOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14591,7 +14591,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14616,7 +14616,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14641,7 +14641,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14666,7 +14666,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14691,7 +14691,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14716,7 +14716,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14741,7 +14741,57 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "publisher-ReviewedStageBImageRepositoriesOnly-ecr-getlifecyclepolicy",
+      "phase": "image-workflow-dispatch",
+      "identity": "GITHUB_IMAGE_PUBLISHER",
+      "executor": "github-actions",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
+      "sourceFunction": "ReviewedStageBImageRepositoriesOnly",
+      "action": "ecr:GetLifecyclePolicy",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {},
+      "classification": "GITHUB_IMAGE_MUTATION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
+        "sid": "ReviewedStageBImageRepositoriesOnly",
+        "livePolicyArn": "github-oidc-role-policy",
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
+      },
+      "required": true,
+      "mutation": true
+    },
+    {
+      "id": "publisher-ReviewedStageBImageRepositoriesOnly-ecr-getrepositorypolicy",
+      "phase": "image-workflow-dispatch",
+      "identity": "GITHUB_IMAGE_PUBLISHER",
+      "executor": "github-actions",
+      "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
+      "sourceFunction": "ReviewedStageBImageRepositoriesOnly",
+      "action": "ecr:GetRepositoryPolicy",
+      "resources": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ],
+      "context": {},
+      "classification": "GITHUB_IMAGE_MUTATION",
+      "probe": "structural",
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
+        "sid": "ReviewedStageBImageRepositoriesOnly",
+        "livePolicyArn": "github-oidc-role-policy",
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14766,7 +14816,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14791,82 +14841,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
-      },
-      "required": true,
-      "mutation": true
-    },
-    {
-      "id": "publisher-ReviewedStageBImageRepositoriesOnly-ecr-putimagescanningconfiguration",
-      "phase": "image-workflow-dispatch",
-      "identity": "GITHUB_IMAGE_PUBLISHER",
-      "executor": "github-actions",
-      "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-      "sourceFunction": "ReviewedStageBImageRepositoriesOnly",
-      "action": "ecr:PutImageScanningConfiguration",
-      "resources": [
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
-      ],
-      "context": {},
-      "classification": "GITHUB_IMAGE_MUTATION",
-      "probe": "structural",
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-        "sid": "ReviewedStageBImageRepositoriesOnly",
-        "livePolicyArn": "github-oidc-role-policy",
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
-      },
-      "required": true,
-      "mutation": true
-    },
-    {
-      "id": "publisher-ReviewedStageBImageRepositoriesOnly-ecr-putimagetagmutability",
-      "phase": "image-workflow-dispatch",
-      "identity": "GITHUB_IMAGE_PUBLISHER",
-      "executor": "github-actions",
-      "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-      "sourceFunction": "ReviewedStageBImageRepositoriesOnly",
-      "action": "ecr:PutImageTagMutability",
-      "resources": [
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
-      ],
-      "context": {},
-      "classification": "GITHUB_IMAGE_MUTATION",
-      "probe": "structural",
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-        "sid": "ReviewedStageBImageRepositoriesOnly",
-        "livePolicyArn": "github-oidc-role-policy",
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
-      },
-      "required": true,
-      "mutation": true
-    },
-    {
-      "id": "publisher-ReviewedStageBImageRepositoriesOnly-ecr-putlifecyclepolicy",
-      "phase": "image-workflow-dispatch",
-      "identity": "GITHUB_IMAGE_PUBLISHER",
-      "executor": "github-actions",
-      "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-      "sourceFunction": "ReviewedStageBImageRepositoriesOnly",
-      "action": "ecr:PutLifecyclePolicy",
-      "resources": [
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
-        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
-      ],
-      "context": {},
-      "classification": "GITHUB_IMAGE_MUTATION",
-      "probe": "structural",
-      "policy": {
-        "sourceFile": "infra/aws/terraform/production-green-stage-b-image-publisher/permissions-policy.json",
-        "sid": "ReviewedStageBImageRepositoriesOnly",
-        "livePolicyArn": "github-oidc-role-policy",
-        "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true
@@ -14891,7 +14866,7 @@
         "sid": "ReviewedStageBImageRepositoriesOnly",
         "livePolicyArn": "github-oidc-role-policy",
         "expectedVersion": "protected-main-source",
-        "expectedPolicySha256": "aaedffc0cddbd2ebc33d8f2583a2a42fa0a78007e36695d3473a8e6fd4e5380f"
+        "expectedPolicySha256": "3ee60948992166cee621b12bc5c6635f6b2e4a18bce83be6a9c0e32b189a08f1"
       },
       "required": true,
       "mutation": true

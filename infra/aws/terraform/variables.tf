@@ -141,18 +141,6 @@ variable "log_retention_days" {
   default     = 30
 }
 
-variable "ecr_keep_release_images" {
-  type        = number
-  description = "How many recent release images to retain in ECR."
-  default     = 120
-}
-
-variable "ecr_untagged_expiry_days" {
-  type        = number
-  description = "How many days untagged ECR images are kept."
-  default     = 7
-}
-
 variable "enable_container_insights" {
   type        = bool
   description = "Enable ECS Container Insights."

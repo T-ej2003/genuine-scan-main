@@ -211,7 +211,7 @@ jobs:
             echo "- Immutable image tag: \`$IMAGE_TAG\`"
             echo "- Platforms requested: \`$PLATFORMS\`"
             echo "- ECS/Fargate requirement: \`linux/amd64\` must be present before task definition updates."
-            echo "- ECR tags are enforced as immutable and lifecycle-controlled before publish."
+            echo "- ECR immutable tags, absent lifecycle expiration, and deletion guard were verified before publish."
             echo "- Worker images use the backend runtime image and are deployed with the worker ECS command."
             echo "- Cosign signatures plus SBOM and provenance attestations were verified before publish completed."
             echo
