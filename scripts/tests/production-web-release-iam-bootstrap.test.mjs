@@ -9,9 +9,9 @@ const policy = read("publisher-permissions-policy.json");
 const trust = read("publisher-trust-policy.json");
 const activation = read("frontend-activation-policy.json");
 const registryRead = read("web-evidence-registry-read-policy.json");
-function fixture({ liveActivation = null, liveRegistryRead = null, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
+function fixture({ liveActivation = null, liveRegistryRead = null, liveTrust = trust, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
   let boundary = existingBoundary ? policy : null;
-  let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
+  let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: liveTrust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
   let publisherPolicy = existingRole ? policy : null, activationPolicy = liveActivation, registryReadPolicy = liveRegistryRead;
   const calls = [];
   const run = (args) => {
@@ -189,6 +189,20 @@ test("existing web-release IAM installs only the absent registry reader", () => 
   assert.equal(writes.length, 1);
   assert.equal(writes[0][writes[0].indexOf("--role-name") + 1], WEB_RELEASE_IAM.releaseRoleName);
   assert.equal(writes[0][writes[0].indexOf("--policy-name") + 1], WEB_RELEASE_IAM.registryReadPolicyName);
+});
+
+test("AWS reordering OIDC condition keys preserves trust identity during a create-only continuation", () => {
+  const liveTrust = structuredClone(trust);
+  const condition = liveTrust.Statement[0].Condition.StringEquals;
+  liveTrust.Statement[0].Condition.StringEquals = Object.fromEntries(Object.entries(condition).reverse());
+  const value = fixture({ existingBoundary: true, existingRole: true, liveActivation: activation, liveTrust });
+  const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  assert.deepEqual(result.actions, [`INSTALL_${WEB_RELEASE_IAM.registryReadPolicyName}`]);
+
+  liveTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] = "repo:T-ej2003/genuine-scan-main:environment:unapproved";
+  const drift = fixture({ existingBoundary: true, existingRole: true, liveActivation: activation, liveTrust });
+  assert.throws(() => bootstrapProductionWebReleaseIam({ run: drift.run, sourceSha: "a".repeat(40) }), /Publisher trust differs/);
+  assert.equal(drift.calls.some(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation)), false);
 });
 
 test("existing permissions boundary metadata must converge with Terraform before import", () => {
