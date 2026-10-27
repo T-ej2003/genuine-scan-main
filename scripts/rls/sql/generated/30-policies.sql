@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa'
+    AND source_contract_sha256='924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -1000,6 +1000,10 @@ CREATE POLICY "b03_authenticated_supportticketmessage_select" ON public."Support
 COMMENT ON POLICY "b03_authenticated_supportticketmessage_select" ON public."SupportTicketMessage" IS '{"boundary":"b03-authenticated-notification-email","ownerIdentity":"identity-auth-function-owner","scope":"live capability plus operation-specific notification or incident selector"}';
 CREATE POLICY "b03_authenticated_supportticketmessage_insert" ON public."SupportTicketMessage" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-ticket-message' AND "ticketId"=current_setting('app.b03_support_ticket_id',true) AND "actorUserId"=current_setting('app.b03_actor_id',true));
 COMMENT ON POLICY "b03_authenticated_supportticketmessage_insert" ON public."SupportTicketMessage" IS '{"boundary":"b03-authenticated-notification-email","ownerIdentity":"identity-auth-function-owner","scope":"live capability plus operation-specific notification or incident selector"}';
+CREATE POLICY "b03_authenticated_supportissuereport_insert" ON public."SupportIssueReport" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND id=current_setting('app.b03_support_report_id',true) AND "reporterUserId"=current_setting('app.b03_actor_id',true) AND "licenseeId" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),''));
+COMMENT ON POLICY "b03_authenticated_supportissuereport_insert" ON public."SupportIssueReport" IS '{"boundary":"b03-authenticated-notification-email","ownerIdentity":"identity-auth-function-owner","scope":"live capability plus operation-specific notification or incident selector"}';
+CREATE POLICY "b03_authenticated_auditlogoutbox_insert" ON public."AuditLogOutbox" AS PERMISSIVE FOR INSERT TO "mscqr_rls_cert_auth_owner" WITH CHECK (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND payload->>'action'='SUPPORT_ISSUE_REPORTED' AND payload->>'entityType'='SupportIssueReport' AND payload->>'entityId'=current_setting('app.b03_support_report_id',true) AND payload->>'userId'=current_setting('app.b03_actor_id',true) AND nullif(payload->>'licenseeId','') IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),''));
+COMMENT ON POLICY "b03_authenticated_auditlogoutbox_insert" ON public."AuditLogOutbox" IS '{"boundary":"b03-authenticated-notification-email","ownerIdentity":"identity-auth-function-owner","scope":"live capability plus operation-specific notification or incident selector"}';
 CREATE POLICY "b03_authenticated_incidenthandoff_select" ON public."IncidentHandoff" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) LIKE 'support-ticket-%');
 COMMENT ON POLICY "b03_authenticated_incidenthandoff_select" ON public."IncidentHandoff" IS '{"boundary":"b03-authenticated-notification-email","ownerIdentity":"identity-auth-function-owner","scope":"live capability plus operation-specific notification or incident selector"}';
 CREATE POLICY "b03_authenticated_auditlog_select" ON public."AuditLog" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='attention-read' AND ((current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (current_setting('app.b03_licensee_id',true)='' OR "licenseeId"=current_setting('app.b03_licensee_id',true))) OR (current_setting('app.b03_actor_role',true)='LICENSEE_ADMIN' AND "licenseeId"=current_setting('app.b03_actor_licensee_id',true)) OR (current_setting('app.b03_actor_role',true)='MANUFACTURER_ADMIN' AND "userId"=current_setting('app.b03_actor_id',true))));

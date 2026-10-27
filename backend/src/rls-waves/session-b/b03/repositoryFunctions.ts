@@ -717,6 +717,52 @@ const supportProjection = (value: Prisma.JsonValue, operation: string) => {
   return value as Record<string, unknown>;
 };
 
+export const createAuthenticatedSupportIssueReport = async (
+  db: B03FunctionClient,
+  input: {
+    licenseeId?: string | null;
+    organizationId?: string | null;
+    title: string;
+    description?: string | null;
+    sourcePath?: string | null;
+    pageUrl?: string | null;
+    autoDetected: boolean;
+    screenshotPath?: string | null;
+    screenshotMime?: string | null;
+    screenshotSize?: number | null;
+    diagnostics?: unknown;
+    ipHash?: string | null;
+    requestId: string;
+  }
+) => {
+  const diagnostics = input.diagnostics == null ? null : JSON.stringify(input.diagnostics);
+  if (diagnostics && Buffer.byteLength(diagnostics, "utf8") > 250_000) {
+    throw new Error("B03 repository requires bounded support diagnostics");
+  }
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_create_support_issue_report(
+      ${optional(input.licenseeId, "licenseeId")}::text,
+      ${optional(input.organizationId, "organizationId")}::text,
+      ${text(input.title, "support report title", 160)}::text,
+      ${optional(input.description, "description", 5000)}::text,
+      ${optional(input.sourcePath, "sourcePath", 500)}::text,
+      ${optional(input.pageUrl, "pageUrl", 1200)}::text,
+      ${input.autoDetected}::boolean,
+      ${optional(input.screenshotPath, "screenshotPath", 191)}::text,
+      ${optional(input.screenshotMime, "screenshotMime", 80)}::text,
+      ${input.screenshotSize == null ? null : integer(input.screenshotSize, "screenshotSize", 0, 10_000_000)}::integer,
+      ${diagnostics}::jsonb,
+      ${optional(input.ipHash, "ipHash", 80)}::text,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_create_support_issue_report");
+  const result = supportProjection(row.result, "app_rls.b03_create_support_issue_report");
+  if (typeof result.id !== "string" || result.status !== "OPEN" || typeof result.createdAt !== "string") {
+    throw new Error("app_rls.b03_create_support_issue_report returned an invalid report");
+  }
+  return result;
+};
+
 export const listSupportTickets = async (
   db: B03FunctionClient,
   input: {

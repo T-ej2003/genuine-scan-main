@@ -14,6 +14,8 @@ import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
+import { createAuthenticatedSupportIssueReport } from "../rls-waves/session-b/b03/repositoryFunctions";
+import { hashIp } from "../utils/security";
 
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
@@ -107,61 +109,44 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
       await removeLocalFileIfExists(file.path);
     }
 
-    const created = await prisma.supportIssueReport.create({
-      data: {
-        reporterUserId: req.user.userId,
-        reporterRole: req.user.role,
-        licenseeId: req.user.licenseeId || null,
-        title: parsed.data.title,
-        description: parsed.data.description?.trim() || null,
-        sourcePath: parsed.data.sourcePath?.trim() || null,
-        pageUrl: parsed.data.pageUrl?.trim() || null,
-        autoDetected:
-          parsed.data.autoDetected === true ||
-          parsed.data.autoDetected === "true" ||
-          parsed.data.autoDetected === "1",
-        screenshotPath,
-        screenshotMime,
-        screenshotSize,
-        diagnostics: diagnostics as any,
-      },
-      include: {
-        reporterUser: { select: { id: true, name: true, email: true, role: true } },
-      },
-    });
+    const boundary = b03BoundaryForRequest(req, "support-report-create");
+    const created = await boundary.run((db) => createAuthenticatedSupportIssueReport(db, {
+      licenseeId: req.user!.licenseeId,
+      organizationId: req.user!.orgId,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      sourcePath: parsed.data.sourcePath,
+      pageUrl: parsed.data.pageUrl,
+      autoDetected: parsed.data.autoDetected === true || parsed.data.autoDetected === "true" || parsed.data.autoDetected === "1",
+      screenshotPath,
+      screenshotMime,
+      screenshotSize,
+      diagnostics,
+      ipHash: hashIp(req.ip),
+      requestId: boundary.requestId,
+    }));
 
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: req.user.licenseeId || undefined,
-      orgId: req.user.orgId || undefined,
-      action: "SUPPORT_ISSUE_REPORTED",
-      entityType: "SupportIssueReport",
-      entityId: created.id,
-      details: {
-        autoDetected: created.autoDetected,
-        sourcePath: created.sourcePath,
-        screenshotAttached: Boolean(created.screenshotPath),
-      },
-      ipAddress: req.ip,
-    });
-
+    try {
       await createRoleNotifications({
         databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
-      audience: NotificationAudience.SUPER_ADMIN,
-      type: "support_issue_reported",
-      title: "New support issue reported",
-      body: `${created.reporterUser?.name || created.reporterUser?.email || "User"} submitted: ${created.title}`,
-      licenseeId: created.licenseeId || null,
-      data: {
-        supportReportId: created.id,
-        sourcePath: created.sourcePath,
-        pageUrl: created.pageUrl,
-        reporterUserId: created.reporterUserId,
-        reporterRole: created.reporterRole,
-        targetRoute: "/support",
-      },
-      channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
-    });
+        audience: NotificationAudience.SUPER_ADMIN,
+        type: "support_issue_reported",
+        title: "New support issue reported",
+        body: `${req.user.email || "User"} submitted: ${created.title}`,
+        licenseeId: String(created.licenseeId || "") || null,
+        data: {
+          supportReportId: created.id,
+          sourcePath: created.sourcePath,
+          pageUrl: created.pageUrl,
+          reporterUserId: created.reporterUserId,
+          reporterRole: created.reporterRole,
+          targetRoute: "/support",
+        },
+        channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
+      });
+    } catch {
+      console.error("Support report notification failed after report commit");
+    }
 
     return res.status(201).json({
       success: true,
@@ -179,7 +164,9 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
       );
       return res.status(503).json({ success: false, error: "Support report storage unavailable" });
     }
-    console.error("createSupportIssueReport error:", error);
+    console.error("createSupportIssueReport failed", {
+      code: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "UNKNOWN",
+    });
     return res.status(500).json({ success: false, error: "Failed to submit support report" });
   }
 };

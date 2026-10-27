@@ -39,7 +39,7 @@
     "test:trust-critical": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && npm run test:trust-critical:compiled\"",
     "test:p0-authz": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p0FullstackAuthorization.test.js\"",
     "test:p1:api-authz": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p1ApiAuthorizationIntegration.test.js && node tests/p1SignedScanTokenIntegration.test.js\"",
-    "test:p2:db": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p2DbAuthorization.test.js\"",
+    "test:p2:db": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p2DbAuthorization.test.js && node tests/supportIssueReportRls.test.js\"",
     "test:p2:release-readiness": "node tests/helpers/runWithGeneratedTestSecrets.js \"npm run build && node tests/p2BatchReleaseReadiness.test.js\"",
     "test:p2:api-authz-db": "npm run test:p2:db",
     "test:p2:exports": "npm run test:p2:db",

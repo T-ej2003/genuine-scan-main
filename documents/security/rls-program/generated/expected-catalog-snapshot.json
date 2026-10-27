@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa",
+  "sourceContractSha256": "924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8b10ea5dfde8a7c0f2b7009667a2b3c3de21b5be6cdaf4fc0148be8fe0ddfc09"
+      "sha256": "75e5388e6df3d13d00751b60c489fdf1f39c6af8d6dccd9b97e280318625a5a3"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -270,7 +270,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
-      "sha256": "eb5120bbd936ee96ee5b0dcdc85b65ba46dcb1b2790a4ed316f8f30a3d411879"
+      "sha256": "303a71dd0b645504943d34ad94596e69e4fa8b67500fd06b510cbd25284e6634"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
@@ -278,7 +278,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-      "sha256": "1f9ab25afbf34c692b1fe2872a6f73822b136ef8e2a7edb4a922dffa9cd0abe9"
+      "sha256": "966856d07a2c35e6bfc8c4a95b051f1be3cd7be91b28896c93f1f0ef9f5a317f"
     },
     {
       "path": "backend/src/services/auditLogOutboxService.ts",
@@ -2864,6 +2864,29 @@
       ],
       "workflowId": null,
       "route": "B01 exact pre-auth SQL boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-audit-log-outbox",
+      "table": "AuditLogOutbox",
+      "policyName": "b03_authenticated_auditlogoutbox_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND payload->>'action'='SUPPORT_ISSUE_REPORTED' AND payload->>'entityType'='SupportIssueReport' AND payload->>'entityId'=current_setting('app.b03_support_report_id',true) AND payload->>'userId'=current_setting('app.b03_actor_id',true) AND nullif(payload->>'licenseeId','') IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-create-support-issue-report:AuditLogOutbox:INSERT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -5605,6 +5628,7 @@
       "sourceCommandRuleIds": [
         "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
+        "contract:b03-create-support-issue-report:Licensee:SELECT",
         "contract:b03-create-user-notification:Licensee:SELECT"
       ],
       "workflowId": null,
@@ -6302,6 +6326,7 @@
         "contract:b03-attention-queue:ManufacturerLicenseeLink:SELECT",
         "contract:b03-claim-incident-email:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-role-notifications:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-create-support-issue-report:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-user-notification:ManufacturerLicenseeLink:SELECT",
         "contract:b03-list-notifications:ManufacturerLicenseeLink:SELECT",
         "contract:b03-mark-notification-emailed:ManufacturerLicenseeLink:SELECT",
@@ -6879,6 +6904,7 @@
       "sourceCommandRuleIds": [
         "contract:b03-attention-queue:Organization:SELECT",
         "contract:b03-create-role-notifications:Organization:SELECT",
+        "contract:b03-create-support-issue-report:Organization:SELECT",
         "contract:b03-create-user-notification:Organization:SELECT"
       ],
       "workflowId": null,
@@ -9691,6 +9717,7 @@
         "contract:b03-claim-incident-email:RefreshToken:SELECT",
         "contract:b03-complete-incident-email:RefreshToken:SELECT",
         "contract:b03-create-role-notifications:RefreshToken:SELECT",
+        "contract:b03-create-support-issue-report:RefreshToken:SELECT",
         "contract:b03-create-user-notification:RefreshToken:SELECT",
         "contract:b03-get-support-ticket:RefreshToken:SELECT",
         "contract:b03-list-notifications:RefreshToken:SELECT",
@@ -10753,6 +10780,29 @@
     {
       "tableId": "table-support-issue-report",
       "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND id=current_setting('app.b03_support_report_id',true) AND \"reporterUserId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-create-support-issue-report:SupportIssueReport:INSERT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
       "policyName": "public_verification_supportissuereport_insert",
       "command": "INSERT",
       "actors": [
@@ -11415,6 +11465,7 @@
         "contract:b03-claim-incident-email:User:SELECT",
         "contract:b03-complete-incident-email:User:SELECT",
         "contract:b03-create-role-notifications:User:SELECT",
+        "contract:b03-create-support-issue-report:User:SELECT",
         "contract:b03-create-user-notification:User:SELECT",
         "contract:b03-get-support-ticket:User:SELECT",
         "contract:b03-list-notifications:User:SELECT",
@@ -12506,55 +12557,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ab7fcfb8cdae177268d6fb2b34f4aa32ebf6783a24592fc0ffd3262b7d1f25aa"
+      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
     }
   ]
 }
