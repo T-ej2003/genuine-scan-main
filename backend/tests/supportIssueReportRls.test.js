@@ -4,6 +4,7 @@ const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFact
 const { randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { Prisma } = require("@prisma/client");
 
 const authHeader = (token) => ({
   authorization: `Bearer ${token.accessToken}`,
@@ -13,6 +14,24 @@ const authHeader = (token) => ({
 (async () => {
   await withP2TestApp(async ({ baseUrl, request, prisma, preauthPrisma, runtimePrisma }) => {
     await seedP2Fixtures(prisma);
+    const { isPrismaMissingTableError } = require("../dist/utils/prismaStorageGuard");
+    const knownError = (code, meta) => new Prisma.PrismaClientKnownRequestError("Query failed", {
+      code, clientVersion: Prisma.prismaVersion.client, meta,
+    });
+    assert(isPrismaMissingTableError(knownError("P2010", {
+      code: "42P01", message: 'relation "SupportIssueReport" does not exist',
+    }), ["supportissuereport"]));
+    assert(isPrismaMissingTableError(knownError("P2021", { table: "SupportIssueReport" }), ["supportissuereport"]));
+    assert(isPrismaMissingTableError(knownError("P2022", { modelName: "SupportIssueReport" }), ["supportissuereport"]));
+    assert(!isPrismaMissingTableError(knownError("P2010", {
+      code: "42501", message: 'permission denied for table "SupportIssueReport"',
+    }), ["supportissuereport"]));
+    assert(!isPrismaMissingTableError(knownError("P2010", {
+      code: "42P01", message: 'relation "OtherTable" does not exist',
+    }), ["supportissuereport"]));
+    assert(!isPrismaMissingTableError(knownError("P2010", {
+      code: "XX000", message: 'relation "SupportIssueReport" does not exist',
+    }), ["supportissuereport"]));
     const tokens = await issueBearerTokens(preauthPrisma);
     const body = { title: "Synthetic printer support issue", description: "Isolated RLS integration test" };
 
@@ -73,6 +92,7 @@ const authHeader = (token) => ({
     });
     assert.equal(valid.status, 201, valid.text);
     const report = await prisma.supportIssueReport.findUnique({ where: { id: valid.payload.data.id } });
+    assert.equal(valid.payload.data.createdAt, report.createdAt.toISOString());
     assert.equal(report.reporterUserId, ids.manufacturerA);
     assert.equal(report.licenseeId, ids.licenseeA);
     const queuedAudit = await prisma.auditLogOutbox.findFirst({
@@ -200,11 +220,21 @@ const authHeader = (token) => ({
     assert.equal(secondReport.licenseeId, ids.licenseeB);
     assert.equal(secondReport.reporterUserId, ids.manufacturerB);
 
+    const createdAt = new Date("2026-10-27T06:30:00.123Z");
+    const updatedAt = new Date("2026-10-27T07:30:00.234Z");
+    const respondedAt = new Date("2026-10-27T08:30:00.456Z");
+    await prisma.supportIssueReport.update({ where: { id: report.id }, data: { createdAt, updatedAt, respondedAt } });
+
     const ownList = await request("GET", "/api/support/reports", undefined, {
       headers: authHeader(tokens.manufacturerA),
     });
     assert.equal(ownList.status, 200, ownList.text);
     assert(ownList.payload.data.reports.some((row) => row.id === report.id));
+    const ownReport = ownList.payload.data.reports.find((row) => row.id === report.id);
+    assert.equal(ownReport.createdAt, createdAt.toISOString());
+    assert.equal(ownReport.updatedAt, updatedAt.toISOString());
+    assert.equal(ownReport.respondedAt, respondedAt.toISOString());
+    assert.equal(new Date(ownReport.createdAt).getTime(), new Date("2026-10-27T12:00:00.123+05:30").getTime());
     assert(ownList.payload.data.reports.every((row) => row.reporterUserId === ids.manufacturerA));
     assert(!ownList.payload.data.reports.some((row) => row.id === secondReport.id));
     const platformList = await request("GET", "/api/support/reports", undefined, {
@@ -213,6 +243,7 @@ const authHeader = (token) => ({
     assert.equal(platformList.status, 200, platformList.text);
     assert(platformList.payload.data.reports.some((row) => row.id === report.id));
     assert(platformList.payload.data.reports.some((row) => row.id === secondReport.id));
+    assert.equal(platformList.payload.data.reports.find((row) => row.id === secondReport.id).respondedAt, null);
     const tenantBList = await request("GET", `/api/support/reports?licenseeId=${ids.licenseeB}`, undefined, {
       headers: authHeader(tokens.superAdmin),
     });
@@ -309,6 +340,17 @@ const authHeader = (token) => ({
       /permission denied|42501/i
     );
     assert.doesNotMatch(valid.text, /passwordHash|sessionCapability|diagnostics/i);
+    await prisma.$executeRawUnsafe('ALTER TABLE "SupportIssueReport" RENAME TO "SupportIssueReportUnavailable"');
+    try {
+      const unavailable = await request("GET", "/api/support/reports", undefined, {
+        headers: authHeader(tokens.superAdmin),
+      });
+      assert.equal(unavailable.status, 503, unavailable.text);
+      assert.equal(unavailable.payload.error, "Support report storage unavailable");
+      assert.doesNotMatch(unavailable.text, /42P01|SELECT|relation/i);
+    } finally {
+      await prisma.$executeRawUnsafe('ALTER TABLE "SupportIssueReportUnavailable" RENAME TO "SupportIssueReport"');
+    }
   });
   console.log("support issue report RLS integration passed");
 })().catch((error) => {

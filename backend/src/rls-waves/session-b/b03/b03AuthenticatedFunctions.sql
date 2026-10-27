@@ -963,7 +963,7 @@ SET search_path = pg_catalog, public
 AS $fn$
 DECLARE actor record;
 DECLARE report_id text := gen_random_uuid()::text;
-DECLARE created_at timestamp without time zone := clock_timestamp()::timestamp without time zone;
+DECLARE created_at timestamp without time zone := (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3);
 BEGIN
   IF current_setting('app.purpose',true)<>'support-report-create'
      OR p_request_id IS NULL OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
@@ -1016,7 +1016,8 @@ BEGIN
       'ipHash',p_ip_hash),created_at
   );
   RETURN jsonb_build_object(
-    'id',report_id,'status','OPEN','createdAt',created_at,
+    'id',report_id,'status','OPEN',
+    'createdAt',to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'reporterUserId',actor."userId",'reporterRole',actor.role,
     'licenseeId',actor."licenseeId",'title',btrim(p_title),
     'sourcePath',p_source_path,'pageUrl',p_page_url
@@ -1096,6 +1097,10 @@ BEGIN
   SELECT (SELECT coalesce(jsonb_agg(
     (CASE WHEN actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN to_jsonb(page)
       ELSE to_jsonb(page)-'internalNote'-'emailErrorCode'-'acknowledgementEmailErrorCode' END)
+    || jsonb_build_object(
+      'createdAt',to_char(page."createdAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'updatedAt',to_char(page."updatedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'respondedAt',to_char(page."respondedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
     || jsonb_build_object(
       'reporterUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role)
         FROM public."User" u WHERE u.id=page."reporterUserId"),
