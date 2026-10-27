@@ -805,6 +805,58 @@ export const getAuthenticatedSupportIssueScreenshot = async (
   return result as { id: string; mime: string | null };
 };
 
+export const respondToAuthenticatedSupportIssueReport = async (
+  db: B03FunctionClient,
+  input: { reportId: string; message: string; status: "OPEN" | "RESPONDED" | "CLOSED"; ipHash?: string | null; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_respond_support_issue_report(
+      ${id(input.reportId, "reportId")}::text,
+      ${text(input.message, "response message", 5000)}::text,
+      ${exactEnum(input.status, "response status", ["OPEN", "RESPONDED", "CLOSED"])}::text,
+      ${optional(input.ipHash, "ipHash", 80)}::text,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_respond_support_issue_report");
+  if (row.result === null) return null;
+  const result = supportProjection(row.result, "app_rls.b03_respond_support_issue_report");
+  if (result.id !== input.reportId || !["OPEN", "RESPONDED", "CLOSED"].includes(String(result.status)) ||
+      typeof result.responseMessage !== "string" || typeof result.respondedAt !== "string") {
+    throw new Error("app_rls.b03_respond_support_issue_report returned an invalid response");
+  }
+  return result;
+};
+
+export const claimSupportResponseEmails = async (
+  db: B03FunctionClient,
+  input: { attemptedAt: Date; batchSize: number }
+) => boundedRows(await db.$queryRaw<Array<{
+  id: string; organizationId: string | null; licenseeId: string | null;
+  reporterUserId: string | null; title: string; body: string; data: Prisma.JsonValue;
+}>>(Prisma.sql`
+  SELECT * FROM app_rls.b03_claim_support_response_emails(
+    ${timestamp(input.attemptedAt, "attemptedAt")}::timestamp,
+    ${integer(input.batchSize, "batchSize", 1, 10)}::integer
+  )
+`), 10, "app_rls.b03_claim_support_response_emails");
+
+export const completeSupportResponseEmail = async (
+  db: B03FunctionClient,
+  input: { notificationId: string; claimToken: string; status: "SENT" | "FAILED" | "UNKNOWN" | "DRY_RUN";
+    errorCode?: string | null; providerMessageId?: string | null }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: boolean }>>(Prisma.sql`
+    SELECT app_rls.b03_complete_support_response_email(
+      ${id(input.notificationId, "notificationId")}::text,
+      ${uuid(input.claimToken)}::text,
+      ${exactEnum(input.status, "email status", ["SENT", "FAILED", "UNKNOWN", "DRY_RUN"])}::text,
+      ${optional(input.errorCode, "errorCode", 80)}::text,
+      ${optional(input.providerMessageId, "providerMessageId", 191)}::text
+    ) AS result
+  `), "app_rls.b03_complete_support_response_email");
+  if (row.result !== true) throw new Error("app_rls.b03_complete_support_response_email did not complete");
+};
+
 export const listSupportTickets = async (
   db: B03FunctionClient,
   input: {

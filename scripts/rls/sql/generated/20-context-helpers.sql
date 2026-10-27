@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca'
+    AND source_contract_sha256='92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13150,13 +13150,13 @@ BEGIN
   IF p_sink_event_id='projection:'||p_job_id THEN
     IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR (
       (o.payload->>'entityType'='QrAllocationRequest' AND o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST'))
-      OR (o.payload->>'entityType'='SupportIssueReport' AND o.payload->>'action'='SUPPORT_ISSUE_REPORTED')) IS NOT TRUE
+      OR (o.payload->>'entityType'='SupportIssueReport' AND o.payload->>'action' IN ('SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED'))) IS NOT TRUE
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET "sinkEventId"=p_sink_event_id,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
     RETURN QUERY SELECT true,coalesce(o."sinkEventId"=p_sink_event_id,false); RETURN;
   END IF;
   IF p_sink_event_id='disabled:'||p_job_id THEN
-    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
+    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED')
        AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET status='FAILED',"sentAt"=NULL,"sinkEventId"=p_sink_event_id,
@@ -13166,7 +13166,7 @@ BEGIN
   IF p_sink_event_id LIKE 'projection:%' OR p_sink_event_id LIKE 'disabled:%' THEN
     RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501';
   END IF;
-  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
+  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED')
      AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."SecurityEventOutbox" SET status='SENT',"sentAt"=p_attempted_at,"sinkEventId"=p_sink_event_id,"lastError"=NULL,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
@@ -14410,6 +14410,215 @@ $fn$;
 
 REVOKE ALL ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_respond_support_issue_report(
+  p_report_id text,p_message text,p_status text,p_ip_hash text,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE report record;
+DECLARE replay record;
+DECLARE recipient text;
+DECLARE tenant_org_id text;
+DECLARE response_at timestamp without time zone := (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3);
+DECLARE response_iso text;
+DECLARE response_key text;
+DECLARE email_id text;
+DECLARE web_id text;
+DECLARE delivery_state text;
+BEGIN
+  SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
+  IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+     OR current_setting('app.purpose',true)<>'support-report-response'
+     OR p_report_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+     OR length(btrim(coalesce(p_message,''))) NOT BETWEEN 5 AND 5000
+     OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
+     OR p_status NOT IN ('OPEN','RESPONDED','CLOSED') THEN
+    RAISE EXCEPTION 'B03_SUPPORT_RESPONSE_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM 1 FROM app_rls.require_recent_mfa_session(
+    current_setting('app.auth_session_id',true),response_at,30
+  );
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'B03_SUPPORT_RESPONSE_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','support-report-response',true),
+          set_config('app.b03_support_report_id',p_report_id,true);
+  SELECT r.id,r."reporterUserId",r."licenseeId",r."publicEmail",r."publicName",
+    r."referenceCode",r.title,r.status,r."responseMessage",r."respondedByUserId",
+    r."respondedAt",r."emailDeliveryStatus"
+    INTO report FROM public."SupportIssueReport" r WHERE r.id=p_report_id FOR UPDATE;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  SELECT l."orgId" INTO tenant_org_id FROM public."Licensee" l WHERE l.id=report."licenseeId";
+  PERFORM set_config('app.b03_licensee_id',coalesce(report."licenseeId",''),true),
+          set_config('app.b03_target_user_id',coalesce(report."reporterUserId",''),true);
+  IF report.status=p_status AND report."responseMessage"=btrim(p_message)
+     AND report."respondedByUserId"=actor.user_id AND report."respondedAt" IS NOT NULL THEN
+    response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message)||':'||report."respondedAt"::text,'UTF8')),'hex');
+    email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
+    PERFORM set_config('app.b03_notification_id',email_id,true);
+    SELECT n.body,n.data INTO replay FROM public."Notification" n WHERE n.id=email_id;
+    IF FOUND AND (replay.data->>'respondedAt')::timestamp without time zone=report."respondedAt" THEN
+      RETURN jsonb_build_object('id',report.id,'status',replay.data->>'status',
+        'responseMessage',replay.body,'respondedAt',to_char(report."respondedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'emailDeliveryStatus',CASE WHEN replay.data->>'emailState'='QUEUED' THEN 'PENDING'
+          ELSE replay.data->>'emailState' END,'replayed',true,
+        'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id);
+    END IF;
+  END IF;
+  response_at:=greatest((clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),coalesce(report."respondedAt"+interval '1 millisecond',response_at));
+  response_iso:=to_char(response_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+  response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message)||':'||response_at::text,'UTF8')),'hex');
+  email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
+  web_id:=encode(sha256(convert_to('web:'||response_key,'UTF8')),'hex');
+  web_id:=substr(web_id,1,8)||'-'||substr(web_id,9,4)||'-4'||substr(web_id,14,3)||'-a'||substr(web_id,18,3)||'-'||substr(web_id,21,12);
+  SELECT coalesce(nullif(report."publicEmail",''),u.email) INTO recipient
+    FROM (SELECT 1) anchor LEFT JOIN public."User" u ON u.id=report."reporterUserId";
+  delivery_state:=CASE WHEN p_status='CLOSED' OR recipient IS NULL THEN 'SKIPPED' ELSE 'QUEUED' END;
+  UPDATE public."SupportIssueReport" r SET status=p_status,
+    "responseMessage"=btrim(p_message),"respondedAt"=response_at,
+    "respondedByUserId"=actor.user_id,
+    "emailDeliveryStatus"=CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END,
+    "emailErrorCode"=NULL,"updatedAt"=response_at
+  WHERE r.id=p_report_id;
+  INSERT INTO public."AuditLogOutbox"(id,payload,"updatedAt") VALUES (
+    gen_random_uuid()::text,
+    jsonb_build_object('userId',actor.user_id,'orgId',tenant_org_id,
+      'licenseeId',report."licenseeId",'action','SUPPORT_ISSUE_RESPONDED',
+      'entityType','SupportIssueReport','entityId',report.id,'ipHash',p_ip_hash,
+      'details',jsonb_build_object('status',p_status,'responseLength',length(btrim(p_message)),
+        'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END)),response_at
+  );
+  PERFORM set_config('app.b03_notification_id',web_id,true);
+  IF report."reporterUserId" IS NOT NULL THEN
+    INSERT INTO public."Notification"(id,"userId","orgId","licenseeId",audience,channel,type,title,body,data,"updatedAt")
+    VALUES (web_id,report."reporterUserId",tenant_org_id,report."licenseeId",
+      'ALL','WEB','support_issue_response','Support response: '||report.title,
+      btrim(p_message),jsonb_build_object('supportReportId',report.id,'status',p_status,
+        'respondedAt',response_iso,'targetRoute','/support'),response_at);
+  END IF;
+  PERFORM set_config('app.b03_notification_id',email_id,true);
+  INSERT INTO public."Notification"(id,"userId","orgId","licenseeId",audience,channel,type,title,body,data,"updatedAt")
+  VALUES (email_id,report."reporterUserId",tenant_org_id,report."licenseeId",
+    'ALL','EMAIL','support_issue_response','Support response: '||report.title,
+    btrim(p_message),jsonb_build_object('supportReportId',report.id,'responseId',email_id,'status',p_status,
+      'recipient',recipient,'reporterName',report."publicName",'referenceCode',report."referenceCode",
+      'subject',report.title,
+      'responderEmail',(SELECT u.email FROM public."User" u WHERE u.id=actor.user_id),
+      'responderUserId',actor.user_id,
+      'respondedAt',response_iso,'emailState',delivery_state,'attempts',0),response_at);
+  RETURN jsonb_build_object('id',report.id,'status',p_status,
+    'responseMessage',btrim(p_message),'respondedAt',response_iso,
+    'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END,
+    'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id,
+    'replayed',false);
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_respond_support_issue_report(text,text,text,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_claim_support_response_emails(
+  p_attempted_at timestamp without time zone,p_batch_size integer
+) RETURNS TABLE(id text,"organizationId" text,"licenseeId" text,"reporterUserId" text,title text,body text,data jsonb)
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE stale record;
+BEGIN
+  IF session_user<>'mscqr_rls_cert_worker'
+     OR current_setting('app.system_identity',true)<>'identity-worker'
+     OR current_setting('app.job_type',true)<>'SUPPORT_RESPONSE_EMAIL'
+     OR current_setting('app.request_id',true) !~* '^[0-9a-f-]{36}$'
+     OR p_batch_size NOT BETWEEN 1 AND 10
+     OR p_attempted_at IS NULL OR abs(extract(epoch FROM (clock_timestamp()-p_attempted_at)))>60 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_EMAIL_WORKER_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','support-email-claim',true);
+  FOR stale IN WITH stale_ids AS (
+    SELECT n.id FROM public."Notification" n
+    WHERE n.channel='EMAIL' AND n.type='support_issue_response'
+      AND n.data->>'emailState'='CLAIMED'
+      AND n."updatedAt"<p_attempted_at-interval '15 minutes'
+    ORDER BY n."updatedAt",n.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ), expired AS (
+    UPDATE public."Notification" n SET
+      data=n.data||jsonb_build_object('emailState','UNKNOWN','errorCode','CLAIM_EXPIRED'),
+      "updatedAt"=p_attempted_at
+    FROM stale_ids s WHERE n.id=s.id
+    RETURNING n.id,n.body,n.data,n."licenseeId"
+  ) SELECT * FROM expired LOOP
+    PERFORM set_config('app.b03_support_report_id',stale.data->>'supportReportId',true),
+            set_config('app.b03_licensee_id',coalesce(stale."licenseeId",''),true);
+    UPDATE public."SupportIssueReport" r SET
+      "emailDeliveryStatus"='UNKNOWN',"emailErrorCode"='CLAIM_EXPIRED',"updatedAt"=p_attempted_at
+    WHERE r.id=stale.data->>'supportReportId' AND r."responseMessage"=stale.body
+      AND r."respondedAt"=(stale.data->>'respondedAt')::timestamp without time zone;
+  END LOOP;
+  RETURN QUERY WITH candidates AS (
+    SELECT n.id FROM public."Notification" n
+    WHERE n.channel='EMAIL' AND n.type='support_issue_response' AND n."emailedAt" IS NULL
+      AND n.data->>'emailState' IN ('QUEUED','FAILED')
+      AND coalesce((n.data->>'attempts')::integer,0)<5
+      AND (n.data->>'emailState'='QUEUED' OR n."updatedAt"+interval '5 minutes'<=p_attempted_at)
+    ORDER BY n."createdAt",n.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ), claimed AS (
+    UPDATE public."Notification" n SET
+      data=n.data||jsonb_build_object('emailState','CLAIMED',
+        'claimToken',current_setting('app.request_id',true),
+        'attempts',coalesce((n.data->>'attempts')::integer,0)+1),
+      "updatedAt"=p_attempted_at
+    FROM candidates c WHERE n.id=c.id
+    RETURNING n.id,n."orgId",n."licenseeId",n."userId",n.title,n.body,n.data
+  ) SELECT c.id,c."orgId",c."licenseeId",c."userId",c.title,c.body,c.data FROM claimed c;
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_complete_support_response_email(
+  p_notification_id text,p_claim_token text,p_status text,p_error_code text,p_provider_message_id text
+) RETURNS boolean
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE notification record;
+BEGIN
+  IF session_user<>'mscqr_rls_cert_worker'
+     OR current_setting('app.system_identity',true)<>'identity-worker'
+     OR current_setting('app.job_type',true)<>'SUPPORT_RESPONSE_EMAIL'
+     OR p_status NOT IN ('SENT','FAILED','UNKNOWN','DRY_RUN')
+     OR p_claim_token !~* '^[0-9a-f-]{36}$'
+     OR length(coalesce(p_error_code,''))>80
+     OR length(coalesce(p_provider_message_id,''))>191 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_EMAIL_WORKER_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_operation','support-email-complete',true),
+          set_config('app.b03_notification_id',p_notification_id,true);
+  SELECT n.id,n."licenseeId",n."orgId",n."userId",n.body,n.data,n."emailedAt"
+    INTO notification FROM public."Notification" n WHERE n.id=p_notification_id
+      AND n.channel='EMAIL' AND n.type='support_issue_response' FOR UPDATE;
+  IF NOT FOUND OR notification.data->>'claimToken' IS DISTINCT FROM p_claim_token THEN
+    RAISE EXCEPTION 'B03_SUPPORT_EMAIL_WORKER_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF notification.data->>'emailState'=p_status THEN RETURN true; END IF;
+  IF notification.data->>'emailState'<>'CLAIMED' THEN
+    RAISE EXCEPTION 'B03_SUPPORT_EMAIL_WORKER_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_support_report_id',notification.data->>'supportReportId',true),
+          set_config('app.b03_licensee_id',coalesce(notification."licenseeId",''),true);
+  UPDATE public."Notification" n SET
+    data=n.data||jsonb_build_object('emailState',p_status,'errorCode',p_error_code,
+      'providerMessageId',p_provider_message_id),
+    "emailedAt"=CASE WHEN p_status='SENT' THEN clock_timestamp() ELSE n."emailedAt" END,
+    "updatedAt"=clock_timestamp()
+  WHERE n.id=p_notification_id;
+  UPDATE public."SupportIssueReport" r SET
+    "emailDeliveryStatus"=p_status,"emailErrorCode"=p_error_code,"updatedAt"=clock_timestamp()
+  WHERE r.id=notification.data->>'supportReportId'
+    AND r."responseMessage"=notification.body
+    AND r."respondedAt"=(notification.data->>'respondedAt')::timestamp without time zone;
+  RETURN true;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_claim_support_response_emails(timestamp without time zone,integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_complete_support_response_email(text,text,text,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
@@ -14427,9 +14636,12 @@ GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_read(text,text,timestamp
 GRANT EXECUTE ON FUNCTION app_rls.b03_primary_superadmin_email() TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_respond_support_issue_report(text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_superadmin_alert_emails() TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_claim_support_response_emails(timestamp without time zone,integer) TO "mscqr_rls_cert_worker";
+GRANT EXECUTE ON FUNCTION app_rls.b03_complete_support_response_email(text,text,text,text,text) TO "mscqr_rls_cert_worker";
 RESET ROLE;
 DO $$ BEGIN
   IF NOT pg_has_role(session_user,'mscqr_rls_cert_owner','SET') THEN RAISE EXCEPTION 'administrative executor lacks SET authority for mscqr_rls_cert_owner'; END IF;
