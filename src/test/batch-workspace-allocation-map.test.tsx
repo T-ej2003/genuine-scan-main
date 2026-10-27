@@ -77,9 +77,10 @@ describe("batch workspace allocation map", () => {
     }) as Awaited<ReturnType<typeof apiClient.getTraceTimeline>>);
     vi.mocked(apiClient.getAuditLogs).mockResolvedValue({ success: true, data: { logs: [] } } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
     let refresh!: () => void;
+    const realSetInterval = window.setInterval.bind(window);
     vi.spyOn(window, "setInterval").mockImplementation((callback, delay) => {
       if (delay === 600_000) refresh = callback as () => void;
-      return 1;
+      return realSetInterval(callback, delay);
     });
     const page = buildStableBatchOverviewRows([source]);
     let currentPage = page;
