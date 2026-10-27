@@ -29,7 +29,7 @@ const MONITOR_BOUNDARY_ARN = "arn:aws:iam::368992683803:policy/MSCQRProductionEc
 const managedInstances = new Set([...managed].flatMap(address => address === "aws_cloudwatch_metric_alarm.ecr_protection" ?
   [...alarmNames].map(name => `${address}["${name}"]`) : [address]));
 const PARTIAL_LINEAGE = "578568c5-ffb1-aa44-c941-6f2a4a17c838";
-const PARTIAL_STATE_VERSION = "mK.Oem0.JG8kyunwI9oI25W0Arqz44FF";
+const PARTIAL_STATE_VERSION = "WTI2o9W_x0Gsab0UoNys9kKyv5EySuQJ";
 const partialIds = new Map([
   ["aws_iam_role.ecr_monitor", "mscqr-production-ecr-monitor"],
   ["aws_iam_role_policy.ecr_monitor", "mscqr-production-ecr-monitor:mscqr-production-ecr-monitor"],
@@ -55,7 +55,7 @@ export function assertInitialOwnership(readbacks) {
 export function assertPartialOwnershipState(state) {
   assert.equal(state.version, 4);
   assert.equal(state.lineage, PARTIAL_LINEAGE, "ECR Terraform state lineage changed");
-  assert.equal(state.serial, 1, "ECR partial state serial changed");
+  assert.equal(state.serial, 2, "ECR partial state serial changed");
   const resources = (state.resources || []).filter(resource => resource.mode === "managed");
   assert.equal(resources.length, 8, "ECR partial state resource count changed");
   assert.ok(resources.every(resource => !resource.module && resource.instances?.length && resource.instances.every(instance => !instance.deposed)), "ECR partial state has an unexpected instance");
@@ -95,7 +95,7 @@ export function assertPartialAlarm(saved, live) {
   }, {
     arn: saved.arn, actionsEnabled: saved.actions_enabled, alarmActions: saved.alarm_actions, okActions: saved.ok_actions,
     insufficientActions: saved.insufficient_data_actions || [], comparison: saved.comparison_operator, evaluations: saved.evaluation_periods,
-    threshold: saved.threshold, datapoints: saved.datapoints_to_alarm || 0, dimensions: saved.dimensions || [],
+    threshold: saved.threshold, datapoints: saved.datapoints_to_alarm || 0, dimensions: saved.dimensions && Object.keys(saved.dimensions).length ? saved.dimensions : [],
     metric: saved.metric_name, namespace: saved.namespace, period: saved.period, statistic: saved.statistic,
     missing: saved.treat_missing_data, description: saved.alarm_description, metrics: saved.metric_query || [],
     thresholdMetric: saved.threshold_metric_id, unit: saved.unit, extendedStatistic: saved.extended_statistic,
