@@ -16,6 +16,15 @@ const guard = { Statement: [{ Effect: "Deny", Principal: "*", Action: ["ecr:Batc
 const protectedRepository = (repository = "mscqr-backend") => ({ repository, caller: { Account: ECR_PROTECTION.account }, lifecyclePolicy: null,
   description: { repositoryName: repository, registryId: ECR_PROTECTION.account, repositoryArn: `arn:aws:ecr:eu-west-2:368992683803:repository/${repository}`, imageTagMutability: "IMMUTABLE", imageScanningConfiguration: { scanOnPush: true } }, repositoryPolicy: guard });
 
+test("generic image publisher and verifier use the same accepted provenance URI", () => {
+  const workflow = fs.readFileSync(new URL("../../.github/workflows/publish-ecs-images.yml", import.meta.url), "utf8");
+  const verifier = fs.readFileSync(new URL("../aws/verify-release-artifacts.sh", import.meta.url), "utf8");
+  const type = "https://mscqr.com/attestations/release-provenance/v1";
+  assert.ok(workflow.includes(`PROVENANCE_ATTESTATION_TYPE: ${type}`));
+  assert.match(workflow, /cosign attest --yes --type "\$PROVENANCE_ATTESTATION_TYPE"/);
+  assert.ok(verifier.includes(`PROVENANCE_ATTESTATION_TYPE:-${type}`));
+});
+
 test("all three repositories require no lifecycle expiration and an explicit delete guard", () => {
   for (const repository of ECR_PROTECTION.repositories) assert.equal(assertEcrRepositoryProtection(protectedRepository(repository)), true);
   const good = protectedRepository();

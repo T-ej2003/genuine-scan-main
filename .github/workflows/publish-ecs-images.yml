@@ -59,6 +59,7 @@ jobs:
       WORKER_ECR_REPO: ${{ inputs.worker_ecr_repo }}
       SERVICES: ${{ inputs.services }}
       COSIGN_EXPERIMENTAL: "1"
+      PROVENANCE_ATTESTATION_TYPE: https://mscqr.com/attestations/release-provenance/v1
     steps:
       - name: Checkout target ref
         uses: actions/checkout@v6
@@ -176,7 +177,7 @@ jobs:
 
             cosign sign --yes "$image_ref"
             cosign attest --yes --type spdxjson --predicate "$sbom_file" "$image_ref"
-            cosign attest --yes --type mscqr-release-provenance --predicate "$provenance_file" "$image_ref"
+            cosign attest --yes --type "$PROVENANCE_ATTESTATION_TYPE" --predicate "$provenance_file" "$image_ref"
           done < "$IMAGES_FILE"
 
       - name: Verify signed release artifacts
