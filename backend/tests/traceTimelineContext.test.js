@@ -127,6 +127,8 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert.doesNotMatch(JSON.stringify(tenant.result), /secret|secret-key/);
   assert.match(JSON.stringify(tenant.result), /retained/);
   assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: `${ids.actor},${ids.manufacturer}` }).success, true);
+  assert.deepStrictEqual(traceTimelineQuerySchema.parse({ batchIds: `${ids.manufacturer},${ids.actor},${ids.manufacturer}` }).batchIds, [ids.actor, ids.manufacturer]);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: "" }).success, false);
   assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: "not-a-uuid" }).success, false);
   assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchId: ids.actor, batchIds: ids.manufacturer }).success, false);
   assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: Array(101).fill(ids.actor).join(",") }).success, false);

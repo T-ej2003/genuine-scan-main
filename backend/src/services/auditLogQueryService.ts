@@ -209,6 +209,7 @@ export const queryAuditLogs = async (
         action: filters.action || null,
         entityType: filters.entityType || null,
         entityId: filters.entityId || null,
+        entityIds: filters.entityIds || null,
         userId: filters.userId || null,
         from: filters.from || null,
         to: filters.to || null,

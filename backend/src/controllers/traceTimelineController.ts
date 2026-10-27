@@ -15,7 +15,7 @@ export const traceTimelineQuerySchema = z.object({
   licenseeId: z.string().uuid().optional(),
   eventType: z.nativeEnum(TraceEventType).optional(),
   batchId: z.string().uuid().optional(),
-  batchIds: z.string().transform((value) => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)).optional(),
+  batchIds: z.string().transform((value) => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)).transform((ids) => [...new Set(ids)].sort()).optional(),
   manufacturerId: z.string().uuid().optional(),
   qrCodeId: z.string().uuid().optional(),
   purpose: z.string().trim().min(1).max(240).optional(),
