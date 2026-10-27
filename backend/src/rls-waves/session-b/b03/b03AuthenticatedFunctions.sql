@@ -1188,6 +1188,8 @@ DECLARE response_key text;
 DECLARE email_id text;
 DECLARE web_id text;
 DECLARE delivery_state text;
+DECLARE superseded_count integer;
+DECLARE in_flight_count integer;
 BEGIN
   SELECT * INTO actor FROM app_rls.b03_require_authenticated_actor(p_request_id);
   IF actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
@@ -1234,6 +1236,22 @@ BEGIN
   email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
   web_id:=encode(sha256(convert_to('web:'||response_key,'UTF8')),'hex');
   web_id:=substr(web_id,1,8)||'-'||substr(web_id,9,4)||'-4'||substr(web_id,14,3)||'-a'||substr(web_id,18,3)||'-'||substr(web_id,21,12);
+  WITH cancellable AS (
+    SELECT n.id FROM public."Notification" n
+    WHERE n.channel='EMAIL' AND n.type='support_issue_response'
+      AND n.data->>'supportReportId'=p_report_id
+      AND (n.data->>'emailState'='QUEUED' OR
+        (n.data->>'emailState'='FAILED' AND coalesce((n.data->>'attempts')::integer,0)<5))
+    ORDER BY n.id FOR UPDATE SKIP LOCKED
+  )
+  UPDATE public."Notification" n SET
+    data=n.data||jsonb_build_object('emailState','CANCELLED','errorCode','SUPERSEDED',
+      'supersededBy',email_id),"updatedAt"=response_at
+  FROM cancellable c WHERE n.id=c.id;
+  GET DIAGNOSTICS superseded_count = ROW_COUNT;
+  SELECT count(*)::integer INTO in_flight_count FROM public."Notification" n
+  WHERE n.channel='EMAIL' AND n.type='support_issue_response'
+    AND n.data->>'supportReportId'=p_report_id AND n.data->>'emailState'='CLAIMED';
   SELECT coalesce(nullif(report."publicEmail",''),u.email) INTO recipient
     FROM (SELECT 1) anchor LEFT JOIN public."User" u ON u.id=report."reporterUserId";
   delivery_state:=CASE WHEN p_status='CLOSED' OR recipient IS NULL THEN 'SKIPPED' ELSE 'QUEUED' END;
@@ -1249,7 +1267,8 @@ BEGIN
       'licenseeId',report."licenseeId",'action','SUPPORT_ISSUE_RESPONDED',
       'entityType','SupportIssueReport','entityId',report.id,'ipHash',p_ip_hash,
       'details',jsonb_build_object('status',p_status,'responseLength',length(btrim(p_message)),
-        'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END)),response_at
+        'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END,
+        'supersededEmailCount',superseded_count,'priorEmailInFlight',in_flight_count>0)),response_at
   );
   PERFORM set_config('app.b03_notification_id',web_id,true);
   IF report."reporterUserId" IS NOT NULL THEN
@@ -1273,7 +1292,7 @@ BEGIN
     'responseMessage',btrim(p_message),'respondedAt',response_iso,
     'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END,
     'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id,
-    'replayed',false);
+    'priorEmailInFlight',in_flight_count>0,'replayed',false);
 END
 $fn$;
 
@@ -1284,6 +1303,8 @@ CREATE OR REPLACE FUNCTION app_rls.b03_claim_support_response_emails(
 ) RETURNS TABLE(id text,"organizationId" text,"licenseeId" text,"reporterUserId" text,title text,body text,data jsonb)
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE stale record;
+DECLARE candidate record;
+DECLARE current_report record;
 BEGIN
   IF session_user<>{{WORKER_ROLE}}
      OR current_setting('app.system_identity',true)<>'identity-worker'
@@ -1314,22 +1335,33 @@ BEGIN
     WHERE r.id=stale.data->>'supportReportId' AND r."responseMessage"=stale.body
       AND r."respondedAt"=(stale.data->>'respondedAt')::timestamp without time zone;
   END LOOP;
-  RETURN QUERY WITH candidates AS (
-    SELECT n.id FROM public."Notification" n
+  FOR candidate IN
+    SELECT n.id,n.body,n.data FROM public."Notification" n
     WHERE n.channel='EMAIL' AND n.type='support_issue_response' AND n."emailedAt" IS NULL
       AND n.data->>'emailState' IN ('QUEUED','FAILED')
       AND coalesce((n.data->>'attempts')::integer,0)<5
       AND (n.data->>'emailState'='QUEUED' OR n."updatedAt"+interval '5 minutes'<=p_attempted_at)
     ORDER BY n."createdAt",n.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
-  ), claimed AS (
-    UPDATE public."Notification" n SET
+  LOOP
+    PERFORM set_config('app.b03_support_report_id',candidate.data->>'supportReportId',true);
+    SELECT r."respondedAt",r."responseMessage" INTO current_report
+      FROM public."SupportIssueReport" r WHERE r.id=candidate.data->>'supportReportId' FOR UPDATE;
+    IF NOT FOUND OR current_report."respondedAt" IS DISTINCT FROM
+        (candidate.data->>'respondedAt')::timestamp without time zone
+        OR current_report."responseMessage" IS DISTINCT FROM candidate.body THEN
+      UPDATE public."Notification" n SET
+        data=n.data||jsonb_build_object('emailState','CANCELLED','errorCode','SUPERSEDED'),
+        "updatedAt"=p_attempted_at WHERE n.id=candidate.id;
+      CONTINUE;
+    END IF;
+    RETURN QUERY UPDATE public."Notification" n SET
       data=n.data||jsonb_build_object('emailState','CLAIMED',
         'claimToken',current_setting('app.request_id',true),
         'attempts',coalesce((n.data->>'attempts')::integer,0)+1),
       "updatedAt"=p_attempted_at
-    FROM candidates c WHERE n.id=c.id
-    RETURNING n.id,n."orgId",n."licenseeId",n."userId",n.title,n.body,n.data
-  ) SELECT c.id,c."orgId",c."licenseeId",c."userId",c.title,c.body,c.data FROM claimed c;
+    WHERE n.id=candidate.id
+    RETURNING n.id,n."orgId",n."licenseeId",n."userId",n.title,n.body,n.data;
+  END LOOP;
 END
 $fn$;
 

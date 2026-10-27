@@ -131,6 +131,14 @@ const authHeader = (token) => ({
       } })).userId, ids.superAdmin);
       const { withB03SupportEmailWorkerContext } = require("../dist/rls-waves/session-b/b03/systemContext");
       const { claimSupportResponseEmails, completeSupportResponseEmail } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
+      const matchingCurrent = await prisma.$queryRaw`
+        SELECT count(*)::integer AS count FROM public."Notification" n
+        JOIN public."SupportIssueReport" r ON r.id=n.data->>'supportReportId'
+          AND r."respondedAt"=(n.data->>'respondedAt')::timestamp without time zone
+          AND r."responseMessage"=n.body
+        WHERE n.channel='EMAIL' AND n.type='support_issue_response'
+      `;
+      assert.equal(matchingCurrent[0].count, 1, "the committed email must match the report version");
       const firstClaimToken = randomUUID();
       const emailClaims = await withB03SupportEmailWorkerContext({
         jobId: `support-email-claim:${firstClaimToken}`, requestId: firstClaimToken,
@@ -168,6 +176,106 @@ const authHeader = (token) => ({
         jobId: `support-email-claim:${randomUUID()}`, requestId: randomUUID(),
       }, (db) => claimSupportResponseEmails(db, { attemptedAt: new Date(), batchSize: 10 }), worker);
       assert.equal(noDuplicate.length, 0);
+      const respond = (message) => {
+        const responseBoundary = createB03AuthenticatedFunctionBoundary({
+          claims: verifyAccessToken(tokens.superAdmin.accessToken),
+          capability: openCookieToken(tokens.superAdmin.databaseCapability, "auth.database-session"),
+          requestId: randomUUID(), purpose: "support-report-response",
+        });
+        return responseBoundary.run((db) => respondToAuthenticatedSupportIssueReport(db, {
+          reportId: report.id, message, status: "RESPONDED", requestId: responseBoundary.requestId,
+        }));
+      };
+      const claimEmail = async () => {
+        const token = randomUUID();
+        const rows = await withB03SupportEmailWorkerContext({
+          jobId: `support-email-claim:${token}`, requestId: token,
+        }, (db) => claimSupportResponseEmails(db, { attemptedAt: new Date(), batchSize: 10 }), worker);
+        return { token, rows };
+      };
+      const finish = (row, token, status) => withB03SupportEmailWorkerContext({
+        jobId: row.id, requestId: randomUUID(),
+        organizationId: row.organizationId, licenseeId: row.licenseeId,
+      }, (db) => completeSupportResponseEmail(db, {
+        notificationId: row.id, claimToken: token, status,
+        ...(status === "FAILED" ? { errorCode: "SMTP_UNAVAILABLE" } : { providerMessageId: randomUUID() }),
+      }), worker);
+      const firstReplacement = await respond("Replacement queued A");
+      assert.equal(firstReplacement.emailDeliveryStatus, "PENDING");
+      const queuedA = await prisma.notification.findFirst({ where: {
+        type: "support_issue_response", channel: "EMAIL", body: "Replacement queued A",
+      } });
+      assert.equal((await prisma.notification.findUnique({ where: { id: emailClaims[0].id } })).data.emailState, "SENT");
+      const secondReplacement = await respond("Replacement queued B");
+      assert.equal(secondReplacement.emailDeliveryStatus, "PENDING");
+      assert.equal((await prisma.notification.findUnique({ where: { id: queuedA.id } })).data.emailState, "CANCELLED");
+      const claimedB = await claimEmail();
+      assert.deepEqual(claimedB.rows.map((row) => row.body), ["Replacement queued B"]);
+      await finish(claimedB.rows[0], claimedB.token, "FAILED");
+      await prisma.notification.update({ where: { id: claimedB.rows[0].id }, data: {
+        updatedAt: new Date(Date.now() - 6 * 60_000),
+      } });
+      const thirdReplacement = await respond("Replacement queued C");
+      assert.equal(thirdReplacement.emailDeliveryStatus, "PENDING");
+      assert.equal((await prisma.notification.findUnique({ where: { id: claimedB.rows[0].id } })).data.emailState, "CANCELLED");
+      const claimedC = await claimEmail();
+      assert.deepEqual(claimedC.rows.map((row) => row.body), ["Replacement queued C"]);
+      const inFlightReplacement = await respond("Replacement while prior email claimed");
+      assert.equal(inFlightReplacement.emailDeliveryStatus, "PENDING");
+      assert.equal(inFlightReplacement.priorEmailInFlight, true);
+      assert.equal((await prisma.notification.findUnique({ where: { id: claimedC.rows[0].id } })).data.emailState, "CLAIMED");
+      await finish(claimedC.rows[0], claimedC.token, "SENT");
+      assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).emailDeliveryStatus, "PENDING");
+      const claimedD = await claimEmail();
+      assert.deepEqual(claimedD.rows.map((row) => row.body), ["Replacement while prior email claimed"]);
+      await finish(claimedD.rows[0], claimedD.token, "SENT");
+      assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).emailDeliveryStatus, "SENT");
+      const concurrentReplacements = await Promise.all([respond("Concurrent response one"), respond("Concurrent response two")]);
+      assert(concurrentReplacements.every((result) => result.replayed === false));
+      const finalMessage = (await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).responseMessage;
+      const currentEmail = await prisma.notification.findFirst({ where: {
+        type: "support_issue_response", channel: "EMAIL", body: finalMessage,
+      } });
+      assert.equal(currentEmail.data.emailState, "QUEUED");
+      assert.equal((await prisma.notification.findMany({ where: {
+        type: "support_issue_response", channel: "EMAIL", body: { in: ["Concurrent response one", "Concurrent response two"] },
+      } })).filter((row) => row.data.emailState === "QUEUED").length, 1);
+      const rollbackBoundary = createB03AuthenticatedFunctionBoundary({
+        claims: verifyAccessToken(tokens.superAdmin.accessToken),
+        capability: openCookieToken(tokens.superAdmin.databaseCapability, "auth.database-session"),
+        requestId: randomUUID(), purpose: "support-report-response",
+      });
+      await assert.rejects(rollbackBoundary.run(async (db) => {
+        await respondToAuthenticatedSupportIssueReport(db, {
+          reportId: report.id, message: "Rolled back replacement", status: "RESPONDED",
+          requestId: rollbackBoundary.requestId,
+        });
+        throw new Error("synthetic rollback of replacement");
+      }), /synthetic rollback of replacement/);
+      assert.equal((await prisma.notification.findUnique({ where: { id: currentEmail.id } })).data.emailState, "QUEUED");
+      assert.equal(await prisma.notification.count({ where: {
+        type: "support_issue_response", channel: "EMAIL", body: "Rolled back replacement",
+      } }), 0);
+      const concurrentClaims = await Promise.all([claimEmail(), claimEmail()]);
+      assert.equal(concurrentClaims.reduce((count, result) => count + result.rows.length, 0), 1);
+      const finalClaim = concurrentClaims.find((result) => result.rows.length === 1);
+      assert.deepEqual(finalClaim.rows.map((row) => row.body), [finalMessage]);
+      await finish(finalClaim.rows[0], finalClaim.token, "SENT");
+      const exhaustedResponse = await respond("Response with exhausted retries");
+      assert.equal(exhaustedResponse.emailDeliveryStatus, "PENDING");
+      const exhaustedEmail = await prisma.notification.findFirst({ where: {
+        type: "support_issue_response", channel: "EMAIL", body: "Response with exhausted retries",
+      } });
+      await prisma.notification.update({ where: { id: exhaustedEmail.id }, data: {
+        data: { ...exhaustedEmail.data, emailState: "FAILED", attempts: 5 },
+      } });
+      const afterExhaustion = await respond("Response after exhausted retries");
+      assert.equal(afterExhaustion.emailDeliveryStatus, "PENDING");
+      assert.equal((await prisma.notification.findUnique({ where: { id: exhaustedEmail.id } })).data.emailState,
+        "FAILED", "terminal failed delivery must remain historical evidence");
+      const afterExhaustionClaim = await claimEmail();
+      assert.deepEqual(afterExhaustionClaim.rows.map((row) => row.body), ["Response after exhausted retries"]);
+      await finish(afterExhaustionClaim.rows[0], afterExhaustionClaim.token, "SENT");
       const { withB03SiemWorkerContext } = require("../dist/rls-waves/session-b/b03/systemContext");
       const { claimSecurityEventOutboxSlice, completeSecurityEventOutbox } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
       const securityClaims = await withB03SiemWorkerContext({
@@ -304,7 +412,7 @@ const authHeader = (token) => ({
     assert.equal(await prisma.notification.count({ where: {
       type: "support_issue_response", channel: "EMAIL",
       data: { path: ["supportReportId"], equals: report.id },
-    } }), 3);
+    } }), 11);
     const restoredReplay = await request("POST", responsePath, { message: "A support reply" }, {
       headers: authHeader(tokens.superAdmin),
     });
@@ -312,7 +420,7 @@ const authHeader = (token) => ({
     assert.equal(restoredReplay.payload.data.respondedAt, restoredResponse.payload.data.respondedAt);
     assert.equal(await prisma.auditLogOutbox.count({ where: {
       payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" },
-    } }), 5);
+    } }), 13);
 
     await prisma.refreshToken.updateMany({ where: { userId: ids.superAdmin, revokedAt: null }, data: {
       mfaVerifiedAt: new Date(Date.now() - 31 * 60_000),
@@ -334,7 +442,7 @@ const authHeader = (token) => ({
     assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).responseMessage, "A support reply");
     assert.equal(await prisma.auditLogOutbox.count({ where: {
       payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" },
-    } }), 5);
+    } }), 13);
 
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {

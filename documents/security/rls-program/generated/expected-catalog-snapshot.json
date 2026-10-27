@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7",
+  "sourceContractSha256": "93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "8e96c222b0d0977201dc5c0b23f33b385e51f6a2273c11fb63e294469a6a622a"
+      "sha256": "3b3bf77fcdade696a31b84458b94bc3920de6bef8a62ea35abb78b4dc04401a6"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -6780,7 +6780,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_operation',true)='notification-read' OR id=current_setting('app.b03_notification_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_operation',true)='notification-read' OR id=current_setting('app.b03_notification_id',true))) OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-response' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND channel='EMAIL' AND type='support_issue_response' AND data->>'supportReportId'=current_setting('app.b03_support_report_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'') AND \"userId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_target_user_id',true),'')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-claim-support-response-emails:Notification:SELECT",
@@ -6807,14 +6807,15 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('notification-read-update','notification-email-update') AND (id=current_setting('app.b03_notification_id',true) OR \"userId\"=current_setting('app.b03_actor_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('notification-read-update','notification-email-update') AND (id=current_setting('app.b03_notification_id',true) OR \"userId\"=current_setting('app.b03_actor_id',true))) OR (app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-response' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND channel='EMAIL' AND type='support_issue_response' AND data->>'supportReportId'=current_setting('app.b03_support_report_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'') AND \"userId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_target_user_id',true),'')) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-claim-support-response-emails:Notification:UPDATE",
         "contract:b03-complete-support-response-email:Notification:UPDATE",
         "contract:b03-mark-all-notifications-read:Notification:UPDATE",
         "contract:b03-mark-notification-emailed:Notification:UPDATE",
-        "contract:b03-mark-notification-read:Notification:UPDATE"
+        "contract:b03-mark-notification-read:Notification:UPDATE",
+        "contract:b03-respond-support-issue-report:Notification:UPDATE"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -12630,55 +12631,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:92eea54a573b5b3339ea1d52f6b83c55327ab7c81bbe4b43df6736b96a7872c7"
+      "marker": "mscqr-full-rls-clean-room:certification:93e5dd6c1f58c430f521f43b46b3f715ac7e6439ddeb81b16a88b782616631e8"
     }
   ]
 }
