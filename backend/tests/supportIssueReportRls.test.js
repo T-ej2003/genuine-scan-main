@@ -294,9 +294,6 @@ const authHeader = (token) => ({
       fs.rmSync(filePath, { force: true });
     }
 
-    await prisma.manufacturerLicenseeLink.create({ data: {
-      manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeB, isPrimary: false,
-    } });
     const selectedTenantReportId = randomUUID();
     await prisma.supportIssueReport.create({ data: {
       id: selectedTenantReportId, reporterUserId: ids.manufacturerA,

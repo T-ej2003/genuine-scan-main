@@ -7,14 +7,12 @@ import { z } from "zod";
 import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
-import { createAuditLog } from "../services/auditService";
-import { announceCommittedSupportIssueReport, createUserNotification } from "../services/notificationService";
-import { sendSupportIssueReply, toDeliveryStatus } from "../services/supportIntakeMailService";
+import { announceCommittedSupportIssueReport, announceCommittedSupportIssueResponse, createUserNotification } from "../services/notificationService";
 import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../middleware/supportIssueUpload";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
-import { createAuthenticatedSupportIssueReport, getAuthenticatedSupportIssueScreenshot, listAuthenticatedSupportIssueReports } from "../rls-waves/session-b/b03/repositoryFunctions";
+import { createAuthenticatedSupportIssueReport, getAuthenticatedSupportIssueScreenshot, listAuthenticatedSupportIssueReports, respondToAuthenticatedSupportIssueReport } from "../rls-waves/session-b/b03/repositoryFunctions";
 import { hashIp } from "../utils/security";
 import { SUPPORT_DIAGNOSTICS_MAX_BYTES, supportDiagnosticsStorageBytesUpperBound } from "../utils/supportDiagnosticsSize";
 
@@ -213,104 +211,31 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
     if (!req.user) return res.status(401).json({ success: false, error: "Not authenticated" });
 
     const id = String(req.params.id || "").trim();
-    if (!id) return res.status(400).json({ success: false, error: "Report ID is required" });
+    if (!z.string().uuid().safeParse(id).success) return res.status(400).json({ success: false, error: "Invalid report ID" });
 
     const parsed = responseSchema.safeParse(req.body || {});
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid response payload" });
     }
 
-    const existing = await prisma.supportIssueReport.findUnique({
-      where: { id },
-      include: {
-        reporterUser: { select: { id: true, email: true, licenseeId: true, orgId: true, name: true } },
-        licensee: { select: { id: true, name: true, prefix: true } },
-      },
-    });
-    if (!existing) return res.status(404).json({ success: false, error: "Support report not found" });
-
-    const respondedAt = new Date();
-    const status = parsed.data.status || "RESPONDED";
-
-    const replyRecipient = existing.publicEmail || existing.reporterUser?.email || null;
-    const replyMail =
-      replyRecipient && !parsed.data.status?.includes("CLOSED")
-        ? await sendSupportIssueReply({
-            referenceCode: (existing as any).referenceCode || null,
-            toAddress: replyRecipient,
-            reporterName: (existing as any).publicName || existing.reporterUser?.name || null,
-            subject: existing.title,
-            message: parsed.data.message,
-            responderEmail: req.user.email || null,
-          })
-        : null;
-
-    const updated = await prisma.supportIssueReport.update({
-      where: { id: existing.id },
-      data: {
-        status,
-        responseMessage: parsed.data.message,
-        respondedAt,
-        respondedByUserId: req.user.userId,
-        emailDeliveryStatus: replyMail ? toDeliveryStatus(replyMail) : undefined,
-        emailErrorCode: replyMail ? safeEmailError(replyMail.errorCode) : undefined,
-      },
-      include: {
-        reporterUser: { select: { id: true, name: true, email: true, role: true } },
-        respondedByUser: { select: { id: true, name: true, email: true, role: true } },
-        licensee: { select: { id: true, name: true, prefix: true } },
-      },
-    });
-
-    await createAuditLog({
-      userId: req.user.userId,
-      licenseeId: updated.licenseeId || undefined,
-      orgId: req.user.orgId || undefined,
-      action: "SUPPORT_ISSUE_RESPONDED",
-      entityType: "SupportIssueReport",
-      entityId: updated.id,
-      details: {
-        status,
-        responseLength: parsed.data.message.length,
-        emailDeliveryStatus: replyMail ? toDeliveryStatus(replyMail) : "NOT_SENT",
-      },
-      ipAddress: req.ip,
-    });
-
-    if (existing.reporterUserId) {
-      const notificationTitle = `Support response: ${updated.title}`;
-      const notificationBody = parsed.data.message;
-      const notificationData = {
-        supportReportId: updated.id,
-        status: updated.status,
-        respondedAt: respondedAt.toISOString(),
-        targetRoute: "/support",
-      };
-
-      await Promise.allSettled([
-        createUserNotification({
-          databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
-          userId: existing.reporterUserId,
-          title: notificationTitle,
-          body: notificationBody,
-          type: "support_issue_response",
-          licenseeId: updated.licenseeId || existing.reporterUser?.licenseeId || null,
-          orgId: existing.reporterUser?.orgId || null,
-          data: notificationData,
-          channel: NotificationChannel.WEB,
-        }),
-        createUserNotification({
-          databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
-          userId: existing.reporterUserId,
-          title: notificationTitle,
-          body: notificationBody,
-          type: "support_issue_response",
-          licenseeId: updated.licenseeId || existing.reporterUser?.licenseeId || null,
-          orgId: existing.reporterUser?.orgId || null,
-          data: notificationData,
-          channel: NotificationChannel.EMAIL,
-        }),
-      ]);
+    const boundary = b03BoundaryForRequest(req, "support-report-response");
+    const updated = await boundary.run((db) => respondToAuthenticatedSupportIssueReport(db, {
+      reportId: id,
+      message: parsed.data.message,
+      status: parsed.data.status || "RESPONDED",
+      requestId: boundary.requestId,
+    }));
+    if (!updated) return res.status(404).json({ success: false, error: "Support report not found" });
+    if (!updated.replayed && typeof updated.reporterUserId === "string") {
+      try {
+        announceCommittedSupportIssueResponse({
+          reporterUserId: updated.reporterUserId,
+          licenseeId: typeof updated.licenseeId === "string" ? updated.licenseeId : null,
+          orgId: typeof updated.orgId === "string" ? updated.orgId : null,
+        });
+      } catch {
+        console.error("Support response notification refresh failed after commit");
+      }
     }
 
     return res.json({
@@ -325,7 +250,9 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
       );
       return res.status(503).json({ success: false, error: "Support report storage unavailable" });
     }
-    console.error("respondToSupportIssueReport error:", error);
+    console.error("respondToSupportIssueReport error", {
+      code: typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "UNKNOWN",
+    });
     return res.status(500).json({ success: false, error: "Failed to respond to support report" });
   }
 };

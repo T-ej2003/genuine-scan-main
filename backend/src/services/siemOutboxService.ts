@@ -128,7 +128,7 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
       };
       try {
         if (claim.expiresAt.getTime() <= attemptedAt.getTime()) throw new Error("SIEM_OUTBOX_EXPIRED");
-        if (claim.eventType === "AUDIT_LOG" && ["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST", "SUPPORT_ISSUE_REPORTED"].includes(String((claim.eventPayload as Record<string, unknown>)?.action || ""))) {
+        if (claim.eventType === "AUDIT_LOG" && ["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST", "SUPPORT_ISSUE_REPORTED", "SUPPORT_ISSUE_RESPONDED"].includes(String((claim.eventPayload as Record<string, unknown>)?.action || ""))) {
           const log = claim.eventPayload as Record<string, unknown>;
           if (b03PayloadDigest(log) !== claim.payloadDigest || log.userId !== claim.initiatingUserId
               || log.licenseeId !== claim.licenseeId || (log.orgId || null) !== (claim.organizationId || null)) {

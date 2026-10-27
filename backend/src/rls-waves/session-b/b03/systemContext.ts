@@ -8,6 +8,7 @@ export type B03JobType =
   | "ANALYTICS_SCAN_HOURLY_ROLLUP"
   | "AUDIT_LOG"
   | "AUDIT_LOG_RECOVERY"
+  | "SUPPORT_RESPONSE_EMAIL"
   | "CSP_VIOLATION"
   | "SCHEDULED_COMPLIANCE_PACK";
 
@@ -118,6 +119,17 @@ export const withB03AuditWorkerContext = <T>(
 ) => withB03SystemContext(
   { ...input, systemIdentity: "identity-worker", jobType: "AUDIT_LOG_RECOVERY" },
   new Set(["AUDIT_LOG_RECOVERY"]),
+  callback,
+  runner
+);
+
+export const withB03SupportEmailWorkerContext = <T>(
+  input: BoundaryInput,
+  callback: (tx: Prisma.TransactionClient) => Promise<T>,
+  runner: TransactionRunner = prisma
+) => withB03SystemContext(
+  { ...input, systemIdentity: "identity-worker", jobType: "SUPPORT_RESPONSE_EMAIL" },
+  new Set(["SUPPORT_RESPONSE_EMAIL"]),
   callback,
   runner
 );

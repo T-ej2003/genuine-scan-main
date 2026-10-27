@@ -126,7 +126,7 @@ function IssueReportCard({
       {report.responseMessage ? (
         <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50/70 p-3">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-emerald-800">
-            <span className="font-semibold">Latest response sent</span>
+            <span className="font-semibold">Latest response saved</span>
             {report.respondedByUser?.name || report.respondedByUser?.email ? (
               <span>by {report.respondedByUser?.name || report.respondedByUser?.email}</span>
             ) : null}
