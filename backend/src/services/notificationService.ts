@@ -138,6 +138,15 @@ const emitNotificationEvent = (event: NotificationRealtimeEvent) => {
   }).catch(() => undefined);
 };
 
+export const announceCommittedSupportIssueReport = (licenseeId: string | null) => {
+  emitNotificationEvent({
+    type: "created",
+    audience: NotificationAudience.SUPER_ADMIN,
+    notificationType: "support_issue_reported",
+    licenseeId,
+  });
+};
+
 export const createRoleNotifications = async (params: {
   audience: NotificationAudience;
   title: string;

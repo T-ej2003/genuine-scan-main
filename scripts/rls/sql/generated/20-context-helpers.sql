@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae'
+    AND source_contract_sha256='eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:eec0f58014e9104e7d16447ef8b23354a802e9ae6eaecd37233c0e32bc94ecca')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -14248,13 +14248,27 @@ BEGIN
   );
   INSERT INTO public."AuditLogOutbox"(id,payload,"updatedAt") VALUES (
     gen_random_uuid()::text,
-    jsonb_build_object('userId',actor."userId",'orgId',actor."organizationId",
+    jsonb_build_object('userId',actor."userId",'orgId',p_organization_id,
       'licenseeId',actor."licenseeId",'action','SUPPORT_ISSUE_REPORTED',
       'entityType','SupportIssueReport','entityId',report_id,
       'details',jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
         'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),
       'ipHash',p_ip_hash),created_at
   );
+  PERFORM set_config('app.b03_operation','support-report-notification',true);
+  INSERT INTO public."Notification"(
+    id,"userId","orgId","licenseeId",audience,channel,type,title,body,data,"updatedAt"
+  )
+  SELECT gen_random_uuid()::text,u.id,p_organization_id,actor."licenseeId",
+    'SUPER_ADMIN'::public."NotificationAudience",'WEB'::public."NotificationChannel",
+    'support_issue_reported','New support issue reported',
+    'A support issue was submitted: ' || btrim(p_title),
+    jsonb_build_object('supportReportId',report_id,'sourcePath',p_source_path,
+      'pageUrl',p_page_url,'reporterUserId',actor."userId",'reporterRole',actor.role,
+      'targetRoute','/support'),created_at
+  FROM public."User" u
+  WHERE u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+    AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL;
   RETURN jsonb_build_object(
     'id',report_id,'status','OPEN',
     'createdAt',to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
