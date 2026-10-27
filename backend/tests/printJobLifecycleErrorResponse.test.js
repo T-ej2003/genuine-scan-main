@@ -46,6 +46,18 @@ assert.strictEqual(
 );
 assert.doesNotMatch(JSON.stringify(wrappedQrMembershipFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
 
+const staleAttestationFailure = describePrintJobCreateFailure(
+  Object.assign(new Error("Prisma raw query failed"), {
+    code: "P2010",
+    meta: { code: "P0001", message: "ERROR: PRINTER_ATTESTATION_STALE" },
+  }),
+  { requestId: "req-stale", failureStage: "transaction_started" }
+);
+assert.strictEqual(staleAttestationFailure.status, 409);
+assert.strictEqual(staleAttestationFailure.payload.code, "PRINTER_ATTESTATION_STALE");
+assert.strictEqual(staleAttestationFailure.payload.requestId, "req-stale");
+assert.doesNotMatch(JSON.stringify(staleAttestationFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
+
 for (const error of [
   Object.assign(new Error("unknown raw query failure"), {
     code: "P2010",
