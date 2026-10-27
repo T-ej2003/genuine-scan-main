@@ -63,6 +63,8 @@ export const getTraceTimelineController = async (req: AuthRequest, res: Response
             purposeCode: boundary.context.purpose,
             requestedPurpose: boundary.query.purpose || null,
             returnedRows: timeline.events.length,
+            batchId: boundary.query.batchId || null,
+            batchIds: boundary.query.batchIds || null,
           },
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
