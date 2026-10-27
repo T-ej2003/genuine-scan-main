@@ -281,10 +281,10 @@ describe("DashboardLayout printer connection dialog", () => {
       expect(screen.getByText("Set up printing on this computer")).toBeInTheDocument();
     });
     expect(vi.mocked(apiClient.getLocalPrintAgentStatus)).not.toHaveBeenCalled();
-    expect(screen.getByText(/The browser cannot install printers, drivers, or desktop apps by itself/i)).toBeInTheDocument();
-    expect(screen.getByText(/If the computer can see the printer, MSCQR will pick it up automatically/i)).toBeInTheDocument();
+    expect(screen.getByText(/Connect the printer and install its driver on this computer/i)).toBeInTheDocument();
+    expect(screen.getByText(/Selected printer: None yet/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /install printer helper/i })).toBeInTheDocument();
-    expect(screen.getByText(/download the Mac or Windows installer for this computer/i)).toBeInTheDocument();
+    expect(screen.getByText(/Download and run the Mac or Windows printer helper installer/i)).toBeInTheDocument();
   });
 
   it("does not auto-open printer onboarding away from Batches", async () => {
