@@ -255,7 +255,7 @@ test("protected push workflow preserves approval, ECR guard, publication, attest
 test("eligible release preserves ECR guard, image provenance, health, receipt and generation CAS", async () => {
   const preparation = prepare([changed]);
   const repository = { repositoryName: "mscqr-backend", registryId: "368992683803", repositoryArn: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend", repositoryUri: "368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend", imageTagMutability: "IMMUTABLE", imageScanningConfiguration: { scanOnPush: true } };
-  const policy = { Statement: [{ Effect: "Deny", Principal: "*", Resource: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"] }] };
+  const policy = { Statement: [{ Effect: "Deny", Principal: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"] }] };
   assert.throws(() => assertEcrRepositoryProtection({ repository: "mscqr-backend", description: repository, lifecyclePolicy: { rules: [] }, repositoryPolicy: policy, caller: { Account: "368992683803" } }), /Automated ECR lifecycle expiration/);
   assertEcrRepositoryProtection({ repository: "mscqr-backend", description: repository, lifecyclePolicy: null, repositoryPolicy: policy, caller: { Account: "368992683803" } });
   assert.equal(assertNormalImageIdentity({ service: "backend", sourceSha: target, repository, image: { repositoryName: "mscqr-backend", registryId: "368992683803", imageTags: [target], imageDigest: digest }, labels: { "org.opencontainers.image.revision": target, "org.opencontainers.image.title": "mscqr-backend" }, platforms: ["linux/amd64"] }), imageRef);
