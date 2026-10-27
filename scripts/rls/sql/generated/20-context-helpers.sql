@@ -14212,7 +14212,9 @@ BEGIN
      OR length(coalesce(p_page_url,''))>1200
      OR length(coalesce(p_diagnostics::text,''))>250000
      OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
-     OR (p_screenshot_size IS NOT NULL AND p_screenshot_size<0) THEN
+     OR length(coalesce(p_screenshot_path,''))>191
+     OR length(coalesce(p_screenshot_mime,''))>80
+     OR (p_screenshot_size IS NOT NULL AND p_screenshot_size NOT BETWEEN 0 AND 10000000) THEN
     RAISE EXCEPTION 'B03_SUPPORT_REPORT_DENIED' USING ERRCODE='42501';
   END IF;
 
