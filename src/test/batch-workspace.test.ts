@@ -3,6 +3,27 @@ import { describe, expect, it } from "vitest";
 import { buildStableBatchOverviewRows, type BatchWorkspaceRow } from "@/lib/batch-workspace";
 
 describe("buildStableBatchOverviewRows", () => {
+  it("reconciles a source across batch pages when given the complete allocation-map rows", () => {
+    const source: BatchWorkspaceRow = {
+      id: "source", name: "Source", licenseeId: "tenant", batchKind: "RECEIVED_PARENT",
+      startCode: "L0011", endCode: "L0150", totalCodes: 140,
+      unassignedRemainingCodes: 140, printedAt: null, createdAt: "2026-03-01T00:00:00Z",
+    };
+    const child: BatchWorkspaceRow = {
+      id: "child", name: "Factory allocation", licenseeId: "tenant", manufacturerId: "factory",
+      batchKind: "MANUFACTURER_CHILD", parentBatchId: "source", rootBatchId: "source",
+      startCode: "L0001", endCode: "L0010", totalCodes: 10, printableCodes: 10,
+      printedAt: null, createdAt: "2026-03-02T00:00:00Z",
+    };
+
+    expect(buildStableBatchOverviewRows([source])[0].originalTotalCodes).toBe(140);
+    const [complete] = buildStableBatchOverviewRows([source, child]);
+    expect(complete.originalTotalCodes).toBe(150);
+    expect(complete.remainingUnassignedCodes).toBe(140);
+    expect(complete.assignedCodes).toBe(10);
+    expect(complete.pendingPrintableCodes).toBe(10);
+  });
+
   it("collapses source and allocated rows into one stable source-batch row", () => {
     const rows: BatchWorkspaceRow[] = [
       {

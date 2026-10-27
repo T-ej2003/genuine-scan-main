@@ -250,7 +250,7 @@ export default function Dashboard() {
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
   const qrStatsExtras = qrStats as QrStatsDashboardExtras | null;
   const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
-  const qrLabelsAvailable = qrStatusData.dormant + qrStatusData.allocated;
+  const qrLabelsAvailable = qrStatusData.dormant;
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role, user?.rawRole), [user?.rawRole, user?.role]);
 
@@ -318,11 +318,11 @@ export default function Dashboard() {
 
     const items = [
       {
-        title: "QR labels available",
+        title: "Unassigned QR labels",
         value: qrLabelsAvailable,
         icon: QrCode,
         variant: "default" as const,
-        subtitle: `${qrStatusData.dormant.toLocaleString()} not used yet • ${qrStatusData.allocated.toLocaleString()} assigned`,
+        subtitle: `${qrStatusData.allocated.toLocaleString()} assigned to manufacturers`,
         href: totalQrHref,
         ctaLabel: totalQrCta,
       },

@@ -177,12 +177,28 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert.doesNotMatch(JSON.stringify(tenant.result), /token-secret|cookie-secret|signing-secret/);
   assert.match(JSON.stringify(tenant.result), /retained/);
   assert.strictEqual(tenant.fake.calls.create[0].values[3], "00000000-0000-4000-8000-0000000000a1");
+  assert.deepStrictEqual(JSON.parse(tenant.fake.calls.create[0].values[0]).details.filters.entityId, "batch-a");
+  assert.strictEqual(JSON.parse(tenant.fake.calls.create[0].values[0]).details.filters.entityIds, null);
+
+  const parsedBulk = auditLogQuerySchema.parse({ entityType: "Batch", entityIds: `${ids.tenantAdmin},${ids.manufacturer},${ids.tenantAdmin}` });
+  const bulk = await read(actor(), filters(parsedBulk));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => clause.licenseeId === ids.tenant));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => clause.entityType === "Batch"));
+  assert(bulk.fake.calls.find[0].where.AND.some((clause) => JSON.stringify(clause.entityId) === JSON.stringify({ in: parsedBulk.entityIds })));
+  assert.deepStrictEqual(JSON.parse(bulk.fake.calls.create[0].values[0]).details.filters.entityIds, parsedBulk.entityIds);
+  assert.strictEqual(JSON.parse(bulk.fake.calls.create[0].values[0]).details.filters.entityId, null);
+  assert.strictEqual(parsedBulk.entityIds.length, 2, "duplicate IDs must not enlarge the queried or recorded set");
+  const crossTenantId = auditLogQuerySchema.parse({ entityType: "Batch", entityIds: ids.foreignTenant });
+  const crossTenant = await read(actor(), filters(crossTenantId));
+  assert(crossTenant.fake.calls.find[0].where.AND.some((clause) => clause.licenseeId === ids.tenant));
+  assert.deepStrictEqual(JSON.parse(crossTenant.fake.calls.create[0].values[0]).details.filters.entityIds, [ids.foreignTenant]);
 
   const manufacturer = await read(
     actor({ userId: ids.manufacturer, role: UserRole.MANUFACTURER, linkedLicenseeIds: [ids.tenant] }),
-    filters({ licenseeId: ids.tenant, manufacturerId: ids.manufacturer })
+    filters({ licenseeId: ids.tenant, manufacturerId: ids.manufacturer, entityIds: [ids.tenantAdmin] })
   );
   assert(manufacturer.fake.calls.find[0].where.AND.some((clause) => clause.userId === ids.manufacturer));
+  assert(manufacturer.fake.calls.find[0].where.AND.some((clause) => JSON.stringify(clause.entityId) === JSON.stringify({ in: [ids.tenantAdmin] })));
   assert.strictEqual(manufacturer.fake.calls.contextValues[0][4], ids.manufacturer);
 
   const platform = await read(
@@ -237,6 +253,12 @@ const denied = (user, input, message, requestId = "request-denied") => {
 
   assert.strictEqual(auditLogQuerySchema.safeParse({ organizationId: ids.foreignOrg, unknownScope: ids.tenant }).success, false);
   assert.strictEqual(auditLogQuerySchema.safeParse({ licenseeId: "not-a-uuid" }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityIds: "not-a-uuid" }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityIds: "" }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityType: "QRCode", entityIds: ids.tenantAdmin }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityId: ids.tenantAdmin, entityIds: ids.manufacturer }).success, false);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityType: "Batch", entityIds: Array(100).fill(ids.tenantAdmin).join(",") }).success, true);
+  assert.strictEqual(auditLogQuerySchema.safeParse({ entityIds: Array(101).fill(ids.tenantAdmin).join(",") }).success, false);
 
   const root = path.resolve(__dirname, "..");
   const serviceSource = fs.readFileSync(path.join(root, "src/services/auditLogQueryService.ts"), "utf8");
