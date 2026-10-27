@@ -395,8 +395,10 @@ const outboxOwnerPolicies = [...new Map(outboxContracts.flatMap((contract) => co
 const b03AuthenticatedFunctionSource = readContractSources(b03AuthenticatedContracts, [
   ["{{AUTH_OWNER}}", q(roleNames.authOwner)],
   ["{{APP_ROLE}}", lit(roleNames.app)],
+  ["{{WORKER_ROLE}}", lit(roleNames.worker)],
 ]);
-const b03AuthenticatedAppSignatures = b03AuthenticatedContracts.map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const b03AuthenticatedAppSignatures = b03AuthenticatedContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
+const b03AuthenticatedWorkerSignatures = b03AuthenticatedContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const b03AuthenticatedOwnerPrivileges = [...new Map(b03AuthenticatedContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const b03AuthenticatedOwnerPolicies = mergeOwnerPolicies(b03AuthenticatedContracts.flatMap((contract) => contract.security.ownerPolicies || []));
 const operationalReadFunctionSource = operationalReadContracts.length
@@ -1712,6 +1714,7 @@ ${resetRole}
 ${setRole(roleNames.authOwner)}
 ${b03AuthenticatedFunctionSource}
 ${b03AuthenticatedAppSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.app)};`).join("\n")}
+${b03AuthenticatedWorkerSignatures.map((signature) => `GRANT EXECUTE ON FUNCTION ${signature} TO ${q(roleNames.worker)};`).join("\n")}
 ${resetRole}
 ${setRole(roleNames.owner)}
 REVOKE CREATE ON SCHEMA app_rls FROM ${q(roleNames.authOwner)};
@@ -2172,7 +2175,8 @@ for (const [table, command, rawPredicate] of outboxOwnerPolicies) {
 for (const [table, command, rawPredicate] of b03AuthenticatedOwnerPolicies) {
   const predicate = rawPredicate
     .replaceAll("{{AUTH_OWNER}}", lit(roleNames.authOwner))
-    .replaceAll("{{APP_ROLE}}", lit(roleNames.app));
+    .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
+    .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker));
   const policyName = shortName("b03_authenticated", table, command);
   const clause = command === "INSERT" ? `WITH CHECK (${predicate})` : command === "UPDATE" ? `USING (${predicate}) WITH CHECK (${predicate})` : `USING (${predicate})`;
   policyStatements.push(`CREATE POLICY ${q(policyName)} ON public.${q(table)} AS PERMISSIVE FOR ${command} TO ${q(roleNames.authOwner)} ${clause};`);

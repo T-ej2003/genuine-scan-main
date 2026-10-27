@@ -7,6 +7,7 @@ import { releaseMetadata } from "./observability/release";
 import { initBackendMonitoring } from "./observability/sentry";
 import { startSecurityEventOutboxWorker, stopSecurityEventOutboxWorker } from "./services/siemOutboxService";
 import { startAuditLogOutboxWorker, stopAuditLogOutboxWorker } from "./services/auditLogOutboxService";
+import { startSupportResponseEmailOutboxWorker, stopSupportResponseEmailOutboxWorker } from "./services/supportResponseEmailOutboxService";
 import { startCompliancePackScheduler, stopCompliancePackScheduler } from "./services/compliancePackService";
 import { resumePendingNetworkDirectJobs } from "./services/networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./services/networkIppPrintService";
@@ -78,6 +79,7 @@ const boot = async () => {
 
   startSecurityEventOutboxWorker();
   startAuditLogOutboxWorker();
+  startSupportResponseEmailOutboxWorker();
   startCompliancePackScheduler();
   await resumePendingNetworkDirectJobs().catch((error) => {
     logger.error("Worker failed to resume pending network-direct jobs", { error: error?.message || error });
@@ -108,6 +110,7 @@ const shutdown = async (signal: string) => {
   stopHotEventPartitionMaintenanceWorker();
   stopSecurityEventOutboxWorker();
   stopAuditLogOutboxWorker();
+  stopSupportResponseEmailOutboxWorker();
   stopCompliancePackScheduler();
   await closeRedisConnections().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);

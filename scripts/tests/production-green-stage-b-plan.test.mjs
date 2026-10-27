@@ -408,6 +408,25 @@ test("Stage B Terraform root is control-plane-only and binds four digest images"
   }
 });
 
+test("support email worker receives the existing SMTP settings and a secret reference", () => {
+  const worker = JSON.parse(fs.readFileSync(
+    "infra/aws/terraform/production-green-stage-b/task-definitions/green-worker-candidate.json", "utf8"
+  )).containerDefinitions[0];
+  const settings = new Map(worker.environment.map(({ name, value }) => [name, value]));
+  assert.equal(settings.get("MSCQR_WORKER_DATABASE_ROLE"), "mscqr_prd_rls_phase2_worker");
+  for (const name of ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_REQUIRE_TLS", "SMTP_USER", "SMTP_FROM"]) {
+    assert.ok(settings.get(name), `${name} must be provisioned for durable support email delivery`);
+  }
+  const credentials = worker.secrets.filter(({ name }) => name === "SMTP_PASS");
+  assert.equal(credentials.length, 1);
+  assert.match(credentials[0].valueFrom,
+    /^arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr\/prod\/smtp-pass-[A-Za-z0-9]+$/);
+  assert.equal(worker.environment.some(({ name }) => name === "SMTP_PASS"), false);
+  const terraform = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
+  assert.match(terraform, /normal_execution_policy_secret_arns = merge\(local\.execution_secret_arns/);
+  assert.match(terraform, /Resource = local\.execution_policy_secret_arns\[each\.key\]/);
+});
+
 test("ECS resources pass one container array and render task-level volumes separately", () => {
   const main = fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8");
   assert.equal((main.match(/container_definitions\s*=\s*jsonencode\(each\.value\.containerDefinitions\)/g) || []).length, 2);

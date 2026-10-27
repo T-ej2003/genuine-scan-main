@@ -7,6 +7,9 @@ import SupportCenter from "@/pages/SupportCenter";
 import apiClient from "@/lib/api-client";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
 
+const toastMock = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: toastMock }) }));
+
 vi.mock("@/contexts/AuthContext", () => ({
   useAuth: () => ({
     user: { id: "admin-1", role: "super_admin", name: "Root", email: "root@example.com" },
@@ -168,6 +171,28 @@ describe("SupportCenter regression", () => {
         })
       );
     });
+  });
+
+  it.each([
+    ["PENDING", "Email delivery is pending."],
+    ["SENT", "email was sent."],
+    ["FAILED", "email delivery failed."],
+    ["UNKNOWN", "email delivery could not be confirmed."],
+    ["DRY_RUN", "email delivery was simulated."],
+    ["NOT_SENT", "without an email recipient."],
+  ])("describes %s support email status accurately", async (status, expected) => {
+    vi.mocked(apiClient.respondToSupportIssueReport).mockResolvedValue({
+      success: true, data: { ...issueReport, status: "RESPONDED", emailDeliveryStatus: status },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><SupportCenter /></MemoryRouter>);
+    await screen.findByText("Printer failed during pairing");
+    fireEvent.change(screen.getByPlaceholderText("Tell the user what happens next."), {
+      target: { value: "We reviewed the printer issue." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+      description: expect.stringContaining(expected),
+    })));
   });
 
   it("shows request access intake and updates status", async () => {

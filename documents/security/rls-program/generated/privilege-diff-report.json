@@ -5365,6 +5365,7 @@
       "table": "Notification",
       "command": "UPDATE",
       "columns": [
+        "data",
         "readAt",
         "emailedAt",
         "updatedAt"
@@ -5569,6 +5570,21 @@
       "columns": [
         "name",
         "prefix"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportIssueReport",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "responseMessage",
+        "respondedAt",
+        "respondedByUserId",
+        "emailDeliveryStatus",
+        "emailErrorCode",
+        "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"
