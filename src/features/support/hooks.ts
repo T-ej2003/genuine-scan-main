@@ -4,6 +4,7 @@ import apiClient from "@/lib/api-client";
 import { parseWithSchema, unwrapApiResponse, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { emitMutationEvent } from "@/lib/mutation-events";
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 import {
   supportAssigneeArraySchema,
@@ -79,8 +80,12 @@ export function useSupportTickets(filters: SupportQueueFilters) {
 
 export function useSupportIssueReports() {
   return useQuery({
-    queryKey: queryKeys.support.reports(),
-    refetchInterval: (query) => query.state.data?.reports.some((report) => report.emailDeliveryStatus === "PENDING") ? 60_000 : false,
+    queryKey: queryKeys.support.reports(getRequestCoordinatorScope()),
+    // shortcut: five attempts take at least 20 minutes; stop after two hours for worker delays, then use Refresh.
+    refetchInterval: (query) => query.state.data?.reports.some((report) => {
+      const ageMs = Date.now() - Date.parse(report.respondedAt || "");
+      return ["PENDING", "FAILED"].includes(report.emailDeliveryStatus || "") && ageMs >= -5 * 60_000 && ageMs < 2 * 60 * 60_000;
+    }) ? 120_000 : false,
     queryFn: async (): Promise<SupportIssueReportListResponse> => {
       const payload = unwrapApiResponse<unknown>(
         await apiClient.getSupportIssueReports({ limit: 60 }),
