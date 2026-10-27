@@ -80,6 +80,7 @@ export function useSupportTickets(filters: SupportQueueFilters) {
 export function useSupportIssueReports() {
   return useQuery({
     queryKey: queryKeys.support.reports(),
+    refetchInterval: (query) => query.state.data?.reports.some((report) => report.emailDeliveryStatus === "PENDING") ? 60_000 : false,
     queryFn: async (): Promise<SupportIssueReportListResponse> => {
       const payload = unwrapApiResponse<unknown>(
         await apiClient.getSupportIssueReports({ limit: 60 }),
