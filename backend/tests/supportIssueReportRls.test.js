@@ -57,6 +57,14 @@ const authHeader = (token) => ({
     const report = await prisma.supportIssueReport.findUnique({ where: { id: valid.payload.data.id } });
     assert.equal(report.reporterUserId, ids.manufacturerA);
     assert.equal(report.licenseeId, ids.licenseeA);
+    const platformNotifications = await prisma.notification.findMany({
+      where: { type: "support_issue_reported", data: { path: ["supportReportId"], equals: report.id } },
+    });
+    assert.equal(platformNotifications.length, 1);
+    assert.equal(platformNotifications[0].userId, ids.superAdmin);
+    assert.equal(platformNotifications[0].licenseeId, ids.licenseeA);
+    assert.equal(platformNotifications[0].channel, "WEB");
+    assert.equal(platformNotifications[0].data.reporterUserId, ids.manufacturerA);
     const queuedAudit = await prisma.auditLogOutbox.findFirst({
       where: { payload: { path: ["entityId"], equals: report.id } },
     });
@@ -129,6 +137,35 @@ const authHeader = (token) => ({
     const secondReport = await prisma.supportIssueReport.findUnique({ where: { id: second.payload.data.id } });
     assert.equal(secondReport.licenseeId, ids.licenseeB);
     assert.equal(secondReport.reporterUserId, ids.manufacturerB);
+    const secondNotifications = await prisma.notification.findMany({
+      where: { type: "support_issue_reported", data: { path: ["supportReportId"], equals: secondReport.id } },
+    });
+    assert.equal(secondNotifications.length, 1);
+    assert.equal(secondNotifications[0].licenseeId, ids.licenseeB);
+
+    await prisma.manufacturerLicenseeLink.create({ data: {
+      manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeB, isPrimary: false,
+    } });
+    const selectedBoundary = createB03AuthenticatedFunctionBoundary({
+      claims: { ...verifyAccessToken(tokens.manufacturerA.accessToken), licenseeId: ids.licenseeB, orgId: ids.orgB },
+      capability: openCookieToken(tokens.manufacturerA.databaseCapability, "auth.database-session"),
+      requestId: randomUUID(), purpose: "support-report-create",
+    });
+    const selectedReport = await selectedBoundary.run((db) => createAuthenticatedSupportIssueReport(db, {
+      licenseeId: ids.licenseeB, organizationId: ids.orgB,
+      title: "Selected tenant support issue", autoDetected: false, requestId: selectedBoundary.requestId,
+    }));
+    const selectedAudit = await prisma.auditLogOutbox.findFirst({
+      where: { payload: { path: ["entityId"], equals: selectedReport.id } },
+    });
+    const selectedNotifications = await prisma.notification.findMany({
+      where: { type: "support_issue_reported", data: { path: ["supportReportId"], equals: selectedReport.id } },
+    });
+    assert.equal(selectedAudit.payload.orgId, ids.orgB);
+    assert.equal(selectedAudit.licenseeId, ids.licenseeB);
+    assert.equal(selectedNotifications.length, 1);
+    assert.equal(selectedNotifications[0].orgId, ids.orgB);
+    assert.equal(selectedNotifications[0].licenseeId, ids.licenseeB);
 
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {

@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import { NotificationAudience, NotificationChannel, UserRole } from "@prisma/client";
+import { NotificationChannel, UserRole } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 
@@ -8,7 +8,7 @@ import prisma from "../config/database";
 import { AuthRequest } from "../middleware/auth";
 import { sanitizeUnknownInput } from "../middleware/requestSanitizer";
 import { createAuditLog } from "../services/auditService";
-import { createRoleNotifications, createUserNotification } from "../services/notificationService";
+import { announceCommittedSupportIssueReport, createUserNotification } from "../services/notificationService";
 import { sendSupportIssueReply, toDeliveryStatus } from "../services/supportIntakeMailService";
 import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../middleware/supportIssueUpload";
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
@@ -126,27 +126,7 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
       requestId: boundary.requestId,
     }));
 
-    try {
-      await createRoleNotifications({
-        databaseBoundary: b03BoundaryForRequest(req, "notification-write"),
-        audience: NotificationAudience.SUPER_ADMIN,
-        type: "support_issue_reported",
-        title: "New support issue reported",
-        body: `${req.user.email || "User"} submitted: ${created.title}`,
-        licenseeId: String(created.licenseeId || "") || null,
-        data: {
-          supportReportId: created.id,
-          sourcePath: created.sourcePath,
-          pageUrl: created.pageUrl,
-          reporterUserId: created.reporterUserId,
-          reporterRole: created.reporterRole,
-          targetRoute: "/support",
-        },
-        channels: [NotificationChannel.WEB, NotificationChannel.EMAIL],
-      });
-    } catch {
-      console.error("Support report notification failed after report commit");
-    }
+    announceCommittedSupportIssueReport(String(created.licenseeId || "") || null);
 
     return res.status(201).json({
       success: true,

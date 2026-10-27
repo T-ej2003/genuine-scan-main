@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "sourceContractSha256": "126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "75e5388e6df3d13d00751b60c489fdf1f39c6af8d6dccd9b97e280318625a5a3"
+      "sha256": "51af53556302ac8fc76300a4850d4a36d30710db186700c91a4f53cdf8d0c586"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -6748,10 +6748,11 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='notification-write' AND (\"userId\"=current_setting('app.b03_target_user_id',true) OR current_setting('app.b03_target_user_id',true)='')",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND ((current_setting('app.b03_operation',true)='notification-write' AND (\"userId\"=current_setting('app.b03_target_user_id',true) OR current_setting('app.b03_target_user_id',true)='')) OR (current_setting('app.b03_operation',true)='support-report-notification' AND audience::text='SUPER_ADMIN' AND channel::text='WEB' AND type='support_issue_reported' AND data->>'supportReportId'=current_setting('app.b03_support_report_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'') AND EXISTS (SELECT 1 FROM public.\"User\" u WHERE u.id=\"userId\" AND u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN'))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-create-role-notifications:Notification:INSERT",
+        "contract:b03-create-support-issue-report:Notification:INSERT",
         "contract:b03-create-user-notification:Notification:INSERT"
       ],
       "workflowId": null,
@@ -11457,7 +11458,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true)='support-report-notification' AND role::text IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-add-support-ticket-message:User:SELECT",
@@ -12557,55 +12558,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:126beafaca3c335d9ce0ed26f3d98ec257f4d80a9385f4196a59a5be2240846f"
     }
   ]
 }
