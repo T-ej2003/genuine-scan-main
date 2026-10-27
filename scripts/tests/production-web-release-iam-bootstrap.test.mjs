@@ -8,10 +8,11 @@ const read = (name) => JSON.parse(fs.readFileSync(`${root}/${name}`, "utf8"));
 const policy = read("publisher-permissions-policy.json");
 const trust = read("publisher-trust-policy.json");
 const activation = read("frontend-activation-policy.json");
-function fixture({ liveActivation = null, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
+const registryRead = read("web-evidence-registry-read-policy.json");
+function fixture({ liveActivation = null, liveRegistryRead = null, liveTrust = trust, existingBoundary = false, existingRole = false, boundaryDescription = "Terraform-managed production web publisher permissions boundary.", versionsResponse = { Versions: [{ VersionId: "v1", IsDefaultVersion: true }] } } = {}) {
   let boundary = existingBoundary ? policy : null;
-  let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: trust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
-  let publisherPolicy = existingRole ? policy : null, activationPolicy = liveActivation;
+  let role = existingRole ? { RoleName: WEB_RELEASE_IAM.roleName, Arn: `arn:aws:iam::368992683803:role/${WEB_RELEASE_IAM.roleName}`, Path: "/", Description: "GitHub OIDC only: publish the reviewed production web image.", PermissionsBoundary: { PermissionsBoundaryArn: `arn:aws:iam::368992683803:policy/${WEB_RELEASE_IAM.boundaryName}` }, MaxSessionDuration: 3600, AssumeRolePolicyDocument: liveTrust, Tags: [{ Key: "ManagedBy", Value: "Terraform" }, { Key: "Environment", Value: "production" }, { Key: "Stack", Value: "production-web-release" }] } : null;
+  let publisherPolicy = existingRole ? policy : null, activationPolicy = liveActivation, registryReadPolicy = liveRegistryRead;
   const calls = [];
   const run = (args) => {
     calls.push(args);
@@ -33,40 +34,43 @@ function fixture({ liveActivation = null, existingBoundary = false, existingRole
     if (operation === "list-role-policies") return output({ IsTruncated: false, PolicyNames: publisherPolicy ? [WEB_RELEASE_IAM.publisherPolicyName] : [] });
     if (operation === "list-attached-role-policies") return output({ IsTruncated: false, AttachedPolicies: [] });
     if (operation === "get-role-policy") {
-      if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName && activationPolicy) return output({ PolicyDocument: activationPolicy });
+      if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName && value("--policy-name") === WEB_RELEASE_IAM.activationPolicyName && activationPolicy) return output({ PolicyDocument: activationPolicy });
+      if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName && value("--policy-name") === WEB_RELEASE_IAM.registryReadPolicyName && registryReadPolicy) return output({ PolicyDocument: registryReadPolicy });
       if (value("--role-name") === WEB_RELEASE_IAM.roleName && publisherPolicy) return output({ PolicyDocument: publisherPolicy });
       throw new Error("NoSuchEntity");
     }
     if (operation === "put-role-policy") {
       const document = JSON.parse(value("--policy-document"));
       if (value("--role-name") === WEB_RELEASE_IAM.roleName) publisherPolicy = document;
-      else if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName) activationPolicy = document;
+      else if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName && value("--policy-name") === WEB_RELEASE_IAM.activationPolicyName) activationPolicy = document;
+      else if (value("--role-name") === WEB_RELEASE_IAM.releaseRoleName && value("--policy-name") === WEB_RELEASE_IAM.registryReadPolicyName) registryReadPolicy = document;
       else throw new Error("Unexpected target role");
       return "";
     }
     throw new Error(`Unexpected IAM call: ${operation}`);
   };
-  return { run, calls, getState: () => ({ boundary, role, publisherPolicy, activationPolicy }) };
+  return { run, calls, getState: () => ({ boundary, role, publisherPolicy, activationPolicy, registryReadPolicy }) };
 }
 
 test("web IAM bootstrap creates only source-defined resources and is idempotent", () => {
   const value = fixture();
   const first = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
-  assert.deepEqual(first.actions, ["CREATE_BOUNDARY", "CREATE_PUBLISHER_ROLE", `INSTALL_${WEB_RELEASE_IAM.publisherPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.activationPolicyName}`]);
+  assert.deepEqual(first.actions, ["CREATE_BOUNDARY", "CREATE_PUBLISHER_ROLE", `INSTALL_${WEB_RELEASE_IAM.publisherPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.activationPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.registryReadPolicyName}`]);
   const second = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
   assert.deepEqual(second.actions, []);
-  assert.equal(value.calls.filter((args) => args[0] === "iam" && ["create-policy", "create-role", "put-role-policy"].includes(args[1])).length, 4);
+  assert.equal(value.calls.filter((args) => args[0] === "iam" && ["create-policy", "create-role", "put-role-policy"].includes(args[1])).length, 5);
   for (const args of value.calls.filter(([service, operation]) => service === "iam" && ["create-policy", "create-role", "put-role-policy"].includes(operation))) {
     const operation = args[1];
     if (operation === "create-policy") assert.equal(args[args.indexOf("--policy-name") + 1], WEB_RELEASE_IAM.boundaryName);
     if (operation === "create-role") assert.equal(args[args.indexOf("--role-name") + 1], WEB_RELEASE_IAM.roleName);
     if (operation === "put-role-policy") {
       const target = [args[args.indexOf("--role-name") + 1], args[args.indexOf("--policy-name") + 1]];
-      assert.equal([[WEB_RELEASE_IAM.roleName, WEB_RELEASE_IAM.publisherPolicyName], [WEB_RELEASE_IAM.releaseRoleName, WEB_RELEASE_IAM.activationPolicyName]].some(([roleName, policyName]) => roleName === target[0] && policyName === target[1]), true);
+      assert.equal([[WEB_RELEASE_IAM.roleName, WEB_RELEASE_IAM.publisherPolicyName], [WEB_RELEASE_IAM.releaseRoleName, WEB_RELEASE_IAM.activationPolicyName], [WEB_RELEASE_IAM.releaseRoleName, WEB_RELEASE_IAM.registryReadPolicyName]].some(([roleName, policyName]) => roleName === target[0] && policyName === target[1]), true);
     }
   }
   const mutations = value.calls.filter(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation));
-  assert.deepEqual(mutations.map(([, operation]) => operation).sort(), ["create-policy", "create-role", "put-role-policy", "put-role-policy"]);
+  assert.deepEqual(mutations.map(([, operation]) => operation).sort(), ["create-policy", "create-role", "put-role-policy", "put-role-policy", "put-role-policy"]);
+  assert.deepEqual(value.getState().registryReadPolicy, registryRead);
   assert.deepEqual(value.calls.filter(([service, operation]) => service === "iam" && operation === "get-policy-version").map((args) => args[args.indexOf("--version-id") + 1]), ["v1", "v1"]);
   const source = fs.readFileSync("scripts/aws/bootstrap-production-web-release-iam.mjs", "utf8");
   assert.match(source, /readPhase3IamProtectedSource\(\{ sourceSha \}\)/);
@@ -99,7 +103,7 @@ test("canonical existing boundary is preserved while bootstrap recovers the prod
   const value = fixture({ existingBoundary: true });
   const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
   assert.equal(result.actions.includes("CREATE_BOUNDARY"), false);
-  assert.deepEqual(result.actions, ["CREATE_PUBLISHER_ROLE", `INSTALL_${WEB_RELEASE_IAM.publisherPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.activationPolicyName}`]);
+  assert.deepEqual(result.actions, ["CREATE_PUBLISHER_ROLE", `INSTALL_${WEB_RELEASE_IAM.publisherPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.activationPolicyName}`, `INSTALL_${WEB_RELEASE_IAM.registryReadPolicyName}`]);
   assert.equal(value.calls.some((args) => args[0] === "iam" && args[1] === "create-policy"), false);
   assert.deepEqual(value.getState().boundary, policy);
 });
@@ -166,6 +170,41 @@ test("release-deployer policy drift fails in the preflight before any IAM mutati
   assert.equal(value.calls.some((args) => args[0] === "iam" && ["create-policy", "create-role", "put-role-policy"].includes(args[1])), false);
 });
 
+test("web evidence registry access is read-only, regional and limited to the web repository", () => {
+  assert.deepEqual(registryRead.Statement.map(({ Action, Resource }) => ({ Action, Resource })), [
+    { Action: "ecr:GetAuthorizationToken", Resource: "*" },
+    { Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web" },
+  ]);
+  assert.ok(registryRead.Statement.every(({ Effect, Condition }) => Effect === "Allow" && Condition?.StringEquals?.["aws:RequestedRegion"] === "eu-west-2"));
+  const drift = fixture({ liveRegistryRead: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "ecr:*", Resource: "*" }] } });
+  assert.throws(() => bootstrapProductionWebReleaseIam({ run: drift.run, sourceSha: "a".repeat(40) }), /Web evidence registry policy differs/);
+  assert.equal(drift.calls.some(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation)), false);
+});
+
+test("existing web-release IAM installs only the absent registry reader", () => {
+  const value = fixture({ existingBoundary: true, existingRole: true, liveActivation: activation });
+  const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  assert.deepEqual(result.actions, [`INSTALL_${WEB_RELEASE_IAM.registryReadPolicyName}`]);
+  const writes = value.calls.filter(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation));
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][writes[0].indexOf("--role-name") + 1], WEB_RELEASE_IAM.releaseRoleName);
+  assert.equal(writes[0][writes[0].indexOf("--policy-name") + 1], WEB_RELEASE_IAM.registryReadPolicyName);
+});
+
+test("AWS reordering OIDC condition keys preserves trust identity during a create-only continuation", () => {
+  const liveTrust = structuredClone(trust);
+  const condition = liveTrust.Statement[0].Condition.StringEquals;
+  liveTrust.Statement[0].Condition.StringEquals = Object.fromEntries(Object.entries(condition).reverse());
+  const value = fixture({ existingBoundary: true, existingRole: true, liveActivation: activation, liveTrust });
+  const result = bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) });
+  assert.deepEqual(result.actions, [`INSTALL_${WEB_RELEASE_IAM.registryReadPolicyName}`]);
+
+  liveTrust.Statement[0].Condition.StringEquals["token.actions.githubusercontent.com:sub"] = "repo:T-ej2003/genuine-scan-main:environment:unapproved";
+  const drift = fixture({ existingBoundary: true, existingRole: true, liveActivation: activation, liveTrust });
+  assert.throws(() => bootstrapProductionWebReleaseIam({ run: drift.run, sourceSha: "a".repeat(40) }), /Publisher trust differs/);
+  assert.equal(drift.calls.some(([service, operation]) => service === "iam" && /^(create|put|attach|update|delete)/.test(operation)), false);
+});
+
 test("existing permissions boundary metadata must converge with Terraform before import", () => {
   const value = fixture({ existingBoundary: true, boundaryDescription: "Unexpected immutable description" });
   assert.throws(() => bootstrapProductionWebReleaseIam({ run: value.run, sourceSha: "a".repeat(40) }), /description differs from Terraform source/);
@@ -179,7 +218,8 @@ test("every bootstrapped IAM object matches the imported Terraform attributes", 
   const boundary = terraform.match(/resource "aws_iam_policy" "publisher_boundary" \{([\s\S]*?)\n\}/)?.[1];
   const publisherInline = terraform.match(/resource "aws_iam_role_policy" "publisher" \{([\s\S]*?)\n\}/)?.[1];
   const activationInline = terraform.match(/resource "aws_iam_role_policy" "frontend_activation" \{([\s\S]*?)\n\}/)?.[1];
-  assert.ok(role && boundary && publisherInline && activationInline);
+  const registryReadInline = terraform.match(/resource "aws_iam_role_policy" "web_evidence_registry_read" \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(role && boundary && publisherInline && activationInline && registryReadInline);
   assert.match(role, /name\s*=\s*local\.publisher_role/);
   assert.match(role, /description\s*=\s*"GitHub OIDC only: publish the reviewed production web image\."/);
   assert.match(role, /max_session_duration\s*=\s*3600/);
@@ -202,6 +242,10 @@ test("every bootstrapped IAM object matches the imported Terraform attributes", 
   assert.match(activationInline, /frontend-activation-policy\.json/);
   assert.match(source, /installIfStillAbsent\(roleName, publisherPolicyName, publisher\)/);
   assert.match(source, /installIfStillAbsent\(releaseRoleName, activationPolicyName, activation\)/);
+  assert.match(registryReadInline, /name\s*=\s*"MSCQRProductionWebEvidenceRegistryRead"/);
+  assert.match(registryReadInline, /role\s*=\s*data\.aws_iam_role\.release_deployer\.id/);
+  assert.match(registryReadInline, /web-evidence-registry-read-policy\.json/);
+  assert.match(source, /installIfStillAbsent\(releaseRoleName, registryReadPolicyName, registryRead\)/);
 });
 
 test("operator backend policy has exact state/lock scope and no IAM mutation or escalation", () => {

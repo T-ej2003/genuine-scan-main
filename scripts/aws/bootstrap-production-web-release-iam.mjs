@@ -10,7 +10,7 @@ import { promptProductionMfaCode } from "../security/production-interactive-mfa-
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createAssumedRoleSessionEnvironment, createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, productionGithubExecutable } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { digest as iamDigest } from "./component-iam-installation-contract.mjs";
+import { canonical as canonicalIam, digest as iamDigest } from "./component-iam-installation-contract.mjs";
 import { readStageBProtectedMainCheckoutFromGitHub } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -21,6 +21,7 @@ const releaseRoleName = "mscqr-production-release-deployer";
 const publisherPolicyName = "MSCQRProductionWebImagePublisher";
 const activationPolicyName = "MSCQRProductionFrontendActivation";
 const auditPolicyName = "MSCQRProductionStageBNativeAudit";
+const registryReadPolicyName = "MSCQRProductionWebEvidenceRegistryRead";
 export const PHASE3_IAM_TRANSITION = Object.freeze({
   baselineSha: "8d0aa82ebf6b5fc70447c4133ea9c9e2aeae4f44",
   reviewedPrNumber: 721,
@@ -335,7 +336,7 @@ const publisherTags = [
 ];
 const readJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const source = (file) => JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-web-release", file), "utf8"));
-const canonical = (value) => JSON.stringify(normalizeIamPolicyDocument(value, "production web release IAM document"));
+const canonical = (value) => canonicalIam(normalizeIamPolicyDocument(value, "production web release IAM document"));
 const fileValue = (file) => `file://${path.join(root, "infra/aws/terraform/production-web-release", file)}`;
 function defaultPolicyVersionId(response) {
   assert.ok(response && typeof response === "object" && !Array.isArray(response), "Permissions boundary policy-version response is malformed.");
@@ -348,7 +349,7 @@ function defaultPolicyVersionId(response) {
   return defaults[0].VersionId;
 }
 
-export const WEB_RELEASE_IAM = Object.freeze({ account, roleName, boundaryName, releaseRoleName, publisherPolicyName, activationPolicyName });
+export const WEB_RELEASE_IAM = Object.freeze({ account, roleName, boundaryName, releaseRoleName, publisherPolicyName, activationPolicyName, registryReadPolicyName });
 
 export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   assert.equal(typeof run, "function");
@@ -362,6 +363,7 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   const publisher = source("publisher-permissions-policy.json");
   const trust = source("publisher-trust-policy.json");
   const activation = source("frontend-activation-policy.json");
+  const registryRead = source("web-evidence-registry-read-policy.json");
   const actions = [];
   const optional = (args, select) => {
     try { return select(readJson(run, args)); }
@@ -403,6 +405,8 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   assert.equal(releaseRole.Arn, `arn:aws:iam::${account}:role/${releaseRoleName}`, "Release deployer identity changed.");
   const liveActivation = optional(["iam", "get-role-policy", "--role-name", releaseRoleName, "--policy-name", activationPolicyName], (value) => value.PolicyDocument);
   if (liveActivation) assert.equal(canonical(liveActivation), canonical(activation), "Frontend activation policy differs from reviewed source.");
+  const liveRegistryRead = optional(["iam", "get-role-policy", "--role-name", releaseRoleName, "--policy-name", registryReadPolicyName], (value) => value.PolicyDocument);
+  if (liveRegistryRead) assert.equal(canonical(liveRegistryRead), canonical(registryRead), "Web evidence registry policy differs from reviewed source.");
 
   if (!boundary) {
     run(["iam", "create-policy", "--policy-name", boundaryName, "--policy-document", fileValue("publisher-permissions-policy.json"), "--description", "Terraform-managed production web publisher permissions boundary."]);
@@ -434,6 +438,7 @@ export function bootstrapProductionWebReleaseIam({ run, sourceSha }) {
   };
   installIfStillAbsent(roleName, publisherPolicyName, publisher);
   installIfStillAbsent(releaseRoleName, activationPolicyName, activation);
+  installIfStillAbsent(releaseRoleName, registryReadPolicyName, registryRead);
   return Object.freeze({ status: "WEB_RELEASE_IAM_SOURCE_VERIFIED", sourceSha, roleArn, boundaryArn, actions: Object.freeze(actions) });
 }
 
