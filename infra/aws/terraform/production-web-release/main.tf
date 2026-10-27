@@ -38,3 +38,9 @@ resource "aws_iam_role_policy" "stage_b_native_audit" {
   role   = data.aws_iam_role.release_deployer.id
   policy = file("${path.module}/stage-b-native-audit-policy.json")
 }
+
+resource "aws_iam_role_policy" "web_evidence_registry_read" {
+  name   = "MSCQRProductionWebEvidenceRegistryRead"
+  role   = data.aws_iam_role.release_deployer.id
+  policy = file("${path.module}/web-evidence-registry-read-policy.json")
+}
