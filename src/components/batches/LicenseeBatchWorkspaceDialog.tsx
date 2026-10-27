@@ -61,6 +61,8 @@ type LicenseeBatchWorkspaceDialogProps = {
   onOpenChange: (open: boolean) => void;
   role?: string | null;
   workspace: StableBatchOverviewRow | null;
+  workspaceLoading?: boolean;
+  workspaceError?: string | null;
   manufacturers: ManufacturerRow[];
   manufacturerPageControls?: React.ReactNode;
   assignManufacturerId: string;
@@ -77,6 +79,7 @@ type LicenseeBatchWorkspaceDialogProps = {
   canDelete: boolean;
   exportingAudit: boolean;
   historyLoading: boolean;
+  historyError?: string | null;
   historyLogs: TraceEventRow[];
   historyLastUpdatedAt: Date | null;
   onRefreshHistory: () => void;
@@ -336,6 +339,8 @@ export function LicenseeBatchWorkspaceDialog({
   onOpenChange,
   role,
   workspace,
+  workspaceLoading,
+  workspaceError,
   manufacturers,
   manufacturerPageControls,
   assignManufacturerId,
@@ -352,6 +357,7 @@ export function LicenseeBatchWorkspaceDialog({
   canDelete,
   exportingAudit,
   historyLoading,
+  historyError,
   historyLogs,
   historyLastUpdatedAt,
   onRefreshHistory,
@@ -435,7 +441,12 @@ export function LicenseeBatchWorkspaceDialog({
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent data-testid="batch-workspace-dialog" className="flex h-[90vh] max-h-[90vh] flex-col overflow-hidden p-0 sm:max-w-[980px]">
-        {!workspace ? null : isManufacturerMode ? (
+        {!workspace ? (
+          <DialogHeader className="border-b px-6 py-5">
+            <DialogTitle>Batch workspace</DialogTitle>
+            <DialogDescription>{workspaceError || (workspaceLoading ? "Loading complete allocation details…" : "Allocation details are unavailable.")}</DialogDescription>
+          </DialogHeader>
+        ) : isManufacturerMode ? (
           <>
             <DialogHeader className="border-b px-6 py-5">
               <div className="flex flex-wrap items-start justify-between gap-4">
@@ -784,8 +795,11 @@ export function LicenseeBatchWorkspaceDialog({
                         <RefreshButtonLabel loading={historyLoading} />
                       </Button>
                     </div>
-                    {historyLoading ? (
+                    {historyError && historyLogs.length > 0 ? <div role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">{historyError} Showing the last complete history.</div> : null}
+                    {historyLoading && historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError && historyLogs.length === 0 ? (
+                      <div role="alert" className="rounded-lg border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No manufacturer-safe history found for this batch.</div>
                     ) : (
@@ -953,8 +967,11 @@ export function LicenseeBatchWorkspaceDialog({
                         <RefreshButtonLabel loading={historyLoading} />
                       </Button>
                     </div>
-                    {historyLoading ? (
+                    {historyError && historyLogs.length > 0 ? <div role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">{historyError} Showing the last complete history.</div> : null}
+                    {historyLoading && historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError && historyLogs.length === 0 ? (
+                      <div role="alert" className="rounded-lg border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-lg border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No audit history found for this batch.</div>
                     ) : (
@@ -1469,8 +1486,11 @@ export function LicenseeBatchWorkspaceDialog({
                       </Button>
                     </div>
 
-                    {historyLoading ? (
+                    {historyError && historyLogs.length > 0 ? <div role="alert" className="rounded-2xl border border-destructive/40 p-4 text-sm text-destructive">{historyError} Showing the last complete history.</div> : null}
+                    {historyLoading && historyLogs.length === 0 ? (
                       <div className="rounded-2xl border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">Loading audit history...</div>
+                    ) : historyError && historyLogs.length === 0 ? (
+                      <div role="alert" className="rounded-2xl border border-destructive/40 p-6 text-sm text-destructive">{historyError}</div>
                     ) : historyLogs.length === 0 ? (
                       <div className="rounded-2xl border border-dashed bg-muted/10 p-6 text-sm text-muted-foreground">No history found for this source batch and its allocations.</div>
                     ) : (

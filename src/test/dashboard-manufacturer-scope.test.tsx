@@ -122,7 +122,7 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     expect(vi.mocked(apiClient.getDashboardStats)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(apiClient.getQRStats)).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Brand workspaces you can print for")).toBeInTheDocument();
-    expect(screen.getByText("120 not used yet • 900 assigned")).toBeInTheDocument();
+    expect(screen.getByText("900 assigned to manufacturers")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Open scope details"));
 

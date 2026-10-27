@@ -106,14 +106,16 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     return core.request(`/users/${id}${query}`, { method: "DELETE" });
   },
 
-  async getAuditLogs(opts?: { entityType?: string; entityId?: string; licenseeId?: string; purpose?: string; limit?: number; offset?: number }) {
+  async getAuditLogs(opts?: { entityType?: string; entityId?: string; entityIds?: string[]; licenseeId?: string; purpose?: string; limit?: number; offset?: number; cursor?: string }) {
     const params = new URLSearchParams();
     if (opts?.entityType) params.append("entityType", opts.entityType);
     if (opts?.entityId) params.append("entityId", opts.entityId);
+    if (opts?.entityIds?.length) params.append("entityIds", opts.entityIds.join(","));
     if (opts?.purpose) params.append("purpose", opts.purpose);
     if (opts?.licenseeId) params.append("licenseeId", opts.licenseeId);
     if (opts?.limit) params.append("limit", String(opts.limit));
     if (opts?.offset) params.append("offset", String(opts.offset));
+    if (opts?.cursor) params.append("cursor", opts.cursor);
     const query = params.toString() ? `?${params.toString()}` : "";
     return controlledDashboardGet(`audit:logs:${query}`, () => core.request(`/audit/logs${query}`));
   },
@@ -335,20 +337,24 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
     purpose?: string;
     eventType?: string;
     batchId?: string;
+    batchIds?: string[];
     manufacturerId?: string;
     qrCodeId?: string;
     limit?: number;
     offset?: number;
+    cursor?: string;
   }) {
     const params = new URLSearchParams();
     if (options?.purpose) params.append("purpose", options.purpose);
     if (options?.licenseeId) params.append("licenseeId", options.licenseeId);
     if (options?.eventType) params.append("eventType", options.eventType);
     if (options?.batchId) params.append("batchId", options.batchId);
+    if (options?.batchIds?.length) params.append("batchIds", options.batchIds.join(","));
     if (options?.manufacturerId) params.append("manufacturerId", options.manufacturerId);
     if (options?.qrCodeId) params.append("qrCodeId", options.qrCodeId);
     if (options?.limit != null) params.append("limit", String(options.limit));
     if (options?.offset != null) params.append("offset", String(options.offset));
+    if (options?.cursor) params.append("cursor", options.cursor);
     const query = params.toString() ? `?${params.toString()}` : "";
     return controlledDashboardGet(`trace:timeline:${query}`, () => core.request(`/trace/timeline${query}`));
   },

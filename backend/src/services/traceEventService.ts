@@ -21,6 +21,7 @@ export type TraceTimelineQuery = {
   licenseeId?: string;
   eventType?: TraceEventType;
   batchId?: string;
+  batchIds?: string[];
   manufacturerId?: string;
   qrCodeId?: string;
   limit: number;
@@ -308,6 +309,7 @@ export const getTraceTimeline = async (
   if (opts.licenseeId) where.licenseeId = opts.licenseeId;
   if (opts.eventType) where.eventType = opts.eventType;
   if (opts.batchId) where.batchId = opts.batchId;
+  if (opts.batchIds) where.batchId = { in: opts.batchIds };
   if (opts.manufacturerId) where.manufacturerId = opts.manufacturerId;
   if (opts.qrCodeId) where.qrCodeId = opts.qrCodeId;
 

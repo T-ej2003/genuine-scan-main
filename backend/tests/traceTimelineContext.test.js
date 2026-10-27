@@ -6,6 +6,10 @@ const { TraceEventType, UserRole } = require("@prisma/client");
 process.env.NODE_ENV = "test";
 
 const { withCanonicalDbContext } = require("../dist/lib/canonicalDbContext");
+const { traceTimelineQuerySchema, getTraceTimelineController } = require("../dist/controllers/traceTimelineController");
+const canonicalAuth = require("../dist/rls-waves/session-b/b01/canonicalAuthContext");
+const auditService = require("../dist/services/auditService");
+const traceService = require("../dist/services/traceEventService");
 const {
   TraceTimelineAccessError,
   buildTraceTimelineBoundary,
@@ -125,15 +129,57 @@ const denied = (user, input, message, requestId = "request-denied") => {
   assert(tenant.fake.calls.find[0].select && !tenant.fake.calls.find[0].include, "trace rows require an explicit projection");
   assert.doesNotMatch(JSON.stringify(tenant.result), /secret|secret-key/);
   assert.match(JSON.stringify(tenant.result), /retained/);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: `${ids.actor},${ids.manufacturer}` }).success, true);
+  assert.deepStrictEqual(traceTimelineQuerySchema.parse({ batchIds: `${ids.manufacturer},${ids.actor},${ids.manufacturer}` }).batchIds, [ids.actor, ids.manufacturer]);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: "" }).success, false);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: "not-a-uuid" }).success, false);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchId: ids.actor, batchIds: ids.manufacturer }).success, false);
+  assert.strictEqual(traceTimelineQuerySchema.safeParse({ batchIds: Array(101).fill(ids.actor).join(",") }).success, false);
+
+  const originalSelection = canonicalAuth.withDatabaseAuthenticatedSelection;
+  const originalTimeline = traceService.getTraceTimeline;
+  const originalAudit = auditService.createAuditLogInTransaction;
+  const recorded = [];
+  try {
+    canonicalAuth.withDatabaseAuthenticatedSelection = async (_actor, _options, callback) => callback({});
+    traceService.getTraceTimeline = async () => ({ events: [], total: 0, nextCursor: null });
+    auditService.createAuditLogInTransaction = async (_tx, context, event) => recorded.push({ context, event });
+    const invoke = async (filters) => {
+      const response = { status: 200, body: null };
+      await getTraceTimelineController(
+        { user: actor(), query: filters, requestId: "request-a", databaseSessionCapability: "test", ip: "127.0.0.1", get: () => "test" },
+        { status(code) { response.status = code; return this; }, json(body) { response.body = body; return this; } }
+      );
+      return response;
+    };
+    assert.strictEqual((await invoke({ batchIds: `${ids.manufacturer},${ids.actor},${ids.manufacturer}` })).status, 200);
+    assert.deepStrictEqual(recorded[0].event.details.batchIds, [ids.actor, ids.manufacturer]);
+    assert.strictEqual(recorded[0].event.details.batchId, null);
+    assert.strictEqual(recorded[0].context.licenseeId, ids.tenant);
+    assert.strictEqual((await invoke({ batchId: ids.actor })).status, 200);
+    assert.strictEqual(recorded[1].event.details.batchId, ids.actor);
+    assert.strictEqual(recorded[1].event.details.batchIds, null);
+    assert.strictEqual((await invoke({ batchIds: "" })).status, 400);
+    assert.strictEqual(recorded.length, 2);
+  } finally {
+    canonicalAuth.withDatabaseAuthenticatedSelection = originalSelection;
+    traceService.getTraceTimeline = originalTimeline;
+    auditService.createAuditLogInTransaction = originalAudit;
+  }
+
+  const bulk = await read(actor(), query({ batchIds: [ids.actor, ids.manufacturer] }));
+  assert.deepStrictEqual(bulk.fake.calls.find[0].where.batchId, { in: [ids.actor, ids.manufacturer] });
+  assert.strictEqual(bulk.fake.calls.find[0].where.licenseeId, ids.tenant);
 
   const manufacturer = await read(actor({
     userId: ids.manufacturer,
     role: UserRole.MANUFACTURER,
     licenseeId: null,
     linkedLicenseeIds: [ids.tenant],
-  }), query({ licenseeId: ids.tenant }));
+  }), query({ licenseeId: ids.tenant, batchIds: [ids.actor, ids.manufacturer] }));
   assert.strictEqual(manufacturer.boundary.query.manufacturerId, ids.manufacturer);
   assert.strictEqual(manufacturer.fake.calls.find[0].where.manufacturerId, ids.manufacturer);
+  assert.deepStrictEqual(manufacturer.fake.calls.find[0].where.batchId, { in: [ids.actor, ids.manufacturer] });
 
   const platform = await read(actor({
     userId: ids.platform,

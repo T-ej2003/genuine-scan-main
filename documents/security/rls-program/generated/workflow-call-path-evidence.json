@@ -288,52 +288,52 @@
       ],
       "productionAccessPath": [
         {
-          "accessId": "access-18a3874b7899502b",
-          "source": "backend/src/services/auditLogQueryService.ts:169",
+          "accessId": "access-2e7ed15a678c742e",
+          "source": "backend/src/services/auditLogQueryService.ts:154",
           "registration": "reachable-from-registered-entrypoint",
-          "method": "count"
+          "method": "findMany"
         },
         {
           "accessId": "access-45b0367c009b90f3",
-          "source": "backend/src/services/auditLogQueryService.ts:172",
+          "source": "backend/src/services/auditLogQueryService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
           "accessId": "access-47bed5dc3f26cdb4",
-          "source": "backend/src/services/auditLogQueryService.ts:172",
+          "source": "backend/src/services/auditLogQueryService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
-        },
-        {
-          "accessId": "access-607bfc78e44cb02c",
-          "source": "backend/src/services/auditLogQueryService.ts:152",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
         },
         {
           "accessId": "access-654420ff46478da2",
-          "source": "backend/src/services/auditLogQueryService.ts:172",
+          "source": "backend/src/services/auditLogQueryService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
-          "accessId": "access-71f0f65d86c59e77",
-          "source": "backend/src/services/auditLogQueryService.ts:183",
-          "registration": "reachable-from-registered-entrypoint",
-          "method": "findMany"
-        },
-        {
           "accessId": "access-9a1e5a3d514f930c",
-          "source": "backend/src/services/auditLogQueryService.ts:172",
+          "source": "backend/src/services/auditLogQueryService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
         },
         {
           "accessId": "access-afa4e724197ffd14",
-          "source": "backend/src/services/auditLogQueryService.ts:172",
+          "source": "backend/src/services/auditLogQueryService.ts:174",
           "registration": "reachable-from-registered-entrypoint",
           "method": "$function:app_rls.platform_audit_log_details"
+        },
+        {
+          "accessId": "access-c1a4925cc09f10d2",
+          "source": "backend/src/services/auditLogQueryService.ts:171",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "count"
+        },
+        {
+          "accessId": "access-c60bcec44993fc58",
+          "source": "backend/src/services/auditLogQueryService.ts:185",
+          "registration": "reachable-from-registered-entrypoint",
+          "method": "findMany"
         }
       ],
       "implementationFamilyId": "family-audit-read-context",

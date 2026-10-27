@@ -541,6 +541,31 @@ async function main(){
     assert.equal(telemetry.data.persisted,false); assert.equal(telemetry.success,false);
     await http("tenant","/telemetry/route-transition","POST",{transitionMs:-1},400);
   } finally { await new Promise(resolve=>server.close(resolve)); }
+  const inventory=JSON.parse(call("qr_allocate_range",`'${caps.platform}','qr-range-allocate','40000000-0000-4000-8000-000000000751','${ids.licenseeA}',100000,100149,'Rollup source','ADMIN_TOPUP'`));
+  const source=inventory.receivedBatchId;
+  assert.equal(inventory.totalCodes,150);
+  workerCall("refresh_inventory_status_rollups","40000000-0000-4000-8000-000000000752");
+  assert.equal(last(bootstrap,`SELECT "totalCodes" FROM public."InventoryStatusRollup" WHERE "batchId"='${source}'`),"150");
+  const assign=(requestId,quantity)=>`SELECT app_rls.qr_batch_command('${caps.tenant}','qr-batch-command','${requestId}','ASSIGN_MANUFACTURER','{"batchId":"${source}","manufacturerId":"${ids.manufacturer}","quantity":${quantity},"name":"Rollup allocation"}'::jsonb)`;
+  const first=JSON.parse(last(app,assign("40000000-0000-4000-8000-000000000753",10)));
+  assert.equal(first.sourceRemainingCodes,140);
+  workerCall("refresh_inventory_status_rollups","40000000-0000-4000-8000-000000000754");
+  assert.equal(last(bootstrap,`SELECT "totalCodes" FROM public."InventoryStatusRollup" WHERE "batchId"='${source}'`),"140");
+  assert.equal(last(bootstrap,`SELECT "totalCodes" FROM public."InventoryStatusRollup" WHERE "batchId"='${first.newBatchId}'`),"10");
+  const second=JSON.parse(last(app,assign("40000000-0000-4000-8000-000000000755",10)));
+  assert.equal(second.sourceRemainingCodes,130);
+  await concurrent([assign("40000000-0000-4000-8000-000000000756",10),assign("40000000-0000-4000-8000-000000000757",10)]);
+  assert.equal(last(bootstrap,`SELECT count(*) FROM public."QRCode" WHERE "batchId"='${source}'`),"110");
+  denied(`SELECT app_rls.qr_batch_command('${caps.tenant}','qr-batch-command','40000000-0000-4000-8000-000000000758','ASSIGN_MANUFACTURER','{"batchId":"40000000-0000-4000-8000-000000000702","manufacturerId":"${ids.manufacturer}","quantity":1}'::jsonb)`);
+  denied(`BEGIN; ${assign("40000000-0000-4000-8000-000000000759",1)}; SELECT 1/0; COMMIT`,/division by zero/);
+  assert.equal(last(bootstrap,`SELECT count(*) FROM public."QRCode" WHERE "batchId"='${source}'`),"110");
+  // Simulate an old source rollup missed by the previous cursor-only implementation.
+  run(bootstrap,`UPDATE public."Batch" SET "updatedAt"=now()-interval '1 day' WHERE id='${source}';
+    UPDATE public."QRCode" SET "updatedAt"=now()-interval '1 day' WHERE "batchId"='${source}' OR "batchId"='${second.newBatchId}'`);
+  workerCall("refresh_inventory_status_rollups","40000000-0000-4000-8000-000000000760");
+  assert.equal(last(bootstrap,`SELECT "totalCodes" FROM public."InventoryStatusRollup" WHERE "batchId"='${source}'`),"110");
+  assert.equal(last(bootstrap,`SELECT count(*) FROM public."QRCode" WHERE "batchId"='${source}'`),"110");
+  assert.equal(last(bootstrap,`SELECT count(*) FROM public."QRCode" WHERE "batchId"='${first.newBatchId}'`),"10");
   run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgB}' WHERE id='${ids.tenant}'`);
   denied(list(caps.tenant)); denied(create(caps.tenant)); denied(analytics(caps.tenant));
   run(bootstrap,`UPDATE public."User" SET "orgId"='${ids.orgA}',"isActive"=false WHERE id='${ids.tenant}'`);

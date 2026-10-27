@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import Dashboard from "@/pages/Dashboard";
@@ -73,8 +73,8 @@ describe("Dashboard rate-limit partial state", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("QR labels available")).toBeInTheDocument();
-    expect(screen.getByText("20 not used yet • 30 assigned")).toBeInTheDocument();
+    expect(await screen.findByText("Unassigned QR labels")).toBeInTheDocument();
+    expect(screen.getByText("30 assigned to manufacturers")).toBeInTheDocument();
     const kpiCards = screen.getAllByTestId("dashboard-kpi-card");
 
     expect(kpiCards).toHaveLength(4);
@@ -94,5 +94,21 @@ describe("Dashboard rate-limit partial state", () => {
     expect(screen.queryByText(/429/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Too many audit read requests/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Operations overview unavailable/i)).not.toBeInTheDocument();
+  });
+
+  it("decreases unassigned inventory when labels move from DORMANT to ALLOCATED", async () => {
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText("Unassigned QR labels")).closest('[data-testid="dashboard-kpi-card"]');
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("20")).toBeInTheDocument();
+
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true,
+      data: { dormant: 10, allocated: 40, printed: 40, scanned: 10 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() => expect(within(card as HTMLElement).getByText("10")).toBeInTheDocument());
+    expect(screen.getByText("40 assigned to manufacturers")).toBeInTheDocument();
   });
 });
