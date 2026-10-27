@@ -340,13 +340,13 @@ export function assertPlan(plan) {
       const guard = policy.Statement[0];
       assert.equal(guard.Effect, "Deny");
       assert.equal(guard.Principal, "*");
-      assert.equal(guard.Resource, "*");
+      assert.ok(!Object.hasOwn(guard, "Resource"), "Tested ECR guard rejects explicit Resource");
       assert.deepEqual(guard.Action, ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"]);
       assert.ok(!guard.Condition && !guard.NotAction && !guard.NotResource && !guard.NotPrincipal, "Conditional deletion guard is unsafe");
       assert.deepEqual(policy.Statement[1], {
         Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow",
         Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" },
-        Resource: "*", Action: "ecr:GetRepositoryPolicy",
+        Action: "ecr:GetRepositoryPolicy",
       }, "Publisher repository-policy read is not exact");
     }
     if (address === "aws_iam_role.ecr_monitor") {

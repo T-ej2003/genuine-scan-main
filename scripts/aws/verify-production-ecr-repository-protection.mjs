@@ -18,7 +18,7 @@ export function assertEcrRepositoryProtection({ repository, description, lifecyc
   const policy = typeof repositoryPolicy === "string" ? JSON.parse(repositoryPolicy) : repositoryPolicy;
   assert.ok(policy && Array.isArray(policy.Statement), "Missing repository deletion guard");
   assert.ok(policy.Statement.some((statement) => statement.Effect === "Deny" && (statement.Principal === "*" || statement.Principal?.AWS === "*") &&
-    (statement.Resource === "*" || statement.Resource === description.repositoryArn) &&
+    !Object.hasOwn(statement, "Resource") &&
     denied.every((action) => Array.isArray(statement.Action) && statement.Action.includes(action)) &&
     !statement.Condition && !statement.NotAction && !statement.NotResource && !statement.NotPrincipal),
   "Repository deletion guard is incomplete");
