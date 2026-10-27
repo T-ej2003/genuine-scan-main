@@ -169,7 +169,7 @@ export function useSupportAssignableUsers(enabled: boolean, offset = 0) {
 const invalidateSupportQueries = async (queryClient: ReturnType<typeof useQueryClient>) => {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets() }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.support.reports() }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.support.reports(getRequestCoordinatorScope()) }),
     queryClient.invalidateQueries({ queryKey: queryKeys.support.requestAccess() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.support.ticketDetail() }),
   ]);
