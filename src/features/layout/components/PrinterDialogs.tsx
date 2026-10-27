@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, Monitor, RefreshCw, Wifi } from "lucide-re
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -130,58 +130,47 @@ export function PrinterOnboardingDialog({
 }: PrinterOnboardingDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[680px]">
-        <DialogHeader>
+      <DialogContent className="max-w-[620px] rounded-md p-5 sm:p-6">
+        <DialogHeader className="text-left">
           <DialogTitle>Set up printing on this computer</DialogTitle>
           <DialogDescription>
-            Install the MSCQR printer helper once on the computer that prints. After that it starts automatically and
-            MSCQR can find the printer without any extra launch steps.
+            Install the MSCQR printer helper on this computer, then check that your printer is ready.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 text-sm text-slate-700">
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <div className="font-semibold text-slate-950">What this does not do</div>
-            <p className="mt-2 leading-6">
-              The browser cannot install printers, drivers, or desktop apps by itself. Those still need to be set up on
-              the computer first.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="font-semibold text-slate-950">What to do once on each printing computer</div>
-            <ol className="mt-3 list-decimal space-y-2 pl-5">
-              <li>Make sure the printer already appears in the computer&apos;s printer list.</li>
-              <li>Open <strong>Install printer helper</strong> and download the Mac or Windows installer for this computer.</li>
-              <li>Run the installer once. The helper starts automatically after that.</li>
-              <li>Return here and use <strong>Check again</strong>.</li>
-              <li>If the computer can see the printer, MSCQR will pick it up automatically.</li>
+        <div className="space-y-4 text-sm text-foreground">
+          <div className="rounded-md border bg-muted/40 p-4">
+            <div className="font-semibold">Installation</div>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted-foreground">
+              <li>Connect the printer and install its driver on this computer.</li>
+              <li>Download and run the Mac or Windows printer helper installer.</li>
+              <li>Return here and select <strong>Check again</strong>.</li>
             </ol>
           </div>
 
-          <div className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="font-semibold text-slate-950">Current readiness</div>
-            <ul className="mt-3 list-disc space-y-2 pl-5">
-              <li>Printer helper online: {localPrinterAgent.reachable ? "Yes" : "No"}</li>
-              <li>Printer detected: {printerHasInventory ? "Yes" : "No"}</li>
-              <li>Selected printer: {selectedPrinterName || "None yet"}</li>
+          <div className="rounded-md border p-4">
+            <div className="font-semibold">Current status</div>
+            <ul className="mt-2 grid gap-1 text-muted-foreground sm:grid-cols-2">
+              <li>Helper: {localPrinterAgent.reachable ? "Online" : "Offline"}</li>
+              <li>Printer: {printerHasInventory ? "Detected" : "Not detected"}</li>
+              <li className="min-w-0 break-words sm:col-span-2">Selected printer: {selectedPrinterName || "None yet"}</li>
             </ul>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <Button variant="outline" onClick={onInstallConnector}>
+          <DialogFooter className="flex-col sm:flex-row sm:flex-wrap sm:justify-between">
+            <Button variant="outline" onClick={() => { onOpenChange(false); onInstallConnector(); }}>
               Install printer helper
             </Button>
             <Button onClick={onCheckAgain} disabled={checking}>
               {checking ? "Connector checking..." : "Check again"}
             </Button>
-            <Button variant="ghost" onClick={onOpenHelp}>
+            <Button variant="ghost" onClick={() => { onOpenChange(false); onOpenHelp(); }}>
               Open help
             </Button>
             <Button variant="ghost" onClick={onCloseForNow}>
               Close for now
             </Button>
-          </div>
+          </DialogFooter>
         </div>
       </DialogContent>
     </Dialog>
