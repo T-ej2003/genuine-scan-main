@@ -191,8 +191,10 @@ export default function SupportCenterPage() {
         message,
       });
       toast({
-        title: "Response saved",
-        description: ({
+        title: result?.replayed ? "Response already saved" : "Response saved",
+        description: result?.replayed
+          ? `No new email was queued. Current delivery status: ${toLabel(result?.emailDeliveryStatus || "NOT_SENT")}.`
+          : ({
           PENDING: "The response is available in the app. Email delivery is pending.",
           SENT: "The response is available in the app and email was sent.",
           FAILED: "The response is saved, but email delivery failed.",

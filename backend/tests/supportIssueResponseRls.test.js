@@ -278,6 +278,18 @@ const authHeader = (token) => ({
     } finally {
       await recoveryWorker.$disconnect();
     }
+    const terminalNotifications = await prisma.notification.count({ where: {
+      type: "support_issue_response", licenseeId: ids.licenseeB,
+    } });
+    const unknownReplay = await request("POST", secondResponsePath, {
+      message: "A response for the other tenant",
+    }, { headers: authHeader(tokens.superAdmin) });
+    assert.equal(unknownReplay.status, 200, unknownReplay.text);
+    assert.equal(unknownReplay.payload.data.replayed, true);
+    assert.equal(unknownReplay.payload.data.emailDeliveryStatus, "UNKNOWN");
+    assert.equal(await prisma.notification.count({ where: {
+      type: "support_issue_response", licenseeId: ids.licenseeB,
+    } }), terminalNotifications, "ambiguous delivery replay must not enqueue a duplicate email");
     const changedResponse = await request("POST", responsePath, { message: "A changed support reply" }, {
       headers: authHeader(tokens.superAdmin),
     });

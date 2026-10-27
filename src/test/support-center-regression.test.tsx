@@ -195,6 +195,22 @@ describe("SupportCenter regression", () => {
     })));
   });
 
+  it.each(["UNKNOWN", "FAILED"])("does not claim a new email was queued when %s response is replayed", async (status) => {
+    vi.mocked(apiClient.respondToSupportIssueReport).mockResolvedValue({
+      success: true, data: { ...issueReport, status: "RESPONDED", emailDeliveryStatus: status, replayed: true },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><SupportCenter /></MemoryRouter>);
+    await screen.findByText("Printer failed during pairing");
+    fireEvent.change(screen.getByPlaceholderText("Tell the user what happens next."), {
+      target: { value: "We reviewed the printer issue." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send reply" }));
+    await waitFor(() => expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Response already saved",
+      description: expect.stringContaining(`No new email was queued. Current delivery status: ${status === "UNKNOWN" ? "Unknown" : "Failed"}.`),
+    })));
+  });
+
   it("shows request access intake and updates status", async () => {
     renderWithQueryClient(
       <MemoryRouter>
