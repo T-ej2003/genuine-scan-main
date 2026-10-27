@@ -186,13 +186,23 @@ export default function SupportCenterPage() {
     }
 
     try {
-      await respondToReportMutation.mutateAsync({
+      const result = await respondToReportMutation.mutateAsync({
         reportId: report.id,
         message,
       });
       toast({
-        title: "Reporter notified",
-        description: "The response was sent through both in-app notification and email.",
+        title: result?.replayed ? "Response already saved" : "Response saved",
+        description: result?.replayed
+          ? `No new email was queued. Current delivery status: ${toLabel(result?.emailDeliveryStatus || "NOT_SENT")}.`
+          : ({
+          PENDING: "The response is available in the app. Email delivery is pending.",
+          SENT: "The response is available in the app and email was sent.",
+          FAILED: "The response is saved, but email delivery failed.",
+          UNKNOWN: "The response is saved; email delivery could not be confirmed.",
+          DRY_RUN: "The response is saved; email delivery was simulated.",
+          NOT_SENT: "The response was saved without an email recipient.",
+          SKIPPED: "The response was saved without an email recipient.",
+        } as Record<string, string>)[result?.emailDeliveryStatus || ""] || "The response was saved. Check email delivery status.",
       });
       setIssueReplyDrafts((prev) => ({ ...prev, [report.id]: "" }));
     } catch (error) {

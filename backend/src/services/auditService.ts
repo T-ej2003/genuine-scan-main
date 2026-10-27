@@ -62,7 +62,7 @@ const emitAuditLog = (log: any) => {
 export const publishAuditedEventProjection = async (log: any) => {
   const allocation = ["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST"].includes(log.action)
     && log.entityType === "QrAllocationRequest" && Boolean(log.licenseeId);
-  const supportReport = log.action === "SUPPORT_ISSUE_REPORTED" && log.entityType === "SupportIssueReport";
+  const supportReport = ["SUPPORT_ISSUE_REPORTED", "SUPPORT_ISSUE_RESPONDED"].includes(log.action) && log.entityType === "SupportIssueReport";
   if ((!allocation && !supportReport) || !log.id || !log.userId || !log.entityId) {
     throw new Error("AUDIT_PROJECTION_INVALID");
   }

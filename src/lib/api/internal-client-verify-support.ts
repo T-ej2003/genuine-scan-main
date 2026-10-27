@@ -749,7 +749,7 @@ export const createVerifySupportApi = (core: ApiClientCore) => ({
       status?: "OPEN" | "RESPONDED" | "CLOSED";
     }
   ) {
-    return core.request(`/support/reports/${encodeURIComponent(reportId)}/respond`, {
+    return core.request<{ emailDeliveryStatus: string; replayed: boolean }>(`/support/reports/${encodeURIComponent(reportId)}/respond`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
