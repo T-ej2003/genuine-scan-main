@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AuthenticateProductionRegistry",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    },
+    {
+      "Sid": "VerifyPublishedWebImage",
+      "Effect": "Allow",
+      "Action": ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
+      "Resource": "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+      "Condition": { "StringEquals": { "aws:RequestedRegion": "eu-west-2" } }
+    }
+  ]
+}
