@@ -187,15 +187,20 @@ test("SNS import preserves the reviewed default statement and exact EventBridge 
 test("plan rejects weaker ECR guards and monitor privilege expansion", () => {
   const repositoryGuardSource = read("main.tf");
   for (const action of ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"]) assert.ok(repositoryGuardSource.includes(action));
+  assert.doesNotMatch(repositoryGuardSource, /\bResource\s*=/);
   assert.ok(!repositoryGuardSource.includes("ecr:UpdateImageStorageClass"));
   const plan = basePlan();
   const guard = { Statement: [
-    { Effect: "Deny", Principal: "*", Resource: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"] },
-    { Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" }, Resource: "*", Action: "ecr:GetRepositoryPolicy" },
+    { Effect: "Deny", Principal: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository", "ecr:PutLifecyclePolicy"] },
+    { Sid: "AllowLegacyPublisherProtectionRead", Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" }, Action: "ecr:GetRepositoryPolicy" },
   ] };
   plan.resource_changes = [{ address: "aws_ecr_repository_policy.backend_delete_guard", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",
     change: { actions: ["create"], after: { repository: "mscqr-backend", policy: JSON.stringify(guard) } } }];
   assert.doesNotThrow(() => assertPlan(plan));
+  plan.resource_changes[0].change.after.policy = JSON.stringify({ Statement: [{ ...guard.Statement[0], Resource: "*" }, guard.Statement[1]] });
+  assert.throws(() => assertPlan(plan), /rejects explicit Resource/);
+  plan.resource_changes[0].change.after.policy = JSON.stringify({ Statement: [guard.Statement[0], { ...guard.Statement[1], Resource: "*" }] });
+  assert.throws(() => assertPlan(plan), /Publisher repository-policy read/);
   plan.resource_changes[0].change.after.policy = JSON.stringify({ Statement: [guard.Statement[0], { ...guard.Statement[1], Action: "ecr:*" }] });
   assert.throws(() => assertPlan(plan), /Publisher repository-policy read/);
   plan.resource_changes = [{ address: "aws_ecr_repository_policy.backend_delete_guard", mode: "managed", provider_name: "registry.terraform.io/hashicorp/aws",

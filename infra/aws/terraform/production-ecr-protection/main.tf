@@ -6,13 +6,13 @@ locals {
   }
 
   # Retirement stays disabled until a separately governed transaction exists.
+  # This repository-scoped guard was rejected by ECR when Resource was explicit.
   ecr_delete_guard = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Sid       = "DenyUnreviewedProductionImageRetirement"
       Effect    = "Deny"
       Principal = "*"
-      Resource  = "*"
       Action = [
         "ecr:BatchDeleteImage",
         "ecr:DeleteRepository",
@@ -22,7 +22,6 @@ locals {
       Sid       = "AllowLegacyPublisherProtectionRead"
       Effect    = "Allow"
       Principal = { AWS = "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" }
-      Resource  = "*"
       Action    = "ecr:GetRepositoryPolicy"
     }]
   })
