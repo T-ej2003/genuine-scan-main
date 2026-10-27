@@ -14517,13 +14517,17 @@ BEGIN
     RAISE EXCEPTION 'B03_SUPPORT_EMAIL_WORKER_DENIED' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.b03_operation','support-email-claim',true);
-  FOR stale IN WITH expired AS (
-    UPDATE public."Notification" n SET
-      data=n.data||jsonb_build_object('emailState','UNKNOWN','errorCode','CLAIM_EXPIRED'),
-      "updatedAt"=p_attempted_at
+  FOR stale IN WITH stale_ids AS (
+    SELECT n.id FROM public."Notification" n
     WHERE n.channel='EMAIL' AND n.type='support_issue_response'
       AND n.data->>'emailState'='CLAIMED'
       AND n."updatedAt"<p_attempted_at-interval '15 minutes'
+    ORDER BY n."updatedAt",n.id FOR UPDATE SKIP LOCKED LIMIT p_batch_size
+  ), expired AS (
+    UPDATE public."Notification" n SET
+      data=n.data||jsonb_build_object('emailState','UNKNOWN','errorCode','CLAIM_EXPIRED'),
+      "updatedAt"=p_attempted_at
+    FROM stale_ids s WHERE n.id=s.id
     RETURNING n.id,n.body,n.data,n."licenseeId"
   ) SELECT * FROM expired LOOP
     PERFORM set_config('app.b03_support_report_id',stale.data->>'supportReportId',true),

@@ -230,6 +230,13 @@ const authHeader = (token) => ({
       message: "A response for the other tenant",
     }, { headers: authHeader(tokens.superAdmin) });
     assert.equal(secondResponse.status, 200, secondResponse.text);
+    const additionalReport = await prisma.supportIssueReport.create({ data: {
+      reporterUserId: ids.manufacturerB, reporterRole: "MANUFACTURER_ADMIN",
+      licenseeId: ids.licenseeB, title: "Another synthetic response",
+    } });
+    assert.equal((await request("POST", `/api/support/reports/${additionalReport.id}/respond`, {
+      message: "Another response for the other tenant",
+    }, { headers: authHeader(tokens.superAdmin) })).status, 200);
     const { withB03SupportEmailWorkerContext: withRecoveryWorkerContext } = require("../dist/rls-waves/session-b/b03/systemContext");
     const { claimSupportResponseEmails: claimRecoveryEmails } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
     const recoveryWorker = new PrismaClient({ datasources: { db: { url: workerUrl.toString() } } });
@@ -237,19 +244,27 @@ const authHeader = (token) => ({
       const staleToken = randomUUID();
       const staleClaims = await withRecoveryWorkerContext({
         jobId: `support-email-claim:${staleToken}`, requestId: staleToken,
-      }, (db) => claimRecoveryEmails(db, { attemptedAt: new Date(), batchSize: 10 }), recoveryWorker);
-      assert.equal(staleClaims.length, 1);
-      assert.equal(staleClaims[0].licenseeId, ids.licenseeB);
-      await prisma.notification.update({ where: { id: staleClaims[0].id }, data: {
-        updatedAt: new Date(Date.now() - 16 * 60_000),
-      } });
+      }, (db) => claimRecoveryEmails(db, { attemptedAt: new Date(), batchSize: 2 }), recoveryWorker);
+      assert.equal(staleClaims.length, 2);
+      assert(staleClaims.every((claim) => claim.licenseeId === ids.licenseeB));
+      for (const claim of staleClaims) {
+        await prisma.notification.update({ where: { id: claim.id }, data: {
+          updatedAt: new Date(Date.now() - 16 * 60_000),
+        } });
+      }
       const recoveryToken = randomUUID();
       const recovered = await withRecoveryWorkerContext({
         jobId: `support-email-claim:${recoveryToken}`, requestId: recoveryToken,
-      }, (db) => claimRecoveryEmails(db, { attemptedAt: new Date(), batchSize: 10 }), recoveryWorker);
+      }, (db) => claimRecoveryEmails(db, { attemptedAt: new Date(), batchSize: 1 }), recoveryWorker);
       assert.equal(recovered.length, 0, "ambiguous delivery must not be retried automatically");
+      assert.equal((await prisma.notification.findMany({ where: { id: { in: staleClaims.map((claim) => claim.id) } } }))
+        .filter((row) => row.data.emailState === "UNKNOWN").length, 1);
+      await withRecoveryWorkerContext({
+        jobId: `support-email-claim:${randomUUID()}`, requestId: randomUUID(),
+      }, (db) => claimRecoveryEmails(db, { attemptedAt: new Date(), batchSize: 1 }), recoveryWorker);
       assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: secondReport.id } })).emailDeliveryStatus, "UNKNOWN");
-      assert.equal((await prisma.notification.findUnique({ where: { id: staleClaims[0].id } })).data.emailState, "UNKNOWN");
+      assert((await prisma.notification.findMany({ where: { id: { in: staleClaims.map((claim) => claim.id) } } }))
+        .every((row) => row.data.emailState === "UNKNOWN"));
     } finally {
       await recoveryWorker.$disconnect();
     }
