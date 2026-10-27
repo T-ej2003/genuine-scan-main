@@ -963,7 +963,7 @@ SET search_path = pg_catalog, public
 AS $fn$
 DECLARE actor record;
 DECLARE report_id text := gen_random_uuid()::text;
-DECLARE created_at timestamp without time zone := clock_timestamp()::timestamp without time zone;
+DECLARE created_at timestamp without time zone := (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3);
 BEGIN
   IF current_setting('app.purpose',true)<>'support-report-create'
      OR p_request_id IS NULL OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
@@ -971,7 +971,7 @@ BEGIN
      OR length(coalesce(p_description,''))>5000
      OR length(coalesce(p_source_path,''))>500
      OR length(coalesce(p_page_url,''))>1200
-     OR length(coalesce(p_diagnostics::text,''))>250000
+     OR octet_length(coalesce(p_diagnostics::text,''))>250000
      OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
      OR length(coalesce(p_screenshot_path,''))>191
      OR length(coalesce(p_screenshot_mime,''))>80
@@ -1016,7 +1016,8 @@ BEGIN
       'ipHash',p_ip_hash),created_at
   );
   RETURN jsonb_build_object(
-    'id',report_id,'status','OPEN','createdAt',created_at,
+    'id',report_id,'status','OPEN',
+    'createdAt',to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'reporterUserId',actor."userId",'reporterRole',actor.role,
     'licenseeId',actor."licenseeId",'title',btrim(p_title),
     'sourcePath',p_source_path,'pageUrl',p_page_url
@@ -1044,3 +1045,114 @@ REVOKE ALL ON FUNCTION app_rls.b03_get_support_ticket(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_create_support_issue_report(text,text,text,text,text,text,boolean,text,text,integer,jsonb,text,text) FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_list_support_issue_reports(
+  p_limit integer,p_offset integer,p_licensee_id text,
+  p_actor_licensee_id text,p_actor_organization_id text,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE reports jsonb;
+DECLARE total_count integer;
+BEGIN
+  IF current_setting('app.purpose',true)<>'support-report-list'
+     OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
+     OR p_limit NOT BETWEEN 1 AND 200 OR p_offset NOT BETWEEN 0 AND 5000
+     OR (p_licensee_id IS NOT NULL AND p_licensee_id !~* '^[0-9a-f-]{36}$') THEN
+    RAISE EXCEPTION 'B03_SUPPORT_REPORT_READ_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.revalidate_authenticated_actor(
+    current_setting('app.user_id',true),current_setting('app.auth_session_id',true),
+    p_actor_licensee_id,p_actor_organization_id,clock_timestamp()::timestamp without time zone,p_request_id
+  );
+  IF NOT FOUND OR actor.role NOT IN (
+    'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
+    'MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'
+  ) OR (actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND
+    (actor."licenseeId" IS NULL OR p_licensee_id IS NOT NULL)) THEN
+    RAISE EXCEPTION 'B03_SUPPORT_REPORT_READ_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_actor_id',actor."userId",true),
+          set_config('app.b03_actor_role',actor.role,true),
+          set_config('app.b03_actor_licensee_id',coalesce(actor."licenseeId",''),true),
+          set_config('app.b03_licensee_id',coalesce(actor."licenseeId",''),true),
+          set_config('app.b03_operation','support-report-list',true);
+  WITH visible AS NOT MATERIALIZED (
+    SELECT r.id,r."reporterUserId",r."reporterRole",r."licenseeId",r."referenceCode",
+      r."publicName",r."publicEmail",r."issueType",r."verificationCode",r."productReference",
+      r.priority,r.title,r.description,r.status,r."internalNote",r."responseMessage",
+      r."respondedAt",r."respondedByUserId",r."emailDeliveryStatus",r."emailErrorCode",
+      r."acknowledgementEmailDeliveryStatus",r."acknowledgementEmailErrorCode",
+      r."sourcePath",r."pageUrl",r."autoDetected",r."screenshotPath",r."screenshotMime",
+      r."screenshotSize",r.diagnostics,r."createdAt",r."updatedAt"
+    FROM public."SupportIssueReport" r
+    WHERE (actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR
+      (r."reporterUserId"=actor."userId" AND r."licenseeId"=actor."licenseeId"))
+      AND (p_licensee_id IS NULL OR r."licenseeId"=p_licensee_id)
+  ), page AS (
+    SELECT * FROM visible ORDER BY "createdAt" DESC,id DESC LIMIT p_limit OFFSET p_offset
+  )
+  SELECT (SELECT coalesce(jsonb_agg(
+    (CASE WHEN actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN to_jsonb(page)
+      ELSE to_jsonb(page)-'internalNote'-'emailErrorCode'-'acknowledgementEmailErrorCode' END)
+    || jsonb_build_object(
+      'createdAt',to_char(page."createdAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'updatedAt',to_char(page."updatedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'respondedAt',to_char(page."respondedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+    || jsonb_build_object(
+      'reporterUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role)
+        FROM public."User" u WHERE u.id=page."reporterUserId"),
+      'respondedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'role',u.role)
+        || CASE WHEN actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
+          THEN jsonb_build_object('email',u.email) ELSE '{}'::jsonb END
+        FROM public."User" u WHERE u.id=page."respondedByUserId"),
+      'licensee',(SELECT jsonb_build_object('id',l.id,'name',l.name,'prefix',l.prefix)
+        FROM public."Licensee" l WHERE l.id=page."licenseeId")
+    ) ORDER BY page."createdAt" DESC,page.id),'[]'::jsonb) FROM page),
+    (SELECT count(*)::integer FROM visible) INTO reports,total_count;
+  RETURN jsonb_build_object('reports',reports,'total',total_count,'limit',p_limit,'offset',p_offset);
+END
+$fn$;
+
+CREATE OR REPLACE FUNCTION app_rls.b03_support_issue_screenshot_access(
+  p_file_name text,p_actor_licensee_id text,p_actor_organization_id text,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE report record;
+BEGIN
+  IF current_setting('app.purpose',true)<>'support-report-screenshot'
+     OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
+     OR p_file_name IS NULL OR length(p_file_name) NOT BETWEEN 1 AND 191 THEN
+    RAISE EXCEPTION 'B03_SUPPORT_SCREENSHOT_DENIED' USING ERRCODE='42501';
+  END IF;
+  SELECT * INTO actor FROM app_rls.revalidate_authenticated_actor(
+    current_setting('app.user_id',true),current_setting('app.auth_session_id',true),
+    p_actor_licensee_id,p_actor_organization_id,clock_timestamp()::timestamp without time zone,p_request_id
+  );
+  IF NOT FOUND OR actor.role NOT IN (
+    'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
+    'MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'
+  ) OR (actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND actor."licenseeId" IS NULL) THEN
+    RAISE EXCEPTION 'B03_SUPPORT_SCREENSHOT_DENIED' USING ERRCODE='42501';
+  END IF;
+  PERFORM set_config('app.b03_actor_id',actor."userId",true),
+          set_config('app.b03_actor_role',actor.role,true),
+          set_config('app.b03_actor_licensee_id',coalesce(actor."licenseeId",''),true),
+          set_config('app.b03_operation','support-report-screenshot',true);
+  SELECT r.id,r."screenshotMime" INTO report FROM public."SupportIssueReport" r
+  WHERE r."screenshotPath"=p_file_name
+    AND (actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR
+      (r."reporterUserId"=actor."userId" AND r."licenseeId"=actor."licenseeId"))
+  ORDER BY r."createdAt" DESC,r.id DESC LIMIT 1;
+  IF NOT FOUND THEN RETURN NULL; END IF;
+  RETURN jsonb_build_object('id',report.id,'mime',report."screenshotMime");
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) FROM PUBLIC;

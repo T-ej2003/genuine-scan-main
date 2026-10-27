@@ -14,14 +14,9 @@ import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
-import { createAuthenticatedSupportIssueReport } from "../rls-waves/session-b/b03/repositoryFunctions";
+import { createAuthenticatedSupportIssueReport, getAuthenticatedSupportIssueScreenshot, listAuthenticatedSupportIssueReports } from "../rls-waves/session-b/b03/repositoryFunctions";
 import { hashIp } from "../utils/security";
-
-const toInt = (value: unknown, fallback: number, min: number, max: number) => {
-  const n = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-};
+import { SUPPORT_DIAGNOSTICS_MAX_BYTES, supportDiagnosticsStorageBytesUpperBound } from "../utils/supportDiagnosticsSize";
 
 const createSchema = z.object({
   title: z.string().trim().min(5).max(160),
@@ -29,7 +24,10 @@ const createSchema = z.object({
   sourcePath: z.string().trim().max(500).optional().or(z.literal("")),
   pageUrl: z.string().trim().max(1200).optional().or(z.literal("")),
   autoDetected: z.union([z.boolean(), z.string().trim().toLowerCase()]).optional(),
-  diagnostics: z.string().trim().max(250_000).optional().or(z.literal("")),
+  diagnostics: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, "utf8") <= SUPPORT_DIAGNOSTICS_MAX_BYTES,
+    "Diagnostics exceed 250000 UTF-8 bytes"
+  ).optional().or(z.literal("")),
 }).strict();
 
 const responseSchema = z.object({
@@ -48,18 +46,19 @@ const listQuerySchema = z.object({
 const parseDiagnostics = (raw?: string | null) => {
   const text = String(raw || "").trim();
   if (!text) return null;
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      const sanitized = sanitizeUnknownInput(parsed, "supportIssueDiagnostics");
-      if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
-        return sanitized;
-      }
-    }
-    return { raw: text };
+    parsed = JSON.parse(text);
   } catch {
     return { raw: text };
   }
+  if (parsed && typeof parsed === "object") {
+    const sanitized = sanitizeUnknownInput(parsed, "supportIssueDiagnostics");
+    if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+      return sanitized;
+    }
+  }
+  return { raw: text };
 };
 
 const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
@@ -91,6 +90,7 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
 
     const parsed = createSchema.safeParse(req.body || {});
     if (!parsed.success) {
+      if ((req as any).file?.path) await removeLocalFileIfExists((req as any).file.path);
       return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
@@ -98,7 +98,17 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
     const screenshotPath = file?.filename || null;
     const screenshotMime = file?.mimetype || null;
     const screenshotSize = file?.size || null;
-    const diagnostics = parseDiagnostics(parsed.data.diagnostics);
+    let diagnostics;
+    try {
+      diagnostics = parseDiagnostics(parsed.data.diagnostics);
+    } catch {
+      if (file?.path) await removeLocalFileIfExists(file.path);
+      return res.status(400).json({ success: false, error: "Invalid diagnostics" });
+    }
+    if (diagnostics && supportDiagnosticsStorageBytesUpperBound(diagnostics) > SUPPORT_DIAGNOSTICS_MAX_BYTES) {
+      if (file?.path) await removeLocalFileIfExists(file.path);
+      return res.status(400).json({ success: false, error: "Diagnostics exceed 250000 UTF-8 bytes" });
+    }
 
     if (file?.path && screenshotPath && isObjectStorageConfigured()) {
       await uploadObjectFromFile({
@@ -178,54 +188,40 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
+    if (parsed.data.licenseeId && !isPlatform(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Insufficient permissions" });
+    }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
 
-    const where: any = {};
-    if (!isPlatform(req.user.role)) {
-      where.reporterUserId = req.user.userId;
-    } else if (parsed.data.licenseeId) {
-      where.licenseeId = parsed.data.licenseeId;
-    }
-
-    const [reports, total] = await Promise.all([
-      prisma.supportIssueReport.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }],
-        take: limit,
-        skip: offset,
-        include: {
-          reporterUser: { select: { id: true, name: true, email: true, role: true } },
-          respondedByUser: { select: { id: true, name: true, email: true, role: true } },
-          licensee: { select: { id: true, name: true, prefix: true } },
-        },
-      }),
-      prisma.supportIssueReport.count({ where }),
-    ]);
+    const boundary = b03BoundaryForRequest(req, "support-report-list");
+    const result = await boundary.run((db) => listAuthenticatedSupportIssueReports(db, {
+      limit,
+      offset,
+      licenseeId: parsed.data.licenseeId,
+      actorLicenseeId: req.user!.licenseeId,
+      actorOrganizationId: req.user!.orgId,
+      requestId: boundary.requestId,
+    }));
 
     const platform = isPlatform(req.user.role);
 
     return res.json({
       success: true,
       data: {
-        reports: reports.map((report) => serializeSupportIssueReport(report, platform)),
-        total,
+        reports: (result.reports as any[]).map((report) => serializeSupportIssueReport(report, platform)),
+        total: result.total,
         limit,
         offset,
       },
     });
   } catch (error) {
-    const limit = toInt(req.query.limit, 50, 1, 200);
-    const offset = toInt(req.query.offset, 0, 0, 5000);
     if (isPrismaMissingTableError(error, ["supportissuereport"])) {
       warnStorageUnavailableOnce(
         "support-issue-list-storage",
-        "[support-issue] support issue storage is unavailable. Returning empty report list."
+        "[support-issue] support issue storage is unavailable. Reports were not loaded."
       );
-      return res.json({
-        success: true,
-        data: { reports: [], total: 0, limit, offset, storageUnavailable: true },
-      });
+      return res.status(503).json({ success: false, error: "Support report storage unavailable" });
     }
     console.error("listSupportIssueReports error:", error);
     return res.status(500).json({ success: false, error: "Failed to load support reports" });
@@ -362,29 +358,20 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
     const fileName = String(req.params.fileName || "").trim();
     if (!fileName) return res.status(404).json({ success: false, error: "File not found" });
 
-    const report = await prisma.supportIssueReport.findFirst({
-      where: isPlatform(authReq.user.role)
-        ? { screenshotPath: fileName }
-        : {
-            screenshotPath: fileName,
-            OR: [
-              { reporterUserId: authReq.user.userId },
-              ...(authReq.user.licenseeId ? [{ licenseeId: authReq.user.licenseeId }] : []),
-            ],
-          },
-      select: {
-        reporterUserId: true,
-        licenseeId: true,
-        screenshotMime: true,
-      },
-    });
+    const boundary = b03BoundaryForRequest(authReq, "support-report-screenshot");
+    const report = await boundary.run((db) => getAuthenticatedSupportIssueScreenshot(db, {
+      fileName,
+      actorLicenseeId: authReq.user!.licenseeId,
+      actorOrganizationId: authReq.user!.orgId,
+      requestId: boundary.requestId,
+    }));
     if (!report) return res.status(404).json({ success: false, error: "File not found" });
 
     if (isObjectStorageConfigured()) {
       const buffer = await downloadObjectBuffer(fileName);
       if (buffer) {
-        if (report.screenshotMime) {
-          res.setHeader("Content-Type", report.screenshotMime);
+        if (report.mime) {
+          res.setHeader("Content-Type", report.mime);
         }
         return res.send(buffer);
       }
@@ -396,8 +383,8 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
       return res.status(400).json({ success: false, error: "Invalid file path" });
     }
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: "File not found" });
-    if (report.screenshotMime) {
-      res.setHeader("Content-Type", report.screenshotMime);
+    if (report.mime) {
+      res.setHeader("Content-Type", report.mime);
     }
     return res.sendFile(resolved);
   } catch (error) {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "sourceContractSha256": "63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "75e5388e6df3d13d00751b60c489fdf1f39c6af8d6dccd9b97e280318625a5a3"
+      "sha256": "36fedc7b1366c1528c7f6767f82b11575a881a473612ba2a90fffac1b4428dd5"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -278,7 +278,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-      "sha256": "966856d07a2c35e6bfc8c4a95b051f1be3cd7be91b28896c93f1f0ef9f5a317f"
+      "sha256": "52eeb9037e538c19c38039cad98abb715a7a7a35fca69dbff20d24612f5701be"
     },
     {
       "path": "backend/src/services/auditLogOutboxService.ts",
@@ -5629,7 +5629,9 @@
         "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
         "contract:b03-create-support-issue-report:Licensee:SELECT",
-        "contract:b03-create-user-notification:Licensee:SELECT"
+        "contract:b03-create-user-notification:Licensee:SELECT",
+        "contract:b03-list-support-issue-reports:Licensee:SELECT",
+        "contract:b03-support-issue-screenshot-access:Licensee:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -6329,8 +6331,10 @@
         "contract:b03-create-support-issue-report:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-user-notification:ManufacturerLicenseeLink:SELECT",
         "contract:b03-list-notifications:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-list-support-issue-reports:ManufacturerLicenseeLink:SELECT",
         "contract:b03-mark-notification-emailed:ManufacturerLicenseeLink:SELECT",
-        "contract:b03-resolve-incident-notification-scope:ManufacturerLicenseeLink:SELECT"
+        "contract:b03-resolve-incident-notification-scope:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-support-issue-screenshot-access:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -6905,7 +6909,9 @@
         "contract:b03-attention-queue:Organization:SELECT",
         "contract:b03-create-role-notifications:Organization:SELECT",
         "contract:b03-create-support-issue-report:Organization:SELECT",
-        "contract:b03-create-user-notification:Organization:SELECT"
+        "contract:b03-create-user-notification:Organization:SELECT",
+        "contract:b03-list-support-issue-reports:Organization:SELECT",
+        "contract:b03-support-issue-screenshot-access:Organization:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -9721,6 +9727,7 @@
         "contract:b03-create-user-notification:RefreshToken:SELECT",
         "contract:b03-get-support-ticket:RefreshToken:SELECT",
         "contract:b03-list-notifications:RefreshToken:SELECT",
+        "contract:b03-list-support-issue-reports:RefreshToken:SELECT",
         "contract:b03-list-support-tickets:RefreshToken:SELECT",
         "contract:b03-mark-all-notifications-read:RefreshToken:SELECT",
         "contract:b03-mark-notification-emailed:RefreshToken:SELECT",
@@ -9729,6 +9736,7 @@
         "contract:b03-resolve-incident-email-actor:RefreshToken:SELECT",
         "contract:b03-resolve-incident-notification-scope:RefreshToken:SELECT",
         "contract:b03-superadmin-alert-emails:RefreshToken:SELECT",
+        "contract:b03-support-issue-screenshot-access:RefreshToken:SELECT",
         "contract:b03-update-support-ticket:RefreshToken:SELECT"
       ],
       "workflowId": null,
@@ -10803,6 +10811,30 @@
     {
       "tableId": "table-support-issue-report",
       "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('support-report-list','support-report-screenshot') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (\"reporterUserId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-list-support-issue-reports:SupportIssueReport:SELECT",
+        "contract:b03-support-issue-screenshot-access:SupportIssueReport:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
       "policyName": "public_verification_supportissuereport_insert",
       "command": "INSERT",
       "actors": [
@@ -11457,7 +11489,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true)='support-report-list' AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR EXISTS (SELECT 1 FROM public.\"SupportIssueReport\" r WHERE r.\"reporterUserId\"=current_setting('app.b03_actor_id',true) AND r.\"licenseeId\"=current_setting('app.b03_actor_licensee_id',true) AND r.\"respondedByUserId\"=id))) OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-add-support-ticket-message:User:SELECT",
@@ -11469,6 +11501,7 @@
         "contract:b03-create-user-notification:User:SELECT",
         "contract:b03-get-support-ticket:User:SELECT",
         "contract:b03-list-notifications:User:SELECT",
+        "contract:b03-list-support-issue-reports:User:SELECT",
         "contract:b03-list-support-tickets:User:SELECT",
         "contract:b03-mark-all-notifications-read:User:SELECT",
         "contract:b03-mark-notification-emailed:User:SELECT",
@@ -11477,6 +11510,7 @@
         "contract:b03-resolve-incident-email-actor:User:SELECT",
         "contract:b03-resolve-incident-notification-scope:User:SELECT",
         "contract:b03-superadmin-alert-emails:User:SELECT",
+        "contract:b03-support-issue-screenshot-access:User:SELECT",
         "contract:b03-update-support-ticket:User:SELECT"
       ],
       "workflowId": null,
@@ -12557,55 +12591,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f"
+      "marker": "mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae"
     }
   ]
 }

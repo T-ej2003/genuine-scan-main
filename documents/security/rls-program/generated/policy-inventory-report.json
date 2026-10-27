@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 376,
+  "count": 377,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -4276,7 +4276,9 @@
         "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
         "contract:b03-create-support-issue-report:Licensee:SELECT",
-        "contract:b03-create-user-notification:Licensee:SELECT"
+        "contract:b03-create-user-notification:Licensee:SELECT",
+        "contract:b03-list-support-issue-reports:Licensee:SELECT",
+        "contract:b03-support-issue-screenshot-access:Licensee:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -4976,8 +4978,10 @@
         "contract:b03-create-support-issue-report:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-user-notification:ManufacturerLicenseeLink:SELECT",
         "contract:b03-list-notifications:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-list-support-issue-reports:ManufacturerLicenseeLink:SELECT",
         "contract:b03-mark-notification-emailed:ManufacturerLicenseeLink:SELECT",
-        "contract:b03-resolve-incident-notification-scope:ManufacturerLicenseeLink:SELECT"
+        "contract:b03-resolve-incident-notification-scope:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-support-issue-screenshot-access:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -5552,7 +5556,9 @@
         "contract:b03-attention-queue:Organization:SELECT",
         "contract:b03-create-role-notifications:Organization:SELECT",
         "contract:b03-create-support-issue-report:Organization:SELECT",
-        "contract:b03-create-user-notification:Organization:SELECT"
+        "contract:b03-create-user-notification:Organization:SELECT",
+        "contract:b03-list-support-issue-reports:Organization:SELECT",
+        "contract:b03-support-issue-screenshot-access:Organization:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -8368,6 +8374,7 @@
         "contract:b03-create-user-notification:RefreshToken:SELECT",
         "contract:b03-get-support-ticket:RefreshToken:SELECT",
         "contract:b03-list-notifications:RefreshToken:SELECT",
+        "contract:b03-list-support-issue-reports:RefreshToken:SELECT",
         "contract:b03-list-support-tickets:RefreshToken:SELECT",
         "contract:b03-mark-all-notifications-read:RefreshToken:SELECT",
         "contract:b03-mark-notification-emailed:RefreshToken:SELECT",
@@ -8376,6 +8383,7 @@
         "contract:b03-resolve-incident-email-actor:RefreshToken:SELECT",
         "contract:b03-resolve-incident-notification-scope:RefreshToken:SELECT",
         "contract:b03-superadmin-alert-emails:RefreshToken:SELECT",
+        "contract:b03-support-issue-screenshot-access:RefreshToken:SELECT",
         "contract:b03-update-support-ticket:RefreshToken:SELECT"
       ],
       "workflowId": null,
@@ -9450,6 +9458,30 @@
     {
       "tableId": "table-support-issue-report",
       "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('support-report-list','support-report-screenshot') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR (\"reporterUserId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_actor_licensee_id',true)))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-list-support-issue-reports:SupportIssueReport:SELECT",
+        "contract:b03-support-issue-screenshot-access:SupportIssueReport:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
       "policyName": "public_verification_supportissuereport_insert",
       "command": "INSERT",
       "actors": [
@@ -10104,7 +10136,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true)='support-report-list' AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR EXISTS (SELECT 1 FROM public.\"SupportIssueReport\" r WHERE r.\"reporterUserId\"=current_setting('app.b03_actor_id',true) AND r.\"licenseeId\"=current_setting('app.b03_actor_licensee_id',true) AND r.\"respondedByUserId\"=id))) OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-add-support-ticket-message:User:SELECT",
@@ -10116,6 +10148,7 @@
         "contract:b03-create-user-notification:User:SELECT",
         "contract:b03-get-support-ticket:User:SELECT",
         "contract:b03-list-notifications:User:SELECT",
+        "contract:b03-list-support-issue-reports:User:SELECT",
         "contract:b03-list-support-tickets:User:SELECT",
         "contract:b03-mark-all-notifications-read:User:SELECT",
         "contract:b03-mark-notification-emailed:User:SELECT",
@@ -10124,6 +10157,7 @@
         "contract:b03-resolve-incident-email-actor:User:SELECT",
         "contract:b03-resolve-incident-notification-scope:User:SELECT",
         "contract:b03-superadmin-alert-emails:User:SELECT",
+        "contract:b03-support-issue-screenshot-access:User:SELECT",
         "contract:b03-update-support-ticket:User:SELECT"
       ],
       "workflowId": null,
