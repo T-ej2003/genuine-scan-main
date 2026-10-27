@@ -16,7 +16,8 @@ const original = {
   let claims = 0;
   const completions = [];
   boundary.withB03SupportEmailWorkerContext = (context, callback) => callback({ requestId: context.requestId });
-  repository.claimSupportResponseEmails = async (db) => {
+  repository.claimSupportResponseEmails = async (db, input) => {
+    assert.equal(input.batchSize, 1, "the worker must claim only the email it can send next");
     assert.equal(sends, claims, "email must not be sent before a committed claim");
     claims += 1;
     if (claims > 2) return [];

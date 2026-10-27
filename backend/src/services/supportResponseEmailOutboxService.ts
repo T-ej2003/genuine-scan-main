@@ -21,7 +21,8 @@ export const flushSupportResponseEmailOutbox = async () => {
   const claimToken = randomUUID();
   const claims = await withB03SupportEmailWorkerContext(
     { jobId: `support-email-claim:${claimToken}`, requestId: claimToken },
-    (db) => claimSupportResponseEmails(db, { attemptedAt: new Date(), batchSize: 10 })
+    // shortcut: claim one at a time so a crash cannot strand unsent rows in the claimed batch.
+    (db) => claimSupportResponseEmails(db, { attemptedAt: new Date(), batchSize: 1 })
   );
   for (const claim of claims) {
     const data = claim.data as DeliveryData;
