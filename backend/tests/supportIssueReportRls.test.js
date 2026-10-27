@@ -11,7 +11,7 @@ const authHeader = (token) => ({
 });
 
 (async () => {
-  await withP2TestApp(async ({ request, prisma, preauthPrisma, runtimePrisma }) => {
+  await withP2TestApp(async ({ baseUrl, request, prisma, preauthPrisma, runtimePrisma }) => {
     await seedP2Fixtures(prisma);
     const tokens = await issueBearerTokens(preauthPrisma);
     const body = { title: "Synthetic printer support issue", description: "Isolated RLS integration test" };
@@ -26,6 +26,22 @@ const authHeader = (token) => ({
       headers: authHeader(tokens.manufacturerA),
     });
     assert.equal(malformed.status, 400, malformed.text);
+    const invalidDiagnostics = await request("POST", "/api/support/reports", {
+      title: "Invalid nested diagnostics", diagnostics: JSON.stringify({ nested: Array(12).fill(0).reduce((value) => ({ child: value }), "leaf") }),
+    }, { headers: authHeader(tokens.manufacturerA) });
+    assert.equal(invalidDiagnostics.status, 400, invalidDiagnostics.text);
+    assert.equal(await prisma.supportIssueReport.count({ where: { title: "Invalid nested diagnostics" } }), 0);
+    const { supportIssueUploadsDirectory } = require("../dist/middleware/supportIssueUpload");
+    const beforeUploads = new Set(fs.existsSync(supportIssueUploadsDirectory) ? fs.readdirSync(supportIssueUploadsDirectory) : []);
+    const upload = new FormData();
+    upload.set("title", "Invalid uploaded diagnostics");
+    upload.set("diagnostics", JSON.stringify({ nested: Array(12).fill(0).reduce((value) => ({ child: value }), "leaf") }));
+    upload.set("screenshot", new Blob([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), "synthetic.png");
+    const invalidUpload = await fetch(`${baseUrl}/api/support/reports`, {
+      method: "POST", headers: authHeader(tokens.manufacturerA), body: upload,
+    });
+    assert.equal(invalidUpload.status, 400, await invalidUpload.text());
+    assert.deepEqual(fs.readdirSync(supportIssueUploadsDirectory).filter((name) => !beforeUploads.has(name)), []);
     const foreign = await request("POST", "/api/support/reports", {
       ...body, licenseeId: ids.licenseeB,
     }, { headers: authHeader(tokens.manufacturerA) });
@@ -214,7 +230,6 @@ const authHeader = (token) => ({
     assert.equal(missingListAuth.status, 401, missingListAuth.text);
 
     const fileName = `p2-support-${randomUUID()}.png`;
-    const { supportIssueUploadsDirectory } = require("../dist/middleware/supportIssueUpload");
     const filePath = path.join(supportIssueUploadsDirectory, fileName);
     fs.mkdirSync(supportIssueUploadsDirectory, { recursive: true });
     fs.writeFileSync(filePath, Buffer.from("synthetic-png-test-file"));

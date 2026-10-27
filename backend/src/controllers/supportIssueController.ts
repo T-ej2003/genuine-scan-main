@@ -46,18 +46,19 @@ const listQuerySchema = z.object({
 const parseDiagnostics = (raw?: string | null) => {
   const text = String(raw || "").trim();
   if (!text) return null;
+  let parsed;
   try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object") {
-      const sanitized = sanitizeUnknownInput(parsed, "supportIssueDiagnostics");
-      if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
-        return sanitized;
-      }
-    }
-    return { raw: text };
+    parsed = JSON.parse(text);
   } catch {
     return { raw: text };
   }
+  if (parsed && typeof parsed === "object") {
+    const sanitized = sanitizeUnknownInput(parsed, "supportIssueDiagnostics");
+    if (sanitized && typeof sanitized === "object" && !Array.isArray(sanitized)) {
+      return sanitized;
+    }
+  }
+  return { raw: text };
 };
 
 const isPlatform = (role: UserRole) => role === UserRole.SUPER_ADMIN || role === UserRole.PLATFORM_SUPER_ADMIN;
@@ -89,6 +90,7 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
 
     const parsed = createSchema.safeParse(req.body || {});
     if (!parsed.success) {
+      if ((req as any).file?.path) await removeLocalFileIfExists((req as any).file.path);
       return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid payload" });
     }
 
@@ -96,7 +98,13 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
     const screenshotPath = file?.filename || null;
     const screenshotMime = file?.mimetype || null;
     const screenshotSize = file?.size || null;
-    const diagnostics = parseDiagnostics(parsed.data.diagnostics);
+    let diagnostics;
+    try {
+      diagnostics = parseDiagnostics(parsed.data.diagnostics);
+    } catch {
+      if (file?.path) await removeLocalFileIfExists(file.path);
+      return res.status(400).json({ success: false, error: "Invalid diagnostics" });
+    }
     if (diagnostics && supportDiagnosticsStorageBytesUpperBound(diagnostics) > SUPPORT_DIAGNOSTICS_MAX_BYTES) {
       if (file?.path) await removeLocalFileIfExists(file.path);
       return res.status(400).json({ success: false, error: "Diagnostics exceed 250000 UTF-8 bytes" });

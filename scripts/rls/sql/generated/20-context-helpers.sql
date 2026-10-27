@@ -14318,7 +14318,7 @@ BEGIN
           set_config('app.b03_actor_licensee_id',coalesce(actor."licenseeId",''),true),
           set_config('app.b03_licensee_id',coalesce(actor."licenseeId",''),true),
           set_config('app.b03_operation','support-report-list',true);
-  WITH visible AS MATERIALIZED (
+  WITH visible AS NOT MATERIALIZED (
     SELECT r.id,r."reporterUserId",r."reporterRole",r."licenseeId",r."referenceCode",
       r."publicName",r."publicEmail",r."issueType",r."verificationCode",r."productReference",
       r.priority,r.title,r.description,r.status,r."internalNote",r."responseMessage",
