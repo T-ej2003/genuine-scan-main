@@ -136,7 +136,7 @@ export function BatchesWorkspaceTable({
       )}
 
       {allocationHint ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+        <div role="status" aria-live="polite" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="font-semibold">{allocationHint.title}</p>
@@ -176,8 +176,8 @@ export function BatchesWorkspaceTable({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All source batches</SelectItem>
-                  <SelectItem value="assigned">With manufacturer assignments</SelectItem>
-                  <SelectItem value="unassigned">With unassigned inventory</SelectItem>
+                  <SelectItem value="assigned">Assignments on this page</SelectItem>
+                  <SelectItem value="unassigned">Unassigned on this page</SelectItem>
                 </SelectContent>
               </Select>
             ) : (
@@ -394,7 +394,7 @@ export function BatchesWorkspaceTable({
                       </TableRow>
                     ) : (
                       filteredStableRows.map((row) => {
-                        const topManufacturer = row.manufacturerSummary[0] || null;
+                        const source = row.sourceBatchRow;
 
                         return (
                           <TableRow
@@ -412,65 +412,39 @@ export function BatchesWorkspaceTable({
                                 </div>
                                 <div className="flex flex-wrap gap-2">
                                   <Badge variant="secondary">Source batch</Badge>
-                                  <Badge variant="outline">{row.originalTotalCodes.toLocaleString()} total</Badge>
+                                  <Badge variant="outline">{source ? `${source.totalCodes.toLocaleString()} in source` : "Source on another page"}</Badge>
                                 </div>
                               </div>
                             </TableCell>
 
                             <TableCell>
-                              <div className="text-sm font-medium">{row.originalTotalCodes.toLocaleString()} labels</div>
-	                              <div className="mt-1 text-xs text-muted-foreground">
-	                                Label range: <span className="font-mono">{row.sourceOriginalRangeStart} to {row.sourceOriginalRangeEnd}</span>
-	                              </div>
+                              <div className="text-sm font-medium">{source ? `${source.totalCodes.toLocaleString()} currently in source` : "Open for complete lineage"}</div>
+                              {source ? <div className="mt-1 text-xs text-muted-foreground font-mono">{source.startCode} to {source.endCode}</div> : null}
                             </TableCell>
 
                             <TableCell>
                               <div className="space-y-2 pr-4">
-                                <Badge variant={row.remainingUnassignedCodes > 0 ? "default" : "secondary"}>
+                                {source ? <Badge variant={row.remainingUnassignedCodes > 0 ? "default" : "secondary"}>
                                   {row.remainingUnassignedCodes.toLocaleString()} unassigned remaining
-                                </Badge>
-                                <div className="flex flex-wrap gap-2 text-xs">
-                                  <Badge variant={row.assignedCodes > 0 ? "secondary" : "outline"}>
-                                    {row.assignedCodes.toLocaleString()} assigned
-                                  </Badge>
-                                  <Badge variant={row.pendingPrintableCodes > 0 ? "secondary" : "outline"}>
-                                    {row.pendingPrintableCodes.toLocaleString()} ready to print
-                                  </Badge>
-                                </div>
-                                {row.remainingRangeStart && row.remainingRangeEnd ? (
+                                </Badge> : <span className="text-xs text-muted-foreground">Open workspace for source inventory</span>}
+                                {source && row.remainingRangeStart && row.remainingRangeEnd ? (
                                   <details className="text-xs text-muted-foreground">
 	                                    <summary className="cursor-pointer">Label range</summary>
                                     <div className="mt-1 break-all font-mono">{`${row.remainingRangeStart} -> ${row.remainingRangeEnd}`}</div>
                                   </details>
-                                ) : (
+                                ) : source ? (
                                   <div className="text-xs text-muted-foreground">No unassigned labels remain.</div>
-                                )}
+                                ) : null}
                               </div>
                             </TableCell>
 
                             <TableCell>
-                              {topManufacturer ? (
-                                <div className="space-y-2">
-                                  <div className="font-medium">{topManufacturer.manufacturerName}</div>
-                                  <div className="text-xs text-muted-foreground">
-                                    {row.manufacturerCount > 1
-                                      ? `+${row.manufacturerCount - 1} more manufacturer accounts`
-                                      : `${topManufacturer.allocatedCodes.toLocaleString()} assigned`}
-                                  </div>
-                                </div>
-                              ) : (
-                                <span className="text-muted-foreground">Not assigned yet</span>
-                              )}
+                              <span className="text-muted-foreground">Open workspace for all assignments</span>
                             </TableCell>
 
                             <TableCell>
                               <div className="space-y-2">
-                                <Badge variant={row.printedCodes > 0 ? "secondary" : "outline"}>
-                                  {row.printedCodes.toLocaleString()} printed
-                                </Badge>
-                                <div className="text-xs text-muted-foreground">
-                                  Ready {row.pendingPrintableCodes.toLocaleString()} · Scanned {row.redeemedCodes.toLocaleString()}
-                                </div>
+                                <span className="text-muted-foreground">Open workspace for print totals</span>
                               </div>
                             </TableCell>
 
@@ -501,7 +475,7 @@ export function BatchesWorkspaceTable({
               </div>
 
               <div className="mt-3 text-sm text-muted-foreground">
-                Showing {filteredStableRows.length} of {stableRows.length} batches
+                Showing {filteredStableRows.length} of {stableRows.length} source groups on this page. Open a workspace for complete lineage totals.
               </div>
             </>
           )}

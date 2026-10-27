@@ -59,4 +59,17 @@ describe("dashboard request control", () => {
     expect(state?.hasLastGood).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
+
+  it("does not let an invalidated in-flight read repopulate the cache", async () => {
+    let finishOld!: (value: { success: true; data: { dormant: number }; status: number }) => void;
+    const oldRead = controlledDashboardGet("qr:stats:?licenseeId=tenant-one", () =>
+      new Promise<{ success: true; data: { dormant: number }; status: number }>((resolve) => { finishOld = resolve; }));
+    clearDashboardReadCache(["qr:stats:"]);
+    const fresh = vi.fn(async () => ({ success: true as const, data: { dormant: 140 }, status: 200 }));
+    expect((await controlledDashboardGet("qr:stats:?licenseeId=tenant-one", fresh)).data).toEqual({ dormant: 140 });
+    finishOld({ success: true, data: { dormant: 150 }, status: 200 });
+    expect((await oldRead).success).toBe(false);
+    expect((await controlledDashboardGet("qr:stats:?licenseeId=tenant-one", fresh)).data).toEqual({ dormant: 140 });
+    expect(fresh).toHaveBeenCalledTimes(1);
+  });
 });

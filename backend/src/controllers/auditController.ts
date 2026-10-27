@@ -52,6 +52,7 @@ export const auditLogQuerySchema = z.object({
   cursor: z.string().trim().max(512).optional(),
   entityType: z.string().trim().max(120).optional(),
   entityId: z.string().trim().max(160).optional(),
+  entityIds: z.string().transform((value) => value.split(",")).pipe(z.array(z.string().uuid()).min(1).max(100)).transform((ids) => [...new Set(ids)].sort()).optional(),
   action: z.string().trim().max(160).optional(),
   userId: z.string().uuid().optional(),
   licenseeId: z.string().uuid().optional(),
@@ -60,7 +61,9 @@ export const auditLogQuerySchema = z.object({
   from: z.string().datetime({ offset: true }).optional(),
   to: z.string().datetime({ offset: true }).optional(),
   purpose: z.string().trim().min(1).max(240).optional(),
-}).strict();
+}).strict()
+  .refine((query) => !(query.entityId && query.entityIds), "Choose one entity filter")
+  .refine((query) => !query.entityIds || query.entityType === "Batch", "Bulk entity filter requires Batch entity type");
 
 const auditExportQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(20_000).optional(),

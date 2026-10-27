@@ -409,6 +409,8 @@ export const assignManufacturer = async (req: AuthRequest, res: Response) => {
       newBatchId: string;
       newBatchName: string;
       allocated: number;
+      startCode: string;
+      endCode: string;
       sourceBatchId: string;
       sourceBatchName: string;
       sourceRemainingCodes: number;

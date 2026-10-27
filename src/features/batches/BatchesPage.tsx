@@ -87,6 +87,8 @@ export default function BatchesPage() {
   const workspace = useBatchWorkspaceController({
     rows: operations.rows,
     stableRows: operations.stableRows,
+    isManufacturer,
+    currentLicenseeScope: role === "super_admin" ? selectedLicenseeId : user?.licenseeId,
     toast,
     onWorkspaceBatchChange: operations.setAssignBatch,
     onWorkspaceDraftReset: operations.resetAssignDraft,
@@ -395,6 +397,8 @@ export default function BatchesPage() {
         }}
         role={role}
         workspace={workspace.workspaceBatch}
+        workspaceLoading={workspace.workspaceLoading}
+        workspaceError={workspace.workspaceError}
         manufacturers={operations.manufacturers}
         manufacturerPageControls={<nav aria-label="Assignable manufacturer pages" className="flex gap-3 text-sm">
           <button type="button" disabled={operations.manufacturersLoading || operations.manufacturerOffset === 0} onClick={() => operations.setManufacturerOffset(operations.manufacturerOffset - 100)}>Previous manufacturers</button>
@@ -431,6 +435,7 @@ export default function BatchesPage() {
         canDelete={canDelete}
         exportingAudit={workspace.exportingBatchId === workspace.workspaceBatch?.sourceBatchRow?.id}
         historyLoading={workspace.workspaceHistoryLoading}
+        historyError={workspace.workspaceHistoryError}
         historyLogs={workspace.workspaceHistoryLogs}
         historyLastUpdatedAt={workspace.workspaceHistoryLastUpdatedAt}
         onRefreshHistory={() => {

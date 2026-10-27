@@ -283,10 +283,11 @@ export const backfillBatchLineageFromAuditLogs = async (opts?: {
 };
 
 const buildCountMaps = async (
-  batchIds: string[],
+  batches: BatchWithScope[],
   db: CanonicalTransactionClient,
   boundary: AuthorizedBatchOperationalRepositoryBoundary
 ) => {
+  const batchIds = batches.map((batch) => batch.id);
   if (batchIds.length === 0) {
     return {
       countsMap: new Map<string, BatchInventoryCounts>(),
@@ -367,8 +368,12 @@ const buildCountMaps = async (
     });
   }
 
-  const missingBatchIds = batchIds.filter((batchId) => !countsMap.has(batchId));
+  const missingBatchIds = batches.filter((batch) => {
+    const counts = countsMap.get(batch.id);
+    return !counts || Object.values(counts).reduce((total, value) => total + value, 0) !== batch.totalCodes;
+  }).map((batch) => batch.id);
   if (missingBatchIds.length > 0) {
+    for (const batchId of missingBatchIds) countsMap.delete(batchId);
     const countGroups: Array<{ batch_id: string; status: QRStatus; count: bigint | number | string }> = [];
     for (let offset = 0; offset < missingBatchIds.length; offset += 500) {
       const ids = missingBatchIds.slice(offset, offset + 500);
@@ -425,9 +430,8 @@ export const enrichBatchSummaries = async (
 ): Promise<BatchOperationalSummary[]> => {
   if (!batches.length) return [];
 
-  const batchIds = batches.map((batch) => batch.id);
   const { countsMap, unassignedRangeMap, printableRangeMap, reservableCountMap } = await buildCountMaps(
-    batchIds,
+    batches,
     db,
     boundary
   );
