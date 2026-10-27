@@ -10,7 +10,7 @@ import { promptProductionMfaCode } from "../security/production-interactive-mfa-
 import { createProductionCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-cutover-production-adapters.mjs";
 import { createAssumedRoleSessionEnvironment, createProductionAwsCredentialEnvironment, createProductionGithubCredentialEnvironment, productionAwsExecutable, productionGithubExecutable } from "./production-credential-source-contract.mjs";
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
-import { digest as iamDigest } from "./component-iam-installation-contract.mjs";
+import { canonical as canonicalIam, digest as iamDigest } from "./component-iam-installation-contract.mjs";
 import { readStageBProtectedMainCheckoutFromGitHub } from "./stage-b-deployment-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -336,7 +336,7 @@ const publisherTags = [
 ];
 const readJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
 const source = (file) => JSON.parse(fs.readFileSync(path.join(root, "infra/aws/terraform/production-web-release", file), "utf8"));
-const canonical = (value) => JSON.stringify(normalizeIamPolicyDocument(value, "production web release IAM document"));
+const canonical = (value) => canonicalIam(normalizeIamPolicyDocument(value, "production web release IAM document"));
 const fileValue = (file) => `file://${path.join(root, "infra/aws/terraform/production-web-release", file)}`;
 function defaultPolicyVersionId(response) {
   assert.ok(response && typeof response === "object" && !Array.isArray(response), "Permissions boundary policy-version response is malformed.");
