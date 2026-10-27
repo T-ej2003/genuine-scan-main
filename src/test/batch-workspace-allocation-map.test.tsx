@@ -104,16 +104,21 @@ describe("batch workspace allocation map", () => {
     await waitFor(() => expect(result.current.workspaceHistoryLoading).toBe(false));
     expect(result.current.workspaceHistoryLogs.map((row) => row.id)).toEqual(["off-page-event", "source-event"]);
 
+    const staleRefresh = refresh;
     mappedChildren = [...children, { ...children[0], id: "child-101" }];
     await act(async () => { await client.invalidateQueries({ queryKey: ["batches", "allocation-map"] }); });
     rerender();
     await waitFor(() => expect(result.current.workspaceBatch?.assignedCodes).toBe(102));
     await waitFor(() => expect(apiClient.getTraceTimeline).toHaveBeenCalledWith(expect.objectContaining({ batchIds: expect.arrayContaining(["child-101"]) })));
     await waitFor(() => expect(result.current.workspaceHistoryLogs.map((row) => row.id)).toContain("new-event"));
+    await act(async () => { staleRefresh(); });
     expect(result.current.workspaceBatch?.assignedCodes).toBe(102);
     expect(result.current.workspaceHistoryLogs.map((row) => row.id)).toEqual(["new-event", "off-page-event", "source-event"]);
     act(() => result.current.closeWorkspace());
     expect(result.current.workspaceHistoryLogs).toEqual([]);
+    const readCountAfterClose = vi.mocked(apiClient.getTraceTimeline).mock.calls.length;
+    await act(async () => { staleRefresh(); });
+    expect(apiClient.getTraceTimeline).toHaveBeenCalledTimes(readCountAfterClose);
   });
 
   it("follows history cursors and ignores a response after closing", async () => {

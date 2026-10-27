@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { saveAs } from "file-saver";
 
 import type { AllocationMapPayload } from "@/components/batches/BatchAllocationMapDialog";
@@ -145,6 +145,8 @@ export function useBatchWorkspaceController({
     if (!map?.sourceBatch) return null;
     return buildStableBatchOverviewRows([map.sourceBatch, ...map.allocations] as BatchRow[])[0] || null;
   }, [workspaceMapQuery.data]);
+  const historyContext = useRef({ completeWorkspace, scopeMatches });
+  useLayoutEffect(() => { historyContext.current = { completeWorkspace, scopeMatches }; }, [completeWorkspace, scopeMatches]);
   const [workspaceHistoryLogs, setWorkspaceHistoryLogs] = useState<TraceEventRow[]>([]);
   const [workspaceHistoryLoading, setWorkspaceHistoryLoading] = useState(false);
   const [workspaceHistoryError, setWorkspaceHistoryError] = useState<string | null>(null);
@@ -157,9 +159,10 @@ export function useBatchWorkspaceController({
   useEffect(() => () => { historyRequest.current += 1; }, []);
 
   const fetchWorkspaceHistory = async (workspace: StableBatchOverviewRow, options?: { silent?: boolean }) => {
-    const selected = !isManufacturer && completeWorkspace?.sourceBatchId === workspace.sourceBatchId
-      ? completeWorkspace : isManufacturer ? workspace : null;
-    if (!selected || !scopeMatches || openWorkspaceSource.current !== selected.sourceBatchId) return;
+    const { completeWorkspace: currentWorkspace, scopeMatches: currentScopeMatches } = historyContext.current;
+    const selected = !isManufacturer && currentWorkspace?.sourceBatchId === workspace.sourceBatchId
+      ? currentWorkspace : isManufacturer ? workspace : null;
+    if (!selected || !currentScopeMatches || openWorkspaceSource.current !== selected.sourceBatchId) return;
     if (!options?.silent && historyChunks.current.size) clearDashboardReadCache(["audit:logs:", "trace:timeline:"]);
     const request = ++historyRequest.current;
     if (!options?.silent) {
