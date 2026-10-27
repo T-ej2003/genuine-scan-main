@@ -807,13 +807,14 @@ export const getAuthenticatedSupportIssueScreenshot = async (
 
 export const respondToAuthenticatedSupportIssueReport = async (
   db: B03FunctionClient,
-  input: { reportId: string; message: string; status: "OPEN" | "RESPONDED" | "CLOSED"; requestId: string }
+  input: { reportId: string; message: string; status: "OPEN" | "RESPONDED" | "CLOSED"; ipHash?: string | null; requestId: string }
 ) => {
   const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
     SELECT app_rls.b03_respond_support_issue_report(
       ${id(input.reportId, "reportId")}::text,
       ${text(input.message, "response message", 5000)}::text,
       ${exactEnum(input.status, "response status", ["OPEN", "RESPONDED", "CLOSED"])}::text,
+      ${optional(input.ipHash, "ipHash", 80)}::text,
       ${authenticatedRequestId(input.requestId)}::text
     ) AS result
   `), "app_rls.b03_respond_support_issue_report");

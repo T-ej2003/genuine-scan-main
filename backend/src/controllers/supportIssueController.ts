@@ -223,6 +223,7 @@ export const respondToSupportIssueReport = async (req: AuthRequest, res: Respons
       reportId: id,
       message: parsed.data.message,
       status: parsed.data.status || "RESPONDED",
+      ipHash: hashIp(req.ip),
       requestId: boundary.requestId,
     }));
     if (!updated) return res.status(404).json({ success: false, error: "Support report not found" });

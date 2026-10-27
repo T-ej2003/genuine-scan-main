@@ -94,6 +94,7 @@ const authHeader = (token) => ({
       where: { payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" } },
     });
     assert.equal(responseAuditRow.payload.entityId, report.id);
+    assert.match(responseAuditRow.payload.ipHash, /^[0-9a-f]{12}:[0-9a-f]{64}$/);
     const { PrismaClient } = require("@prisma/client");
     const workerUrl = new URL(process.env.DATABASE_URL);
     workerUrl.username = "mscqr_rls_cert_worker";
@@ -215,6 +216,10 @@ const authHeader = (token) => ({
       capability: openCookieToken(tokens.superAdmin.databaseCapability, "auth.database-session"),
       requestId: randomUUID(), purpose: "support-report-response",
     });
+    await assert.rejects(responseBoundary.run((db) => respondToAuthenticatedSupportIssueReport(db, {
+      reportId: secondReport.id, message: "Rejected raw address", status: "RESPONDED",
+      ipHash: "127.0.0.1", requestId: responseBoundary.requestId,
+    })), /B03_SUPPORT_RESPONSE_DENIED|42501/i);
     await assert.rejects(responseBoundary.run(async (db) => {
       await respondToAuthenticatedSupportIssueReport(db, {
         reportId: secondReport.id, message: "Rolled back response", status: "RESPONDED",

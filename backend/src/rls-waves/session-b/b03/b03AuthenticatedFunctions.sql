@@ -1167,7 +1167,7 @@ REVOKE ALL ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,te
 REVOKE ALL ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION app_rls.b03_respond_support_issue_report(
-  p_report_id text,p_message text,p_status text,p_request_id text
+  p_report_id text,p_message text,p_status text,p_ip_hash text,p_request_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
@@ -1188,6 +1188,7 @@ BEGIN
      OR current_setting('app.purpose',true)<>'support-report-response'
      OR p_report_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
      OR length(btrim(coalesce(p_message,''))) NOT BETWEEN 5 AND 5000
+     OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
      OR p_status NOT IN ('OPEN','RESPONDED','CLOSED') THEN
     RAISE EXCEPTION 'B03_SUPPORT_RESPONSE_DENIED' USING ERRCODE='42501';
   END IF;
@@ -1236,7 +1237,7 @@ BEGIN
     gen_random_uuid()::text,
     jsonb_build_object('userId',actor.user_id,'orgId',tenant_org_id,
       'licenseeId',report."licenseeId",'action','SUPPORT_ISSUE_RESPONDED',
-      'entityType','SupportIssueReport','entityId',report.id,
+      'entityType','SupportIssueReport','entityId',report.id,'ipHash',p_ip_hash,
       'details',jsonb_build_object('status',p_status,'responseLength',length(btrim(p_message)),
         'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END)),response_at
   );
@@ -1266,7 +1267,7 @@ BEGIN
 END
 $fn$;
 
-REVOKE ALL ON FUNCTION app_rls.b03_respond_support_issue_report(text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_respond_support_issue_report(text,text,text,text,text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION app_rls.b03_claim_support_response_emails(
   p_attempted_at timestamp without time zone,p_batch_size integer
