@@ -302,6 +302,28 @@ const authHeader = (token) => ({
       payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" },
     } }), 5);
 
+    await prisma.refreshToken.updateMany({ where: { userId: ids.superAdmin, revokedAt: null }, data: {
+      mfaVerifiedAt: new Date(Date.now() - 31 * 60_000),
+    } });
+    const staleMfaBoundary = createB03AuthenticatedFunctionBoundary({
+      claims: verifyAccessToken(tokens.superAdmin.accessToken),
+      capability: openCookieToken(tokens.superAdmin.databaseCapability, "auth.database-session"),
+      requestId: randomUUID(), purpose: "support-report-response",
+    });
+    const [mfaState] = await staleMfaBoundary.run((db) => db.$queryRaw`
+      SELECT count(*)::integer AS "count" FROM app_rls.require_recent_mfa_session(
+        current_setting('app.auth_session_id',true),clock_timestamp()::timestamp,30)
+    `);
+    assert.equal(mfaState.count, 0, "the authenticated actor must have no recent-MFA result");
+    await assert.rejects(staleMfaBoundary.run((db) => respondToAuthenticatedSupportIssueReport(db, {
+      reportId: report.id, message: "This response must not persist", status: "RESPONDED",
+      requestId: staleMfaBoundary.requestId,
+    })), /B03_SUPPORT_RESPONSE_DENIED|RECENT_MFA_DENIED|42501/i);
+    assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).responseMessage, "A support reply");
+    assert.equal(await prisma.auditLogOutbox.count({ where: {
+      payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" },
+    } }), 5);
+
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {
         reporterUserId: ids.manufacturerA, reporterRole: "MANUFACTURER_ADMIN",

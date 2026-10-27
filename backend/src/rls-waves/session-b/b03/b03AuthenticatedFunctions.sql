@@ -1201,6 +1201,9 @@ BEGIN
   PERFORM 1 FROM app_rls.require_recent_mfa_session(
     current_setting('app.auth_session_id',true),response_at,30
   );
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'B03_SUPPORT_RESPONSE_DENIED' USING ERRCODE='42501';
+  END IF;
   PERFORM set_config('app.b03_operation','support-report-response',true),
           set_config('app.b03_support_report_id',p_report_id,true);
   SELECT r.id,r."reporterUserId",r."licenseeId",r."publicEmail",r."publicName",
