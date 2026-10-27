@@ -963,7 +963,7 @@ SET search_path = pg_catalog, public
 AS $fn$
 DECLARE actor record;
 DECLARE report_id text := gen_random_uuid()::text;
-DECLARE created_at timestamp without time zone := clock_timestamp()::timestamp without time zone;
+DECLARE created_at timestamp without time zone := (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3);
 BEGIN
   IF current_setting('app.purpose',true)<>'support-report-create'
      OR p_request_id IS NULL OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
@@ -1030,7 +1030,8 @@ BEGIN
   WHERE u.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')
     AND u."isActive" AND u.status='ACTIVE' AND u."deletedAt" IS NULL AND u."disabledAt" IS NULL;
   RETURN jsonb_build_object(
-    'id',report_id,'status','OPEN','createdAt',created_at,
+    'id',report_id,'status','OPEN',
+    'createdAt',to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
     'reporterUserId',actor."userId",'reporterRole',actor.role,
     'licenseeId',actor."licenseeId",'title',btrim(p_title),
     'sourcePath',p_source_path,'pageUrl',p_page_url
@@ -1111,6 +1112,10 @@ BEGIN
     (CASE WHEN actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') THEN to_jsonb(page)
       ELSE to_jsonb(page)-'internalNote'-'emailErrorCode'-'acknowledgementEmailErrorCode' END)
     || jsonb_build_object(
+      'createdAt',to_char(page."createdAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'updatedAt',to_char(page."updatedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+      'respondedAt',to_char(page."respondedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))
+    || jsonb_build_object(
       'reporterUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'email',u.email,'role',u.role)
         FROM public."User" u WHERE u.id=page."reporterUserId"),
       'respondedByUser',(SELECT jsonb_build_object('id',u.id,'name',u.name,'role',u.role)
@@ -1177,7 +1182,8 @@ DECLARE report record;
 DECLARE replay record;
 DECLARE recipient text;
 DECLARE tenant_org_id text;
-DECLARE response_at timestamp without time zone := clock_timestamp()::timestamp(3);
+DECLARE response_at timestamp without time zone := (clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3);
+DECLARE response_iso text;
 DECLARE response_key text;
 DECLARE email_id text;
 DECLARE web_id text;
@@ -1213,13 +1219,14 @@ BEGIN
     SELECT n.body,n.data INTO replay FROM public."Notification" n WHERE n.id=email_id;
     IF FOUND AND (replay.data->>'respondedAt')::timestamp without time zone=report."respondedAt" THEN
       RETURN jsonb_build_object('id',report.id,'status',replay.data->>'status',
-        'responseMessage',replay.body,'respondedAt',replay.data->>'respondedAt',
+        'responseMessage',replay.body,'respondedAt',to_char(report."respondedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'emailDeliveryStatus',CASE WHEN replay.data->>'emailState'='QUEUED' THEN 'PENDING'
           ELSE replay.data->>'emailState' END,'replayed',true,
         'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id);
     END IF;
   END IF;
-  response_at:=greatest(clock_timestamp()::timestamp(3),coalesce(report."respondedAt"+interval '1 millisecond',response_at));
+  response_at:=greatest((clock_timestamp() AT TIME ZONE 'UTC')::timestamp(3),coalesce(report."respondedAt"+interval '1 millisecond',response_at));
+  response_iso:=to_char(response_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
   response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message)||':'||response_at::text,'UTF8')),'hex');
   email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
   web_id:=encode(sha256(convert_to('web:'||response_key,'UTF8')),'hex');
@@ -1247,7 +1254,7 @@ BEGIN
     VALUES (web_id,report."reporterUserId",tenant_org_id,report."licenseeId",
       'ALL','WEB','support_issue_response','Support response: '||report.title,
       btrim(p_message),jsonb_build_object('supportReportId',report.id,'status',p_status,
-        'respondedAt',response_at,'targetRoute','/support'),response_at);
+        'respondedAt',response_iso,'targetRoute','/support'),response_at);
   END IF;
   PERFORM set_config('app.b03_notification_id',email_id,true);
   INSERT INTO public."Notification"(id,"userId","orgId","licenseeId",audience,channel,type,title,body,data,"updatedAt")
@@ -1258,9 +1265,9 @@ BEGIN
       'subject',report.title,
       'responderEmail',(SELECT u.email FROM public."User" u WHERE u.id=actor.user_id),
       'responderUserId',actor.user_id,
-      'respondedAt',response_at,'emailState',delivery_state,'attempts',0),response_at);
+      'respondedAt',response_iso,'emailState',delivery_state,'attempts',0),response_at);
   RETURN jsonb_build_object('id',report.id,'status',p_status,
-    'responseMessage',btrim(p_message),'respondedAt',response_at,
+    'responseMessage',btrim(p_message),'respondedAt',response_iso,
     'emailDeliveryStatus',CASE WHEN delivery_state='QUEUED' THEN 'PENDING' ELSE 'NOT_SENT' END,
     'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id,
     'replayed',false);

@@ -70,10 +70,15 @@ const authHeader = (token) => ({
     assert(concurrentResponses.every((response) => response.status === 200), concurrentResponses.map((response) => response.text).join("\n"));
     assert.deepEqual(concurrentResponses.map((response) => response.payload.data.replayed).sort(), [false, true]);
     assert(concurrentResponses.every((response) => response.payload.data.emailDeliveryStatus === "PENDING"));
+    assert(concurrentResponses.every((response) => /Z$/.test(response.payload.data.respondedAt)));
+    assert.equal(new Date(concurrentResponses[0].payload.data.respondedAt).getTime(),
+      (await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).respondedAt.getTime());
     const responseNotifications = await prisma.notification.findMany({ where: { type: "support_issue_response" } });
     assert.equal(responseNotifications.filter((row) => row.channel === "EMAIL").length, 1);
     assert.equal(responseNotifications.filter((row) => row.channel === "WEB").length, 1);
     assert.equal(responseNotifications.find((row) => row.channel === "EMAIL").emailedAt, null);
+    assert.equal(responseNotifications.find((row) => row.channel === "EMAIL").data.respondedAt,
+      concurrentResponses[0].payload.data.respondedAt);
     const duplicateResponse = await request("POST", responsePath, { message: "A support reply" }, {
       headers: authHeader(tokens.superAdmin),
     });
