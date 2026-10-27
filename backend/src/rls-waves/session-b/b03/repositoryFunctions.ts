@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import type { AuthenticatedSessionClaims } from "../../../types";
 import { withDatabaseAuthenticatedSession } from "../b01/canonicalAuthContext";
+import { SUPPORT_DIAGNOSTICS_MAX_BYTES, supportDiagnosticsStorageBytesUpperBound } from "../../../utils/supportDiagnosticsSize";
 
 export type B03FunctionClient = Pick<Prisma.TransactionClient, "$queryRaw">;
 export type B03AuthenticatedFunctionBoundary = {
@@ -736,7 +737,7 @@ export const createAuthenticatedSupportIssueReport = async (
   }
 ) => {
   const diagnostics = input.diagnostics == null ? null : JSON.stringify(input.diagnostics);
-  if (diagnostics && Buffer.byteLength(diagnostics, "utf8") > 250_000) {
+  if (input.diagnostics != null && supportDiagnosticsStorageBytesUpperBound(input.diagnostics) > SUPPORT_DIAGNOSTICS_MAX_BYTES) {
     throw new Error("B03 repository requires bounded support diagnostics");
   }
   const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
@@ -765,13 +766,15 @@ export const createAuthenticatedSupportIssueReport = async (
 
 export const listAuthenticatedSupportIssueReports = async (
   db: B03FunctionClient,
-  input: { limit: number; offset: number; licenseeId?: string | null; requestId: string }
+  input: { limit: number; offset: number; licenseeId?: string | null; actorLicenseeId?: string | null; actorOrganizationId?: string | null; requestId: string }
 ) => {
   const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
     SELECT app_rls.b03_list_support_issue_reports(
       ${integer(input.limit, "limit", 1, 200)}::integer,
       ${integer(input.offset, "offset", 0, 5000)}::integer,
       ${optional(input.licenseeId, "licenseeId")}::text,
+      ${optional(input.actorLicenseeId, "actorLicenseeId")}::text,
+      ${optional(input.actorOrganizationId, "actorOrganizationId")}::text,
       ${authenticatedRequestId(input.requestId)}::text
     ) AS result
   `), "app_rls.b03_list_support_issue_reports");
@@ -784,11 +787,13 @@ export const listAuthenticatedSupportIssueReports = async (
 
 export const getAuthenticatedSupportIssueScreenshot = async (
   db: B03FunctionClient,
-  input: { fileName: string; requestId: string }
+  input: { fileName: string; actorLicenseeId?: string | null; actorOrganizationId?: string | null; requestId: string }
 ) => {
   const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
     SELECT app_rls.b03_support_issue_screenshot_access(
       ${text(input.fileName, "screenshot file name", 191)}::text,
+      ${optional(input.actorLicenseeId, "actorLicenseeId")}::text,
+      ${optional(input.actorOrganizationId, "actorOrganizationId")}::text,
       ${authenticatedRequestId(input.requestId)}::text
     ) AS result
   `), "app_rls.b03_support_issue_screenshot_access");

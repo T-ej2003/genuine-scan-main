@@ -124,6 +124,58 @@ const authHeader = (token) => ({
     assert.equal(securityEvent.sinkEventId, `projection:${securityEvent.id}`);
     assert.equal(await prisma.supportIssueReport.count({ where: { title: body.title } }), 1);
 
+    const { supportDiagnosticsStorageBytesUpperBound, SUPPORT_DIAGNOSTICS_MAX_BYTES } = require("../dist/utils/supportDiagnosticsSize");
+    const asciiBase = supportDiagnosticsStorageBytesUpperBound({ message: "" });
+    const asciiDiagnostics = { message: "a".repeat(SUPPORT_DIAGNOSTICS_MAX_BYTES - asciiBase) };
+    assert.equal(supportDiagnosticsStorageBytesUpperBound(asciiDiagnostics), SUPPORT_DIAGNOSTICS_MAX_BYTES);
+    const asciiPgSize = await prisma.$queryRawUnsafe(
+      "SELECT octet_length($1::jsonb::text) AS bytes", JSON.stringify(asciiDiagnostics)
+    );
+    assert.equal(asciiPgSize[0].bytes, SUPPORT_DIAGNOSTICS_MAX_BYTES);
+    const asciiValid = await request("POST", "/api/support/reports", {
+      title: "ASCII diagnostics at boundary", diagnostics: JSON.stringify(asciiDiagnostics),
+    }, { headers: authHeader(tokens.manufacturerA) });
+    assert.equal(asciiValid.status, 201, asciiValid.text.slice(0, 500));
+    assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: asciiValid.payload.data.id } })).diagnostics.message.length,
+      asciiDiagnostics.message.length);
+
+    const unicodeCount = Math.floor((SUPPORT_DIAGNOSTICS_MAX_BYTES - asciiBase) / Buffer.byteLength("🎯", "utf8"));
+    const unicodeDiagnostics = { message: "🎯".repeat(unicodeCount) };
+    const unicodePgSize = await prisma.$queryRawUnsafe(
+      "SELECT octet_length($1::jsonb::text) AS bytes", JSON.stringify(unicodeDiagnostics)
+    );
+    assert.equal(unicodePgSize[0].bytes, supportDiagnosticsStorageBytesUpperBound(unicodeDiagnostics));
+    for (const sample of [{ nested: [1e21, 1e-7, 1e308, "line\nbreak"] }, { accent: "é", emoji: "🎯" }]) {
+      const pgSize = await prisma.$queryRawUnsafe(
+        "SELECT octet_length($1::jsonb::text) AS bytes", JSON.stringify(sample)
+      );
+      assert(supportDiagnosticsStorageBytesUpperBound(sample) >= pgSize[0].bytes);
+    }
+    const unicodeValid = await request("POST", "/api/support/reports", {
+      title: "Unicode diagnostics within boundary", diagnostics: JSON.stringify(unicodeDiagnostics),
+    }, { headers: authHeader(tokens.manufacturerA) });
+    assert.equal(unicodeValid.status, 201, unicodeValid.text.slice(0, 500));
+    const oversized = await request("POST", "/api/support/reports", {
+      title: "Unicode diagnostics over boundary",
+      diagnostics: JSON.stringify({ message: unicodeDiagnostics.message + "🎯" }),
+    }, { headers: authHeader(tokens.manufacturerA) });
+    assert.equal(oversized.status, 400, oversized.text.slice(0, 500));
+    assert.equal(await prisma.supportIssueReport.count({ where: { title: "Unicode diagnostics over boundary" } }), 0);
+    const oversizedAscii = await request("POST", "/api/support/reports", {
+      title: "ASCII diagnostics over boundary",
+      diagnostics: JSON.stringify({ message: asciiDiagnostics.message + "a" }),
+    }, { headers: authHeader(tokens.manufacturerA) });
+    assert.equal(oversizedAscii.status, 400, oversizedAscii.text.slice(0, 500));
+    await assert.rejects(
+      boundary.run((db) => db.$queryRawUnsafe(
+        `SELECT app_rls.b03_create_support_issue_report(
+          $1::text,$2::text,'SQL boundary oversized diagnostics',NULL::text,NULL::text,NULL::text,
+          false,NULL::text,NULL::text,NULL::integer,$3::jsonb,NULL::text,$4::text)`,
+        ids.licenseeA, ids.orgA, JSON.stringify({ message: asciiDiagnostics.message + "a" }), boundary.requestId
+      )),
+      /B03_SUPPORT_REPORT_DENIED|42501/i
+    );
+
     const second = await request("POST", "/api/support/reports", {
       title: "Second tenant printer support issue",
     }, { headers: authHeader(tokens.manufacturerB) });
@@ -189,6 +241,46 @@ const authHeader = (token) => ({
     } finally {
       fs.rmSync(filePath, { force: true });
     }
+
+    await prisma.manufacturerLicenseeLink.create({ data: {
+      manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeB, isPrimary: false,
+    } });
+    const selectedTenantReportId = randomUUID();
+    await prisma.supportIssueReport.create({ data: {
+      id: selectedTenantReportId, reporterUserId: ids.manufacturerA,
+      reporterRole: "MANUFACTURER_ADMIN", licenseeId: ids.licenseeB,
+      title: "Selected tenant B report", screenshotPath: "selected-tenant-b.png",
+      screenshotMime: "image/png",
+    } });
+    await prisma.user.update({ where: { id: ids.manufacturerA }, data: {
+      licenseeId: null, orgId: null,
+    } });
+    const selectedClaims = {
+      ...verifyAccessToken(tokens.manufacturerA.accessToken),
+      licenseeId: ids.licenseeB, orgId: ids.orgB,
+    };
+    const selectedListBoundary = createB03AuthenticatedFunctionBoundary({
+      claims: selectedClaims,
+      capability: openCookieToken(tokens.manufacturerA.databaseCapability, "auth.database-session"),
+      requestId: randomUUID(), purpose: "support-report-list",
+    });
+    const { listAuthenticatedSupportIssueReports, getAuthenticatedSupportIssueScreenshot } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
+    const selectedList = await selectedListBoundary.run((db) => listAuthenticatedSupportIssueReports(db, {
+      limit: 50, offset: 0, actorLicenseeId: ids.licenseeB,
+      actorOrganizationId: ids.orgB, requestId: selectedListBoundary.requestId,
+    }));
+    assert(selectedList.reports.some((row) => row.id === selectedTenantReportId));
+    assert(!selectedList.reports.some((row) => row.id === report.id));
+    const selectedScreenshotBoundary = createB03AuthenticatedFunctionBoundary({
+      claims: selectedClaims,
+      capability: openCookieToken(tokens.manufacturerA.databaseCapability, "auth.database-session"),
+      requestId: randomUUID(), purpose: "support-report-screenshot",
+    });
+    const selectedScreenshot = await selectedScreenshotBoundary.run((db) => getAuthenticatedSupportIssueScreenshot(db, {
+      fileName: "selected-tenant-b.png", actorLicenseeId: ids.licenseeB,
+      actorOrganizationId: ids.orgB, requestId: selectedScreenshotBoundary.requestId,
+    }));
+    assert.equal(selectedScreenshot.id, selectedTenantReportId);
 
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {

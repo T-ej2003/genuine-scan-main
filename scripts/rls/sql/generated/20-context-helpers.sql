@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='e8ad71292847232ce8b8912bc2458e80850ce52eed1727c20f4ccd9593c1033c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:e8ad71292847232ce8b8912bc2458e80850ce52eed1727c20f4ccd9593c1033c'
+    AND source_contract_sha256='63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e8ad71292847232ce8b8912bc2458e80850ce52eed1727c20f4ccd9593c1033c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:63f4a4464b4cf840c42435c61162907c3549625773c7c8d25be8fd71a20eb6ae')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -14211,7 +14211,7 @@ BEGIN
      OR length(coalesce(p_description,''))>5000
      OR length(coalesce(p_source_path,''))>500
      OR length(coalesce(p_page_url,''))>1200
-     OR length(coalesce(p_diagnostics::text,''))>250000
+     OR octet_length(coalesce(p_diagnostics::text,''))>250000
      OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
      OR length(coalesce(p_screenshot_path,''))>191
      OR length(coalesce(p_screenshot_mime,''))>80
@@ -14286,7 +14286,8 @@ REVOKE ALL ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,
 REVOKE ALL ON FUNCTION app_rls.b03_create_support_issue_report(text,text,text,text,text,text,boolean,text,text,integer,jsonb,text,text) FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION app_rls.b03_list_support_issue_reports(
-  p_limit integer,p_offset integer,p_licensee_id text,p_request_id text
+  p_limit integer,p_offset integer,p_licensee_id text,
+  p_actor_licensee_id text,p_actor_organization_id text,p_request_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
@@ -14303,8 +14304,7 @@ BEGIN
   END IF;
   SELECT * INTO actor FROM app_rls.revalidate_authenticated_actor(
     current_setting('app.user_id',true),current_setting('app.auth_session_id',true),
-    nullif(current_setting('app.licensee_id',true),''),
-    nullif(current_setting('app.organization_id',true),''),clock_timestamp()::timestamp without time zone,p_request_id
+    p_actor_licensee_id,p_actor_organization_id,clock_timestamp()::timestamp without time zone,p_request_id
   );
   IF NOT FOUND OR actor.role NOT IN (
     'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
@@ -14352,7 +14352,7 @@ END
 $fn$;
 
 CREATE OR REPLACE FUNCTION app_rls.b03_support_issue_screenshot_access(
-  p_file_name text,p_request_id text
+  p_file_name text,p_actor_licensee_id text,p_actor_organization_id text,p_request_id text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path = pg_catalog, public
@@ -14367,8 +14367,7 @@ BEGIN
   END IF;
   SELECT * INTO actor FROM app_rls.revalidate_authenticated_actor(
     current_setting('app.user_id',true),current_setting('app.auth_session_id',true),
-    nullif(current_setting('app.licensee_id',true),''),
-    nullif(current_setting('app.organization_id',true),''),clock_timestamp()::timestamp without time zone,p_request_id
+    p_actor_licensee_id,p_actor_organization_id,clock_timestamp()::timestamp without time zone,p_request_id
   );
   IF NOT FOUND OR actor.role NOT IN (
     'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
@@ -14390,8 +14389,8 @@ BEGIN
 END
 $fn$;
 
-REVOKE ALL ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_attention_queue_projection(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_claim_incident_email_delivery(text,text,text,text,text,text,text,text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
@@ -14401,7 +14400,7 @@ GRANT EXECUTE ON FUNCTION app_rls.b03_create_support_issue_report(text,text,text
 GRANT EXECUTE ON FUNCTION app_rls.b03_create_user_notification(text,text,text,text,text,text,text,jsonb,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_get_support_ticket(text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_list_notifications_for_user(text,integer,integer,boolean,timestamp without time zone,text,text) TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_list_support_issue_reports(integer,integer,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_list_support_tickets(text,text,text,text,integer,integer,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_mark_all_notifications_read(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_mark_notification_emailed(text,timestamp without time zone,text) TO "mscqr_rls_cert_app";
@@ -14410,7 +14409,7 @@ GRANT EXECUTE ON FUNCTION app_rls.b03_primary_superadmin_email() TO "mscqr_rls_c
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_resolve_incident_notification_scope(text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_superadmin_alert_emails() TO "mscqr_rls_cert_app";
-GRANT EXECUTE ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.b03_support_issue_screenshot_access(text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) TO "mscqr_rls_cert_app";
 RESET ROLE;
 DO $$ BEGIN

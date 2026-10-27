@@ -16,6 +16,7 @@ import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { createAuthenticatedSupportIssueReport, getAuthenticatedSupportIssueScreenshot, listAuthenticatedSupportIssueReports } from "../rls-waves/session-b/b03/repositoryFunctions";
 import { hashIp } from "../utils/security";
+import { SUPPORT_DIAGNOSTICS_MAX_BYTES, supportDiagnosticsStorageBytesUpperBound } from "../utils/supportDiagnosticsSize";
 
 const createSchema = z.object({
   title: z.string().trim().min(5).max(160),
@@ -23,7 +24,10 @@ const createSchema = z.object({
   sourcePath: z.string().trim().max(500).optional().or(z.literal("")),
   pageUrl: z.string().trim().max(1200).optional().or(z.literal("")),
   autoDetected: z.union([z.boolean(), z.string().trim().toLowerCase()]).optional(),
-  diagnostics: z.string().trim().max(250_000).optional().or(z.literal("")),
+  diagnostics: z.string().trim().refine(
+    (value) => Buffer.byteLength(value, "utf8") <= SUPPORT_DIAGNOSTICS_MAX_BYTES,
+    "Diagnostics exceed 250000 UTF-8 bytes"
+  ).optional().or(z.literal("")),
 }).strict();
 
 const responseSchema = z.object({
@@ -93,6 +97,10 @@ export const createSupportIssueReport = async (req: AuthRequest, res: Response) 
     const screenshotMime = file?.mimetype || null;
     const screenshotSize = file?.size || null;
     const diagnostics = parseDiagnostics(parsed.data.diagnostics);
+    if (diagnostics && supportDiagnosticsStorageBytesUpperBound(diagnostics) > SUPPORT_DIAGNOSTICS_MAX_BYTES) {
+      if (file?.path) await removeLocalFileIfExists(file.path);
+      return res.status(400).json({ success: false, error: "Diagnostics exceed 250000 UTF-8 bytes" });
+    }
 
     if (file?.path && screenshotPath && isObjectStorageConfigured()) {
       await uploadObjectFromFile({
@@ -183,6 +191,8 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
       limit,
       offset,
       licenseeId: parsed.data.licenseeId,
+      actorLicenseeId: req.user!.licenseeId,
+      actorOrganizationId: req.user!.orgId,
       requestId: boundary.requestId,
     }));
 
@@ -343,6 +353,8 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
     const boundary = b03BoundaryForRequest(authReq, "support-report-screenshot");
     const report = await boundary.run((db) => getAuthenticatedSupportIssueScreenshot(db, {
       fileName,
+      actorLicenseeId: authReq.user!.licenseeId,
+      actorOrganizationId: authReq.user!.orgId,
       requestId: boundary.requestId,
     }));
     if (!report) return res.status(404).json({ success: false, error: "File not found" });
