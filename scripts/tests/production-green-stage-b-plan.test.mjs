@@ -413,6 +413,7 @@ test("support email worker receives the existing SMTP settings and a secret refe
     "infra/aws/terraform/production-green-stage-b/task-definitions/green-worker-candidate.json", "utf8"
   )).containerDefinitions[0];
   const settings = new Map(worker.environment.map(({ name, value }) => [name, value]));
+  assert.equal(settings.get("MSCQR_WORKER_DATABASE_ROLE"), "mscqr_prd_rls_phase2_worker");
   for (const name of ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_REQUIRE_TLS", "SMTP_USER", "SMTP_FROM"]) {
     assert.ok(settings.get(name), `${name} must be provisioned for durable support email delivery`);
   }

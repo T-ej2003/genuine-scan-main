@@ -14444,19 +14444,25 @@ BEGIN
   SELECT l."orgId" INTO tenant_org_id FROM public."Licensee" l WHERE l.id=report."licenseeId";
   PERFORM set_config('app.b03_licensee_id',coalesce(report."licenseeId",''),true),
           set_config('app.b03_target_user_id',coalesce(report."reporterUserId",''),true);
-  response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message),'UTF8')),'hex');
+  IF report.status=p_status AND report."responseMessage"=btrim(p_message)
+     AND report."respondedByUserId"=actor.user_id AND report."respondedAt" IS NOT NULL THEN
+    response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message)||':'||report."respondedAt"::text,'UTF8')),'hex');
+    email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
+    PERFORM set_config('app.b03_notification_id',email_id,true);
+    SELECT n.body,n.data INTO replay FROM public."Notification" n WHERE n.id=email_id;
+    IF FOUND AND (replay.data->>'respondedAt')::timestamp without time zone=report."respondedAt" THEN
+      RETURN jsonb_build_object('id',report.id,'status',replay.data->>'status',
+        'responseMessage',replay.body,'respondedAt',replay.data->>'respondedAt',
+        'emailDeliveryStatus',CASE WHEN replay.data->>'emailState'='QUEUED' THEN 'PENDING'
+          ELSE replay.data->>'emailState' END,'replayed',true,
+        'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id);
+    END IF;
+  END IF;
+  response_at:=greatest(clock_timestamp()::timestamp(3),coalesce(report."respondedAt"+interval '1 millisecond',response_at));
+  response_key:=encode(sha256(convert_to(actor.user_id||':'||report.id||':'||p_status||':'||btrim(p_message)||':'||response_at::text,'UTF8')),'hex');
   email_id:=substr(response_key,1,8)||'-'||substr(response_key,9,4)||'-4'||substr(response_key,14,3)||'-a'||substr(response_key,18,3)||'-'||substr(response_key,21,12);
   web_id:=encode(sha256(convert_to('web:'||response_key,'UTF8')),'hex');
   web_id:=substr(web_id,1,8)||'-'||substr(web_id,9,4)||'-4'||substr(web_id,14,3)||'-a'||substr(web_id,18,3)||'-'||substr(web_id,21,12);
-  PERFORM set_config('app.b03_notification_id',email_id,true);
-  SELECT n.body,n.data INTO replay FROM public."Notification" n WHERE n.id=email_id;
-  IF FOUND THEN
-    RETURN jsonb_build_object('id',report.id,'status',replay.data->>'status',
-      'responseMessage',replay.body,'respondedAt',replay.data->>'respondedAt',
-      'emailDeliveryStatus',CASE WHEN replay.data->>'emailState'='QUEUED' THEN 'PENDING'
-        ELSE replay.data->>'emailState' END,'replayed',true,
-      'reporterUserId',report."reporterUserId",'licenseeId',report."licenseeId",'orgId',tenant_org_id);
-  END IF;
   SELECT coalesce(nullif(report."publicEmail",''),u.email) INTO recipient
     FROM (SELECT 1) anchor LEFT JOIN public."User" u ON u.id=report."reporterUserId";
   delivery_state:=CASE WHEN p_status='CLOSED' OR recipient IS NULL THEN 'SKIPPED' ELSE 'QUEUED' END;

@@ -268,6 +268,29 @@ const authHeader = (token) => ({
     } finally {
       await recoveryWorker.$disconnect();
     }
+    const changedResponse = await request("POST", responsePath, { message: "A changed support reply" }, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(changedResponse.status, 200, changedResponse.text);
+    assert.equal(changedResponse.payload.data.replayed, false);
+    const restoredResponse = await request("POST", responsePath, { message: "A support reply" }, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(restoredResponse.status, 200, restoredResponse.text);
+    assert.equal(restoredResponse.payload.data.replayed, false);
+    assert.equal((await prisma.supportIssueReport.findUnique({ where: { id: report.id } })).responseMessage, "A support reply");
+    assert.equal(await prisma.notification.count({ where: {
+      type: "support_issue_response", channel: "EMAIL",
+      data: { path: ["supportReportId"], equals: report.id },
+    } }), 3);
+    const restoredReplay = await request("POST", responsePath, { message: "A support reply" }, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(restoredReplay.payload.data.replayed, true);
+    assert.equal(restoredReplay.payload.data.respondedAt, restoredResponse.payload.data.respondedAt);
+    assert.equal(await prisma.auditLogOutbox.count({ where: {
+      payload: { path: ["action"], equals: "SUPPORT_ISSUE_RESPONDED" },
+    } }), 5);
 
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {
