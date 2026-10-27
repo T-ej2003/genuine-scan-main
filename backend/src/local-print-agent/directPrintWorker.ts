@@ -1447,7 +1447,6 @@ const startPersistentPrintSessionWorker = () => {
         };
 
         ws.on("open", () => {
-          reconnectAttempt = 0;
           updatePersistentSessionStatus({ lastRejectReasonCode: null });
           void buildSignedSessionMessage({
             type: "hello",
@@ -1491,6 +1490,7 @@ const startPersistentPrintSessionWorker = () => {
                 ws.close();
                 return;
               }
+              reconnectAttempt = 0;
               heartbeatTimer = setInterval(() => {
                 if (!session || ws.readyState !== WebSocket.OPEN) return;
                 void sendSessionMessage(ws, session, selection.selectedPrinterId, {
