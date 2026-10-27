@@ -5365,6 +5365,7 @@
       "table": "Notification",
       "command": "UPDATE",
       "columns": [
+        "data",
         "readAt",
         "emailedAt",
         "updatedAt"
@@ -5519,6 +5520,41 @@
         "screenshotSize",
         "diagnostics",
         "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportIssueReport",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "reporterUserId",
+        "licenseeId",
+        "publicEmail",
+        "publicName",
+        "referenceCode",
+        "title",
+        "status",
+        "responseMessage",
+        "respondedByUserId",
+        "respondedAt",
+        "emailDeliveryStatus"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "SupportIssueReport",
+      "command": "UPDATE",
+      "columns": [
+        "status",
+        "responseMessage",
+        "respondedAt",
+        "respondedByUserId",
+        "emailDeliveryStatus",
+        "emailErrorCode",
         "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",

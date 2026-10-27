@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 376,
+  "count": 378,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -1527,10 +1527,11 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND payload->>'action'='SUPPORT_ISSUE_REPORTED' AND payload->>'entityType'='SupportIssueReport' AND payload->>'entityId'=current_setting('app.b03_support_report_id',true) AND payload->>'userId'=current_setting('app.b03_actor_id',true) AND nullif(payload->>'licenseeId','') IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('support-report-create','support-report-response') AND payload->>'action'=CASE WHEN current_setting('app.b03_operation',true)='support-report-create' THEN 'SUPPORT_ISSUE_REPORTED' ELSE 'SUPPORT_ISSUE_RESPONDED' END AND payload->>'entityType'='SupportIssueReport' AND payload->>'entityId'=current_setting('app.b03_support_report_id',true) AND payload->>'userId'=current_setting('app.b03_actor_id',true) AND nullif(payload->>'licenseeId','') IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')",
       "columns": [],
       "sourceCommandRuleIds": [
-        "contract:b03-create-support-issue-report:AuditLogOutbox:INSERT"
+        "contract:b03-create-support-issue-report:AuditLogOutbox:INSERT",
+        "contract:b03-respond-support-issue-report:AuditLogOutbox:INSERT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -4276,7 +4277,8 @@
         "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
         "contract:b03-create-support-issue-report:Licensee:SELECT",
-        "contract:b03-create-user-notification:Licensee:SELECT"
+        "contract:b03-create-user-notification:Licensee:SELECT",
+        "contract:b03-respond-support-issue-report:Licensee:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -5395,11 +5397,12 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='notification-write' AND (\"userId\"=current_setting('app.b03_target_user_id',true) OR current_setting('app.b03_target_user_id',true)='')",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND ((current_setting('app.b03_operation',true)='notification-write' AND (\"userId\"=current_setting('app.b03_target_user_id',true) OR current_setting('app.b03_target_user_id',true)='')) OR (current_setting('app.b03_operation',true)='support-report-response' AND id=current_setting('app.b03_notification_id',true) AND type='support_issue_response' AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'') AND \"userId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_target_user_id',true),'')))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-create-role-notifications:Notification:INSERT",
-        "contract:b03-create-user-notification:Notification:INSERT"
+        "contract:b03-create-user-notification:Notification:INSERT",
+        "contract:b03-respond-support-issue-report:Notification:INSERT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -5419,11 +5422,14 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_operation',true)='notification-read' OR id=current_setting('app.b03_notification_id',true))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND (current_setting('app.b03_operation',true)='notification-read' OR id=current_setting('app.b03_notification_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-claim-support-response-emails:Notification:SELECT",
+        "contract:b03-complete-support-response-email:Notification:SELECT",
         "contract:b03-list-notifications:Notification:SELECT",
-        "contract:b03-mark-notification-read:Notification:SELECT"
+        "contract:b03-mark-notification-read:Notification:SELECT",
+        "contract:b03-respond-support-issue-report:Notification:SELECT"
       ],
       "workflowId": null,
       "route": "B03 authenticated notification and incident email boundary",
@@ -5443,9 +5449,11 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('notification-read-update','notification-email-update') AND (id=current_setting('app.b03_notification_id',true) OR \"userId\"=current_setting('app.b03_actor_id',true))",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true) IN ('notification-read-update','notification-email-update') AND (id=current_setting('app.b03_notification_id',true) OR \"userId\"=current_setting('app.b03_actor_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND channel='EMAIL' AND type='support_issue_response' AND (current_setting('app.b03_operation',true)='support-email-claim' OR id=current_setting('app.b03_notification_id',true)))",
       "columns": [],
       "sourceCommandRuleIds": [
+        "contract:b03-claim-support-response-emails:Notification:UPDATE",
+        "contract:b03-complete-support-response-email:Notification:UPDATE",
         "contract:b03-mark-all-notifications-read:Notification:UPDATE",
         "contract:b03-mark-notification-emailed:Notification:UPDATE",
         "contract:b03-mark-notification-read:Notification:UPDATE"
@@ -8375,6 +8383,7 @@
         "contract:b03-primary-superadmin-email:RefreshToken:SELECT",
         "contract:b03-resolve-incident-email-actor:RefreshToken:SELECT",
         "contract:b03-resolve-incident-notification-scope:RefreshToken:SELECT",
+        "contract:b03-respond-support-issue-report:RefreshToken:SELECT",
         "contract:b03-superadmin-alert-emails:RefreshToken:SELECT",
         "contract:b03-update-support-ticket:RefreshToken:SELECT"
       ],
@@ -9450,6 +9459,56 @@
     {
       "tableId": "table-support-issue-report",
       "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_select",
+      "command": "SELECT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-response' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.b03_support_report_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND id=current_setting('app.b03_support_report_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-claim-support-response-emails:SupportIssueReport:SELECT",
+        "contract:b03-complete-support-response-email:SupportIssueReport:SELECT",
+        "contract:b03-respond-support-issue-report:SupportIssueReport:SELECT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_update",
+      "command": "UPDATE",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "(app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-response' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND id=current_setting('app.b03_support_report_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL' AND current_setting('app.b03_operation',true) IN ('support-email-claim','support-email-complete') AND id=current_setting('app.b03_support_report_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-claim-support-response-emails:SupportIssueReport:UPDATE",
+        "contract:b03-complete-support-response-email:SupportIssueReport:UPDATE",
+        "contract:b03-respond-support-issue-report:SupportIssueReport:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
       "policyName": "public_verification_supportissuereport_insert",
       "command": "INSERT",
       "actors": [
@@ -10104,7 +10163,7 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND (id=current_setting('app.b03_actor_id',true) OR current_setting('app.b03_operation',true)='superadmin-read' OR current_setting('app.b03_operation',true) LIKE 'support-ticket-%' OR (current_setting('app.b03_operation',true) IN ('notification-write','actor-read','support-report-response') AND (current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') OR \"licenseeId\"=current_setting('app.b03_licensee_id',true) OR id=current_setting('app.b03_target_user_id',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-add-support-ticket-message:User:SELECT",
@@ -10123,6 +10182,7 @@
         "contract:b03-primary-superadmin-email:User:SELECT",
         "contract:b03-resolve-incident-email-actor:User:SELECT",
         "contract:b03-resolve-incident-notification-scope:User:SELECT",
+        "contract:b03-respond-support-issue-report:User:SELECT",
         "contract:b03-superadmin-alert-emails:User:SELECT",
         "contract:b03-update-support-ticket:User:SELECT"
       ],

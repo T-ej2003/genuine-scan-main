@@ -1,4 +1,7 @@
 REVOKE ALL ON FUNCTION app_rls.b03_create_support_issue_report(text,text,text,text,text,text,boolean,text,text,integer,jsonb,text,text) FROM {{APP_ROLE}};
+REVOKE ALL ON FUNCTION app_rls.b03_respond_support_issue_report(text,text,text,text) FROM {{APP_ROLE}};
+REVOKE ALL ON FUNCTION app_rls.b03_claim_support_response_emails(timestamp without time zone,integer) FROM {{WORKER_ROLE}};
+REVOKE ALL ON FUNCTION app_rls.b03_complete_support_response_email(text,text,text,text,text) FROM {{WORKER_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_get_support_ticket(text,text) FROM {{APP_ROLE}};
@@ -17,6 +20,9 @@ REVOKE ALL ON FUNCTION app_rls.b03_resolve_incident_email_actor(text) FROM {{APP
 REVOKE ALL ON FUNCTION app_rls.b03_superadmin_alert_emails() FROM {{APP_ROLE}};
 REVOKE ALL ON FUNCTION app_rls.b03_primary_superadmin_email() FROM {{APP_ROLE}};
 DROP FUNCTION IF EXISTS app_rls.b03_create_support_issue_report(text,text,text,text,text,text,boolean,text,text,integer,jsonb,text,text);
+DROP FUNCTION IF EXISTS app_rls.b03_respond_support_issue_report(text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.b03_claim_support_response_emails(timestamp without time zone,integer);
+DROP FUNCTION IF EXISTS app_rls.b03_complete_support_response_email(text,text,text,text,text);
 DROP FUNCTION IF EXISTS app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text);
 DROP FUNCTION IF EXISTS app_rls.b03_get_support_ticket(text,text);

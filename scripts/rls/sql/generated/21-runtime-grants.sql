@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
+    AND source_contract_sha256='2e340397c03b3d9ff999c399beb9ec9466e9e40c7a3234d78f39ca0eee6fce38'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:2e340397c03b3d9ff999c399beb9ec9466e9e40c7a3234d78f39ca0eee6fce38'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2e340397c03b3d9ff999c399beb9ec9466e9e40c7a3234d78f39ca0eee6fce38')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -367,7 +367,7 @@ GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cer
 GRANT SELECT ("manufacturerId", "licenseeId") ON TABLE public."ManufacturerLicenseeLink" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "orgId", "licenseeId", "incidentId", "audience", "channel", "type", "title", "body", "data", "readAt", "emailedAt", "createdAt", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "orgId", "licenseeId", "incidentId", "audience", "channel", "type", "title", "body", "data", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("readAt", "emailedAt", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("data", "readAt", "emailedAt", "updatedAt") ON TABLE public."Notification" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "qrCodeId", "qrCodeValue", "scanEventId", "licenseeId", "severity", "status", "slaDueAt", "createdAt") ON TABLE public."Incident" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "batchId") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "licenseeId", "manufacturerId") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
@@ -378,6 +378,8 @@ GRANT UPDATE ("status", "assignedToUserId", "resolvedAt", "updatedAt") ON TABLE 
 GRANT SELECT ("id", "ticketId", "actorType", "actorUserId", "message", "isInternal", "createdAt") ON TABLE public."SupportTicketMessage" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "ticketId", "actorType", "actorUserId", "message", "isInternal", "createdAt") ON TABLE public."SupportTicketMessage" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "reporterUserId", "reporterRole", "licenseeId", "title", "description", "sourcePath", "pageUrl", "autoDetected", "screenshotPath", "screenshotMime", "screenshotSize", "diagnostics", "createdAt", "updatedAt") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "reporterUserId", "licenseeId", "publicEmail", "publicName", "referenceCode", "title", "status", "responseMessage", "respondedByUserId", "respondedAt", "emailDeliveryStatus") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "responseMessage", "respondedAt", "respondedByUserId", "emailDeliveryStatus", "emailErrorCode", "updatedAt") ON TABLE public."SupportIssueReport" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "payload", "updatedAt") ON TABLE public."AuditLogOutbox" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "incidentId", "currentStage", "slaDueAt") ON TABLE public."IncidentHandoff" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "licenseeId", "action", "entityType", "entityId", "createdAt") ON TABLE public."AuditLog" TO "mscqr_rls_cert_auth_owner";

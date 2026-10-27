@@ -186,13 +186,15 @@ export default function SupportCenterPage() {
     }
 
     try {
-      await respondToReportMutation.mutateAsync({
+      const result = await respondToReportMutation.mutateAsync({
         reportId: report.id,
         message,
       });
       toast({
-        title: "Reporter notified",
-        description: "The response was sent through both in-app notification and email.",
+        title: "Response saved",
+        description: result?.emailDeliveryStatus === "PENDING"
+          ? "The response is available in the app. Email delivery is pending."
+          : "The response was saved without an email recipient.",
       });
       setIssueReplyDrafts((prev) => ({ ...prev, [report.id]: "" }));
     } catch (error) {

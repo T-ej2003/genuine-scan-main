@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "sourceContractSha256": "2e340397c03b3d9ff999c399beb9ec9466e9e40c7a3234d78f39ca0eee6fce38",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -72,7 +72,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "f26b54d95ff4c88306c482f9a10daab9bbce3431fd86a5f332a6aa5ee788db68"
+      "sha256": "d7ce847c15beb4b892ffdaff4303fabc4fc6355be8845de22e95edffdeff0992"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -104,7 +104,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "75e5388e6df3d13d00751b60c489fdf1f39c6af8d6dccd9b97e280318625a5a3"
+      "sha256": "556d157044160fd984733fd28bd34e338c5379cc4d7bdc60e5e920c0e5a725fa"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -284,7 +284,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
-      "sha256": "303a71dd0b645504943d34ad94596e69e4fa8b67500fd06b510cbd25284e6634"
+      "sha256": "91b33d92ec75e05f94046d985c4858817c540a0229109715f2b957113c19c6d3"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxRollback.sql",
@@ -292,7 +292,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-      "sha256": "966856d07a2c35e6bfc8c4a95b051f1be3cd7be91b28896c93f1f0ef9f5a317f"
+      "sha256": "a2729f47c2a1d4e9f3a74c5ddbdb1c1bba75998f94fc765984f29cb737ee82aa"
     },
     {
       "path": "backend/src/services/auditLogOutboxService.ts",
@@ -390,7 +390,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 376,
+    "generatedPolicies": 378,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 56,
     "prismaEnums": 58,
@@ -408,7 +408,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:2e340397c03b3d9ff999c399beb9ec9466e9e40c7a3234d78f39ca0eee6fce38",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

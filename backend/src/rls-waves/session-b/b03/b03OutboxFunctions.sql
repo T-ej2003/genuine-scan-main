@@ -379,13 +379,13 @@ BEGIN
   IF p_sink_event_id='projection:'||p_job_id THEN
     IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR (
       (o.payload->>'entityType'='QrAllocationRequest' AND o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST'))
-      OR (o.payload->>'entityType'='SupportIssueReport' AND o.payload->>'action'='SUPPORT_ISSUE_REPORTED')) IS NOT TRUE
+      OR (o.payload->>'entityType'='SupportIssueReport' AND o.payload->>'action' IN ('SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED'))) IS NOT TRUE
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET "sinkEventId"=p_sink_event_id,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
     RETURN QUERY SELECT true,coalesce(o."sinkEventId"=p_sink_event_id,false); RETURN;
   END IF;
   IF p_sink_event_id='disabled:'||p_job_id THEN
-    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
+    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED')
        AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET status='FAILED',"sentAt"=NULL,"sinkEventId"=p_sink_event_id,
@@ -395,7 +395,7 @@ BEGIN
   IF p_sink_event_id LIKE 'projection:%' OR p_sink_event_id LIKE 'disabled:%' THEN
     RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501';
   END IF;
-  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
+  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED','SUPPORT_ISSUE_RESPONDED')
      AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."SecurityEventOutbox" SET status='SENT',"sentAt"=p_attempted_at,"sinkEventId"=p_sink_event_id,"lastError"=NULL,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
