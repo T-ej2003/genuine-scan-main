@@ -67,7 +67,7 @@ test("the exact failed apply may continue, while substituted or ambiguous state 
   const topic = "arn:aws:sns:eu-west-2:368992683803:mscqr-prod-alerts";
   const rules = ["ecr_protection_change", "ecr_image_action"];
   const names = ["mscqr-production-ecr-protection-change", "mscqr-production-ecr-image-action"];
-  const state = { version: 4, lineage: "578568c5-ffb1-aa44-c941-6f2a4a17c838", serial: 1, resources: [
+  const state = { version: 4, lineage: "578568c5-ffb1-aa44-c941-6f2a4a17c838", serial: 2, resources: [
     resource("aws_iam_role", "ecr_monitor", [[null, "mscqr-production-ecr-monitor"]]),
     resource("aws_iam_role_policy", "ecr_monitor", [[null, "mscqr-production-ecr-monitor:mscqr-production-ecr-monitor"]]),
     resource("aws_sns_topic_policy", "ecr_alerts", [[null, topic]]),
@@ -77,7 +77,8 @@ test("the exact failed apply may continue, while substituted or ambiguous state 
   ] };
   assert.doesNotThrow(() => assertPartialOwnershipState(state));
   assert.throws(() => assertPartialOwnershipState({ ...state, lineage: "replacement" }), /lineage/);
-  assert.throws(() => assertPartialOwnershipState({ ...state, serial: 2 }), /serial/);
+  assert.throws(() => assertPartialOwnershipState({ ...state, serial: 3 }), /serial/);
+  assert.throws(() => assertPartialOwnershipState({ ...state, serial: 1 }), /serial/);
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: [...state.resources, resource("aws_ecs_service", "backend", [[null, "service"]])] }), /resource count/);
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: state.resources.map(item => item.type === "aws_sns_topic_policy" ? resource(item.type, item.name, [[null, "other-topic"]]) : item) }), /identities/);
   assert.throws(() => assertPartialOwnershipState({ ...state, resources: state.resources.map(item => item.type === "aws_cloudwatch_metric_alarm" ? resource(item.type, item.name, [["critical", "mscqr-production-ecr-critical"]]) : item) }), /instance count/);
@@ -103,6 +104,8 @@ test("partial apply rejects changed live EventBridge rules and alarm settings", 
   const liveAlarm = { AlarmArn: savedAlarm.arn, ActionsEnabled: true, AlarmActions: [topic], OKActions: [topic], ComparisonOperator: "GreaterThanThreshold",
     EvaluationPeriods: 1, Threshold: 0, MetricName: savedAlarm.metric_name, Namespace: savedAlarm.namespace, Period: 900, Statistic: "Maximum", TreatMissingData: "breaching" };
   assert.doesNotThrow(() => assertPartialAlarm(savedAlarm, liveAlarm));
+  assert.doesNotThrow(() => assertPartialAlarm({ ...savedAlarm, dimensions: {}, insufficient_data_actions: [] }, liveAlarm));
+  assert.throws(() => assertPartialAlarm({ ...savedAlarm, dimensions: { Unexpected: "value" } }, liveAlarm), /alarm changed/);
   assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, ActionsEnabled: false }), /alarm changed/);
   assert.throws(() => assertPartialAlarm(savedAlarm, { ...liveAlarm, MetricName: "OtherMetric" }), /alarm changed/);
 });
