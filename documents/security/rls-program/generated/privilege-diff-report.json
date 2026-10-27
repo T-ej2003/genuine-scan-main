@@ -5502,6 +5502,29 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "SupportIssueReport",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "reporterUserId",
+        "reporterRole",
+        "licenseeId",
+        "title",
+        "description",
+        "sourcePath",
+        "pageUrl",
+        "autoDetected",
+        "screenshotPath",
+        "screenshotMime",
+        "screenshotSize",
+        "diagnostics",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "IncidentHandoff",
       "command": "SELECT",
       "columns": [
@@ -5604,6 +5627,7 @@
         "entityType",
         "entityId",
         "details",
+        "ipHash",
         "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",

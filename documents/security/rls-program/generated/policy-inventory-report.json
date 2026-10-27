@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 374,
+  "count": 375,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -766,11 +766,12 @@
         "notification-and-incident-email"
       ],
       "scopeType": "security-definer-owner-capability-and-operation-selector",
-      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND ((current_setting('app.b03_operation',true)='incident-email-complete' AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_licensee_id',true)) OR (current_setting('app.b03_operation',true) IN ('support-ticket-update','support-ticket-message') AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"entityType\"='SupportTicket' AND \"entityId\"=current_setting('app.b03_support_ticket_id',true)))",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND ((current_setting('app.b03_operation',true)='incident-email-complete' AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\"=current_setting('app.b03_licensee_id',true)) OR (current_setting('app.b03_operation',true) IN ('support-ticket-update','support-ticket-message') AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"entityType\"='SupportTicket' AND \"entityId\"=current_setting('app.b03_support_ticket_id',true)) OR (current_setting('app.b03_operation',true)='support-report-create' AND \"userId\"=current_setting('app.b03_actor_id',true) AND \"entityType\"='SupportIssueReport' AND \"entityId\"=current_setting('app.b03_support_report_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:b03-add-support-ticket-message:AuditLog:INSERT",
         "contract:b03-complete-incident-email:AuditLog:INSERT",
+        "contract:b03-create-support-issue-report:AuditLog:INSERT",
         "contract:b03-update-support-ticket:AuditLog:INSERT"
       ],
       "workflowId": null,
@@ -4252,6 +4253,7 @@
       "sourceCommandRuleIds": [
         "contract:b03-attention-queue:Licensee:SELECT",
         "contract:b03-create-role-notifications:Licensee:SELECT",
+        "contract:b03-create-support-issue-report:Licensee:SELECT",
         "contract:b03-create-user-notification:Licensee:SELECT"
       ],
       "workflowId": null,
@@ -4949,6 +4951,7 @@
         "contract:b03-attention-queue:ManufacturerLicenseeLink:SELECT",
         "contract:b03-claim-incident-email:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-role-notifications:ManufacturerLicenseeLink:SELECT",
+        "contract:b03-create-support-issue-report:ManufacturerLicenseeLink:SELECT",
         "contract:b03-create-user-notification:ManufacturerLicenseeLink:SELECT",
         "contract:b03-list-notifications:ManufacturerLicenseeLink:SELECT",
         "contract:b03-mark-notification-emailed:ManufacturerLicenseeLink:SELECT",
@@ -5526,6 +5529,7 @@
       "sourceCommandRuleIds": [
         "contract:b03-attention-queue:Organization:SELECT",
         "contract:b03-create-role-notifications:Organization:SELECT",
+        "contract:b03-create-support-issue-report:Organization:SELECT",
         "contract:b03-create-user-notification:Organization:SELECT"
       ],
       "workflowId": null,
@@ -8338,6 +8342,7 @@
         "contract:b03-claim-incident-email:RefreshToken:SELECT",
         "contract:b03-complete-incident-email:RefreshToken:SELECT",
         "contract:b03-create-role-notifications:RefreshToken:SELECT",
+        "contract:b03-create-support-issue-report:RefreshToken:SELECT",
         "contract:b03-create-user-notification:RefreshToken:SELECT",
         "contract:b03-get-support-ticket:RefreshToken:SELECT",
         "contract:b03-list-notifications:RefreshToken:SELECT",
@@ -9400,6 +9405,29 @@
     {
       "tableId": "table-support-issue-report",
       "table": "SupportIssueReport",
+      "policyName": "b03_authenticated_supportissuereport_insert",
+      "command": "INSERT",
+      "actors": [
+        "authenticated-application"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "notification-and-incident-email"
+      ],
+      "scopeType": "security-definer-owner-capability-and-operation-selector",
+      "scopePredicate": "app_rls.b03_authenticated_context_valid() AND current_setting('app.b03_operation',true)='support-report-create' AND id=current_setting('app.b03_support_report_id',true) AND \"reporterUserId\"=current_setting('app.b03_actor_id',true) AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'')",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:b03-create-support-issue-report:SupportIssueReport:INSERT"
+      ],
+      "workflowId": null,
+      "route": "B03 authenticated notification and incident email boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-support-issue-report",
+      "table": "SupportIssueReport",
       "policyName": "public_verification_supportissuereport_insert",
       "command": "INSERT",
       "actors": [
@@ -10062,6 +10090,7 @@
         "contract:b03-claim-incident-email:User:SELECT",
         "contract:b03-complete-incident-email:User:SELECT",
         "contract:b03-create-role-notifications:User:SELECT",
+        "contract:b03-create-support-issue-report:User:SELECT",
         "contract:b03-create-user-notification:User:SELECT",
         "contract:b03-get-support-ticket:User:SELECT",
         "contract:b03-list-notifications:User:SELECT",

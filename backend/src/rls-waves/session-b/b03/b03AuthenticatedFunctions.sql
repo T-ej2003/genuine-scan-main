@@ -952,6 +952,72 @@ BEGIN
 END
 $fn$;
 
+CREATE OR REPLACE FUNCTION app_rls.b03_create_support_issue_report(
+  p_licensee_id text,p_organization_id text,p_title text,p_description text,
+  p_source_path text,p_page_url text,p_auto_detected boolean,
+  p_screenshot_path text,p_screenshot_mime text,p_screenshot_size integer,
+  p_diagnostics jsonb,p_ip_hash text,p_request_id text
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $fn$
+DECLARE actor record;
+DECLARE report_id text := gen_random_uuid()::text;
+DECLARE created_at timestamp without time zone := clock_timestamp()::timestamp without time zone;
+BEGIN
+  IF current_setting('app.purpose',true)<>'support-report-create'
+     OR p_request_id IS NULL OR p_request_id IS DISTINCT FROM current_setting('app.request_id',true)
+     OR length(btrim(coalesce(p_title,''))) NOT BETWEEN 5 AND 160
+     OR length(coalesce(p_description,''))>5000
+     OR length(coalesce(p_source_path,''))>500
+     OR length(coalesce(p_page_url,''))>1200
+     OR length(coalesce(p_diagnostics::text,''))>250000
+     OR (p_ip_hash IS NOT NULL AND p_ip_hash !~ '^[0-9a-f]{12}:[0-9a-f]{64}$')
+     OR (p_screenshot_size IS NOT NULL AND p_screenshot_size<0) THEN
+    RAISE EXCEPTION 'B03_SUPPORT_REPORT_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  SELECT * INTO actor FROM app_rls.revalidate_authenticated_actor(
+    current_setting('app.user_id',true),current_setting('app.auth_session_id',true),
+    p_licensee_id,p_organization_id,created_at,p_request_id
+  );
+  IF NOT FOUND OR actor.role NOT IN (
+    'SUPER_ADMIN','PLATFORM_SUPER_ADMIN','LICENSEE_ADMIN','ORG_ADMIN',
+    'MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'
+  ) OR (actor.role NOT IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND actor."licenseeId" IS NULL) THEN
+    RAISE EXCEPTION 'B03_SUPPORT_REPORT_DENIED' USING ERRCODE='42501';
+  END IF;
+
+  PERFORM set_config('app.b03_actor_id',actor."userId",true),
+          set_config('app.b03_actor_role',actor.role,true),
+          set_config('app.b03_operation','support-report-create',true),
+          set_config('app.b03_support_report_id',report_id,true),
+          set_config('app.b03_licensee_id',coalesce(actor."licenseeId",''),true);
+  INSERT INTO public."SupportIssueReport"(
+    id,"reporterUserId","reporterRole","licenseeId",title,description,
+    "sourcePath","pageUrl","autoDetected","screenshotPath","screenshotMime",
+    "screenshotSize",diagnostics,"createdAt","updatedAt"
+  ) VALUES (
+    report_id,actor."userId",actor.role::public."UserRole",actor."licenseeId",
+    btrim(p_title),nullif(btrim(coalesce(p_description,'')),''),
+    nullif(btrim(coalesce(p_source_path,'')),''),nullif(btrim(coalesce(p_page_url,'')),''),
+    coalesce(p_auto_detected,false),p_screenshot_path,p_screenshot_mime,
+    p_screenshot_size,p_diagnostics,created_at,created_at
+  );
+  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"ipHash","createdAt")
+  VALUES (gen_random_uuid()::text,actor."userId",actor."organizationId",actor."licenseeId",
+    'SUPPORT_ISSUE_REPORTED','SupportIssueReport',report_id,
+    jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
+      'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),p_ip_hash,created_at);
+  RETURN jsonb_build_object(
+    'id',report_id,'status','OPEN','createdAt',created_at,
+    'reporterUserId',actor."userId",'reporterRole',actor.role,
+    'licenseeId',actor."licenseeId",'title',btrim(p_title),
+    'sourcePath',p_source_path,'pageUrl',p_page_url
+  );
+END
+$fn$;
+
 REVOKE ALL ON FUNCTION app_rls.b03_require_authenticated_actor(text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_assert_requested_scope(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_primary_superadmin_email() FROM PUBLIC;
@@ -971,3 +1037,4 @@ REVOKE ALL ON FUNCTION app_rls.b03_list_support_tickets(text,text,text,text,inte
 REVOKE ALL ON FUNCTION app_rls.b03_get_support_ticket(text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_update_support_ticket(text,text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.b03_add_support_ticket_message(text,text,boolean,timestamp without time zone,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.b03_create_support_issue_report(text,text,text,text,text,text,boolean,text,text,integer,jsonb,text,text) FROM PUBLIC;
