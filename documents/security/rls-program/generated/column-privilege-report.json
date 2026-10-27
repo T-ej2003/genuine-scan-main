@@ -12329,6 +12329,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12337,6 +12338,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12368,6 +12370,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12376,6 +12379,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12400,6 +12404,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12408,6 +12413,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12430,6 +12436,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12438,6 +12445,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12460,6 +12468,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12468,6 +12477,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12503,6 +12513,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12511,6 +12522,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12543,6 +12555,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12551,6 +12564,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12574,6 +12588,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12582,6 +12597,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12611,6 +12627,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12619,6 +12636,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12641,6 +12659,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12649,6 +12668,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12672,6 +12692,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12680,6 +12701,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12703,6 +12725,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12711,6 +12734,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12739,6 +12763,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12747,6 +12772,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12781,6 +12807,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12789,6 +12816,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12813,6 +12841,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12821,6 +12850,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12848,6 +12878,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12856,6 +12887,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12883,6 +12915,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12891,6 +12924,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12926,6 +12960,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12934,6 +12969,100 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "SupportIssueReport",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "reporterUserId",
+        "reporterRole",
+        "licenseeId",
+        "referenceCode",
+        "publicName",
+        "publicEmail",
+        "issueType",
+        "verificationCode",
+        "productReference",
+        "priority",
+        "title",
+        "description",
+        "status",
+        "internalNote",
+        "responseMessage",
+        "respondedAt",
+        "respondedByUserId",
+        "emailDeliveryStatus",
+        "emailErrorCode",
+        "acknowledgementEmailDeliveryStatus",
+        "acknowledgementEmailErrorCode",
+        "sourcePath",
+        "pageUrl",
+        "autoDetected",
+        "screenshotPath",
+        "screenshotMime",
+        "screenshotSize",
+        "diagnostics",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-support-issue-report",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-issue-reports",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
+        "b03-update-support-ticket"
+      ]
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "name",
+        "prefix"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "b03-add-support-ticket-message",
+        "b03-attention-queue",
+        "b03-claim-incident-email",
+        "b03-complete-incident-email",
+        "b03-create-role-notifications",
+        "b03-create-support-issue-report",
+        "b03-create-user-notification",
+        "b03-get-support-ticket",
+        "b03-list-notifications",
+        "b03-list-support-issue-reports",
+        "b03-list-support-tickets",
+        "b03-mark-all-notifications-read",
+        "b03-mark-notification-emailed",
+        "b03-mark-notification-read",
+        "b03-primary-superadmin-email",
+        "b03-resolve-incident-email-actor",
+        "b03-resolve-incident-notification-scope",
+        "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12957,6 +13086,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12965,6 +13095,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -12989,6 +13120,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -12997,6 +13129,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13024,6 +13157,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13032,6 +13166,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13063,6 +13198,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13071,6 +13207,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13102,6 +13239,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13110,6 +13248,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13134,6 +13273,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13142,6 +13282,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13168,6 +13309,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13176,6 +13318,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13206,6 +13349,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13214,6 +13358,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13243,6 +13388,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13251,6 +13397,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13278,6 +13425,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13286,6 +13434,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },
@@ -13309,6 +13458,7 @@
         "b03-create-user-notification",
         "b03-get-support-ticket",
         "b03-list-notifications",
+        "b03-list-support-issue-reports",
         "b03-list-support-tickets",
         "b03-mark-all-notifications-read",
         "b03-mark-notification-emailed",
@@ -13317,6 +13467,7 @@
         "b03-resolve-incident-email-actor",
         "b03-resolve-incident-notification-scope",
         "b03-superadmin-alert-emails",
+        "b03-support-issue-screenshot-access",
         "b03-update-support-ticket"
       ]
     },

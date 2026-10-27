@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "sourceContractSha256": "e8ad71292847232ce8b8912bc2458e80850ce52eed1727c20f4ccd9593c1033c",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -104,7 +104,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "75e5388e6df3d13d00751b60c489fdf1f39c6af8d6dccd9b97e280318625a5a3"
+      "sha256": "6c458f1723696c9d749bbeddf4a4ceb03f9cb5eb87523d84f6ad8429a30b2b53"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -292,7 +292,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/repositoryFunctions.ts",
-      "sha256": "966856d07a2c35e6bfc8c4a95b051f1be3cd7be91b28896c93f1f0ef9f5a317f"
+      "sha256": "ec8863e1afaf741bf15449441b6a91e550c78ba981da8d3fc7e724103eea64b5"
     },
     {
       "path": "backend/src/services/auditLogOutboxService.ts",
@@ -390,7 +390,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 376,
+    "generatedPolicies": 377,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 56,
     "prismaEnums": 58,
@@ -408,7 +408,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:e8ad71292847232ce8b8912bc2458e80850ce52eed1727c20f4ccd9593c1033c",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

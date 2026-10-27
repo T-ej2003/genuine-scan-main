@@ -5525,6 +5525,55 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "SupportIssueReport",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "reporterUserId",
+        "reporterRole",
+        "licenseeId",
+        "referenceCode",
+        "publicName",
+        "publicEmail",
+        "issueType",
+        "verificationCode",
+        "productReference",
+        "priority",
+        "title",
+        "description",
+        "status",
+        "internalNote",
+        "responseMessage",
+        "respondedAt",
+        "respondedByUserId",
+        "emailDeliveryStatus",
+        "emailErrorCode",
+        "acknowledgementEmailDeliveryStatus",
+        "acknowledgementEmailErrorCode",
+        "sourcePath",
+        "pageUrl",
+        "autoDetected",
+        "screenshotPath",
+        "screenshotMime",
+        "screenshotSize",
+        "diagnostics",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "Licensee",
+      "command": "SELECT",
+      "columns": [
+        "name",
+        "prefix"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "AuditLogOutbox",
       "command": "INSERT",
       "columns": [

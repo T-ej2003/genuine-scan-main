@@ -2,6 +2,8 @@ const assert = require("node:assert/strict");
 const { withP2TestApp, P2TestDbSkip } = require("./helpers/p2TestDb");
 const { ids, issueBearerTokens, seedP2Fixtures } = require("./helpers/p2SeedFactories");
 const { randomUUID } = require("node:crypto");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const authHeader = (token) => ({
   authorization: `Bearer ${token.accessToken}`,
@@ -130,11 +132,73 @@ const authHeader = (token) => ({
     assert.equal(secondReport.licenseeId, ids.licenseeB);
     assert.equal(secondReport.reporterUserId, ids.manufacturerB);
 
+    const ownList = await request("GET", "/api/support/reports", undefined, {
+      headers: authHeader(tokens.manufacturerA),
+    });
+    assert.equal(ownList.status, 200, ownList.text);
+    assert(ownList.payload.data.reports.some((row) => row.id === report.id));
+    assert(ownList.payload.data.reports.every((row) => row.reporterUserId === ids.manufacturerA));
+    assert(!ownList.payload.data.reports.some((row) => row.id === secondReport.id));
+    const platformList = await request("GET", "/api/support/reports", undefined, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(platformList.status, 200, platformList.text);
+    assert(platformList.payload.data.reports.some((row) => row.id === report.id));
+    assert(platformList.payload.data.reports.some((row) => row.id === secondReport.id));
+    const tenantBList = await request("GET", `/api/support/reports?licenseeId=${ids.licenseeB}`, undefined, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(tenantBList.status, 200, tenantBList.text);
+    assert(tenantBList.payload.data.reports.every((row) => row.licenseeId === ids.licenseeB));
+    const foreignFilter = await request("GET", `/api/support/reports?licenseeId=${ids.licenseeB}`, undefined, {
+      headers: authHeader(tokens.manufacturerA),
+    });
+    assert.equal(foreignFilter.status, 403, foreignFilter.text);
+    const malformedList = await request("GET", "/api/support/reports?limit=201", undefined, {
+      headers: authHeader(tokens.superAdmin),
+    });
+    assert.equal(malformedList.status, 400, malformedList.text);
+    const missingListAuth = await request("GET", "/api/support/reports");
+    assert.equal(missingListAuth.status, 401, missingListAuth.text);
+
+    const fileName = `p2-support-${randomUUID()}.png`;
+    const { supportIssueUploadsDirectory } = require("../dist/middleware/supportIssueUpload");
+    const filePath = path.join(supportIssueUploadsDirectory, fileName);
+    fs.mkdirSync(supportIssueUploadsDirectory, { recursive: true });
+    fs.writeFileSync(filePath, Buffer.from("synthetic-png-test-file"));
+    try {
+      await prisma.supportIssueReport.update({ where: { id: report.id }, data: {
+        screenshotPath: fileName, screenshotMime: "image/png",
+      } });
+      const ownScreenshot = await request("GET", `/api/support/reports/files/${fileName}`, undefined, {
+        headers: authHeader(tokens.manufacturerA),
+      });
+      assert.equal(ownScreenshot.status, 200, ownScreenshot.text);
+      const foreignScreenshot = await request("GET", `/api/support/reports/files/${fileName}`, undefined, {
+        headers: authHeader(tokens.manufacturerB),
+      });
+      assert.equal(foreignScreenshot.status, 404, foreignScreenshot.text);
+      const sameTenantNonOwner = await request("GET", `/api/support/reports/files/${fileName}`, undefined, {
+        headers: authHeader(tokens.licenseeAdminA),
+      });
+      assert.equal(sameTenantNonOwner.status, 404, sameTenantNonOwner.text);
+      const platformScreenshot = await request("GET", `/api/support/reports/files/${fileName}`, undefined, {
+        headers: authHeader(tokens.superAdmin),
+      });
+      assert.equal(platformScreenshot.status, 200, platformScreenshot.text);
+    } finally {
+      fs.rmSync(filePath, { force: true });
+    }
+
     await assert.rejects(
       runtimePrisma.supportIssueReport.create({ data: {
         reporterUserId: ids.manufacturerA, reporterRole: "MANUFACTURER_ADMIN",
         licenseeId: ids.licenseeA, title: "Direct write must fail",
       } }),
+      /permission denied|42501/i
+    );
+    await assert.rejects(
+      runtimePrisma.supportIssueReport.findMany(),
       /permission denied|42501/i
     );
     assert.doesNotMatch(valid.text, /passwordHash|sessionCapability|diagnostics/i);

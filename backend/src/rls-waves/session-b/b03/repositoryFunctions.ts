@@ -763,6 +763,43 @@ export const createAuthenticatedSupportIssueReport = async (
   return result;
 };
 
+export const listAuthenticatedSupportIssueReports = async (
+  db: B03FunctionClient,
+  input: { limit: number; offset: number; licenseeId?: string | null; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_list_support_issue_reports(
+      ${integer(input.limit, "limit", 1, 200)}::integer,
+      ${integer(input.offset, "offset", 0, 5000)}::integer,
+      ${optional(input.licenseeId, "licenseeId")}::text,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_list_support_issue_reports");
+  const result = supportProjection(row.result, "app_rls.b03_list_support_issue_reports");
+  if (!Array.isArray(result.reports) || !Number.isInteger(result.total)) {
+    throw new Error("app_rls.b03_list_support_issue_reports returned an invalid list");
+  }
+  return result;
+};
+
+export const getAuthenticatedSupportIssueScreenshot = async (
+  db: B03FunctionClient,
+  input: { fileName: string; requestId: string }
+) => {
+  const row = exactlyOne(await db.$queryRaw<Array<{ result: Prisma.JsonValue }>>(Prisma.sql`
+    SELECT app_rls.b03_support_issue_screenshot_access(
+      ${text(input.fileName, "screenshot file name", 191)}::text,
+      ${authenticatedRequestId(input.requestId)}::text
+    ) AS result
+  `), "app_rls.b03_support_issue_screenshot_access");
+  if (row.result === null) return null;
+  const result = supportProjection(row.result, "app_rls.b03_support_issue_screenshot_access");
+  if (typeof result.id !== "string" || (result.mime !== null && typeof result.mime !== "string")) {
+    throw new Error("app_rls.b03_support_issue_screenshot_access returned invalid metadata");
+  }
+  return result as { id: string; mime: string | null };
+};
+
 export const listSupportTickets = async (
   db: B03FunctionClient,
   input: {

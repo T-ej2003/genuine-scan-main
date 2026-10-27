@@ -14,14 +14,8 @@ import { resolveSupportIssueUploadPath, supportIssueUploadsDirectory } from "../
 import { downloadObjectBuffer, isObjectStorageConfigured, removeLocalFileIfExists, uploadObjectFromFile } from "../services/objectStorageService";
 import { isPrismaMissingTableError, warnStorageUnavailableOnce } from "../utils/prismaStorageGuard";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
-import { createAuthenticatedSupportIssueReport } from "../rls-waves/session-b/b03/repositoryFunctions";
+import { createAuthenticatedSupportIssueReport, getAuthenticatedSupportIssueScreenshot, listAuthenticatedSupportIssueReports } from "../rls-waves/session-b/b03/repositoryFunctions";
 import { hashIp } from "../utils/security";
-
-const toInt = (value: unknown, fallback: number, min: number, max: number) => {
-  const n = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(min, Math.min(max, n));
-};
 
 const createSchema = z.object({
   title: z.string().trim().min(5).max(160),
@@ -178,54 +172,38 @@ export const listSupportIssueReports = async (req: AuthRequest, res: Response) =
     if (!parsed.success) {
       return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid filters" });
     }
+    if (parsed.data.licenseeId && !isPlatform(req.user.role)) {
+      return res.status(403).json({ success: false, error: "Insufficient permissions" });
+    }
     const limit = parsed.data.limit ?? 50;
     const offset = parsed.data.offset ?? 0;
 
-    const where: any = {};
-    if (!isPlatform(req.user.role)) {
-      where.reporterUserId = req.user.userId;
-    } else if (parsed.data.licenseeId) {
-      where.licenseeId = parsed.data.licenseeId;
-    }
-
-    const [reports, total] = await Promise.all([
-      prisma.supportIssueReport.findMany({
-        where,
-        orderBy: [{ createdAt: "desc" }],
-        take: limit,
-        skip: offset,
-        include: {
-          reporterUser: { select: { id: true, name: true, email: true, role: true } },
-          respondedByUser: { select: { id: true, name: true, email: true, role: true } },
-          licensee: { select: { id: true, name: true, prefix: true } },
-        },
-      }),
-      prisma.supportIssueReport.count({ where }),
-    ]);
+    const boundary = b03BoundaryForRequest(req, "support-report-list");
+    const result = await boundary.run((db) => listAuthenticatedSupportIssueReports(db, {
+      limit,
+      offset,
+      licenseeId: parsed.data.licenseeId,
+      requestId: boundary.requestId,
+    }));
 
     const platform = isPlatform(req.user.role);
 
     return res.json({
       success: true,
       data: {
-        reports: reports.map((report) => serializeSupportIssueReport(report, platform)),
-        total,
+        reports: (result.reports as any[]).map((report) => serializeSupportIssueReport(report, platform)),
+        total: result.total,
         limit,
         offset,
       },
     });
   } catch (error) {
-    const limit = toInt(req.query.limit, 50, 1, 200);
-    const offset = toInt(req.query.offset, 0, 0, 5000);
     if (isPrismaMissingTableError(error, ["supportissuereport"])) {
       warnStorageUnavailableOnce(
         "support-issue-list-storage",
-        "[support-issue] support issue storage is unavailable. Returning empty report list."
+        "[support-issue] support issue storage is unavailable. Reports were not loaded."
       );
-      return res.json({
-        success: true,
-        data: { reports: [], total: 0, limit, offset, storageUnavailable: true },
-      });
+      return res.status(503).json({ success: false, error: "Support report storage unavailable" });
     }
     console.error("listSupportIssueReports error:", error);
     return res.status(500).json({ success: false, error: "Failed to load support reports" });
@@ -362,29 +340,18 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
     const fileName = String(req.params.fileName || "").trim();
     if (!fileName) return res.status(404).json({ success: false, error: "File not found" });
 
-    const report = await prisma.supportIssueReport.findFirst({
-      where: isPlatform(authReq.user.role)
-        ? { screenshotPath: fileName }
-        : {
-            screenshotPath: fileName,
-            OR: [
-              { reporterUserId: authReq.user.userId },
-              ...(authReq.user.licenseeId ? [{ licenseeId: authReq.user.licenseeId }] : []),
-            ],
-          },
-      select: {
-        reporterUserId: true,
-        licenseeId: true,
-        screenshotMime: true,
-      },
-    });
+    const boundary = b03BoundaryForRequest(authReq, "support-report-screenshot");
+    const report = await boundary.run((db) => getAuthenticatedSupportIssueScreenshot(db, {
+      fileName,
+      requestId: boundary.requestId,
+    }));
     if (!report) return res.status(404).json({ success: false, error: "File not found" });
 
     if (isObjectStorageConfigured()) {
       const buffer = await downloadObjectBuffer(fileName);
       if (buffer) {
-        if (report.screenshotMime) {
-          res.setHeader("Content-Type", report.screenshotMime);
+        if (report.mime) {
+          res.setHeader("Content-Type", report.mime);
         }
         return res.send(buffer);
       }
@@ -396,8 +363,8 @@ export const serveSupportIssueScreenshot = async (req: Request, res: Response) =
       return res.status(400).json({ success: false, error: "Invalid file path" });
     }
     if (!fs.existsSync(resolved)) return res.status(404).json({ success: false, error: "File not found" });
-    if (report.screenshotMime) {
-      res.setHeader("Content-Type", report.screenshotMime);
+    if (report.mime) {
+      res.setHeader("Content-Type", report.mime);
     }
     return res.sendFile(resolved);
   } catch (error) {
