@@ -57,12 +57,69 @@ const authHeader = (token) => ({
     const report = await prisma.supportIssueReport.findUnique({ where: { id: valid.payload.data.id } });
     assert.equal(report.reporterUserId, ids.manufacturerA);
     assert.equal(report.licenseeId, ids.licenseeA);
+    const queuedAudit = await prisma.auditLogOutbox.findFirst({
+      where: { payload: { path: ["entityId"], equals: report.id } },
+    });
+    assert.equal(queuedAudit.status, "QUEUED");
+    assert.equal(queuedAudit.initiatingUserId, ids.manufacturerA);
+    assert.equal(queuedAudit.licenseeId, ids.licenseeA);
+    assert.equal(queuedAudit.payload.action, "SUPPORT_ISSUE_REPORTED");
+    assert.equal(queuedAudit.payload.entityId, report.id);
+    assert.match(queuedAudit.payload.ipHash, /^[0-9a-f]{12}:[0-9a-f]{64}$/);
+    const { PrismaClient } = require("@prisma/client");
+    const workerUrl = new URL(process.env.DATABASE_URL);
+    workerUrl.username = "mscqr_rls_cert_worker";
+    workerUrl.password = "";
+    const worker = new PrismaClient({ datasources: { db: { url: workerUrl.toString() } } });
+    process.env.MSCQR_WORKER_DATABASE_ROLE = "mscqr_rls_cert_worker";
+    const { withB03AuditWorkerContext } = require("../dist/rls-waves/session-b/b03/systemContext");
+    const { claimAuditLogOutboxSlice, consumeAuditLogOutbox } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
+    try {
+      const claimRequestId = randomUUID();
+      const claims = await withB03AuditWorkerContext({
+        jobId: `audit-outbox-claim:${claimRequestId}`, requestId: claimRequestId,
+      }, (db) => claimAuditLogOutboxSlice(db, { attemptedAt: new Date(), batchSize: 25 }), worker);
+      const claim = claims.find((row) => row.id === queuedAudit.id);
+      assert(claim, "Committed support audit was not claimable by the worker");
+      await withB03AuditWorkerContext({
+        jobId: claim.id, requestId: claim.requestId,
+        organizationId: claim.organizationId, licenseeId: claim.licenseeId,
+        manufacturerId: claim.manufacturerId, initiatingUserId: claim.initiatingUserId,
+      }, (db) => consumeAuditLogOutbox(db, {
+        jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt: new Date(),
+      }), worker);
+      const { withB03SiemWorkerContext } = require("../dist/rls-waves/session-b/b03/systemContext");
+      const { claimSecurityEventOutboxSlice, completeSecurityEventOutbox } = require("../dist/rls-waves/session-b/b03/repositoryFunctions");
+      const securityClaims = await withB03SiemWorkerContext({
+        jobId: `siem-outbox-claim:${claimRequestId}`, requestId: claimRequestId, jobType: "AUDIT_LOG",
+      }, (db) => claimSecurityEventOutboxSlice(db, {
+        attemptedAt: new Date(), batchSize: 25, jobType: "AUDIT_LOG",
+      }), worker);
+      const securityClaim = securityClaims.find((row) => row.requestId === queuedAudit.requestId);
+      assert(securityClaim, "Committed support security event was not claimable");
+      await withB03SiemWorkerContext({
+        jobId: securityClaim.id, requestId: securityClaim.requestId, jobType: "AUDIT_LOG",
+        organizationId: securityClaim.organizationId, licenseeId: securityClaim.licenseeId,
+        manufacturerId: securityClaim.manufacturerId, initiatingUserId: securityClaim.initiatingUserId,
+      }, (db) => completeSecurityEventOutbox(db, {
+        jobId: securityClaim.id, payloadDigest: securityClaim.payloadDigest,
+        attemptedAt: new Date(), sinkEventId: `projection:${securityClaim.id}`,
+      }), worker);
+    } finally {
+      await worker.$disconnect();
+    }
     const audit = await prisma.auditLog.findFirst({
       where: { action: "SUPPORT_ISSUE_REPORTED", entityType: "SupportIssueReport", entityId: report.id },
     });
     assert.equal(audit.userId, ids.manufacturerA);
     assert.equal(audit.licenseeId, ids.licenseeA);
     assert.match(audit.ipHash, /^[0-9a-f]{12}:[0-9a-f]{64}$/);
+    const securityEvent = await prisma.securityEventOutbox.findFirst({
+      where: { eventType: "AUDIT_LOG", requestId: queuedAudit.requestId },
+    });
+    assert.equal(securityEvent.payload.action, "SUPPORT_ISSUE_REPORTED");
+    assert.equal(securityEvent.payload.entityId, report.id);
+    assert.equal(securityEvent.sinkEventId, `projection:${securityEvent.id}`);
     assert.equal(await prisma.supportIssueReport.count({ where: { title: body.title } }), 1);
 
     const second = await request("POST", "/api/support/reports", {

@@ -57,15 +57,19 @@ const emitAuditLog = (log: any) => {
   for (const cb of listeners) cb(log);
 };
 
-// No database insert or forensic classification: these two actions have never
-// mapped to a forensic/trace event. Delivery retries reuse the durable audit ID.
-export const publishAllocationRequestAuditProjection = async (log: any) => {
-  if (!["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST"].includes(log.action)
-      || log.entityType !== "QrAllocationRequest" || !log.id || !log.licenseeId) {
+// Outbox consumption already inserts the audit row; these actions have no trace
+// or forensic mapping. Delivery retries reuse the durable audit ID.
+export const publishAuditedEventProjection = async (log: any) => {
+  const allocation = ["CREATE_QR_ALLOCATION_REQUEST", "REJECT_QR_ALLOCATION_REQUEST"].includes(log.action)
+    && log.entityType === "QrAllocationRequest" && Boolean(log.licenseeId);
+  const supportReport = log.action === "SUPPORT_ISSUE_REPORTED" && log.entityType === "SupportIssueReport";
+  if ((!allocation && !supportReport) || !log.id || !log.userId || !log.entityId) {
     throw new Error("AUDIT_PROJECTION_INVALID");
   }
-  await Promise.all(["dashboard-snapshot", "attention-queue", "qr-batches", "print-jobs"]
-    .map(bumpCacheNamespaceVersion));
+  if (allocation) {
+    await Promise.all(["dashboard-snapshot", "attention-queue", "qr-batches", "print-jobs"]
+      .map(bumpCacheNamespaceVersion));
+  }
   if (!await publishRedisJson(AUDIT_LOG_CHANNEL, { origin: getRedisInstanceId(), log })) {
     throw new Error("AUDIT_PROJECTION_REDIS_UNAVAILABLE");
   }

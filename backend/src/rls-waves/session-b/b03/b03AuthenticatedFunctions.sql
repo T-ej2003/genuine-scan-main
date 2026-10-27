@@ -1006,11 +1006,15 @@ BEGIN
     coalesce(p_auto_detected,false),p_screenshot_path,p_screenshot_mime,
     p_screenshot_size,p_diagnostics,created_at,created_at
   );
-  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"ipHash","createdAt")
-  VALUES (gen_random_uuid()::text,actor."userId",actor."organizationId",actor."licenseeId",
-    'SUPPORT_ISSUE_REPORTED','SupportIssueReport',report_id,
-    jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
-      'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),p_ip_hash,created_at);
+  INSERT INTO public."AuditLogOutbox"(id,payload,"updatedAt") VALUES (
+    gen_random_uuid()::text,
+    jsonb_build_object('userId',actor."userId",'orgId',actor."organizationId",
+      'licenseeId',actor."licenseeId",'action','SUPPORT_ISSUE_REPORTED',
+      'entityType','SupportIssueReport','entityId',report_id,
+      'details',jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
+        'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),
+      'ipHash',p_ip_hash),created_at
+  );
   RETURN jsonb_build_object(
     'id',report_id,'status','OPEN','createdAt',created_at,
     'reporterUserId',actor."userId",'reporterRole',actor.role,

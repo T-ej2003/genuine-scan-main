@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='8ca643a64932fb6f4a3b3969071c61b618817df47a524517bd1a5d741c3f52d5'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:8ca643a64932fb6f4a3b3969071c61b618817df47a524517bd1a5d741c3f52d5'
+    AND source_contract_sha256='924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8ca643a64932fb6f4a3b3969071c61b618817df47a524517bd1a5d741c3f52d5')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:924079347ba437f6c3a530e80931a7f2b2acce8558f1a43f15835e0233d97e6f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -13148,14 +13148,15 @@ BEGIN
   IF o."claimLeaseExpiresAt" IS NULL OR o."claimLeaseExpiresAt"<p_attempted_at THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   -- Existing fields distinguish internal completion from actual external delivery.
   IF p_sink_event_id='projection:'||p_job_id THEN
-    IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR o.payload->>'entityType' IS DISTINCT FROM 'QrAllocationRequest'
-       OR coalesce(o.payload->>'action','') NOT IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+    IF o."eventType" IS DISTINCT FROM 'AUDIT_LOG' OR (
+      (o.payload->>'entityType'='QrAllocationRequest' AND o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST'))
+      OR (o.payload->>'entityType'='SupportIssueReport' AND o.payload->>'action'='SUPPORT_ISSUE_REPORTED')) IS NOT TRUE
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET "sinkEventId"=p_sink_event_id,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
     RETURN QUERY SELECT true,coalesce(o."sinkEventId"=p_sink_event_id,false); RETURN;
   END IF;
   IF p_sink_event_id='disabled:'||p_job_id THEN
-    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+    IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
        AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
     THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
     UPDATE public."SecurityEventOutbox" SET status='FAILED',"sentAt"=NULL,"sinkEventId"=p_sink_event_id,
@@ -13165,7 +13166,7 @@ BEGIN
   IF p_sink_event_id LIKE 'projection:%' OR p_sink_event_id LIKE 'disabled:%' THEN
     RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501';
   END IF;
-  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST')
+  IF o.payload->>'action' IN ('CREATE_QR_ALLOCATION_REQUEST','REJECT_QR_ALLOCATION_REQUEST','SUPPORT_ISSUE_REPORTED')
      AND o."sinkEventId" IS DISTINCT FROM 'projection:'||p_job_id
   THEN RAISE EXCEPTION 'B03_OUTBOX_DENIED' USING ERRCODE='42501'; END IF;
   UPDATE public."SecurityEventOutbox" SET status='SENT',"sentAt"=p_attempted_at,"sinkEventId"=p_sink_event_id,"lastError"=NULL,"claimLeaseExpiresAt"=NULL,"updatedAt"=transaction_timestamp() WHERE id=p_job_id;
@@ -14245,11 +14246,15 @@ BEGIN
     coalesce(p_auto_detected,false),p_screenshot_path,p_screenshot_mime,
     p_screenshot_size,p_diagnostics,created_at,created_at
   );
-  INSERT INTO public."AuditLog"(id,"userId","orgId","licenseeId",action,"entityType","entityId",details,"ipHash","createdAt")
-  VALUES (gen_random_uuid()::text,actor."userId",actor."organizationId",actor."licenseeId",
-    'SUPPORT_ISSUE_REPORTED','SupportIssueReport',report_id,
-    jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
-      'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),p_ip_hash,created_at);
+  INSERT INTO public."AuditLogOutbox"(id,payload,"updatedAt") VALUES (
+    gen_random_uuid()::text,
+    jsonb_build_object('userId',actor."userId",'orgId',actor."organizationId",
+      'licenseeId',actor."licenseeId",'action','SUPPORT_ISSUE_REPORTED',
+      'entityType','SupportIssueReport','entityId',report_id,
+      'details',jsonb_build_object('autoDetected',coalesce(p_auto_detected,false),
+        'sourcePath',p_source_path,'screenshotAttached',p_screenshot_path IS NOT NULL),
+      'ipHash',p_ip_hash),created_at
+  );
   RETURN jsonb_build_object(
     'id',report_id,'status','OPEN','createdAt',created_at,
     'reporterUserId',actor."userId",'reporterRole',actor.role,
