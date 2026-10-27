@@ -3,6 +3,7 @@ import { saveAs } from "file-saver";
 
 import type { AllocationMapPayload } from "@/components/batches/BatchAllocationMapDialog";
 import apiClient from "@/lib/api-client";
+import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
 
 import { useBatchAllocationMap } from "./hooks";
@@ -50,21 +51,55 @@ const normalizeAuditLogToTraceEvent = (log: AuditLogRow): TraceEventRow => ({
 const HISTORY_PAGE_SIZE = 200;
 const HISTORY_BATCH_SIZE = 100;
 const HISTORY_BATCH_CONCURRENCY = 2;
+const HISTORY_REFRESH_MS = 10 * 60_000;
+const HISTORY_READ_BUDGET = 20; // Leave room in the 30/40 request actor limits for other audit and policy reads.
+const historyReadTimes = { audit: [] as number[], trace: [] as number[] };
+if (typeof window !== "undefined") window.addEventListener("auth:logout", () => {
+  historyReadTimes.audit.length = 0;
+  historyReadTimes.trace.length = 0;
+});
+
+const reserveHistoryRead = (kind: "audit" | "trace") => {
+  const times = historyReadTimes[kind];
+  const cutoff = Date.now() - HISTORY_REFRESH_MS;
+  while (times[0] <= cutoff) times.shift();
+  if (times.length >= HISTORY_READ_BUDGET) {
+    throw new Error("History is incomplete because the read budget is exhausted. Try again after ten minutes.");
+  }
+  times.push(Date.now());
+};
+
+type HistoryPage<T> = { rows: T[]; total: number | null; headIds: string[] };
 
 const readHistoryPages = async <T,>(
-  fetchPage: (cursor?: string) => Promise<{ success: boolean; data?: unknown; error?: string }>,
-  rowsFromPayload: (payload: unknown) => T[]
-): Promise<T[]> => {
+  fetchPage: (cursor?: string) => Promise<{ success: boolean; data?: unknown; error?: string; degraded?: boolean; code?: string }>,
+  rowsFromPayload: (payload: unknown) => T[],
+  kind: "audit" | "trace",
+  previous?: HistoryPage<T>,
+  isCurrent?: () => boolean
+): Promise<HistoryPage<T>> => {
   const rows: T[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
+  let total: number | null = null;
+  let headIds: string[] = [];
   while (true) {
+    if (isCurrent && !isCurrent()) throw new Error("History request was superseded");
+    reserveHistoryRead(kind);
     const response = await fetchPage(cursor);
-    if (!response.success) throw new Error(response.error || "Audit history could not be loaded");
+    if (isCurrent && !isCurrent()) throw new Error("History request was superseded");
+    if (!response.success || response.degraded) throw new Error(response.error || "History is incomplete because the latest read was rate limited or unavailable");
     const page = rowsFromPayload(response.data);
+    const payload = response.data as { total?: number | null; nextCursor?: string | null } | undefined;
+    if (!cursor) {
+      total = typeof payload?.total === "number" ? payload.total : payload?.nextCursor ? null : page.length;
+      headIds = page.map((row) => String((row as { id?: string }).id || ""));
+      if (previous && total !== null && total === previous.total &&
+          headIds.length === previous.headIds.length && headIds.every((id, index) => id === previous.headIds[index])) return previous;
+    }
     rows.push(...page);
-    const nextCursor = (response.data as { nextCursor?: string | null } | undefined)?.nextCursor || undefined;
-    if (!nextCursor) return rows;
+    const nextCursor = payload?.nextCursor || undefined;
+    if (!nextCursor) return { rows, total, headIds };
     if (seenCursors.has(nextCursor)) throw new Error("Audit history pagination did not advance");
     seenCursors.add(nextCursor);
     cursor = nextCursor;
@@ -115,6 +150,7 @@ export function useBatchWorkspaceController({
   const [workspaceHistoryError, setWorkspaceHistoryError] = useState<string | null>(null);
   const [workspaceHistoryLastUpdatedAt, setWorkspaceHistoryLastUpdatedAt] = useState<Date | null>(null);
   const historyRequest = useRef(0);
+  const historyChunks = useRef(new Map<string, { traces: HistoryPage<TraceEventRow>; audits: HistoryPage<AuditLogRow> }>());
   const openWorkspaceSource = useRef<string | null>(null);
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
 
@@ -124,6 +160,7 @@ export function useBatchWorkspaceController({
     const selected = !isManufacturer && completeWorkspace?.sourceBatchId === workspace.sourceBatchId
       ? completeWorkspace : isManufacturer ? workspace : null;
     if (!selected || !scopeMatches || openWorkspaceSource.current !== selected.sourceBatchId) return;
+    if (!options?.silent && historyChunks.current.size) clearDashboardReadCache(["audit:logs:", "trace:timeline:"]);
     const request = ++historyRequest.current;
     if (!options?.silent) {
       setWorkspaceHistoryLoading(true);
@@ -139,28 +176,33 @@ export function useBatchWorkspaceController({
         )
       );
       const licenseeId = selected.licensee?.id || selected.sourceBatchRow?.licenseeId;
-      const merged = new Map<string, TraceEventRow>();
+      const staged = new Map<string, { traces: HistoryPage<TraceEventRow>; audits: HistoryPage<AuditLogRow> }>();
       const chunks = Array.from({ length: Math.ceil(batchIds.length / HISTORY_BATCH_SIZE) }, (_, index) =>
         batchIds.slice(index * HISTORY_BATCH_SIZE, (index + 1) * HISTORY_BATCH_SIZE));
       for (let index = 0; index < chunks.length; index += HISTORY_BATCH_CONCURRENCY) {
-        const group = await Promise.all(chunks.slice(index, index + HISTORY_BATCH_CONCURRENCY).map(async (ids) =>
-          Promise.all([
+        const group = await Promise.all(chunks.slice(index, index + HISTORY_BATCH_CONCURRENCY).map(async (ids) => {
+          const key = `${licenseeId}:${ids.join(",")}`;
+          const previous = historyChunks.current.get(key);
+          const [traces, audits] = await Promise.all([
             readHistoryPages<TraceEventRow>((cursor) => apiClient.getTraceTimeline({ batchIds: ids, limit: HISTORY_PAGE_SIZE, cursor,
-              licenseeId, purpose: "batch-workspace-history-review" }), traceRows),
+              licenseeId, purpose: "batch-workspace-history-review" }), traceRows, "trace", previous?.traces, () => request === historyRequest.current),
             readHistoryPages<AuditLogRow>((cursor) => apiClient.getAuditLogs({ entityType: "Batch", entityIds: ids,
-              limit: HISTORY_PAGE_SIZE, cursor, licenseeId, purpose: "batch-workspace-history-review" }), auditRows),
-          ])
-        ));
+              limit: HISTORY_PAGE_SIZE, cursor, licenseeId, purpose: "batch-workspace-history-review" }), auditRows, "audit", previous?.audits, () => request === historyRequest.current),
+          ]);
+          return { key, traces, audits };
+        }));
         if (request !== historyRequest.current) return;
-        for (const [traces, audits] of group) {
-          for (const item of traces) merged.set(String(item.id), item);
-          for (const item of audits) {
-            const normalized = normalizeAuditLogToTraceEvent(item);
-            if (!merged.has(normalized.id)) merged.set(normalized.id, normalized);
-          }
+        for (const { key, traces, audits } of group) staged.set(key, { traces, audits });
+      }
+      const merged = new Map<string, TraceEventRow>();
+      for (const { traces, audits } of staged.values()) {
+        for (const item of traces.rows) merged.set(String(item.id), item);
+        for (const item of audits.rows) {
+          const normalized = normalizeAuditLogToTraceEvent(item);
+          if (!merged.has(normalized.id)) merged.set(normalized.id, normalized);
         }
       }
-
+      historyChunks.current = staged;
       setWorkspaceHistoryLogs(
         Array.from(merged.values()).sort(
           (left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime() || right.id.localeCompare(left.id)
@@ -180,6 +222,7 @@ export function useBatchWorkspaceController({
     setWorkspaceBatch(workspace);
     setWorkspaceOpen(true);
     setWorkspaceHistoryLogs([]);
+    historyChunks.current.clear();
     setWorkspaceHistoryLastUpdatedAt(null);
     setWorkspaceHistoryError(null);
     onWorkspaceBatchChange?.(isManufacturer ? workspace.sourceBatchRow || null : null);
@@ -193,6 +236,7 @@ export function useBatchWorkspaceController({
     setWorkspaceOpen(false);
     setWorkspaceBatch(null);
     setWorkspaceHistoryLogs([]);
+    historyChunks.current.clear();
     setWorkspaceHistoryLastUpdatedAt(null);
     setWorkspaceHistoryLoading(false);
     setWorkspaceHistoryError(null);
@@ -291,7 +335,7 @@ export function useBatchWorkspaceController({
     if (!workspaceOpen || !currentWorkspace) return;
     const timer = window.setInterval(() => {
       void fetchWorkspaceHistory(currentWorkspace, { silent: true });
-    }, 60_000);
+    }, HISTORY_REFRESH_MS);
 
     return () => window.clearInterval(timer);
   }, [completeWorkspace, isManufacturer, workspaceBatch, workspaceOpen]);
