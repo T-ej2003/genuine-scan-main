@@ -6,6 +6,8 @@ import { PRODUCTION_ENVIRONMENT_APPROVAL, createProductionEnvironmentApprovalEvi
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR } from "../aws/production-mixed-dual-slot-recovery-contract.mjs";
 import {
   BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION,
+  BOOTSTRAP_V2_SUCCESSOR_KIND,
+  BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256,
   LEGACY_BOOTSTRAP_MFA_TRANSITION,
   LEGACY_BOOTSTRAP_TRANSITION_KIND,
   LEGACY_BOOTSTRAP_TRANSITION_LIVE_PREDECESSOR_POLICY_SHA256,
@@ -28,6 +30,7 @@ import { brokerSignerSuccessorManagedIdentities, identityBootstrap } from "../aw
 import { rotationBindingsToTaskBindings } from "../aws/production-cutover-runtime-bootstrap.mjs";
 import { canonicalJson } from "../aws/production-green-stage-b-contract.mjs";
 import { productionStaleSupersessionPredecessorIdentity, productionSupersessionEvidenceIdentity, productionSupersessionVersionId } from "../security/production-initial-migration-source-advance.mjs";
+import { buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement } from "../aws/production-stage-a-control-plane.mjs";
 
 const sourceSha = "a".repeat(40);
 const now = new Date("2026-09-14T12:00:00.000Z");
@@ -105,8 +108,8 @@ const legacyBindingOrigin = (bindings = legacyBindings()) => {
   const hash = (value) => createHash("sha256").update(Buffer.from(canonicalJson(value))).digest("hex");
   return { ...body, bindingSha256: hash(bindings), originSha256: hash(body) };
 };
-const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0, policyWriteError = false } = {}) => {
-  let document = structuredClone(initial); let writes = 0; let tagWrites = 0; let reservationWrites = 0; const commands = []; let tags = structuredClone(credentialTopology.tags || []); let reservation = credentialTopology.reservation ? structuredClone(credentialTopology.reservation) : null; let reservationVersion = 0; let staleReads = 0; let transientReads = 0;
+const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, transientPostWriteReads = 0, policyWriteError = false, bucketPolicy = buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement(), successorReservationConflict = false } = {}) => {
+  let document = structuredClone(initial); let writes = 0; let tagWrites = 0; let reservationWrites = 0; const commands = []; let tags = structuredClone(credentialTopology.tags || []); const reservations = new Map(Object.entries(credentialTopology.reservations || (credentialTopology.reservation ? { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: credentialTopology.reservation } : {}))); const reservationVersions = new Map(); let staleReads = 0; let transientReads = 0; let injectedConflict = false;
   const run = (args) => {
     commands.push([...args]);
     if (args[0] === "sts") return JSON.stringify({ Arn: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.administratorArn });
@@ -125,6 +128,7 @@ const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, tra
       if (writes && transientReads++ < transientPostWriteReads) throw Object.assign(new Error("ThrottlingException"), { stderr: "ThrottlingException" });
       return JSON.stringify({ PolicyDocument: writes && staleReads++ < stalePostWriteReads ? initial : document });
     }
+    if (args[0] === "s3api" && args[1] === "get-bucket-policy") return JSON.stringify({ Policy: JSON.stringify(bucketPolicy) });
     if (args[1] === "put-user-policy") {
       writes += 1;
       const name = args[args.indexOf("--policy-name") + 1];
@@ -140,21 +144,157 @@ const runner = (initial, credentialTopology = {}, { stalePostWriteReads = 0, tra
       return "";
     }
     if (args[0] === "s3api" && args[1] === "get-object") {
+      const key = args[args.indexOf("--key") + 1]; const reservation = reservations.get(key); const reservationVersion = reservationVersions.get(key) || 0;
       if (!reservation) throw Object.assign(new Error("NoSuchKey"), { stderr: "NoSuchKey" });
       fs.writeFileSync(args[args.indexOf("--key") + 2], `${JSON.stringify(reservation)}\n`);
       return JSON.stringify({ ETag: `\"${String(reservationVersion).padStart(32, "0")}\"` });
     }
     if (args[0] === "s3api" && args[1] === "put-object") {
+      const key = args[args.indexOf("--key") + 1]; const reservation = reservations.get(key); const reservationVersion = reservationVersions.get(key) || 0;
       const create = args.includes("--if-none-match"); const match = args.includes("--if-match") ? args[args.indexOf("--if-match") + 1] : null;
+      if (successorReservationConflict && !injectedConflict && key === BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.v2SuccessorReservationKey) {
+        injectedConflict = true;
+        const contender = JSON.parse(fs.readFileSync(args[args.indexOf("--body") + 1], "utf8"));
+        reservations.set(key, { ...contender, authorizationSha256: "f".repeat(64) });
+        reservationVersions.set(key, reservationVersion + 1);
+        throw Object.assign(new Error("PreconditionFailed"), { stderr: "PreconditionFailed" });
+      }
       if ((create && reservation) || (match && match !== `\"${String(reservationVersion).padStart(32, "0")}\"`)) throw Object.assign(new Error("PreconditionFailed"), { stderr: "PreconditionFailed" });
-      reservation = JSON.parse(fs.readFileSync(args[args.indexOf("--body") + 1], "utf8")); reservationVersion += 1; reservationWrites += 1;
-      return JSON.stringify({ ETag: `\"${String(reservationVersion).padStart(32, "0")}\"` });
+      reservations.set(key, JSON.parse(fs.readFileSync(args[args.indexOf("--body") + 1], "utf8"))); reservationVersions.set(key, reservationVersion + 1); reservationWrites += 1;
+      return JSON.stringify({ ETag: `\"${String(reservationVersion + 1).padStart(32, "0")}\"` });
     }
     throw new Error(`unexpected command: ${args.join(" ")}`);
   };
-  return { run, writes: () => writes, tagWrites: () => tagWrites, reservationWrites: () => reservationWrites, document: () => document, tags: () => tags, reservation: () => reservation, commands: () => commands };
+  return { run, writes: () => writes, tagWrites: () => tagWrites, reservationWrites: () => reservationWrites, document: () => document, tags: () => tags, reservation: () => reservations.get(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey), successorReservation: () => reservations.get(BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.v2SuccessorReservationKey), commands: () => commands };
 };
 const permitsAssumeRole = ({ roleArn, mfa }) => desired.document.Statement.some((statement) => statement.Effect === "Allow" && statement.Action === "sts:AssumeRole" && (Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).includes(roleArn) && statement.Condition?.Bool?.["aws:MultiFactorAuthPresent"] === "true" && mfa === true);
+
+const successorNow = new Date("2026-10-28T12:00:00.000Z");
+const successorTransition = { kind: BOOTSTRAP_V2_SUCCESSOR_KIND, completedAuthorizationSha256: BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256 };
+const predecessorReservation = { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_LEGACY_MFA_TRANSITION_RESERVATION", authorizationSha256: BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256, expiresAt: "2026-09-25T22:46:41.331Z", executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: "2026-09-25T22:23:01.145Z" };
+const successorApproval = createProductionEnvironmentApprovalEvidence({
+  environmentConfig: { id: 7, name: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+  repository: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.repository, environment: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, sourceSha,
+  workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "101", workflowRunAttempt: "1", executionActor: "operator", observedAt: successorNow.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, userId: 3, userLogin: "reviewer" },
+});
+const successorAuthorization = () => createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation: createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument, { accessKeys: legacyAccessKeys }), transition: successorTransition, preparedAt: successorNow.toISOString() }), protectedEnvironmentApprovalEvidence: successorApproval, authorizedAt: successorNow.toISOString() });
+const successorFixture = (initial = desired.predecessorDocument, extra = {}, options = {}) => runner(initial, { accessKeys: legacyAccessKeys, tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `completed:${BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256}` }], reservations: { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: predecessorReservation }, ...extra }, options);
+
+test("v2 successor uses a new authorization and reservation without replaying the completed legacy transition", () => {
+  const authorization = successorAuthorization();
+  assert.deepEqual(authorization.preparation.expectedWritePlan.map(({ action }) => action), ["s3:PutObject", "iam:PutUserPolicy"]);
+  assert.equal(authorization.preparation.legacyRotationBindings, null);
+  assert.equal(authorization.preparation.legacyRotationBindingOrigin, null);
+  const fixture = successorFixture();
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), { status: "COMPLETE", iamPutUserPolicyCount: 1, s3PutObjectCount: 1, recovered: false });
+  assert.equal(fixture.writes(), 1);
+  assert.equal(fixture.tagWrites(), 0);
+  assert.equal(fixture.successorReservation().authorizationSha256, authorization.authorizationSha256);
+  assert.equal(fixture.tags()[0].Value, `completed:${BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256}`);
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), { status: "COMPLETE", iamPutUserPolicyCount: 0, s3PutObjectCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 1);
+});
+
+test("v1 to v2 changes only the four MFA-gated Stage A policy reads", () => {
+  const grants = (document) => new Set(document.Statement.flatMap(({ Effect, Action, Resource, Condition }) => {
+    const actions = Array.isArray(Action) ? Action : [Action];
+    const resources = Array.isArray(Resource) ? Resource : [Resource];
+    return actions.flatMap((action) => resources.map((resource) => canonicalJson({ Effect, action, resource, Condition: Condition || null })));
+  }));
+  const before = grants(desired.predecessorDocument); const after = grants(desired.document);
+  assert.deepEqual([...before].filter((grant) => !after.has(grant)), []);
+  const added = [...after].filter((grant) => !before.has(grant)).map((grant) => JSON.parse(grant));
+  assert.deepEqual(added.map(({ action }) => action).sort(), ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListEntitiesForPolicy", "iam:ListPolicyVersions"].sort());
+  for (const grant of added) {
+    assert.equal(grant.resource, "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease");
+    assert.deepEqual(grant.Condition, { Bool: { "aws:MultiFactorAuthPresent": "true" } });
+  }
+});
+
+test("v2 successor rejects missing predecessor proof, altered keys, concurrent claims and unrelated policy state", () => {
+  const authorization = successorAuthorization();
+  for (const extra of [
+    { tags: [] },
+    { tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `completed:${"f".repeat(64)}` }] },
+    { reservations: {} },
+    { reservations: { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: { ...predecessorReservation, authorizationSha256: "f".repeat(64) } } },
+    { accessKeys: legacyAccessKeys.slice(0, 1) },
+  ]) {
+    const fixture = successorFixture(desired.predecessorDocument, extra);
+    assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }));
+    assert.equal(fixture.writes(), 0);
+  }
+  const active = successorFixture(desired.predecessorDocument, { reservations: { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: predecessorReservation, [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.v2SuccessorReservationKey]: { ...predecessorReservation, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_V2_SUCCESSOR_RESERVATION", authorizationSha256: "f".repeat(64), expiresAt: new Date(successorNow.getTime() + 60_000).toISOString(), leaseExpiresAt: new Date(successorNow.getTime() + 30_000).toISOString() } } });
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: active.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), /active executor/);
+  assert.equal(active.writes(), 0);
+  const unrelated = successorFixture(desired.legacyLivePredecessorDocument);
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: unrelated.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), /drift|predecessor/);
+  assert.equal(unrelated.writes(), 0);
+  assert.throws(() => createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.predecessorDocument, { accessKeys: legacyAccessKeys }), transition: successorTransition, legacyRotationBindings: {}, preparedAt: successorNow.toISOString() }), /must not reuse/);
+});
+
+test("v2 successor refuses the old bucket policy before reserving or changing IAM", () => {
+  const fixture = successorFixture(desired.predecessorDocument, {}, { bucketPolicy: buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection() });
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: successorAuthorization(), sourceSha, now: successorNow, clock: () => successorNow }), /governed Stage A reservation policy update/);
+  assert.equal(fixture.reservationWrites(), 0);
+  assert.equal(fixture.writes(), 0);
+});
+
+test("v2 successor replaces an expired claim with If-Match and never replays a completed IAM write", () => {
+  const authorization = successorAuthorization();
+  const expired = { schemaVersion: 2, kind: "PRODUCTION_BOOTSTRAP_OPERATOR_V2_SUCCESSOR_RESERVATION", authorizationSha256: authorization.authorizationSha256, expiresAt: authorization.preparation.expiresAt, executionId: "11111111-1111-4111-8111-111111111111", leaseExpiresAt: new Date(successorNow.getTime() - 1).toISOString() };
+  const fixture = successorFixture(desired.predecessorDocument, { reservations: { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: predecessorReservation, [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.v2SuccessorReservationKey]: expired } });
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), { status: "COMPLETE", iamPutUserPolicyCount: 1, s3PutObjectCount: 1, recovered: false });
+  const replacement = fixture.commands().find((args) => args[0] === "s3api" && args[1] === "put-object");
+  assert.equal(replacement.includes("--if-match"), true);
+  assert.equal(fixture.reservationWrites(), 1);
+  assert.equal(fixture.writes(), 1);
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), { status: "COMPLETE", iamPutUserPolicyCount: 0, s3PutObjectCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 1);
+});
+
+test("v2 successor loses a conditional reservation race without changing IAM", () => {
+  const fixture = successorFixture(desired.predecessorDocument, {}, { successorReservationConflict: true });
+  assert.throws(() => reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization: successorAuthorization(), sourceSha, now: successorNow, clock: () => successorNow }), /active executor/);
+  assert.equal(fixture.reservationWrites(), 0);
+  assert.equal(fixture.writes(), 0);
+  assert.equal(fixture.successorReservation().authorizationSha256, "f".repeat(64));
+});
+
+test("v2 successor recovers ambiguous post-write success without another IAM write", () => {
+  const fixture = successorFixture(desired.predecessorDocument, {}, { policyWriteError: true });
+  const authorization = successorAuthorization();
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: successorNow, clock: () => successorNow }), { status: "COMPLETE", iamPutUserPolicyCount: 0, s3PutObjectCount: 1, recovered: true });
+  assert.equal(fixture.writes(), 1);
+});
+
+test("v2 successor can certify an already complete policy without replaying an expired authorization", () => {
+  const prior = successorAuthorization();
+  const priorRun = successorFixture();
+  reconcileBootstrapOperatorPolicy({ run: priorRun.run, authorization: prior, sourceSha, now: successorNow, clock: () => successorNow });
+  const later = new Date(successorNow.getTime() + 31 * 60_000);
+  const laterApproval = createProductionEnvironmentApprovalEvidence({
+    environmentConfig: { id: 7, name: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, can_admins_bypass: false, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 3, login: "reviewer" } }] }] },
+    repository: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.repository, environment: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, sourceSha,
+    workflowRef: PRODUCTION_ENVIRONMENT_APPROVAL.bootstrapOperatorPolicyReconciliationWorkflowRef, eventName: "workflow_dispatch", workflowRunId: "102", workflowRunAttempt: "1", executionActor: "operator", observedAt: later.toISOString(), actualApproval: { state: "approved", environmentId: 7, environmentName: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.environment, userId: 3, userLogin: "reviewer" },
+  });
+  const preparation = createBootstrapOperatorPolicyPreparation({ sourceSha, liveState: live(desired.document, { accessKeys: legacyAccessKeys }), transition: successorTransition, preparedAt: later.toISOString() });
+  const authorization = createBootstrapOperatorPolicyAuthorization({ sourceSha, preparation, protectedEnvironmentApprovalEvidence: laterApproval, authorizedAt: later.toISOString() });
+  const fixture = successorFixture(desired.document, { reservations: { [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionReservationKey]: predecessorReservation, [BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.v2SuccessorReservationKey]: priorRun.successorReservation() } });
+  assert.deepEqual(preparation.expectedWritePlan, []);
+  assert.deepEqual(reconcileBootstrapOperatorPolicy({ run: fixture.run, authorization, sourceSha, now: later }), { status: "COMPLETE", iamPutUserPolicyCount: 0, s3PutObjectCount: 0, recovered: true });
+  assert.equal(fixture.writes(), 0);
+});
+
+test("v2 successor OIDC authorization checks the completed predecessor and never reads secret values", () => {
+  const authorization = successorAuthorization();
+  const principal = `${BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.authorizationRoleArn.replace(":iam::", ":sts::").replace(":role/", ":assumed-role/")}/successor-test`;
+  const calls = [];
+  const run = (args) => { calls.push(args); return JSON.stringify(args[0] === "sts" ? { Arn: principal } : { Tags: [{ Key: BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION.legacyTransitionConsumptionTagKey, Value: `completed:${BOOTSTRAP_V2_PREDECESSOR_AUTHORIZATION_SHA256}` }] }); };
+  assert.deepEqual(authenticateBootstrapOperatorAuthorizationLiveState({ run, preparation: authorization.preparation, sourceSha, now: successorNow }), { principalArn: principal, liveInitialOverlapBindingReverified: false });
+  assert.deepEqual(calls.map(([service, action]) => [service, action]), [["sts", "get-caller-identity"], ["iam", "list-user-tags"]]);
+  assert.throws(() => authenticateBootstrapOperatorAuthorizationLiveState({ run: (args) => JSON.stringify(args[0] === "sts" ? { Arn: principal } : { Tags: [] }), preparation: authorization.preparation, sourceSha, now: successorNow }), /predecessor completion/);
+});
 
 test("bootstrap policy stays constrained and delegates signer policy transition to the protected installer", () => {
   const assume = desired.document.Statement.find(({ Action }) => Action === "sts:AssumeRole");
@@ -520,6 +660,9 @@ test("the RLS contract makes the legacy transition explicit without weakening th
   assert.match(contract.stageAOperatorPath.bootstrapOperatorRequirements.join("\n"), /no permanent access keys/);
   assert.deepEqual(Object.fromEntries(Object.entries(contract.stageAOperatorPath.legacyBootstrapMfaTransition).filter(([key]) => key !== "scope")), LEGACY_BOOTSTRAP_MFA_TRANSITION);
   assert.match(contract.stageAOperatorPath.legacyBootstrapMfaTransition.scope, /exact governed addition of MFA-gated publisher-bootstrap and verifier AssumeRole statements/);
+  assert.deepEqual({ kind: contract.stageAOperatorPath.bootstrapOperatorV2Successor.kind, completedAuthorizationSha256: contract.stageAOperatorPath.bootstrapOperatorV2Successor.completedAuthorizationSha256 }, successorTransition);
+  assert.match(contract.stageAOperatorPath.bootstrapOperatorV2Successor.scope, /four MFA-gated Stage A policy read actions/);
+  assert.match(fs.readFileSync("documents/ops/iam/MSCQR_BOOTSTRAP_OPERATOR_V2_SUCCESSOR.md", "utf8"), /separately approved update from the exact v1 inline/);
 });
 
 test("authorization workflow uses exact read-only OIDC authority and produces a source-bound authorization", () => {

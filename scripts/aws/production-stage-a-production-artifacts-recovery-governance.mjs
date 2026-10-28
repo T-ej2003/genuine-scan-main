@@ -86,7 +86,11 @@ export function stageAProductionArtifactsGovernedExecutableManifest(sourceSha, {
     if (!object || object.type !== "blob" || !["100644", "100755"].includes(object.mode)) throw new Error(`Stage A production-artifacts governed source file is missing or unsafe: ${file}`);
     const bytes = Buffer.from(git(["cat-file", "blob", object.object])); bytesByPath.set(file, bytes);
     for (const specifier of relativeImports(bytes)) {
-      let dependency = path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
+      // This child-process bootstrap runs from the repository root, so its
+      // embedded dynamic imports are root-relative rather than module-relative.
+      let dependency = file === "scripts/aws/production-green-stage-b-task-definitions.mjs" && specifier.startsWith("./scripts/aws/")
+        ? specifier.slice(2)
+        : path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier));
       if (!path.posix.extname(dependency)) dependency += ".mjs";
       if (dependency.startsWith("../") || dependency.startsWith("/") || !tree.has(dependency)) throw new Error(`Stage A production-artifacts governed source import is invalid: ${file} -> ${specifier}`);
       if (!selected.has(dependency)) { selected.add(dependency); pending.push(dependency); }
