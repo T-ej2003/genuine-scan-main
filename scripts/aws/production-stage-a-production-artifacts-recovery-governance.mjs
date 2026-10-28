@@ -116,6 +116,12 @@ export const STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES = Object.freeze([
   "scripts/aws/production-stage-a-production-artifacts-recovery-governance.mjs",
   "scripts/aws/run-production-stage-a-production-artifacts-recovery.mjs",
 ]);
+// Recovery f537683 was signed before the checker role was added to the locked state schema.
+const PRE_CHECKER_RECEIPT_RECOVERY_MANIFEST_SHA256 = "fb9f82eb2401ccab60c8b4d92310bac8bab6d287d8556f329cc1f6e10d80e323";
+const PRE_CHECKER_RECEIPT_STATE_SCHEMA_VERSIONS = Object.freeze({
+  "aws_s3_bucket_policy.production_artifacts": 0,
+  "aws_db_instance.green": 2,
+});
 
 export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha, recoverySourceSha, proveDescendant, historicalGovernedExecutableManifestSha256, readGovernedExecutableManifestSha256 = stageAProductionArtifactsGovernedExecutableManifestSha256, readContinuationChangedFiles } = {}) {
   if (!SHA40.test(sourceSha || "") || !SHA40.test(recoverySourceSha || "")) throw new Error("Stage A production-artifacts recovery source compatibility is invalid.");
@@ -127,7 +133,7 @@ export function assertStageAProductionArtifactsRecoverySourceCompatibility({ sou
   if (historical === current) return true;
   if (typeof readContinuationChangedFiles !== "function") throw new Error("Stage A production-artifacts descendant changed the governed executable source.");
   const changed = readContinuationChangedFiles({ ancestorSha: recoverySourceSha, descendantSha: sourceSha });
-  if (!Array.isArray(changed) || JSON.stringify([...changed].sort()) !== JSON.stringify(STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES)) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
+  if (!Array.isArray(changed) || !changed.length || new Set(changed).size !== changed.length || changed.some((file) => !STAGE_A_RECOVERY_CONTINUATION_SAFE_FILES.includes(file))) throw new Error("Stage A production-artifacts descendant changed an unsafe governed executable source.");
   return true;
 }
 
@@ -150,7 +156,7 @@ export const stageAProductionArtifactsContinuationCompatibilitySha256 = ({ gover
   awsProviderVersion: "6.56.0",
   terraformRoot: "infra/aws/terraform/production-green-stage-a",
   terraformBackend: STAGE_A_TERRAFORM_BACKEND,
-  stateSchemaVersions: STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
+  stateSchemaVersions: governedExecutableManifestSha256 === PRE_CHECKER_RECEIPT_RECOVERY_MANIFEST_SHA256 ? PRE_CHECKER_RECEIPT_STATE_SCHEMA_VERSIONS : STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
   rootAttestationKey: ROOT_ATTESTATION_KEY_ALIAS_ARN,
   rootAttestationSigningAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM,
   governedExecutableManifestSha256,

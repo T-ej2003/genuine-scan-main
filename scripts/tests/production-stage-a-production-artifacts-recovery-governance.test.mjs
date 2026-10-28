@@ -28,6 +28,7 @@ import {
   STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_WORKFLOW_REF,
   stageAProductionArtifactsGovernedExecutableManifest,
   stageAProductionArtifactsGovernedExecutableManifestSha256,
+  stageAProductionArtifactsContinuationCompatibilitySha256,
 } from "../aws/production-stage-a-production-artifacts-recovery-governance.mjs";
 import { buildStageAProductionArtifactsBucketPolicy, buildStageAProductionArtifactsBucketPolicyPredecessor, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservation, buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor, buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap, buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection, buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation, stageAProductionArtifactsLegacyReservationRepairTransition, stageAProductionArtifactsV2SuccessorReservationTransition, createStageAProductionArtifactsReconciliationPrepareEvidence, currentStageAProductionArtifactsBucketPolicyTransition, stageAProductionArtifactsPolicySha256 } from "../aws/production-stage-a-control-plane.mjs";
 import { STAGE_A_PRODUCTION_ARTIFACTS_RECONCILIATION_OPERATION } from "../aws/production-stage-a-production-artifacts-journal.mjs";
@@ -289,6 +290,15 @@ test("descendant continuation binds the complete governed Git-object manifest", 
   }
   assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant, historicalGovernedExecutableManifestSha256: "0".repeat(64), readGovernedExecutableManifestSha256: () => historical }), /governed executable source/);
   assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant, readGovernedExecutableManifestSha256: () => historical }));
+  assert.doesNotThrow(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant, readGovernedExecutableManifestSha256: (sha) => sha.startsWith("a") ? historical : changedDigest("scripts/aws/production-stage-a-control-plane.mjs"), readContinuationChangedFiles: () => ["scripts/aws/production-stage-a-control-plane.mjs"] }));
+  assert.throws(() => assertStageAProductionArtifactsRecoverySourceCompatibility({ sourceSha: "b".repeat(40), recoverySourceSha: "a".repeat(40), proveDescendant, readGovernedExecutableManifestSha256: (sha) => sha.startsWith("a") ? historical : changedDigest("scripts/aws/production-stage-a-control-plane.mjs"), readContinuationChangedFiles: () => ["scripts/aws/production-stage-a-control-plane.mjs", "scripts/aws/unreviewed.mjs"] }), /unsafe governed executable source/);
+});
+
+test("historical f537683 recovery compatibility survives the reviewed checker state-schema addition", () => {
+  const manifest = "fb9f82eb2401ccab60c8b4d92310bac8bab6d287d8556f329cc1f6e10d80e323";
+  const transition = stageAProductionArtifactsV2SuccessorReservationTransition();
+  assert.equal(stageAProductionArtifactsContinuationCompatibilitySha256({ governedExecutableManifestSha256: manifest, predecessorPolicySha256: transition.predecessorPolicySha256, desiredPolicySha256: transition.desiredPolicySha256 }), "1374f49adecf733e3bf20930b8bc2b6ac8347ed3cb2c58acdd3f0bdaabc0eeec");
+  assert.notEqual(stageAProductionArtifactsContinuationCompatibilitySha256({ governedExecutableManifestSha256: "0".repeat(64), predecessorPolicySha256: transition.predecessorPolicySha256, desiredPolicySha256: transition.desiredPolicySha256 }), "1374f49adecf733e3bf20930b8bc2b6ac8347ed3cb2c58acdd3f0bdaabc0eeec");
 });
 
 test("descendant reconciliation preserves the historical recovery source and completion", () => {

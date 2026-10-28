@@ -39,6 +39,8 @@ renew its two-minute lease after expiry using the S3 ETag condition.
 The governed Terraform state refresh may also observe the already-installed
 checker `ReadCompletedInventoryReceipts` policy. Reconcile it only when the
 refresh-only plan proves that exact policy addition; this does not change IAM.
+The completed Stage A recovery remains bound to `f537683`; after the checker
+state fix, authorize a continuation rebind before preparing a new state plan.
 
 After this change is reviewed and merged, prepare and authorize the successor
 against the new protected-main SHA using `--v2-successor`. Do not reuse the
