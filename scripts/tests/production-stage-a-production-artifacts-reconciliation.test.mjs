@@ -20,6 +20,7 @@ import {
   prepareStageAProductionArtifactsStateReconciliation,
   runStageAProductionArtifactsStateReconciliation,
   STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS,
+  STAGE_A_CHECKER_PUBLICATION_POLICY,
   STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY,
   STAGE_A_TERRAFORM_VERSION,
   stageAProductionArtifactsLegacyReservationRepairTransition,
@@ -43,6 +44,16 @@ const reconciliationAuthorization = (serial = 35, savedPlanSha256 = "b".repeat(6
 const verifyReconciliationAuthorization = (value) => ({ authorizationSha256: value.authorizationSha256, approved: true, independent: true });
 const verifier = (value) => ({ authorizationSha256: value.recoveryAuthorizationSha256, livePolicySha256: value.livePolicySha256, completed: true });
 const refreshPlan = ({ before = predecessor, after = desired, drift = [] } = {}) => ({ complete: true, errored: false, applyable: true, resource_changes: [], resource_drift: [{ address: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address, mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: resource(before), after: resource(after), replace_paths: [], before_unknown: {}, after_unknown: {}, before_sensitive: {}, after_sensitive: {} } }, ...drift] });
+const checkerReceiptDrift = () => {
+  const name = "mscqr-production-rls-independent-checker";
+  const previous = { Version: "2012-10-17", Statement: [
+    { Sid: "SignExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.kmsResource },
+    { Sid: "PublishExactStageBApproval", Effect: "Allow", Action: STAGE_A_CHECKER_PUBLICATION_POLICY.publishAction, Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.publishResource },
+  ] };
+  const current = { ...previous, Statement: [...previous.Statement, { Sid: "ReadCompletedInventoryReceipts", Effect: "Allow", Action: "dynamodb:GetItem", Resource: STAGE_A_CHECKER_PUBLICATION_POLICY.inventoryReceiptTableArn, Condition: { "ForAllValues:StringLike": { "dynamodb:LeadingKeys": ["inventory-completion#production-predeployment-rotation-inventory#*"] }, StringEquals: { "aws:RequestedRegion": "eu-west-2" } } }] };
+  const attributes = (policy) => ({ id: name, name, arn: `arn:aws:iam::368992683803:role/${name}`, inline_policy: [{ name, policy: JSON.stringify(policy) }] });
+  return { address: "aws_iam_role.checker", mode: "managed", type: "aws_iam_role", name: "checker", provider_name: "registry.terraform.io/hashicorp/aws", change: { actions: ["update"], before: attributes(previous), after: attributes(current), after_unknown: {}, before_sensitive: {}, after_sensitive: {} } };
+};
 const stateSnapshot = (identity, policy = identity.serial === 35 ? predecessor : desired, resources = []) => ({ ...identity, state: { version: 4, lineage: identity.lineage, serial: identity.serial, resources: [{ mode: "managed", type: STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type, name: "production_artifacts", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS[STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address], attributes: resource(policy) }] }, ...resources] } });
 const consumption = (overrides = {}) => ({ reserveConsumption: async () => ({ reservation: "exact" }), finalizeConsumption: async () => {}, abortConsumption: async () => {}, recordPostApply: async () => {}, readConsumptionEvidence: async () => ({}), ...overrides });
 const execute = async ({ adapter, ...options }) => { const preparedAdapter = { ...adapter, readStateSnapshot: adapter.readStateSnapshot || (async () => stateSnapshot(await adapter.readStateIdentity())), createSavedRefreshOnlyPlan: async () => ({ ...(await adapter.createSavedRefreshOnlyPlan()), terraformVersion: STAGE_A_TERRAFORM_VERSION }) }; const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter: preparedAdapter, sourceSha, recoveryCompletion: options.recoveryCompletion || completion(), verifyRecoveryCompletion: verifier }); return runStageAProductionArtifactsStateReconciliation({ ...options, adapter: preparedAdapter, saved: prepared.saved, preparedState: prepared.preState }); };
@@ -152,6 +163,41 @@ test("recovery refresh validator is closed-world for policy and resource drift",
     ["replace", (plan) => { plan.resource_drift[0].change.actions = ["delete", "create"]; }],
   ];
   for (const [label, mutate] of mutations) { const plan = structuredClone(refreshPlan()); mutate(plan); assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier }), /not exact|uncontracted|invalid|policy/i, label); }
+});
+
+test("refresh-only reconciliation admits only the reviewed checker receipt policy drift", () => {
+  const exact = refreshPlan({ drift: [checkerReceiptDrift()] });
+  const options = { sourceSha, recoveryCompletion: completion(), preStateSerial: 35, verifyRecoveryCompletion: verifier };
+  assert.equal(assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(exact, options).resourceDriftCount, 2);
+  for (const [label, mutate] of [
+    ["unrelated IAM action", (entry) => { const policy = JSON.parse(entry.change.after.inline_policy[0].policy); policy.Statement[2].Action = "dynamodb:*"; entry.change.after.inline_policy[0].policy = JSON.stringify(policy); }],
+    ["extra role change", (entry) => { entry.change.after.max_session_duration = 900; }],
+    ["different role", (entry) => { entry.change.after.arn = "arn:aws:iam::368992683803:role/other"; }],
+    ["sensitive policy", (entry) => { entry.change.after_sensitive = { inline_policy: [{ policy: true }] }; }],
+    ["replacement", (entry) => { entry.change.actions = ["delete", "create"]; }],
+  ]) {
+    const candidate = structuredClone(exact);
+    mutate(candidate.resource_drift[1]);
+    assert.throws(() => assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(candidate, options), /checker receipt policy drift|not exact/, label);
+  }
+});
+
+test("checker receipt drift requires exact post-apply state before completion", async () => {
+  const drift = checkerReceiptDrift();
+  const plan = refreshPlan({ drift: [drift] });
+  let state = { lineage, serial: 35, stateSha256 };
+  const checkerState = (attributes) => ({ mode: "managed", type: "aws_iam_role", name: "checker", provider: 'provider["registry.terraform.io/hashicorp/aws"]', instances: [{ schema_version: 0, attributes }] });
+  let snapshot = stateSnapshot(state, predecessor, [checkerState(drift.change.before)]);
+  const adapter = { readStateIdentity: async () => ({ ...state }), readStateSnapshot: async () => structuredClone(snapshot), createSavedRefreshOnlyPlan: async () => ({ sourceSha, refreshOnly: true, savedPlanSha256: "b".repeat(64), savedPlanByteLength: 1, planPath: "/tmp/reconciliation.tfplan", preState: { lineage, serial: 35, stateSha256 }, terraformVersion: STAGE_A_TERRAFORM_VERSION, plan }), applySavedRefreshOnlyPlan: async () => {}, readProductionArtifactsPolicy: async () => desired };
+  const prepared = await prepareStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier });
+  const authorization = reconciliationAuthorization();
+  const reservation = createStageAProductionArtifactsReservation({ operation: "STAGE_A_PRODUCTION_ARTIFACTS_STATE_RECONCILIATION", sourceSha, account: "368992683803", region: "eu-west-2", executionPrincipal: "arn:aws:iam::368992683803:role/mscqr-production-release-deployer", authorizationSha256: authorization.authorizationSha256, recoveryCompletionSha256: completion().completionSha256, savedPlanSha256: prepared.saved.savedPlanSha256, preStateLineage: lineage, preStateSerial: 35, preStateSha256: stateSha256, desiredPolicySha256: completion().desiredPolicySha256 });
+  state = { lineage, serial: 36, stateSha256: "d".repeat(64) };
+  const resume = () => runStageAProductionArtifactsStateReconciliation({ adapter, sourceSha, saved: prepared.saved, preparedState: prepared.preState, recoveryCompletion: completion(), verifyRecoveryCompletion: verifier, reconciliationAuthorization: authorization, verifyReconciliationAuthorization, resumeReservation: reservation, ...consumption() });
+  snapshot = stateSnapshot(state, desired, [checkerState(drift.change.before)]);
+  await assert.rejects(resume(), /post-state checker/i);
+  snapshot = stateSnapshot(state, desired, [checkerState(drift.change.after)]);
+  assert.equal((await resume()).resumed, true);
 });
 
 test("locked-provider bucket-policy envelope permits only the unset owner representation", () => {

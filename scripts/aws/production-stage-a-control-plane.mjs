@@ -100,6 +100,7 @@ export const STAGE_A_PRODUCTION_ARTIFACTS_EXECUTABLE_TRANSITIONS = Object.freeze
 export const STAGE_A_LOCKED_AWS_RESOURCE_STATE_SCHEMA_VERSIONS = Object.freeze({
   [STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address]: 0,
   "aws_db_instance.green": 2,
+  "aws_iam_role.checker": 0,
 });
 export function buildStageAProductionArtifactsBucketPolicyPredecessor() {
   const objects = [PRODUCTION_ACTIVATION_LIFECYCLE.claimArn, PRODUCTION_ACTIVATION_LIFECYCLE.completionArn];
@@ -570,10 +571,11 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   recoverySourceSha ||= recoveryCompletion?.sourceSha;
   preStateSha256 ||= recoveryCompletion?.preStateSha256;
   assertStageAProductionArtifactsRecoveryCompletion(recoveryCompletion, { sourceSha: recoverySourceSha, stateLineage, preStateSerial, preStateSha256, verifyRecoveryCompletion });
-  if (!plan || plan.complete !== true || plan.errored !== false || plan.applyable !== true || plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change } = {}) => !exactActions(change?.actions, ["no-op"]) && !exactActions(change?.actions, ["read"]))) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length < 1 || plan.resource_drift.length > 2) throw new Error("Stage A production-artifacts refresh-only plan is not exact.");
+  if (!plan || plan.complete !== true || plan.errored !== false || plan.applyable !== true || plan.resource_changes !== undefined && (!Array.isArray(plan.resource_changes) || plan.resource_changes.some(({ change } = {}) => !exactActions(change?.actions, ["no-op"]) && !exactActions(change?.actions, ["read"]))) || !Array.isArray(plan.resource_drift) || plan.resource_drift.length < 1 || plan.resource_drift.length > 3) throw new Error("Stage A production-artifacts refresh-only plan is not exact.");
   const bucketDrift = plan.resource_drift.filter(({ address }) => address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address);
   const rdsDrift = plan.resource_drift.filter(({ address }) => address === "aws_db_instance.green");
-  if (bucketDrift.length !== 1 || rdsDrift.length > 1 || bucketDrift.length + rdsDrift.length !== plan.resource_drift.length) throw new Error("Stage A production-artifacts refresh-only plan contains uncontracted drift.");
+  const checkerDrift = plan.resource_drift.filter(({ address }) => address === "aws_iam_role.checker");
+  if (bucketDrift.length !== 1 || rdsDrift.length > 1 || checkerDrift.length > 1 || bucketDrift.length + rdsDrift.length + checkerDrift.length !== plan.resource_drift.length) throw new Error("Stage A production-artifacts refresh-only plan contains uncontracted drift.");
   const entry = bucketDrift[0]; const change = entry.change;
   if (entry.mode !== "managed" || entry.type !== STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.type || entry.name !== "production_artifacts" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !change || !exactActions(change.actions, ["update"]) || change.replace_paths?.length || !emptyObject(change.before_unknown) || !emptyObject(change.after_unknown) || !emptyObject(change.before_sensitive) || !emptyObject(change.after_sensitive)) throw new Error("Stage A production-artifacts refresh-only bucket drift is not exact.");
   const transition = resolveStageAProductionArtifactsBucketPolicyTransition(recoveryCompletion);
@@ -586,7 +588,23 @@ export function assertStageAProductionArtifactsRecoveryRefreshOnlyPlan(plan, { s
   assertStageAProductionArtifactsPolicyResource(change.before, "predecessor", transition.predecessor, incidentStatePredecessors);
   assertStageAProductionArtifactsPolicyResource(change.after, "desired", transition.desired);
   if (rdsDrift.length) assertStageARdsLatestRestorableTimeDrift(rdsDrift[0]);
+  if (checkerDrift.length) assertStageACheckerReceiptInlinePolicyDrift(checkerDrift[0]);
   return Object.freeze({ valid: true, stateReconciliationRequired: true, address: entry.address, actions: change.actions, resourceDriftCount: plan.resource_drift.length, rdsLatestRestorableTimeRefreshed: rdsDrift.length === 1 });
+}
+
+function assertStageACheckerReceiptInlinePolicyDrift(entry) {
+  const { before, after } = entry.change || {};
+  const beforeInline = before?.inline_policy;
+  const afterInline = after?.inline_policy;
+  const hasUnknown = (value) => value && typeof value === "object" && Object.values(value).some((item) => item === true || hasUnknown(item));
+  if (entry.mode !== "managed" || entry.type !== "aws_iam_role" || entry.name !== "checker" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !exactActions(entry.change.actions, ["update"])) throw new Error("Stage A checker receipt policy drift is not exact.");
+  if (hasUnknown(entry.change.after_unknown) || hasUnknown(entry.change.before_sensitive) || hasUnknown(entry.change.after_sensitive)) throw new Error("Stage A checker receipt policy drift is not exact.");
+  if (!Array.isArray(beforeInline) || beforeInline.length !== 1 || !Array.isArray(afterInline) || afterInline.length !== 1) throw new Error("Stage A checker receipt policy drift is not exact.");
+  if (before.name !== STAGE_A_CHECKER_ROLE_TRUST.name || before.id !== before.name || before.arn !== `arn:aws:iam::368992683803:role/${before.name}` || !isDeepStrictEqual({ ...before, inline_policy: null }, { ...after, inline_policy: null })) throw new Error("Stage A checker receipt policy drift is not exact.");
+  if (beforeInline[0].name !== STAGE_A_CHECKER_PUBLICATION_POLICY.name || !isDeepStrictEqual({ ...beforeInline[0], policy: null }, { ...afterInline[0], policy: null })) throw new Error("Stage A checker receipt policy drift is not exact.");
+  const previous = decodePolicyDocument(beforeInline[0].policy, "Stage A checker receipt predecessor");
+  const current = decodePolicyDocument(afterInline[0].policy, "Stage A checker receipt successor");
+  if (stablePolicyJson(previous) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_BEFORE_RECEIPT) || stablePolicyJson(current) !== stablePolicyJson(STAGE_A_CHECKER_PUBLICATION_DESIRED)) throw new Error("Stage A checker receipt policy drift is not the reviewed transition.");
 }
 
 function assertStageAProductionArtifactsAuthorizedPostState(state, plan, recoveryCompletion) {
@@ -599,6 +617,7 @@ function assertStageAProductionArtifactsAuthorizedPostState(state, plan, recover
     const actual = resources[0].instances[0].attributes;
     if (entry.address === STAGE_A_PRODUCTION_ARTIFACTS_BUCKET_POLICY.address) assertStageAProductionArtifactsPolicyResource(actual, "post-apply", resolveStageAProductionArtifactsBucketPolicyTransition(recoveryCompletion).desired);
     else if (entry.address === "aws_db_instance.green") { if (!isDeepStrictEqual(actual, expected)) throw new Error("Stage A reconciliation post-state RDS values are not the authorized refresh result."); }
+    else if (entry.address === "aws_iam_role.checker") { if (!isDeepStrictEqual(actual, expected)) throw new Error("Stage A reconciliation post-state checker values are not the authorized refresh result."); }
     else throw new Error("Stage A reconciliation post-state contains an uncontracted resource.");
   }
   return true;

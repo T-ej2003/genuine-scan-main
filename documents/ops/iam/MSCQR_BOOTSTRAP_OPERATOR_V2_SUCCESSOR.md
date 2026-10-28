@@ -36,6 +36,9 @@ key and all create, read and delete restrictions. Merging this PR does not
 install the bucket policy. The reconciler checks the exact installed policy
 before creating a successor reservation, so an interrupted execution can
 renew its two-minute lease after expiry using the S3 ETag condition.
+The governed Terraform state refresh may also observe the already-installed
+checker `ReadCompletedInventoryReceipts` policy. Reconcile it only when the
+refresh-only plan proves that exact policy addition; this does not change IAM.
 
 After this change is reviewed and merged, prepare and authorize the successor
 against the new protected-main SHA using `--v2-successor`. Do not reuse the
