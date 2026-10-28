@@ -238,7 +238,7 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 767, uniqueActions: 159, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 768, uniqueActions: 159, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",
@@ -302,7 +302,7 @@ test("generated capability graph is exhaustive, deterministic, and identity-exac
   assert(workspaceStateCapabilities.every(({ identity, context }) => identity === "ROOT_OPERATOR" && context.targetPolicyArn === "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState"));
   assert.deepEqual(workspaceStateCapabilities.filter(({ mutation }) => mutation).map(({ action }) => action).sort(), ["iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "s3:PutObject"]);
   const bootstrapOperatorReconciliation = first.capabilities.filter(({ phase }) => phase === "bootstrap-operator-policy-reconciliation");
-  assert.equal(bootstrapOperatorReconciliation.length, 21);
+  assert.equal(bootstrapOperatorReconciliation.length, 22);
   assert(bootstrapOperatorReconciliation.filter(({ id }) => id.startsWith("bootstrap-operator-policy-reconciliation-")).every(({ id, identity, policy }) => identity === "ROOT_OPERATOR" && (id.includes("reservation") ? policy.sourceFile === "infra/aws/terraform/production-green-stage-a/main.tf" : policy.sourceFile === "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs")));
   assert.deepEqual(bootstrapOperatorReconciliation.filter(({ id }) => id.includes("reservation")).map(({ id, policy }) => [id, policy.sid]), [
     ["bootstrap-operator-policy-reconciliation-create-reservation", "AllowRootOperatorConditionalInitialActivationPolicyReconciliationReservationCreate"],

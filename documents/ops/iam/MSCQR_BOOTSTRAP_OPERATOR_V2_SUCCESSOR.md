@@ -27,6 +27,16 @@ policy write. The existing protected GitHub environment issues a fresh,
 source-bound authorization; the root executor rechecks all live preconditions
 and reads back v2. A completed v2 readback does not repeat the policy write.
 
+**Required ordering:** First install and read back the reviewed Stage A
+`B_TO_B_SUCCESSOR_RESERVATION` bucket-policy transition through the governed
+production-artifacts recovery and Terraform state reconciliation workflows.
+The live predecessor is State B; the transition adds `If-Match` replacement
+for only `bootstrap-operator-v2-successor.json` while retaining the legacy
+key and all create, read and delete restrictions. Merging this PR does not
+install the bucket policy. The reconciler checks the exact installed policy
+before creating a successor reservation, so an interrupted execution can
+renew its two-minute lease after expiry using the S3 ETag condition.
+
 After this change is reviewed and merged, prepare and authorize the successor
 against the new protected-main SHA using `--v2-successor`. Do not reuse the
 expired signer-policy-install authorization. Resume the existing signer

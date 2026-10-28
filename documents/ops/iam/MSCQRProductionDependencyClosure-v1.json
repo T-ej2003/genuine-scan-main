@@ -4713,11 +4713,31 @@
     },
     {
       "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
+      "action": "s3:GetBucketPolicy",
+      "capabilityId": "bootstrap-operator-policy-reconciliation-read-bucket-policy",
+      "identity": "ROOT_OPERATOR",
+      "resources": [
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an"
+      ],
+      "reachableMode": [
+        "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
+      ],
+      "executionPrincipal": "ROOT_OPERATOR",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/production-bootstrap-operator-policy-reconciliation.mjs",
       "action": "s3:GetObject",
       "capabilityId": "bootstrap-operator-policy-reconciliation-read-reservation",
       "identity": "ROOT_OPERATOR",
       "resources": [
-        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-v2-successor.json"
       ],
       "reachableMode": [
         "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
@@ -4736,7 +4756,8 @@
       "capabilityId": "bootstrap-operator-policy-reconciliation-create-reservation",
       "identity": "ROOT_OPERATOR",
       "resources": [
-        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-v2-successor.json"
       ],
       "reachableMode": [
         "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"
@@ -4755,7 +4776,8 @@
       "capabilityId": "bootstrap-operator-policy-reconciliation-replace-expired-reservation",
       "identity": "ROOT_OPERATOR",
       "resources": [
-        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json"
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-legacy-mfa-transition.json",
+        "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-initial-activation-lifecycle-policy-reconciliation/reservations/bootstrap-operator-v2-successor.json"
       ],
       "reachableMode": [
         "BOOTSTRAP_OPERATOR_POLICY_RECONCILIATION"

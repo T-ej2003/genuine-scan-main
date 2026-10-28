@@ -14,6 +14,7 @@ import { assertProtectedCheckout } from "./prepare-production-initial-activation
 import { ECS_EXEC_OPERATOR_BOOTSTRAP_MFA_SERIAL_ARN } from "./production-ecs-exec-operator-contract.mjs";
 import { assertInitialBindingSchemaClosed, assertInitialDualSlotBindings, verifyLiveInitialDualSlotBindingWithRunner } from "./production-initial-dual-slot-bootstrap.mjs";
 import { MIXED_DUAL_SLOT_RECOVERY_IAM_RESOURCES, MIXED_DUAL_SLOT_RECOVERY_LIVE_PREDECESSOR } from "./production-mixed-dual-slot-recovery-contract.mjs";
+import { buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement, stageAProductionArtifactsPolicySemanticallyEqual } from "./production-stage-a-control-plane.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
@@ -151,6 +152,12 @@ const assertLegacyReservation = (value, transition) => {
 };
 const noSuchKey = (error) => /\bNoSuchKey\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
 const conditionalConflict = (error) => /\b(?:PreconditionFailed|ConditionalRequestConflict)\b/.test(`${error?.stderr || ""} ${error?.message || ""}`);
+const assertV2SuccessorBucketPolicy = (run) => {
+  let policy;
+  try { policy = JSON.parse(runJson(run, ["s3api", "get-bucket-policy", "--bucket", PRODUCTION_ACTIVATION_LIFECYCLE.bucket]).Policy); }
+  catch { throw new Error("Bootstrap v2 successor requires authenticated Stage A bucket-policy readback before reservation."); }
+  if (!stageAProductionArtifactsPolicySemanticallyEqual(policy, buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement())) throw new Error("Bootstrap v2 successor requires the governed Stage A reservation policy update before execution.");
+};
 const readLegacyTransitionReservation = (run, transition) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-bootstrap-operator-reservation-"));
   const output = path.join(directory, "reservation.json");
@@ -452,6 +459,7 @@ export function reconcileBootstrapOperatorPolicy({ run, authorization, sourceSha
     }
   }
   if (successor) {
+    assertV2SuccessorBucketPolicy(run);
     ownedReservation = acquireLegacyTransitionReservation(run, authorization, now);
     if (ownedReservation.acquired) s3PutObjectCount += 1;
   }

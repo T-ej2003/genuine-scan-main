@@ -9,6 +9,8 @@ import {
   buildStageAProductionArtifactsBucketPolicyWithInitialActivationReservationPredecessor,
   buildStageAProductionArtifactsBucketPolicyWithRecoveryListBucketBootstrap,
   buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection,
+  buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement,
+  stageAProductionArtifactsV2SuccessorReservationTransition,
   stageAProductionArtifactsLegacyReservationRepairTransition,
   buildStageAProductionArtifactsBucketPolicyWithoutInitialActivationReservation,
   assertStageAProductionArtifactsExecutableTransition,
@@ -205,6 +207,35 @@ test("State A requires the root-read and release-write bootstrap split without w
   assert.equal(explicitlyAllowed(APrime, { ...conditionalWrite, principal: release }), true);
   assert.equal(explicitlyDenied(APrime, { ...conditionalWrite, principal: release }), false);
   assert.ok(statement(A, "DenyOtherPrincipalsStageAProductionArtifactsReconciliationWrites"));
+});
+
+test("successor policy permits CAS replacement of exactly two reservation keys", () => {
+  const policy = buildStageAProductionArtifactsBucketPolicyWithV2SuccessorReservationReplacement();
+  const historical = buildStageAProductionArtifactsBucketPolicyWithProviderReadonlyJournalProtection();
+  const transition = stageAProductionArtifactsV2SuccessorReservationTransition();
+  assert.equal(stageAProductionArtifactsPolicySha256(transition.predecessor), stageAProductionArtifactsPolicySha256(historical));
+  assert.deepEqual(resolveStageAProductionArtifactsBucketPolicyTransition(transition), { predecessor: transition.predecessor, desired: transition.desired });
+  assert.deepEqual(assertStageAProductionArtifactsExecutableTransition(transition), { predecessor: transition.predecessor, desired: transition.desired });
+  const bucket = "arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
+  const prefix = `${bucket}/production-initial-activation-lifecycle-policy-reconciliation/reservations/`;
+  const root = "arn:aws:iam::368992683803:root";
+  const other = "arn:aws:iam::368992683803:role/other";
+  for (const key of ["bootstrap-operator-legacy-mfa-transition.json", "bootstrap-operator-v2-successor.json"]) {
+    const request = { principal: root, action: "s3:PutObject", resource: `${prefix}${key}`, context: { "s3:if-match": '"etag"' } };
+    assert.equal(explicitlyAllowed(policy, request), true);
+    assert.equal(explicitlyDenied(policy, request), false);
+    assert.equal(explicitlyDenied(policy, { ...request, principal: other }), true);
+    assert.equal(explicitlyDenied(policy, { ...request, context: {} }), true);
+    assert.equal(explicitlyDenied(policy, { ...request, action: "s3:DeleteObject", context: {} }), true);
+  }
+  const unrelated = { principal: root, action: "s3:PutObject", resource: `${prefix}other.json`, context: { "s3:if-match": '"etag"' } };
+  assert.equal(explicitlyDenied(policy, unrelated), true);
+  assert.equal(explicitlyAllowed(policy, unrelated), false);
+  assert.equal(explicitlyDenied(historical, { ...unrelated, resource: `${prefix}bootstrap-operator-v2-successor.json` }), true);
+  const tf = fs.readFileSync("infra/aws/terraform/production-green-stage-a/main.tf", "utf8");
+  assert.match(tf, /initial_activation_policy_reconciliation_replaceable_reservation_object_arns = \[[\s\S]*bootstrap-operator-legacy-mfa-transition\.json[\s\S]*bootstrap-operator-v2-successor\.json/);
+  assert.match(tf, /Resource = local\.initial_activation_policy_reconciliation_replaceable_reservation_object_arns/);
+  assert.match(tf, /NotResource = concat\(local\.initial_activation_policy_reconciliation_non_reservation_object_arns, local\.initial_activation_policy_reconciliation_replaceable_reservation_object_arns\)/);
 });
 
 test("IAM grammar singleton forms are normalized only at their grammar positions", () => {
