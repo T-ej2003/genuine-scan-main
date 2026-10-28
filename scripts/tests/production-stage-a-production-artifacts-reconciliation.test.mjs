@@ -174,6 +174,10 @@ test("refresh-only reconciliation admits only the reviewed checker receipt polic
     ["extra role change", (entry) => { entry.change.after.max_session_duration = 900; }],
     ["different role", (entry) => { entry.change.after.arn = "arn:aws:iam::368992683803:role/other"; }],
     ["sensitive policy", (entry) => { entry.change.after_sensitive = { inline_policy: [{ policy: true }] }; }],
+    ["root sensitivity", (entry) => { entry.change.before_sensitive = true; }],
+    ["unknown predecessor", (entry) => { entry.change.before_unknown = { inline_policy: true }; }],
+    ["unknown successor", (entry) => { entry.change.after_unknown = { inline_policy: true }; }],
+    ["replacement path", (entry) => { entry.change.replace_paths = [["inline_policy"]]; }],
     ["replacement", (entry) => { entry.change.actions = ["delete", "create"]; }],
   ]) {
     const candidate = structuredClone(exact);

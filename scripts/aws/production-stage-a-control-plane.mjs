@@ -596,9 +596,9 @@ function assertStageACheckerReceiptInlinePolicyDrift(entry) {
   const { before, after } = entry.change || {};
   const beforeInline = before?.inline_policy;
   const afterInline = after?.inline_policy;
-  const hasUnknown = (value) => value && typeof value === "object" && Object.values(value).some((item) => item === true || hasUnknown(item));
+  const hasUnknown = (value) => value === true || value && typeof value === "object" && Object.values(value).some(hasUnknown);
   if (entry.mode !== "managed" || entry.type !== "aws_iam_role" || entry.name !== "checker" || entry.provider_name !== "registry.terraform.io/hashicorp/aws" || !exactActions(entry.change.actions, ["update"])) throw new Error("Stage A checker receipt policy drift is not exact.");
-  if (hasUnknown(entry.change.after_unknown) || hasUnknown(entry.change.before_sensitive) || hasUnknown(entry.change.after_sensitive)) throw new Error("Stage A checker receipt policy drift is not exact.");
+  if (!emptyObject(entry.change.before_unknown) || !emptyObject(entry.change.after_unknown) || entry.change.replace_paths !== undefined && (!Array.isArray(entry.change.replace_paths) || entry.change.replace_paths.length) || hasUnknown(entry.change.before_sensitive) || hasUnknown(entry.change.after_sensitive)) throw new Error("Stage A checker receipt policy drift is not exact.");
   if (!Array.isArray(beforeInline) || beforeInline.length !== 1 || !Array.isArray(afterInline) || afterInline.length !== 1) throw new Error("Stage A checker receipt policy drift is not exact.");
   if (before.name !== STAGE_A_CHECKER_ROLE_TRUST.name || before.id !== before.name || before.arn !== `arn:aws:iam::368992683803:role/${before.name}` || !isDeepStrictEqual({ ...before, inline_policy: null }, { ...after, inline_policy: null })) throw new Error("Stage A checker receipt policy drift is not exact.");
   if (beforeInline[0].name !== STAGE_A_CHECKER_PUBLICATION_POLICY.name || !isDeepStrictEqual({ ...beforeInline[0], policy: null }, { ...afterInline[0], policy: null })) throw new Error("Stage A checker receipt policy drift is not exact.");
