@@ -77,6 +77,16 @@ const boot = async () => {
     return;
   }
 
+  const workerMode = process.env.MSCQR_WORKER_MODE || "all";
+  if (workerMode === "support-response-email") {
+    await prisma.$queryRaw`SELECT 1`;
+    if (!(await getRedisHealth()).ready) throw new Error("Support email worker requires Redis");
+    startSupportResponseEmailOutboxWorker();
+    startKeepAlive();
+    return;
+  }
+  if (workerMode !== "all") throw new Error("Unsupported worker mode");
+
   startSecurityEventOutboxWorker();
   startAuditLogOutboxWorker();
   startSupportResponseEmailOutboxWorker();
