@@ -297,6 +297,14 @@ jobs:
           terraform -chdir=infra/aws/terraform/production-ecr-protection init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/aws/terraform/production-ecr-protection validate -no-color
 
+      - name: Validate support email worker infrastructure
+        run: |
+          node --test scripts/tests/production-support-email-worker.test.mjs
+          terraform -chdir=infra/aws/terraform/production-support-email-worker fmt -check
+          export TF_DATA_DIR="$(mktemp -d)"
+          terraform -chdir=infra/aws/terraform/production-support-email-worker init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/terraform/production-support-email-worker validate -no-color
+
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 
