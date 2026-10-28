@@ -6,6 +6,9 @@ type PrinterStatusLike = {
   trusted?: boolean | null;
   compatibilityMode?: boolean | null;
   stale?: boolean | null;
+  degraded?: boolean | null;
+  refreshPaused?: boolean | null;
+  rateLimited?: boolean | null;
   connectionClass?: string | null;
   securePrinterSession?: boolean | null;
   freshHelperHeartbeat?: boolean | null;
@@ -31,6 +34,8 @@ export type SecurePrintReadiness = {
   ready: boolean;
   reasonCode:
     | "READY"
+    | "VERIFICATION_PENDING"
+    | "VERIFICATION_UNAVAILABLE"
     | "VERIFICATION_EXPIRED"
     | "HELPER_OFFLINE"
     | "CONNECTOR_UPDATE_REQUIRED"
@@ -62,6 +67,11 @@ export const isSecurePrintReady = (status?: PrinterStatusLike | null) =>
 	      status?.persistentSessionDisconnected !== true &&
 	      !status?.compatibilityMode &&
 	      !status?.stale &&
+      !status?.degraded &&
+      !status?.refreshPaused &&
+      !status?.rateLimited &&
+      status?.trustReason !== "Checking current printer verification." &&
+      !status?.trustReason?.startsWith("Printer verification is unavailable.") &&
       String(status?.connectionClass || "TRUSTED").toUpperCase() === "TRUSTED"
   );
 
@@ -89,6 +99,45 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
       tone: "danger",
       summary: "MSCQR Connector update required.",
       detail: `Update MSCQR Connector to use persistent print session mode. Required ${minimum}; detected ${detected}.`,
+      recoveryAction: "refresh_printer_helper",
+      canRetry: true,
+    };
+  }
+
+  if (status?.trustReason === "Checking current printer verification.") {
+    return {
+      ready: false,
+      reasonCode: "VERIFICATION_PENDING",
+      badgeLabel: "Needs check",
+      tone: "warning",
+      summary: "Checking current printer verification.",
+      detail: "Wait for the server check before starting this print run.",
+      recoveryAction: "refresh_printer_helper",
+      canRetry: true,
+    };
+  }
+
+  if (status?.trustReason?.startsWith("Printer verification is unavailable.")) {
+    return {
+      ready: false,
+      reasonCode: "VERIFICATION_UNAVAILABLE",
+      badgeLabel: "Needs check",
+      tone: "warning",
+      summary: "Printer verification unavailable.",
+      detail: sanitizePrinterUiError(status.trustReason, "Refresh printer status and try again."),
+      recoveryAction: "refresh_printer_helper",
+      canRetry: true,
+    };
+  }
+
+  if (status?.connected && /printer attestation expired/i.test(status.trustReason || "")) {
+    return {
+      ready: false,
+      reasonCode: "VERIFICATION_EXPIRED",
+      badgeLabel: "Needs check",
+      tone: "warning",
+      summary: "Printer security verification expired.",
+      detail: "The connector is connected, but its signed printer attestation must be renewed before printing.",
       recoveryAction: "refresh_printer_helper",
       canRetry: true,
     };
@@ -123,7 +172,7 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
     };
   }
 
-  if (status?.stale || !status?.trusted || status?.compatibilityMode || hasMtlsMissingReason(status)) {
+  if (status?.stale || status?.degraded || status?.refreshPaused || status?.rateLimited || !status?.trusted || status?.compatibilityMode || hasMtlsMissingReason(status)) {
     return {
       ready: false,
       reasonCode: status?.stale ? "VERIFICATION_EXPIRED" : "SECURE_SESSION_MISSING",

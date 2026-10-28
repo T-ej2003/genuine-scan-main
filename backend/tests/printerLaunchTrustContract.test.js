@@ -1,7 +1,7 @@
 const assert = require("assert");
 const path = require("path");
 const { generateKeyPairSync } = require("crypto");
-const { PrinterTrustStatus, UserRole } = require("@prisma/client");
+const { Prisma, PrinterTrustStatus, UserRole } = require("@prisma/client");
 const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
@@ -29,6 +29,7 @@ const now = new Date();
 
 let registration;
 let latestAttestation;
+let latestSession;
 
 const resetState = () => {
   registration = {
@@ -48,18 +49,25 @@ const resetState = () => {
     updatedAt: now,
   };
   latestAttestation = null;
+  latestSession = null;
 };
 
 const registrationWithAttestation = () => ({
   ...registration,
   attestations: latestAttestation ? [latestAttestation] : [],
+  agentSessions: latestSession ? [latestSession] : [],
 });
 
 mockModule("config/database.js", {
   __esModule: true,
   default: {
     printerRegistration: {
-      findFirst: async ({ where }) => {
+      findFirst: async ({ where, include }) => {
+        if (include?.attestations) {
+          assert.deepStrictEqual(include.attestations.where?.metadata?.path, ["operation"],
+            "status must select the same non-operation attestation as SQL authorization");
+          assert.strictEqual(include.attestations.where?.metadata?.equals, Prisma.DbNull);
+        }
         if (where?.userId === registration.userId) return registrationWithAttestation();
         return null;
       },
@@ -187,6 +195,25 @@ const signedHeartbeatInput = (overrides = {}) => {
     valid.status.missingFields.includes("helperConnection") || valid.status.missingFields.includes("securePrinterSession"),
     "fresh signed heartbeat should still report the missing persistent-session readiness field"
   );
+
+  latestSession = {
+    connectionState: "CONNECTED", revokedAt: null,
+    lastSignedHeartbeatAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
+    selectedPrinterId: "zebra-zd421", selectedPrinterName: "Reference ZPL printer",
+    connectorVersion: "2026.6.26",
+    printerHealth: { connected: true, selectedPrinterId: "zebra-zd421",
+      printers: [{ printerId: "zebra-zd421", printerName: "Reference ZPL printer", online: true }] },
+  };
+  const validSessionAndAttestation = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(validSessionAndAttestation.eligibleForPrinting, true,
+    "a healthy signed session with a valid attestation remains print eligible");
+  latestAttestation.expiresAt = new Date(Date.now() - 1_000);
+  const expiredAttestationWithSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(expiredAttestationWithSession.connected, true, "signed session remains connected");
+  assert.strictEqual(expiredAttestationWithSession.eligibleForPrinting, false,
+    "an expired SQL attestation must not be described as print eligible");
+  assert.strictEqual(expiredAttestationWithSession.signedAttestation.fresh, false,
+    "session heartbeat is not a replacement for the required printer attestation");
 
   resetState();
   const oldConnector = await upsertPrinterConnectionHeartbeat(

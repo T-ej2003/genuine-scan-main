@@ -66,7 +66,7 @@ export const isPrintJobServerSettled = (job: PrintJobRow | null | undefined) => 
 };
 
 export const formatActionablePrintWorkflowError = (
-  response: any,
+  response: { errorCode?: unknown; code?: unknown; requiredPreviousStep?: unknown; userMessage?: unknown; message?: unknown; error?: unknown } | null | undefined,
   fallback = "Complete the previous step before continuing."
 ) => {
   const code = String(response?.errorCode || response?.code || "").trim();
@@ -284,7 +284,7 @@ const reportLocalPrinterHeartbeat = async () => {
     heartbeatIssuedAt: data.heartbeatIssuedAt || undefined,
     heartbeatSignature: data.heartbeatSignature || undefined,
     capabilitySummary: data.capabilitySummary || undefined,
-    printers: Array.isArray(data.printers) ? (data.printers as any) : [],
+    printers: Array.isArray(data.printers) ? (data.printers as NonNullable<Parameters<typeof apiClient.reportPrinterHeartbeat>[0]["printers"]>) : [],
     calibrationProfile: data.calibrationProfile || undefined,
   });
   return heartbeat.success && heartbeat.data ? heartbeat.data : null;
@@ -480,6 +480,20 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     return;
   }
 
+  if (!selectedPrinterCanPrint) {
+    toast({
+      title: "Printer verification required",
+      description: selectedPrinterProfile.connectionType === "LOCAL_AGENT"
+        ? "Verify the selected printer and its security status before starting this run."
+        : sanitizePrinterUiError(
+            selectedPrinterProfile.registryStatus?.detail || selectedPrinterProfile.registryStatus?.summary,
+            "This saved printer route needs attention before printing."
+          ),
+      variant: "destructive",
+    });
+    return;
+  }
+
   if (selectedPrinterProfile.connectionType === "LOCAL_AGENT") {
     const preferredLocalPrinter = chooseStablePrinterSelection(
       detectedPrinters,
@@ -512,38 +526,42 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     }
 
     const livePrinterStatus = await apiClient.getPrinterConnectionStatus({ force: true, minIntervalMs: 0 });
-    const refreshRateLimited =
-      livePrinterStatus.status === 429 || String(livePrinterStatus.code || "").toUpperCase() === "RATE_LIMITED";
     const effectiveLiveStatus = (livePrinterStatus.data || printerStatus) as PrinterConnectionStatus;
+    const verificationUnavailable = Boolean(
+      !livePrinterStatus.success || !livePrinterStatus.data || livePrinterStatus.degraded ||
+      String(livePrinterStatus.code || livePrinterStatus.errorCode || "").toUpperCase() === "RATE_LIMITED" ||
+      livePrinterStatus.data?.rateLimited || livePrinterStatus.data?.refreshPaused
+    );
     if (
-      refreshRateLimited &&
-      buildSecurePrintReadiness(printerStatus).ready &&
-      detectedPrinters.some((row) => row.printerId === selectedPrinterId && row.online !== false)
-    ) {
-      toast({
-        title: "Using last ready printer status",
-        description: "Printer status refresh is temporarily paused. Last trusted status is retained.",
-      });
-    } else if (
-      !livePrinterStatus.success ||
-      !livePrinterStatus.data ||
+      verificationUnavailable ||
       !buildSecurePrintReadiness(effectiveLiveStatus).ready
     ) {
       setPrinterStatus({
-        ...defaultPrinterStatus,
+        ...effectiveLiveStatus,
+        trusted: false,
+        eligibleForPrinting: false,
+        stale: true,
+        trustReason: verificationUnavailable
+          ? "Printer verification is unavailable. Refresh printer status and try again."
+          : effectiveLiveStatus.trustReason,
         printers: detectedPrinters,
-        error:
-          livePrinterStatus.error ||
-          (detectedPrinters.length > 0 ? "Printer connection requires attention" : "Printer unavailable"),
+        error: livePrinterStatus.error || effectiveLiveStatus.error || null,
       });
       const updateRequired =
-        Boolean((effectiveLiveStatus as any).persistentSessionUpdateRequired || (effectiveLiveStatus as any).connectorUpdateRequired) ||
+        Boolean(effectiveLiveStatus.persistentSessionUpdateRequired || (effectiveLiveStatus as PrinterConnectionStatus & { connectorUpdateRequired?: boolean }).connectorUpdateRequired) ||
         String(livePrinterStatus.code || livePrinterStatus.errorCode || "").toLowerCase() === "connector_update_required";
       toast({
-        title: updateRequired ? "Connector update required" : "Printer session disconnected",
+        title: updateRequired ? "Connector update required"
+          : verificationUnavailable ? "Printer verification unavailable"
+          : !effectiveLiveStatus.connected || effectiveLiveStatus.persistentSessionDisconnected
+            ? "Printer session disconnected" : "Printer verification required",
         description: updateRequired
           ? "Connector update required. Install the latest MSCQR printer connector, then refresh printer status."
-          : "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry.",
+          : verificationUnavailable
+            ? "MSCQR could not verify the printer with the server. Refresh printer status and retry."
+            : !effectiveLiveStatus.connected || effectiveLiveStatus.persistentSessionDisconnected
+              ? "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry."
+              : "Printer security verification has expired. Refresh printer status and retry.",
         variant: "destructive",
       });
       return;
@@ -579,16 +597,6 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       });
       return;
     }
-  } else if (!selectedPrinterCanPrint) {
-    toast({
-      title: "Network printer needs attention",
-      description: sanitizePrinterUiError(
-        selectedPrinterProfile.registryStatus?.detail || selectedPrinterProfile.registryStatus?.summary,
-        "This saved printer route needs attention before printing."
-      ),
-      variant: "destructive",
-    });
-    return;
   }
 
   try {

@@ -173,6 +173,7 @@ type PrintJobDialogProps = {
   printing: boolean;
   onStartPrint: () => void;
   selectedPrinterCanPrint: boolean;
+  printerVerificationPending?: boolean;
   printJobId: string | null;
   printProgressPrinterName: string | null;
   printProgressDispatchMode: string | null;
@@ -322,6 +323,7 @@ export function BatchPrintJobDialog({
   printing,
   onStartPrint,
   selectedPrinterCanPrint,
+  printerVerificationPending = false,
   printJobId,
   printProgressPrinterName,
   printProgressDispatchMode,
@@ -554,6 +556,11 @@ export function BatchPrintJobDialog({
               <div className="font-medium">{selectedPrinterNotice.title}</div>
               <div className="text-xs">{selectedPrinterNotice.summary}</div>
               <div className="mt-2 text-[11px]">{selectedPrinterNotice.detail}</div>
+              {isManufacturerMode && selectedPrinterProfile && !selectedPrinterCanPrint && !printing && !printJobId ? (
+                <Button size="sm" variant="ghost" className="mt-2" disabled={printerVerificationPending} onClick={onRefreshPrinters}>
+                  Retry printer verification
+                </Button>
+              ) : null}
             </div>
 
             <div className="rounded-md border p-3 text-sm">

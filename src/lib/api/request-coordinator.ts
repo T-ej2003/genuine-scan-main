@@ -273,7 +273,7 @@ export const coordinateProtectedRead = async <T>(
   const minRefreshMs = options.minRefreshMs ?? DEFAULT_MIN_REFRESH_MS;
   const cooldownMessage = options.cooldownMessage || DEFAULT_COOLDOWN_MESSAGE;
 
-  if (state.cooldownUntil > timestamp && !options.force) {
+  if (state.cooldownUntil > timestamp) {
     return staleFromLastGood(state, state.cooldownUntil, cooldownMessage) || cooldownFailure<T>(state.cooldownUntil, cooldownMessage);
   }
 

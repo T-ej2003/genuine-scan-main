@@ -136,12 +136,13 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
   const actorDeviceHash = fingerprint ? hashToken(`device:${fingerprint}`) : null;
 
   try {
-    const db = getB01PreAuthPrisma();
+    let printerSetupTest = false;
     const row = token
       ? await (() => {
           const verified = verifyQrToken(token);
           const payload = verified.payload;
           if (isPrinterTestQrId(payload.qr_id)) {
+            printerSetupTest = true;
             return Promise.resolve({
               result: "AUTHENTIC",
               messageKey: "verification.first_scan",
@@ -162,7 +163,7 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
               sessionStartToken: null,
             });
           }
-          return verifySignedQr(db, {
+          return verifySignedQr(getB01PreAuthPrisma(), {
             tokenDigest: hashQrToken(token),
             qrId: payload.qr_id,
             licenseeId: payload.licensee_id,
@@ -179,11 +180,14 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
             actorDeviceHash,
           });
         })()
-      : await verifyRawQr(db, { requestedCode: code, checkedAt, requestId, actorIpHash, actorDeviceHash });
+      : await verifyRawQr(getB01PreAuthPrisma(), { requestedCode: code, checkedAt, requestId, actorIpHash, actorDeviceHash });
     if (!row) return publicFailure(res, 404, "Requested information is unavailable.");
+    const publicData = buildPublicVerificationResponse(row, Boolean(req.customer));
     return res.json({
       success: true,
-      data: buildPublicVerificationResponse(row, Boolean(req.customer)),
+      data: printerSetupTest
+        ? { ...publicData, scanOutcome: "PRINTER_SETUP_TEST", message: "MSCQR verified this printer setup test label. It is not a production QR label." }
+        : publicData,
     });
   } catch (error) {
     if (token && isSignedTokenRejection(error)) {

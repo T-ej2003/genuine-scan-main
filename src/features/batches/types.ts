@@ -68,7 +68,7 @@ export type TraceEventRow = {
   action?: string;
   sourceAction?: string | null;
   createdAt: string;
-  details?: any;
+  details?: Record<string, unknown>;
   user?: { id: string; name?: string | null; email?: string | null } | null;
   manufacturer?: { id: string; name?: string | null; email?: string | null } | null;
   qrCode?: { id: string; code?: string | null } | null;
@@ -81,7 +81,7 @@ export type AuditLogRow = {
   entityType?: string | null;
   entityId?: string | null;
   createdAt: string;
-  details?: any;
+  details?: Record<string, unknown>;
   user?: { id: string; name?: string | null; email?: string | null } | null;
   userId?: string | null;
 };
@@ -130,6 +130,7 @@ export type PrinterConnectionStatus = {
   persistentSessionCapable?: boolean;
   persistentSessionMinimumBuildVersion?: string | null;
   persistentSessionUpdateRequired?: boolean;
+  persistentSessionDisconnected?: boolean;
   capabilitySummary?: {
     transports: string[];
     protocols: string[];
