@@ -15,7 +15,7 @@ Environment:
   REQUIRED_PLATFORMS              Default: linux/amd64
   COSIGN_CERT_IDENTITY_REGEXP     Required regex for signing workflow identity
   COSIGN_CERT_OIDC_ISSUER         Default: https://token.actions.githubusercontent.com
-  PROVENANCE_ATTESTATION_TYPE     Default: mscqr-release-provenance
+  PROVENANCE_ATTESTATION_TYPE     Default: https://mscqr.com/attestations/release-provenance/v1
 EOF
 }
 
@@ -38,7 +38,7 @@ fi
 REQUIRED_PLATFORMS="${REQUIRED_PLATFORMS:-linux/amd64}"
 COSIGN_CERT_IDENTITY_REGEXP="${COSIGN_CERT_IDENTITY_REGEXP:-}"
 COSIGN_CERT_OIDC_ISSUER="${COSIGN_CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
-PROVENANCE_ATTESTATION_TYPE="${PROVENANCE_ATTESTATION_TYPE:-mscqr-release-provenance}"
+PROVENANCE_ATTESTATION_TYPE="${PROVENANCE_ATTESTATION_TYPE:-https://mscqr.com/attestations/release-provenance/v1}"
 
 if [[ -z "$COSIGN_CERT_IDENTITY_REGEXP" ]]; then
   echo "Set COSIGN_CERT_IDENTITY_REGEXP before verifying release artifacts." >&2
