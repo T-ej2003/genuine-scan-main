@@ -25,6 +25,13 @@ const REPOSITORY = "T-ej2003/genuine-scan-main";
 const exactKeys = (value, keys, label) => assert.deepEqual(Object.keys(value || {}).sort(), [...keys].sort(), `${label} fields are invalid`);
 const hashBytes = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
+export function canonicalGitHubArtifactDigest(value) {
+  assert.equal(typeof value, "string", "GitHub artifact digest is invalid");
+  const canonical = value.startsWith("sha256:") ? value : `sha256:${value}`;
+  assert.match(canonical, DIGEST, "GitHub artifact digest is invalid");
+  return canonical;
+}
+
 export function productionSubscriptionProjectionContractSha256(repositoryRoot = cleanRoomRepoRoot) {
   const provisioningSqlSha256 = hashBytes(fs.readFileSync(path.join(repositoryRoot, "documents/ops/iam/production-green-phase-4-read-only-canary-provision.sql")));
   const verifierSourceSha256 = hashBytes(fs.readFileSync(path.join(repositoryRoot, "scripts/aws/production-app-only-database-verifier.mjs")));

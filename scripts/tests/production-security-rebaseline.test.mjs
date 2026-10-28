@@ -11,7 +11,7 @@ import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, createSecurityRebaselineInventory, diffSecurityRebaselineInventories, SECURITY_REBASELINE_COVERAGE, SECURITY_REBASELINE_NORMALIZED_COLLECTIONS, SECURITY_REBASELINE_OPERATIONS } from "../aws/production-security-rebaseline-inventory.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport, encryptSecurityCatalogueTransport } from "../aws/production-security-rebaseline-transport.mjs";
 import { assertProductionRlsProbeImageSource, parseProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "../aws/production-rls-catalogue-probe-config.mjs";
-import { buildSecurityRebaselineImageAuthorization, createProductionSecurityRebaselinePreparationManifest, assertProductionSecurityRebaselinePreparationManifest, verifyProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation, assertSecurityRebaselineSigningEnvironment, assertPreparationWorkflowArtifacts, SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, SECURITY_REBASELINE_SIGNING_ALGORITHM, SECURITY_REBASELINE_SIGNING_KEY_ALIAS, SECURITY_REBASELINE_SIGNER_ENVIRONMENT, SECURITY_REBASELINE_SIGNER_JOB_WORKFLOW, SECURITY_REBASELINE_SIGNER_WORKFLOW } from "../aws/production-security-rebaseline-preparation.mjs";
+import { buildSecurityRebaselineImageAuthorization, canonicalGitHubArtifactDigest, createProductionSecurityRebaselinePreparationManifest, assertProductionSecurityRebaselinePreparationManifest, verifyProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation, assertSecurityRebaselineSigningEnvironment, assertPreparationWorkflowArtifacts, SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, SECURITY_REBASELINE_SIGNING_ALGORITHM, SECURITY_REBASELINE_SIGNING_KEY_ALIAS, SECURITY_REBASELINE_SIGNER_ENVIRONMENT, SECURITY_REBASELINE_SIGNER_JOB_WORKFLOW, SECURITY_REBASELINE_SIGNER_WORKFLOW } from "../aws/production-security-rebaseline-preparation.mjs";
 import { assertProductionSecurityRebaselineSignerReadback, verifyProductionSecurityRebaselineSigner } from "../aws/verify-production-security-rebaseline-signer.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contract.mjs";
@@ -262,6 +262,18 @@ test("signing environment and purpose-specific OIDC/KMS source contracts fail cl
   assert.equal(environmentContract.requiredReviewers, true); assert.equal(environmentContract.preventSelfReview, true);
   assert.deepEqual(environmentContract.variables, ["PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN"]);
   assert.deepEqual(environmentContract.forbiddenSecrets, ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]);
+});
+
+test("preparation canonicalizes GitHub artifact digests without accepting malformed values", () => {
+  const canonical = `sha256:${"a".repeat(64)}`;
+  assert.equal(canonicalGitHubArtifactDigest("a".repeat(64)), canonical);
+  assert.equal(canonicalGitHubArtifactDigest(canonical), canonical);
+  for (const value of ["", "a".repeat(63), `sha256:${"g".repeat(64)}`, `sha512:${"a".repeat(64)}`, null, 123])
+    assert.throws(() => canonicalGitHubArtifactDigest(value), /digest is invalid/);
+  const workflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
+  assert.match(workflow, /artifactDigest: canonicalGitHubArtifactDigest\(digest\)/);
+  const signerWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
+  assert.match(signerWorkflow, /artifactDigest: canonicalGitHubArtifactDigest\(process\.env\.MANIFEST_DIGEST\)/);
 });
 
 test("signer readback detects trust, permission, key, alias and grant drift", () => {

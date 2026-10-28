@@ -92,10 +92,11 @@ jobs:
           node --input-type=module <<'NODE' >> "$GITHUB_OUTPUT"
           import fs from 'node:fs';
           import crypto from 'node:crypto';
+          import { canonicalGitHubArtifactDigest } from './scripts/aws/production-security-rebaseline-preparation.mjs';
           const hash = (file) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
           const make = (id, digest, file) => {
-            if (!/^[1-9][0-9]*$/.test(id) || !/^sha256:[a-f0-9]{64}$/.test(digest)) throw new Error('Invalid immutable artifact output.');
-            return JSON.stringify({ sourceSha: process.env.SOURCE_SHA, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: id, artifactDigest: digest, fileSha256: hash(file) });
+            if (!/^[1-9][0-9]*$/.test(id)) throw new Error('Invalid immutable artifact output.');
+            return JSON.stringify({ sourceSha: process.env.SOURCE_SHA, runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: id, artifactDigest: canonicalGitHubArtifactDigest(digest), fileSha256: hash(file) });
           };
           console.log(`requirements=${make(process.env.REQUIREMENTS_ID, process.env.REQUIREMENTS_DIGEST, `${process.env.RUNNER_TEMP}/app-only-requirements.json`)}`);
           console.log(`canonical=${make(process.env.CANONICAL_ID, process.env.CANONICAL_DIGEST, `${process.env.RUNNER_TEMP}/security-rebaseline-canonical.json`)}`);
