@@ -9,7 +9,7 @@ import { assertStageBProtectedMainCheckout, buildStageBProtectedMainCheckoutEvid
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const STAGE_B_IMAGE_REUSE_SCHEMA_VERSION = 2;
-export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v8";
+export const STAGE_B_IMAGE_REUSE_RULES_VERSION = "stage-b-image-reuse-v9";
 export const COMPATIBILITY_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageReuseCompatibility-v1.json";
 export const STAGE_B_IMAGE_IMPACT_SCHEMA_VERSION = 1;
 export const IMAGE_IMPACT_REPORT_REPO_PATH = "documents/ops/iam/MSCQRProductionGreenStageBImageImpact-v1.json";
@@ -64,6 +64,7 @@ const TERRAFORM = /^infra\/aws\/terraform\/(?:(?:main|variables)\.tf$|production
 // This isolated root creates IAM permissions only and is absent from all
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
+const SUPPORT_EMAIL_WORKER_TERRAFORM = /^infra\/aws\/terraform\/production-support-email-worker\/(?:main\.tf|versions\.tf|\.terraform\.lock\.hcl)$/;
 const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:e2e|tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker/nginx-root-entrypoint.sh"]);
@@ -252,7 +253,7 @@ export function classifyStageBImageReusePath(file) {
     const category = /package-lock|lock$/.test(file) ? "dependencyLockfile" : /Dockerfile|dockerignore|workflow.*image-build/.test(file) ? "dockerBuildConfiguration" : /^backend\//.test(file) || /^shared\//.test(file) ? "runtimeApplicationSource" : /generated/.test(file) ? "generatedRuntimePackage" : "imageBuildInput";
     return { file, category, imageAffecting: true };
   }
-  if (TERRAFORM.test(file) || APP_ONLY_PERMISSION_SOURCE.test(file)) return { file, category: "terraformOnly", imageAffecting: false };
+  if (TERRAFORM.test(file) || APP_ONLY_PERMISSION_SOURCE.test(file) || SUPPORT_EMAIL_WORKER_TERRAFORM.test(file)) return { file, category: "terraformOnly", imageAffecting: false };
   if (CI.test(file)) return { file, category: "ciOnly", imageAffecting: false };
   if (DOCUMENTATION.test(file)) return { file, category: "documentationOnly", imageAffecting: false };
   if (TEST.test(file)) return { file, category: "testOnly", imageAffecting: false };
