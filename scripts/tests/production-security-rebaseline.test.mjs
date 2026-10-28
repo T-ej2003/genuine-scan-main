@@ -272,6 +272,8 @@ test("preparation canonicalizes GitHub artifact digests without accepting malfor
     assert.throws(() => canonicalGitHubArtifactDigest(value), /digest is invalid/);
   const workflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
   assert.match(workflow, /artifactDigest: canonicalGitHubArtifactDigest\(digest\)/);
+  const signerWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
+  assert.match(signerWorkflow, /artifactDigest: canonicalGitHubArtifactDigest\(process\.env\.MANIFEST_DIGEST\)/);
 });
 
 test("signer readback detects trust, permission, key, alias and grant drift", () => {

@@ -136,10 +136,11 @@ jobs:
           node --input-type=module <<'NODE' >> "$GITHUB_STEP_SUMMARY"
           import crypto from 'node:crypto';
           import fs from 'node:fs';
+          import { canonicalGitHubArtifactDigest } from './scripts/aws/production-security-rebaseline-preparation.mjs';
           const file = `${process.env.RUNNER_TEMP}/preparation-manifest.json`;
           const reference = { sourceSha: process.env.SOURCE_SHA, runId: process.env.GITHUB_RUN_ID,
             runAttempt: process.env.GITHUB_RUN_ATTEMPT, artifactId: process.env.MANIFEST_ID,
-            artifactDigest: process.env.MANIFEST_DIGEST,
+            artifactDigest: canonicalGitHubArtifactDigest(process.env.MANIFEST_DIGEST),
             fileSha256: crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex') };
           if (JSON.parse(fs.readFileSync(file, 'utf8')).manifestSha256 !== process.env.MANIFEST_SHA) throw new Error('Manifest digest changed after upload.');
           if (!/^[1-9][0-9]*$/.test(reference.artifactId) || !/^sha256:[a-f0-9]{64}$/.test(reference.artifactDigest)) throw new Error('Manifest artifact reference is invalid.');
