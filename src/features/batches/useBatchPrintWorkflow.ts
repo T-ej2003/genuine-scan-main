@@ -29,6 +29,7 @@ import {
 } from "./print-workflow-utils";
 import { createPrintJob as executeCreatePrintJob, formatActionablePrintWorkflowError, syncProgressFromPrintJob as syncPrintJobProgress } from "./batch-print-operations";
 import { abandonPrintJobAction, printDiagnosticTestLabelAction, relinkSelectedPrinterAction } from "./print-workflow-recovery-actions";
+import { createBatchPrinterFailureReporter } from "./batchPrinterFailureReporter";
 import { runSingleFlightAction } from "./singleFlightAction";
 import { clampPrintRunQuantityInput, resolveMaxPrintRunQuantity } from "./print-run-limits";
 import { useActivePrintJobPolling } from "./useActivePrintJobPolling";
@@ -49,25 +50,7 @@ import type {
   RegisteredPrinterRow,
 } from "./types";
 
-type ToastLike = (options: { title?: string; description?: string; variant?: "default" | "destructive" }) => unknown;
-
-type ReleaseApprovalState = {
-  approvalRequired: boolean;
-  approvalId: string;
-  status: string;
-  expiresAt?: string | null;
-  threshold?: number | null;
-};
-
-type PrintControlAction = "pause" | "stop";
-
-type UseBatchPrintWorkflowParams = {
-  isManufacturer: boolean;
-  userId?: string | null;
-  toast: ToastLike;
-  getAvailableInventory: (batch: BatchRow) => number;
-  onBatchesChanged?: () => Promise<void> | void;
-};
+import type { PrintControlAction, ReleaseApprovalState, UseBatchPrintWorkflowParams } from "./batchPrintWorkflowTypes";
 
 export function useBatchPrintWorkflow({
   isManufacturer,
@@ -356,59 +339,9 @@ export function useBatchPrintWorkflow({
     });
   };
 
-  const autoReportPrinterFailure = async (params: {
-    context: string;
-    reason: string;
-    diagnostics?: Record<string, unknown>;
-  }) => {
-    const now = Date.now();
-    const signature = `${params.context}|${params.reason}|${
-      selectedPrinterId || printerStatus.selectedPrinterId || printerStatus.printerId || ""
-    }`;
-
-    if (
-      printerFailureReportRef.current.signature === signature &&
-      now - printerFailureReportRef.current.at < PRINTER_FAILURE_AUTO_REPORT_COOLDOWN_MS
-    ) {
-      return true;
-    }
-    if (printerFailureInFlightRef.current) return true;
-
-    printerFailureInFlightRef.current = true;
-    printerFailureReportRef.current = { signature, at: now };
-
-    try {
-      const screenshot = await captureSupportScreenshot();
-      const form = new FormData();
-      form.append(
-        "title",
-        `Auto printer failure (${params.context}): ${printerStatus.selectedPrinterName || printerStatus.printerName || "Unknown printer"}`
-      );
-      form.append("description", params.reason);
-      form.append("sourcePath", `${window.location.pathname}${window.location.search}`);
-      form.append("pageUrl", window.location.href);
-      form.append("autoDetected", "true");
-      form.append(
-        "diagnostics",
-        JSON.stringify({
-          ...buildSupportDiagnosticsPayload(),
-          printerStatus,
-          selectedPrinterId,
-          detectedPrinters,
-          context: params.context,
-          details: params.diagnostics || null,
-        })
-      );
-      if (screenshot) form.append("screenshot", screenshot);
-      const response = await apiClient.createSupportIssueReport(form);
-      return Boolean(response.success);
-    } catch {
-      // Avoid interrupting print flow when auto-reporting fails.
-      return false;
-    } finally {
-      printerFailureInFlightRef.current = false;
-    }
-  };
+  const autoReportPrinterFailure = createBatchPrinterFailureReporter({
+    selectedPrinterId, printerStatus, detectedPrinters, printerFailureReportRef, printerFailureInFlightRef,
+  });
 
   const loadRecentPrintJobs = async () => {
     if (!isManufacturer) return;
