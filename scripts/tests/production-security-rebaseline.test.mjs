@@ -221,13 +221,32 @@ test("protected preparation producer binds exact PG18 artifacts, image publicati
 });
 
 test("signing environment and purpose-specific OIDC/KMS source contracts fail closed", () => {
-  const environment = { name: SECURITY_REBASELINE_SIGNER_ENVIRONMENT, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [{ type: "Team", reviewer: { id: 1 } }] }, { type: "branch_policy" }], deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } };
-  assert.equal(assertSecurityRebaselineSigningEnvironment(environment), true);
-  for (const changed of [{ ...environment, protection_rules: [] }, { ...environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{}] }] }, { ...environment, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } }]) assert.throws(() => assertSecurityRebaselineSigningEnvironment(changed));
+  const reviewer = { type: "User", reviewer: { id: 183396573, login: "T-ej2003" } };
+  const environment = { id: 42, name: SECURITY_REBASELINE_SIGNER_ENVIRONMENT, can_admins_bypass: false,
+    protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [reviewer] }, { type: "branch_policy" }],
+    deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } };
+  const approvals = [{ state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: 42, name: environment.name }] }];
+  const check = (changedEnvironment = environment, changedApprovals = approvals, actor = "T-ej2003") =>
+    assertSecurityRebaselineSigningEnvironment(changedEnvironment, changedApprovals, actor);
+  assert.equal(check(), true);
+  for (const changed of [
+    { ...environment, protection_rules: [] },
+    { ...environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: true, reviewers: [reviewer] }] },
+    { ...environment, protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 1, login: "other" } }] }] },
+    { ...environment, deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } },
+    { ...environment, can_admins_bypass: true },
+    { ...environment, name: "other" },
+  ]) assert.throws(() => check(changed));
+  for (const changed of [[], [{ ...approvals[0], state: "rejected" }],
+    [{ ...approvals[0], user: { id: 1, login: "other" } }],
+    [{ ...approvals[0], environments: [{ id: 99, name: environment.name }] }],
+    [approvals[0], approvals[0]]]) assert.throws(() => check(environment, changed));
+  assert.throws(() => check(environment, approvals, "other"));
   const signingWorkflow = fs.readFileSync(".github/workflows/sign-production-security-rebaseline.yml", "utf8");
   const preparationWorkflow = fs.readFileSync(".github/workflows/prepare-production-security-rebaseline.yml", "utf8");
   assert.doesNotMatch(`${signingWorkflow}\n${preparationWorkflow}`, /administration:\s*read|environments\/[^\s]+\/(?:variables|secrets)/);
   assert.match(signingWorkflow, /gh api .*\/environments\/production-security-rebaseline-signing/);
+  assert.match(signingWorkflow, /actions\/runs\/\$GITHUB_RUN_ID\/approvals/);
   assert.match(signingWorkflow, /permissions:\s*\n\s*contents: read\n\s*actions: read/);
   assert.match(preparationWorkflow, /sign-and-manifest:[\s\S]*?permissions:\s*\n\s*contents: read\n\s*actions: read\n\s*id-token: write/);
   assert.match(signingWorkflow, /role-to-assume: \$\{\{ vars\.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN \}\}/);
@@ -259,7 +278,9 @@ test("signing environment and purpose-specific OIDC/KMS source contracts fail cl
   const environmentContract = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/github-environment-contract.json", "utf8"));
   assert.equal(environmentContract.name, SECURITY_REBASELINE_SIGNER_ENVIRONMENT);
   assert.equal(environmentContract.signingJobWorkflow, `.github/workflows/sign-production-security-rebaseline.yml`);
-  assert.equal(environmentContract.requiredReviewers, true); assert.equal(environmentContract.preventSelfReview, true);
+  assert.equal(environmentContract.requiredReviewers, true); assert.equal(environmentContract.preventSelfReview, false);
+  assert.equal(environmentContract.canAdminsBypass, false); assert.equal(environmentContract.explicitApprovalRequired, true);
+  assert.deepEqual(environmentContract.authorizedOperator, { login: "T-ej2003", id: 183396573 });
   assert.deepEqual(environmentContract.variables, ["PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN"]);
   assert.deepEqual(environmentContract.forbiddenSecrets, ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"]);
 });

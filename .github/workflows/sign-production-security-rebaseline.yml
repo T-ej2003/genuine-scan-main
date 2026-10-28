@@ -75,10 +75,12 @@ jobs:
             publicationReference: JSON.parse(process.env.PUBLICATION_REFERENCE_JSON) });
           NODE
           gh api repos/T-ej2003/genuine-scan-main/environments/production-security-rebaseline-signing > "$RUNNER_TEMP/signing-environment.json"
-          node --input-type=module - "$RUNNER_TEMP/signing-environment.json" <<'NODE'
+          gh api "repos/T-ej2003/genuine-scan-main/actions/runs/$GITHUB_RUN_ID/approvals" > "$RUNNER_TEMP/signing-approvals.json"
+          node --input-type=module - "$RUNNER_TEMP/signing-environment.json" "$RUNNER_TEMP/signing-approvals.json" <<'NODE'
           import fs from 'node:fs';
           import { assertSecurityRebaselineSigningEnvironment } from './scripts/aws/production-security-rebaseline-preparation.mjs';
-          assertSecurityRebaselineSigningEnvironment(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')));
+          assertSecurityRebaselineSigningEnvironment(JSON.parse(fs.readFileSync(process.argv[2], 'utf8')),
+            JSON.parse(fs.readFileSync(process.argv[3], 'utf8')), process.env.GITHUB_ACTOR);
           NODE
       - uses: actions/download-artifact@v4
         with:

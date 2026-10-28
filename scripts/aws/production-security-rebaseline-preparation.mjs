@@ -39,11 +39,19 @@ export function productionSubscriptionProjectionContractSha256(repositoryRoot = 
     statusContracts: [SUBSCRIPTION_PROJECTION_STATUS_CONTRACT, RDS_SUBSCRIPTION_PROJECTION_STATUS_CONTRACT] });
 }
 
-export function assertSecurityRebaselineSigningEnvironment(value) {
+export function assertSecurityRebaselineSigningEnvironment(value, approvals, actor) {
   assert.equal(value?.name, SECURITY_REBASELINE_SIGNER_ENVIRONMENT);
+  assert.ok(Number.isSafeInteger(value.id) && value.id > 0);
+  assert.equal(value.can_admins_bypass, false);
+  assert.equal(actor, "T-ej2003");
   const reviewers = (value.protection_rules || []).find((rule) => rule.type === "required_reviewers");
-  assert.ok(reviewers?.prevent_self_review === true && reviewers.reviewers?.length > 0, "Signing environment lacks independent required approval");
+  assert.equal(reviewers?.prevent_self_review, false);
+  assert.deepEqual(reviewers.reviewers?.map(({ type, reviewer }) => ({ type, id: reviewer?.id, login: reviewer?.login })),
+    [{ type: "User", id: 183396573, login: "T-ej2003" }], "Signing environment must require the authorized operator");
   assert.deepEqual(value.deployment_branch_policy, { protected_branches: true, custom_branch_policies: false }, "Signing environment must permit protected branches only");
+  const matching = (approvals || []).filter((approval) => approval.state === "approved" && approval.user?.id === 183396573
+    && approval.user?.login === actor && approval.environments?.some((environment) => environment.id === value.id && environment.name === value.name));
+  assert.equal(matching.length, 1, "Signing requires one actual authorized environment approval");
   return true;
 }
 

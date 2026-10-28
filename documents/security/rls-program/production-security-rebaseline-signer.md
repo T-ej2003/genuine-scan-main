@@ -13,10 +13,15 @@ The trust policy requires the exact default repository/environment subject,
 and the pinned reusable signing-workflow `job_workflow_ref`. AWS maps these
 GitHub claims to IAM condition keys. The signing job also verifies the exact
 calling preparation workflow, source SHA, repository identity, and first-run
-identity before assuming the role. GitHub's protected signing environment must
-allow protected branches only, require an independent reviewer, prevent
-self-review, contain only the signer-role ARN variable, and have no secrets.
-The workflow reads back these conditions before requesting AWS credentials.
+identity before assuming the role. MSCQR's single-operator exception authorizes
+only `T-ej2003` (GitHub ID `183396573`) to approve this signing environment,
+including self-review. This is explicit human approval, not independent human
+review. The environment must allow protected branches only, require that
+reviewer, disable administrator bypass, contain only the signer-role ARN
+variable, and have no secrets. Before requesting AWS credentials, the workflow
+checks the live environment settings and the run's recorded approval. The
+separate signature, source, artifact, and KMS checks remain independent
+automated verification.
 
 After this PR is reviewed and merged, a separately authorized MFA-backed,
 non-root operator must plan and apply this root through the canonical encrypted
