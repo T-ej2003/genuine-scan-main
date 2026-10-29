@@ -173,7 +173,7 @@ test("release-deployer policy drift fails in the preflight before any IAM mutati
 test("web evidence registry access is read-only, regional and limited to the web repository", () => {
   assert.deepEqual(registryRead.Statement.map(({ Action, Resource }) => ({ Action, Resource })), [
     { Action: "ecr:GetAuthorizationToken", Resource: "*" },
-    { Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"], Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web" },
+    { Action: ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer", "ecr:DescribeRepositories", "ecr:DescribeImages"], Resource: "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web" },
   ]);
   assert.ok(registryRead.Statement.every(({ Effect, Condition }) => Effect === "Allow" && Condition?.StringEquals?.["aws:RequestedRegion"] === "eu-west-2"));
   const drift = fixture({ liveRegistryRead: { Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: "ecr:*", Resource: "*" }] } });

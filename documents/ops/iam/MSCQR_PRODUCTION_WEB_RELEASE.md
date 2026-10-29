@@ -2,6 +2,21 @@
 
 Production web evidence is intentionally separate from the mature four-image Stage-B object. Coordinated release consumes both authorizations and requires their exact protected `sourceSha` values to match. This preserves existing Stage-B consumers and permits web-only publication only when canonical image-impact evidence requires it.
 
+## Frontend activation read prerequisite
+
+The release role must have the source-owned `MSCQRProductionWebEvidenceRegistryRead`
+inline policy, including `ecr:DescribeRepositories` and `ecr:DescribeImages` on
+only `mscqr-web` in `eu-west-2`. The image-authorization verifier reads repository
+immutability and the exact-source image digest before comparing the live ECS
+frontend. Image publication alone does not install this permission update.
+
+Reconcile this existing policy through the separately authorized IAM installation
+path before rerunning image-authorization publication. Review a fresh plan against
+the `production-web-release` state; only this inline-policy delta is expected.
+The create-only bootstrap rejects differing existing policies and must not be used
+to bypass that installation approval. No ECS launch, secret access, image writes,
+or additional repository access is authorized by this read-policy change.
+
 ## Publication and evidence
 
 Dispatch `.github/workflows/production-web-image.yml` from protected `main` with only `release_sha`. Environment `production-web-image-publish` requires review by `T-ej2003`, permits that operator to approve their own deployment, and allows deployments only from protected `main`; it exposes only `PRODUCTION_WEB_IMAGE_PUBLISH_ROLE`. GitHub OIDC is the sole credential path. Account `368992683803`, region `eu-west-2`, repository `mscqr-web`, context `.`, `Dockerfile.ecs-frontend`, platform `linux/amd64`, and the full SHA tag are fixed in source.
