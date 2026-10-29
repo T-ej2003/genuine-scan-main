@@ -9,7 +9,8 @@ const target = JSON.parse(fs.readFileSync('infra/aws/terraform/production-web-re
 const predecessor = structuredClone(target);
 predecessor.Statement[1].Action = ['ecr:BatchGetImage', 'ecr:GetDownloadUrlForLayer'];
 const sourceSha = 'b'.repeat(40), authorizationId = 42;
-const mfa = () => ({sourceSha, ticketId:t.ticketId, authorizationId,
+// Attestation metadata only; no OTP or AWS credentials are present in this fixture.
+const operatorAttestation = () => ({sourceSha, ticketId:t.ticketId, authorizationId,
   operatorArn:'arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator',
   mfaSerial:'arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator', accessKeyIdSha256:'f'.repeat(64),
   verifiedAt:new Date().toISOString(), expiresAt:new Date(Date.now()+900000).toISOString()});
@@ -36,7 +37,7 @@ function fixture({live=predecessor,loseResponse=false,mark=true,dispatched=false
   return {calls,run,owner};
 }
 const execute=(f,extra={})=>reconcileWebRegistryReadIam({run:f.run,sourceSha,ticketId:t.ticketId,plan:plan(),authorizationId,
-  mfaEvidence:mfa(),assertProtectedSource:()=>sourceSha,assertCurrentAuthorization:()=>authorizationId,claimOwnership:()=>f.owner,...extra});
+  mfaEvidence:operatorAttestation(),assertProtectedSource:()=>sourceSha,assertCurrentAuthorization:()=>authorizationId,claimOwnership:()=>f.owner,...extra});
 const writes=f=>f.calls.filter(args=>args[1]==='put-role-policy');
 test('registry exact predecessor installs only its reviewed read delta and verifies it',()=>{
   const f=fixture();assert.equal(execute(f).status,'WEB_REGISTRY_READ_RECONCILED');assert.equal(writes(f).length,1);
@@ -52,7 +53,7 @@ test('registry plan rejects source substitution, other changes, unknowns, replac
   }
 });
 test('expired MFA, changed approval, source drift, unexpected policy and consumed dispatch prevent writes',()=>{
-  for(const extra of [{mfaEvidence:{...mfa(),expiresAt:new Date(0).toISOString()}},
+  for(const extra of [{mfaEvidence:{...operatorAttestation(),expiresAt:new Date(0).toISOString()}},
     {assertCurrentAuthorization:()=>99},{assertProtectedSource:()=> 'c'.repeat(40)}]) {
     const f=fixture();assert.throws(()=>execute(f,extra));assert.equal(writes(f).length,0);
   }
@@ -84,7 +85,7 @@ test('registry ownership uses durable existing journal, restricts policy names a
   const objects=new Map();const run=args=>{const flag=k=>args[args.indexOf(k)+1],key=flag('--key');
     if(args[1]==='put-object'){assert.equal(flag('--if-none-match'),'*');if(objects.has(key))throw Error('PreconditionFailed');objects.set(key,fs.readFileSync(flag('--body')));return '{}';}
     if(!objects.has(key))throw Error('NoSuchKey');fs.writeFileSync(args.at(-1),objects.get(key));return '{}';};
-  const input={run,sourceSha,authorizationId,mfaEvidence:mfa(),transition:t,ownerFile:path.join(d,'owner.json')};
+  const input={run,sourceSha,authorizationId,mfaEvidence:operatorAttestation(),transition:t,ownerFile:path.join(d,'owner.json')};
   try {
     const owner=claimPhase3IamOwner(input);assert.throws(()=>owner.markDispatch('MSCQRProductionFrontendActivation',t.registryTargetSha256));
     assert.equal(owner.markDispatch(t.registryPolicyName,t.registryTargetSha256),true);
@@ -98,7 +99,7 @@ test('registry rechecks approval and MFA after its dispatch journal before mutat
   const f=fixture();let approvals=0;
   assert.throws(()=>execute(f,{assertCurrentAuthorization:()=>++approvals===3?99:authorizationId}),/authorization changed/);
   assert.equal(writes(f).length,0);
-  const second=fixture(),evidence=mfa();
+  const second=fixture(),evidence=operatorAttestation();
   const mark=second.owner.markDispatch;second.owner.markDispatch=()=>{evidence.expiresAt=new Date(0).toISOString();return mark();};
   assert.throws(()=>execute(second,{mfaEvidence:evidence}),/expired/);assert.equal(writes(second).length,0);
   const other=fixture();other.run=args=>args[0]==='sts'?JSON.stringify({Account:t.account,Arn:`arn:aws:iam::${t.account}:user/operator`}):fixture().run(args);
