@@ -184,12 +184,25 @@ test("RLS probe definition reuses the exact private read-only task boundary", ()
   assert.equal(definition.containerDefinitions[0].image, `${APP_ONLY.backendRepository}@${identity.probeImageDigest}`);
   assert.deepEqual(definition.containerDefinitions[0].command, []);
   assert.deepEqual(JSON.parse(definition.containerDefinitions[0].environment[0].value), { schemaVersion: 1, ...identity, requirementsSha256: requirements.requirementsSha256, securityTransportPublicKey: null });
+  const prior = structuredClone(baseDefinition);
+  Object.assign(prior.containerDefinitions[0], { entryPoint: definition.containerDefinitions[0].entryPoint,
+    command: definition.containerDefinitions[0].command, environment: definition.containerDefinitions[0].environment });
+  assert.deepEqual(buildProductionRlsProbeDefinition({ baseDefinition: prior, requirements, identity, databaseSecretArn: secret }), definition);
+  for (const change of [
+    { entryPoint: ["node", "unapproved.mjs"] },
+    { command: ["unapproved"] },
+    { environment: [{ name: "RLS_PROBE_INPUT_JSON", value: "{}" }, { name: "EXTRA", value: "1" }] },
+    { environment: [{ name: "OTHER", value: "{}" }] },
+  ]) {
+    const unsafe = structuredClone(prior); Object.assign(unsafe.containerDefinitions[0], change);
+    assert.throws(() => buildProductionRlsProbeDefinition({ baseDefinition: unsafe, requirements, identity, databaseSecretArn: secret }));
+  }
   const wrapper = collectAppOnlyDatabaseCatalogue.toString(), collector = collectAppOnlyDatabaseCatalogueRows.toString();
   assert.equal((wrapper.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(wrapper, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY/);
   assert.equal((collector.match(/\$executeRawUnsafe/g) || []).length, 1); assert.match(collector, /SET LOCAL search_path = pg_catalog/);
-  const queryCount = (collector.match(/\$queryRawUnsafe\(/g) || []).length;
+  const queryCount = (collector.match(/await read\("[A-Z_]+", `/g) || []).length;
   assert.ok(queryCount > 0);
-  const queries = [...collector.matchAll(/\$queryRawUnsafe\(`([\s\S]*?)`\)/g)].map(([, sql]) => sql.trim());
+  const queries = [...collector.matchAll(/await read\("[A-Z_]+", `([\s\S]*?)`\)/g)].map(([, sql]) => sql.trim());
   assert.equal(queries.length, queryCount);
   assert.ok(queries.every((sql) => /^(?:SELECT|WITH)\b/.test(sql)));
 });
