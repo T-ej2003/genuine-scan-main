@@ -157,14 +157,30 @@ for (const status of [401, 429, 500]) {
 }
 test("bounded read-only registry retries still authenticate every immutable byte", async () => {
   const f = fixture(); let attempts = 0; const delays = [];
-  await verifyApprovedImage(f.image, { fetcher: async url => attempts++ === 0 ? new Response("throttled", { status: 429, headers: { "retry-after": "2" } }) : f.fetcher(url), wait: async delay => delays.push(delay) });
-  assert.deepEqual(delays, [2000]);
+  await verifyApprovedImage(f.image, { fetcher: async url => attempts++ === 0 ? new Response("throttled", { status: 429, headers: { "retry-after": "2" } }) : f.fetcher(url), wait: async delay => delays.push(delay), random: () => 0 });
+  assert.deepEqual(delays, [5000]);
   const invalid = fixture(); invalid.resources.set(invalid.image.digest, bytes({ substituted: true }));
   let retry = true;
   await assert.rejects(verifyApprovedImage(invalid.image, { fetcher: async url => { if (retry) { retry = false; return new Response("throttled", { status: 429 }); } return invalid.fetcher(url); }, wait: async () => {} }), /substituted/);
   let reads = 0;
   await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => { reads++; return new Response("throttled", { status: 429 }); }, wait: async () => {} }), /HTTP 429/);
-  assert.equal(reads, 4);
+  assert.equal(reads, 6);
+});
+test("registry throttling has bounded jittered backoff and honors HTTP-date Retry-After", async () => {
+  const f = fixture(); const delays = []; let reads = 0;
+  await verifyApprovedImage(f.image, { fetcher: async url => reads++ < 5 ? new Response("busy", { status: 503 }) : f.fetcher(url),
+    wait: async delay => delays.push(delay), random: () => 0.5 });
+  assert.deepEqual(delays, [5500, 11000, 22000, 44000, 60000]);
+  const dateDelays = []; let first = true;
+  await verifyApprovedImage(f.image, { fetcher: async url => { if (first) { first = false; return new Response("busy", { status: 429, headers: { "retry-after": "Thu, 29 Oct 2026 12:00:20 GMT" } }); } return f.fetcher(url); },
+    now: () => Date.parse("2026-10-29T12:00:00Z"), random: () => 0, wait: async delay => dateDelays.push(delay) });
+  assert.deepEqual(dateDelays, [20000]);
+  await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => new Response("busy", { status: 429, headers: { "retry-after": "120" } }),
+    wait: async () => assert.fail("must not retry before server permits") }), /retry budget/);
+  let denied = 0;
+  await assert.rejects(verifyApprovedImage(f.image, { fetcher: async () => { denied++; return new Response("denied", { status: 401 }); },
+    wait: async () => assert.fail("must not retry authorization failure") }), /HTTP 401/);
+  assert.equal(denied, 1);
 });
 test("PostgreSQL mirror keeps strict reference and native content identity assertions", () => {
   const reference = images.postgres.reference;
