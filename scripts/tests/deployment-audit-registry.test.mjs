@@ -72,12 +72,21 @@ test("CI Dockerfiles change only the registry host for exact approved base diges
   const output = mkdtempSync(path.join(os.tmpdir(), "mscqr-ci-dockerfiles-"));
   try {
     execFileSync(process.execPath, ["scripts/ci/render-pinned-dockerfiles.mjs", output]);
-    for (const [file, rendered] of [["Dockerfile", "frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
+    for (const [file, rendered] of [["Dockerfile", "frontend.Dockerfile"], ["Dockerfile.ecs-frontend", "ecs-frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
       let expected = readFileSync(file, "utf8");
       for (const key of ["node", "nginx"]) expected = expected.replaceAll(images[key].reference, ciImageReference(images[key]));
       assert.equal(readFileSync(path.join(output, rendered), "utf8"), expected);
     }
   } finally { rmSync(output, { recursive: true, force: true }); }
+});
+
+test("production web publication verifies and builds the same pinned mirror inputs", () => {
+  const workflow = load(readFileSync(".github/workflows/production-web-image.yml", "utf8"));
+  const publish = workflow.jobs.publish.steps.find(step => step.name === "Publish exact immutable web image").run;
+  assert.match(publish, /verify-container-image-provenance\.mjs --production-mirror/);
+  assert.match(publish, /render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP\/web-pinned-inputs"/);
+  assert.match(publish, /--file "\$RUNNER_TEMP\/web-pinned-inputs\/ecs-frontend\.Dockerfile"/);
+  assert.doesNotMatch(publish, /--review-upstream|\|\| true/);
 });
 
 for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {

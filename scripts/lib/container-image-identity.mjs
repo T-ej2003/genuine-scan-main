@@ -144,7 +144,9 @@ export function assertPinnedImageInputs(repository = root) {
   assert.match(audit, /node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP"[\s\S]*?docker build -t deployment-audit:latest -f "\$RUNNER_TEMP\/frontend\.Dockerfile" "\$\{\{ steps\.docker-detect\.outputs\.context \}\}"/);
   assert.doesNotMatch(audit, /--build-context/);
   const production = readFileSync(path.join(repository, ".github/workflows/production-web-image.yml"), "utf8");
-  assert.match(production, /docker buildx build --platform "\$PLATFORM" --file Dockerfile\.ecs-frontend/);
+  assert.match(production, /node scripts\/verify-container-image-provenance\.mjs --production-mirror/);
+  assert.match(production, /node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP\/web-pinned-inputs"/);
+  assert.match(production, /docker buildx build --platform "\$PLATFORM" --file "\$RUNNER_TEMP\/web-pinned-inputs\/ecs-frontend\.Dockerfile"/);
   assert.doesNotMatch(production, /--build-context/);
   return images;
 }

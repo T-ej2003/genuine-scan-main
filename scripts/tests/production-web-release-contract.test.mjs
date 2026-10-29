@@ -517,6 +517,6 @@ test("web publication resumes immutable tags through the reviewed digest-bound p
   assert.match(publish, /ImageNotFoundException/);
   assert.match(publish, /resolveWebImagePublication/);
   assert.match(publish, /image_ref=.*@\$digest/);
-  assert.match(publish, /if \[\[ "\$image_state" == absent \]\]; then\n\s+node scripts\/verify-container-image-provenance\.mjs --production\n\s+docker buildx build[\s\S]*?--push/);
+  assert.match(publish, /if \[\[ "\$image_state" == absent \]\]; then\n\s+node scripts\/verify-container-image-provenance\.mjs --production-mirror\n\s+install -d -m 700 "\$RUNNER_TEMP\/web-pinned-inputs"\n\s+node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP\/web-pinned-inputs"\n\s+docker buildx build[\s\S]*?--push/);
   assert.match(publish, /verify-image-manifest\.sh"? "\$image_ref"/);
 });

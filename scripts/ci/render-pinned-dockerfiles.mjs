@@ -6,7 +6,7 @@ import { assertPinnedImageInputs, ciImageReference } from "../lib/container-imag
 const output = process.argv[2];
 assert.ok(process.argv.length === 3 && path.isAbsolute(output), "Expected absolute CI output directory");
 const images = assertPinnedImageInputs();
-for (const [source, target] of [["Dockerfile", "frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
+for (const [source, target] of [["Dockerfile", "frontend.Dockerfile"], ["Dockerfile.ecs-frontend", "ecs-frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
   let content = readFileSync(source, "utf8");
   for (const key of ["node", "nginx"]) content = content.replaceAll(images[key].reference, ciImageReference(images[key]));
   assert.doesNotMatch(content, /public\.ecr\.aws\/docker\/library\//);
