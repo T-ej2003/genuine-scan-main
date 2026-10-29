@@ -162,23 +162,26 @@ export function assertImageManifest(bytes, expectedDigest) {
   return JSON.parse(Buffer.from(bytes));
 }
 
-export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, ci = false, wait = pause } = {}) {
+export async function verifyApprovedImage(image, { fetcher = fetch, upstream = false, ci = false, wait = pause, random = Math.random, now = Date.now } = {}) {
   assert.ok(!(upstream && ci));
   const name = image.upstream.split(":")[0];
   const dockerHub = upstream || ci || image.reference.startsWith("docker.io/");
   const host = dockerHub ? "registry-1.docker.io" : "public.ecr.aws";
   const repository = dockerHub ? `library/${name}` : `docker/library/${name}`;
   const get = async (url, headers = {}) => {
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 6; attempt++) {
       const response = await fetcher(url, { headers, signal: AbortSignal.timeout(30000) });
       if (response.ok) return Buffer.from(await response.arrayBuffer());
-      if (attempt === 3 || ![429, 500, 502, 503, 504].includes(response.status)) {
+      await response.body?.cancel();
+      if (attempt === 5 || ![429, 500, 502, 503, 504].includes(response.status)) {
         assert.fail(`Registry read failed: ${host} HTTP ${response.status}`);
       }
       // Retry read-only requests for the same identity; every returned byte still authenticates.
-      const retryAfter = Number(response.headers.get("retry-after"));
-      await response.body?.cancel();
-      await wait(Math.max(1000 * 2 ** attempt, Math.min(30000, Number.isFinite(retryAfter) ? retryAfter * 1000 : 0)));
+      const header = response.headers.get("retry-after");
+      const retryAfter = header === null ? 0 : /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - now();
+      assert.ok(!Number.isFinite(retryAfter) || retryAfter <= 60000, "Registry Retry-After exceeds bounded retry budget");
+      const backoff = Math.min(60000, 5000 * 2 ** attempt);
+      await wait(Math.max(Math.min(60000, backoff + Math.floor(random() * backoff / 5)), Number.isFinite(retryAfter) ? retryAfter : 0));
     }
   };
   const tokenUrl = dockerHub
