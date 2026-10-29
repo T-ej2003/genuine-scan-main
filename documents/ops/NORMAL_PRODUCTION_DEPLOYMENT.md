@@ -177,6 +177,36 @@ ECS materializes an omitted host-volume configuration as `host: {}` on task-defi
 
 Task timeout, missing evidence, nonzero exit, or unavailable readback is ambiguous. Do not rerun the writer. Run the read-only catalogue probe and reconcile `MATCH`, `EXPECTED_THREE_ROUTINE_DELTA_ONLY`, or `UNEXPECTED_DRIFT` first. Only `MATCH` permits the one-time baseline deployment.
 
+### C02 persistent connector session prerequisite
+
+The connector-session backend cannot start against the older printing catalogue. Its
+`PrinterAgentSession.lastMessageSeq` Prisma migration must be installed first. A
+separately authorized C02 installation then installs only
+`app_rls.printing_connector_session`, the three C02 session policies and the three
+column-scoped grants; B03 does not own these grants. From a clean, current protected-main
+checkout, the governed operator command is:
+
+```bash
+npm run production:apply-c02-session-prerequisite -- --source-sha <protected-main-sha> --aws-profile mscqr-production-root --receipt-out <new-private-outside-repository-path>
+```
+
+This command uses the pinned existing RLS executor image, private ECS network,
+administrator secret, source-bound bounded SQL package and committed catalogue
+readback. It refuses a missing migration, a partial predecessor, a different
+session function, unexpected policies, or broader table grants. The production
+backend also performs an independent restricted-role catalogue check before it
+opens its HTTP listener or starts workers. A missing migration, function, policy,
+grant or wrong function body prevents activation. The normal application lane
+continues to reject undeployed SQL/security changes; the installer is an
+explicit privileged operation, never an automatic application deployment step.
+
+Release order: reviewed Prisma migration, authorized C02 installation, independent
+database readback, then the new backend. The old backend remains compatible with
+the additive column and C02 function. Do not remove C02 functions or policies
+automatically during a backend rollback: persistent session records and signed
+attestations may still depend on them. If installation or verification fails,
+leave the old backend active and reconcile the database catalogue before retry.
+
 Do not use `seed-launch-smoke-users.js` in production: that executable deliberately refuses protected-environment mutation. The already-provisioned ordinary canary is reused instead of creating a second identity system.
 
 A permanent public-verification fixture must use the normal QR lifecycle: the dedicated canary licensee submits one QR allocation request, a human platform operator approves it with normal MFA in the application, governed printing/issuance completes, and the resulting non-customer raw QR code is transferred directly into the GitHub environment secret without terminal or workflow-log output. Do not use a customer QR, a generated random string, the risk-blocked platform canary, or the operator's human credentials in CI. Until that fixture exists, leave `PRODUCTION_SMOKE_VERIFY_CODE` unset.

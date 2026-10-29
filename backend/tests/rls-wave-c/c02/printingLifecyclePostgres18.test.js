@@ -891,6 +891,10 @@ async function main() {
   assert(catalog.audit >= 3);
   assert(catalog.outbox >= 3);
 
+  const { printingSessionPrerequisiteSql } = require("../../../dist/rls-waves/session-c/c02/printingSessionPrerequisite");
+  assert.equal(psql(app, printingSessionPrerequisiteSql("mscqr_rls_cert_")), "t|t|t|t|t",
+    "The restricted runtime role must independently verify its installed C02 session prerequisite");
+
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),
     "utf8"

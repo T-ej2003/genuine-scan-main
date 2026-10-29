@@ -15,6 +15,7 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
 import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
+import { buildC02SessionPrerequisitePackage } from "../aws/production-c02-session-package.mjs";
 import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildB01ExecutorInput, canonicalB01Prerequisite, collectB01State, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
@@ -40,6 +41,7 @@ const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 const b03DeltaRuntime = createRequire(import.meta.url)("../aws/production-b03-delta-executor.cjs");
+const c02Runtime = createRequire(import.meta.url)("../aws/production-c02-session-executor.cjs");
 const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
 const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
 const printingRoutine = (source, name) => {
@@ -299,6 +301,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     const { PrismaClient } = createRequire(new URL("../../backend/package.json", import.meta.url))("@prisma/client");
     const verifier = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, verifierRole) } } });
     const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });
+    const c02Package = buildC02SessionPrerequisitePackage({ sourceSha: "a".repeat(40), repositoryRoot: root });
+    assert.ok(c02Runtime.installed(await c02Runtime.readback(administratorClient, c02Package), c02Package),
+      "The production-role C02 successor must match the separately governed session installation contract");
     const maintenanceClient = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, adminUrl.username) } } });
     try {
       psql(maintenanceUrl, ["-q", "-c", `ALTER ROLE "${administrator}" INHERIT;

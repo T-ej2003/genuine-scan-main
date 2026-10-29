@@ -435,6 +435,39 @@ export const resolveSessionUrl = (backendUrl: string) => {
   return url.toString();
 };
 
+export const buildSelectedPrinterHealth = (
+  selectedPrinterId: string,
+  persistedSelectedPrinterId: string | null,
+  inventory: Awaited<ReturnType<typeof listLocalPrinters>> & { observedAt?: string },
+  now = () => new Date(),
+): Record<string, unknown> => {
+  const selected = inventory.printers.find((printer) => printer.printerId === selectedPrinterId);
+  const source = inventory.diagnostics?.selectedSource;
+  const command = source === "cim" ? inventory.diagnostics?.commands?.fallback
+    : source === "powershell-get-printer" ? inventory.diagnostics?.commands?.primary : null;
+  return {
+    healthVersion: 1,
+    selectedPrinterId,
+    // Discovery executes uncached platform commands. A future cache must carry
+    // its own observation time; never restamp an older source observation.
+    observedAt: inventory.observedAt ?? now().toISOString(),
+    discovered: Boolean(selected && persistedSelectedPrinterId === selectedPrinterId),
+    queueAvailable: Boolean(selected && !inventory.error && (!command || command.exitCode === 0) && !selected.queueHasErrors
+      && !(selected.stuckJobCount && selected.stuckJobCount > 0)
+      && !(selected.retainedJobCount && selected.retainedJobCount > 0)
+      && (process.platform !== "win32" || /^(normal|idle|printing|warmup|warming up|PrinterStatus (0|3|4|5)|0|3|4|5)$/i.test(selected.queueStatus || ""))
+      && !/paused|offline|error|unavailable/i.test(selected.queueStatus || "")),
+    online: selected?.online === true,
+  };
+};
+
+export const observeSelectedPrinterHealth = async (
+  selectedPrinterId: string,
+  persistedSelectedPrinterId: string | null,
+  readInventory: typeof listLocalPrinters = listLocalPrinters,
+  now = () => new Date(),
+) => buildSelectedPrinterHealth(selectedPrinterId, persistedSelectedPrinterId, await readInventory(), now);
+
 export const buildSignedSessionMessage = async (params: {
   type: "hello" | SessionProgressType;
   session?: SessionContext | null;
@@ -455,21 +488,9 @@ export const buildSignedSessionMessage = async (params: {
 }) => {
   const state = await loadAgentState();
   if (params.type === "heartbeat") {
-    const observedAt = new Date().toISOString();
-    const inventory = await listLocalPrinters();
-    const selected = inventory.printers.find((printer) => printer.printerId === params.selectedPrinterId);
     params.printerHealth = {
       ...params.printerHealth,
-      healthVersion: 1,
-      selectedPrinterId: params.selectedPrinterId,
-      observedAt,
-      discovered: Boolean(selected && state.selectedPrinterId === params.selectedPrinterId),
-      queueAvailable: Boolean(selected && !inventory.error && !selected.queueHasErrors
-        && !(selected.stuckJobCount && selected.stuckJobCount > 0)
-        && !(selected.retainedJobCount && selected.retainedJobCount > 0)
-        && (process.platform !== "win32" || /^(normal|idle|printing|warmup|warming up|PrinterStatus (0|3|4|5)|0|3|4|5)$/i.test(selected.queueStatus || ""))
-        && !/paused|offline|error|unavailable/i.test(selected.queueStatus || "")),
-      online: selected?.online === true,
+      ...await observeSelectedPrinterHealth(params.selectedPrinterId, state.selectedPrinterId),
     };
   }
   const issuedAt = new Date().toISOString();

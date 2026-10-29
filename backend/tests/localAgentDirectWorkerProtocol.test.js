@@ -17,6 +17,8 @@ const {
   validateClaimedLocalPrintJobForAttempt,
   startPersistentHeartbeatLoop,
   runPersistentSelectionHeartbeat,
+  buildSelectedPrinterHealth,
+  observeSelectedPrinterHealth,
 } = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
@@ -40,6 +42,40 @@ const assert = (condition, message) => {
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
 const run = async () => {
+  mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-29T12:00:00.000Z") });
+  try {
+    const printer = { printerId: "queue-a", online: true, queueHasErrors: false, queueStatus: "normal" };
+    const inventory = { printers: [printer], error: null, observedAt: new Date().toISOString() };
+    const fast = buildSelectedPrinterHealth("queue-a", "queue-a", inventory);
+    assert(fast.discovered && fast.queueAvailable && fast.online, "Fresh selected queue must remain available");
+    let completeSlowDiscovery;
+    const slowInventory = new Promise((resolve) => { completeSlowDiscovery = resolve; });
+    const pendingHealth = observeSelectedPrinterHealth("queue-a", "queue-a", () => slowInventory);
+    mock.timers.tick(21_000);
+    completeSlowDiscovery({ printers: [printer], error: null });
+    const delayedFresh = await pendingHealth;
+    assert(delayedFresh.observedAt === "2026-10-29T12:00:21.000Z", "Slow fresh discovery must use completion evidence");
+    const delayedStale = buildSelectedPrinterHealth("queue-a", "queue-a", inventory);
+    assert(delayedStale.observedAt === "2026-10-29T12:00:00.000Z", "Stale cached inventory must retain its old observation time");
+    assert(buildSelectedPrinterHealth("queue-a", "queue-b", inventory).discovered === false, "Changed selection must not reuse old health");
+    assert(buildSelectedPrinterHealth("queue-a", "queue-a", { ...inventory, error: "discovery failed" }).queueAvailable === false,
+      "Failed discovery must not attest a healthy queue");
+    assert(buildSelectedPrinterHealth("queue-a", "queue-a", { ...inventory, diagnostics: {
+      selectedSource: "powershell-get-printer", commands: { primary: { exitCode: 1 } },
+    } }).queueAvailable === false, "A failed selected discovery command must not attest a healthy queue");
+    assert(buildSelectedPrinterHealth("queue-a", "queue-a", { ...inventory, printers: [] }).discovered === false,
+      "Missing selected printer must not be discovered");
+    for (const changed of [{ ...printer, online: false }, { ...printer, queueHasErrors: true }, { ...printer, queueStatus: "paused", queueHasErrors: true }]) {
+      const health = buildSelectedPrinterHealth("queue-a", "queue-a", { ...inventory, printers: [changed] });
+      assert(health.online === false || health.queueAvailable === false, "Offline, error or paused queues must not be healthy");
+    }
+    const recovered = buildSelectedPrinterHealth("queue-a", "queue-a", {
+      ...inventory, observedAt: new Date().toISOString(),
+    });
+    assert(recovered.queueAvailable && recovered.online, "Fresh discovery must restore queue health after failure");
+  } finally {
+    mock.timers.reset();
+  }
   let initialHeartbeats = 0;
   const heartbeatTimer = startPersistentHeartbeatLoop(() => { initialHeartbeats += 1; }, 15_000);
   clearInterval(heartbeatTimer);
