@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 378,
+  "count": 381,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -6630,6 +6630,7 @@
         "contract:release-fix-5-connector-event:Printer:SELECT",
         "contract:release-fix-5-connector-identity:Printer:SELECT",
         "contract:release-fix-5-connector-registration:Printer:SELECT",
+        "contract:release-fix-5-connector-session:Printer:SELECT",
         "contract:release-fix-5-create-job:Printer:SELECT",
         "contract:release-fix-5-gateway-job:Printer:SELECT",
         "contract:release-fix-5-printer-administration:Printer:SELECT",
@@ -6659,7 +6660,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true) IN ('printing-printer-admin-update','printing-test-label-queue') AND id=current_setting('app.printing_printer_id',true)) OR (current_setting('app.printing_operation',true)='printing-printer-admin-relink' AND (id=current_setting('app.printing_printer_id',true) OR \"assignedUserId\"=current_setting('app.printing_user_id',true))) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=current_setting('app.printing_printer_id',true) OR (\"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true))))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true) IN ('printing-printer-admin-update','printing-test-label-queue') AND id=current_setting('app.printing_printer_id',true)) OR (current_setting('app.printing_operation',true)='printing-printer-admin-relink' AND (id=current_setting('app.printing_printer_id',true) OR \"assignedUserId\"=current_setting('app.printing_user_id',true))) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-session','printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=current_setting('app.printing_printer_id',true) OR (current_setting('app.printing_operation',true) IN ('printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail') AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (\"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-identity:Printer:UPDATE",
@@ -6667,6 +6668,92 @@
         "contract:release-fix-5-gateway-job:Printer:UPDATE",
         "contract:release-fix-5-printer-administration:Printer:UPDATE",
         "contract:release-fix-5-test-label-job:Printer:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-agent-session",
+      "table": "PrinterAgentSession",
+      "policyName": "printing_lifecycle_printeragentsession_insert",
+      "command": "INSERT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-session' AND \"registrationId\"=current_setting('app.printing_registration_id',true) AND id=current_setting('app.printing_agent_session_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-session:PrinterAgentSession:INSERT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-agent-session",
+      "table": "PrinterAgentSession",
+      "policyName": "printing_lifecycle_printeragentsession_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"registrationId\"=current_setting('app.printing_registration_id',true) AND (current_setting('app.printing_operation',true)='printing-connector-session' OR id=current_setting('app.printing_agent_session_id',true))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-readiness','printing-create-job','printing-reissue') AND \"registrationId\"=current_setting('app.printing_registration_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-event:PrinterAgentSession:SELECT",
+        "contract:release-fix-5-connector-session:PrinterAgentSession:SELECT",
+        "contract:release-fix-5-create-job:PrinterAgentSession:SELECT",
+        "contract:release-fix-5-readiness:PrinterAgentSession:SELECT",
+        "contract:release-fix-5-reissue-request:PrinterAgentSession:SELECT",
+        "contract:release-fix-5-test-label-job:PrinterAgentSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-printer-agent-session",
+      "table": "PrinterAgentSession",
+      "policyName": "printing_lifecycle_printeragentsession_update",
+      "command": "UPDATE",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"registrationId\"=current_setting('app.printing_registration_id',true) AND (current_setting('app.printing_operation',true)='printing-connector-session' OR id=current_setting('app.printing_agent_session_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-connector-session:PrinterAgentSession:UPDATE"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -6694,7 +6781,8 @@
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-event:PrinterAttestation:INSERT",
-        "contract:release-fix-5-connector-registration:PrinterAttestation:INSERT"
+        "contract:release-fix-5-connector-registration:PrinterAttestation:INSERT",
+        "contract:release-fix-5-connector-session:PrinterAttestation:INSERT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -6722,6 +6810,7 @@
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-registration:PrinterAttestation:SELECT",
+        "contract:release-fix-5-connector-session:PrinterAttestation:SELECT",
         "contract:release-fix-5-create-job:PrinterAttestation:SELECT",
         "contract:release-fix-5-reissue-request:PrinterAttestation:SELECT",
         "contract:release-fix-5-test-label-job:PrinterAttestation:SELECT"
@@ -6781,6 +6870,7 @@
         "contract:release-fix-5-connector-event:PrinterRegistration:SELECT",
         "contract:release-fix-5-connector-identity:PrinterRegistration:SELECT",
         "contract:release-fix-5-connector-registration:PrinterRegistration:SELECT",
+        "contract:release-fix-5-connector-session:PrinterRegistration:SELECT",
         "contract:release-fix-5-create-job:PrinterRegistration:SELECT",
         "contract:release-fix-5-printer-administration:PrinterRegistration:SELECT",
         "contract:release-fix-5-test-label-job:PrinterRegistration:SELECT"
@@ -6807,7 +6897,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"userId\"=current_setting('app.printing_user_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true)='printing-connector-identity' AND id=current_setting('app.printing_registration_id',true))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"userId\"=current_setting('app.printing_user_id',true)) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-session','printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND id=current_setting('app.printing_registration_id',true))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-identity:PrinterRegistration:UPDATE",

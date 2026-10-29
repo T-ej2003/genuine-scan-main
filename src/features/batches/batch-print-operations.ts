@@ -519,10 +519,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
         setPrintProgressError(message);
         return;
       }
-      const heartbeatStatus = await reportLocalPrinterHeartbeat();
-      if (heartbeatStatus) {
-        setPrinterStatus((previous) => ({ ...previous, ...(heartbeatStatus as PrinterConnectionStatus) }));
-      }
+      // The authenticated connector maintains attestation. Submission only
+      // reads fresh server authorization; browser relays can displace that evidence.
     }
 
     const livePrinterStatus = await apiClient.getPrinterConnectionStatus({ force: true, minIntervalMs: 0 });

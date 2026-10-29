@@ -5,6 +5,7 @@ import { defaultPrinterStatus } from "@/features/batches/print-workflow-utils";
 
 vi.mock("@/lib/api-client", () => ({ default: {
   getPrinterConnectionStatus: vi.fn(), getLocalPrintAgentStatus: vi.fn(), listRegisteredPrinters: vi.fn(),
+  reportPrinterHeartbeat: vi.fn(),
 } }));
 
 describe("start print run runtime verification", () => {
@@ -43,5 +44,41 @@ describe("start print run runtime verification", () => {
     const result = await refreshManufacturerPrinterRuntimeSnapshot();
     expect(result.remoteStatus.eligibleForPrinting).toBe(false);
     expect(result.remoteStatus.trustReason).toMatch(/verification is unavailable/i);
+  });
+
+  it("blocks expired verification until a connector-originated renewal is visible from the server", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      ...localStatus, printerId: "queue-1", selectedPrinterId: "queue-1", agentId: "agent-1",
+      deviceFingerprint: "device-1", heartbeatNonce: "nonce-123456789", heartbeatIssuedAt: new Date().toISOString(),
+      heartbeatSignature: "signed-connector-heartbeat",
+    } });
+    const expiredStatus = {
+      ...defaultPrinterStatus, connected: true, trusted: true, eligibleForPrinting: false, stale: false,
+      connectionClass: "TRUSTED", trustStatus: "TRUSTED", trustReason: "Printer attestation expired",
+      selectedPrinterId: "queue-1", printerId: "queue-1", persistentSessionDisconnected: false,
+      signedAttestation: { required: true, present: true, signatureValid: true, fresh: false },
+      requiredForPrinting: true, lastHeartbeatAt: null, ageSeconds: 0,
+    } as const;
+    vi.mocked(apiClient.getPrinterConnectionStatus)
+      .mockResolvedValueOnce({ success: true, data: expiredStatus })
+      .mockResolvedValueOnce({ success: true, data: {
+        ...expiredStatus, eligibleForPrinting: true, trustReason: null,
+        signedAttestation: { ...expiredStatus.signedAttestation, fresh: true },
+      } });
+    const before = await refreshManufacturerPrinterRuntimeSnapshot();
+    expect(before.localAgent.connected).toBe(true);
+    expect(before.remoteStatus.eligibleForPrinting).toBe(false);
+    const after = await refreshManufacturerPrinterRuntimeSnapshot();
+    expect(after.remoteStatus.eligibleForPrinting).toBe(true);
+    expect(apiClient.reportPrinterHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it("keeps printing blocked when connector renewal is unavailable", async () => {
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({
+      success: false, status: 503, error: "verification unavailable",
+    });
+    const result = await refreshManufacturerPrinterRuntimeSnapshot();
+    expect(result.remoteStatus.eligibleForPrinting).toBe(false);
+    expect(apiClient.reportPrinterHeartbeat).not.toHaveBeenCalled();
   });
 });

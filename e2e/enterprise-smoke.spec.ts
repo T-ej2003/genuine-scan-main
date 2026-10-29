@@ -1,11 +1,16 @@
 import { expect, test, type Locator, type Page, type TestInfo } from "@playwright/test";
-import { generateKeyPairSync, randomUUID } from "node:crypto";
+import { createHash, generateKeyPairSync, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import printerAgentSigningService from "../backend/dist/services/printerAgentSigningService.js";
+import directPrintWorker from "../backend/dist/local-print-agent/directPrintWorker.js";
+import prismaPackage from "../backend/node_modules/@prisma/client/index.js";
+import { assertSafeTestDatabaseUrl } from "../backend/tests/helpers/testDbSafetyGuard.js";
 
 const {
   buildPrinterAgentHeartbeatPayload,
+  buildPrinterAgentSessionPayload,
   signPrinterAgentPayload,
 } = printerAgentSigningService;
 
@@ -403,8 +408,98 @@ const refreshE2EPrinterHeartbeat = async (page: Page) => {
   return result;
 };
 
+const startE2ESignedConnectorSession = async (registrationId: string, backendUrl?: string) => {
+  const url = new URL("/api/printer-agent/session", backendUrl || process.env.VITE_API_PROXY_TARGET ||
+    process.env.E2E_BACKEND_HEALTH_URL || "http://127.0.0.1:4000");
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const socket = new WebSocket(url);
+  const receive = (expectedType: string) => new Promise<Record<string, unknown>>((resolve, reject) => {
+    const timeout = setTimeout(() => { cleanup(); reject(new Error(`Signed connector ${expectedType} timed out`)); }, 15_000);
+    const onMessage = (event: MessageEvent) => {
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(String(event.data)) as Record<string, unknown>; }
+      catch { cleanup(); reject(new Error("Invalid signed connector response")); return; }
+      if (body.type !== expectedType && body.type !== "error") return;
+      cleanup();
+      if (body.type === "error") reject(new Error(`Signed connector rejected: ${String(body.errorCode || "unknown")}`));
+      else resolve(body);
+    };
+    const onClose = () => { cleanup(); reject(new Error("Signed connector closed before acknowledgement")); };
+    const cleanup = () => {
+      clearTimeout(timeout); socket.removeEventListener("message", onMessage); socket.removeEventListener("close", onClose);
+    };
+    socket.addEventListener("message", onMessage);
+    socket.addEventListener("close", onClose);
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener("open", () => resolve(), { once: true });
+    socket.addEventListener("error", () => reject(new Error("Signed connector socket failed")), { once: true });
+  });
+  const common = { registrationId, agentId: e2ePrinterIdentity.agentId,
+    deviceFingerprint: e2ePrinterIdentity.deviceFingerprint, selectedPrinterId: "e2e-local-printer",
+    connectorVersion: E2E_LOCAL_AGENT_BUILD_VERSION };
+  const hello = { type: "hello", ...common, nonce: randomUUID(), issuedAt: new Date().toISOString(),
+    printerHealth: { capabilities: { supportsPersistentPrintSession: true } } };
+  const sessionReady = receive("session_ready");
+  socket.send(JSON.stringify({ ...hello, signature: signPrinterAgentPayload(e2ePrinterIdentity.privateKeyPem,
+    buildPrinterAgentSessionPayload({ ...hello, messageType: "hello" })) }));
+  const sessionId = String((await sessionReady.catch((error) => { socket.close(); throw error; })).sessionId);
+  let messageSeq = 0;
+  let outbound = Promise.resolve();
+  const sendSigned = (type: string, fields: Record<string, unknown> = {}) => {
+    const next = outbound.then(async () => {
+    const message = { type, sessionId, messageSeq: ++messageSeq,
+      nonce: randomUUID(), issuedAt: new Date().toISOString(), ...fields };
+    const acknowledgement = receive("message_ack");
+    socket.send(JSON.stringify({ ...message, signature: signPrinterAgentPayload(e2ePrinterIdentity.privateKeyPem,
+      buildPrinterAgentSessionPayload({ ...common, ...message, messageType: type })) }));
+    await acknowledgement;
+    });
+    outbound = next.catch(() => undefined);
+    return next;
+  };
+  const heartbeat = () => sendSigned("heartbeat");
+  await heartbeat().catch((error) => { socket.close(); throw error; });
+  const spooledJobs: string[] = [];
+  let spoolFailure: Error | null = null;
+  socket.addEventListener("message", (event) => {
+    const chunk = JSON.parse(String(event.data)) as Record<string, unknown>;
+    if (chunk.type !== "print_chunk") return;
+    void (async () => {
+      const labels = Array.isArray(chunk.labels) ? chunk.labels as Record<string, unknown>[] : [];
+      expect(labels.length).toBeGreaterThan(0);
+      await directPrintWorker.runPersistentPrintChunk(null, {
+        sessionId, registrationId, selectedPrinterId: common.selectedPrinterId,
+        connectorVersion: common.connectorVersion, messageSeq,
+      }, chunk, common.selectedPrinterId, {
+        send: async (_socket, _session, _printer, event) => { await sendSigned(event.type, event); },
+        print: async ({ request }) => {
+          const zpl = String(request.payloadContent || "");
+          expect(zpl).toMatch(/^\^XA/);
+          expect(zpl).toContain("^XZ");
+          expect(createHash("sha256").update(zpl).digest("hex")).toBe(request.payloadHash);
+          spooledJobs.push(String(chunk.printJobId));
+          return { printPath: "windows-raw-zpl", labelLanguage: "ZPL",
+            jobRef: `isolated-spool-${spooledJobs.length}`, bytesWritten: Buffer.byteLength(zpl) };
+        },
+        wait: async () => ({ confirmed: true }),
+      });
+    })().catch((error) => { spoolFailure = error instanceof Error ? error : new Error(String(error)); });
+  });
+  let inFlight = false;
+  const timer = setInterval(() => {
+    if (inFlight || socket.readyState !== WebSocket.OPEN) return;
+    inFlight = true;
+    void heartbeat().catch(() => socket.close()).finally(() => { inFlight = false; });
+  }, 15_000);
+  return { stop: () => { clearInterval(timer); socket.close(); }, heartbeat, spooledJobs,
+    getSpoolFailure: () => spoolFailure };
+};
+
 test.describe.serial("Enterprise smoke flows", () => {
   let capturedSupportTicketReference = "";
+  let stopSignedConnectorSession: (() => void) | null = null;
+  test.afterEach(() => { stopSignedConnectorSession?.(); stopSignedConnectorSession = null; });
 
   test("super admin login lands on the dashboard shell", async ({ page }, testInfo) => {
     requireEnterpriseEnv(
@@ -463,6 +558,7 @@ test.describe.serial("Enterprise smoke flows", () => {
   });
 
   test("manufacturer can start a print job from the controlled print dialog", async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
     requireEnterpriseEnv(
       ["E2E_MANUFACTURER_EMAIL", env.manufacturerEmail],
       ["E2E_MANUFACTURER_PASSWORD", env.manufacturerPassword],
@@ -483,15 +579,17 @@ test.describe.serial("Enterprise smoke flows", () => {
     await login(page, env.manufacturerEmail, env.manufacturerPassword, {
       mfaBackupCode: backupCodeForRetry(env.manufacturerMfaBackupCodes, testInfo),
     });
-    await refreshE2EPrinterHeartbeat(page);
+    const bootstrapStatus = await refreshE2EPrinterHeartbeat(page);
+    const registrationId = String(bootstrapStatus.body?.data?.registrationId || "");
+    expect(registrationId).toBeTruthy();
+    const connector = await startE2ESignedConnectorSession(registrationId);
+    stopSignedConnectorSession = connector.stop;
     await goto(page, "/batches");
 
     await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
-    await page.getByTestId("batches-search-input").fill(env.manufacturerBatchQuery);
-    const targetBatchRow = page.locator("tbody tr", { hasText: env.manufacturerBatchQuery }).first();
-    await expect(targetBatchRow).toBeVisible({ timeout: 30_000 });
-    const createPrintJobButton = targetBatchRow.getByTestId("manufacturer-create-print-job").first();
-    await expect(createPrintJobButton).toBeVisible();
+    await expect.poll(async () => (await page.request.get("/api/auth/me")).status(), {
+      timeout: 20_000, intervals: [500, 1000, 2000],
+    }).toBe(200);
     const currentActor = await page.request.get("/api/auth/me");
     expect(currentActor.ok()).toBe(true);
     const actorPayload = await currentActor.json();
@@ -516,11 +614,21 @@ test.describe.serial("Enterprise smoke flows", () => {
     }).toPass({ timeout: 20_000 });
     await expect(printerOnboarding).toBeHidden();
     await closeTransientDialogs(page);
+    await expect(page.getByTestId("batches-search-input")).toBeVisible({ timeout: 30_000 });
+    await page.getByTestId("batches-search-input").fill(env.manufacturerBatchQuery);
+    const targetBatchRow = page.locator("tbody tr", { hasText: env.manufacturerBatchQuery }).first();
+    await expect(targetBatchRow).toBeVisible({ timeout: 30_000 });
+    const createPrintJobButton = targetBatchRow.getByTestId("manufacturer-create-print-job").first();
+    await expect(createPrintJobButton).toBeVisible();
     await createPrintJobButton.click();
 
     await expect(page.getByTestId("create-print-job-dialog")).toBeVisible();
     await page.getByTestId("print-job-quantity-input").fill(env.printQuantity);
-    const readiness = await refreshE2EPrinterHeartbeat(page);
+    await expect.poll(() => page.evaluate(async () => {
+      const response = await fetch("/api/manufacturer/printer-agent/status", { credentials: "include", cache: "no-store" });
+      const body = await response.json();
+      return { productionReady: Boolean(response.ok && body.success && body.data?.eligibleForPrinting) };
+    }), { timeout: 30_000 }).toEqual({ productionReady: true });
     const printerProfile = page.getByTestId("print-job-printer-profile");
     if (!(await printerProfile.isVisible().catch(() => false))) {
       await clickWithAutoDetectedIssueRetry(page, page.getByRole("button", { name: /refresh printers/i }));
@@ -529,7 +637,6 @@ test.describe.serial("Enterprise smoke flows", () => {
     await selectRadixOption(page, "print-job-printer-profile", env.printerProfileName);
     const printDialog = page.getByTestId("create-print-job-dialog");
     const startButton = page.getByTestId("print-job-start-button");
-    if (readiness.productionReady) {
       await expect(printDialog).toContainText(/Printer ready/, { timeout: 30_000 });
       const relinkButton = page.getByRole("button", { name: /relink saved printer/i });
       if (await relinkButton.isVisible().catch(() => false)) {
@@ -545,13 +652,189 @@ test.describe.serial("Enterprise smoke flows", () => {
           name: /Printing in progress|Print did not start|Print needs attention|Print completed/,
         })
       ).toBeVisible({ timeout: 30_000 });
-      return;
-    }
+      await expect.poll(() => connector.spooledJobs.length, { timeout: 45_000 }).toBe(1);
+      expect(connector.getSpoolFailure()).toBeNull();
+      await expect.poll(async () => {
+        const response = await page.request.get(`/api/manufacturer/print-jobs/${connector.spooledJobs[0]}`);
+        if (!response.ok()) return `HTTP_${response.status()}`;
+        const body = await response.json() as { data?: { status?: string; job?: { status?: string } } };
+        return body.data?.job?.status || body.data?.status || "UNKNOWN";
+      }, { timeout: 45_000 }).toBe("CONFIRMED");
 
-    await expect(printDialog).toContainText(/Connector update required|Persistent session is not connected/i, {
-      timeout: 30_000,
-    });
-    await expect(startButton).toBeDisabled({ timeout: 30_000 });
+      // A separate backend process must observe the same persisted authorization.
+      const backendBUrl = "http://127.0.0.1:4011";
+      let backendB = spawn("node", ["dist/index.js"], {
+        cwd: path.resolve("backend"), env: { ...process.env, PORT: "4011", NODE_ENV: "test" }, stdio: "ignore",
+      });
+      let secondConnector: Awaited<ReturnType<typeof startE2ESignedConnectorSession>> | null = null;
+      try {
+        await expect.poll(async () => {
+          if (backendB.exitCode !== null) return `EXIT_${backendB.exitCode}`;
+          return (await fetch(`${backendBUrl}/health/ready`).catch(() => null))?.status || 0;
+        }, { timeout: 30_000 }).toBe(200);
+        await expect.poll(async () => {
+          const response = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+          if (!response.ok()) return `HTTP_${response.status()}`;
+          const body = await response.json() as { data?: { eligibleForPrinting?: boolean } };
+          return body.data?.eligibleForPrinting === true;
+        }, { timeout: 20_000 }).toBe(true);
+
+        const cookies = await page.context().cookies(backendBUrl);
+        const eventAbort = new AbortController();
+        const eventResponse = await fetch(`${backendBUrl}/api/manufacturer/printer-agent/events`, {
+          headers: { Cookie: cookies.map(({ name, value }) => `${name}=${value}`).join("; ") },
+          signal: eventAbort.signal,
+        });
+        expect(eventResponse.status).toBe(200);
+        const eventReader = eventResponse.body?.getReader();
+        expect(eventReader).toBeDefined();
+        let eventBuffer = "";
+        const eventDecoder = new TextDecoder();
+        const nextSnapshot = async (reason: string) => {
+          const deadline = Date.now() + 30_000;
+          while (Date.now() < deadline) {
+            const delimiter = eventBuffer.indexOf("\n\n");
+            if (delimiter >= 0) {
+              const frame = eventBuffer.slice(0, delimiter);
+              eventBuffer = eventBuffer.slice(delimiter + 2);
+              const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+              if (!data) continue;
+              const envelope = JSON.parse(data) as { type?: string; payload?: {
+                reason?: string; status?: { eligibleForPrinting?: boolean } } };
+              if (envelope.type === "snapshot" && envelope.payload?.reason === reason) return envelope.payload.status;
+              continue;
+            }
+            const remaining = deadline - Date.now();
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            const read = await Promise.race([
+              eventReader!.read(),
+              new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Printer EventSource convergence timed out")), remaining); }),
+            ]).finally(() => clearTimeout(timeout));
+            if (read.done) throw new Error("Printer EventSource closed before convergence");
+            eventBuffer += eventDecoder.decode(read.value, { stream: true });
+          }
+          throw new Error("Printer EventSource convergence timed out");
+        };
+        try {
+          await nextSnapshot("initial");
+          const convergenceStartedAt = Date.now();
+          const changed = await nextSnapshot("changed");
+          expect(changed?.eligibleForPrinting).toBe(true);
+          const convergenceLatencyMs = Date.now() - convergenceStartedAt;
+          console.info("isolated printer event convergence", { convergenceLatencyMs });
+          expect(convergenceLatencyMs).toBeLessThan(30_000);
+        } finally {
+          eventAbort.abort();
+          await eventReader?.cancel().catch(() => undefined);
+        }
+
+        secondConnector = await startE2ESignedConnectorSession(registrationId, backendBUrl);
+        await expect(connector.heartbeat()).rejects.toThrow();
+        await expect.poll(async () => {
+          const response = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+          if (!response.ok()) return false;
+          const body = await response.json() as { data?: { eligibleForPrinting?: boolean } };
+          return body.data?.eligibleForPrinting === true;
+        }, { timeout: 20_000 }).toBe(true);
+
+        secondConnector.stop();
+        secondConnector = null;
+        await expect.poll(async () => {
+          const response = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+          if (!response.ok()) return `HTTP_${response.status()}`;
+          const body = await response.json() as { data?: { eligibleForPrinting?: boolean } };
+          return body.data?.eligibleForPrinting === false;
+        }, { timeout: 20_000 }).toBe(true);
+        backendB.kill();
+        await new Promise<void>((resolve) => backendB.once("exit", () => resolve()));
+        backendB = spawn("node", ["dist/index.js"], {
+          cwd: path.resolve("backend"), env: { ...process.env, PORT: "4011", NODE_ENV: "test" }, stdio: "ignore",
+        });
+        await expect.poll(async () => (await fetch(`${backendBUrl}/health/ready`).catch(() => null))?.status || 0,
+          { timeout: 30_000 }).toBe(200);
+        await expect(connector.heartbeat()).rejects.toThrow();
+        const restartedStatus = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+        expect(restartedStatus.ok()).toBe(true);
+        const restartedBody = await restartedStatus.json() as { data?: { eligibleForPrinting?: boolean } };
+        expect(restartedBody.data?.eligibleForPrinting).toBe(false);
+        secondConnector = await startE2ESignedConnectorSession(registrationId, backendBUrl);
+        await expect.poll(async () => {
+          const response = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+          if (!response.ok()) return false;
+          const body = await response.json() as { data?: { eligibleForPrinting?: boolean } };
+          return body.data?.eligibleForPrinting === true;
+        }, { timeout: 20_000 }).toBe(true);
+        const disposableDatabaseUrl = String(process.env.E2E_SEED_DATABASE_URL || "");
+        assertSafeTestDatabaseUrl(disposableDatabaseUrl);
+        const disposableDb = new prismaPackage.PrismaClient({ datasources: { db: { url: disposableDatabaseUrl } } });
+        const revokedEventAbort = new AbortController();
+        const revokedEventResponse = await fetch(`${backendBUrl}/api/manufacturer/printer-agent/events`, {
+          headers: { Cookie: cookies.map(({ name, value }) => `${name}=${value}`).join("; ") },
+          signal: revokedEventAbort.signal,
+        });
+        expect(revokedEventResponse.status).toBe(200);
+        const revokedEventReader = revokedEventResponse.body?.getReader();
+        expect(revokedEventReader).toBeDefined();
+        await revokedEventReader!.read(); // Initial authorized snapshot.
+        try {
+          const revokedAt = Date.now();
+          await disposableDb.printerRegistration.update({ where: { id: registrationId },
+            data: { revokedAt: new Date(), trustStatus: "REVOKED" } });
+          await expect(secondConnector.heartbeat()).rejects.toThrow();
+          let revokedFrame = "";
+          let revokedEventLatencyMs: number | null = null;
+          const deadline = Date.now() + 30_000;
+          while (Date.now() < deadline && revokedEventLatencyMs === null) {
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            const next = await Promise.race([
+              revokedEventReader!.read(),
+              new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("Revoked printer event timed out")),
+                Math.max(1, deadline - Date.now())); }),
+            ]).finally(() => clearTimeout(timeout));
+            if (next.done) throw new Error("Revoked printer EventSource closed");
+            revokedFrame += new TextDecoder().decode(next.value);
+            const frames = revokedFrame.split("\n\n");
+            revokedFrame = frames.pop() || "";
+            for (const frame of frames) {
+              const data = frame.split("\n").find((line) => line.startsWith("data: "))?.slice(6);
+              if (!data) continue;
+              const envelope = JSON.parse(data) as { type?: string; payload?: { status?: { eligibleForPrinting?: boolean } } };
+              if (envelope.type === "snapshot" && envelope.payload?.status?.eligibleForPrinting === false) {
+                revokedEventLatencyMs = Date.now() - revokedAt;
+                break;
+              }
+            }
+          }
+          expect(revokedEventLatencyMs).not.toBeNull();
+          console.info("isolated revoked printer event convergence", { convergenceLatencyMs: revokedEventLatencyMs });
+          await expect.poll(async () => {
+            const response = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+            if (!response.ok()) return `HTTP_${response.status()}`;
+            const body = await response.json() as { data?: { eligibleForPrinting?: boolean } };
+            return body.data?.eligibleForPrinting === false;
+          }, { timeout: 20_000 }).toBe(true);
+          secondConnector.stop();
+          secondConnector = null;
+          backendB.kill();
+          await new Promise<void>((resolve) => backendB.once("exit", () => resolve()));
+          backendB = spawn("node", ["dist/index.js"], {
+            cwd: path.resolve("backend"), env: { ...process.env, PORT: "4011", NODE_ENV: "test" }, stdio: "ignore",
+          });
+          await expect.poll(async () => (await fetch(`${backendBUrl}/health/ready`).catch(() => null))?.status || 0,
+            { timeout: 30_000 }).toBe(200);
+          const revokedAfterRestart = await page.request.get(`${backendBUrl}/api/manufacturer/printer-agent/status`);
+          expect(revokedAfterRestart.ok()).toBe(true);
+          const revokedBody = await revokedAfterRestart.json() as { data?: { eligibleForPrinting?: boolean } };
+          expect(revokedBody.data?.eligibleForPrinting).toBe(false);
+        } finally {
+          revokedEventAbort.abort();
+          await revokedEventReader?.cancel().catch(() => undefined);
+          await disposableDb.$disconnect();
+        }
+      } finally {
+        secondConnector?.stop();
+        backendB.kill();
+      }
   });
 
   test("public verify can submit a concern and return a support reference", async ({ page }) => {

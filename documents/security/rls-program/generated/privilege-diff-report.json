@@ -3718,6 +3718,68 @@
       "ownerIdentity": "identity-auth-function-owner"
     },
     {
+      "table": "PrinterAgentSession",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "registrationId",
+        "agentId",
+        "deviceFingerprint",
+        "publicKeyFingerprint",
+        "selectedPrinterId",
+        "connectionState",
+        "expiresAt",
+        "revokedAt",
+        "lastMessageSeq",
+        "lastSignedHeartbeatAt",
+        "metadata"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PrinterAgentSession",
+      "command": "INSERT",
+      "columns": [
+        "id",
+        "connectionId",
+        "registrationId",
+        "agentId",
+        "deviceFingerprint",
+        "publicKeyFingerprint",
+        "selectedPrinterId",
+        "selectedPrinterName",
+        "connectorVersion",
+        "connectionState",
+        "lastMessageSeq",
+        "connectedAt",
+        "lastSeenAt",
+        "lastSignedHeartbeatAt",
+        "expiresAt",
+        "metadata",
+        "createdAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PrinterAgentSession",
+      "command": "UPDATE",
+      "columns": [
+        "connectionState",
+        "revokedAt",
+        "disconnectedAt",
+        "closeReason",
+        "lastMessageSeq",
+        "lastSeenAt",
+        "lastSignedHeartbeatAt",
+        "updatedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
       "table": "User",
       "command": "SELECT",
       "columns": [

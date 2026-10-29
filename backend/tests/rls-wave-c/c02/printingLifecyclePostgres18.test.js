@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
+const { generateKeyPairSync, randomUUID } = require("node:crypto");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
 
@@ -41,6 +42,9 @@ const quorumCases = [
   })),
 }));
 const hash = (value) => require("node:crypto").createHash("sha256").update(value).digest("hex");
+const signingPair = generateKeyPairSync("ed25519");
+const signingPrivateKey = signingPair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+const signingPublicKey = signingPair.publicKey.export({ type: "spki", format: "pem" }).toString();
 const requestId = (() => {
   let sequence = 0;
   return () => `50000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
@@ -68,7 +72,7 @@ const psql = (raw, sql, expectFailure = false) => {
   if (result.status !== 0) throw new Error(output || "psql failed");
   return String(result.stdout || "").trim().split("\n").filter(Boolean).at(-1) || "";
 };
-const denied = (url, sql, pattern = /permission denied|PRINTING_BOUNDARY_DENIED|AUTH_SESSION_CAPABILITY_DENIED|INVALID_STATE_TRANSITION|PRINT_ACK_REQUIRED|SAMPLE_SCAN_REQUIRED/i) =>
+const denied = (url, sql, pattern = /permission denied|PRINTING_BOUNDARY_DENIED|CONNECTOR_SESSION_DENIED|CONNECTOR_SESSION_NOT_ACTIVE|CONNECTOR_SESSION_REPLAY|AUTH_SESSION_CAPABILITY_DENIED|INVALID_STATE_TRANSITION|PRINT_ACK_REQUIRED|SAMPLE_SCAN_REQUIRED/i) =>
   assert.match(psql(url, sql, true), pattern);
 const json = (url, sql) => JSON.parse(psql(url, sql));
 const psqlAsync = (raw, sql) => new Promise((resolve) => {
@@ -108,6 +112,7 @@ async function main() {
     DELETE FROM public."AuditLog" WHERE "entityId"='${ids.batch}' OR "licenseeId"='${ids.licenseeA}';
     DELETE FROM public."SecurityEventOutbox" WHERE "licenseeId"='${ids.licenseeA}';
     DELETE FROM public."PrinterAttestation" WHERE "printerRegistrationId" IN ('${ids.registration}','${ids.staleRegistration}');
+    DELETE FROM public."PrinterAgentSession" WHERE "registrationId" IN ('${ids.registration}','${ids.staleRegistration}');
     DELETE FROM public."RefreshToken" WHERE id IN ('${ids.makerRefresh}','${ids.checkerRefresh}','${ids.outsiderRefresh}');
     DELETE FROM public."Printer" WHERE id IN ('${ids.printer}','${ids.foreignPrinter}','${ids.discoveredPrinter}');
     DELETE FROM public."PrinterRegistration" WHERE id IN ('${ids.registration}','${ids.staleRegistration}');
@@ -138,7 +143,7 @@ async function main() {
       ('${ids.raceQr}','immutable-printing-race-code','LBL-0002','${ids.licenseeA}','${ids.raceBatch}','ALLOCATED',now());
     INSERT INTO public."PrinterRegistration"(id,"userId","orgId","licenseeId","deviceFingerprint","agentId","publicKeyPem","trustStatus","approvedAt","lastSeenAt","updatedAt")
       VALUES
-      ('${ids.registration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device','printing-agent','-----BEGIN PUBLIC KEY----- fixture','TRUSTED',now(),now(),now()),
+      ('${ids.registration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device','printing-agent','${signingPublicKey.replace(/'/g, "''")}','TRUSTED',now(),now(),now()),
       ('${ids.staleRegistration}','${ids.maker}','${ids.orgA}','${ids.licenseeA}','printing-device-stale','printing-agent-stale','-----BEGIN PUBLIC KEY----- fixture','TRUSTED',now(),now(),now());
     INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","nativePrinterId","agentId","deviceFingerprint","printerRegistrationId","orgId","licenseeId","assignedUserId","createdByUserId","isActive","isDefault","updatedAt")
       VALUES
@@ -160,9 +165,320 @@ async function main() {
     )`);
   }
 
-  for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "Printer", "PrinterRegistration", "ActionIdempotencyKey"]) {
+  for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "Printer", "PrinterRegistration", "PrinterAgentSession", "ActionIdempotencyKey"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  // Each psql call is a distinct backend process. The database, not a process map,
+  // serializes replacement and signed-message sequence advancement.
+  const sessionA = "50000000-0000-4000-8000-000000000901";
+  const sessionB = "50000000-0000-4000-8000-000000000902";
+  const sessionPayload = (extra = {}) => JSON.stringify({
+    printerId: ids.discoveredPrinter, selectedPrinterId: "printing-native",
+    agentId: "printing-agent", deviceFingerprint: "printing-device",
+    publicKeyFingerprint: hash(signingPublicKey), ...extra,
+  });
+  const sessionSql = (operation, id, payload, reg = ids.registration) =>
+    `SELECT app_rls.printing_connector_session('${operation}','${id}','${reg}','${sessionPayload(payload)}'::jsonb)`;
+  assert.equal(psql(admin, `SELECT data_type FROM information_schema.columns
+    WHERE table_schema='public' AND table_name='PrinterAgentSession' AND column_name='lastMessageSeq'`), "integer");
+  const open = (id, connectionId) => sessionSql("OPEN", id, { connectionId, expirySeconds: 3600 });
+  const advance = (id, messageSeq) => sessionSql("ADVANCE", id, {
+    messageSeq, messageType: "heartbeat", signatureVerified: true,
+    signedPayloadHash: hash(`${id}:${messageSeq}:payload`),
+    signatureHash: hash(`${id}:${messageSeq}:signature`),
+    heartbeatNonce: `signed_nonce_${messageSeq}_fixture`,
+    heartbeatIssuedAt: new Date().toISOString(),
+  });
+  denied(worker, open(sessionA, sessionA));
+  denied(app, open(sessionA, sessionA).replace(`'${ids.registration}'`, `'${ids.staleRegistration}'`));
+  denied(app, sessionSql("OPEN", sessionA, { connectionId: sessionA, expirySeconds: 3600,
+    printerId: ids.foreignPrinter }));
+  denied(app, sessionSql("OPEN", sessionA, { connectionId: sessionA, expirySeconds: 3600,
+    selectedPrinterId: "another-queue" }));
+  denied(app, sessionSql("OPEN", sessionA, { connectionId: sessionA, expirySeconds: 3600,
+    publicKeyFingerprint: hash("forged-key") }));
+  psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
+  denied(app, open(sessionA, sessionA));
+  psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
+  assert.equal(json(app, open(sessionA, sessionA)).state, "CONNECTED");
+  denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
+  assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
+  denied(app, advance(sessionA, 1), /CONNECTOR_SESSION_REPLAY/);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.registration}';
+    UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
+  denied(app, advance(sessionA, 2), /CONNECTOR_SESSION_DENIED/);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.registration}';
+    UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
+  const parallel = await Promise.all([psqlAsync(app, advance(sessionA, 2)), psqlAsync(app, advance(sessionA, 2))]);
+  assert.deepEqual(parallel.map(result => result.status === 0).sort(), [false, true]);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds' WHERE id='${sessionA}'`);
+  denied(app, sessionSql("CHECK", sessionA, {}), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  assert.equal(json(app, advance(sessionA, 3)).lastMessageSeq, 3);
+  assert.equal(json(app, sessionSql("CHECK", sessionA, {})).state, "CONNECTED");
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()-interval '1 second' WHERE id='${sessionA}'`);
+  denied(app, advance(sessionA, 4), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()+interval '1 hour' WHERE id='${sessionA}'`);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "revokedAt"=now() WHERE id='${sessionA}'`);
+  denied(app, advance(sessionA, 4), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "revokedAt"=NULL WHERE id='${sessionA}'`);
+  denied(app, sessionSql("ADVANCE", sessionA, { messageSeq: 4, messageType: "heartbeat",
+    selectedPrinterId: "another-queue" }), /CONNECTOR_SESSION_DENIED/);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=now() WHERE id='${ids.registration}'`);
+  denied(app, advance(sessionA, 4));
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=NULL WHERE id='${ids.registration}'`);
+  const revoking = psqlAsync(admin, `BEGIN;
+    UPDATE public."PrinterRegistration" SET "revokedAt"=now() WHERE id='${ids.registration}';
+    SELECT pg_sleep(1.5) /* stage1_registration_revocation_lock */;
+    COMMIT;`);
+  let revocationLockHeld = false;
+  for (let attempt = 0; attempt < 40 && !revocationLockHeld; attempt += 1) {
+    revocationLockHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity
+      WHERE wait_event='PgSleep' AND query LIKE '%stage1_registration_revocation_lock%'`)) > 0;
+    if (!revocationLockHeld) await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.equal(revocationLockHeld, true, "registration revocation transaction must hold its row lock");
+  const [revoked, racedHeartbeat] = await Promise.all([revoking, psqlAsync(app, advance(sessionA, 4))]);
+  assert.equal(revoked.status, 0);
+  assert.notEqual(racedHeartbeat.status, 0, "heartbeat must not survive committed revocation");
+  assert.match(racedHeartbeat.output, /CONNECTOR_SESSION_DENIED/);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=NULL WHERE id='${ids.registration}'`);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()+interval '1 second' WHERE id='${sessionA}'`);
+  const holdingRegistration = psqlAsync(admin, `BEGIN;
+    UPDATE public."PrinterRegistration" SET "revokedAt"=NULL WHERE id='${ids.registration}';
+    SELECT pg_sleep(2) /* stage1_session_expiry_lock */;
+    COMMIT;`);
+  let expiryLockHeld = false;
+  for (let attempt = 0; attempt < 40 && !expiryLockHeld; attempt += 1) {
+    expiryLockHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity
+      WHERE wait_event='PgSleep' AND query LIKE '%stage1_session_expiry_lock%'`)) > 0;
+    if (!expiryLockHeld) await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.equal(expiryLockHeld, true, "expiry probe must hold the registration row lock");
+  const [expiryLockRelease, expiredHeartbeat] = await Promise.all([holdingRegistration, psqlAsync(app, advance(sessionA, 4))]);
+  assert.equal(expiryLockRelease.status, 0);
+  assert.match(expiredHeartbeat.output, /CONNECTOR_SESSION_NOT_ACTIVE/);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()+interval '1 hour' WHERE id='${sessionA}'`);
+  assert.equal(json(app, open(sessionB, sessionB)).state, "CONNECTED");
+  denied(app, advance(sessionA, 4), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  const socketClaim = (sessionId) => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','session_claim_nonce_123',now()::timestamp,
+    '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.discoveredPrinter}',NULL,NULL,
+    '{"sessionId":"${sessionId}","deliveryMode":"PERSISTENT_SESSION"}'::jsonb)`;
+  denied(app, socketClaim(sessionA), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
+  denied(app, socketClaim(sessionB), /CONNECTOR_BOUNDARY_DENIED/);
+  psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
+  assert.equal(json(app, socketClaim(sessionB)).available, false);
+  const socketTestClaim = (sessionId) => `SELECT app_rls.printing_test_label_job(
+    NULL,'${requestId()}','CLAIM','${ids.discoveredPrinter}',
+    jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent',
+      'deviceFingerprint','printing-device','nonce','test_session_claim_${sessionId.slice(-4)}',
+      'issuedAt',now(),'sessionId','${sessionId}'), '{}'::jsonb)`;
+  denied(app, socketTestClaim(sessionA), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  assert.equal(json(app, socketTestClaim(sessionB)).available, false);
+  assert.equal(json(app, advance(sessionB, 1)).lastMessageSeq, 1);
+  assert.equal(json(app, sessionSql("CLOSE", sessionB, { reason: "socket_closed" })).state, "DISCONNECTED");
+  denied(app, advance(sessionB, 2), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  const sessionC = "50000000-0000-4000-8000-000000000903";
+  const sessionD = "50000000-0000-4000-8000-000000000904";
+  const replacementOpens = await Promise.all([
+    psqlAsync(app, open(sessionC, sessionC)), psqlAsync(app, open(sessionD, sessionD)),
+  ]);
+  assert.deepEqual(replacementOpens.map(result => result.status), [0, 0]);
+  const currentSession = psql(admin, `SELECT id FROM public."PrinterAgentSession"
+    WHERE "registrationId"='${ids.registration}' AND "connectionState"='CONNECTED' AND "revokedAt" IS NULL`);
+  assert([sessionC, sessionD].includes(currentSession));
+  const replacedSession = currentSession === sessionC ? sessionD : sessionC;
+  denied(app, advance(replacedSession, 1), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  assert.equal(json(app, advance(currentSession, 1)).lastMessageSeq, 1);
+  assert.equal(json(app, sessionSql("CLOSE", currentSession, { reason: "replacement_test" })).state, "DISCONNECTED");
+  process.env.DATABASE_URL = app;
+  const signedSessionBoundary = require("../../../dist/services/printerAgentSessionBoundaryService");
+  const sessionSigning = require("../../../dist/services/printerAgentSigningService");
+  const connectorVersion = require("../../../dist/services/localAgentProtocol").LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION;
+  const signedHello = {
+    type: "hello", registrationId: ids.registration, agentId: "printing-agent",
+    deviceFingerprint: "printing-device", selectedPrinterId: "printing-native",
+    connectorVersion, nonce: randomUUID(), issuedAt: new Date().toISOString(),
+    printerHealth: { capabilities: { supportsPersistentPrintSession: true } },
+  };
+  signedHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
+    sessionSigning.buildPrinterAgentSessionPayload({ ...signedHello, messageType: "hello" }));
+  const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
+  const signedHeartbeat = (messageSeq, targetSession = liveSession) => {
+    const message = { type: "heartbeat", sessionId: targetSession.id, messageSeq,
+      nonce: randomUUID(), issuedAt: new Date().toISOString() };
+    message.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
+      sessionSigning.buildPrinterAgentSessionPayload({ ...message, messageType: "heartbeat",
+        registrationId: ids.registration, agentId: "printing-agent",
+        deviceFingerprint: "printing-device", selectedPrinterId: "printing-native", connectorVersion }));
+    return message;
+  };
+  const renewalCount = () => Number(psql(admin, `SELECT count(*) FROM public."PrinterAttestation"
+    WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'source'='PERSISTENT_SESSION'`));
+  const baselineRenewals = renewalCount();
+  denied(app, `INSERT INTO public."PrinterAttestation"(
+    id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt",
+    "signatureValid","trustValid",metadata) VALUES (
+    gen_random_uuid()::text,'${ids.registration}','${hash("forged")}',
+    'forged_browser_nonce',now(),now()+interval '35 seconds',true,true,
+    '{"source":"PERSISTENT_SESSION","connected":true}')`, /permission denied|row-level security/i);
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(1));
+  assert.equal(renewalCount(), baselineRenewals + 1, "first signed heartbeat must replace prior evidence with session-bound attestation");
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(2));
+  assert.equal(renewalCount(), baselineRenewals + 1, "fresh session-bound attestation must not trigger another write");
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
+    WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'sessionId'='${liveSession.id}'`);
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(3));
+  assert.equal(renewalCount(), baselineRenewals + 2, "expired attestation must renew from a signed socket heartbeat");
+  const renewedAttestation = json(admin, `SELECT jsonb_build_object(
+    'sessionId',metadata->>'sessionId','messageSeq',metadata->>'messageSeq',
+    'selectedPrinterId',metadata->>'selectedPrinterId','signatureValid',"signatureValid",
+    'trustValid',"trustValid",'fresh',"expiresAt">now())
+    FROM public."PrinterAttestation" WHERE "printerRegistrationId"='${ids.registration}'
+      AND metadata->>'source'='PERSISTENT_SESSION' ORDER BY "createdAt" DESC LIMIT 1`);
+  assert.deepEqual(renewedAttestation, { sessionId: liveSession.id, messageSeq: "3",
+    selectedPrinterId: "printing-native", signatureValid: true, trustValid: true, fresh: true });
+  const activeReadiness = json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`);
+  assert.equal(activeReadiness.eligibleForPrinting, true);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
+    'LOCAL_AGENT','printing-agent','printing-device','${ids.discoveredPrinter}',NULL,NULL,'VERIFY')`).eligibleForPrinting, true);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "orgId"='${ids.orgB}' WHERE id='${ids.registration}'`);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
+    'LOCAL_AGENT','printing-agent','printing-device','${ids.discoveredPrinter}',NULL,NULL,'VERIFY')`).eligibleForPrinting,
+  false, "tenant reassignment invalidates the persisted session scope");
+  psql(admin, `UPDATE public."PrinterRegistration" SET "orgId"='${ids.orgA}' WHERE id='${ids.registration}'`);
+  const invalidHeartbeat = signedHeartbeat(4);
+  invalidHeartbeat.nonce = randomUUID();
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, invalidHeartbeat), /signature/i);
+  assert.equal(renewalCount(), baselineRenewals + 2, "invalid signature cannot issue an attestation");
+  const acceptedHeartbeat = signedHeartbeat(4);
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, acceptedHeartbeat);
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, acceptedHeartbeat), /replay/i);
+  assert.equal(renewalCount(), baselineRenewals + 2, "duplicate signed message cannot issue another attestation");
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()+interval '20 seconds'
+    WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'source'='PERSISTENT_SESSION'`);
+  const simultaneousHeartbeat = signedHeartbeat(5);
+  const simultaneousResults = await Promise.allSettled([
+    signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, simultaneousHeartbeat),
+    signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, simultaneousHeartbeat),
+  ]);
+  assert.deepEqual(simultaneousResults.map(result => result.status).sort(), ["fulfilled", "rejected"]);
+  assert.equal(renewalCount(), baselineRenewals + 3, "concurrent duplicate heartbeat must produce one renewal");
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
+    WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'source'='PERSISTENT_SESSION'`);
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()-interval '1 second' WHERE id='${liveSession.id}'`);
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(6)), /authorized|active/i);
+  assert.equal(renewalCount(), baselineRenewals + 3, "expired socket session cannot renew expired attestation");
+  psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()+interval '1 hour' WHERE id='${liveSession.id}'`);
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=now() WHERE id='${ids.registration}'`);
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(6)), /authorized|active/i);
+  assert.equal(renewalCount(), baselineRenewals + 3, "revoked registration cannot renew expired attestation");
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=NULL WHERE id='${ids.registration}'`);
+  denied(app, sessionSql("ADVANCE", liveSession.id, { messageSeq: 6, messageType: "heartbeat",
+    selectedPrinterId: "another-queue" }), /CONNECTOR_SESSION_DENIED/);
+  assert.equal(renewalCount(), baselineRenewals + 3, "printer substitution cannot renew expired attestation");
+  const reconnectHello = { ...signedHello, nonce: randomUUID(), issuedAt: new Date().toISOString() };
+  reconnectHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
+    sessionSigning.buildPrinterAgentSessionPayload({ ...reconnectHello, messageType: "hello" }));
+  const reconnectedSession = await signedSessionBoundary.openTrustedPrinterAgentSession(reconnectHello);
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(6)), /authorized|active/i);
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(reconnectedSession, signedHeartbeat(1, reconnectedSession));
+  assert.equal(renewalCount(), baselineRenewals + 4, "replacement session must issue its own bound attestation");
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()+interval '1 second'
+    WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'sessionId'='${reconnectedSession.id}'`);
+  denied(app, `BEGIN; SELECT pg_sleep(2); SELECT app_rls.printing_create_job(
+    '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.discoveredPrinter}',1,
+    'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("lock-wait-expiry")}","tokenIssuedAt":"${new Date().toISOString()}","tokenExpiresAt":"${new Date(Date.now() + 3_600_000).toISOString()}"}]'::jsonb
+  ); ROLLBACK;`, /PRINTER_ATTESTATION_STALE/, "transaction start cannot extend expired print authorization");
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(reconnectedSession, signedHeartbeat(2, reconnectedSession));
+  assert.equal(renewalCount(), baselineRenewals + 5, "fresh signed evidence restores authorization after expiry");
+  await signedSessionBoundary.closeTrustedPrinterAgentSession(reconnectedSession.id, "test complete");
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(reconnectedSession, signedHeartbeat(3, reconnectedSession)), /authorized|active/i);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`).eligibleForPrinting, false);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
+    'LOCAL_AGENT','printing-agent','printing-device','${ids.discoveredPrinter}',NULL,NULL,'VERIFY')`).eligibleForPrinting, false);
+  denied(app, `SELECT app_rls.printing_create_job(
+    '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.discoveredPrinter}',1,
+    'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("closed-session")}","tokenExpiresAt":"${new Date(Date.now() + 3_600_000).toISOString()}"}]'::jsonb
+  )`, /PRINTER_ATTESTATION_STALE/, "closed persistent session cannot authorize job creation");
+  const { PrismaClient, Prisma } = require("@prisma/client");
+  const prismaAdmin = new PrismaClient({ datasources: { db: { url: admin } } });
+  try {
+    const attestation = await prismaAdmin.printerAttestation.findFirst({
+      where: { printerRegistrationId: ids.registration, expiresAt: { gt: new Date() },
+        metadata: { path: ["operation"], equals: Prisma.DbNull } },
+      orderBy: [{ createdAt: "desc" }],
+    });
+    assert.equal(attestation?.metadata?.source, "PERSISTENT_SESSION");
+    assert.equal(attestation?.metadata?.sessionId, reconnectedSession.id);
+    assert.equal(await prismaAdmin.printerAttestation.count({
+      where: { printerRegistrationId: ids.staleRegistration,
+        metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+    }), 0, "Prisma renewal query remains registration scoped");
+  } finally { await prismaAdmin.$disconnect(); }
+  const prismaApp = new PrismaClient({ datasources: { db: { url: app } } });
+  try {
+    await assert.rejects(prismaApp.printerAttestation.findFirst({
+      where: { printerRegistrationId: ids.registration,
+        metadata: { path: ["operation"], equals: Prisma.DbNull } },
+    }), /permission denied/i, "runtime app role cannot bypass the governed attestation projection");
+  } finally { await prismaApp.$disconnect(); }
+  // Resume the pre-existing legacy REST-attestation lifecycle fixtures after
+  // the persistent-session denial checks above. These later assertions exercise
+  // the compatibility path independently of the closed socket session.
+  psql(admin, `INSERT INTO public."PrinterAttestation"(
+    id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt",
+    "expiresAt","signatureValid","trustValid",metadata,"createdAt") VALUES (
+    '50000000-0000-4000-8000-000000000805','${ids.registration}','${hash("legacy-followup")}',
+    'legacy_followup_nonce',now(),now()+interval '10 minutes',true,true,
+    '{"connected":true,"selectedPrinterId":"printing-native","printers":[{"printerId":"printing-native","printerName":"Printing Local Agent"}]}',
+    now()+interval '1 second')`);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`).eligibleForPrinting,
+  false, "legacy REST evidence cannot downgrade a registration with persisted session history");
+  denied(app, `SELECT app_rls.printing_create_job(
+    '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.discoveredPrinter}',1,
+    'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("legacy-downgrade")}","tokenExpiresAt":"${new Date(Date.now() + 3_600_000).toISOString()}"}]'::jsonb
+  )`, /PRINTER_ATTESTATION_STALE/, "legacy attestation cannot authorize after persistent session revocation");
+  // Advance persisted evidence ages rather than waiting an hour. The production
+  // signature verifier, governed SQL and database clock remain unchanged.
+  const continuousHello = { ...signedHello, nonce: randomUUID(), issuedAt: new Date().toISOString() };
+  continuousHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
+    sessionSigning.buildPrinterAgentSessionPayload({ ...continuousHello, messageType: "hello" }));
+  const continuousSession = await signedSessionBoundary.openTrustedPrinterAgentSession(continuousHello);
+  const continuousBaseline = renewalCount();
+  let rejectedReplays = 0;
+  for (let sequence = 1; sequence <= 240; sequence++) {
+    psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"="expiresAt"-interval '15 seconds',
+      "lastSignedHeartbeatAt"="lastSignedHeartbeatAt"-interval '15 seconds'
+      WHERE id='${continuousSession.id}';
+      UPDATE public."PrinterAttestation" SET "expiresAt"="expiresAt"-interval '15 seconds',
+      "createdAt"="createdAt"-interval '15 seconds',"attestedAt"="attestedAt"-interval '15 seconds'
+      WHERE "printerRegistrationId"='${ids.registration}'`);
+    const message = signedHeartbeat(sequence, continuousSession);
+    await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, message);
+    await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, message), /replayed/);
+    rejectedReplays++;
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`).eligibleForPrinting, true);
+  }
+  assert.equal(renewalCount() - continuousBaseline, 240, "at most one renewal per 15-second signed heartbeat");
+  assert.equal(rejectedReplays, 240);
+  await signedSessionBoundary.closeTrustedPrinterAgentSession(continuousSession.id, "continuous_operation_complete");
+  console.log("CONTINUOUS_OPERATION simulatedSeconds=3600 heartbeats=240 renewals=240 replayRejections=240");
+  psql(admin, `DELETE FROM public."PrinterAttestation" WHERE metadata->>'sessionId'='${continuousSession.id}';
+    UPDATE public."PrinterAttestation" SET "expiresAt"="expiresAt"+interval '3600 seconds',
+      "createdAt"="createdAt"+interval '3600 seconds',"attestedAt"="attestedAt"+interval '3600 seconds'
+    WHERE "printerRegistrationId"='${ids.registration}'`);
+  // Isolate the older REST compatibility assertions below from the signed
+  // persistent-session fixture. The disposable database has no live sockets.
+  psql(admin, `DELETE FROM public."PrinterAgentSession" WHERE "registrationId"='${ids.registration}'`);
   denied(app, `SELECT "underInvestigationReason" FROM public."QRCode" WHERE id='${ids.qr}'`);
   denied(app, `UPDATE public."QRCode" SET code='forged' WHERE id='${ids.qr}'`);
   denied(app, `SELECT app_rls.install_actor_context('${ids.maker}','MANUFACTURER_ADMIN','${ids.orgA}','${ids.licenseeA}','${ids.maker}','mfa-verified','forged','printing-create-job')`);
@@ -241,7 +557,7 @@ async function main() {
   )`, /PRINTING_BOUNDARY_DENIED/);
   assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
     'LOCAL_AGENT','printing-agent','printing-device','${ids.printer}',NULL,NULL,'VERIFY'
-  )`).eligibleForPrinting, true);
+  )`).eligibleForPrinting, true, "legacy compatibility attestation remains available after relink");
   const testJobId = "50000000-0000-4000-8000-000000000901";
   const queuedTest = json(app, `SELECT app_rls.printing_test_label_job(
     '${caps.maker}','${requestId()}','QUEUE','${ids.printer}','{}'::jsonb,
@@ -312,6 +628,11 @@ async function main() {
     '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.printer}','${hash("claim")}',NULL,'{}'::jsonb
   )`);
   assert.equal(claim.available, true);
+  const duplicateDelivery = json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','claim_nonce_00002',now()::timestamp,
+    '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.printer}','${hash("claim-again")}',NULL,'{}'::jsonb
+  )`);
+  assert.equal(duplicateDelivery.available, false, "A claimed item must not be delivered again after an uncertain spool submission");
   assert.equal(claim.qrCode.code, immutableCode);
   assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
     'LOCAL_AGENT','printing-agent','printing-device','${ids.printer}',NULL,NULL,'VERIFY'
@@ -479,7 +800,7 @@ async function main() {
 
   const catalog = json(admin, `SELECT jsonb_build_object(
     'force',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-      WHERE n.nspname='public' AND c.relname IN ('Batch','QRCode','PrintJob','PrintSession','PrintItem','Printer','PrinterRegistration')
+      WHERE n.nspname='public' AND c.relname IN ('Batch','QRCode','PrintJob','PrintSession','PrintItem','Printer','PrinterRegistration','PrinterAgentSession')
         AND c.relrowsecurity AND c.relforcerowsecurity),
     'publicExecute',(SELECT count(*) FROM information_schema.routine_privileges
       WHERE specific_schema IN ('app_rls','app_worker') AND grantee='PUBLIC' AND routine_name LIKE 'printing_%'),
@@ -491,7 +812,7 @@ async function main() {
     'audit',(SELECT count(*) FROM public."AuditLog" WHERE "entityId" IN ('${ids.batch}','${created.job.id}')),
     'outbox',(SELECT count(*) FROM public."SecurityEventOutbox" WHERE "licenseeId"='${ids.licenseeA}')
   )`);
-  assert.equal(catalog.force, 7);
+  assert.equal(catalog.force, 8);
   assert.equal(catalog.publicExecute, 0);
   assert.equal(catalog.ownerSafe, 2);
   assert.equal(catalog.ownerTables, 0);

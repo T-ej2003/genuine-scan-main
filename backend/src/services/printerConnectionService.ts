@@ -108,7 +108,7 @@ const assessSelectedPrinterEligibility = (payload: ReturnType<typeof normalizeSt
 
 export type PrinterConnectionRealtimeEvent = {
   userId: string;
-  status: PrinterConnectionStatus;
+  status?: PrinterConnectionStatus;
   changedAt: string;
 };
 
@@ -747,6 +747,13 @@ export const publishPrinterConnectionStatusForUser = async (userId: string) => {
     changedAt: new Date().toISOString(),
   });
   return status;
+};
+
+// Connector heartbeats do not carry a manufacturer database-session capability.
+// Notify authenticated event streams to read their own governed status projection.
+export const publishPrinterConnectionChangeForUser = (userId: string) => {
+  void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
+  emitConnectionEvent({ userId, changedAt: new Date().toISOString() });
 };
 
 export const getPrinterConnectionStatusForRegistration = async (

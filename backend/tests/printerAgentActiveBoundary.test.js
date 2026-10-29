@@ -17,17 +17,40 @@ const registration = {
 };
 const operations = [];
 const published = [];
+const persisted = new Map();
+let legacyHeartbeatFails = false;
 const claim = { available: true, printJobId: "job-fixture", printItemId: "item-fixture",
   manufacturerId: registration.userId, batch: { id: "batch-fixture", licenseeId: "tenant-fixture" },
   printer: { id: "printer-db-id" }, qrCode: {},
 };
 mock("rls-waves/session-c/c02/printingLifecycleRepository", {
-  resolvePrintingConnectorIdentity: async () => ({
-    registration, printer: { id: "printer-db-id", nativePrinterId: "native-printer" },
-  }),
+  resolvePrintingConnectorIdentity: async (input) => {
+    if (legacyHeartbeatFails && input.operation === "HEARTBEAT") throw new Error("fixture legacy projection failed");
+    return { registration, printer: { id: "printer-db-id", nativePrinterId: "native-printer" } };
+  },
   recordConnectorEvent: async (input) => { operations.push(input.operation); return input.operation === "CLAIM" ? claim : {}; },
 });
-const sessionContract = { PRINT_AGENT_REQUIRE_MTLS: false };
+mock("rls-waves/session-c/c02/printingConnectorSessionRepository", {
+  mutatePrintingConnectorSession: async ({ operation, sessionId, registrationId, payload }) => {
+    if (operation === "OPEN") {
+      for (const row of persisted.values()) if (row.registrationId === registrationId) row.active = false;
+      persisted.set(sessionId, { registrationId, selector: payload.selectedPrinterId, active: true, seq: 0 });
+      return { state: "CONNECTED" };
+    }
+    const row = persisted.get(sessionId);
+    if (!row || (operation !== "CLOSE" && !row.active)
+        || row.registrationId !== registrationId || row.selector !== payload.selectedPrinterId) {
+      throw new Error("CONNECTOR_SESSION_NOT_ACTIVE");
+    }
+    if (operation === "ADVANCE") {
+      if (payload.messageSeq <= row.seq) throw new Error("CONNECTOR_SESSION_REPLAY");
+      row.seq = payload.messageSeq;
+    }
+    if (operation === "CLOSE") row.active = false;
+    return { state: row.active ? "CONNECTED" : "DISCONNECTED" };
+  },
+});
+const sessionContract = { PRINT_AGENT_REQUIRE_MTLS: false, PRINT_AGENT_SESSION_EXPIRY_SECONDS: 43200 };
 mock("services/printerAgentSessionService", sessionContract);
 mock("services/printPayloadService", { buildApprovedPrintPayload: () => ({ payloadHash: "payload-fixture" }) });
 mock("services/printerTestLabelService", { claimLocalAgentPrinterTestJob: async () => null });
@@ -117,6 +140,65 @@ test("tampered and expired hello messages fail closed", async () => {
   await assert.rejects(boundary.openTrustedPrinterAgentSession(hello({ issuedAt: "2000-01-01T00:00:00.000Z" })), {
     errorCode: "agent_timestamp_expired",
   });
+});
+
+test("a replacement session invalidates the old socket even when it remains in memory", async () => {
+  const oldSession = await boundary.openTrustedPrinterAgentSession(hello());
+  const newSession = await boundary.openTrustedPrinterAgentSession(hello());
+  const signedHeartbeat = (session, seq) => {
+    const value = { type: "heartbeat", sessionId: session.id, issuedAt: new Date().toISOString(),
+      nonce: randomUUID(), messageSeq: seq };
+    value.signature = signing.signPrinterAgentPayload(privateKey, signing.buildPrinterAgentSessionPayload({
+      ...value, messageType: "heartbeat", registrationId: registration.id,
+      agentId: registration.agentId, deviceFingerprint: registration.deviceFingerprint,
+      selectedPrinterId: session.selectedPrinterId, connectorVersion: version,
+    }));
+    return value;
+  };
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(oldSession, signedHeartbeat(oldSession, 1)), {
+    errorCode: "session_not_active",
+  });
+  await boundary.recordTrustedSessionHeartbeat(newSession, signedHeartbeat(newSession, 1));
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(newSession, signedHeartbeat(newSession, 1)), {
+    errorCode: "message_replay",
+  });
+  await boundary.closeTrustedPrinterAgentSession(oldSession.id, "superseded");
+  await boundary.closeTrustedPrinterAgentSession(newSession.id, "test complete");
+});
+
+test("database revocation blocks a still-open signed socket", async () => {
+  const session = await boundary.openTrustedPrinterAgentSession(hello());
+  const message = { type: "heartbeat", sessionId: session.id, issuedAt: new Date().toISOString(),
+    nonce: randomUUID(), messageSeq: 1 };
+  message.signature = signing.signPrinterAgentPayload(privateKey, signing.buildPrinterAgentSessionPayload({
+    ...message, messageType: "heartbeat", registrationId: registration.id,
+    agentId: registration.agentId, deviceFingerprint: registration.deviceFingerprint,
+    selectedPrinterId: session.selectedPrinterId, connectorVersion: version,
+  }));
+  persisted.get(session.id).active = false;
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, message), {
+    statusCode: 401, errorCode: "session_not_active",
+  });
+  await boundary.closeTrustedPrinterAgentSession(session.id, "revoked");
+});
+
+test("committed signed heartbeat is not reported as failed when legacy last-seen projection fails", async () => {
+  const session = await boundary.openTrustedPrinterAgentSession(hello());
+  const message = { type: "heartbeat", sessionId: session.id, issuedAt: new Date().toISOString(),
+    nonce: randomUUID(), messageSeq: 1 };
+  message.signature = signing.signPrinterAgentPayload(privateKey, signing.buildPrinterAgentSessionPayload({
+    ...message, messageType: "heartbeat", registrationId: registration.id,
+    agentId: registration.agentId, deviceFingerprint: registration.deviceFingerprint,
+    selectedPrinterId: session.selectedPrinterId, connectorVersion: version,
+  }));
+  legacyHeartbeatFails = true;
+  try {
+    await boundary.recordTrustedSessionHeartbeat(session, message);
+    await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, message), { errorCode: "message_replay" });
+  } finally {
+    legacyHeartbeatFails = false;
+    await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+  }
 });
 
 test("strict mTLS requires the trusted fingerprint and matches a pinned certificate", async () => {

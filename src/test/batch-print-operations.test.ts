@@ -124,6 +124,13 @@ describe("batch print operations", () => {
     });
   });
 
+  it("does not replace connector-originated attestation with a browser REST heartbeat during submission", async () => {
+    await createPrintJob(operationContext());
+    expect(apiClient.reportPrinterHeartbeat).not.toHaveBeenCalled();
+    expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledWith({ force: true, minIntervalMs: 0 });
+    expect(apiClient.createPrintJob).toHaveBeenCalledTimes(1);
+  });
+
   it("does not create a job when a forced status check returns rate-limited cached readiness", async () => {
     const toast = vi.fn();
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({

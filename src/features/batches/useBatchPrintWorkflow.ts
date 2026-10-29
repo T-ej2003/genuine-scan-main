@@ -452,6 +452,8 @@ export function useBatchPrintWorkflow({
     setSelectedPrinterProfileId((previous) => {
       const current = registeredPrinters.find((row) => row.id === previous) || null;
       if (current?.connectionType && current.connectionType !== "LOCAL_AGENT") return previous;
+      if (current?.isActive && current.nativePrinterId === selectedPrinterId &&
+          (!printerStatus.registrationId || current.printerRegistrationId === printerStatus.registrationId)) return previous;
 
       const matchingLocal = registeredPrinters.find(
         (row) =>
@@ -905,15 +907,18 @@ export function useBatchPrintWorkflow({
     },
     selectedPrinterProfileId,
     onSelectedPrinterProfileIdChange: (profileId: string) => {
+      if (profileId === selectedPrinterProfileId) return;
       ++printerRefreshGenerationRef.current;
       setSelectedPrinterProfileId(profileId);
       setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,
         trustReason: "Printer selection changed. Refresh printer verification." }));
+      void loadPrinterStatus({ force: true });
     },
     selectedPrinterProfile,
     detectedPrinters,
     selectedPrinterId,
     onSelectedPrinterIdChange: (printerId: string) => {
+      if (printerId === selectedPrinterId) return;
       ++printerRefreshGenerationRef.current;
       setSelectedPrinterId(printerId);
       setPrinterStatus((previous) => ({ ...previous, trusted: false, eligibleForPrinting: false, stale: true,

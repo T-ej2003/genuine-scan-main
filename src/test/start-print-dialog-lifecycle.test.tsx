@@ -112,6 +112,17 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
+  it("does not expire verification when the already selected printer is selected again", async () => {
+    const view = mount();
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-1"));
+    act(() => view.result.current.openPrintPack(batch));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(true));
+    act(() => view.result.current.dialogProps.onSelectedPrinterProfileIdChange("profile-1"));
+    expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(true);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("keeps connected hardware blocked when the mounted dialog sees expired attestation", async () => {
     const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
@@ -212,6 +223,20 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
+  it("reverifies a saved-profile change instead of leaving the opening request invalidated", async () => {
+    const alternative = { ...profile, id: "profile-alternative", isDefault: false };
+    vi.mocked(apiClient.listRegisteredPrinters).mockResolvedValue({ success: true, data: [profile, alternative] });
+    const view = mount();
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-1"));
+    act(() => view.result.current.openPrintPack(batch));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(true));
+    act(() => view.result.current.dialogProps.onSelectedPrinterProfileIdChange(alternative.id));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(true));
+    expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe(alternative.id);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("blocks a saved profile when fresh status belongs to another selected queue", async () => {
     const secondPrinter = { printerId: "queue-2", printerName: "Another ZPL printer", online: true };
     const secondProfile = { ...profile, id: "profile-2", name: secondPrinter.printerName,
@@ -226,8 +251,10 @@ describe("Start print run dialogue lifecycle", () => {
       view.result.current.dialogProps.onSelectedPrinterIdChange("queue-2");
       view.result.current.dialogProps.onSelectedPrinterProfileIdChange("profile-2");
     });
-    act(() => view.result.current.openPrintPack(batch));
     await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false));
+    act(() => view.result.current.openPrintPack(batch));
+    await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(3));
     expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-2");
     expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
     expect(apiClient.createPrintJob).not.toHaveBeenCalled();

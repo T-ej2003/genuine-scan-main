@@ -15,6 +15,9 @@ DROP POLICY IF EXISTS printing_lifecycle_printer_select ON public."Printer";
 DROP POLICY IF EXISTS printing_lifecycle_printer_update ON public."Printer";
 DROP POLICY IF EXISTS printing_lifecycle_printerattestation_insert ON public."PrinterAttestation";
 DROP POLICY IF EXISTS printing_lifecycle_printerattestation_select ON public."PrinterAttestation";
+DROP POLICY IF EXISTS printing_lifecycle_printeragentsession_select ON public."PrinterAgentSession";
+DROP POLICY IF EXISTS printing_lifecycle_printeragentsession_insert ON public."PrinterAgentSession";
+DROP POLICY IF EXISTS printing_lifecycle_printeragentsession_update ON public."PrinterAgentSession";
 DROP POLICY IF EXISTS printing_lifecycle_printerregistration_insert ON public."PrinterRegistration";
 DROP POLICY IF EXISTS printing_lifecycle_printerregistration_select ON public."PrinterRegistration";
 DROP POLICY IF EXISTS printing_lifecycle_printerregistration_update ON public."PrinterRegistration";
@@ -47,6 +50,7 @@ REVOKE ALL ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,tex
 REVOKE ALL ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.printing_connector_session(text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_test_label_job(text,text,text,text,jsonb,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_gateway_job(text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_record_sample(text,text,text,text,text,jsonb) FROM PUBLIC;
@@ -62,6 +66,7 @@ DROP FUNCTION IF EXISTS app_rls.printing_release_batch(text,text,text,text,text,
 DROP FUNCTION IF EXISTS app_rls.printing_record_sample(text,text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_connector_identity(text,text,text,text,text,text,text);
+DROP FUNCTION IF EXISTS app_rls.printing_connector_session(text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_test_label_job(text,text,text,text,jsonb,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_gateway_job(text,text,text,text,text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_control_job(text,text,text,text,text,text);

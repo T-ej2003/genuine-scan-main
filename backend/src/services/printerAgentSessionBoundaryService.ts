@@ -5,10 +5,12 @@ import {
   recordConnectorEvent,
   resolvePrintingConnectorIdentity,
 } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { mutatePrintingConnectorSession } from "../rls-waves/session-c/c02/printingConnectorSessionRepository";
 import {
   sessionClientMessageSchema,
   sessionHelloSchema,
   PRINT_AGENT_REQUIRE_MTLS,
+  PRINT_AGENT_SESSION_EXPIRY_SECONDS,
   type SessionClientMessage,
   type SessionHello,
   type TrustedPrinterAgentSession,
@@ -22,8 +24,9 @@ import {
   isLocalAgentPersistentSessionCapable,
   LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
 } from "./localAgentProtocol";
-import { buildApprovedPrintPayload } from "./printPayloadService";
+import { buildApprovedPrintPayload, type PrinterPayloadProfile, type PrintPayloadQr } from "./printPayloadService";
 import { publishPrintJobViewEvent } from "./printJobRealtimeService";
+import { publishPrinterConnectionChangeForUser } from "./printerConnectionService";
 import {
   acknowledgeLocalAgentPrinterTestJob,
   claimLocalAgentPrinterTestJob,
@@ -36,13 +39,56 @@ export type { TrustedPrinterAgentSession };
 
 type SessionState = {
   session: TrustedPrinterAgentSession;
-  lastMessageSeq: number;
   chunks: Map<string, { jobId: string; itemId: string; licenseeId: string; batchId: string; payloadHash: string | null; acknowledged: boolean; terminal?: "CONFIRM" | "FAIL" }>;
+};
+
+type ConnectorIdentityProjection = {
+  registration?: {
+    id: string; publicKeyPem: string | null; agentId: string; deviceFingerprint: string;
+    certFingerprint: string | null; userId: string;
+  } | null;
+  printer?: { id: string; name: string | null } | null;
+};
+
+type ClaimedChunkProjection = {
+  available: boolean;
+  printer: PrinterPayloadProfile;
+  qrCode: PrintPayloadQr;
+  manufacturerId: string;
+  printJobId: string;
+  printSessionId: string;
+  printItemId: string;
+  jobNumber: string | null;
+  reprintOfJobId: string | null;
+  issueSequence: number;
+  issuedAt: string;
+  code: string;
+  batch: { id: string; licenseeId: string; licensee?: { metadata?: unknown; name?: string | null } | null; metadata?: unknown; name?: string | null };
+  manufacturer?: { metadata?: unknown; name?: string | null } | null;
 };
 
 const sessions = new Map<string, SessionState>();
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const nonce = (value: string) => hash(value).slice(0, 32);
+
+const sessionMutation = async (input: Parameters<typeof mutatePrintingConnectorSession>[0]) => {
+  try {
+    return await mutatePrintingConnectorSession(input);
+  } catch (error) {
+    const detail = String(error);
+    const databaseCode = error && typeof error === "object" && "meta" in error
+      && error.meta && typeof error.meta === "object" && "code" in error.meta
+      ? error.meta.code : null;
+    const replay = detail.includes("CONNECTOR_SESSION_REPLAY") || databaseCode === "23505";
+    const rejected = detail.includes("CONNECTOR_SESSION_DENIED") || detail.includes("CONNECTOR_SESSION_NOT_ACTIVE");
+    throw Object.assign(new Error(replay ? "Printer session message replayed."
+      : rejected ? "Printer connector session is no longer authorized."
+      : "Printer session verification is unavailable."), {
+      statusCode: replay ? 409 : rejected ? 401 : 503,
+      errorCode: replay ? "message_replay" : rejected ? "session_not_active" : "session_verification_unavailable",
+    });
+  }
+};
 
 const verifyMessage = (
   session: TrustedPrinterAgentSession,
@@ -85,6 +131,7 @@ const verifyMessage = (
       errorCode: "bad_session_signature",
     });
   }
+  return payload;
 };
 
 export const logPrinterSessionResolverOutcome = (
@@ -96,8 +143,11 @@ export const openTrustedPrinterAgentSession = async (
   hello: SessionHello,
   options: { mtlsFingerprintHeader?: string | null } = {}
 ): Promise<TrustedPrinterAgentSession> => {
+  const health = hello.printerHealth;
+  const capabilities = health && typeof health.capabilities === "object" && !Array.isArray(health.capabilities)
+    ? health.capabilities as Record<string, unknown> : null;
   if (!isLocalAgentPersistentSessionCapable(hello.connectorVersion)
-      || (hello.printerHealth as any)?.capabilities?.supportsPersistentPrintSession !== true) {
+      || capabilities?.supportsPersistentPrintSession !== true) {
     throw Object.assign(new Error("Connector update required for persistent printing."), {
       statusCode: 426,
       errorCode: "persistent_session_connector_update_required",
@@ -109,7 +159,7 @@ export const openTrustedPrinterAgentSession = async (
     agentId: hello.agentId,
     deviceFingerprint: hello.deviceFingerprint,
     printerSelector: hello.selectedPrinterId,
-  }) as any;
+  }) as ConnectorIdentityProjection;
   const registration = identity.registration;
   const printer = identity.printer;
   if (!registration?.id || !printer?.id || !registration.publicKeyPem) {
@@ -152,12 +202,32 @@ export const openTrustedPrinterAgentSession = async (
     manufacturerId: registration.userId,
   };
   verifyMessage(session, hello);
-  sessions.set(session.id, { session, lastMessageSeq: 0, chunks: new Map() });
+  await sessionMutation({
+    operation: "OPEN", sessionId: session.id, registrationId: session.registrationId,
+    payload: {
+      connectionId: session.connectionId, printerId: session.printerId,
+      selectedPrinterId: session.selectedPrinterId, selectedPrinterName: session.selectedPrinterName,
+      agentId: session.agentId, deviceFingerprint: session.deviceFingerprint,
+      publicKeyFingerprint: session.publicKeyFingerprint, connectorVersion: session.connectorVersion,
+      expirySeconds: PRINT_AGENT_SESSION_EXPIRY_SECONDS,
+    },
+  });
+  sessions.set(session.id, { session, chunks: new Map() });
   return session;
 };
 
 export const closeTrustedPrinterAgentSession = async (sessionId: string, reason: string) => {
-  sessions.delete(sessionId);
+  const state = sessions.get(sessionId);
+  if (state) {
+    try {
+      await sessionMutation({
+        operation: "CLOSE", sessionId, registrationId: state.session.registrationId,
+        payload: sessionPayload(state.session, { reason }),
+      });
+    } finally {
+      sessions.delete(sessionId);
+    }
+  }
   console.info("printer_session_disconnected", { agentSessionId: sessionId, reason: reason.slice(0, 120) });
 };
 
@@ -172,35 +242,65 @@ const active = (session: TrustedPrinterAgentSession) => {
   return state;
 };
 
+const sessionPayload = (session: TrustedPrinterAgentSession, extra: Record<string, unknown> = {}) => ({
+  printerId: session.printerId, selectedPrinterId: session.selectedPrinterId,
+  agentId: session.agentId, deviceFingerprint: session.deviceFingerprint,
+  publicKeyFingerprint: session.publicKeyFingerprint, ...extra,
+});
+
+const mutateActiveSession = (
+  session: TrustedPrinterAgentSession,
+  operation: "ADVANCE" | "CHECK",
+  message?: SessionClientMessage,
+  signedPayload?: string
+) => sessionMutation({
+  operation, sessionId: session.id, registrationId: session.registrationId,
+  payload: sessionPayload(session, message ? {
+    messageSeq: message.messageSeq, messageType: message.type,
+    ...(message.type === "heartbeat" && signedPayload ? {
+      signatureVerified: true,
+      signedPayloadHash: hash(signedPayload),
+      signatureHash: hash(message.signature),
+      heartbeatNonce: message.nonce,
+      heartbeatIssuedAt: message.issuedAt,
+    } : {}),
+  } : {}),
+});
+
 export const recordTrustedSessionHeartbeat = async (
   session: TrustedPrinterAgentSession,
   message: SessionClientMessage
 ) => {
-  const state = active(session);
-  verifyMessage(session, message);
-  if (message.messageSeq <= state.lastMessageSeq) {
-    throw Object.assign(new Error("Printer session message replayed."), {
-      statusCode: 409,
-      errorCode: "message_replay",
+  active(session);
+  const signedPayload = verifyMessage(session, message);
+  const accepted = await mutateActiveSession(session, "ADVANCE", message, signedPayload);
+  try {
+    await resolvePrintingConnectorIdentity({
+      kind: "LOCAL_AGENT",
+      agentId: session.agentId,
+      deviceFingerprint: session.deviceFingerprint,
+      printerSelector: session.printerId,
+      operation: "HEARTBEAT",
     });
+  } catch {
+    // The governed session transaction already accepted the heartbeat. A
+    // legacy last-seen projection failure must not cause a replay on retry.
+    console.warn("printer_session_legacy_last_seen_unavailable");
   }
-  state.lastMessageSeq = message.messageSeq;
-  await resolvePrintingConnectorIdentity({
-    kind: "LOCAL_AGENT",
-    agentId: session.agentId,
-    deviceFingerprint: session.deviceFingerprint,
-    printerSelector: session.printerId,
-    operation: "HEARTBEAT",
-  });
+  if (accepted.attestationRenewed) {
+    publishPrinterConnectionChangeForUser(session.manufacturerId);
+  }
 };
 
 export const buildNextPrintChunkForSession = async (
   session: TrustedPrinterAgentSession
 ) => {
   const state = active(session);
+  await mutateActiveSession(session, "CHECK");
   const test = await claimLocalAgentPrinterTestJob({
     printerIds: [session.printerId],
     connectorBoundary: {
+      sessionId: session.id,
       registrationId: session.registrationId,
       agentId: session.agentId,
       deviceFingerprint: session.deviceFingerprint,
@@ -222,7 +322,7 @@ export const buildNextPrintChunkForSession = async (
     jobId: randomUUID(),
     printerId: session.printerId,
     details: { sessionId: session.id, deliveryMode: "PERSISTENT_SESSION" },
-  }) as any;
+  }) as ClaimedChunkProjection;
   if (!claimed?.available) return null;
 
   const chunkId = randomUUID();
@@ -296,17 +396,12 @@ export const handleTrustedSessionProgressMessage = async (
     return { ok: true as const };
   }
   const state = active(session);
-  verifyMessage(session, message);
-  if (message.messageSeq <= state.lastMessageSeq) {
-    throw Object.assign(new Error("Printer session message replayed."), {
-      statusCode: 409,
-      errorCode: "message_replay",
-    });
-  }
-  state.lastMessageSeq = message.messageSeq;
+  const signedPayload = verifyMessage(session, message);
+  await mutateActiveSession(session, "ADVANCE", message, signedPayload);
 
   if (message.type.startsWith("test_")) {
     const connectorBoundary = {
+      sessionId: session.id,
       registrationId: session.registrationId,
       agentId: session.agentId,
       deviceFingerprint: session.deviceFingerprint,

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='f11c618d41aad483a4ed176dff9bf50a70af1dee71753b0e7b1bad17cad84fa4'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:f11c618d41aad483a4ed176dff9bf50a70af1dee71753b0e7b1bad17cad84fa4'
+    AND source_contract_sha256='e66940eb5eec828d4cb24c43cd01858b34a43affaa465ac851500030e9d7f615'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:e66940eb5eec828d4cb24c43cd01858b34a43affaa465ac851500030e9d7f615'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:f11c618d41aad483a4ed176dff9bf50a70af1dee71753b0e7b1bad17cad84fa4')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e66940eb5eec828d4cb24c43cd01858b34a43affaa465ac851500030e9d7f615')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8531,13 +8531,29 @@ BEGIN
     PERFORM set_config('app.printing_registration_id',coalesce(target_registration_id,''),true);
     RETURN (
       WITH registration AS (
-        SELECT pr.id,pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
+        SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",
+          pr."agentId",pr."deviceFingerprint",pr."trustStatus",pr."trustReason",
           pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
         FROM public."PrinterRegistration" pr
         WHERE pr.id=target_registration_id
       ), attestation AS (
         SELECT pa.id,pa."printerRegistrationId",pa.metadata,pa."expiresAt",pa."trustValid",
-          pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt"
+          pa."signatureValid",pa."attestedAt",pa."rejectionReason",pa."createdAt",
+          ((pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
+            SELECT 1 FROM public."PrinterAgentSession" prior
+            WHERE prior."registrationId"=pa."printerRegistrationId"
+          )) OR EXISTS (
+            SELECT 1 FROM public."PrinterAgentSession" s
+            WHERE s.id=pa.metadata->>'sessionId' AND s."registrationId"=pa."printerRegistrationId"
+              AND s."connectionState"='CONNECTED' AND s."revokedAt" IS NULL
+              AND s."expiresAt">transaction_timestamp()
+              AND s."lastSignedHeartbeatAt">transaction_timestamp()-interval '35 seconds'
+              AND s."selectedPrinterId"=pa.metadata->>'selectedPrinterId'
+              AND s.metadata->>'printerId'=pa.metadata->>'printerId'
+              AND s.metadata->>'manufacturerId'=pr."userId"
+              AND s.metadata->>'orgId' IS NOT DISTINCT FROM pr."orgId"
+              AND s.metadata->>'licenseeId' IS NOT DISTINCT FROM pr."licenseeId"
+          )) AS session_authorized
         FROM public."PrinterAttestation" pa
         JOIN registration pr ON pr.id=pa."printerRegistrationId"
         WHERE NOT (pa.metadata ? 'operation')
@@ -8557,24 +8573,24 @@ BEGIN
         coalesce(pa.metadata,'{}'::jsonb)
         ||jsonb_build_object(
           'connected',coalesce((pa.metadata->>'connected')::boolean,false)
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid",
+            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa.session_authorized,
           'trusted',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid",
+            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized,
           'compatibilityMode',false,
           'requiredForPrinting',true,
           'eligibleForPrinting',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid"
+            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized
             AND coalesce((pa.metadata->>'connected')::boolean,false)
             AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')<>'',
           'connectionClass',CASE WHEN pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid"
+            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized
             THEN 'TRUSTED' ELSE 'BLOCKED' END,
-          'stale',pa."expiresAt"<=transaction_timestamp(),
+          'stale',pa."expiresAt"<=transaction_timestamp() OR NOT pa.session_authorized,
           'securePrinterSession',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid",
-          'freshHelperHeartbeat',pa."expiresAt">transaction_timestamp(),
+            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized,
+          'freshHelperHeartbeat',pa."expiresAt">transaction_timestamp() AND pa.session_authorized,
           'helperConnection',coalesce((pa.metadata->>'connected')::boolean,false)
-            AND pa."expiresAt">transaction_timestamp(),
+            AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized,
           'eligiblePrinter',coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')<>'',
           'missingFields','[]'::jsonb,
           'registrationId',pr.id,'agentId',pr."agentId",
@@ -8583,11 +8599,12 @@ BEGIN
           'ageSeconds',greatest(0,extract(epoch FROM transaction_timestamp()-pa."attestedAt")::integer),
           'signedAttestation',jsonb_build_object(
             'required',true,'present',true,'signatureValid',pa."signatureValid",
-            'fresh',pa."expiresAt">transaction_timestamp() AND pa."trustValid",
+            'fresh',pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa.session_authorized,
             'issuedAt',pa.metadata->>'heartbeatIssuedAt','rejectReason',pa."rejectionReason"
           ),
-          'error',CASE WHEN pa."trustValid" AND pa."expiresAt">transaction_timestamp()
-            THEN NULL ELSE coalesce(pa."rejectionReason",pr."trustReason",'Printer attestation stale') END
+          'error',CASE WHEN pa."trustValid" AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized
+            THEN NULL WHEN NOT pa.session_authorized THEN 'Persistent printer session disconnected'
+            ELSE coalesce(pa."rejectionReason",pr."trustReason",'Printer attestation stale') END
         )
       ) END
       FROM (SELECT 1) seed
@@ -9365,7 +9382,7 @@ BEGIN
     WHERE pr.id=p_connector->>'registrationId'
       AND pr."agentId"=p_connector->>'agentId'
       AND pr."deviceFingerprint"=p_connector->>'deviceFingerprint'
-      AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL;
+      AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL FOR UPDATE;
   PERFORM set_config('app.printing_user_id',registration."userId",true),
           set_config('app.printing_organization_id',coalesce(registration."orgId",''),true),
           set_config('app.printing_licensee_id',coalesce(registration."licenseeId",''),true);
@@ -9375,14 +9392,37 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM public."PrinterAttestation" pa
     WHERE pa."printerRegistrationId"=registration.id
-      AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
+      AND pa."signatureValid" AND pa."trustValid"
+      AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
   ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
   SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
-    p."nativePrinterId",p."ipAddress",p.host,p.port,p."printerUri",p."commandLanguage"
+    p."nativePrinterId",p."ipAddress",p.host,p.port,p."printerUri",p."commandLanguage",p."assignedUserId"
     INTO STRICT printer_row FROM public."Printer" p
     WHERE p.id=p_printer_id AND p."printerRegistrationId"=registration.id
       AND p."isActive" AND p."connectionType"='LOCAL_AGENT'
     FOR UPDATE;
+  IF printer_row."orgId" IS DISTINCT FROM registration."orgId"
+     OR printer_row."licenseeId" IS DISTINCT FROM registration."licenseeId"
+     OR printer_row."assignedUserId" IS DISTINCT FROM registration."userId"
+  THEN RAISE EXCEPTION 'PRINTING_TEST_LABEL_DENIED' USING ERRCODE='42501'; END IF;
+  IF nullif(p_connector->>'sessionId','') IS NOT NULL THEN
+    PERFORM set_config('app.printing_agent_session_id',p_connector->>'sessionId',true);
+    PERFORM 1 FROM public."PrinterAgentSession" agent_session
+      WHERE agent_session.id=p_connector->>'sessionId'
+        AND agent_session."registrationId"=registration.id
+        AND agent_session."agentId"=p_connector->>'agentId'
+        AND agent_session."deviceFingerprint"=p_connector->>'deviceFingerprint'
+        AND agent_session."selectedPrinterId" IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+        AND agent_session.metadata->>'printerId'=printer_row.id
+        AND agent_session.metadata->>'manufacturerId'=registration."userId"
+        AND agent_session.metadata->>'orgId' IS NOT DISTINCT FROM registration."orgId"
+        AND agent_session.metadata->>'licenseeId' IS NOT DISTINCT FROM registration."licenseeId"
+        AND agent_session."connectionState"='CONNECTED' AND agent_session."revokedAt" IS NULL
+        AND agent_session."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+        AND agent_session."lastSignedHeartbeatAt">(clock_timestamp() AT TIME ZONE 'UTC')-interval '35 seconds'
+      FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
+  END IF;
   current_job:=printer_row.metadata->'pendingLocalAgentTestLabel';
   IF current_job IS NULL THEN RETURN jsonb_build_object('available',false); END IF;
   expires_at:=nullif(current_job->>'expiresAt','')::timestamp without time zone;
@@ -9518,7 +9558,8 @@ BEGIN
        AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING')
   ) THEN RAISE EXCEPTION 'ACTIVE_PRINT_JOB_EXISTS'; END IF;
 
-  SELECT p.id,p."connectionType",p."commandLanguage",p."printerRegistrationId",p."nativePrinterId"
+  SELECT p.id,p."connectionType",p."commandLanguage",p."printerRegistrationId",p."nativePrinterId",
+    p."assignedUserId",p."orgId",p."licenseeId"
     INTO printer_row FROM public."Printer" p
    WHERE p.id=p_printer_id AND p."isActive"
      AND p."licenseeId"=batch_row."licenseeId"
@@ -9554,10 +9595,25 @@ BEGIN
     IF NOT EXISTS (
       SELECT 1 FROM public."PrinterAttestation" pa
       WHERE pa."printerRegistrationId"=printer_row."printerRegistrationId"
-        AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
+        AND pa."signatureValid" AND pa."trustValid"
+        AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
         AND coalesce((pa.metadata->>'connected')::boolean,false)
         AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+        AND ((pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
+          SELECT 1 FROM public."PrinterAgentSession" prior
+          WHERE prior."registrationId"=pa."printerRegistrationId"
+        )) OR EXISTS (
+          SELECT 1 FROM public."PrinterAgentSession" s
+          WHERE s.id=pa.metadata->>'sessionId' AND s."registrationId"=pa."printerRegistrationId"
+            AND s."connectionState"='CONNECTED' AND s."revokedAt" IS NULL
+            AND s."expiresAt">clock_timestamp() AND s."lastSignedHeartbeatAt">clock_timestamp()-interval '35 seconds'
+            AND s."selectedPrinterId"=pa.metadata->>'selectedPrinterId'
+            AND s.metadata->>'printerId'=printer_row.id
+            AND s.metadata->>'manufacturerId'=printer_row."assignedUserId"
+            AND s.metadata->>'orgId' IS NOT DISTINCT FROM printer_row."orgId"
+            AND s.metadata->>'licenseeId' IS NOT DISTINCT FROM printer_row."licenseeId"
+        ))
     ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
   END IF;
 
@@ -9732,10 +9788,10 @@ BEGIN
           set_config('app.printing_registration_id',p_registration_id,true),
           set_config('app.printing_job_id',coalesce(p_job_id,''),true),
           set_config('app.printing_item_id',coalesce(p_item_id,''),true);
-  SELECT pr."userId" INTO STRICT registration FROM public."PrinterRegistration" pr
+  SELECT pr."userId",pr."orgId",pr."licenseeId" INTO STRICT registration FROM public."PrinterRegistration" pr
    WHERE pr.id=p_registration_id AND pr."agentId"=p_agent_id
      AND pr."deviceFingerprint"=p_device_fingerprint
-     AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL;
+     AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL FOR UPDATE;
   INSERT INTO public."PrinterAttestation"(
     id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt",
     "signatureValid","trustValid",metadata,"createdAt"
@@ -9745,12 +9801,40 @@ BEGIN
     jsonb_build_object('operation',p_operation,'requestId',p_request_id),now_at
   );
   SELECT p.id,p.name,p."connectionType",p."commandLanguage",p."nativePrinterId",
-    p."ipAddress",p.port,p."calibrationProfile",p."capabilitySummary",p.metadata
+    p."ipAddress",p.port,p."calibrationProfile",p."capabilitySummary",p.metadata,
+    p."orgId",p."licenseeId",p."assignedUserId"
     INTO STRICT printer_row FROM public."Printer" p
    WHERE (p.id=p_printer_id OR p."nativePrinterId"=p_printer_id)
      AND p."printerRegistrationId"=p_registration_id AND p."isActive"
-   ORDER BY (p.id=p_printer_id) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1;
+   ORDER BY (p.id=p_printer_id) DESC,p."isDefault" DESC,p."updatedAt" DESC LIMIT 1 FOR UPDATE OF p;
+  IF printer_row."orgId" IS DISTINCT FROM registration."orgId"
+     OR printer_row."licenseeId" IS DISTINCT FROM registration."licenseeId"
+     OR printer_row."assignedUserId" IS DISTINCT FROM registration."userId"
+  THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.printing_printer_id',printer_row.id,true);
+  IF p_details->>'deliveryMode'='PERSISTENT_SESSION' OR p_details ? 'sessionId' THEN
+    IF nullif(p_details->>'sessionId','') IS NULL
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM set_config('app.printing_agent_session_id',p_details->>'sessionId',true);
+    PERFORM 1 FROM public."PrinterAgentSession" agent_session
+      WHERE agent_session.id=p_details->>'sessionId'
+        AND agent_session."registrationId"=p_registration_id
+        AND agent_session."agentId"=p_agent_id
+        AND agent_session."deviceFingerprint"=p_device_fingerprint
+        AND agent_session."publicKeyFingerprint"=encode(sha256(convert_to(
+          (SELECT r."publicKeyPem" FROM public."PrinterRegistration" r WHERE r.id=p_registration_id),
+          'UTF8')),'hex')
+        AND agent_session."selectedPrinterId" IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+        AND agent_session.metadata->>'printerId'=printer_row.id
+        AND agent_session.metadata->>'manufacturerId'=registration."userId"
+        AND agent_session.metadata->>'orgId' IS NOT DISTINCT FROM registration."orgId"
+        AND agent_session.metadata->>'licenseeId' IS NOT DISTINCT FROM registration."licenseeId"
+        AND agent_session."connectionState"='CONNECTED' AND agent_session."revokedAt" IS NULL
+        AND agent_session."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+        AND agent_session."lastSignedHeartbeatAt">(clock_timestamp() AT TIME ZONE 'UTC')-interval '35 seconds'
+      FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
+  END IF;
   IF p_operation='CLAIM' THEN
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
       INTO job_row FROM public."PrintJob" j
@@ -9935,6 +10019,8 @@ BEGIN
       WHERE pa."printerRegistrationId"=registration.id
         AND NOT (pa.metadata ? 'operation')
       ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1;
+    PERFORM set_config('app.printing_agent_session_id',
+      coalesce(attestation_row.metadata->>'sessionId',''),true);
     IF p_operation='HEARTBEAT' THEN
       UPDATE public."PrinterRegistration" SET "lastSeenAt"=now_at,"updatedAt"=now_at WHERE id=registration.id;
       UPDATE public."Printer" SET "lastSeenAt"=now_at,"updatedAt"=now_at WHERE id=printer_row.id;
@@ -9951,10 +10037,25 @@ BEGIN
       'printer',to_jsonb(printer_row),
       'eligibleForPrinting',registration."publicKeyPem" LIKE '%BEGIN%' AND printer_row."isActive"
         AND attestation_row."signatureValid" AND attestation_row."trustValid"
-        AND attestation_row."expiresAt">now_at
+        AND attestation_row."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
         AND coalesce((attestation_row.metadata->>'connected')::boolean,false)
         AND coalesce(attestation_row.metadata->>'selectedPrinterId',attestation_row.metadata->>'printerId','')
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+        AND ((attestation_row.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
+          SELECT 1 FROM public."PrinterAgentSession" prior
+          WHERE prior."registrationId"=registration.id
+        )) OR EXISTS (
+          SELECT 1 FROM public."PrinterAgentSession" s
+          WHERE s.id=attestation_row.metadata->>'sessionId' AND s."registrationId"=registration.id
+            AND s."connectionState"='CONNECTED' AND s."revokedAt" IS NULL
+            AND s."expiresAt">clock_timestamp()
+            AND s."lastSignedHeartbeatAt">clock_timestamp()-interval '35 seconds'
+            AND s."selectedPrinterId"=attestation_row.metadata->>'selectedPrinterId'
+            AND s.metadata->>'printerId'=printer_row.id
+            AND s.metadata->>'manufacturerId'=registration."userId"
+            AND s.metadata->>'orgId' IS NOT DISTINCT FROM registration."orgId"
+            AND s.metadata->>'licenseeId' IS NOT DISTINCT FROM registration."licenseeId"
+        ))
     );
   END IF;
   SELECT p.id,p.name,p.vendor,p.model,p."connectionType",p."commandLanguage",p."ipAddress",p.host,p.port,
@@ -9973,6 +10074,174 @@ BEGIN
       "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   END IF;
   RETURN jsonb_build_object('printer',to_jsonb(printer_row),'eligibleForPrinting',true);
+END
+$fn$;
+
+-- The registration row is the serialization point for opening, replacing,
+-- advancing, and closing a persistent connector session. Signature verification
+-- occurs in the WebSocket boundary before this function is called.
+CREATE OR REPLACE FUNCTION app_rls.printing_connector_session(
+  p_operation text, p_session_id text, p_registration_id text, p_payload jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+DECLARE registration record; printer_row record; session_row record;
+  now_at timestamp without time zone;
+  latest_attestation_expiry timestamp without time zone;
+  latest_attestation_usable boolean;
+  selected text := p_payload->>'selectedPrinterId';
+  printer_id text := p_payload->>'printerId';
+  next_seq integer;
+  renewed boolean := false;
+  signed_nonce text;
+  attestation_nonce text;
+  heartbeat_issued_at timestamp with time zone;
+BEGIN
+  IF session_user<>'mscqr_rls_cert_app' OR p_operation NOT IN ('OPEN','ADVANCE','CHECK','CLOSE')
+     OR p_session_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR p_registration_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+     OR jsonb_typeof(coalesce(p_payload,'null'::jsonb))<>'object'
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  PERFORM set_config('app.printing_operation','printing-connector-session',true),
+          set_config('app.printing_registration_id',p_registration_id,true),
+          set_config('app.printing_agent_session_id',p_session_id,true),
+          set_config('app.printing_printer_id',coalesce(printer_id,''),true);
+  SELECT r.id,r."userId",r."orgId",r."licenseeId",r."agentId",r."deviceFingerprint",
+         r."publicKeyPem",r."certFingerprint",r."trustStatus",r."revokedAt"
+    INTO STRICT registration FROM public."PrinterRegistration" r
+    WHERE r.id=p_registration_id FOR UPDATE;
+  IF coalesce(registration."publicKeyPem",'')='' OR registration."agentId" IS DISTINCT FROM p_payload->>'agentId'
+     OR registration."deviceFingerprint" IS DISTINCT FROM p_payload->>'deviceFingerprint'
+     OR encode(sha256(convert_to(registration."publicKeyPem",'UTF8')),'hex') IS DISTINCT FROM p_payload->>'publicKeyFingerprint'
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  IF p_operation='CLOSE' THEN
+    SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
+           s."selectedPrinterId"
+      INTO STRICT session_row FROM public."PrinterAgentSession" s WHERE s.id=p_session_id FOR UPDATE;
+    IF session_row."registrationId"<>registration.id OR session_row."agentId"<>registration."agentId"
+       OR session_row."deviceFingerprint"<>registration."deviceFingerprint"
+       OR session_row."publicKeyFingerprint"<>p_payload->>'publicKeyFingerprint'
+       OR session_row."selectedPrinterId"<>selected
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    now_at := clock_timestamp() AT TIME ZONE 'UTC';
+    UPDATE public."PrinterAgentSession" SET "connectionState"='DISCONNECTED',"revokedAt"=now_at,
+      "disconnectedAt"=now_at,"closeReason"=left(coalesce(p_payload->>'reason','socket_closed'),120),"updatedAt"=now_at
+      WHERE id=session_row.id AND "connectionState"='CONNECTED';
+    RETURN jsonb_build_object('sessionId',p_session_id,'state','DISCONNECTED');
+  END IF;
+  IF registration."trustStatus"<>'TRUSTED' OR registration."revokedAt" IS NOT NULL
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT p.id,p.name,p."orgId",p."licenseeId",p."assignedUserId",p."nativePrinterId",p."agentId",p."deviceFingerprint"
+    INTO STRICT printer_row FROM public."Printer" p
+    WHERE p.id=printer_id AND p."printerRegistrationId"=registration.id AND p."isActive"
+      AND (p.id=selected OR p."nativePrinterId"=selected) FOR UPDATE;
+  IF printer_row."orgId" IS DISTINCT FROM registration."orgId"
+     OR printer_row."licenseeId" IS DISTINCT FROM registration."licenseeId"
+     OR printer_row."assignedUserId" IS DISTINCT FROM registration."userId"
+     OR printer_row."agentId" IS DISTINCT FROM registration."agentId"
+     OR printer_row."deviceFingerprint" IS DISTINCT FROM registration."deviceFingerprint"
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  now_at := clock_timestamp() AT TIME ZONE 'UTC';
+  IF p_operation='OPEN' THEN
+    IF p_payload->>'connectionId' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+       OR coalesce(length(selected),0)=0 OR length(selected)>180
+       OR coalesce((p_payload->>'expirySeconds')::integer,0) NOT BETWEEN 60 AND 86400
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    UPDATE public."PrinterAgentSession" SET "connectionState"='SUPERSEDED',"revokedAt"=now_at,
+      "disconnectedAt"=now_at,"closeReason"='session_replaced',"updatedAt"=now_at
+      WHERE "registrationId"=registration.id AND "connectionState"='CONNECTED' AND "revokedAt" IS NULL;
+    INSERT INTO public."PrinterAgentSession"(id,"connectionId","registrationId","agentId",
+      "deviceFingerprint","publicKeyFingerprint","selectedPrinterId","selectedPrinterName",
+      "connectorVersion","connectionState","lastMessageSeq","connectedAt","lastSeenAt",
+      "lastSignedHeartbeatAt","expiresAt",metadata,"createdAt","updatedAt")
+    VALUES(p_session_id,p_payload->>'connectionId',registration.id,registration."agentId",
+      registration."deviceFingerprint",p_payload->>'publicKeyFingerprint',selected,
+      left(p_payload->>'selectedPrinterName',180),left(p_payload->>'connectorVersion',80),
+      'CONNECTED',0,now_at,now_at,now_at,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
+      jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
+        'licenseeId',registration."licenseeId",'printerId',printer_row.id),now_at,now_at);
+    RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
+  END IF;
+  SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
+         s."selectedPrinterId",s."connectionState",s."expiresAt",s."revokedAt",s."lastMessageSeq",
+         s."lastSignedHeartbeatAt",s.metadata
+    INTO STRICT session_row FROM public."PrinterAgentSession" s WHERE s.id=p_session_id FOR UPDATE;
+  IF session_row."registrationId"<>registration.id OR session_row."agentId"<>registration."agentId"
+     OR session_row."deviceFingerprint"<>registration."deviceFingerprint"
+     OR session_row."publicKeyFingerprint"<>p_payload->>'publicKeyFingerprint'
+     OR session_row."selectedPrinterId"<>selected
+     OR session_row.metadata->>'manufacturerId' IS DISTINCT FROM registration."userId"
+     OR session_row.metadata->>'orgId' IS DISTINCT FROM registration."orgId"
+     OR session_row.metadata->>'licenseeId' IS DISTINCT FROM registration."licenseeId"
+     OR session_row.metadata->>'printerId' IS DISTINCT FROM printer_row.id
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+  now_at := clock_timestamp() AT TIME ZONE 'UTC';
+  IF session_row."connectionState"<>'CONNECTED' OR session_row."revokedAt" IS NOT NULL
+     OR session_row."expiresAt" IS NULL OR session_row."expiresAt"<=now_at
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
+  IF p_operation='CHECK' AND session_row."lastSignedHeartbeatAt"<=now_at-interval '35 seconds'
+  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
+  IF p_operation='ADVANCE' THEN
+    IF p_payload->>'messageSeq' !~ '^[1-9][0-9]{0,9}$'
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    next_seq := (p_payload->>'messageSeq')::integer;
+    IF next_seq<=session_row."lastMessageSeq" THEN
+      RAISE EXCEPTION 'CONNECTOR_SESSION_REPLAY' USING ERRCODE='23505';
+    END IF;
+    IF p_payload->>'messageType'='heartbeat' THEN
+      signed_nonce := p_payload->>'heartbeatNonce';
+      heartbeat_issued_at := nullif(p_payload->>'heartbeatIssuedAt','')::timestamp with time zone;
+      IF coalesce((p_payload->>'signatureVerified')::boolean,false) IS NOT TRUE
+         OR p_payload->>'signedPayloadHash' !~ '^[0-9a-f]{64}$'
+         OR p_payload->>'signatureHash' !~ '^[0-9a-f]{64}$'
+         OR length(coalesce(signed_nonce,'')) NOT BETWEEN 8 AND 180
+         OR heartbeat_issued_at IS NULL
+         OR abs(extract(epoch FROM (clock_timestamp()-heartbeat_issued_at)))>180
+      THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+      SELECT pa."expiresAt",
+        pa."signatureValid" AND pa."trustValid"
+          AND coalesce((pa.metadata->>'connected')::boolean,false)
+          AND pa.metadata->>'source'='PERSISTENT_SESSION'
+          AND pa.metadata->>'sessionId'=p_session_id
+          AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
+            IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+        INTO latest_attestation_expiry,latest_attestation_usable
+        FROM public."PrinterAttestation" pa
+        WHERE pa."printerRegistrationId"=registration.id AND NOT (pa.metadata ? 'operation')
+        ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1;
+      IF NOT coalesce(latest_attestation_usable,false)
+         OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds' THEN
+        attestation_nonce := encode(sha256(convert_to(
+          p_session_id||'|'||next_seq::text||'|'||signed_nonce,'UTF8')),'hex');
+        INSERT INTO public."PrinterAttestation"(
+          id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt",
+          "mtlsFingerprint","signatureValid","trustValid",metadata,"createdAt"
+        ) VALUES (
+          gen_random_uuid()::text,registration.id,p_payload->>'signedPayloadHash',attestation_nonce,
+          now_at,now_at+interval '35 seconds',registration."certFingerprint",true,true,
+          jsonb_build_object(
+            'source','PERSISTENT_SESSION','sessionId',p_session_id,'messageSeq',next_seq,
+            'signedMessageNonce',signed_nonce,'signatureHash',p_payload->>'signatureHash',
+            'heartbeatIssuedAt',p_payload->>'heartbeatIssuedAt','connected',true,
+            'printerId',printer_row.id,'selectedPrinterId',selected,
+            'agentId',registration."agentId",'deviceFingerprint',registration."deviceFingerprint",
+            'manufacturerId',registration."userId",'orgId',registration."orgId",
+            'licenseeId',registration."licenseeId",
+            'printers',jsonb_build_array(jsonb_build_object(
+              'id',printer_row.id,'printerId',coalesce(printer_row."nativePrinterId",printer_row.id),
+              'name',printer_row.name,'printerName',printer_row.name))
+          ),now_at
+        );
+        renewed := true;
+      END IF;
+    END IF;
+    UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=next_seq,"lastSeenAt"=now_at,
+      "lastSignedHeartbeatAt"=CASE WHEN p_payload->>'messageType'='heartbeat' THEN now_at ELSE "lastSignedHeartbeatAt" END,
+      "updatedAt"=now_at WHERE id=session_row.id;
+  END IF;
+  RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED',
+    'lastMessageSeq',coalesce(next_seq,session_row."lastMessageSeq"),'attestationRenewed',renewed);
+EXCEPTION WHEN NO_DATA_FOUND THEN
+  RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501';
 END
 $fn$;
 
@@ -10344,10 +10613,26 @@ BEGIN
           SELECT 1 FROM public."PrinterAttestation" pa
           JOIN public."Printer" p ON p.id=job_row."printerId"
           WHERE pa."printerRegistrationId"=job_row.original_registration_id
-            AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
+            AND pa."signatureValid" AND pa."trustValid"
+            AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
             AND coalesce((pa.metadata->>'connected')::boolean,false)
             AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
               IN (p.id,coalesce(p."nativePrinterId",''))
+            AND ((pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
+              SELECT 1 FROM public."PrinterAgentSession" prior
+              WHERE prior."registrationId"=pa."printerRegistrationId"
+            )) OR EXISTS (
+              SELECT 1 FROM public."PrinterAgentSession" s
+              WHERE s.id=pa.metadata->>'sessionId' AND s."registrationId"=pa."printerRegistrationId"
+                AND s."connectionState"='CONNECTED' AND s."revokedAt" IS NULL
+                AND s."expiresAt">clock_timestamp()
+                AND s."lastSignedHeartbeatAt">clock_timestamp()-interval '35 seconds'
+                AND s."selectedPrinterId"=pa.metadata->>'selectedPrinterId'
+                AND s.metadata->>'printerId'=p.id
+                AND s.metadata->>'manufacturerId'=p."assignedUserId"
+                AND s.metadata->>'orgId' IS NOT DISTINCT FROM p."orgId"
+                AND s.metadata->>'licenseeId' IS NOT DISTINCT FROM p."licenseeId"
+            ))
         ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
       END IF;
       replacement_job_id:=gen_random_uuid()::text;
@@ -10649,6 +10934,7 @@ $fn$;
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.printing_connector_session(text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_control_job(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_create_job(text,text,text,text,text,integer,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_gateway_job(text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
@@ -14757,7 +15043,8 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
+     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')
