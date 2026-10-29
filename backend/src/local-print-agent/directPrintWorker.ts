@@ -465,6 +465,8 @@ export const buildSignedSessionMessage = async (params: {
       observedAt,
       discovered: Boolean(selected && state.selectedPrinterId === params.selectedPrinterId),
       queueAvailable: Boolean(selected && !inventory.error && !selected.queueHasErrors
+        && !(selected.stuckJobCount && selected.stuckJobCount > 0)
+        && !(selected.retainedJobCount && selected.retainedJobCount > 0)
         && (process.platform !== "win32" || /^(normal|idle|printing|warmup|warming up|PrinterStatus (0|3|4|5)|0|3|4|5)$/i.test(selected.queueStatus || ""))
         && !/paused|offline|error|unavailable/i.test(selected.queueStatus || "")),
       online: selected?.online === true,

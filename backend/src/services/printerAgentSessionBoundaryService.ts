@@ -80,12 +80,14 @@ const sessionMutation = async (input: Parameters<typeof mutatePrintingConnectorS
       && error.meta && typeof error.meta === "object" && "code" in error.meta
       ? error.meta.code : null;
     const replay = detail.includes("CONNECTOR_SESSION_REPLAY") || databaseCode === "23505";
+    const healthPending = detail.includes("PRINTER_HEALTH_NOT_READY");
     const rejected = detail.includes("CONNECTOR_SESSION_DENIED") || detail.includes("CONNECTOR_SESSION_NOT_ACTIVE");
     throw Object.assign(new Error(replay ? "Printer session message replayed."
       : rejected ? "Printer connector session is no longer authorized."
       : "Printer session verification is unavailable."), {
-      statusCode: replay ? 409 : rejected ? 401 : 503,
-      errorCode: replay ? "message_replay" : rejected ? "session_not_active" : "session_verification_unavailable",
+      statusCode: replay || healthPending ? 409 : rejected ? 401 : 503,
+      errorCode: replay ? "message_replay" : healthPending ? "printer_health_not_ready"
+        : rejected ? "session_not_active" : "session_verification_unavailable",
     });
   }
 };
@@ -298,7 +300,14 @@ export const buildNextPrintChunkForSession = async (
   session: TrustedPrinterAgentSession
 ) => {
   const state = active(session);
-  await mutateActiveSession(session, "CHECK");
+  try {
+    await mutateActiveSession(session, "CHECK");
+  } catch (error) {
+    // An authenticated socket can wait for healthy evidence without being
+    // disconnected or receiving work. Revocation/expiry still propagate.
+    if (error instanceof Error && "errorCode" in error && error.errorCode === "printer_health_not_ready") return null;
+    throw error;
+  }
   const test = await claimLocalAgentPrinterTestJob({
     printerIds: [session.printerId],
     connectorBoundary: {

@@ -203,6 +203,7 @@ async function main() {
   denied(app, open(sessionA, sessionA));
   psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
   assert.equal(json(app, open(sessionA, sessionA)).state, "CONNECTED");
+  denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
   denied(app, advance(sessionA, 1), /CONNECTOR_SESSION_REPLAY/);
@@ -214,7 +215,7 @@ async function main() {
   const parallel = await Promise.all([psqlAsync(app, advance(sessionA, 2)), psqlAsync(app, advance(sessionA, 2))]);
   assert.deepEqual(parallel.map(result => result.status === 0).sort(), [false, true]);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds' WHERE id='${sessionA}'`);
-  denied(app, sessionSql("CHECK", sessionA, {}), /CONNECTOR_SESSION_NOT_ACTIVE/);
+  denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   assert.equal(json(app, advance(sessionA, 3)).lastMessageSeq, 3);
   assert.equal(json(app, sessionSql("CHECK", sessionA, {})).state, "CONNECTED");
   psql(admin, `UPDATE public."PrinterAgentSession" SET "expiresAt"=now()-interval '1 second' WHERE id='${sessionA}'`);
@@ -263,22 +264,24 @@ async function main() {
   assert.equal(json(app, open(sessionB, sessionB)).state, "CONNECTED");
   denied(app, advance(sessionA, 4), /CONNECTOR_SESSION_NOT_ACTIVE/);
   const socketClaim = (sessionId) => `SELECT app_rls.printing_connector_event(
-    '${ids.registration}','printing-agent','printing-device','session_claim_nonce_123',now()::timestamp,
+    '${ids.registration}','printing-agent','printing-device','session_claim_${requestId()}',now()::timestamp,
     '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.discoveredPrinter}',NULL,NULL,
     '{"sessionId":"${sessionId}","deliveryMode":"PERSISTENT_SESSION"}'::jsonb)`;
   denied(app, socketClaim(sessionA), /CONNECTOR_SESSION_NOT_ACTIVE/);
   psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
   denied(app, socketClaim(sessionB), /CONNECTOR_BOUNDARY_DENIED/);
   psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
-  assert.equal(json(app, socketClaim(sessionB)).available, false);
+  denied(app, socketClaim(sessionB), /CONNECTOR_SESSION_NOT_ACTIVE/);
   const socketTestClaim = (sessionId) => `SELECT app_rls.printing_test_label_job(
     NULL,'${requestId()}','CLAIM','${ids.discoveredPrinter}',
     jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent',
       'deviceFingerprint','printing-device','nonce','test_session_claim_${sessionId.slice(-4)}',
       'issuedAt',now(),'sessionId','${sessionId}'), '{}'::jsonb)`;
   denied(app, socketTestClaim(sessionA), /CONNECTOR_SESSION_NOT_ACTIVE/);
-  assert.equal(json(app, socketTestClaim(sessionB)).available, false);
+  denied(app, socketTestClaim(sessionB), /CONNECTOR_SESSION_NOT_ACTIVE/);
   assert.equal(json(app, advance(sessionB, 1)).lastMessageSeq, 1);
+  assert.equal(json(app, socketClaim(sessionB)).available, false);
+  assert.equal(json(app, socketTestClaim(sessionB)).available, false);
   assert.equal(json(app, sessionSql("CLOSE", sessionB, { reason: "socket_closed" })).state, "DISCONNECTED");
   denied(app, advance(sessionB, 2), /CONNECTOR_SESSION_NOT_ACTIVE/);
   const sessionC = "50000000-0000-4000-8000-000000000903";
@@ -307,6 +310,8 @@ async function main() {
   signedHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
     sessionSigning.buildPrinterAgentSessionPayload({ ...signedHello, messageType: "hello" }));
   const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
+  assert.equal(await signedSessionBoundary.buildNextPrintChunkForSession(liveSession), null,
+    "A signed hello alone must wait for health, without claiming or closing the session");
   const signedHeartbeat = (messageSeq, targetSession = liveSession, health = {}) => {
     const message = { type: "heartbeat", sessionId: targetSession.id, messageSeq,
       printerHealth: { healthVersion: 1, selectedPrinterId: "printing-native", observedAt: new Date().toISOString(),
@@ -505,6 +510,11 @@ async function main() {
     { selectedPrinterId: "wrong-printer" } ]) {
     await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
       signedHeartbeat(++healthSequence, continuousSession, health));
+    denied(app, sessionSql("CHECK", continuousSession.id, {}), /PRINTER_HEALTH_NOT_READY/);
+    assert.equal(await signedSessionBoundary.buildNextPrintChunkForSession(continuousSession), null,
+      "An unavailable printer leaves the authenticated socket idle, not disconnected");
+    denied(app, socketClaim(continuousSession.id), /PRINTER_ATTESTATION_STALE/);
+    denied(app, socketTestClaim(continuousSession.id), /PRINTER_ATTESTATION_STALE/);
     assert.equal(json(app, `SELECT app_rls.printing_readiness(
       '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
       .eligibleForPrinting, false, "Unavailable or stale health must block despite a connected session");

@@ -58,9 +58,12 @@ mock("services/printJobRealtimeService", { publishPrintJobViewEvent: async (even
 let localSelectedPrinterId = "native-printer";
 let localQueueStatus = "Normal";
 let localOnline = true;
+let localStuckJobs = 0;
+let localRetainedJobs = 0;
 mock("local-print-agent/state", { loadAgentState: async () => ({ ...registration, privateKeyPem: privateKey, selectedPrinterId: localSelectedPrinterId }) });
 mock("local-print-agent/cups", { listLocalPrinters: async () => ({ error: null, printers: [
-  { printerId: localSelectedPrinterId, online: localOnline, queueHasErrors: false, queueStatus: localQueueStatus },
+  { printerId: localSelectedPrinterId, online: localOnline, queueHasErrors: false, queueStatus: localQueueStatus,
+    stuckJobCount: localStuckJobs, retainedJobCount: localRetainedJobs },
 ] }) });
 mock("local-print-agent/render", {});
 const signing = require(path.join(dist, "services/printerAgentSigningService"));
@@ -117,6 +120,13 @@ test(`connector continuation preserves authenticated selector ${selectedPrinterI
     assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false);
   }
   localQueueStatus = "Normal";
+  localStuckJobs = 1;
+  assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false, "stuck jobs block queue availability");
+  localStuckJobs = 0;
+  localRetainedJobs = 1;
+  assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false, "retained jobs block queue availability");
+  localRetainedJobs = 0;
+  assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, true);
   localOnline = false;
   assert.equal((await sign("heartbeat")).printerHealth.online, false);
   localOnline = true;

@@ -9440,6 +9440,15 @@ BEGIN
     IF NOT FOUND THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
   END IF;
   current_job:=printer_row.metadata->'pendingLocalAgentTestLabel';
+  IF p_operation='CLAIM' AND nullif(p_connector->>'sessionId','') IS NOT NULL AND NOT coalesce((
+    SELECT pa.metadata->>'sessionId'=p_connector->>'sessionId'
+      AND pa.metadata->>'selectedPrinterId' IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+      AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+      AND pa.metadata->'printerHealth'->>'healthVersion'='1' AND pa.metadata->>'connected'='true'
+    FROM public."PrinterAttestation" pa WHERE pa."printerRegistrationId"=registration.id
+      AND pa.metadata->>'source'='PERSISTENT_SESSION' AND NOT (pa.metadata ? 'operation')
+    ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
+  ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF current_job IS NULL THEN RETURN jsonb_build_object('available',false); END IF;
   expires_at:=nullif(current_job->>'expiresAt','')::timestamp without time zone;
   IF expires_at IS NULL OR expires_at<=now_at THEN
@@ -9857,6 +9866,15 @@ BEGIN
       FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
   END IF;
+  IF p_operation='CLAIM' AND p_details ? 'sessionId' AND NOT coalesce((
+    SELECT pa.metadata->>'sessionId'=p_details->>'sessionId'
+      AND pa.metadata->>'selectedPrinterId' IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
+      AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
+      AND pa.metadata->'printerHealth'->>'healthVersion'='1' AND pa.metadata->>'connected'='true'
+    FROM public."PrinterAttestation" pa WHERE pa."printerRegistrationId"=p_registration_id
+      AND pa.metadata->>'source'='PERSISTENT_SESSION' AND NOT (pa.metadata ? 'operation')
+    ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
+  ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
       INTO job_row FROM public."PrintJob" j
@@ -10183,7 +10201,7 @@ BEGIN
     VALUES(p_session_id,p_payload->>'connectionId',registration.id,registration."agentId",
       registration."deviceFingerprint",p_payload->>'publicKeyFingerprint',selected,
       left(p_payload->>'selectedPrinterName',180),left(p_payload->>'connectorVersion',80),
-      'CONNECTED',0,now_at,now_at,now_at,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
+      'CONNECTED',0,now_at,now_at,'epoch'::timestamp,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
         'licenseeId',registration."licenseeId",'printerId',printer_row.id),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
@@ -10205,8 +10223,17 @@ BEGIN
   IF session_row."connectionState"<>'CONNECTED' OR session_row."revokedAt" IS NOT NULL
      OR session_row."expiresAt" IS NULL OR session_row."expiresAt"<=now_at
   THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
-  IF p_operation='CHECK' AND session_row."lastSignedHeartbeatAt"<=now_at-interval '35 seconds'
-  THEN RAISE EXCEPTION 'CONNECTOR_SESSION_NOT_ACTIVE' USING ERRCODE='42501'; END IF;
+  IF p_operation='CHECK' AND (session_row."lastSignedHeartbeatAt"<=now_at-interval '35 seconds'
+    OR NOT coalesce((
+    SELECT pa.metadata->>'sessionId'=p_session_id
+      AND pa.metadata->>'selectedPrinterId'=selected
+      AND pa."signatureValid" AND pa."trustValid" AND pa."expiresAt">now_at
+      AND pa.metadata->'printerHealth'->>'healthVersion'='1'
+      AND pa.metadata->>'connected'='true'
+    FROM public."PrinterAttestation" pa WHERE pa."printerRegistrationId"=registration.id
+      AND pa.metadata->>'source'='PERSISTENT_SESSION' AND NOT (pa.metadata ? 'operation')
+    ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
+  ),false)) THEN RAISE EXCEPTION 'PRINTER_HEALTH_NOT_READY' USING ERRCODE='42501'; END IF;
   IF p_operation='ADVANCE' THEN
     IF p_payload->>'messageSeq' !~ '^[1-9][0-9]{0,9}$'
     THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
