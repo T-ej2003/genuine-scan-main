@@ -141,6 +141,8 @@ test("Release Train forwards B03 references; Gate starts or completes only throu
   assert.equal(train.on.workflow_dispatch.inputs.b03_compatibility_reference_json.type, "string");
   assert.equal(gate.on.workflow_dispatch.inputs.b03_approval_reference_json.type, "string");
   assert.equal(gate.on.workflow_dispatch.inputs.b03_compatibility_reference_json.type, "string");
+  assert.equal(Object.keys(gate.on.workflow_dispatch.inputs).length, 25);
+  assert.equal(gate.on.workflow_dispatch.inputs.database_install_mode, undefined);
   const trainSteps = Object.values(train.jobs).flatMap(j => j.steps || []);
   assert.ok(trainSteps.some(s => s.run?.includes('["b03_approval_reference_json", process.env.B03_APPROVAL_REFERENCE_JSON]')));
   assert.ok(trainSteps.some(s => s.run?.includes('["b03_compatibility_reference_json", process.env.B03_COMPATIBILITY_REFERENCE_JSON]')));
@@ -150,7 +152,7 @@ test("Release Train forwards B03 references; Gate starts or completes only throu
   assert.equal(execute.env.B03_COMPATIBILITY_REFERENCE_JSON, "${{ inputs.b03_compatibility_reference_json }}");
   assert.match(execute.run, /b03_mode=start/); assert.match(execute.run, /b03_mode=complete/);
   assert.match(execute.run, /--mode "\$b03_mode"/); assert.match(execute.run, /--b03-request/);
-  const branch = execute.run.slice(execute.run.indexOf('if [[ "$DATABASE_INSTALL_MODE"'), execute.run.indexOf('elif [[ "$DATABASE_INSTALL_MODE"'));
+  const branch = execute.run.slice(execute.run.indexOf('if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]'), execute.run.indexOf('          else\n', execute.run.indexOf('if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]')));
   assert.doesNotMatch(branch, /aws ecs|--task-definition-arn|--overrides/);
   assert.match(branch, /b03_output="\$PRODUCTION_RLS_RELEASE_RECEIPT_PATH"/);
   assert.match(branch, /--compatibility-reference/);

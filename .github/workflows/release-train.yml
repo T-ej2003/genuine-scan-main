@@ -482,6 +482,14 @@ jobs:
             dispatch_args+=(--historical-runtime-evidence "$historical_file" --historical-runtime-evidence-sha256 "$HISTORICAL_RUNTIME_EVIDENCE_SHA256")
           fi
           node scripts/aws/production-release-dispatch-contract.mjs "${dispatch_args[@]}"
+          if [[ "$DATABASE_INSTALL_MODE" == incremental-b03 ]]; then
+            test -n "$B03_APPROVAL_REFERENCE_JSON"
+          elif [[ "$DATABASE_INSTALL_MODE" == clean-room ]]; then
+            test -z "$B03_APPROVAL_REFERENCE_JSON$B03_COMPATIBILITY_REFERENCE_JSON"
+          else
+            echo "::error::Unsupported database installation mode."
+            exit 1
+          fi
           rm -f "$authorization_file" "$web_authorization_file"
           trap - EXIT
 
@@ -499,7 +507,6 @@ jobs:
             ["normal_image_authorization_json", transport.json],
             ["normal_image_authorization_sha256", transport.sha256],
             ["web_image_authorization_json", process.env.WEB_IMAGE_AUTHORIZATION_JSON],
-            ["database_install_mode", process.env.DATABASE_INSTALL_MODE],
             ["b03_approval_reference_json", process.env.B03_APPROVAL_REFERENCE_JSON],
             ["b03_compatibility_reference_json", process.env.B03_COMPATIBILITY_REFERENCE_JSON],
             ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],

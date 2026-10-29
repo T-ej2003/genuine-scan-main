@@ -40,14 +40,6 @@ on:
         description: "Canonical signed web-image authorization when canonical impact requires web publication."
         required: false
         type: string
-      database_install_mode:
-        description: "Use the exact existing-database B03 predecessor, or retain the clean-room installer."
-        required: false
-        type: choice
-        options:
-          - clean-room
-          - incremental-b03
-        default: clean-room
       b03_approval_reference_json:
         description: "Compact source-bound reference to the published B03 approval; required for incremental-b03."
         required: false
@@ -603,10 +595,11 @@ jobs:
       - name: Full RLS verification and PostgreSQL 18.4 certification
         env:
           MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/full-rls-certification/disposable-certification-result.json
+          B03_APPROVAL_REFERENCE_JSON: ${{ inputs.b03_approval_reference_json }}
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
-          if [[ "${{ inputs.release_mode }}" == "backend-health-recovery" || "${{ inputs.database_install_mode }}" == "incremental-b03" ]]; then
+          if [[ "${{ inputs.release_mode }}" == "backend-health-recovery" || -n "$B03_APPROVAL_REFERENCE_JSON" ]]; then
             GITHUB_TOKEN="${{ github.token }}" TARGET_SHA="$DEPLOY_SHA" \
               node scripts/github/assert-backend-recovery-ci-certification.mjs
           else
@@ -936,7 +929,6 @@ jobs:
           ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
           WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
           WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
-          DATABASE_INSTALL_MODE: ${{ inputs.database_install_mode }}
           B03_APPROVAL_REFERENCE_JSON: ${{ inputs.b03_approval_reference_json }}
           B03_COMPATIBILITY_REFERENCE_JSON: ${{ inputs.b03_compatibility_reference_json }}
         run: |
@@ -966,7 +958,11 @@ jobs:
             --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "$ACTIVATION_BINDING_FILE" \
             --binding-sha256 "$ACTIVATION_BINDING_SHA256"
-          if [[ "$DATABASE_INSTALL_MODE" == "incremental-b03" ]]; then
+          if [[ -n "$B03_COMPATIBILITY_REFERENCE_JSON" && -z "$B03_APPROVAL_REFERENCE_JSON" ]]; then
+            echo "::error::B03 completion evidence requires a B03 approval reference."
+            exit 1
+          fi
+          if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]; then
             node --input-type=module -e '
               import fs from "node:fs";
               const bytes = process.env.B03_APPROVAL_REFERENCE_JSON || "";
@@ -995,15 +991,12 @@ jobs:
               echo "::error::B03 initiated. Run the governed app-only compatibility verifier after completion, then resume with its authenticated artifact reference."
               exit 1
             fi
-          elif [[ "$DATABASE_INSTALL_MODE" == "clean-room" ]]; then
-            node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
           else
-            echo "::error::Database installation mode is unsupported."
-            exit 1
+            node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
           fi
 
       - name: Preserve B03 initiation evidence
-        if: ${{ always() && inputs.database_install_mode == 'incremental-b03' }}
+        if: ${{ always() && inputs.b03_approval_reference_json != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: b03-broker-initiation-attempt-${{ github.run_attempt }}

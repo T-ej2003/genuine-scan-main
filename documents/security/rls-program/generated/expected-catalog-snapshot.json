@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f",
+  "sourceContractSha256": "bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6",
   "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
   "sourceContractInputs": [
     {
@@ -262,11 +262,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "e9939253c43903c116ff611ddf69e4cab18c7976120d0781fa9823edb8707843"
+      "sha256": "a3a16b9dc708369bb6d84fe65e137d1a4523b65436f841e1801712f6be9ad1a3"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "151889ac6d6dc0c032eeefd1ae91b3a02b467651a71a00cc6fba67ae47cf7b9a"
+      "sha256": "908f13bfa327ba0d6b6c34fafcae4cb91cacc326035cbc6eaa5fe2f5bc81ac00"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
@@ -12631,55 +12631,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:ee212b17f478cb7a53ad81d4887aa6450f75a54ee5e243fee09e1dc64eb2be1f"
+      "marker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6"
     }
   ]
 }
