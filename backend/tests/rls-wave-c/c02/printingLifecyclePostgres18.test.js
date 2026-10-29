@@ -532,6 +532,21 @@ async function main() {
       '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
       .eligibleForPrinting, true, "Fresh signed health must restore readiness");
   }
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
+    WHERE metadata->>'sessionId'='${continuousSession.id}'`);
+  const futureHealth = signedHeartbeat(++healthSequence, continuousSession,
+    { observedAt: new Date(Date.now()+60_000).toISOString() });
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, futureHealth);
+  denied(app, sessionSql("CHECK", continuousSession.id, {}), /PRINTER_HEALTH_NOT_READY/);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, false, "Future health cannot authorize printing");
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+    signedHeartbeat(++healthSequence, continuousSession,
+      { observedAt: new Date(Date.now()+1_000).toISOString() }));
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, true, "Corrected workstation time must recover without waiting for the future timestamp");
   const staleHealth = signedHeartbeat(++healthSequence, continuousSession,
     { observedAt: new Date(Date.now()-60_000).toISOString() });
   await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, staleHealth), /verification is unavailable/);

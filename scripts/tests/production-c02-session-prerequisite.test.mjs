@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 import test from "node:test";
@@ -66,6 +67,12 @@ test("C02 task parses the actual node -e argument layout", () => {
   assert.deepEqual(runtime.parseTaskArguments(argv),
     { encoded: "encoded", payloadHash: "digest", hostname: "test.invalid" });
   assert.throws(() => runtime.parseTaskArguments([process.execPath, "encoded", "digest"]));
+  const task = buildC02SessionTask({ sourceSha, hostname: "test.invalid" });
+  const launched = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
+    { cwd: os.tmpdir(), encoding: "utf8", env: { ...process.env, MSCQR_C02_ADMIN_PASSWORD: "" } });
+  assert.equal(launched.status, 1, launched.error?.message || launched.stderr);
+  assert.equal(launched.stderr.trim(), '{"status":"blocked","reason":"c02-prerequisite-failed-closed"}',
+    "The ECS eval source must run without resolving a repository-relative dependency");
 });
 
 test("C02 installation requires migration and FORCE RLS, and refuses partial predecessors", async () => {

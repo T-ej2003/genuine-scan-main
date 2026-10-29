@@ -3,7 +3,14 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const { gunzipSync } = require("node:zlib");
-const { canonicalJson } = require("./production-printing-routine-delta-executor.cjs");
+// This source is executed through `node -e` in the pinned RLS image, so it
+// must not resolve relative imports against that image's working directory.
+const canonicalJson = (value) => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) =>
+    `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+};
 
 const database = "mscqr_production_rls_green_phase2";
 const admin = "mscqr_prod_admin";

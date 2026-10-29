@@ -28,8 +28,8 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
   // SHA-256 of pg_proc.prosrc from the generated C02 session function for
   // each governed role prefix. Source-contract tests regenerate both values.
   const expectedBodySha256 = rolePrefix === "mscqr_prd_rls_phase2_"
-    ? "fbd1ca0ca682f4fcd97488ece1f7da7fafa1acbf46f96b7d6fc6264567c9bfb6"
-    : "d9b9b313b443da6abca2d4f3e0bf6290cbc9005735d1d7381e4e3def769329cc";
+    ? "c897b34f2b345347f815ca18f7240b076fb75a87e6618dd811df3037abe4fea3"
+    : "29241e3e433fedc2e5632b9016b8cfdbc41cdcb5d05e08a5987be6f833af825c";
   const policyDigests = rolePrefix === "mscqr_prd_rls_phase2_"
     ? ["b78bbd15b05c261a07dcaa0ba070f630758d9f3122649294e4fb6569b985ff7a",
       "e799b9179ad2d9faff7a59acd1b8b5cfe4d5b26074353cf5b7d03e6fa0e5144b",
