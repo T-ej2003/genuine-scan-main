@@ -87,13 +87,13 @@ export function assertWebImageEvidence(evidence, { signature, verify, now = new 
 
 export function buildWebImageAuthorization({ sourceSha, evidence, signature, imageImpact, reviewer, now, verify } = {}) {
   assertWebImageEvidence(evidence, { signature, verify, now });
-  if (sourceSha !== evidence.sourceSha || reviewer !== evidence.reviewer || !imageImpact?.webPublicationRequired || imageImpact.toolingSha !== sourceSha || canonicalSha256(imageImpact) !== evidence.imageImpactSha256) throw new Error("Web authorization source, reviewer, or image-impact binding is invalid.");
+  if (sourceSha !== evidence.sourceSha || reviewer !== evidence.reviewer || typeof imageImpact?.webPublicationRequired !== "boolean" || imageImpact.toolingSha !== sourceSha || canonicalSha256(imageImpact) !== evidence.imageImpactSha256) throw new Error("Web authorization source, reviewer, or image-impact binding is invalid.");
   const authorization = { schemaVersion: 1, operation: "PRODUCTION_WEB_IMAGE_AUTHORIZATION", valid: true, sourceSha, account: WEB_RELEASE.account, region: WEB_RELEASE.region, repository: WEB_RELEASE.repository, imageDigest: evidence.imageDigest, imageRef: evidence.imageRef, evidenceSha256: evidence.evidenceSha256, signatureSha256: canonicalSha256(signature), imageImpactSha256: evidence.imageImpactSha256, reviewer, createdAt: evidence.createdAt, expiresAt: evidence.expiresAt, evidence, signature, imageImpact };
   authorization.authorizationSha256 = canonicalSha256(authorizationPayload(authorization)); return Object.freeze(authorization);
 }
 
 export function assertWebImageAuthorization(value, { sourceSha, now = new Date().toISOString(), verify, minimumRemainingMs } = {}) {
-  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_WEB_IMAGE_AUTHORIZATION" || value.valid !== true || value.sourceSha !== sourceSha || value.evidence?.sourceSha !== value.sourceSha || value.createdAt !== value.evidence?.createdAt || value.expiresAt !== value.evidence?.expiresAt || value.authorizationSha256 !== canonicalSha256(authorizationPayload(value)) || value.imageRef !== value.evidence?.imageRef || value.imageDigest !== value.evidence?.imageDigest || value.evidenceSha256 !== value.evidence?.evidenceSha256 || value.signatureSha256 !== canonicalSha256(value.signature) || value.imageImpactSha256 !== canonicalSha256(value.imageImpact) || value.imageImpact?.webPublicationRequired !== true || value.imageImpact?.toolingSha !== sourceSha || value.reviewer !== value.evidence?.reviewer) throw new Error("Web image authorization is invalid.");
+  if (value?.schemaVersion !== 1 || value.operation !== "PRODUCTION_WEB_IMAGE_AUTHORIZATION" || value.valid !== true || value.sourceSha !== sourceSha || value.evidence?.sourceSha !== value.sourceSha || value.createdAt !== value.evidence?.createdAt || value.expiresAt !== value.evidence?.expiresAt || value.authorizationSha256 !== canonicalSha256(authorizationPayload(value)) || value.imageRef !== value.evidence?.imageRef || value.imageDigest !== value.evidence?.imageDigest || value.evidenceSha256 !== value.evidence?.evidenceSha256 || value.signatureSha256 !== canonicalSha256(value.signature) || typeof value.imageImpact?.webPublicationRequired !== "boolean" || value.imageImpact?.toolingSha !== sourceSha || value.reviewer !== value.evidence?.reviewer) throw new Error("Web image authorization is invalid.");
   assertWebImageEvidence(value.evidence, { signature: value.signature, verify, now });
   if (minimumRemainingMs !== undefined && (!Number.isSafeInteger(minimumRemainingMs) || minimumRemainingMs < 0 || nowMs(value.expiresAt, "Web authorization expiry") - nowMs(now, "Web authorization validation time") <= minimumRemainingMs)) throw new Error("Web image authorization does not have enough remaining lifetime for the governed release.");
   return true;
@@ -101,8 +101,9 @@ export function assertWebImageAuthorization(value, { sourceSha, now = new Date()
 
 export function assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization, webAuthorization, webPublicationRequired, verifyWeb, now, minimumWebAuthorizationRemainingMs } = {}) {
   if (stageBAuthorization?.sourceSha !== sourceSha) throw new Error("Stage-B authorization source does not match coordinated release source.");
-  if (!webPublicationRequired) {
-    if (webAuthorization !== undefined) throw new Error("Web authorization is forbidden when authenticated Stage-B impact does not require web publication.");
+  if (stageBAuthorization.imageReuseEvidence?.webPublicationRequired !== webPublicationRequired) throw new Error("Web publication decision differs from authenticated Stage-B impact.");
+  if (webAuthorization === undefined) {
+    if (webPublicationRequired) throw new Error("Web-impacting release requires web image authorization.");
     return Object.freeze({ sourceSha, webRequired: false, stageBAuthorizationSha256: stageBAuthorization.authorizationSha256 });
   }
   if (webAuthorization?.imageImpactSha256 !== canonicalSha256(stageBAuthorization.imageReuseEvidence)) throw new Error("Web authorization does not match the authenticated Stage-B image impact.");

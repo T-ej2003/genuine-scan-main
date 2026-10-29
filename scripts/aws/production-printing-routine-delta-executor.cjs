@@ -347,7 +347,7 @@ async function main({ argv = process.argv, env = process.env, execArgv = process
   setStage(stages.SUCCESS_EVIDENCE); console.log(evidence);
 }
 
-module.exports = { authenticateSubscriptionProjection, canonicalJson, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, readRdsSubscriptionState, stages, validateInput };
+module.exports = { authenticateSubscriptionProjection, canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue, decodeInput, errorClasses, executePrintingRoutineDeltaTransaction, failureRecord, main, readRdsSubscriptionState, stages, validateInput };
 
 if (module.id === "[eval]") main().catch((error) => {
   const record = error instanceof PrintingRoutineDeltaFailure ? error.record : failureRecord(stages.ARGV_VALIDATION, error);

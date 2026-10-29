@@ -842,6 +842,21 @@ export function buildStageBDeploymentCapabilityGraph() {
     sourceFunction: entry.id, action: entry.action, resources: entry.resources, context: entry.context || [], classification: "CHECKER_APPROVAL_PUBLICATION",
     probe: "structural", probeIds: [], policy: checkerAuthority(entry), required: true, mutation: true,
   }));
+  const checkerPolicy = fs.readFileSync(path.join(root, checkerPolicyPath), "utf8");
+  const taskReadStatement = checkerPolicy.split("\n").find((line) => line.includes('Sid = "ReadNativeStageBTaskDefinitions"'));
+  if (!taskReadStatement?.includes('Action = "ecs:DescribeTaskDefinition"') || !taskReadStatement.includes('Resource = "*"')
+      || !taskReadStatement.includes('"aws:RequestedRegion" = "eu-west-2"')) throw new Error("B03 approval task read lacks reviewed checker IAM authority.");
+  for (const [id, sourceFile] of [
+    ["checker-b03-approval-task-definition-read", "scripts/aws/create-production-green-stage-b-approval.mjs"],
+    ["checker-b03-publication-task-definition-read", "scripts/aws/publish-production-green-stage-b-approval.mjs"],
+  ]) checkerCapabilities.push({
+    id, phase: "approval-publication", identity: "INDEPENDENT_CHECKER", executor: "aws-cli", sourceFile,
+    sourceFunction: id, action: "ecs:DescribeTaskDefinition", resources: ["*"],
+    context: { account: STAGE_B.account, region: STAGE_B.region }, classification: "CHECKER_B03_TASK_READ",
+    probe: "structural", probeIds: [], policy: { sourceFile: checkerPolicyPath, sid: "ReadNativeStageBTaskDefinitions",
+      livePolicyArn: null, expectedVersion: "protected-main-source", expectedPolicySha256: sha256(Buffer.from(checkerPolicy)) },
+    required: true, mutation: false,
+  });
   checkerCapabilities.push({
     id: "administrator-release-preflight-trust-attestation-identify", phase: "release-preflight-checker-trust-attestation", identity: "ADMINISTRATOR", executor: "aws-cli",
     sourceFile: "scripts/aws/production-release-preflight-checker-attestation.mjs", sourceFunction: "runReleasePreflightCheckerTrustAttestationCli",

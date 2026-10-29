@@ -14,6 +14,7 @@ import { STAGE_B, STAGE_B_MODES, canonicalJson } from "./production-green-stage-
 import { assertStageBRecoveryRefreshStatus, resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "./stage-b-deployment-contract.mjs";
 import { assertStageBBrokerPackageManifest } from "./package-production-green-stage-b-broker.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
+import { B03_TASK_ADDRESS, assertB03TaskPlan, b03DefinitionFromContainer } from "./production-b03-plan-contract.mjs";
 import { assertStageAStateIdentity, parseAuthenticatedStateBytes, STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_PREREQUISITES_GENERATOR, STAGE_A_PREREQUISITES_SCHEMA_VERSION, STAGE_A_STATE_IDENTITY_VERSION, stageAStateSemanticSha256, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
 import { assertStageBArtifactPath, assertStageBPrivateFile, ensureStageBPrivateDirectory, writeStageBPrivateFilesAtomic } from "./stage-b-artifact-contract.mjs";
 import { assertCanonicalTerraformSerialNumber, assertVerifiedStageBRecovery, createStageBRecoveryKmsVerifier } from "./stage-b-partial-apply-recovery-contract.mjs";
@@ -184,6 +185,23 @@ function resourceInstances(state, type, name) {
   return (state.resources || []).filter((resource) => resource.type === type && resource.name === name).flatMap((resource) => resource.instances || []);
 }
 
+export function b03DefinitionFromAuthenticatedState(state, { toolingSha, imageReleaseSha } = {}) {
+  const resources = (state.resources || []).filter((resource) => resource.type === "aws_ecs_task_definition" && resource.name === "b03");
+  if (!resources.length) return null;
+  if (resources.length !== 1 || !isRootManagedTaskDefinition(resources[0]) || resources[0].instances?.length !== 1
+      || resources[0].instances[0].index_key !== 0 || resources[0].instances[0].deposed !== undefined)
+    throw new Error("Authenticated B03 state has an unexpected task topology.");
+  const attributes = resources[0].instances[0].attributes;
+  const definition = b03DefinitionFromContainer(parseContainerDefinitions(attributes, "Authenticated B03 state")[0]);
+  assertB03TaskPlan({ address: B03_TASK_ADDRESS, type: "aws_ecs_task_definition",
+    change: { actions: ["no-op"], before: attributes, after: attributes } }, { variables: {
+      account_id: { value: STAGE_B.account }, aws_region: { value: STAGE_B.region }, deployment_environment: { value: "production" },
+      tooling_sha: { value: toolingSha }, image_release_sha: { value: imageReleaseSha },
+      b03_executor_definition_json: { value: JSON.stringify(definition) },
+    } });
+  return definition;
+}
+
 function taskDefinitionFamily(kind, category) {
   const address = category === "executor" ? `aws_ecs_task_definition.executor["${kind}"]` : `aws_ecs_task_definition.candidate["${kind}"]`;
   return STAGE_B_TASK_DEFINITION_FAMILIES[address];
@@ -215,6 +233,11 @@ export function validateCurrentTaskDefinitionState(resources) {
   const seenDeposed = new Set();
   for (const resource of resources.filter(({ type }) => type === "aws_ecs_task_definition")) {
     if (!isRootManagedTaskDefinition(resource)) throw new Error(`Terraform state task-definition resource is not a root managed resource: ${resource.name}.`);
+    if (resource.name === "b03") {
+      if (resource.instances?.length !== 1 || resource.instances[0].index_key !== 0 || resource.instances[0].deposed !== undefined)
+        throw new Error("Terraform state B03 task topology is malformed.");
+      continue;
+    }
     if (!currentTaskDefinitionCollections.has(resource.name)) {
       if (retainedTaskDefinitionCollections.has(resource.name)) continue;
       throw new Error(`Terraform state contains an unexpected Stage B task-definition collection: ${resource.name}.`);
@@ -457,6 +480,7 @@ export function renderTfvars(values) {
     `canary_image = ${quote(values.canary_image)}`,
     `read_only_canary_image = ${quote(values.read_only_canary_image)}`,
     `stage_a_read_only_canary_database_secret_arn = ${quote(values.stage_a_read_only_canary_database_secret_arn)}`,
+    `b03_executor_definition_json = ${values.b03_executor_definition_json == null ? "null" : quote(JSON.stringify(values.b03_executor_definition_json))}`,
     `retained_candidate_task_definitions = ${renderRetained(values.retained_candidate_task_definitions, "kind")}`,
     `retained_executor_task_definitions = ${renderRetained(values.retained_executor_task_definitions, "mode")}`,
   ];
@@ -579,9 +603,13 @@ function validateTfvarsValues(values) {
   for (const field of ["tooling_sha", "image_release_sha"]) if (!/^[a-f0-9]{40}$/.test(values[field] || "")) throw new Error(`${field} is malformed.`);
   for (const field of ["canonical_image_evidence_sha256", "source_contract_sha256", "migration_set_digest", "package_checksum_sha256"]) requireDigest(values[field], field);
   for (const field of ["backend_image", "worker_image", "executor_image", "canary_image", "read_only_canary_image"]) if (!imageUriPattern.test(values[field] || "")) throw new Error(`${field} is not an immutable Stage B image reference.`);
+  if (values.b03_executor_definition_json != null) {
+    const expected = b03DefinitionFromContainer(values.b03_executor_definition_json.containerDefinitions?.[0]);
+    if (canonicalJson(values.b03_executor_definition_json) !== canonicalJson(expected)) throw new Error("B03 tfvars definition is not canonical.");
+  }
 }
 
-export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, successorBrokerPackageStatePath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, brokerPackageHistoricalSourceSha, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
+export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, imageEvidenceBytes, imageEvidenceSignatureBytes, stateBackup, stageAInput, stageAStateBackup, brokerPackagePath, successorBrokerPackageStatePath, b03DefinitionPath, toolingSha, toolingTreeSha256, imageReleaseSha, workflowRunId, canonicalArtifactSha256, environment = STAGE_B_EXPECTED_ENVIRONMENT, now = new Date().toISOString(), verifySignature = verifyImageEvidenceSignature, checksumsFile = checksumsPath, brokerPackageHistoricalSourceSha, outputPath, bindingReportPath, allowOverwrite = false, recoveryOnly = false, partialApplyRecovery = false, freshImagePartialApplyRecovery = false, recovery } = {}) {
   if (!/^[a-f0-9]{40}$/.test(toolingSha || "") || !digestPattern.test(toolingTreeSha256 || "") || !/^[a-f0-9]{40}$/.test(imageReleaseSha || "")) throw new Error("Tooling, tooling-tree, or image-release identity is malformed.");
   const recoveryMode = resolveStageBRecoveryMode({ recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery });
   const partialRecoveryMode = recoveryMode === "PARTIAL_APPLY_RECOVERY" || recoveryMode === "FRESH_IMAGE_PARTIAL_APPLY_RECOVERY";
@@ -617,6 +645,16 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
   const stageAState = parseAuthenticatedStateBytes(stageAStateBytes);
   const stageAPrerequisiteInput = validateStageBStageAInput(readJson(stageAInput), { toolingSha, toolingTreeSha256 });
   const stageAStateSha256 = assertStageAInputMatchesStateBackup(stageAPrerequisiteInput, stageAStateBytes, stageAState);
+  const retainedB03 = b03DefinitionFromAuthenticatedState(state, { toolingSha, imageReleaseSha });
+  if (b03DefinitionPath) assertAbsoluteFile(b03DefinitionPath, "B03 definition");
+  const requestedB03 = b03DefinitionPath ? readJson(b03DefinitionPath) : null;
+  if (requestedB03) {
+    const expected = b03DefinitionFromContainer(requestedB03.containerDefinitions?.[0]);
+    if (canonicalJson(requestedB03) !== canonicalJson(expected) || expected.containerDefinitions[0].image !== images.backend_image.value
+        || expected.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA")?.value !== toolingSha)
+      throw new Error("Requested B03 executor is not bound to current source and backend image.");
+    if (retainedB03 && canonicalJson(retainedB03) !== canonicalJson(requestedB03)) throw new Error("Existing B03 executor cannot be replaced.");
+  }
   const contract = deriveContractDigests({ file: checksumsFile }); const brokerBytes = fs.readFileSync(brokerPackagePath);
   const brokerManifest = assertStageBBrokerPackageManifest({ brokerPackagePath, repositoryRoot: root, historicalSourceSha: brokerPackageHistoricalSourceSha, ...(recoveryOnly ? {} : { expectedToolingSha: toolingSha, expectedToolingTreeSha256: toolingTreeSha256 }) });
   const values = {
@@ -628,6 +666,7 @@ export function generateStageBTfvars({ imageEvidence, imageEvidenceSignature, im
     ...(successorBrokerPackageStatePath ? { broker_package_bytes_path: path.resolve(brokerPackagePath) } : {}),
     tooling_sha: toolingSha, image_release_sha: imageReleaseSha, canonical_image_evidence_sha256: evidenceSha256, source_contract_sha256: contract.sourceContractSha256, migration_set_digest: contract.migrationSetDigest, package_checksum_sha256: contract.packageChecksumSha256,
     backend_image: images.backend_image.value, worker_image: images.worker_image.value, executor_image: images.executor_image.value, canary_image: images.canary_image.value, read_only_canary_image: images.read_only_canary_image.value, stage_a_read_only_canary_database_secret_arn: stageAPrerequisiteInput.stageAReadOnlyCanaryDatabaseSecretArn,
+    b03_executor_definition_json: retainedB03 || requestedB03,
     retained_candidate_task_definitions: retained.retainedCandidateTaskDefinitions, retained_executor_task_definitions: retained.retainedExecutorTaskDefinitions,
     stage_b_recovery_only: recoveryOnly,
     stage_b_recovery_alias_target_version: recoveryOnly ? recoveryEvidence.report.currentObservedEvidence.configuredDesiredVersion : null,
@@ -690,6 +729,7 @@ export function parseCli(argv = process.argv.slice(2)) {
     imageEvidence: requiredOption(argv, "--image-evidence"), imageEvidenceSignature: requiredOption(argv, "--image-evidence-signature"), stateBackup: requiredOption(argv, "--state-backup"), stageAInput: requiredOption(argv, "--stage-a-input"), stageAStateBackup: requiredOption(argv, "--stage-a-state-backup"), brokerPackagePath: requiredOption(argv, "--broker-package"),
     toolingSha: requiredOption(argv, "--tooling-sha"), toolingTreeSha256: requiredOption(argv, "--tooling-tree-sha256"), imageReleaseSha: requiredOption(argv, "--image-release-sha"), workflowRunId: requiredOption(argv, "--workflow-run-id"), canonicalArtifactSha256: requiredOption(argv, "--canonical-artifact-sha256"), environment: requiredOption(argv, "--environment"), outputPath: requiredOption(argv, "--output"), bindingReportPath: requiredOption(argv, "--binding-report"), allowOverwrite: argv.includes("--allow-overwrite"), recoveryOnly, partialApplyRecovery, freshImagePartialApplyRecovery,
   };
+  if (argv.includes("--b03-definition")) result.b03DefinitionPath = requiredOption(argv, "--b03-definition");
   if (recoveryOnly) result.recovery = {
     refreshReportPath: requiredOption(argv, "--refresh-report"), refreshReportSha256: requiredOption(argv, "--refresh-report-sha256"),
     attestationPath: requiredOption(argv, "--recovery-attestation"), attestationSha256: requiredOption(argv, "--recovery-attestation-sha256"),

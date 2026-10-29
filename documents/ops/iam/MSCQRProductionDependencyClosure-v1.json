@@ -1730,6 +1730,44 @@
       "capabilityGraphPresent": true
     },
     {
+      "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
+      "action": "ecs:DescribeTaskDefinition",
+      "capabilityId": "checker-b03-approval-task-definition-read",
+      "identity": "INDEPENDENT_CHECKER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
+      "action": "ecs:DescribeTaskDefinition",
+      "capabilityId": "checker-b03-publication-task-definition-read",
+      "identity": "INDEPENDENT_CHECKER",
+      "resources": [
+        "*"
+      ],
+      "reachableMode": [
+        "BACKEND_HEALTH_RECOVERY_LEGACY_RUNTIME"
+      ],
+      "executionPrincipal": "INDEPENDENT_CHECKER",
+      "sourcePolicyPresent": true,
+      "generatedManifestPresent": true,
+      "capabilityGraphPresent": true,
+      "administratorPreflightPresent": true,
+      "runtimePreflightPresent": true,
+      "negativeTestPresent": true
+    },
+    {
       "sourceFile": "scripts/aws/reconcile-production-workspace-state-policy.mjs",
       "action": "sts:GetCallerIdentity",
       "capabilityId": "workspace-state-reconciliation-identify",

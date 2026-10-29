@@ -11,6 +11,7 @@ import {
   validateStageBApproval,
 } from "./production-green-stage-b-contract.mjs";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
+import { decodeB03Approval, authenticateB03BrokerRequest, B03_BROKER } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/b03-approval.mjs";
 
 const CHECKER_CALLER = new RegExp(`^arn:aws:sts::${STAGE_B.account}:assumed-role/mscqr-production-rls-independent-checker/[A-Za-z0-9+=,.@_-]{2,64}$`);
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
@@ -23,15 +24,27 @@ const assertSourceSha = (value) => {
   if (!/^[a-f0-9]{40}$/.test(value)) throw new Error("Source SHA is not an exact commit.");
   return value;
 };
-const assertCleanSource = () => {
+const assertCleanSource = (operation, expectedSourceSha) => {
   if (String(execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], { encoding: "utf8" })).trim()) throw new Error("Publisher requires a clean source checkout.");
+  if (operation !== B03_BROKER.mode) return;
+  if (currentSourceSha() !== expectedSourceSha || String(execFileSync("git", ["status", "--porcelain", "--untracked-files=all"], { encoding: "utf8" })).trim()) throw new Error("B03 publisher source advanced or is dirty");
+  const branch = JSON.parse(execFileSync("gh", ["api", "repos/T-ej2003/genuine-scan-main/branches/main"], { encoding: "utf8" }));
+  if (branch.commit?.sha !== currentSourceSha() || branch.protected !== true) throw new Error("Publisher requires current protected main.");
 };
 
-export async function prepareStageBApprovalPublication({ approvalBytes, expectedSourceSha, callerArn, now = new Date(), verifySignature }) {
+export async function prepareStageBApprovalPublication({ approvalBytes, expectedSourceSha, callerArn, now = new Date(), verifySignature, describeTaskDefinition }) {
   if (!Buffer.isBuffer(approvalBytes) || !approvalBytes.length) throw new Error("Approval artifact is missing.");
   let approval;
   try { approval = JSON.parse(approvalBytes.toString("utf8")); } catch { throw new Error("Approval artifact is not valid JSON."); }
   const sourceSha = assertSourceSha(expectedSourceSha);
+  if (approval.operation === B03_BROKER.mode) {
+    const request = decodeB03Approval(approvalBytes);
+    if (!CHECKER_CALLER.test(callerArn) || request.approval.checkerIdentity !== callerArn || request.approval.sourceSha !== sourceSha) throw new Error("B03 publication checker/source mismatch");
+    const validated = await authenticateB03BrokerRequest(request, { now, verifySignature, describeTaskDefinition });
+    return { approval: request.approval, approvalBytes, approvalSha256: sha256(approvalBytes),
+      approvalContractSha256: validated.approvalContractSha256,
+      clientRequestToken: approvalPublicationClientRequestToken({ approvalId: request.approval.approvalId, releaseSha: sourceSha }) };
+  }
   if (!CHECKER_CALLER.test(callerArn) || approval.checkerIdentity !== callerArn) throw new Error("Only the exact independent checker session may publish the approval.");
   if (approval.approvalId !== stageBApprovalIdForReleaseSha(sourceSha) || approval.releaseSha !== sourceSha) throw new Error("Approval identity is not bound to the current release.");
   if (!verifySignature) throw new Error("Approval signature verifier is required.");
@@ -45,17 +58,18 @@ export async function prepareStageBApprovalPublication({ approvalBytes, expected
   };
 }
 
-export async function publishStageBApproval({ approvalPath, expectedSourceSha = currentSourceSha(), callerArn, now = new Date(), readFile = fs.readFileSync, verifySignature, putSecretValue, assertSource = assertCleanSource }) {
+export async function publishStageBApproval({ approvalPath, expectedSourceSha = currentSourceSha(), callerArn, now = new Date(), readFile = fs.readFileSync, verifySignature, describeTaskDefinition, putSecretValue, assertSource = assertCleanSource }) {
   assertSource();
-  const prepared = await prepareStageBApprovalPublication({ approvalBytes: readFile(approvalPath), expectedSourceSha, callerArn, now, verifySignature });
+  const prepared = await prepareStageBApprovalPublication({ approvalBytes: readFile(approvalPath), expectedSourceSha, callerArn, now, verifySignature, describeTaskDefinition });
   if (!putSecretValue) throw new Error("Approval publisher requires a Secrets Manager writer.");
+  assertSource(prepared.approval.operation === "PRODUCTION_B03_BROKER_APPROVAL" ? B03_BROKER.mode : undefined, expectedSourceSha);
   const response = await putSecretValue({
     SecretId: STAGE_B.approvalSecretArn,
     SecretString: prepared.approvalBytes.toString("utf8"),
     ClientRequestToken: prepared.clientRequestToken,
   });
   if (response.ARN !== STAGE_B.approvalSecretArn || response.VersionId !== prepared.clientRequestToken || !response.VersionStages?.includes("AWSCURRENT")) throw new Error("Secrets Manager publication response is outside the reviewed contract.");
-  return { status: "published", secretArn: response.ARN, versionId: response.VersionId, versionStages: response.VersionStages, approvalId: prepared.approval.approvalId, sourceSha: prepared.approval.releaseSha, approvalSha256: prepared.approvalSha256, approvalContractSha256: prepared.approvalContractSha256 };
+  return { status: "published", secretArn: response.ARN, versionId: response.VersionId, versionStages: response.VersionStages, approvalId: prepared.approval.approvalId, sourceSha: prepared.approval.sourceSha || prepared.approval.releaseSha, approvalSha256: prepared.approvalSha256, approvalContractSha256: prepared.approvalContractSha256 };
 }
 
 const runAwsJson = (run, args) => JSON.parse(run([...args, "--output", "json", "--no-cli-pager"]));
@@ -78,7 +92,8 @@ async function run(argv = process.argv.slice(2)) {
   if (sourceIndex < 0 || argv[sourceIndex + 1] !== PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION) throw new Error("Approval publication requires the inherited independent-checker session credential source.");
   const runAws = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION });
   const identity = await callerArn(runAws);
-  const result = await publishStageBApproval({ approvalPath: argv[index + 1], callerArn: identity, verifySignature: verifySignature(runAws), putSecretValue: putSecretValue(runAws) });
+  const result = await publishStageBApproval({ approvalPath: argv[index + 1], callerArn: identity, verifySignature: verifySignature(runAws),
+    describeTaskDefinition: async task => runAwsJson(runAws, ["ecs", "describe-task-definition", "--task-definition", task, "--include", "TAGS"]), putSecretValue: putSecretValue(runAws) });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 

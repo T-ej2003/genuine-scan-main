@@ -2,6 +2,7 @@ import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs"
 import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
 import { TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE, assertPrerequisitePlan } from './stage-b-release-prerequisites.mjs';
+import { B03_TASK_ADDRESS, assertB03TaskPlan, b03TaskArnFromPlan } from './production-b03-plan-contract.mjs';
 
 const exactActions = (actual, expected) => JSON.stringify(actual) === JSON.stringify(expected);
 const exactJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -226,6 +227,7 @@ const brokerPolicyConditions = Object.freeze({
 });
 
 export const STAGE_B_RESOURCE_ACTION_MATRIX = Object.freeze({
+  "aws_ecs_task_definition.b03[0]": Object.freeze({ type: "aws_ecs_task_definition", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact source-bound fixed B03 executor; no replacement or deletion" }),
   "aws_cloudwatch_log_group.stage_b[*]": Object.freeze({ type: "aws_cloudwatch_log_group", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact Stage B log-group name" }),
   "aws_iam_role.execution[*]": Object.freeze({ type: "aws_iam_role", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact execution-role name and account" }),
   "aws_iam_role.task[*]": Object.freeze({ type: "aws_iam_role", actions: Object.freeze([["create"], ["no-op"]]), identity: "exact task-role name and account" }),
@@ -334,8 +336,15 @@ function normalizedPolicyShape(document) {
   return canonicalJson(actual.sort((left, right) => left.Sid.localeCompare(right.Sid)));
 }
 
-export function assertStageBBrokerPolicyDocument(document) {
-  normalizedPolicyShape(document);
+export function assertStageBBrokerPolicyDocument(document, plan) {
+  const copy = structuredClone(document);
+  const b03Arn = plan && b03TaskArnFromPlan(plan);
+  if (b03Arn) {
+    const statement = copy.Statement?.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions");
+    if (!Array.isArray(statement?.Resource) || statement.Resource.filter(value => value === b03Arn).length !== 1) throw new Error("B03 broker policy must bind exactly its planned revision");
+    if (Array.isArray(statement?.Resource)) statement.Resource = statement.Resource.filter(value => value !== b03Arn);
+  }
+  normalizedPolicyShape(copy);
   return true;
 }
 
@@ -387,7 +396,7 @@ export function assertStageBTerraformBrokerPolicySource(terraformConfiguration, 
     if (JSON.stringify(effects) !== JSON.stringify(["Allow"]) || JSON.stringify(actionValues) !== JSON.stringify([...actions].sort())) throw new Error(`Broker managed-policy source statement is not canonical: ${sid}`);
   }
   const sourceResourceExpressions = {
-    RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = values(local.active_broker_task_definition_arns)",
+    RunOnlyApprovedExecutorAndCanaryRevisions: "Resource = concat(values(local.active_broker_task_definition_arns), aws_ecs_task_definition.b03[*].arn)",
     RunOnlyApprovedPreDeploymentInventory: "Resource = [\"arn:aws:ecs:${var.aws_region}:${var.account_id}:task-definition/mscqr-production-rls-green-predeployment-inventory:*\"]",
     DescribeOnlyPreDeploymentInventoryTaskDefinitions: "Resource = \"*\"",
     ReadAndStopOnlyPreDeploymentInventory: "Resource = [\n          \"arn:aws:ecs:${var.aws_region}:${var.account_id}:task/${local.ecs_cluster_name}/*\",\n        ]",
@@ -420,7 +429,7 @@ export function assertStageBTerraformBrokerPolicySource(terraformConfiguration, 
   if (/NotAction|NotResource|Resource\s*=\s*"\*"/.test(sourceWithoutApprovedWildcard)) throw new Error("Broker managed-policy source contains an unsupported wildcard contract.");
 }
 
-function assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false }) {
+function assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions = true, allowBrokerPolicyCreate = false, plan }) {
   const actions = change.change?.actions;
   if (change.type !== "aws_iam_policy") throw new Error(`Stage B broker managed policy resource type is outside the exact contract: ${change.type}.`);
   if (validateActions && (!exactActions(actions, ["no-op"]) && !exactActions(actions, ["update"]) && !(allowBrokerPolicyCreate && exactActions(actions, ["create"])))) throw new Error(`Stage B broker managed policy has unsupported actions: ${JSON.stringify(actions)}.`);
@@ -432,7 +441,7 @@ function assertBrokerPolicyChange(change, { strict, terraformConfiguration, vali
   for (const [value, label] of [[before.arn, "Broker managed-policy before ARN"], [after.arn, "Broker managed-policy after ARN"], [before.id, "Broker managed-policy before ID"], [after.id, "Broker managed-policy after ID"]]) {
     if (value !== undefined) assertIamArn(value, STAGE_B_BROKER_POLICY.arn, label, true);
   }
-  if (typeof after.policy === "string") normalizedPolicyShape(JSON.parse(after.policy));
+  if (typeof after.policy === "string") assertStageBBrokerPolicyDocument(JSON.parse(after.policy), plan);
   else if (after_unknown_policy(change) !== true) throw new Error("Broker managed-policy document is missing or unprovable.");
   assertStageBTerraformBrokerPolicySource(terraformConfiguration, strict);
   return exactActions(actions, ["update"]) ? "broker-managed-policy-update" : exactActions(actions, ["create"]) ? "broker-managed-policy-create" : "broker-managed-policy-no-op";
@@ -680,6 +689,10 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
   const address = change?.address || "<missing address>";
   const type = change?.type || "<missing type>";
   const actions = change?.change?.actions || [];
+  if (address === B03_TASK_ADDRESS) {
+    if (recoveryMode !== "NORMAL") throw new Error("B03 is forbidden in historical recovery profiles");
+    return assertB03TaskPlan(change, plan);
+  }
   if (address === legacyInlineAddress) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; legacy inline broker policy is forbidden.`);
 
   const task = taskDefinitionAddress.exec(address);
@@ -700,7 +713,7 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
     if (validateActions && !exactActions(actions, ["no-op"])) throw new Error(`Stage B resource rejected: ${address} ${type} ${JSON.stringify(actions)}; retained task definitions are append-only no-op only.`);
     return { address, type, actions, classification: "retained-task-definition-no-op" };
   }
-  if (address === policyAddress) return { address, type, actions, classification: assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions, allowBrokerPolicyCreate }) };
+  if (address === policyAddress) return { address, type, actions, classification: assertBrokerPolicyChange(change, { strict, terraformConfiguration, validateActions, allowBrokerPolicyCreate, plan }) };
   if (address === attachmentAddress) return { address, type, actions, classification: assertBrokerAttachmentChange(change, { strict, validateActions }) };
 
   let kind;
@@ -729,6 +742,9 @@ export function assertStageBPlanResourceChange(change, { strict = true, terrafor
 }
 
 export function classifyStageBPlan(plan, options = {}) {
+  const b03Changes = (plan?.resource_changes || []).filter(c => c.address === B03_TASK_ADDRESS);
+  if (b03Changes.length > 1) throw new Error("B03 duplicate task definition");
+  if (plan.variables?.b03_executor_definition_json?.value != null && b03Changes.length !== 1) throw new Error("B03 fixed definition requires exactly one planned executor");
   if (options.stagedBroker) {
     const p = options.stagedBroker; assertBrokerPreparation(p);
     const prerequisite = [TASK_REGISTRATION, BROKER_POLICY_CONVERGENCE].includes(p.purpose);

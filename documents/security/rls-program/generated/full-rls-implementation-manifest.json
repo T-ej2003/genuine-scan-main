@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "e66940eb5eec828d4cb24c43cd01858b34a43affaa465ac851500030e9d7f615",
+  "sourceContractSha256": "1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1",
   "migrationSetDigest": "cc77e3a7b653cda9ea422e9a676d9f2eda707173c8d77dd858549cdd8f99f094",
   "sourceContractInputs": [
     {
@@ -112,7 +112,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "85ca52b5777e5ab79a6db3b7b96ccb05da1bb7dcbd174b0d9b855921ff93dd49"
+      "sha256": "d76347178ac754e02963493eea74ebdcb2eb422335ce37698bd0630c27ee3936"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -208,7 +208,7 @@
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/index.mjs",
-      "sha256": "fcbe3bb04196b56d94954537bdd59d225a09ee64accf0d076a23036cbe442b26"
+      "sha256": "8a22d8d9455f5b30326bb4fa83502006b438d140fe5981c5b4ec0671742cdd04"
     },
     {
       "path": "infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs",
@@ -220,7 +220,7 @@
     },
     {
       "path": "scripts/aws/create-production-green-stage-b-approval.mjs",
-      "sha256": "2ae2f8c7d299b0af7ba358b729c68d38776761861fbf37e47e12d39bb6238747"
+      "sha256": "fd11b3dc378cee3dc3eb4cabf7d37322d1fea8837c43d7858637762ae355165b"
     },
     {
       "path": "scripts/aws/apply-production-full-rls-release.mjs",
@@ -236,7 +236,7 @@
     },
     {
       "path": "scripts/aws/production-release-oidc-contract.mjs",
-      "sha256": "51f2cb2fecf3aaf33af5b434b15f4881166c90212da6ce8b78887893b664272c"
+      "sha256": "cd86711295dc974eecc102c7598d04978f41a24e35e771bc157bf64e497c562f"
     },
     {
       "path": "scripts/aws/iam-policy-document.mjs",
@@ -276,11 +276,11 @@
     },
     {
       "path": ".github/workflows/release-gate.yml",
-      "sha256": "0c43126dc69cf767560797cc4e12733c0cf042db8b44f202a6fc27c9474e79a2"
+      "sha256": "cc172bd1b0b86809e92bede23641233187aae2d1cb4026026eedbc487771b873"
     },
     {
       "path": ".github/workflows/release-train.yml",
-      "sha256": "8f9442cde614aa7c975ca55c2ef02997468871a7f7a9a374e1b9cce68a8610f1"
+      "sha256": "026576c0f98a133874906f57b63b7e2da305e5b3c895f666fc2ae63123b37c00"
     },
     {
       "path": "backend/src/rls-waves/session-b/b03/b03OutboxFunctions.sql",
@@ -408,7 +408,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:e66940eb5eec828d4cb24c43cd01858b34a43affaa465ac851500030e9d7f615",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
