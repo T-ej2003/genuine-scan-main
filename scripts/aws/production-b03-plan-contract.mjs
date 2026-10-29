@@ -10,6 +10,21 @@ const metadata = new Set(["arn", "arn_without_revision", "id", "revision"]);
 const optional = { task_role_arn: null, ipc_mode: null, pid_mode: null, enable_fault_injection: false, track_latest: false,
   ephemeral_storage: [], placement_constraints: [], proxy_configuration: [], inference_accelerator: [] };
 
+export function b03DefinitionFromContainer(container) {
+  const entry = container?.entryPoint;
+  assert.equal(entry?.length, 12);
+  const bytes = gunzipSync(Buffer.from(entry[9], "base64"), { maxOutputLength: 96 * 1024 });
+  const pkg = JSON.parse(bytes);
+  assert.equal(canonicalSha256(pkg), entry[10]);
+  const { packageSha256, ...body } = pkg;
+  assert.equal(packageSha256, canonicalSha256(body));
+  assert.equal(pkg.kind, "PRODUCTION_B03_INCREMENTAL_PACKAGE"); assert.equal(pkg.schemaVersion, 1);
+  assert.equal(pkg.predecessorSourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
+  assert.equal(pkg.mutations?.length, 44);
+  return buildB03ExecutorDefinition({ sourceSha: pkg.sourceSha, backendImage: container.image,
+    package: pkg, databaseHostname: entry[11] });
+}
+
 export function assertB03TaskPlan(change, plan) {
   assert.equal(change.address, B03_TASK_ADDRESS); assert.equal(change.type, "aws_ecs_task_definition");
   assert.ok(change.mode === undefined || change.mode === "managed");
@@ -22,21 +37,14 @@ export function assertB03TaskPlan(change, plan) {
   assert.equal(variables.aws_region?.value, "eu-west-2");
   assert.equal(variables.deployment_environment?.value, "production");
   assert.match(variables.tooling_sha?.value || "", /^[a-f0-9]{40}$/);
-  assert.equal(variables.image_release_sha?.value, variables.tooling_sha.value, "B03 requires exact-source images");
+  if (change.change.actions[0] === "create") assert.equal(variables.image_release_sha?.value, variables.tooling_sha.value, "B03 requires exact-source images");
   const definition = JSON.parse(variables.b03_executor_definition_json?.value || "null");
   assert.ok(definition, "B03 fixed definition is missing");
-  const entry = definition.containerDefinitions?.[0]?.entryPoint;
-  assert.equal(entry?.length, 12);
-  const bytes = gunzipSync(Buffer.from(entry[9], "base64"), { maxOutputLength: 96 * 1024 });
-  const pkg = JSON.parse(bytes);
-  assert.equal(canonicalSha256(pkg), entry[10]);
-  const { packageSha256, ...body } = pkg;
-  assert.equal(packageSha256, canonicalSha256(body));
-  assert.equal(pkg.kind, "PRODUCTION_B03_INCREMENTAL_PACKAGE"); assert.equal(pkg.schemaVersion, 1);
-  assert.equal(pkg.predecessorSourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
-  assert.equal(pkg.mutations?.length, 44);
-  const expected = buildB03ExecutorDefinition({ sourceSha: variables.tooling_sha.value, backendImage: variables.backend_image?.value,
-    package: pkg, databaseHostname: entry[11] });
+  const expected = b03DefinitionFromContainer(definition.containerDefinitions?.[0]);
+  if (change.change.actions[0] === "create") {
+    assert.equal(expected.containerDefinitions[0].image, variables.backend_image?.value);
+    assert.equal(expected.containerDefinitions[0].environment.find(({ name }) => name === "RELEASE_GIT_SHA")?.value, variables.tooling_sha.value);
+  }
   equal(definition, expected);
   const tags = { Environment: "production", ManagedBy: "Terraform", Component: "b03-incremental-release" };
   const required = { family: expected.family, network_mode: expected.networkMode, requires_compatibilities: expected.requiresCompatibilities,

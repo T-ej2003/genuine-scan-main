@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { assertStageBPlan, assertStageBPlanCapture } from "../plan-production-green-stage-b.mjs";
 import { B03_TASK_ADDRESS } from "../aws/production-b03-plan-contract.mjs";
+import { b03DefinitionFromAuthenticatedState } from "../aws/generate-production-green-stage-b-tfvars.mjs";
 
 const options = { terraformConfiguration: fs.readFileSync("infra/aws/terraform/production-green-stage-b/main.tf", "utf8") };
 test("canonical classifier and capture recognize the fixed B03 executor create and retained no-op", () => {
@@ -14,6 +15,24 @@ test("canonical classifier and capture recognize the fixed B03 executor create a
   change.change.after.arn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:1";
   change.change.actions = ["no-op"]; change.change.before = structuredClone(change.change.after); delete change.change.after_unknown;
   assert.equal(assertStageBPlan(plan, options).actionCounts["no-op"], 1);
+});
+
+test("a later source retains the installed B03 revision from authenticated state", () => {
+  const plan = fixture(); const after = plan.resource_changes[0].change.after;
+  Object.assign(after, { arn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:1",
+    arn_without_revision: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental", id: after.family, revision: 1 });
+  const state = { resources: [{ mode: "managed", type: "aws_ecs_task_definition", name: "b03", instances: [{ index_key: 0, attributes: after }] }] };
+  const laterSha = "5".repeat(40);
+  const definition = b03DefinitionFromAuthenticatedState(state, { toolingSha: laterSha, imageReleaseSha: laterSha });
+  assert.deepEqual(definition, JSON.parse(plan.variables.b03_executor_definition_json.value));
+  plan.variables.tooling_sha.value = laterSha; plan.variables.image_release_sha.value = laterSha;
+  plan.variables.backend_image.value = plan.variables.backend_image.value.replace("a".repeat(64), "b".repeat(64));
+  plan.resource_changes[0].change = { actions: ["no-op"], before: structuredClone(after), after };
+  assert.equal(assertStageBPlan(plan, options).actionCounts["no-op"], 1);
+  const task = fs.readFileSync("infra/aws/terraform/production-green-stage-b/b03.tf", "utf8");
+  assert.doesNotMatch(task, /default\s*=\s*null/);
+  state.resources[0].instances[0].attributes.task_role_arn = "arn:aws:iam::368992683803:role/admin";
+  assert.throws(() => b03DefinitionFromAuthenticatedState(state, { toolingSha: laterSha, imageReleaseSha: laterSha }));
 });
 
 for (const [name, mutate] of Object.entries({

@@ -1,7 +1,6 @@
 variable "b03_executor_definition_json" {
-  description = "Canonical fixed B03 definition generated from authenticated requirements and exact-source image evidence; null preserves the existing installation."
+  description = "Canonical fixed B03 definition generated from authenticated requirements and exact-source image evidence; the governed tfvars generator retains any installed revision."
   type        = string
-  default     = null
   nullable    = true
   validation {
     condition = var.b03_executor_definition_json == null ? true : try(

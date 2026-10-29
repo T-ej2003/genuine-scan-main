@@ -9,11 +9,13 @@ import { assertImageEvidence, imageEvidenceSha256, signImageEvidence } from "../
 import { publicationIdentitySha256 } from "../aws/stage-b-image-publication-identity.mjs";
 import { packageStageBBroker } from "../aws/package-production-green-stage-b-broker.mjs";
 import { assertStageBCanonicalTfvarsFile, assertStageBTfvarsBinding, assertSuccessorBrokerPackageStatePath, deriveContractDigests, deriveRecoveryOnlyBindings, deriveRetainedDefinitions, generateStageBTfvars, isTerraformDeposedInstance, parseCli, validateStageBStageAInput, writeAtomicPair } from "../aws/generate-production-green-stage-b-tfvars.mjs";
-import { STAGE_B, STAGE_B_MODES } from "../aws/production-green-stage-b-contract.mjs";
+import { STAGE_B, STAGE_B_MODES, canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { resolveStageBRecoveryMode, STAGE_B_BROKER_POLICY } from "../aws/stage-b-deployment-contract.mjs";
 import { STAGE_A_EXPECTED_STATE_LINEAGE, STAGE_A_MINIMUM_STATE_SERIAL, STAGE_A_STATE_IDENTITY_VERSION, STAGE_A_STATE_OBJECT, stageAStateSemanticSha256 } from "../aws/generate-production-green-stage-a-prerequisites.mjs";
 import { readPlanningInputs } from "../plan-production-green-stage-b.mjs";
 import { deriveStageBToolingInputTreeSha256 } from "../aws/validate-stage-b-image-reuse.mjs";
+import { fixture as b03PlanFixture } from "./fixtures/production-b03-plan.mjs";
+import { buildB03ExecutorDefinition } from "../aws/production-b03-release-contract.mjs";
 
 const releaseSha = "7245a6036492f875654c414473737e33c1422f3c";
 const now = "2026-08-03T12:00:00.000Z";
@@ -91,6 +93,7 @@ test("production-shaped inputs generate deterministic private tfvars and binding
   assert.equal(second.tfvarsSha256, first.tfvarsSha256);
   assert.deepEqual(second.bindingReport, first.bindingReport);
   assert.match(fs.readFileSync(first.outputPath, "utf8"), /read_only_canary_image/);
+  assert.match(fs.readFileSync(first.outputPath, "utf8"), /^b03_executor_definition_json = null$/m);
   assert.equal(first.bindingReport.tfvarsFormat, "hcl");
   assert.equal(first.bindingReport.tfvarsFileName, "out.tfvars");
   assert.equal(first.bindingReport.tfvarsExtension, ".tfvars");
@@ -278,6 +281,37 @@ test("retained 12-family state generates valid tfvars", () => {
   fs.writeFileSync(f.state, `${JSON.stringify(state)}\n`);
   const result = generateStageBTfvars(input({ stateBackup: f.state }));
   assert.equal(result.bindingReport.retainedDefinitions.candidate, 4);
+});
+
+test("installed B03 executor stays in canonical tfvars on a later source", () => {
+  const f = files(); const state = stateFixture(); const plan = b03PlanFixture();
+  const after = plan.resource_changes[0].change.after;
+  Object.assign(after, { arn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:1",
+    arn_without_revision: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental", id: after.family, revision: 1 });
+  state.resources.push({ mode: "managed", type: "aws_ecs_task_definition", name: "b03", instances: [{ index_key: 0, attributes: after }] });
+  fs.writeFileSync(f.state, `${JSON.stringify(state)}\n`);
+  const result = generateStageBTfvars(input({ stateBackup: f.state }));
+  assert.deepEqual(result.values.b03_executor_definition_json, JSON.parse(plan.variables.b03_executor_definition_json.value));
+  assert.match(fs.readFileSync(result.outputPath, "utf8"), /^b03_executor_definition_json = "\{/m);
+  state.resources.at(-1).instances[0].attributes.task_role_arn = "arn:aws:iam::368992683803:role/admin";
+  fs.writeFileSync(f.state, `${JSON.stringify(state)}\n`);
+  assert.throws(() => generateStageBTfvars(input({ stateBackup: f.state })), /B03/);
+});
+
+test("first B03 registration requires an exact-source private definition", () => {
+  const f = files(); const definitionPath = path.join(path.dirname(f.state), "b03-definition.json");
+  const body = { schemaVersion: 1, kind: "PRODUCTION_B03_INCREMENTAL_PACKAGE", sourceSha: "b".repeat(40),
+    predecessorSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec",
+    mutations: Array.from({ length: 44 }, () => ({ owner: "auth", sql: "SELECT 1" })) };
+  const definition = buildB03ExecutorDefinition({ sourceSha: body.sourceSha,
+    backendImage: `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/mscqr-backend@${digest(1)}`,
+    package: { ...body, packageSha256: canonicalSha256(body) }, databaseHostname: "db.example.internal" });
+  fs.writeFileSync(definitionPath, JSON.stringify(definition), { mode: 0o600 });
+  const result = generateStageBTfvars(input({ stateBackup: f.state, b03DefinitionPath: definitionPath }));
+  assert.deepEqual(result.values.b03_executor_definition_json, definition);
+  definition.containerDefinitions[0].image = definition.containerDefinitions[0].image.replace("1".repeat(64), "2".repeat(64));
+  fs.writeFileSync(definitionPath, JSON.stringify(definition), { mode: 0o600 });
+  assert.throws(() => generateStageBTfvars(input({ stateBackup: f.state, b03DefinitionPath: definitionPath })), /B03/);
 });
 
 test("partial-apply state accepts current candidate and executor addresses", () => {

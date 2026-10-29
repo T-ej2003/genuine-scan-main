@@ -91,8 +91,11 @@ artifact does not change the trust classification of historical logs.
 | `broker_package_path` | explicit output of the reviewed broker package builder | tfvars; raw and base64 SHA-256 in report |
 | `source_contract_sha256`, `migration_set_digest`, `package_checksum_sha256` | source-controlled `generated/checksums.json` bytes and fields | tfvars and binding report |
 | retained candidate/executor maps | supplied production Terraform state backup after lineage, serial, family, revision, broker policy, and address checks | tfvars and retained counts in report |
+| `b03_executor_definition_json` | optional private `--b03-definition` file for first registration, then the exact authenticated Stage B state revision | canonical tfvars; later plans retain the installed revision |
 
 `stage_a_executor_networking_ready` and `log_retention_days` are contract values; the former must be proven true in the prerequisite JSON and the latter remains the reviewed Terraform default of 30 days. No sensitive secret values are accepted or emitted.
+
+For first B03 registration, supply `--b03-definition` to the canonical tfvars generator with the current-source fixed executor definition. The generator checks its package transport, source and backend image against authenticated evidence. After registration, the generator derives this input from the authenticated state backup and rejects a different requested definition. The Terraform variable has no default, so a plan without canonical tfvars cannot remove the installed task by silently selecting `null`. The broker policy retains that exact revision; later source releases may retain it as a no-op, while B03 execution still requires its original signed approval.
 
 The release role's backend access is defined by `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`: it uses `s3:GetBucketLocation`, exact production state read/write, and exact `.tflock` lifecycle access. The legacy workspace base key, state deletion, workspace listing, and unrestricted bucket listing are not deployment gates or permissions.
 
