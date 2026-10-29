@@ -10,12 +10,49 @@ only `mscqr-web` in `eu-west-2`. The image-authorization verifier reads reposito
 immutability and the exact-source image digest before comparing the live ECS
 frontend. Image publication alone does not install this permission update.
 
-Reconcile this existing policy through the separately authorized IAM installation
-path before rerunning image-authorization publication. Review a fresh plan against
-the `production-web-release` state; only this inline-policy delta is expected.
-The create-only bootstrap rejects differing existing policies and must not be used
-to bypass that installation approval. No ECS launch, secret access, image writes,
-or additional repository access is authorized by this read-policy change.
+After this correction is merged, use the existing exact-document IAM reconciler
+with its separate `web-registry-read` operation. It accepts only the reviewed
+predecessor (`75e8b1a4...c9f198b`) or the exact successor
+(`cbece5c8...0ceb255`) for this one inline policy. The historical Phase 3
+operation and its authorization remain unchanged. The create-only bootstrap
+still rejects policy drift.
+
+1. Authenticate the new protected-main SHA and clean checkout. Prepare a fresh
+   saved plan in the existing `production-web-release` backend, using
+   `-var="phase3_iam_source_sha=<merged-source>"`. Require the registry policy
+   alone to update; all five other managed resources must be no-ops. Do not
+   apply the plan: the governed exact-document reconciler is the IAM writer.
+2. After merge, `T-ej2003` must publish one unedited PR comment containing the
+   exact marker from `phase3IamAuthorizationMarker(prHead, mergedSource,
+   WEB_REGISTRY_READ_TRANSITION)`. The existing verifier independently reads
+   both PR #775 and the correction PR from GitHub, binds their ancestry and
+   merge identities, and rejects edited or older-than-two-hour comments.
+3. Execute from the trusted terminal. The existing interactive operator MFA,
+   root identity, protected-source rechecks, write-once S3 ownership/dispatch
+   journal and durable completion apply to the new operation:
+
+```sh
+node scripts/aws/bootstrap-production-web-release-iam.mjs \
+  --operation web-registry-read \
+  --source-sha <merged-protected-main-sha> \
+  --admin-profile mscqr-production-root \
+  --ticket-id CHG-20261028-001 \
+  --authorization-pr <correction-pr-number> \
+  --plan-file <private-saved-plan> \
+  --owner-file <private-directory>/web-registry-read-owner.json
+```
+
+4. Independently read back the live policy, then generate fresh image authorization
+   and retry its governed publication. Do not reuse source-mismatched evidence.
+
+On a lost IAM response, the reconciler reads the exact live target before
+accepting success. For a completed write without its completion receipt, refresh
+only the saved plan to the authenticated target no-op and resume with the same
+owner and valid authorization. A dispatch whose outcome remains unknown blocks
+another IAM write and requires read-only reconciliation; do not delete its
+journal or switch owners. Unknown live policy drift always stops execution.
+No ECS launch, secret access, image writes or additional repository access is
+authorized by this read-policy change.
 
 ## Publication and evidence
 

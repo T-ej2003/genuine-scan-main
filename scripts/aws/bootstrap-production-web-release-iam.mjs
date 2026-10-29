@@ -37,11 +37,24 @@ export const PHASE3_IAM_TRANSITION = Object.freeze({
   frontendTargetSha256: "5f594748ad6f60ec039a2c2a1ef3744cb28c857732fdd427acb7baaad5a7c93d",
   auditTargetSha256: "741f2c3e88478ad23d287f58298cc1abbd3ef6f8459cd29aa20b1f202c5a5122",
 });
+export const WEB_REGISTRY_READ_TRANSITION = Object.freeze({
+  baselineSha: "e2bcd50e7869bf54f8b5c4e6d801ece61afde3cc",
+  reviewedPrNumber: 775,
+  reviewedHeadSha: "c0a8bd6af5931ccdc8c7c21ec0aecef2c4d597de",
+  reviewedMergeSha: "02f0ba5a875c8b6a400647c284372cae8d3c22e5",
+  ticketId: "CHG-20261028-001", account, region: "eu-west-2", roleName: releaseRoleName,
+  registryPolicyName: registryReadPolicyName,
+  registryPredecessorSha256: "75e8b1a4fb4df745dbf2b8fdb36d8d840b9fae20f6825aa1854c09a10c9f198b",
+  registryTargetSha256: "cbece5c8888fd737a5a2a35e70a5859d27a1ee2131b2ce5da84708b6e0ceb255",
+});
+const assertTransition = transition => assert.ok(transition === PHASE3_IAM_TRANSITION || transition === WEB_REGISTRY_READ_TRANSITION,
+  "Unsupported exact IAM transition");
 const PHASE3_IAM_AUTHORIZATION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
-export const phase3IamAuthorizationMarker = (headSha, sourceSha) => {
+export const phase3IamAuthorizationMarker = (headSha, sourceSha, transition = PHASE3_IAM_TRANSITION) => {
+  assertTransition(transition);
   assert.match(headSha || "", /^[a-f0-9]{40}$/);
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
-  return `MSCQR_PHASE3_IAM_SOLO_AUTH_V2:${iamDigest(PHASE3_IAM_TRANSITION)}:${headSha}:${sourceSha}`;
+  return `${transition === WEB_REGISTRY_READ_TRANSITION ? "MSCQR_WEB_REGISTRY_READ_SOLO_AUTH_V1" : "MSCQR_PHASE3_IAM_SOLO_AUTH_V2"}:${iamDigest(transition)}:${headSha}:${sourceSha}`;
 };
 export function pinPhase3IamGitPath(env = process.env, fsOps = fs) {
   const stat = fsOps.statSync("/usr/bin/git");
@@ -146,21 +159,22 @@ export function assertPhase3IamPlan(plan, sourceSha, checkpoint) {
   assert.equal(iamDigest(normalizeIamPolicyDocument(audit.after?.policy)), PHASE3_IAM_TRANSITION.auditTargetSha256);
   assert.ok(Object.values(plan.output_changes || {}).every(({ actions }) => actions?.join(",") === "no-op"), "IAM plan changes outputs");
 }
-export function assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now = Date.now() }) {
-  assert.equal(reviewedPull?.number, PHASE3_IAM_TRANSITION.reviewedPrNumber);
+export function assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now = Date.now(), transition = PHASE3_IAM_TRANSITION }) {
+  assertTransition(transition);
+  assert.equal(reviewedPull?.number, transition.reviewedPrNumber);
   assert.equal(reviewedPull?.merged, true);
-  assert.equal(reviewedPull?.head?.sha, PHASE3_IAM_TRANSITION.reviewedHeadSha);
-  assert.equal(reviewedPull?.merge_commit_sha, PHASE3_IAM_TRANSITION.reviewedMergeSha);
+  assert.equal(reviewedPull?.head?.sha, transition.reviewedHeadSha);
+  assert.equal(reviewedPull?.merge_commit_sha, transition.reviewedMergeSha);
   assert.equal(reviewedPull?.base?.ref, "main");
-  assert.equal(reviewedPull?.base?.sha, PHASE3_IAM_TRANSITION.baselineSha);
+  assert.equal(reviewedPull?.base?.sha, transition.baselineSha);
   assert.equal(reviewedPull?.base?.repo?.full_name, "T-ej2003/genuine-scan-main");
   assert.equal(reviewedPull?.user?.id, 183396573);
   assert.equal(pull?.merged, true, "IAM correction PR is not merged");
   assert.equal(pull?.number, Number(prNumber), "IAM authorization PR identity differs");
-  assert.ok(Number.isSafeInteger(pull?.number) && pull.number > PHASE3_IAM_TRANSITION.reviewedPrNumber,
+  assert.ok(Number.isSafeInteger(pull?.number) && pull.number > transition.reviewedPrNumber,
     "Post-merge IAM authorization requires a distinct correction PR");
-  assert.equal(pull?.base?.sha, PHASE3_IAM_TRANSITION.reviewedMergeSha,
-    "IAM correction PR is not based on the reviewed PR #721 merge");
+  assert.equal(pull?.base?.sha, transition.reviewedMergeSha,
+    `IAM correction PR is not based on the reviewed PR #${transition.reviewedPrNumber} merge`);
   assert.equal(pull?.merge_commit_sha, sourceSha, "IAM authorization does not bind current protected main");
   assert.equal(pull?.base?.ref, "main");
   assert.equal(pull?.base?.repo?.full_name, "T-ej2003/genuine-scan-main");
@@ -169,9 +183,9 @@ export function assertPhase3IamAuthorization({ pull, reviewedPull, comments, ope
   assert.ok(Array.isArray(comments) && comments.length < 100, "IAM authorization comment page is incomplete");
   assert.ok(Number.isFinite(Date.parse(pull.merged_at)), "IAM merge time is invalid");
   assert.ok(Number.isFinite(Date.parse(reviewedPull.merged_at)) && Date.parse(pull.merged_at) > Date.parse(reviewedPull.merged_at),
-    "IAM correction did not merge after reviewed PR #721");
+    `IAM correction did not merge after reviewed PR #${transition.reviewedPrNumber}`);
   const authorized = comments.filter(({ body, user, created_at, updated_at }) =>
-    body === phase3IamAuthorizationMarker(pull.head?.sha, sourceSha) && user?.id === operator.id && user?.type === "User"
+    body === phase3IamAuthorizationMarker(pull.head?.sha, sourceSha, transition) && user?.id === operator.id && user?.type === "User"
     && created_at === updated_at && Number.isFinite(Date.parse(created_at))
     && Date.parse(created_at) > Date.parse(pull.merged_at) && Date.parse(created_at) <= now
     && now - Date.parse(created_at) < PHASE3_IAM_AUTHORIZATION_MAX_AGE_MS);
@@ -179,20 +193,22 @@ export function assertPhase3IamAuthorization({ pull, reviewedPull, comments, ope
   assert.ok(Number.isSafeInteger(authorized[0].id) && authorized[0].id > 0, "IAM authorization identity is invalid");
   return authorized[0].id;
 }
-export function readPhase3IamAuthorization({ prNumber, sourceSha, execute = execFileSync, executable = productionGithubExecutable(), env = process.env, now = Date.now }) {
+export function readPhase3IamAuthorization({ prNumber, sourceSha, execute = execFileSync, executable = productionGithubExecutable(), env = process.env, now = Date.now, transition = PHASE3_IAM_TRANSITION }) {
+  assertTransition(transition);
   assert.match(String(prNumber || ""), /^[1-9][0-9]*$/);
   const ghEnv = { ...createProductionGithubCredentialEnvironment({ env }), GH_HOST: "github.com", GH_PROMPT_DISABLED: "1" };
   const gh = endpoint => JSON.parse(execute(executable, ["api", "--hostname", "github.com", endpoint],
     { env: ghEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const base = "repos/T-ej2003/genuine-scan-main";
   const pull = gh(`${base}/pulls/${prNumber}`);
-  const reviewedPull = gh(`${base}/pulls/${PHASE3_IAM_TRANSITION.reviewedPrNumber}`);
+  const reviewedPull = gh(`${base}/pulls/${transition.reviewedPrNumber}`);
   const comments = gh(`${base}/issues/${prNumber}/comments?per_page=100`);
   const operator = gh("user");
-  return assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now: now() });
+  return assertPhase3IamAuthorization({ pull, reviewedPull, comments, operator, prNumber, sourceSha, now: now(), transition });
 }
 export async function verifyPhase3IamMfa({ sourceSha, authorizationId, execute = execFileSync,
-  prompt = () => promptProductionMfaCode({ prompt: "Phase 3 IAM operator MFA code: " }), now = Date.now } = {}) {
+  prompt = () => promptProductionMfaCode({ prompt: "Production web IAM operator MFA code: " }), now = Date.now, transition = PHASE3_IAM_TRANSITION } = {}) {
+  assertTransition(transition);
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
   assert.ok(Number.isSafeInteger(authorizationId) && authorizationId > 0);
   const code = String(await prompt()).trim();
@@ -217,13 +233,14 @@ export async function verifyPhase3IamMfa({ sourceSha, authorizationId, execute =
     { env: createAssumedRoleSessionEnvironment({ credentials: issued, region: "eu-west-2" }), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   assert.equal(identity.Account, account);
   assert.equal(identity.Arn, "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator");
-  return Object.freeze({ sourceSha, ticketId: PHASE3_IAM_TRANSITION.ticketId, authorizationId, operatorArn: identity.Arn,
+  return Object.freeze({ sourceSha, ticketId: transition.ticketId, authorizationId, operatorArn: identity.Arn,
     mfaSerial: serial, accessKeyIdSha256: createHash("sha256").update(issued.AccessKeyId).digest("hex"),
     verifiedAt: new Date(now()).toISOString(), expiresAt: new Date(expiry).toISOString() });
 }
-function assertPhase3IamMfaEvidence(value, sourceSha, authorizationId, now = Date.now()) {
+function assertPhase3IamMfaEvidence(value, sourceSha, authorizationId, now = Date.now(), transition = PHASE3_IAM_TRANSITION) {
+  assertTransition(transition);
   assert.equal(value?.sourceSha, sourceSha, "Operator MFA source binding differs");
-  assert.equal(value?.ticketId, PHASE3_IAM_TRANSITION.ticketId);
+  assert.equal(value?.ticketId, transition.ticketId);
   assert.equal(value?.authorizationId, authorizationId);
   assert.equal(value?.operatorArn, "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator");
   assert.equal(value?.mfaSerial, "arn:aws:iam::368992683803:mfa/mscqr-production-bootstrap-operator");
@@ -232,18 +249,22 @@ function assertPhase3IamMfaEvidence(value, sourceSha, authorizationId, now = Dat
     && Date.parse(value.verifiedAt) >= now - 300000, "Operator MFA verification is stale");
   assert.ok(Date.parse(value?.expiresAt) > now + 120000, "Operator MFA authority expired");
 }
-export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEvidence, ownerFile, resumeOnly = false }) {
+export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEvidence, ownerFile, resumeOnly = false, transition = PHASE3_IAM_TRANSITION }) {
+  assertTransition(transition);
   assert.equal(typeof run, "function");
   assert.ok(path.isAbsolute(ownerFile), "IAM owner file must use a private absolute path");
   const parent = fs.realpathSync(path.dirname(ownerFile));
   assert.ok(!parent.startsWith(`${root}${path.sep}`) && parent !== root, "IAM owner file must stay outside the repository");
   assert.equal(fs.statSync(parent).mode & 0o077, 0, "IAM owner directory is not private");
-  const binding = { sourceSha, ticketId: PHASE3_IAM_TRANSITION.ticketId, authorizationId,
+  const binding = transition === WEB_REGISTRY_READ_TRANSITION
+    ? { sourceSha, authorizationId, ...WEB_REGISTRY_READ_TRANSITION }
+    : { sourceSha, ticketId: PHASE3_IAM_TRANSITION.ticketId, authorizationId,
     reviewedHeadSha: PHASE3_IAM_TRANSITION.reviewedHeadSha, reviewedMergeSha: PHASE3_IAM_TRANSITION.reviewedMergeSha,
     roleName: releaseRoleName, frontendPolicyName: activationPolicyName, auditPolicyName,
     frontendPredecessorSha256: PHASE3_IAM_TRANSITION.frontendPredecessorSha256,
     frontendTargetSha256: PHASE3_IAM_TRANSITION.frontendTargetSha256, auditTargetSha256: PHASE3_IAM_TRANSITION.auditTargetSha256 };
-  assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId);
+  assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId, Date.now(), transition);
+  const policyNames = transition === WEB_REGISTRY_READ_TRANSITION ? [registryReadPolicyName] : [auditPolicyName, activationPolicyName];
   let owner;
   try {
     const stat = fs.lstatSync(ownerFile);
@@ -281,7 +302,7 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
   const dispatchPayload = (policyName, inputHash, dispatchId) => ({ ownerId: owner.ownerId, binding, policyName, inputHash, dispatchId });
   const dispatchKey = policyName => `${key.slice(0, -5)}/${policyName}.json`;
   const hasDispatch = (policyName, inputHash) => {
-    assert.ok([auditPolicyName, activationPolicyName].includes(policyName));
+    assert.ok(policyNames.includes(policyName));
     assert.match(inputHash || "", /^[a-f0-9]{64}$/);
     try {
       const { dispatchId, ...actual } = JSON.parse(readback(dispatchKey(policyName)));
@@ -292,7 +313,7 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
     catch (error) { if (/NoSuchKey/.test(`${error?.message || ""} ${error?.stderr || ""}`)) return false; throw error; }
   };
   const markDispatch = (policyName, inputHash) => {
-    assert.ok([auditPolicyName, activationPolicyName].includes(policyName));
+    assert.ok(policyNames.includes(policyName));
     assert.match(inputHash || "", /^[a-f0-9]{64}$/);
     const keyForDispatch = dispatchKey(policyName);
     const dispatchFile = path.join(path.dirname(ownerFile), `.iam-dispatch-${randomUUID()}`);
@@ -316,8 +337,8 @@ export function claimPhase3IamOwner({ run, sourceSha, authorizationId, mfaEviden
     const completionKey = `${key.slice(0, -5)}/complete.json`;
     const completionFile = path.join(path.dirname(ownerFile), `.iam-complete-${randomUUID()}`);
     const body = Buffer.from(JSON.stringify({ ownerId: owner.ownerId, binding,
-      frontendPolicySha256: PHASE3_IAM_TRANSITION.frontendTargetSha256,
-      auditPolicySha256: PHASE3_IAM_TRANSITION.auditTargetSha256 }));
+      ...(transition === WEB_REGISTRY_READ_TRANSITION ? { registryPolicySha256: transition.registryTargetSha256 } : {
+      frontendPolicySha256: PHASE3_IAM_TRANSITION.frontendTargetSha256, auditPolicySha256: PHASE3_IAM_TRANSITION.auditTargetSha256 }) }));
     fs.writeFileSync(completionFile, body, { mode: 0o600, flag: "wx" });
     try {
       try { run(["s3api", "put-object", "--bucket", bucket, "--key", completionKey, "--body", completionFile,
@@ -527,6 +548,97 @@ export function reconcilePhase3WebIam({ run, sourceSha, ticketId, plan, authoriz
   return Object.freeze({ status: "PHASE3_WEB_IAM_RECONCILED", sourceSha, ticketId, authorizationId, ownershipSha256, completionSha256, actions: Object.freeze(actions) });
 }
 
+export function assertWebRegistryReadPlan(plan, sourceSha) {
+  assert.match(sourceSha || "", /^[a-f0-9]{40}$/);
+  assert.equal(plan?.variables?.phase3_iam_source_sha?.value, sourceSha, "Registry plan source differs");
+  const address = "aws_iam_role_policy.web_evidence_registry_read";
+  const changes = plan.resource_changes || [];
+  const expected = [...Object.keys(POLICY_NO_OPS), "aws_iam_role_policy.frontend_activation", "aws_iam_role_policy.stage_b_native_audit", address];
+  const dataAddress = "data.aws_iam_role.release_deployer";
+  const read = changes.filter(change => change.address === dataAddress);
+  assert.ok(read.length <= 1, "Registry plan repeats release-role data");
+  assert.deepEqual(changes.filter(change => change.address !== dataAddress).map(change => change.address).sort(), expected.sort(), "Registry plan contains an unapproved resource");
+  for (const item of changes) {
+    assert.ok(!item.deposed && !item.module_address, "Registry plan resource is not canonical");
+    assert.equal(item.mode, item.address === dataAddress ? "data" : "managed");
+    if (item.address === dataAddress) {
+      assert.equal(item.type, "aws_iam_role");
+      assert.equal(item.change.after?.name, releaseRoleName);
+      assert.equal(item.change.after?.arn, `arn:aws:iam::${account}:role/${releaseRoleName}`);
+    }
+    assert.equal(item.provider_name, "registry.terraform.io/hashicorp/aws");
+    const change = item.change;
+    assert.ok(!change.replace_paths?.length, "Registry plan cannot replace resources");
+    assert.ok(!Object.values(change.after_unknown || {}).some(Boolean), "Registry plan has unknown target fields");
+    if (item.address !== address) {
+      assert.deepEqual(change.actions, ["no-op"], "Registry plan changes unrelated IAM");
+      assert.equal(canonicalIam(change.before), canonicalIam(change.after), "Registry plan alters unrelated IAM");
+      continue;
+    }
+    assert.ok(["update", "no-op"].includes(change.actions?.join(",")), "Registry policy must already exist");
+    for (const value of [change.before, change.after]) {
+      assert.equal(value.role, releaseRoleName); assert.equal(value.name, registryReadPolicyName);
+    }
+    const t = WEB_REGISTRY_READ_TRANSITION;
+    assert.equal(iamDigest(normalizeIamPolicyDocument(change.before.policy)), change.actions[0] === "update" ? t.registryPredecessorSha256 : t.registryTargetSha256);
+    assert.equal(iamDigest(normalizeIamPolicyDocument(change.after.policy)), t.registryTargetSha256);
+    const withoutPolicy = value => Object.fromEntries(Object.entries(value).filter(([key]) => key !== "policy"));
+    assert.equal(canonicalIam(withoutPolicy(change.before)), canonicalIam(withoutPolicy(change.after)), "Registry plan changes policy identity");
+  }
+  assert.ok(Object.values(plan.output_changes || {}).every(({ actions }) => actions?.join(",") === "no-op"), "Registry plan changes outputs");
+}
+
+export function reconcileWebRegistryReadIam({ run, sourceSha, ticketId, plan, authorizationId, mfaEvidence,
+  assertProtectedSource, assertCurrentAuthorization, claimOwnership }) {
+  const transition = WEB_REGISTRY_READ_TRANSITION;
+  assert.ok(Number.isSafeInteger(authorizationId) && authorizationId > 0, "Registry authorization identity is missing");
+  assert.equal(ticketId, transition.ticketId);
+  assertWebRegistryReadPlan(plan, sourceSha);
+  assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId, Date.now(), transition);
+  const document = source("web-evidence-registry-read-policy.json");
+  assert.equal(iamDigest(normalizeIamPolicyDocument(document)), transition.registryTargetSha256, "Registry target source changed");
+  const caller = readJson(run, ["sts", "get-caller-identity"]);
+  assert.equal(caller.Account, account); assert.equal(caller.Arn, `arn:aws:iam::${account}:root`);
+  const observed = () => iamDigest(normalizeIamPolicyDocument(readJson(run,
+    ["iam", "get-role-policy", "--role-name", releaseRoleName, "--policy-name", registryReadPolicyName]).PolicyDocument));
+  const before = observed();
+  assert.ok([transition.registryPredecessorSha256, transition.registryTargetSha256].includes(before), "Registry predecessor changed");
+  const planned = plan.resource_changes.find(({ address }) => address === "aws_iam_role_policy.web_evidence_registry_read").change;
+  assert.equal(iamDigest(normalizeIamPolicyDocument(planned.before.policy)), before, "Registry saved plan is stale");
+  const authenticate = () => {
+    assert.equal(assertProtectedSource(), sourceSha, "Protected source changed before registry write");
+    assert.equal(assertCurrentAuthorization(), authorizationId, "Registry authorization changed");
+    assertPhase3IamMfaEvidence(mfaEvidence, sourceSha, authorizationId, Date.now(), transition);
+  };
+  authenticate();
+  const owner = claimOwnership({ run, sourceSha, authorizationId, mfaEvidence, transition,
+    resumeOnly: before === transition.registryTargetSha256 });
+  assert.match(owner.ownershipSha256 || "", /^[a-f0-9]{64}$/);
+  const actions = [];
+  if (before === transition.registryTargetSha256) {
+    assert.equal(owner.hasDispatch(registryReadPolicyName, before), true, "Registry target lacks its authenticated dispatch");
+  } else {
+    assert.equal(observed(), before, "Registry changed after ownership");
+    authenticate();
+    assert.equal(owner.markDispatch(registryReadPolicyName, transition.registryTargetSha256), true,
+      "Registry dispatch outcome unknown; reconcile live IAM before retry");
+    authenticate();
+    assert.equal(observed(), before, "Registry changed before write");
+    try { run(["iam", "put-role-policy", "--role-name", releaseRoleName, "--policy-name", registryReadPolicyName,
+      "--policy-document", JSON.stringify(document)]); }
+    catch (error) {
+      if (observed() !== transition.registryTargetSha256) throw new Error("Registry write outcome unknown; reconcile live IAM before retry", { cause: error });
+    }
+    actions.push(`INSTALL_${registryReadPolicyName}`);
+  }
+  assert.equal(observed(), transition.registryTargetSha256, "Registry target readback differs");
+  assert.equal(owner.hasDispatch(registryReadPolicyName, transition.registryTargetSha256), true);
+  const completionSha256 = owner.complete();
+  assert.match(completionSha256 || "", /^[a-f0-9]{64}$/);
+  return { status: "WEB_REGISTRY_READ_RECONCILED", sourceSha, ticketId, authorizationId,
+    ownershipSha256: owner.ownershipSha256, completionSha256, actions };
+}
+
 export function createPhase3IamAwsRunner({ profile, exec = execFileSync } = {}) {
   const mutating = new Set(["create-policy", "create-role", "put-role-policy"]);
   const aws = productionAwsExecutable();
@@ -551,7 +663,8 @@ function args(argv) {
   const keys = [...result.keys()].sort();
   assert.ok(
     JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--source-sha"])
-    || JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--authorization-pr", "--owner-file", "--plan-file", "--source-sha", "--ticket-id"]),
+    || JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--authorization-pr", "--owner-file", "--plan-file", "--source-sha", "--ticket-id"])
+    || JSON.stringify(keys) === JSON.stringify(["--admin-profile", "--authorization-pr", "--operation", "--owner-file", "--plan-file", "--source-sha", "--ticket-id"]) && result.get("--operation") === "web-registry-read",
     "IAM bootstrap accepts only the existing bootstrap or exact Phase 3 transition arguments",
   );
   return result;
@@ -564,7 +677,17 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   assert.equal(readPhase3IamProtectedSource({ sourceSha }), sourceSha, "IAM bootstrap source is not exact protected main.");
   const run = createPhase3IamAwsRunner({ profile: values.get("--admin-profile") });
   let result;
-  if (values.has("--ticket-id")) {
+  if (values.get("--operation") === "web-registry-read") {
+    const transition = WEB_REGISTRY_READ_TRANSITION;
+    const { plan, planSha256 } = readPhase3IamPlan({ planFile: path.resolve(values.get("--plan-file")) });
+    assertWebRegistryReadPlan(plan, sourceSha);
+    const assertCurrentAuthorization = () => readPhase3IamAuthorization({ prNumber: values.get("--authorization-pr"), sourceSha, transition });
+    const authorizationId = assertCurrentAuthorization();
+    const mfaEvidence = await verifyPhase3IamMfa({ sourceSha, authorizationId, transition });
+    result = { ...reconcileWebRegistryReadIam({ run, sourceSha, ticketId: values.get("--ticket-id"), plan, authorizationId, mfaEvidence,
+      assertProtectedSource: () => readPhase3IamProtectedSource({ sourceSha }), assertCurrentAuthorization,
+      claimOwnership: input => claimPhase3IamOwner({ ...input, ownerFile: path.resolve(values.get("--owner-file")) }) }), planSha256 };
+  } else if (values.has("--ticket-id")) {
     execFileSync("/usr/bin/git", ["merge-base", "--is-ancestor", PHASE3_IAM_TRANSITION.baselineSha, sourceSha], { cwd: root, stdio: "ignore" });
     const planFile = path.resolve(values.get("--plan-file"));
     const { plan, planSha256 } = readPhase3IamPlan({ planFile });
