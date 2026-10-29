@@ -68,7 +68,12 @@ const res = {
 
   assert.strictEqual(res.statusCode, 200, "printer setup test token should return HTTP 200");
   assert(res.body && res.body.success === true, "printer setup test token should return a success payload");
-  assert.strictEqual(res.body.data.isAuthentic, true, "printer setup test token should verify as authentic");
+  assert.strictEqual(res.body.data.isAuthentic, false, "a setup token must not authenticate a production product");
+  assert.strictEqual(res.body.data.publicStatus, "not_ready");
+  assert.strictEqual(res.body.data.status, "not_ready");
+  assert.strictEqual(res.body.data.isFirstScan, false);
+  assert.strictEqual(res.body.data.ownershipStatus.canClaim, false);
+  assert.strictEqual(res.body.data.sessionStartToken, null);
   assert.strictEqual(res.body.data.scanOutcome, "PRINTER_SETUP_TEST", "printer setup test token should return the dedicated outcome");
   assert.match(
     String(res.body.data.message || ""),

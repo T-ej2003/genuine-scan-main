@@ -144,8 +144,10 @@ export const verifyQRCode = async (req: CustomerVerifyRequest, res: Response) =>
           if (isPrinterTestQrId(payload.qr_id)) {
             printerSetupTest = true;
             return Promise.resolve({
-              result: "AUTHENTIC",
-              messageKey: "verification.first_scan",
+              // A valid setup signature proves only the test label's origin,
+              // never a released production product's authenticity.
+              result: "NOT_READY",
+              messageKey: "verification.not_ready",
               nextAction: "NONE",
               verificationMethod: "SIGNED_LABEL",
               maskedCode: "PRINTER_SETUP_TEST",

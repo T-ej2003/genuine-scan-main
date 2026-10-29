@@ -178,6 +178,26 @@ describe("Verify page", () => {
     });
   });
 
+  it("does not present a signed printer setup label as an authentic product", async () => {
+    vi.mocked(apiClient.scanToken).mockResolvedValue({
+      success: true,
+      data: {
+        isAuthentic: false,
+        publicStatus: "not_ready",
+        status: "not_ready",
+        scanOutcome: "PRINTER_SETUP_TEST",
+        sessionStartToken: null,
+        message: "MSCQR verified this printer setup test label. It is not a production QR label.",
+      },
+    });
+
+    renderVerifyPage("/scan?t=printer-setup-token");
+
+    expect(await screen.findByText("This label is not ready for customer verification.")).toBeInTheDocument();
+    expect(screen.queryByText("Verification passed")).toBeNull();
+    expect(apiClient.startVerificationSession).not.toHaveBeenCalled();
+  });
+
   it("creates a secure verification session and navigates to the canonical signed URL", async () => {
     vi.mocked(apiClient.scanToken).mockResolvedValue({
       success: true,
