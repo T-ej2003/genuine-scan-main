@@ -20,7 +20,7 @@ import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, securityRebaselineLogSummary } from "./production-security-rebaseline-inventory.mjs";
 import { assertProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation } from "./production-security-rebaseline-preparation.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport } from "./production-security-rebaseline-transport.mjs";
-import { createProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
+import { createProductionRlsProbeRuntimeConfig, parseProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
 import { readImageRepositoryEvidence } from "./production-green-stage-b-image-evidence.mjs";
 import { classifyB03Catalogue } from "./production-b03-catalogue-diagnostic.mjs";
 
@@ -94,7 +94,9 @@ export function buildProductionRlsProbeDefinition({ baseDefinition, requirements
     assert.deepEqual(base.command || [], []);
     assert.deepEqual((base.environment || []).map(({ name }) => name), ["RLS_PROBE_INPUT_JSON"]);
     assert.deepEqual(Object.keys(base.environment[0]).sort(), ["name", "value"]);
-    assert.ok(typeof base.environment[0].value === "string" && base.environment[0].value.length <= 8192);
+    const previous = parseProductionRlsProbeRuntimeConfig(base.environment[0].value);
+    assert.equal(base.image, `${APP_ONLY.backendRepository}@${previous.probeImageDigest}`);
+    assert.equal(previous.databaseHostname, identity.databaseHostname);
   } else { assert.deepEqual(base.entryPoint, ["node"]); assert.deepEqual(base.environment || [], []); }
   assert.deepEqual(base.secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: databaseSecretArn }]);
   assert.match(base.image || "", new RegExp(`^${APP_ONLY.backendRepository.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@sha256:[a-f0-9]{64}$`));

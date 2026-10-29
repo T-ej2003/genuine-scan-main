@@ -186,13 +186,18 @@ test("RLS probe definition reuses the exact private read-only task boundary", ()
   assert.deepEqual(JSON.parse(definition.containerDefinitions[0].environment[0].value), { schemaVersion: 1, ...identity, requirementsSha256: requirements.requirementsSha256, securityTransportPublicKey: null });
   const prior = structuredClone(baseDefinition);
   Object.assign(prior.containerDefinitions[0], { entryPoint: definition.containerDefinitions[0].entryPoint,
-    command: definition.containerDefinitions[0].command, environment: definition.containerDefinitions[0].environment });
+    command: definition.containerDefinitions[0].command, environment: definition.containerDefinitions[0].environment,
+    image: definition.containerDefinitions[0].image });
   assert.deepEqual(buildProductionRlsProbeDefinition({ baseDefinition: prior, requirements, identity, databaseSecretArn: secret }), definition);
   for (const change of [
     { entryPoint: ["node", "unapproved.mjs"] },
     { command: ["unapproved"] },
     { environment: [{ name: "RLS_PROBE_INPUT_JSON", value: "{}" }, { name: "EXTRA", value: "1" }] },
     { environment: [{ name: "OTHER", value: "{}" }] },
+    { environment: [{ name: "RLS_PROBE_INPUT_JSON", value: "{}" }] },
+    { image: `${APP_ONLY.backendRepository}@sha256:${"1".repeat(64)}` },
+    { environment: [{ name: "RLS_PROBE_INPUT_JSON", value: JSON.stringify({
+      ...JSON.parse(definition.containerDefinitions[0].environment[0].value), databaseHostname: "other.example.com" }) }] },
   ]) {
     const unsafe = structuredClone(prior); Object.assign(unsafe.containerDefinitions[0], change);
     assert.throws(() => buildProductionRlsProbeDefinition({ baseDefinition: unsafe, requirements, identity, databaseSecretArn: secret }));
