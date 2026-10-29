@@ -16,6 +16,7 @@ const {
   resolveSessionUrl,
   validateClaimedLocalPrintJobForAttempt,
   startPersistentHeartbeatLoop,
+  runPersistentSelectionHeartbeat,
 } = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
@@ -43,6 +44,16 @@ const run = async () => {
   const heartbeatTimer = startPersistentHeartbeatLoop(() => { initialHeartbeats += 1; }, 15_000);
   clearInterval(heartbeatTimer);
   assert(initialHeartbeats === 1, "Session readiness must send a signed heartbeat immediately without waiting for the interval");
+  let selectedQueue = "queue-a";
+  let selectionHeartbeats = 0;
+  let reconnects = 0;
+  const selectionHeartbeat = () => runPersistentSelectionHeartbeat("queue-a", async () => selectedQueue,
+    async () => { selectionHeartbeats += 1; }, () => { reconnects += 1; return false; });
+  await selectionHeartbeat();
+  assert(selectionHeartbeats === 1 && reconnects === 0, "Unchanged selection must preserve its session");
+  selectedQueue = "queue-b";
+  await selectionHeartbeat();
+  assert(selectionHeartbeats === 1 && reconnects === 1, "A changed selection must request reconnection instead of attesting the old selector");
   mock.timers.enable({ apis: ["setInterval"] });
   let finishObservation;
   let observations = 0;

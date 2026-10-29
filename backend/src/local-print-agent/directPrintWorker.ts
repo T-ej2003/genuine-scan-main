@@ -115,6 +115,18 @@ export const startPersistentHeartbeatLoop = (heartbeat: () => void | Promise<voi
   tick();
   return setInterval(tick, intervalMs);
 };
+export const runPersistentSelectionHeartbeat = async (
+  boundPrinterId: string,
+  readSelection: () => Promise<string | null>,
+  sendHeartbeat: () => Promise<void>,
+  selectionChanged: () => boolean
+) => {
+  if (await readSelection() !== boundPrinterId) {
+    if (!selectionChanged()) return false;
+  }
+  await sendHeartbeat();
+  return true;
+};
 const PRINT_AGENT_SESSION_RECONNECT_MAX_MS = Math.max(15_000, Number(process.env.PRINT_AGENT_SESSION_RECONNECT_MAX_MS || 60_000) || 60_000);
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
@@ -1513,6 +1525,7 @@ const startPersistentPrintSessionWorker = () => {
       let heartbeatTimer: NodeJS.Timeout | null = null;
       let session: SessionContext | null = null;
       let processing = false;
+      let selectionReconnect = false;
       const sessionUrl = resolveSessionUrl(backendUrl);
       const sessionPath = new URL(sessionUrl).pathname;
       console.info(
@@ -1599,7 +1612,10 @@ const startPersistentPrintSessionWorker = () => {
               reconnectAttempt = 0;
               heartbeatTimer = startPersistentHeartbeatLoop(() => {
                 if (!session || ws.readyState !== WebSocket.OPEN) return;
-                return sendSessionMessage(ws, session, selection.selectedPrinterId, {
+                const activeSession = session;
+                return runPersistentSelectionHeartbeat(selection.selectedPrinterId,
+                  async () => (await loadAgentState()).selectedPrinterId || null,
+                  () => sendSessionMessage(ws, activeSession, selection.selectedPrinterId, {
                   type: "heartbeat",
                   printerHealth: {
                     deviceName: os.hostname(),
@@ -1611,8 +1627,12 @@ const startPersistentPrintSessionWorker = () => {
                     selectedPrinterId: selection.selectedPrinterId,
                     selectedPrinterName: selection.selectedPrinterName,
                   },
+                }), () => {
+                  selectionReconnect = true;
+                  if (!processing) ws.close();
+                  return processing;
                 })
-                  .then(() => updatePersistentSessionStatus({ lastHeartbeatAt: new Date().toISOString(), lastError: null }))
+                  .then((sent) => { if (sent) updatePersistentSessionStatus({ lastHeartbeatAt: new Date().toISOString(), lastError: null }); })
                   .catch((error: unknown) => updatePersistentSessionStatus({ lastError: errorInfo(error).message || "Persistent session heartbeat failed." }));
               }, PRINT_AGENT_SESSION_HEARTBEAT_MS);
               updatePersistentSessionStatus({
@@ -1648,6 +1668,7 @@ const startPersistentPrintSessionWorker = () => {
                 console.error("persistent printer session test failed", { error: errorInfo(error).message || error });
               } finally {
                 processing = false;
+                if (selectionReconnect) ws.close();
               }
               return;
             }
@@ -1664,6 +1685,7 @@ const startPersistentPrintSessionWorker = () => {
                 });
               } finally {
                 processing = false;
+                if (selectionReconnect) ws.close();
               }
             }
           })();
@@ -1703,6 +1725,10 @@ const startPersistentPrintSessionWorker = () => {
       });
 
       if (stopped) break;
+      if (selectionReconnect) {
+        reconnectAttempt = 0;
+        continue;
+      }
       reconnectAttempt += 1;
       const backoff = Math.min(
         PRINT_AGENT_SESSION_RECONNECT_MAX_MS,
