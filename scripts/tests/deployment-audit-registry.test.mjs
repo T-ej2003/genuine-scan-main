@@ -9,6 +9,13 @@ import { load } from "js-yaml";
 import { readApprovedImages, ciImageReference, assertPinnedDockerfiles, assertPinnedImageInputs, assertDisposablePostgresImage, verifyApprovedImage } from "../lib/container-image-identity.mjs";
 
 const images = readApprovedImages();
+test("frontend runtimes retain the exact signed Brotli security update", () => {
+  for (const file of ["Dockerfile", "Dockerfile.ecs-frontend"]) {
+    const runtime = readFileSync(file, "utf8").split(`FROM ${images.nginx.reference}`)[1];
+    assert.match(runtime, /^\s*# CVE-2026-111497[^\n]*\nRUN apk add --no-cache brotli-libs=1\.2\.1-r0\n/);
+    assert.doesNotMatch(runtime, /--allow-untrusted|apk upgrade/);
+  }
+});
 const sha = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const bytes = value => Buffer.from(JSON.stringify(value));
 const files = ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile", ".github/workflows/auth-security-tests.yml", ".github/workflows/quality-gate.yml", ".github/workflows/release-gate.yml", ".github/workflows/deployment-audit.yml", ".github/workflows/production-web-image.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker-compose.rls-certification.yml", "docker/base-image-identities.json"];
