@@ -40,6 +40,14 @@ on:
         description: "Canonical signed web-image authorization when canonical impact requires web publication."
         required: false
         type: string
+      b03_approval_reference_json:
+        description: "Compact source-bound reference to the published B03 approval; required for incremental-b03."
+        required: false
+        type: string
+      b03_compatibility_reference_json:
+        description: "Authenticated post-commit app-only compatibility artifact reference; required to complete B03."
+        required: false
+        type: string
       release_mode:
         description: "Governed production release mode."
         required: false
@@ -587,10 +595,11 @@ jobs:
       - name: Full RLS verification and PostgreSQL 18.4 certification
         env:
           MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/full-rls-certification/disposable-certification-result.json
+          B03_APPROVAL_REFERENCE_JSON: ${{ inputs.b03_approval_reference_json }}
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
-          if [[ "${{ inputs.release_mode }}" == "backend-health-recovery" ]]; then
+          if [[ "${{ inputs.release_mode }}" == "backend-health-recovery" || -n "$B03_APPROVAL_REFERENCE_JSON" ]]; then
             GITHUB_TOKEN="${{ github.token }}" TARGET_SHA="$DEPLOY_SHA" \
               node scripts/github/assert-backend-recovery-ci-certification.mjs
           else
@@ -791,7 +800,7 @@ jobs:
             echo "web_authorization_file=$web_file" >> "$GITHUB_OUTPUT"
             echo "web_authorization_sha256=$web_sha256" >> "$GITHUB_OUTPUT"
           elif [ -n "${WEB_IMAGE_AUTHORIZATION_JSON:-}" ]; then
-            echo "::error::Web authorization is forbidden when canonical impact does not require web publication."
+            echo "::error::Web authorization was supplied when the stable frontend already runs the current-source digest."
             exit 1
           fi
 
@@ -920,6 +929,8 @@ jobs:
           ACTIVATION_BINDING_SHA256: ${{ steps.backend-activation.outputs.binding_sha256 }}
           WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
           WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
+          B03_APPROVAL_REFERENCE_JSON: ${{ inputs.b03_approval_reference_json }}
+          B03_COMPATIBILITY_REFERENCE_JSON: ${{ inputs.b03_compatibility_reference_json }}
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
@@ -947,7 +958,51 @@ jobs:
             --image-authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
             --binding "$ACTIVATION_BINDING_FILE" \
             --binding-sha256 "$ACTIVATION_BINDING_SHA256"
-          node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
+          if [[ -n "$B03_COMPATIBILITY_REFERENCE_JSON" && -z "$B03_APPROVAL_REFERENCE_JSON" ]]; then
+            echo "::error::B03 completion evidence requires a B03 approval reference."
+            exit 1
+          fi
+          if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]; then
+            node --input-type=module -e '
+              import fs from "node:fs";
+              const bytes = process.env.B03_APPROVAL_REFERENCE_JSON || "";
+              if (Buffer.byteLength(bytes) > 2048) throw new Error("B03 reference is oversized");
+              fs.writeFileSync(process.argv[1], JSON.stringify(JSON.parse(bytes)), { mode: 0o600, flag: "wx" });
+            ' "$RUNNER_TEMP/b03-approval-reference.json"
+            b03_mode=start
+            b03_output="$RUNNER_TEMP/b03-broker-start.json"
+            b03_extra=()
+            if [[ -n "$B03_COMPATIBILITY_REFERENCE_JSON" ]]; then
+              node --input-type=module -e 'import fs from "node:fs"; const value = process.env.B03_COMPATIBILITY_REFERENCE_JSON; if (Buffer.byteLength(value) > 2048) throw new Error("Oversized verification reference"); fs.writeFileSync(process.argv[1], value, {mode: 0o600, flag: "wx"});' "$RUNNER_TEMP/b03-compatibility-reference.json"
+              b03_mode=complete
+              b03_output="$PRODUCTION_RLS_RELEASE_RECEIPT_PATH"
+              b03_extra=(--compatibility-reference "$RUNNER_TEMP/b03-compatibility-reference.json")
+            fi
+            node scripts/aws/apply-production-b03-incremental-release.mjs \
+              --mode "$b03_mode" \
+              --source-sha "$SOURCE_SHA" \
+              --authorization "${{ steps.images.outputs.authorization_file }}" \
+              --authorization-sha256 "${{ env.RELEASE_IMAGE_AUTHORIZATION_SHA256 }}" \
+              --approval-evidence "${{ steps.production-environment-approval.outputs.evidence_file }}" \
+              --b03-request "$RUNNER_TEMP/b03-approval-reference.json" \
+              --release-train-run-id "$RELEASE_TRAIN_RUN_ID" \
+              --output "$b03_output" "${b03_extra[@]}"
+            if [[ "$b03_mode" == start ]]; then
+              echo "::error::B03 initiated. Run the governed app-only compatibility verifier after completion, then resume with its authenticated artifact reference."
+              exit 1
+            fi
+          else
+            node scripts/aws/apply-production-full-rls-release.mjs --credential-source github-oidc-release-deployer
+          fi
+
+      - name: Preserve B03 initiation evidence
+        if: ${{ always() && inputs.b03_approval_reference_json != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: b03-broker-initiation-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/b03-broker-start.json
+          if-no-files-found: ignore
+          retention-days: 90
 
       - name: Upload immutable production database receipt
         if: ${{ inputs.release_mode == 'normal' }}
@@ -1438,13 +1493,17 @@ jobs:
           WEB_REQUIRED: ${{ steps.images.outputs.web_required }}
           FRONTEND_ACTIVATION: ${{ steps.frontend-activation.outputs.evidence_file }}
           FRONTEND_ACTIVATION_SHA256: ${{ steps.frontend-activation.outputs.evidence_sha256 }}
+          WEB_AUTHORIZATION_FILE: ${{ steps.images.outputs.web_authorization_file }}
+          WEB_AUTHORIZATION_SHA256: ${{ steps.images.outputs.web_authorization_sha256 }}
         run: |
           set -euo pipefail
           node scripts/github/osv-acceptance-window.mjs --revision "$DEPLOY_SHA"
           args=(--source-sha="$SOURCE_SHA" --authorization="$AUTHORIZATION_FILE" --authorization-sha256="$AUTHORIZATION_SHA256" --release-receipt="$RLS_RECEIPT" --release-receipt-sha256="$(sha256sum "$RLS_RECEIPT" | cut -d' ' -f1)" --backend-metadata="$BACKEND_METADATA" --backend-metadata-sha256="$(sha256sum "$BACKEND_METADATA" | cut -d' ' -f1)")
           if [ "$WEB_REQUIRED" = true ]; then
             test -n "$FRONTEND_ACTIVATION" && test -n "$FRONTEND_ACTIVATION_SHA256"
+            test -n "$WEB_AUTHORIZATION_FILE" && test -n "$WEB_AUTHORIZATION_SHA256"
             args+=(--frontend-activation="$FRONTEND_ACTIVATION" --frontend-activation-sha256="$FRONTEND_ACTIVATION_SHA256")
+            args+=(--web-authorization="$WEB_AUTHORIZATION_FILE" --web-authorization-sha256="$WEB_AUTHORIZATION_SHA256")
           fi
           if [ -n "${HISTORICAL_RUNTIME_EVIDENCE_JSON:-}${HISTORICAL_RUNTIME_EVIDENCE_SHA256:-}" ]; then
             args+=(--historical-runtime-evidence="$RUNNER_TEMP/historical-runtime-evidence.json" --historical-runtime-evidence-sha256="$HISTORICAL_RUNTIME_EVIDENCE_SHA256")

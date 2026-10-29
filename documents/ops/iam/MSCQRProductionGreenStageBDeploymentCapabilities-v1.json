@@ -4327,6 +4327,62 @@
       "mutation": true
     },
     {
+      "id": "checker-b03-approval-task-definition-read",
+      "phase": "approval-publication",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
+      "sourceFunction": "checker-b03-approval-task-definition-read",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CHECKER_B03_TASK_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "ReadNativeStageBTaskDefinitions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4a1e0eaf2403631cf31b5c5151b21bcccd6a619f5401a8d0d174d4a90cfdf9f5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
+      "id": "checker-b03-publication-task-definition-read",
+      "phase": "approval-publication",
+      "identity": "INDEPENDENT_CHECKER",
+      "executor": "aws-cli",
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
+      "sourceFunction": "checker-b03-publication-task-definition-read",
+      "action": "ecs:DescribeTaskDefinition",
+      "resources": [
+        "*"
+      ],
+      "context": {
+        "account": "368992683803",
+        "region": "eu-west-2"
+      },
+      "classification": "CHECKER_B03_TASK_READ",
+      "probe": "structural",
+      "probeIds": [],
+      "policy": {
+        "sourceFile": "infra/aws/terraform/production-green-stage-a/main.tf",
+        "sid": "ReadNativeStageBTaskDefinitions",
+        "livePolicyArn": null,
+        "expectedVersion": "protected-main-source",
+        "expectedPolicySha256": "4a1e0eaf2403631cf31b5c5151b21bcccd6a619f5401a8d0d174d4a90cfdf9f5"
+      },
+      "required": true,
+      "mutation": false
+    },
+    {
       "id": "checker-publish-stage-b-approval",
       "phase": "approval-publication",
       "identity": "INDEPENDENT_CHECKER",
@@ -25099,6 +25155,10 @@
     },
     {
       "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
+      "action": "ecs:DescribeTaskDefinition"
+    },
+    {
+      "sourceFile": "scripts/aws/create-production-green-stage-b-approval.mjs",
       "action": "kms:Sign"
     },
     {
@@ -26208,6 +26268,10 @@
     {
       "sourceFile": "scripts/aws/production-stage-a-root-drop-orphan-recovery.mjs",
       "action": "s3:PutObject"
+    },
+    {
+      "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",
+      "action": "ecs:DescribeTaskDefinition"
     },
     {
       "sourceFile": "scripts/aws/publish-production-green-stage-b-approval.mjs",

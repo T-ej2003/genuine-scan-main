@@ -14,6 +14,8 @@ import { writeStageBPrivateFileExclusive } from "../aws/stage-b-artifact-contrac
 import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
+import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
+import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildB01ExecutorInput, canonicalB01Prerequisite, collectB01State, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
 import { B01_PREREQUISITE } from "../aws/production-b01-prerequisite-contract.mjs";
 import { classifyProductionRlsCatalogue, hashProductionRlsCatalogue, RLS_PROBE_CLASSIFICATIONS } from "../aws/probe-production-rls-catalogue.mjs";
@@ -22,6 +24,7 @@ import {
   canonicalProductionApprovalPayload,
 } from "../../backend/scripts/production-rls-approval.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const enabled = process.env.MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST === "true";
 const root = process.cwd();
@@ -36,6 +39,7 @@ const liveTaskEvidence = (sourceSha, candidateSourceSha, digest, taskId = "9") =
 const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
+const b03DeltaRuntime = createRequire(import.meta.url)("../aws/production-b03-delta-executor.cjs");
 const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
 const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
 const printingRoutine = (source, name) => {
@@ -1306,6 +1310,83 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const converged = await administratorClient.$transaction((tx) => printingDeltaRuntime.executePrintingRoutineDeltaTransaction({ tx, input: deltaInput }), { maxWait: 10000, timeout: 120000 });
       assert.deepEqual(converged, { status: "ALREADY_CONVERGED", writeCount: 0 });
       assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "already-converged privilege unchanged"), "f");
+
+      const oldSource = (file) => run("git", ["show", `d785aa7f1e154f37c0dc621082e3f6c46d5d5aec:${file}`]);
+      const oldFunctions = oldSource("scripts/rls/sql/generated/20-context-helpers.sql");
+      const oldPolicies = oldSource("scripts/rls/sql/generated/30-policies.sql");
+      const oldGrants = oldSource("scripts/rls/sql/generated/21-runtime-grants.sql");
+      const currentGrants = fs.readFileSync(path.join(sqlRoot, "21-runtime-grants.sql"), "utf8");
+      const productionRole = (sql) => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_");
+      const oldFunction = (name) => {
+        const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`, start = oldFunctions.indexOf(marker), end = oldFunctions.indexOf("\n$fn$;", start);
+        assert.ok(start >= 0 && end > start);
+        return productionRole(oldFunctions.slice(start, end + 6));
+      };
+      const selectedOldPolicy = (identity) => {
+        const [table, name] = identity.split(".");
+        const lines = oldPolicies.split("\n"), line = lines.findIndex((value) => value.startsWith(`CREATE POLICY "${name}" ON public."${table}" `));
+        assert.ok(line >= 0); assert.ok(lines[line + 1].startsWith(`COMMENT ON POLICY "${name}"`));
+        return [productionRole(lines[line]), productionRole(lines[line + 1])];
+      };
+      const columnRights = (source, table, privilege) => new Set(source.split("\n").flatMap((line) => {
+        const match = new RegExp(`^GRANT ${privilege} \\(([^)]+)\\) ON TABLE public\\."${table}" TO "mscqr_prd_rls_phase2_auth_owner";$`).exec(productionRole(line));
+        return match ? [...match[1].matchAll(/"([^"]+)"/g)].map((value) => value[1]) : [];
+      }));
+      const reverseGrants = [["Notification", "UPDATE"], ["SupportIssueReport", "INSERT"], ["SupportIssueReport", "SELECT"], ["SupportIssueReport", "UPDATE"]]
+        .flatMap(([table, privilege]) => {
+          const old = columnRights(oldGrants, table, privilege), current = columnRights(currentGrants, table, privilege);
+          const extra = [...current].filter((column) => !old.has(column)).sort();
+          return extra.length ? [`REVOKE ${privilege} (${extra.map((column) => `"${column}"`).join(",")}) ON TABLE public."${table}" FROM mscqr_prd_rls_phase2_auth_owner`] : [];
+        });
+      assert.equal(reverseGrants.length, 3);
+      const newFunctions = B03_DELTA_OBJECTS.routines.filter((identity) => !requirements.objects.routines.some((row) => row.identity === identity));
+      assert.equal(newFunctions.length, 0, "Current package must contain all B03 routines");
+      const historicalFunctions = B03_DELTA_OBJECTS.routines.filter((identity) => !oldFunctions.includes(`CREATE OR REPLACE FUNCTION ${identity.slice(0, identity.indexOf("("))}(`));
+      assert.equal(historicalFunctions.length, 6);
+      const dropFunctions = historicalFunctions.map((identity) => {
+        const name = /^app_rls\.([a-z0-9_]+)\(/.exec(identity)[1];
+        const signature = `${name}(${identity.slice(identity.indexOf("(") + 1, -1).split(", ").map((argument) => argument.replace(/^p_[a-z0-9_]+ /, "")).join(",")})`;
+        return `DROP FUNCTION app_rls.${signature}`;
+      });
+      const dropPolicies = B03_DELTA_OBJECTS.policies.map((identity) => {
+        const [table, name] = identity.split("."); return `DROP POLICY "${name}" ON public."${table}"`;
+      });
+      const priorPolicies = B03_DELTA_OBJECTS.policies.filter((identity) => oldPolicies.includes(`CREATE POLICY "${identity.split(".")[1]}" ON public."${identity.split(".")[0]}" `))
+        .flatMap(selectedOldPolicy);
+      assert.equal(priorPolicies.length, 8);
+      const preservedCounts = ["User", "QRCode", "SupportIssueReport", "Notification"].map((table) =>
+        scalar(privilegedGreenUrl, `SELECT count(*) FROM public."${table}"`, `B03 ${table} before`));
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        ${[...dropFunctions, oldFunction("complete_security_event_outbox"), oldFunction("refresh_inventory_status_rollups")].join(";\n")};
+        RESET ROLE;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
+        ${[...dropPolicies, ...priorPolicies, ...reverseGrants].join(";\n")};
+        RESET ROLE; COMMIT;`], "restore exact historical B03 predecessor in disposable PostgreSQL");
+      const beforeB03 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
+      const oldRequirementBody = { ...requirements, sourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec",
+        candidateSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", objects: beforeB03 };
+      delete oldRequirementBody.requirementsSha256;
+      const oldRequirements = { ...oldRequirementBody, requirementsSha256: canonicalSha256(oldRequirementBody) };
+      const packageB03 = buildB03DeltaPackage({ predecessor: oldRequirements, successor: requirements });
+      assert.equal(packageB03.mutations.length, 44);
+      for (const stage of ["after-temporary-grant", "after-1", "after-22", "after-44"]) {
+        await assert.rejects(administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03,
+          checkpoint: (value) => { if (value === stage) throw new Error(stage); } }), { maxWait: 10000, timeout: 180000 }), new RegExp(stage));
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${stage} B03 privilege rollback`), "f");
+        assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
+      }
+      assert.deepEqual(await administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03 }),
+        { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 44 });
+      assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements.objects);
+      assert.deepEqual(await administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03 }),
+        { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
+      assert.deepEqual(["User", "QRCode", "SupportIssueReport", "Notification"].map((table) =>
+        scalar(privilegedGreenUrl, `SELECT count(*) FROM public."${table}"`, `B03 ${table} after`)), preservedCounts);
     } finally { await Promise.all([maintenanceClient.$disconnect(), administratorClient.$disconnect(), verifier.$disconnect()]); }
     restoreDisposableMemberships();
     rdsMembershipsNormalized = false;

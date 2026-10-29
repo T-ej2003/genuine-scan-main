@@ -312,6 +312,7 @@ test("release gate certifies the same disposable PostgreSQL database used by int
     GITHUB_ENV: githubEnv,
     INVOCATION_LOG: invocations,
     DEPLOY_SHA: "a".repeat(40),
+    B03_APPROVAL_REFERENCE_JSON: "",
     P2_TEST_DB_PROTOCOL: "postgresql",
     P2_TEST_DB_USER: "mscqr_rls_cert_admin",
     P2_TEST_DB_HOST: "127.0.0.1",

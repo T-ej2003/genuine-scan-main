@@ -56,6 +56,7 @@ test("normal security completion records only live-authenticated backend, databa
   assert.match(workflow.slice(commit), /--release-receipt="\$RLS_RECEIPT"[\s\S]*--backend-metadata="\$BACKEND_METADATA"/);
   assert.match(workflow.slice(activation, commit), /frontend-activation\.json[\s\S]*evidence_sha256/);
   assert.match(workflow.slice(commit), /--frontend-activation="\$FRONTEND_ACTIVATION"[\s\S]*--frontend-activation-sha256="\$FRONTEND_ACTIVATION_SHA256"/);
+  assert.match(workflow.slice(commit), /--web-authorization="\$WEB_AUTHORIZATION_FILE"[\s\S]*--web-authorization-sha256="\$WEB_AUTHORIZATION_SHA256"/);
   assert.match(writer, /assertProductionRlsReleaseReceipt\(releaseReceipt, \{ sourceSha, imageDigest: authorizedBackendDigest\(authorization\) \}\)/);
   assert.match(writer, /assertNormalBackendActivationEvidence\(backendActivation, \{ sourceSha, stageBAuthorization: authorization \}\)/);
   assert.match(writer, /changes\.database = \{ sourceSha, releaseIdentity: releaseReceipt\.receiptBundleSha256 \}/);
@@ -69,6 +70,16 @@ test("web-required security completion records the exact activated frontend only
   const result = commitSecurityComponentState({ sourceSha: source, authorization, frontendActivation: activation, frontendLive: frontend, frontendImageSource: source, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true });
   assert.deepEqual(result.state.components.frontend, { ...frontend, establishedThroughSha: source });
   assert.throws(() => commitSecurityComponentState({ sourceSha: source, authorization, client: { read: () => initial, advance: () => {} }, isProtectedMainAncestor: () => true }), /Web-required/);
+});
+
+test("frontend activation with unchanged build impact cannot commit without signed web authorization", () => {
+  const initial = state(); const body = { sourceSha: source, valid: true, imageReuseEvidence: { webPublicationRequired: false } };
+  const authorization = { ...body, authorizationSha256: canonicalSha256(body) };
+  const frontend = { sourceSha: source, imageDigest: `sha256:${"4".repeat(64)}`, taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-frontend:8", desiredCount: 2 };
+  const activation = { sourceSha: source, candidateTaskDefinitionArn: frontend.taskDefinitionArn,
+    imageRef: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-web@${frontend.imageDigest}`, health: { ready: true, loginStatus: 200 } };
+  assert.throws(() => commitSecurityComponentState({ sourceSha: source, authorization, frontendActivation: activation,
+    frontendLive: frontend, frontendImageSource: source, client: { read: () => initial, advance: () => {} } }), /signed web authorization/);
 });
 
 test("a verified security rotation may refresh only its release identity at the same source", () => {

@@ -1,5 +1,6 @@
 import { stageBStaticConfiguration as configuration } from './fixtures/stage-b-static-configuration.mjs';
 import assert from "node:assert/strict";
+import { fixture as b03PlanFixture, b03Configuration } from "./fixtures/production-b03-plan.mjs";
 import fs from "node:fs";
 import test from "node:test";
 import {
@@ -1520,4 +1521,43 @@ test("fresh recovery mutation identity preserves current/deposed instance cardin
   assert.throws(() => assertStageBMutationInstanceMultisetEqual([...currentIds, ...deposedIds], [...currentIds, ...deposedIds, stageBMutationInstanceIdentity(deposed[0], "current-task-definition-rotation")]), /mutation-instance identity/);
   assert.throws(() => stageBMutationInstanceIdentity({ ...deposed[0], deposed: "deadbeefdeadbeef" }, "partial-apply-deposed-task-definition-cleanup"), /malformed deposed identity/);
   assert.throws(() => classifyStageBPlan(freshImagePartialApplyRecoveryPlan(), { partialApplyRecovery: true, freshImagePartialApplyRecovery: true }), /mutually exclusive/);
+});
+
+test("B03 fixed executor participates in the canonical semantic census without widening legacy profiles", () => {
+  const value = baselinePlan(), b03 = b03PlanFixture();
+  Object.assign(value.variables, b03.variables);
+  value.resource_changes.push(...b03.resource_changes);
+  value.configuration.root_module.resources.push(b03Configuration());
+  const census = assertStageBPlanSemanticCompleteness(value);
+  assert.equal(census.resources.filter(r => r.classification === "b03-fixed-executor").length, 1);
+  assert.equal(census.counts.unclassifiedResourceActions, 0);
+  const wrongRef = structuredClone(value);
+  wrongRef.configuration.root_module.resources.at(-1).expressions.execution_role_arn.references.push("aws_iam_role.admin.arn");
+  assert.throws(() => assertStageBPlanSemanticCompleteness(wrongRef), /B03/);
+  const wrongCommand = structuredClone(value);
+  const change = wrongCommand.resource_changes.at(-1);
+  const containers = JSON.parse(change.change.after.container_definitions);
+  containers[0].command = ["sh"];
+  change.change.after.container_definitions = JSON.stringify(containers);
+  assert.throws(() => assertStageBPlanSemanticCompleteness(wrongCommand), /B03/);
+});
+
+test("B03 broker IAM permits exactly the validated planned revision without widening PassRole", async () => {
+  const { assertStageBBrokerPolicyDocument } = await import("../aws/stage-b-deployment-contract.mjs");
+  const p = b03PlanFixture(), change = p.resource_changes[0];
+  const taskArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:7";
+  change.change.after.arn = taskArn; delete change.change.after_unknown.arn;
+  const policy = canonicalBrokerPolicy();
+  policy.Statement.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions").Resource.push(taskArn);
+  assert.equal(assertStageBBrokerPolicyDocument(policy, p), true);
+  assert.throws(() => assertStageBBrokerPolicyDocument(policy));
+  for (const substitute of [taskArn.replace(":7", ":8"), taskArn.replace(":7", ":*"), "*"]) {
+    const bad = structuredClone(policy); bad.Statement[0].Resource[bad.Statement[0].Resource.length - 1] = substitute;
+    assert.throws(() => assertStageBBrokerPolicyDocument(bad, p));
+  }
+  const role = structuredClone(policy);
+  role.Statement.find(s => s.Sid === "PassOnlyApprovedTaskRoles").Resource.push("arn:aws:iam::368992683803:role/administrator");
+  assert.throws(() => assertStageBBrokerPolicyDocument(role, p));
+  const duplicate = structuredClone(policy); duplicate.Statement[0].Resource.push(taskArn);
+  assert.throws(() => assertStageBBrokerPolicyDocument(duplicate, p));
 });

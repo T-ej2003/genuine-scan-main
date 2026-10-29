@@ -91,8 +91,11 @@ artifact does not change the trust classification of historical logs.
 | `broker_package_path` | explicit output of the reviewed broker package builder | tfvars; raw and base64 SHA-256 in report |
 | `source_contract_sha256`, `migration_set_digest`, `package_checksum_sha256` | source-controlled `generated/checksums.json` bytes and fields | tfvars and binding report |
 | retained candidate/executor maps | supplied production Terraform state backup after lineage, serial, family, revision, broker policy, and address checks | tfvars and retained counts in report |
+| `b03_executor_definition_json` | optional private `--b03-definition` file for first registration, then the exact authenticated Stage B state revision | canonical tfvars; later plans retain the installed revision |
 
 `stage_a_executor_networking_ready` and `log_retention_days` are contract values; the former must be proven true in the prerequisite JSON and the latter remains the reviewed Terraform default of 30 days. No sensitive secret values are accepted or emitted.
+
+For first B03 registration, supply `--b03-definition` to the canonical tfvars generator with the current-source fixed executor definition. The generator checks its package transport, source and backend image against authenticated evidence. After registration, the generator derives this input from the authenticated state backup and rejects a different requested definition. The Terraform variable has no default, so a plan without canonical tfvars cannot remove the installed task by silently selecting `null`. The broker policy retains that exact revision; later source releases may retain it as a no-op, while B03 execution still requires its original signed approval.
 
 The release role's backend access is defined by `documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json`: it uses `s3:GetBucketLocation`, exact production state read/write, and exact `.tflock` lifecycle access. The legacy workspace base key, state deletion, workspace listing, and unrestricted bucket listing are not deployment gates or permissions.
 
@@ -115,3 +118,69 @@ Both wrapper modes run `terraform -chdir=infra/aws/terraform/production-green-st
 ## Broker environment size bound
 
 AWS limits the aggregate Lambda environment to 4096 bytes ([AWS quota](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html)). The internal JSON payload guard is 3584 bytes, retaining a 512-byte reserve. The previous 3500-byte guard was repository headroom introduced after the historical oversized inventory configuration; it was not an AWS limit. The required dual-SHA environment is 3522 bytes, including the explicit authenticated `BROKER_IMAGE_RELEASE_SHA`, leaving 62 bytes inside the guard and 574 bytes below AWS's limit. Terraform and the JavaScript semantic validator enforce the same bound; image and tooling provenance checks remain unchanged.
+
+### B03 approval issuance and transport
+
+B03 uses the existing independent-checker KMS key and approval secret, with a
+separate `b03-incremental` operation. Full-RLS approvals cannot authorize B03.
+The canonical issuer accepts B03 input fields `operation`, `sourceSha`,
+`backendImage`, `pkg`, `databaseHostname`, `taskDefinitionArn`, `ticketId`,
+`predecessorRequirementsReference` and `successorRequirementsReference`.
+References use the existing authenticated GitHub requirements-artifact format;
+the predecessor must be `d785aa7f1e154f37c0dc621082e3f6c46d5d5aec`.
+The issuer rebuilds the package from those artifacts, verifies the current-source
+signed image authorization, live database identity and fixed task definition,
+and rechecks protected main immediately before signing. Approval lifetime is
+30 minutes; source image authorization must cover that interval.
+
+```sh
+node scripts/aws/create-production-green-stage-b-approval.mjs \
+  --input /private/path/b03-input.json \
+  --image-authorization /private/path/image-authorization.json \
+  --credential-source inherited-checker-session \
+  --sign --output /private/path/b03-approval.json
+node scripts/aws/publish-production-green-stage-b-approval.mjs \
+  --approval /private/path/b03-approval.json \
+  --credential-source inherited-checker-session
+node scripts/aws/check-production-green-stage-b-approval-publication.mjs \
+  --approval /private/path/b03-approval.json
+```
+
+The output is canonical, bounded compressed transport; do not reformat it.
+Publication preserves those exact bytes and the existing deterministic Secrets
+Manager version token. It replaces `AWSCURRENT`, so publish B03 only for a B03
+release; concurrent approval replacement fails the broker's artifact-hash check.
+The broker retrieves the canonical secret itself and independently verifies the
+signature, source, task revision, image, package, database and catalogue bindings.
+Requests carry only the operation, approval ID, source and published-byte hash.
+Publication proof does not claim an execution. Repeating execution can only
+recover the original one-use task; it cannot schedule a second migration.
+
+### B03 Release Gate initiation
+
+For `database_install_mode=incremental-b03`, Release Train forwards
+`b03_approval_reference_json` unchanged to Release Gate. Generate this compact
+reference with `b03PublicationRequest` from the canonical published approval;
+it contains only operation, approval ID, source SHA and published-byte SHA-256.
+Release Gate's existing B03 CLI uses `--mode start --b03-request <file>` and the
+existing production environment approval and signed image authorization.
+It requests broker publication proof, checks the source/image/expiry, refreshes
+protected main, then requests execution through the same immutable broker version.
+The task revision comes from the published signed B03 binding and is read back by
+the broker; Terraform IAM permits only the registered revision. Dispatch cannot
+supply task definitions, runtime overrides or database secrets.
+
+The output `b03-broker-start.json` is initiation evidence with status
+`STARTED_UNVERIFIED`. It is not a SQL completion receipt. Release Gate preserves
+this artifact and stops before backend activation. After the ECS task stops,
+run the existing governed app-only compatibility verifier against the exact
+successor requirements. Dispatch Release Train again with the same B03 approval
+reference and the verifier's authenticated `b03_compatibility_reference_json`.
+The B03 CLI then uses `--mode complete`; it does not relaunch SQL. The broker
+authenticates the original signed launch, the one-use task claim and native ECS
+success. Release Gate independently authenticates the verifier's protected-main
+GitHub artifact, fixed read-only ECS task and exact successor catalogue. The
+broker persists the completion in its existing DynamoDB and S3 receipt stores;
+backend activation rechecks that broker record and verifier artifact. An expired
+completion requires a new read-only verifier artifact; the migration task is
+still one-use. Unknown task outcomes and missing proof stop the release.

@@ -73,6 +73,20 @@ test("web-impacting normal release requires source-bound web transport and activ
   assert.throws(() => assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes: tamperedBytes, expectedSha256: crypto.createHash("sha256").update(tamperedBytes).digest("hex"), webPublicationRequired: false }), /canonical source-bound envelope/);
 });
 
+test("already published web image may be authorized for activation even when no new build is required", () => {
+  const transport = { sourceSha, authorizationBytes: bytes, expectedSha256: digest,
+    webAuthorizationBytes: webBytes, webExpectedSha256: webDigest, webPublicationRequired: false };
+  assert.equal(assertNormalReleaseAuthorizationTransport(transport).webActivationAuthorized, true);
+  assert.equal(assertNormalReleaseGateInputs({ ...transport, preserveCurrentFrontend: false, authenticateAuthorization: authenticate,
+    authenticateWebAuthorization: (value) => value.sourceSha === sourceSha }), true);
+  assert.throws(() => assertNormalReleaseGateInputs({ ...transport, preserveCurrentFrontend: true, authenticateAuthorization: authenticate,
+    authenticateWebAuthorization: () => true }), /frontend action/);
+  assert.throws(() => assertNormalReleaseGateInputs({ ...transport, preserveCurrentFrontend: false, authenticateAuthorization: authenticate }), /not authenticated/);
+  const substituted = Buffer.from(JSON.stringify({ ...webAuthorization, sourceSha: "0".repeat(40) }));
+  assert.throws(() => assertNormalReleaseAuthorizationTransport({ ...transport, webAuthorizationBytes: substituted,
+    webExpectedSha256: crypto.createHash("sha256").update(substituted).digest("hex") }), /not source-bound/);
+});
+
 
 test('existing release transport binds durable registration source and rejects malformed or substituted references',()=>{
  const authorizationJson=bytes.toString(),authorizationSha256=digest,completedRegistrationSourceSha='a'.repeat(40);

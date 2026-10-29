@@ -65,7 +65,7 @@ const TERRAFORM = /^infra\/aws\/terraform\/(?:(?:main|variables)\.tf$|production
 // canonical Docker COPY inputs. Do not classify arbitrary neighboring files.
 const APP_ONLY_PERMISSION_SOURCE = /^infra\/aws\/terraform\/production-app-only-permissions\/(?:main\.tf\.json|\.terraform\.lock\.hcl)$/;
 const SUPPORT_EMAIL_WORKER_TERRAFORM = /^infra\/aws\/terraform\/production-support-email-worker\/(?:main\.tf|versions\.tf|\.terraform\.lock\.hcl)$/;
-const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|package\.json|package-lock\.json)$/;
+const CONTROL_PLANE = /^infra\/aws\/terraform\/lambda\/production-rls-approval-broker\/(?:index\.mjs|ecs-task-definition-readback\.mjs|b03-approval\.mjs|b03-completion\.mjs|package\.json|package-lock\.json)$/;
 const TEST = /(?:^|\/)(?:e2e|tests?|fixtures)(?:\/|\.)|\.test\.[^.]+$/;
 const TOOLING_ONLY = new Set([".gitleaks-baseline.json", ".gitleaksignore", ".security/rotation-evidence.schema.json", "docker-compose.yml", "docker-compose.asg-web.yml", "docker-compose.rls-certification.yml", "docker-compose.p2-test.yml", "docker-compose.production-read-only-rls-canary-test.yml", "docker/nginx-root-entrypoint.sh"]);
 

@@ -1,3 +1,4 @@
+import { B03_TASK_ADDRESS, assertB03TaskPlan, assertB03PlanConfiguration } from "./production-b03-plan-contract.mjs";
 import {
   canonicalizeEcsTaskDefinitionVolumes,
   STAGE_B_TASK_DEFINITION_FAMILIES,
@@ -580,7 +581,8 @@ function expectedStaticExpression(plan, address, field) {
 }
 
 export function assertStageBStaticConfigurationCoverage(plan, { terraformConfiguration } = {}) {
-  const resources = rootConfigurationResources(plan);
+  assertB03PlanConfiguration(plan);
+  const resources = rootConfigurationResources(plan).filter(r => r.address !== "aws_ecs_task_definition.b03");
   const profiles = Object.entries(STATIC_CONFIGURATION_PROFILES);
   const expectedAddresses = new Set(profiles.map(([address]) => address));
   const configured = new Set();
@@ -631,12 +633,14 @@ export function assertStageBStaticConfigurationCoverage(plan, { terraformConfigu
   const brokerChange = plan?.resource_changes?.find((change) => change.address === "aws_iam_policy.broker");
   const brokerPolicy = brokerChange?.change?.after?.policy;
   if (typeof brokerPolicy === "string") {
-    try { assertStageBBrokerPolicyDocument(JSON.parse(brokerPolicy)); } catch { throw new Error("UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: aws_iam_policy.broker.policy"); }
+    try { assertStageBBrokerPolicyDocument(JSON.parse(brokerPolicy), plan); } catch { throw new Error("UNCLASSIFIED_STATIC_CONFIGURATION_EXPRESSION: aws_iam_policy.broker.policy"); }
   }
   const attributes = profiles.flatMap(([address, profile]) => profile.fields.map((field) => ({ address, field, classification: staticConfigurationClass(address, field) })));
+  const b03Configuration = rootConfigurationResources(plan).find(r => r.address === "aws_ecs_task_definition.b03");
+  if (b03Configuration) attributes.push(...[...Object.keys(b03Configuration.expressions), "count_expression"].map(field => ({ address: b03Configuration.address, field, classification: "B03_FIXED_EXECUTOR" })));
   return {
-    resourceProfiles: profiles.length,
-    configuredResourceProfiles: configured.size,
+    resourceProfiles: profiles.length + (b03Configuration ? 1 : 0),
+    configuredResourceProfiles: configured.size + (b03Configuration ? 1 : 0),
     configurationAttributes: attributes.length,
     unclassifiedConfigurationAttributes: 0,
     missingExpectedStaticProfiles: missing.length,
@@ -858,7 +862,7 @@ function assertConcreteBrokerEnvironment(variables) {
   assertStageBLambdaEnvironmentSize(variables);
 }
 
-function assertInitialProviderComputedShape(change) {
+function assertInitialProviderComputedShape(change, plan) {
   let expected = change.address === "aws_iam_policy.broker" ? BROKER_POLICY_INITIAL_PROVIDER_UNKNOWN_PATHS
     : change.address === "aws_lambda_function.broker" ? BROKER_FUNCTION_INITIAL_PROVIDER_UNKNOWN_PATHS
       : change.address === "aws_lambda_alias.reviewed" ? BROKER_ALIAS_INITIAL_PROVIDER_UNKNOWN_PATHS
@@ -882,7 +886,7 @@ function assertInitialProviderComputedShape(change) {
   }
   if (dependencyPath === "policy" && dependencyConcrete) {
     if (truePaths(change.change?.after_unknown).includes("policy")) throw new Error(`UNFAITHFUL_PROVIDER_COMPUTED_FIELDS: ${change.address}.policy`);
-    try { assertStageBBrokerPolicyDocument(JSON.parse(change.change.after.policy)); } catch { throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.policy`); }
+    try { assertStageBBrokerPolicyDocument(JSON.parse(change.change.after.policy), plan); } catch { throw new Error(`UNCLASSIFIED_CHANGED_PATH: ${change.address}.policy`); }
   }
   if (dependencyPath === "environment[0].variables" && dependencyConcrete) assertInitialBrokerEnvironment(change);
   expected = dependencyUnknown ? new Set([...expected, dependencyPath]) : expected;
@@ -1168,6 +1172,21 @@ export function censusStageBPlanSemantics(plan, options = {}) {
   const seenAddresses = new Set();
   for (const change of plan.resource_changes) {
     const actions = change?.change?.actions || [];
+    if (change.address === B03_TASK_ADDRESS) {
+      if (recoveryMode !== "NORMAL") throw new Error("B03 is forbidden in historical recovery profiles");
+      const { classification } = assertB03TaskPlan(change, plan);
+      if (seenAddresses.has(change.address)) throw new Error("B03 duplicate task definition");
+      seenAddresses.add(change.address);
+      if (exactJson(actions, ["no-op"])) continue;
+      // The fixed B03 contract checks every executable field, metadata marker,
+      // configuration expression and lifecycle before assigning these classes.
+      resources.push({ address: change.address, classification, actions: [...actions],
+        mutationInstanceIdentity: stageBMutationInstanceIdentity(change, classification),
+        changedPaths: diffPaths(change.change.before, change.change.after).filter(Boolean).map(path => ({ path, classification: "B03_FIXED_EXECUTOR" })),
+        afterUnknownPaths: truePaths(change.change.after_unknown).filter(Boolean).map(path => ({ path, classification: "B03_PROVIDER_METADATA" })),
+        beforeSensitivePaths: [], afterSensitivePaths: [], replacePaths: [], configurationReferences: [] });
+      continue;
+    }
     if (exactJson(actions, ["no-op"]) || actions.length === 0) continue;
     const deposedCleanup = isStageBPartialApplyDeposedTaskDefinitionCleanup(change);
     if (!deposedCleanup || !(options.partialApplyRecovery || options.freshImagePartialApplyRecovery)) {
@@ -1184,7 +1203,7 @@ export function censusStageBPlanSemantics(plan, options = {}) {
     }
     if (ECS_ADDRESSES.has(change.address) && !((options.partialApplyRecovery || options.freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change))) assertEcsSemanticDomain(change);
     assertInitialBrokerEnvironment(change);
-    if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change);
+    if (isBrokerInitialCreate(change) || isEcsInitialCreate(change)) assertInitialProviderComputedShape(change, plan);
     const changedPaths = (options.partialApplyRecovery || options.freshImagePartialApplyRecovery) && isStageBPartialApplyDeposedTaskDefinitionCleanup(change)
       ? []
       : diffPaths(change.change?.before, change.change?.after).filter(Boolean).map((path) => ({ path, classification: assertClass(classifyChangedPath(change, path), "CHANGED_PATH") }));

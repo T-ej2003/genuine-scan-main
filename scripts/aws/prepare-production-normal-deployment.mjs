@@ -20,7 +20,7 @@ const imageInputs = Object.freeze({
     /^backend\/(?:src\/|prisma\/|scripts\/|tests\/|local-print-agent\/releases\/|docker\/start-runtime\.sh$)/,
     /^backend\/(?:Dockerfile|package(?:-lock)?\.json|prisma\.config\.ts|tsconfig\.json)$/,
     /^shared\/|^\.dockerignore$|^docker\/base-image-identities\.json$/,
-    /^scripts\/(?:smoke-release\.mjs|lib\/staging-smoke-totp\.mjs|security\/production-rotation-state-inventory\.mjs|aws\/(?:production-green-stage-b-contract|production-app-only-(?:database-verifier|verifier-runtime|requirements-runtime)|production-security-rebaseline-transport|production-rls-catalogue-probe-(?:config|runtime))\.mjs)$/,
+    /^scripts\/(?:smoke-release\.mjs|lib\/staging-smoke-totp\.mjs|security\/production-rotation-state-inventory\.mjs|aws\/(?:production-green-stage-b-contract|production-app-only-(?:database-verifier|verifier-runtime|requirements-runtime)|production-security-rebaseline-transport|production-rls-catalogue-probe-(?:config|runtime))\.mjs|aws\/(?:production-printing-routine-delta-executor|production-b03-delta-executor)\.cjs)$/,
     /^documents\/security\/mscqr_staging_rls_shared_batch_phase_(?:apply|rollback|verify)_2026-07-15\.sql$/,
   ],
   frontend: [

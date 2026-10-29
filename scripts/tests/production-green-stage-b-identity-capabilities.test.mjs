@@ -238,7 +238,13 @@ test("runtime S3 Get and List actions are classified as read-only", () => {
 test("generated capability graph is exhaustive, deterministic, and identity-exact", () => {
   const first = buildStageBDeploymentCapabilityGraph(); const second = buildStageBDeploymentCapabilityGraph();
   assert.deepEqual(first, second);
-  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 768, uniqueActions: 159, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  assert.deepEqual(assertStageBDeploymentCapabilityGraph(first), { phases: 61, capabilities: 770, uniqueActions: 159, unmappedCalls: 0, unclassifiedCapabilities: 0, identityBoundaryViolations: 0, sourcePolicyMismatches: 0, manifestMismatches: 0, configurationContradictions: 0 });
+  for (const id of ["checker-b03-approval-task-definition-read", "checker-b03-publication-task-definition-read"]) {
+    const capability = first.capabilities.find((entry) => entry.id === id);
+    assert.equal(capability?.identity, "INDEPENDENT_CHECKER");
+    assert.equal(capability?.action, "ecs:DescribeTaskDefinition");
+    assert.equal(capability?.policy?.sid, "ReadNativeStageBTaskDefinitions");
+  }
   const normalState = first.capabilities.find(({ id }) => id === "reference-audit-normal-deployment-component-state");
   assert.deepEqual(normalState && [normalState.action, normalState.resources, normalState.probeIds, normalState.mutation], [
     "dynamodb:GetItem",

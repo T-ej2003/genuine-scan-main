@@ -217,7 +217,7 @@ locals {
         Sid      = "RunOnlyApprovedExecutorAndCanaryRevisions"
         Effect   = "Allow"
         Action   = ["ecs:RunTask"]
-        Resource = values(local.active_broker_task_definition_arns)
+        Resource = concat(values(local.active_broker_task_definition_arns), aws_ecs_task_definition.b03[*].arn)
       },
       {
         Sid      = "RunOnlyApprovedPreDeploymentInventory"

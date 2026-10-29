@@ -33,6 +33,8 @@ const WORKSPACE_STATE_JOURNAL = `${STAGE_B_TERRAFORM_BACKEND.bucketArn}/${STAGE_
 const BOOTSTRAP_OPERATOR_USER = "arn:aws:iam::368992683803:user/mscqr-production-bootstrap-operator";
 
 const CALLS = Object.freeze([
+  ["scripts/aws/create-production-green-stage-b-approval.mjs", "ecs:DescribeTaskDefinition", "checker-b03-approval-task-definition-read", ["*"], "INDEPENDENT_CHECKER"],
+  ["scripts/aws/publish-production-green-stage-b-approval.mjs", "ecs:DescribeTaskDefinition", "checker-b03-publication-task-definition-read", ["*"], "INDEPENDENT_CHECKER"],
   ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "sts:GetCallerIdentity", "workspace-state-reconciliation-identify", ["*"], "ROOT_OPERATOR"],
   ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:GetPolicy", "workspace-state-reconciliation-read-policy", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
   ["scripts/aws/reconcile-production-workspace-state-policy.mjs", "iam:GetPolicyVersion", "workspace-state-reconciliation-read-policy-version", [WORKSPACE_STATE_POLICY], "ROOT_OPERATOR"],
@@ -291,7 +293,9 @@ export function buildProductionDependencyClosure() {
     if (!Object.hasOwn(MODE_CAPABILITIES, mode)) throw new Error(`Reachable production mode ${mode} is undeclared.`);
   }
   const workflow = read(".github/workflows/release-gate.yml");
-  const workflowDispatchInputCount = [...workflow.matchAll(/^      [a-z0-9_]+:$/gm)].length;
+  const dispatchInputs = workflow.match(/^  workflow_dispatch:\n    inputs:\n([\s\S]*?)^permissions:/m)?.[1];
+  if (!dispatchInputs) throw new Error("Release Gate workflow_dispatch inputs are missing.");
+  const workflowDispatchInputCount = [...dispatchInputs.matchAll(/^      [a-z0-9_]+:$/gm)].length;
   if (workflowDispatchInputCount > 25) throw new Error(`Release Gate exceeds GitHub's 25-input workflow_dispatch limit: ${workflowDispatchInputCount}.`);
   const workflowInputs = [...workflow.matchAll(/^      (backend_recovery_[a-z0-9_]+):$/gm)].map((match) => match[1]).sort();
   const expectedInputs = ["backend_recovery_current_task_definition_arn", "backend_recovery_evidence_bundle_gzip_base64", "backend_recovery_evidence_bundle_sha256", "backend_recovery_image_digest"];
