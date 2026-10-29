@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1'
+    AND source_contract_sha256='a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -15043,8 +15043,7 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
-     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')
