@@ -8557,6 +8557,10 @@ BEGIN
         FROM public."PrinterAttestation" pa
         JOIN registration pr ON pr.id=pa."printerRegistrationId"
         WHERE NOT (pa.metadata ? 'operation')
+          AND (pa.metadata->>'source'='PERSISTENT_SESSION' OR NOT EXISTS (
+            SELECT 1 FROM public."PrinterAgentSession" prior
+            WHERE prior."registrationId"=pa."printerRegistrationId"
+          ))
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
       )
       SELECT CASE WHEN pr.id IS NULL THEN jsonb_build_object(
