@@ -42,6 +42,9 @@ RUN if [ "$RUN_VERIFY" = "true" ]; then npm run check:security-guardrails \
 
 FROM public.ecr.aws/docker/library/nginx@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
 
+# CVE-2026-111497: retain the approved base and pin the signed Alpine security fix.
+RUN apk add --no-cache brotli-libs=1.2.1-r0
+
 ARG GIT_SHA=unknown
 ARG RELEASE_GIT_SHA=${GIT_SHA}
 LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
