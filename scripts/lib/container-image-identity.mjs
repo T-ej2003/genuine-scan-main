@@ -111,14 +111,8 @@ function dockerfileStages(source) {
   return stages;
 }
 
-export function assertPinnedImageInputs(repository = root) {
+export function assertPinnedDockerfiles(repository = root) {
   const images = readApprovedImages(repository);
-  const counts = (file, pattern, key, count, reference = images[key].reference) => {
-    const values = [...readFileSync(path.join(repository, file), "utf8").matchAll(pattern)].map(match => match[1]);
-    assert.equal(values.filter(value => value === reference).length, count, `${file}: unapproved ${key} image`);
-    if (reference.startsWith("docker.io/")) assert.ok(!values.some(value => value.startsWith("public.ecr.aws/docker/library/")), `${file}: CI image fell back to ECR Public`);
-    return values;
-  };
   for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {
     const stages = dockerfileStages(readFileSync(path.join(repository, file), "utf8"));
     const backend = file === "backend/Dockerfile";
@@ -132,6 +126,17 @@ export function assertPinnedImageInputs(repository = root) {
       assert.equal(stages.at(-1).reference, images.nginx.reference, `${file}: unapproved frontend runtime family`);
     }
   }
+  return images;
+}
+
+export function assertPinnedImageInputs(repository = root) {
+  const images = assertPinnedDockerfiles(repository);
+  const counts = (file, pattern, key, count, reference = images[key].reference) => {
+    const values = [...readFileSync(path.join(repository, file), "utf8").matchAll(pattern)].map(match => match[1]);
+    assert.equal(values.filter(value => value === reference).length, count, `${file}: unapproved ${key} image`);
+    if (reference.startsWith("docker.io/")) assert.ok(!values.some(value => value.startsWith("public.ecr.aws/docker/library/")), `${file}: CI image fell back to ECR Public`);
+    return values;
+  };
   for (const [file, count] of [[".github/workflows/auth-security-tests.yml", 1], [".github/workflows/quality-gate.yml", 3], ["docker-compose.p2-test.yml", 1]]) {
     counts(file, /^\s+image:\s+(\S+)\s*$/gm, "postgres", count, ciImageReference(images.postgres));
   }
@@ -144,7 +149,9 @@ export function assertPinnedImageInputs(repository = root) {
   assert.match(audit, /node scripts\/ci\/render-pinned-dockerfiles\.mjs "\$RUNNER_TEMP"[\s\S]*?docker build -t deployment-audit:latest -f "\$RUNNER_TEMP\/frontend\.Dockerfile" "\$\{\{ steps\.docker-detect\.outputs\.context \}\}"/);
   assert.doesNotMatch(audit, /--build-context/);
   const production = readFileSync(path.join(repository, ".github/workflows/production-web-image.yml"), "utf8");
-  assert.match(production, /docker buildx build --platform "\$PLATFORM" --file Dockerfile\.ecs-frontend/);
+  assert.match(production, /node "\$GITHUB_WORKSPACE\/scripts\/verify-container-image-provenance\.mjs" --production-mirror/);
+  assert.match(production, /node "\$GITHUB_WORKSPACE\/scripts\/ci\/render-pinned-dockerfiles\.mjs" "\$RUNNER_TEMP\/web-pinned-inputs"/);
+  assert.match(production, /docker buildx build --platform "\$PLATFORM" --file "\$RUNNER_TEMP\/web-pinned-inputs\/ecs-frontend\.Dockerfile"/);
   assert.doesNotMatch(production, /--build-context/);
   return images;
 }

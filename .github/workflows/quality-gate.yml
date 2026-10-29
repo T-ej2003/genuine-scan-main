@@ -376,7 +376,7 @@ jobs:
         run: npm run test:rf7:static
 
       - name: Phase 3 IAM authorization and recovery contract
-        run: node --test scripts/tests/production-web-release-phase3-iam.test.mjs scripts/tests/production-web-release-iam-bootstrap.test.mjs
+        run: node --test scripts/tests/production-web-release-phase3-iam.test.mjs scripts/tests/production-web-release-iam-bootstrap.test.mjs scripts/tests/production-web-registry-read-transition.test.mjs
 
       - name: Production read-only RLS canary PostgreSQL contract
         run: npm run test:production-green-read-only-rls-canary:integration
@@ -777,3 +777,21 @@ jobs:
           docker buildx build --platform linux/amd64 --load --file "$RUNNER_TEMP/frontend.Dockerfile" --build-arg VITE_API_URL=/api --tag "mscqr-frontend-ci:${GITHUB_SHA:-local}" .
           docker buildx build --platform linux/amd64 --load --file "$RUNNER_TEMP/backend.Dockerfile" --build-arg GIT_SHA="ci-${GITHUB_SHA:-local}" --tag "mscqr-backend-ci:${GITHUB_SHA:-local}" .
           node --test scripts/tests/root-compose-proxy-runtime.test.mjs scripts/tests/asg-compose-proxy-runtime.test.mjs
+
+      - name: Verify patched production frontend runtime
+        run: |
+          set -euo pipefail
+          docker buildx build --platform linux/amd64 --load --file "$RUNNER_TEMP/ecs-frontend.Dockerfile" --tag mscqr-frontend-security:ci .
+          docker run --rm --entrypoint sh mscqr-frontend-security:ci -ec 'apk info --installed --exists brotli-libs=1.2.1-r0'
+          trap 'docker rm -f mscqr-frontend-security-smoke >/dev/null 2>&1 || true' EXIT
+          docker run -d --name mscqr-frontend-security-smoke -e BACKEND_UPSTREAM=http://127.0.0.1:4000 mscqr-frontend-security:ci
+          timeout 30 sh -c 'until docker exec mscqr-frontend-security-smoke wget -qO- http://127.0.0.1/healthz; do sleep 1; done'
+          docker exec mscqr-frontend-security-smoke nginx -t
+
+      - name: Reject critical production frontend vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: mscqr-frontend-security:ci
+          severity: CRITICAL
+          exit-code: '1'
