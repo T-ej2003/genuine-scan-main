@@ -20,7 +20,7 @@ import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, securityRebaselineLogSummary } from "./production-security-rebaseline-inventory.mjs";
 import { assertProductionSecurityRebaselinePreparationManifest, authenticateProductionSecurityRebaselinePreparation } from "./production-security-rebaseline-preparation.mjs";
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport } from "./production-security-rebaseline-transport.mjs";
-import { createProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
+import { createProductionRlsProbeRuntimeConfig, parseProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
 import { readImageRepositoryEvidence } from "./production-green-stage-b-image-evidence.mjs";
 import { classifyB03Catalogue } from "./production-b03-catalogue-diagnostic.mjs";
 
@@ -89,7 +89,16 @@ export function buildProductionRlsProbeDefinition({ baseDefinition, requirements
   assert.equal(baseDefinition.networkMode, "awsvpc"); assert.deepEqual(baseDefinition.runtimePlatform, STAGE_B.taskRuntimePlatform);
   assert.equal(baseDefinition.containerDefinitions?.length, 1); const base = baseDefinition.containerDefinitions[0];
   assert.equal(base.name, "production-green-read-only-rls-canary"); assert.equal(base.readonlyRootFilesystem, true); assert.equal(base.privileged, false);
-  assert.deepEqual(base.entryPoint, ["node"]); assert.deepEqual(base.environment || [], []); assert.deepEqual(base.secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: databaseSecretArn }]);
+  const priorProbe = JSON.stringify(base.entryPoint) === JSON.stringify(["node", PRODUCTION_RLS_PROBE_ENTRYPOINT]);
+  if (priorProbe) {
+    assert.deepEqual(base.command || [], []);
+    assert.deepEqual((base.environment || []).map(({ name }) => name), ["RLS_PROBE_INPUT_JSON"]);
+    assert.deepEqual(Object.keys(base.environment[0]).sort(), ["name", "value"]);
+    const previous = parseProductionRlsProbeRuntimeConfig(base.environment[0].value);
+    assert.equal(base.image, `${APP_ONLY.backendRepository}@${previous.probeImageDigest}`);
+    assert.equal(previous.databaseHostname, identity.databaseHostname);
+  } else { assert.deepEqual(base.entryPoint, ["node"]); assert.deepEqual(base.environment || [], []); }
+  assert.deepEqual(base.secrets, [{ name: "RLS_CANARY_DATABASE_URL", valueFrom: databaseSecretArn }]);
   assert.match(base.image || "", new RegExp(`^${APP_ONLY.backendRepository.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}@sha256:[a-f0-9]{64}$`));
   const template = JSON.parse(fs.readFileSync(new URL("../../infra/aws/terraform/production-green-stage-b/task-definitions/green-read-only-rls-canary.json", import.meta.url), "utf8"));
   template.family = APP_ONLY_VERIFIER.family;
