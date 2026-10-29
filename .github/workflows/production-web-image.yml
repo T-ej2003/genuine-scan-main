@@ -83,9 +83,9 @@ jobs:
             image_state=absent
           fi
           if [[ "$image_state" == absent ]]; then
-            node scripts/verify-container-image-provenance.mjs --production-mirror
+            node "$GITHUB_WORKSPACE/scripts/verify-container-image-provenance.mjs" --production-mirror
             install -d -m 700 "$RUNNER_TEMP/web-pinned-inputs"
-            node scripts/ci/render-pinned-dockerfiles.mjs "$RUNNER_TEMP/web-pinned-inputs"
+            node "$GITHUB_WORKSPACE/scripts/ci/render-pinned-dockerfiles.mjs" "$RUNNER_TEMP/web-pinned-inputs"
             docker buildx build --platform "$PLATFORM" --file "$RUNNER_TEMP/web-pinned-inputs/ecs-frontend.Dockerfile" --build-arg "GIT_SHA=$IMAGE_TAG" --build-arg "RELEASE_GIT_SHA=$IMAGE_TAG" --label "org.opencontainers.image.revision=$IMAGE_TAG" --label "org.opencontainers.image.title=mscqr-frontend" --push --tag "$image_uri" .
             aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids "imageTag=$IMAGE_TAG" --output json >"$image_json"
           fi
