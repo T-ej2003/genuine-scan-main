@@ -46,6 +46,17 @@ try {
     { maxWait: 10000, timeout: 120000 });
   assert.equal(applied.status, "APPLIED");
   assert.ok(installed(await readback(admin, pkg, contract), pkg));
+  const catalogueOnly = await admin.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL ROLE pg_monitor");
+    const [access] = await tx.$queryRawUnsafe(`SELECT
+      pg_catalog.has_schema_privilege(current_user,'public','USAGE') AS public_usage,
+      pg_catalog.has_schema_privilege(current_user,'app_rls','USAGE') AS rls_usage`);
+    assert.equal(access.public_usage, false);
+    assert.equal(access.rls_usage, false);
+    await assertPrintingSessionPrerequisite(tx, rolePrefix);
+    return readback(tx, pkg, contract);
+  });
+  assert.ok(installed(catalogueOnly, pkg), "C02 catalogue readback must not require schema USAGE");
   await assertPrintingSessionPrerequisite(app, rolePrefix);
   const repeated = await admin.$transaction((tx) => executeC02SessionInstallTransaction({ tx, pkg, contract }));
   assert.equal(repeated.status, "ALREADY_CONVERGED");

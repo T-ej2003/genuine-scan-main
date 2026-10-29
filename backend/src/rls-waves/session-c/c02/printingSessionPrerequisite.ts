@@ -17,6 +17,11 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
   const appRole = `${rolePrefix}app`;
   const ownerRole = `${rolePrefix}auth_owner`;
   const schemaOwnerRole = `${rolePrefix}owner`;
+  const tableOid = `(SELECT c.oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n
+    ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='PrinterAgentSession')`;
+  const functionOid = `(SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n
+    ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname='printing_connector_session'
+      AND p.proargtypes=ARRAY['text'::regtype,'text'::regtype,'text'::regtype,'jsonb'::regtype]::oidvector)`;
   const expectedGrantsSha256 = rolePrefix === "mscqr_prd_rls_phase2_"
     ? "010eadaf7ab470e98382dad5eac9b95dbc63a67cd6b05a3c1dd6ff4e4d091dc6"
     : "52eef76d2e49ae3a29fd58af1f7435debcb820f0b9d883cd5cc3669f8dfd60b0";
@@ -36,14 +41,14 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
     SELECT
       EXISTS (
         SELECT 1 FROM pg_catalog.pg_attribute a
-        WHERE a.attrelid = 'public."PrinterAgentSession"'::regclass
+        WHERE a.attrelid = ${tableOid}
           AND a.attname = 'lastMessageSeq' AND a.atttypid = 'integer'::regtype
           AND a.attnotnull AND NOT a.attisdropped
       ) AS "migrationReady",
       EXISTS (
         SELECT 1 FROM pg_catalog.pg_proc p
         JOIN pg_catalog.pg_roles r ON r.oid = p.proowner
-        WHERE p.oid = to_regprocedure('app_rls.printing_connector_session(text,text,text,jsonb)')
+        WHERE p.oid = ${functionOid}
           AND r.rolname = '${ownerRole}' AND p.prosecdef
           AND encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc, 'UTF8')), 'hex') = '${expectedBodySha256}'
           AND EXISTS (SELECT 1 FROM unnest(p.proconfig) setting
@@ -55,7 +60,7 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
       ) AS "functionReady",
       EXISTS (
         SELECT 1 FROM pg_catalog.pg_class c
-        WHERE c.oid = 'public."PrinterAgentSession"'::regclass
+        WHERE c.oid = ${tableOid}
           AND c.relrowsecurity AND c.relforcerowsecurity
       ) AS "rlsReady",
       (SELECT count(*) = 3 AND coalesce(bool_and(
@@ -69,7 +74,7 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
               WHEN 'printing_lifecycle_printeragentsession_update' THEN '${policyDigests[2]}'
               ELSE '' END
         ), false) FROM pg_catalog.pg_policy p
-        WHERE p.polrelid = 'public."PrinterAgentSession"'::regclass
+        WHERE p.polrelid = ${tableOid}
       ) AS "policiesReady",
       (
         encode(pg_catalog.sha256(pg_catalog.convert_to(coalesce((
@@ -80,23 +85,23 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
           CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
           JOIN pg_catalog.pg_roles r ON r.oid = acl.grantee
           JOIN pg_catalog.pg_roles grantor ON grantor.oid = acl.grantor
-          WHERE a.attrelid = 'public."PrinterAgentSession"'::regclass
+          WHERE a.attrelid = ${tableOid}
             AND a.attnum > 0 AND NOT a.attisdropped AND r.rolname = '${ownerRole}'
         ), ''), 'UTF8')), 'hex') = '${expectedGrantsSha256}'
         AND EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='${schemaOwnerRole}')
-        AND NOT pg_catalog.has_table_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'SELECT')
-        AND pg_catalog.has_column_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'lastMessageSeq', 'SELECT')
-        AND pg_catalog.has_column_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'lastMessageSeq', 'INSERT')
-        AND pg_catalog.has_column_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'lastMessageSeq', 'UPDATE')
-        AND NOT pg_catalog.has_table_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'INSERT')
-        AND NOT pg_catalog.has_table_privilege('${ownerRole}', 'public."PrinterAgentSession"', 'UPDATE')
-        AND NOT pg_catalog.has_table_privilege('${appRole}', 'public."PrinterAgentSession"', 'SELECT')
-        AND NOT pg_catalog.has_table_privilege('${appRole}', 'public."PrinterAgentSession"', 'INSERT')
-        AND NOT pg_catalog.has_table_privilege('${appRole}', 'public."PrinterAgentSession"', 'UPDATE')
+        AND NOT pg_catalog.has_table_privilege('${ownerRole}', ${tableOid}, 'SELECT')
+        AND pg_catalog.has_column_privilege('${ownerRole}', ${tableOid}, 'lastMessageSeq', 'SELECT')
+        AND pg_catalog.has_column_privilege('${ownerRole}', ${tableOid}, 'lastMessageSeq', 'INSERT')
+        AND pg_catalog.has_column_privilege('${ownerRole}', ${tableOid}, 'lastMessageSeq', 'UPDATE')
+        AND NOT pg_catalog.has_table_privilege('${ownerRole}', ${tableOid}, 'INSERT')
+        AND NOT pg_catalog.has_table_privilege('${ownerRole}', ${tableOid}, 'UPDATE')
+        AND NOT pg_catalog.has_table_privilege('${appRole}', ${tableOid}, 'SELECT')
+        AND NOT pg_catalog.has_table_privilege('${appRole}', ${tableOid}, 'INSERT')
+        AND NOT pg_catalog.has_table_privilege('${appRole}', ${tableOid}, 'UPDATE')
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
           CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
           JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
-          WHERE a.attrelid='public."PrinterAgentSession"'::regclass
+          WHERE a.attrelid=${tableOid}
             AND a.attnum>0 AND NOT a.attisdropped AND r.rolname='${appRole}')
       ) AS "grantsReady"
   `;

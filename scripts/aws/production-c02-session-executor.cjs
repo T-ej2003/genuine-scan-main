@@ -11,6 +11,14 @@ const schemaOwner = "mscqr_prd_rls_phase2_owner";
 const authOwner = "mscqr_prd_rls_phase2_auth_owner";
 const appRole = "mscqr_prd_rls_phase2_app";
 const identity = "app_rls.printing_connector_session(text,text,text,jsonb)";
+// Catalogue OIDs remain readable by the non-superuser production administrator
+// even when it has no USAGE on public or app_rls. regclass/regprocedure name
+// resolution would incorrectly require that schema privilege.
+const tableOid = `(SELECT c.oid FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n
+  ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='PrinterAgentSession')`;
+const functionOid = `(SELECT p.oid FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n
+  ON n.oid=p.pronamespace WHERE n.nspname='app_rls' AND p.proname='printing_connector_session'
+  AND p.proargtypes=ARRAY['text'::regtype,'text'::regtype,'text'::regtype,'jsonb'::regtype]::oidvector)`;
 const policyDigests = Object.freeze({
   printing_lifecycle_printeragentsession_insert: "b78bbd15b05c261a07dcaa0ba070f630758d9f3122649294e4fb6569b985ff7a",
   printing_lifecycle_printeragentsession_select: "e799b9179ad2d9faff7a59acd1b8b5cfe4d5b26074353cf5b7d03e6fa0e5144b",
@@ -63,32 +71,32 @@ async function readback(tx, pkg, contract = { admin, database }) {
       (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname=current_user) AS superuser,
       (SELECT rolbypassrls FROM pg_catalog.pg_roles WHERE rolname=current_user) AS bypass_rls,
       (SELECT c.relrowsecurity AND c.relforcerowsecurity FROM pg_catalog.pg_class c
-        WHERE c.oid='public."PrinterAgentSession"'::regclass) AS force_rls,
-      EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid='public."PrinterAgentSession"'::regclass
+        WHERE c.oid=${tableOid}) AS force_rls,
+      EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a WHERE a.attrelid=${tableOid}
         AND a.attname='lastMessageSeq' AND a.atttypid='integer'::regtype AND a.attnotnull AND NOT a.attisdropped) AS migration_ready,
       (SELECT encode(pg_catalog.sha256(pg_catalog.convert_to(p.prosrc,'UTF8')),'hex') FROM pg_catalog.pg_proc p
-        WHERE p.oid=to_regprocedure('${identity}')) AS function_body_sha256,
+        WHERE p.oid=${functionOid}) AS function_body_sha256,
       (SELECT r.rolname FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles r ON r.oid=p.proowner
-        WHERE p.oid=to_regprocedure('${identity}')) AS function_owner,
-      (SELECT p.prosecdef FROM pg_catalog.pg_proc p WHERE p.oid=to_regprocedure('${identity}')) AS security_definer,
-      (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid='public."PrinterAgentSession"'::regclass) AS policy_count,
-      (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid='public."PrinterAgentSession"'::regclass
+        WHERE p.oid=${functionOid}) AS function_owner,
+      (SELECT p.prosecdef FROM pg_catalog.pg_proc p WHERE p.oid=${functionOid}) AS security_definer,
+      (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid=${tableOid}) AS policy_count,
+      (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid=${tableOid}
         AND p.polname=ANY(ARRAY[${pkg.policyNames.map((name) => `'${name}'`).join(",")}])) AS named_policy_count,
       (SELECT pg_catalog.has_function_privilege('${application}',p.oid,'EXECUTE') FROM pg_catalog.pg_proc p
-        WHERE p.oid=to_regprocedure('${identity}')) AS app_execute,
+        WHERE p.oid=${functionOid}) AS app_execute,
       (SELECT NOT EXISTS (SELECT 1 FROM pg_catalog.aclexplode(coalesce(p.proacl,pg_catalog.acldefault('f',p.proowner))) acl
         WHERE acl.grantee=0 AND acl.privilege_type='EXECUTE') FROM pg_catalog.pg_proc p
-        WHERE p.oid=to_regprocedure('${identity}')) AS no_public_execute,
-      NOT pg_catalog.has_table_privilege('${owner}','public."PrinterAgentSession"','SELECT') AS no_broad_select,
-      NOT pg_catalog.has_table_privilege('${owner}','public."PrinterAgentSession"','INSERT') AS no_broad_insert,
-      NOT pg_catalog.has_table_privilege('${owner}','public."PrinterAgentSession"','UPDATE') AS no_broad_update,
-      NOT pg_catalog.has_table_privilege('${application}','public."PrinterAgentSession"','SELECT')
-        AND NOT pg_catalog.has_table_privilege('${application}','public."PrinterAgentSession"','INSERT')
-        AND NOT pg_catalog.has_table_privilege('${application}','public."PrinterAgentSession"','UPDATE')
+        WHERE p.oid=${functionOid}) AS no_public_execute,
+      NOT pg_catalog.has_table_privilege('${owner}',${tableOid},'SELECT') AS no_broad_select,
+      NOT pg_catalog.has_table_privilege('${owner}',${tableOid},'INSERT') AS no_broad_insert,
+      NOT pg_catalog.has_table_privilege('${owner}',${tableOid},'UPDATE') AS no_broad_update,
+      NOT pg_catalog.has_table_privilege('${application}',${tableOid},'SELECT')
+        AND NOT pg_catalog.has_table_privilege('${application}',${tableOid},'INSERT')
+        AND NOT pg_catalog.has_table_privilege('${application}',${tableOid},'UPDATE')
         AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
           CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
           JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
-          WHERE a.attrelid='public."PrinterAgentSession"'::regclass AND a.attnum>0
+          WHERE a.attrelid=${tableOid} AND a.attnum>0
             AND NOT a.attisdropped AND r.rolname='${application}') AS no_app_grants
   `);
   const grants = await tx.$queryRawUnsafe(`SELECT acl.privilege_type||':'||a.attname||':'||grantor.rolname||':'||
@@ -96,7 +104,7 @@ async function readback(tx, pkg, contract = { admin, database }) {
     CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) acl
     JOIN pg_catalog.pg_roles r ON r.oid=acl.grantee
     JOIN pg_catalog.pg_roles grantor ON grantor.oid=acl.grantor
-    WHERE a.attrelid='public."PrinterAgentSession"'::regclass AND a.attnum>0 AND NOT a.attisdropped
+    WHERE a.attrelid=${tableOid} AND a.attnum>0 AND NOT a.attisdropped
       AND r.rolname='${owner}' ORDER BY 1`);
   const policies = await tx.$queryRawUnsafe(`SELECT p.polname AS name, p.polcmd AS command,
     p.polpermissive AS permissive, r.rolname AS role,
@@ -104,7 +112,7 @@ async function readback(tx, pkg, contract = { admin, database }) {
       coalesce(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')||'|'||
       coalesce(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'UTF8')),'hex') AS digest
     FROM pg_catalog.pg_policy p JOIN pg_catalog.pg_roles r ON r.oid=ANY(p.polroles)
-    WHERE p.polrelid='public."PrinterAgentSession"'::regclass ORDER BY p.polname`);
+    WHERE p.polrelid=${tableOid} ORDER BY p.polname`);
   return { ...row, grants: grants.map(({ entry }) => entry).sort(), policies };
 }
 
