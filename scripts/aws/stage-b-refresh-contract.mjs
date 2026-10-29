@@ -245,8 +245,13 @@ const variableValidationNamesFromSource = (source) => [...source.matchAll(/varia
 const variablesSource = fs.readFileSync(VARIABLES_SOURCE_PATH, "utf8");
 const sourceVariableValidationNames = variableValidationNamesFromSource(variablesSource);
 if (JSON.stringify(sourceVariableValidationNames) !== JSON.stringify([...REVIEWED_VARIABLE_VALIDATION_NAMES].sort())) throw new Error("Stage B Terraform variable-validation inventory requires review.");
+const b03Source = fs.readFileSync(path.join(TERRAFORM_ROOT_PATH, "b03.tf"), "utf8");
+const b03ValidationNames = namedTerraformBlocksFromSource(b03Source, "variable", 1)
+  .filter(({ body }) => namedTerraformBlocksFromSource(body, "validation", 0).length > 0)
+  .map(({ labels }) => labels[0]);
+if (JSON.stringify(b03ValidationNames) !== JSON.stringify(["b03_executor_definition_json"])) throw new Error("Stage B B03 variable-validation inventory requires review.");
 export const STAGE_B_EXPECTED_CHECK_ADDRESSES = Object.freeze(collectStageBTerraformCheckAddresses());
-export const STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES = Object.freeze(REVIEWED_VARIABLE_VALIDATION_NAMES.map((name) => `var.${name}`).sort());
+export const STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES = Object.freeze([...REVIEWED_VARIABLE_VALIDATION_NAMES, ...b03ValidationNames].map((name) => `var.${name}`).sort());
 export const STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES = Object.freeze((() => {
   const addresses = [];
   const files = fs.readdirSync(TERRAFORM_ROOT_PATH, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name));
@@ -420,7 +425,12 @@ export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreco
     const seenInstanceAddresses = new Set();
     for (const instance of instances) {
       emittedInstanceCount += 1;
-      const instanceAddress = refreshCheckAddress(instance?.address).address;
+      // Terraform emits an addressless aggregate pass for this absent counted resource.
+      const b03AggregatePass = category === "resource" && address === "aws_ecs_task_definition.b03"
+        && expectedResourcePreconditionAddresses.includes(address) && check.status === "pass"
+        && instances.length === 1 && instance?.status === "pass"
+        && Object.keys(instance).length === 1;
+      const instanceAddress = b03AggregatePass ? address : refreshCheckAddress(instance?.address).address;
       const problems = instance?.problems;
       normalizedInstances.push({ address: instanceAddress, status: instance?.status });
       const malformedInstance = !instance || typeof instance !== "object" || Array.isArray(instance) || !instanceAddress || instanceAddress !== address || (problems !== undefined && !Array.isArray(problems));
