@@ -107,6 +107,7 @@ const verifyMessage = (
   }
   const payload = buildPrinterAgentSessionPayload({
     messageType: message.type,
+    printerHealth: message.printerHealth,
     registrationId: message.type === "hello" ? message.registrationId || null : session.registrationId,
     agentId: session.agentId,
     deviceFingerprint: session.deviceFingerprint,
@@ -263,6 +264,7 @@ const mutateActiveSession = (
       signatureHash: hash(message.signature),
       heartbeatNonce: message.nonce,
       heartbeatIssuedAt: message.issuedAt,
+      printerHealth: message.printerHealth?.healthVersion === 1 ? message.printerHealth : null,
     } : {}),
   } : {}),
 });

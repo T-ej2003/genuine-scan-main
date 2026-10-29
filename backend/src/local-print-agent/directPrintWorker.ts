@@ -430,12 +430,29 @@ export const buildSignedSessionMessage = async (params: {
   printerHealth?: Record<string, unknown> | null;
 }) => {
   const state = await loadAgentState();
+  if (params.type === "heartbeat") {
+    const observedAt = new Date().toISOString();
+    const inventory = await listLocalPrinters();
+    const selected = inventory.printers.find((printer) => printer.printerId === params.selectedPrinterId);
+    params.printerHealth = {
+      ...params.printerHealth,
+      healthVersion: 1,
+      selectedPrinterId: params.selectedPrinterId,
+      observedAt,
+      discovered: Boolean(selected && state.selectedPrinterId === params.selectedPrinterId),
+      queueAvailable: Boolean(selected && !inventory.error && !selected.queueHasErrors
+        && (process.platform !== "win32" || /^(normal|idle|printing|warmup|warming up|PrinterStatus (0|3|4|5)|0|3|4|5)$/i.test(selected.queueStatus || ""))
+        && !/paused|offline|error|unavailable/i.test(selected.queueStatus || "")),
+      online: selected?.online === true,
+    };
+  }
   const issuedAt = new Date().toISOString();
   const nonce = randomOpaqueToken(12);
   const messageSeq = params.type === "hello" ? null : (params.session!.messageSeq += 1);
   const connectorVersion = AGENT_BUILD_VERSION || AGENT_VERSION;
   const signedPayload = buildPrinterAgentSessionPayload({
     messageType: params.type,
+    printerHealth: params.printerHealth,
     registrationId: params.session?.registrationId || null,
     agentId: state.agentId,
     deviceFingerprint: state.deviceFingerprint,

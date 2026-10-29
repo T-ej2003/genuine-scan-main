@@ -528,10 +528,22 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       registration.trustStatus !== PrinterTrustStatus.REVOKED
   );
   const connected = helperConnection;
-  const eligibleForPrinting = Boolean(trusted && helperConnection && printerEligibility.eligible && attestationFresh);
+  const attestationMetadata = latestAttestation?.metadata as Record<string, unknown> | undefined;
+  const signedHealth = attestationMetadata?.printerHealth as Record<string, unknown> | undefined;
+  const healthObservedAt = typeof signedHealth?.observedAt === "string" ? Date.parse(signedHealth.observedAt) : NaN;
+  const attestationHealthFresh = attestationMetadata?.source !== "PERSISTENT_SESSION"
+    ? !latestSession
+    : Boolean(latestSession?.id) && attestationMetadata?.sessionId === latestSession?.id
+      && signedHealth?.healthVersion === 1 && signedHealth.discovered === true
+      && signedHealth.queueAvailable === true && signedHealth.online === true
+      && signedHealth.selectedPrinterId === latestSession?.selectedPrinterId
+      && Date.now() - healthObservedAt >= -5000 && Date.now() - healthObservedAt < 35000;
+  const eligibleForPrinting = Boolean(trusted && helperConnection && printerEligibility.eligible && attestationFresh && attestationHealthFresh);
 
   const trustReason = trusted && !attestationFresh
     ? "Printer attestation expired"
+    : trusted && !attestationHealthFresh
+      ? "Selected printer health is unavailable or stale"
     : trusted
     ? null
     : registration.revokedAt
@@ -645,7 +657,10 @@ const loadLatestRegistrationForUser = async (
     orderBy: [{ approvedAt: "desc" }, { lastSeenAt: "desc" }, { updatedAt: "desc" }],
     include: {
       attestations: {
-        where: { metadata: { path: ["operation"], equals: Prisma.DbNull } },
+        where: { metadata: { path: ["operation"], equals: Prisma.DbNull }, OR: [
+          { metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+          { printerRegistration: { agentSessions: { none: {} } } },
+        ] },
         orderBy: [{ createdAt: "desc" }],
         take: 1,
       },
@@ -666,7 +681,10 @@ const loadRegistrationById = async (
     where: { id: registrationId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
     include: {
       attestations: {
-        where: { metadata: { path: ["operation"], equals: Prisma.DbNull } },
+        where: { metadata: { path: ["operation"], equals: Prisma.DbNull }, OR: [
+          { metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+          { printerRegistration: { agentSessions: { none: {} } } },
+        ] },
         orderBy: [{ createdAt: "desc" }],
         take: 1,
       },

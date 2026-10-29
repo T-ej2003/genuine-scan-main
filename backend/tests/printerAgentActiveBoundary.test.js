@@ -55,8 +55,13 @@ mock("services/printerAgentSessionService", sessionContract);
 mock("services/printPayloadService", { buildApprovedPrintPayload: () => ({ payloadHash: "payload-fixture" }) });
 mock("services/printerTestLabelService", { claimLocalAgentPrinterTestJob: async () => null });
 mock("services/printJobRealtimeService", { publishPrintJobViewEvent: async (event) => { published.push(event); } });
-mock("local-print-agent/state", { loadAgentState: async () => ({ ...registration, privateKeyPem: privateKey }) });
-mock("local-print-agent/cups", {});
+let localSelectedPrinterId = "native-printer";
+let localQueueStatus = "Normal";
+let localOnline = true;
+mock("local-print-agent/state", { loadAgentState: async () => ({ ...registration, privateKeyPem: privateKey, selectedPrinterId: localSelectedPrinterId }) });
+mock("local-print-agent/cups", { listLocalPrinters: async () => ({ error: null, printers: [
+  { printerId: localSelectedPrinterId, online: localOnline, queueHasErrors: false, queueStatus: localQueueStatus },
+] }) });
 mock("local-print-agent/render", {});
 const signing = require(path.join(dist, "services/printerAgentSigningService"));
 const { LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION: version } = require(path.join(dist, "services/localAgentProtocol"));
@@ -80,6 +85,7 @@ function hello(overrides = {}) {
 
 for (const selectedPrinterId of ["printer-db-id", "native-printer"]) {
 test(`connector continuation preserves authenticated selector ${selectedPrinterId}`, async () => {
+  localSelectedPrinterId = selectedPrinterId;
   operations.length = 0;
   const wire = await buildSignedSessionMessage({ type: "hello", selectedPrinterId,
     printerHealth: { capabilities: { supportsPersistentPrintSession: true } },
@@ -99,6 +105,22 @@ test(`connector continuation preserves authenticated selector ${selectedPrinterI
   const heartbeat = await sign("heartbeat");
   await boundary.recordTrustedSessionHeartbeat(session, heartbeat);
   await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, heartbeat), { errorCode: "message_replay" });
+  const forgedHealth = await sign("heartbeat");
+  forgedHealth.printerHealth.online = false;
+  await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, forgedHealth), { errorCode: "bad_session_signature" });
+  localQueueStatus = "Paused";
+  assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false);
+  localQueueStatus = "Error";
+  assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false);
+  if (process.platform === "win32") {
+    localQueueStatus = "Unknown";
+    assert.equal((await sign("heartbeat")).printerHealth.queueAvailable, false);
+  }
+  localQueueStatus = "Normal";
+  localOnline = false;
+  assert.equal((await sign("heartbeat")).printerHealth.online, false);
+  localOnline = true;
+  assert.equal((await sign("heartbeat")).printerHealth.online, true);
   for (const selector of [selectedPrinterId === "printer-db-id" ? "native-printer" : "printer-db-id", "foreign-printer"]) {
     await assert.rejects(boundary.recordTrustedSessionHeartbeat(session, await sign("heartbeat", selector)), {
       errorCode: "bad_session_signature",

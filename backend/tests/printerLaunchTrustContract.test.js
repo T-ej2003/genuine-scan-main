@@ -197,16 +197,25 @@ const signedHeartbeatInput = (overrides = {}) => {
   );
 
   latestSession = {
+    id: "session-launch-1",
     connectionState: "CONNECTED", revokedAt: null,
     lastSignedHeartbeatAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
     selectedPrinterId: "zebra-zd421", selectedPrinterName: "Reference ZPL printer",
-    connectorVersion: "2026.6.26",
+    connectorVersion: LOCAL_AGENT_MIN_VERSION_HINT,
     printerHealth: { connected: true, selectedPrinterId: "zebra-zd421",
       printers: [{ printerId: "zebra-zd421", printerName: "Reference ZPL printer", online: true }] },
   };
+  latestAttestation.metadata.source = "PERSISTENT_SESSION";
+  latestAttestation.metadata.sessionId = latestSession.id;
+  latestAttestation.metadata.printerHealth = { healthVersion: 1, selectedPrinterId: "zebra-zd421",
+    observedAt: new Date().toISOString(), discovered: true, queueAvailable: true, online: true };
   const validSessionAndAttestation = await getPrinterConnectionStatusForUser(registration.userId);
   assert.strictEqual(validSessionAndAttestation.eligibleForPrinting, true,
     "a healthy signed session with a valid attestation remains print eligible");
+  latestAttestation.metadata.printerHealth.online = false;
+  assert.strictEqual((await getPrinterConnectionStatusForUser(registration.userId)).eligibleForPrinting, false,
+    "a fresh connector session must not override signed offline printer evidence");
+  latestAttestation.metadata.printerHealth.online = true;
   latestAttestation.expiresAt = new Date(Date.now() - 1_000);
   const expiredAttestationWithSession = await getPrinterConnectionStatusForUser(registration.userId);
   assert.strictEqual(expiredAttestationWithSession.connected, true, "signed session remains connected");

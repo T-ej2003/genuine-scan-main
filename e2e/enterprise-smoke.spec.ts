@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import printerAgentSigningService from "../backend/dist/services/printerAgentSigningService.js";
 import directPrintWorker from "../backend/dist/local-print-agent/directPrintWorker.js";
+import localAgentProtocol from "../backend/dist/services/localAgentProtocol.js";
 import prismaPackage from "../backend/node_modules/@prisma/client/index.js";
 import { assertSafeTestDatabaseUrl } from "../backend/tests/helpers/testDbSafetyGuard.js";
 
@@ -93,7 +94,7 @@ const latestConnectorRelease = connectorManifest.releases?.find(
   (release) => release.version === connectorManifest.latestVersion
 );
 const E2E_LOCAL_AGENT_PROTOCOL_VERSION = String(latestConnectorRelease?.requiredProtocolVersion || "local-agent-direct-v2");
-const E2E_LOCAL_AGENT_BUILD_VERSION = `${String(connectorManifest.minimumBuildVersion || connectorManifest.latestVersion)}-e2e`;
+const E2E_LOCAL_AGENT_BUILD_VERSION = `${localAgentProtocol.LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION}-e2e`;
 const E2E_TRANSPORT_DIAGNOSTICS_VERSION = String(
   latestConnectorRelease?.transportDiagnosticsVersion || "transport-diagnostics-v1"
 );
@@ -449,6 +450,9 @@ const startE2ESignedConnectorSession = async (registrationId: string, backendUrl
   const sendSigned = (type: string, fields: Record<string, unknown> = {}) => {
     const next = outbound.then(async () => {
     const message = { type, sessionId, messageSeq: ++messageSeq,
+      ...(type === "heartbeat" ? { printerHealth: { healthVersion: 1,
+        selectedPrinterId: common.selectedPrinterId, observedAt: new Date().toISOString(),
+        discovered: true, queueAvailable: true, online: true } } : {}),
       nonce: randomUUID(), issuedAt: new Date().toISOString(), ...fields };
     const acknowledgement = receive("message_ack");
     socket.send(JSON.stringify({ ...message, signature: signPrinterAgentPayload(e2ePrinterIdentity.privateKeyPem,

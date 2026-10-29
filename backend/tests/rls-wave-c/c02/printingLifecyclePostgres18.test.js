@@ -173,6 +173,8 @@ async function main() {
   const sessionA = "50000000-0000-4000-8000-000000000901";
   const sessionB = "50000000-0000-4000-8000-000000000902";
   const sessionPayload = (extra = {}) => JSON.stringify({
+    printerHealth: { healthVersion: 1, selectedPrinterId: "printing-native", observedAt: new Date().toISOString(),
+      discovered: true, queueAvailable: true, online: true },
     printerId: ids.discoveredPrinter, selectedPrinterId: "printing-native",
     agentId: "printing-agent", deviceFingerprint: "printing-device",
     publicKeyFingerprint: hash(signingPublicKey), ...extra,
@@ -305,8 +307,10 @@ async function main() {
   signedHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
     sessionSigning.buildPrinterAgentSessionPayload({ ...signedHello, messageType: "hello" }));
   const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
-  const signedHeartbeat = (messageSeq, targetSession = liveSession) => {
+  const signedHeartbeat = (messageSeq, targetSession = liveSession, health = {}) => {
     const message = { type: "heartbeat", sessionId: targetSession.id, messageSeq,
+      printerHealth: { healthVersion: 1, selectedPrinterId: "printing-native", observedAt: new Date().toISOString(),
+        discovered: true, queueAvailable: true, online: true, ...health },
       nonce: randomUUID(), issuedAt: new Date().toISOString() };
     message.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
       sessionSigning.buildPrinterAgentSessionPayload({ ...message, messageType: "heartbeat",
@@ -419,10 +423,18 @@ async function main() {
   )`, /PRINTER_ATTESTATION_STALE/, "closed persistent session cannot authorize job creation");
   const { PrismaClient, Prisma } = require("@prisma/client");
   const prismaAdmin = new PrismaClient({ datasources: { db: { url: admin } } });
+  const prismaRelayId = requestId();
+  psql(admin, `INSERT INTO public."PrinterAttestation"
+    (id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt","signatureValid","trustValid",metadata,"createdAt")
+    VALUES('${prismaRelayId}','${ids.registration}','${hash("prisma-rest")}', '${requestId()}',now(),now()+interval '35 seconds',true,true,
+      '{"source":"REST_HEARTBEAT"}'::jsonb,now()+interval '1 second')`);
   try {
     const attestation = await prismaAdmin.printerAttestation.findFirst({
       where: { printerRegistrationId: ids.registration, expiresAt: { gt: new Date() },
-        metadata: { path: ["operation"], equals: Prisma.DbNull } },
+        metadata: { path: ["operation"], equals: Prisma.DbNull }, OR: [
+          { metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+          { printerRegistration: { agentSessions: { none: {} } } },
+        ] },
       orderBy: [{ createdAt: "desc" }],
     });
     assert.equal(attestation?.metadata?.source, "PERSISTENT_SESSION");
@@ -431,7 +443,10 @@ async function main() {
       where: { printerRegistrationId: ids.staleRegistration,
         metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
     }), 0, "Prisma renewal query remains registration scoped");
-  } finally { await prismaAdmin.$disconnect(); }
+  } finally {
+    psql(admin, `DELETE FROM public."PrinterAttestation" WHERE id='${prismaRelayId}'`);
+    await prismaAdmin.$disconnect();
+  }
   const prismaApp = new PrismaClient({ datasources: { db: { url: app } } });
   try {
     await assert.rejects(prismaApp.printerAttestation.findFirst({
@@ -481,8 +496,43 @@ async function main() {
   }
   assert.equal(renewalCount() - continuousBaseline, 240, "at most one renewal per 15-second signed heartbeat");
   assert.equal(rejectedReplays, 240);
-  await signedSessionBoundary.closeTrustedPrinterAgentSession(continuousSession.id, "continuous_operation_complete");
   console.log("CONTINUOUS_OPERATION simulatedSeconds=3600 heartbeats=240 renewals=240 replayRejections=240");
+  let healthSequence = 240;
+  const forgedHealth = signedHeartbeat(healthSequence+1, continuousSession);
+  forgedHealth.printerHealth.online = false;
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, forgedHealth), /signature/i);
+  for (const health of [ { online: false }, { queueAvailable: false }, { discovered: false },
+    { selectedPrinterId: "wrong-printer" } ]) {
+    await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+      signedHeartbeat(++healthSequence, continuousSession, health));
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+      .eligibleForPrinting, false, "Unavailable or stale health must block despite a connected session");
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+      .connected, true, "Printer failure must not falsely classify the authenticated connector as disconnected");
+    denied(app, `SELECT app_rls.printing_create_job(
+      '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.discoveredPrinter}',1,
+      'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+      '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("unhealthy")}","tokenExpiresAt":"${new Date(Date.now()+3_600_000).toISOString()}"}]'::jsonb
+    )`, /PRINTER_ATTESTATION_STALE/, "A previous healthy observation cannot authorize a job after failure");
+    await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+      signedHeartbeat(++healthSequence, continuousSession));
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+      .eligibleForPrinting, true, "Fresh signed health must restore readiness");
+  }
+  const staleHealth = signedHeartbeat(++healthSequence, continuousSession,
+    { observedAt: new Date(Date.now()-60_000).toISOString() });
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, staleHealth), /verification is unavailable/);
+  assert.equal(Number(psql(admin, `SELECT "lastMessageSeq" FROM public."PrinterAgentSession" WHERE id='${continuousSession.id}'`)),
+    healthSequence-1, "Stale health must not advance the accepted sequence or renew authorization");
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
+    WHERE metadata->>'sessionId'='${continuousSession.id}'`);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, false, "Stale health cannot keep expired authorization ready");
+  await signedSessionBoundary.closeTrustedPrinterAgentSession(continuousSession.id, "continuous_operation_complete");
   psql(admin, `DELETE FROM public."PrinterAttestation" WHERE metadata->>'sessionId'='${continuousSession.id}';
     UPDATE public."PrinterAttestation" SET "expiresAt"="expiresAt"+interval '3600 seconds',
       "createdAt"="createdAt"+interval '3600 seconds',"attestedAt"="attestedAt"+interval '3600 seconds'

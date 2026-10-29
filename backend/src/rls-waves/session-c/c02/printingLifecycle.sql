@@ -517,8 +517,10 @@ BEGIN
       ) ELSE (
         coalesce(pa.metadata,'{}'::jsonb)
         ||jsonb_build_object(
-          'connected',coalesce((pa.metadata->>'connected')::boolean,false)
-            AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa.session_authorized,
+          'connected',CASE WHEN pa.metadata->>'source'='PERSISTENT_SESSION' THEN pa.session_authorized
+            ELSE coalesce((pa.metadata->>'connected')::boolean,false)
+              AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa.session_authorized END,
+          'printerAvailable',coalesce((pa.metadata->>'connected')::boolean,false) AND pa."expiresAt">transaction_timestamp(),
           'trusted',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized,
           'compatibilityMode',false,
@@ -526,6 +528,12 @@ BEGIN
           'eligibleForPrinting',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized
             AND coalesce((pa.metadata->>'connected')::boolean,false)
+        AND (pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION'
+          OR pa.metadata->'printerHealth'->>'healthVersion'='1')
+        AND NOT EXISTS (SELECT 1 FROM public."PrinterAttestation" newer
+          WHERE newer."printerRegistrationId"=pa."printerRegistrationId"
+            AND newer.metadata->>'source'='PERSISTENT_SESSION'
+            AND (newer."createdAt",newer.id)>(pa."createdAt",pa.id))
             AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')<>'',
           'connectionClass',CASE WHEN pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized
@@ -534,20 +542,24 @@ BEGIN
           'securePrinterSession',pr."trustStatus"='TRUSTED'::public."PrinterTrustStatus"
             AND pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa."signatureValid" AND pa.session_authorized,
           'freshHelperHeartbeat',pa."expiresAt">transaction_timestamp() AND pa.session_authorized,
-          'helperConnection',coalesce((pa.metadata->>'connected')::boolean,false)
-            AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized,
+          'helperConnection',CASE WHEN pa.metadata->>'source'='PERSISTENT_SESSION' THEN pa.session_authorized
+            ELSE coalesce((pa.metadata->>'connected')::boolean,false)
+              AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized END,
           'eligiblePrinter',coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')<>'',
           'missingFields','[]'::jsonb,
           'registrationId',pr.id,'agentId',pr."agentId",
           'deviceFingerprint',pr."deviceFingerprint",'trustStatus',pr."trustStatus",
-          'trustReason',pr."trustReason",'lastHeartbeatAt',pa."attestedAt",
+          'trustReason',CASE WHEN pa.session_authorized AND NOT coalesce((pa.metadata->>'connected')::boolean,false)
+            THEN 'Selected printer health is unavailable or stale' ELSE pr."trustReason" END,'lastHeartbeatAt',pa."attestedAt",
           'ageSeconds',greatest(0,extract(epoch FROM transaction_timestamp()-pa."attestedAt")::integer),
           'signedAttestation',jsonb_build_object(
             'required',true,'present',true,'signatureValid',pa."signatureValid",
             'fresh',pa."expiresAt">transaction_timestamp() AND pa."trustValid" AND pa.session_authorized,
             'issuedAt',pa.metadata->>'heartbeatIssuedAt','rejectReason',pa."rejectionReason"
           ),
-          'error',CASE WHEN pa."trustValid" AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized
+          'error',CASE WHEN pa.session_authorized AND NOT coalesce((pa.metadata->>'connected')::boolean,false)
+            THEN 'Selected printer health is unavailable or stale'
+            WHEN pa."trustValid" AND pa."expiresAt">transaction_timestamp() AND pa.session_authorized
             THEN NULL WHEN NOT pa.session_authorized THEN 'Persistent printer session disconnected'
             ELSE coalesce(pa."rejectionReason",pr."trustReason",'Printer attestation stale') END
         )
@@ -1543,6 +1555,12 @@ BEGIN
         AND pa."signatureValid" AND pa."trustValid"
         AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
         AND coalesce((pa.metadata->>'connected')::boolean,false)
+        AND (pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION'
+          OR pa.metadata->'printerHealth'->>'healthVersion'='1')
+        AND NOT EXISTS (SELECT 1 FROM public."PrinterAttestation" newer
+          WHERE newer."printerRegistrationId"=pa."printerRegistrationId"
+            AND newer.metadata->>'source'='PERSISTENT_SESSION'
+            AND (newer."createdAt",newer.id)>(pa."createdAt",pa.id))
         AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
         AND ((pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
@@ -1984,6 +2002,8 @@ BEGIN
         AND attestation_row."signatureValid" AND attestation_row."trustValid"
         AND attestation_row."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
         AND coalesce((attestation_row.metadata->>'connected')::boolean,false)
+        AND (attestation_row.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION'
+          OR attestation_row.metadata->'printerHealth'->>'healthVersion'='1')
         AND coalesce(attestation_row.metadata->>'selectedPrinterId',attestation_row.metadata->>'printerId','')
           IN (printer_row.id,coalesce(printer_row."nativePrinterId",''))
         AND ((attestation_row.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
@@ -2033,6 +2053,9 @@ DECLARE registration record; printer_row record; session_row record;
   now_at timestamp without time zone;
   latest_attestation_expiry timestamp without time zone;
   latest_attestation_usable boolean;
+  health_usable boolean;
+  health_observed_at timestamp without time zone;
+  latest_health_observed_at timestamp without time zone;
   selected text := p_payload->>'selectedPrinterId';
   printer_id text := p_payload->>'printerId';
   next_seq integer;
@@ -2142,9 +2165,24 @@ BEGIN
          OR heartbeat_issued_at IS NULL
          OR abs(extract(epoch FROM (clock_timestamp()-heartbeat_issued_at)))>180
       THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+      health_observed_at := nullif(p_payload->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC';
+      health_usable := coalesce(
+        p_payload->'printerHealth'->>'healthVersion'='1'
+        AND p_payload->'printerHealth'->>'selectedPrinterId'=selected
+        AND p_payload->'printerHealth'->>'discovered'='true'
+        AND p_payload->'printerHealth'->>'queueAvailable'='true'
+        AND p_payload->'printerHealth'->>'online'='true'
+        AND health_observed_at>now_at-interval '20 seconds'
+        AND health_observed_at<=now_at+interval '5 seconds',false);
       SELECT pa."expiresAt",
         pa."signatureValid" AND pa."trustValid"
           AND coalesce((pa.metadata->>'connected')::boolean,false)
+        AND (pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION'
+          OR pa.metadata->'printerHealth'->>'healthVersion'='1')
+        AND NOT EXISTS (SELECT 1 FROM public."PrinterAttestation" newer
+          WHERE newer."printerRegistrationId"=pa."printerRegistrationId"
+            AND newer.metadata->>'source'='PERSISTENT_SESSION'
+            AND (newer."createdAt",newer.id)>(pa."createdAt",pa.id))
           AND pa.metadata->>'source'='PERSISTENT_SESSION'
           AND pa.metadata->>'sessionId'=p_session_id
           AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
@@ -2153,7 +2191,14 @@ BEGIN
         FROM public."PrinterAttestation" pa
         WHERE pa."printerRegistrationId"=registration.id AND NOT (pa.metadata ? 'operation')
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1;
-      IF NOT coalesce(latest_attestation_usable,false)
+      SELECT max(nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
+        INTO latest_health_observed_at FROM public."PrinterAttestation" pa
+        WHERE pa."printerRegistrationId"=registration.id AND pa.metadata->>'sessionId'=p_session_id
+          AND pa.metadata->>'source'='PERSISTENT_SESSION';
+      IF health_observed_at<=latest_health_observed_at THEN
+        RAISE EXCEPTION 'CONNECTOR_HEALTH_OUT_OF_ORDER' USING ERRCODE='42501';
+      END IF;
+      IF NOT health_usable OR NOT coalesce(latest_attestation_usable,false)
          OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds' THEN
         attestation_nonce := encode(sha256(convert_to(
           p_session_id||'|'||next_seq::text||'|'||signed_nonce,'UTF8')),'hex');
@@ -2162,18 +2207,19 @@ BEGIN
           "mtlsFingerprint","signatureValid","trustValid",metadata,"createdAt"
         ) VALUES (
           gen_random_uuid()::text,registration.id,p_payload->>'signedPayloadHash',attestation_nonce,
-          now_at,now_at+interval '35 seconds',registration."certFingerprint",true,true,
+          now_at,least(now_at+interval '35 seconds',coalesce(health_observed_at,now_at)+interval '35 seconds'),registration."certFingerprint",true,true,
           jsonb_build_object(
             'source','PERSISTENT_SESSION','sessionId',p_session_id,'messageSeq',next_seq,
             'signedMessageNonce',signed_nonce,'signatureHash',p_payload->>'signatureHash',
-            'heartbeatIssuedAt',p_payload->>'heartbeatIssuedAt','connected',true,
+            'heartbeatIssuedAt',p_payload->>'heartbeatIssuedAt','connected',health_usable,
+            'printerHealth',p_payload->'printerHealth',
             'printerId',printer_row.id,'selectedPrinterId',selected,
             'agentId',registration."agentId",'deviceFingerprint',registration."deviceFingerprint",
             'manufacturerId',registration."userId",'orgId',registration."orgId",
             'licenseeId',registration."licenseeId",
-            'printers',jsonb_build_array(jsonb_build_object(
+            'printers',CASE WHEN health_usable THEN jsonb_build_array(jsonb_build_object(
               'id',printer_row.id,'printerId',coalesce(printer_row."nativePrinterId",printer_row.id),
-              'name',printer_row.name,'printerName',printer_row.name))
+              'name',printer_row.name,'printerName',printer_row.name)) ELSE '[]'::jsonb END
           ),now_at
         );
         renewed := true;
@@ -2561,6 +2607,12 @@ BEGIN
             AND pa."signatureValid" AND pa."trustValid"
             AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
             AND coalesce((pa.metadata->>'connected')::boolean,false)
+        AND (pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION'
+          OR pa.metadata->'printerHealth'->>'healthVersion'='1')
+        AND NOT EXISTS (SELECT 1 FROM public."PrinterAttestation" newer
+          WHERE newer."printerRegistrationId"=pa."printerRegistrationId"
+            AND newer.metadata->>'source'='PERSISTENT_SESSION'
+            AND (newer."createdAt",newer.id)>(pa."createdAt",pa.id))
             AND coalesce(pa.metadata->>'selectedPrinterId',pa.metadata->>'printerId','')
               IN (p.id,coalesce(p."nativePrinterId",''))
             AND ((pa.metadata->>'source' IS DISTINCT FROM 'PERSISTENT_SESSION' AND NOT EXISTS (
