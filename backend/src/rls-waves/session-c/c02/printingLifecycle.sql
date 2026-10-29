@@ -2072,6 +2072,7 @@ DECLARE registration record; printer_row record; session_row record;
   latest_attestation_expiry timestamp without time zone;
   latest_attestation_usable boolean;
   health_usable boolean;
+  health_out_of_order boolean;
   health_observed_at timestamp without time zone;
   latest_health_observed_at timestamp without time zone;
   selected text := p_payload->>'selectedPrinterId';
@@ -2227,11 +2228,14 @@ BEGIN
             >pa."createdAt"-interval '20 seconds'
           AND (nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
             <=pa."createdAt"+interval '5 seconds';
-      IF health_observed_at<=latest_health_observed_at THEN
-        RAISE EXCEPTION 'CONNECTOR_HEALTH_OUT_OF_ORDER' USING ERRCODE='42501';
-      END IF;
-      IF NOT health_usable OR NOT coalesce(latest_attestation_usable,false)
-         OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds' THEN
+      health_out_of_order := coalesce(health_observed_at<=latest_health_observed_at,false);
+      -- A newly accepted signed message with unavailable or stale health must
+      -- supersede the previous healthy attestation. Replayed sequences were
+      -- rejected above; a still-fresh but older healthy observation is merely
+      -- consumed and cannot extend authorization or displace newer evidence.
+      IF NOT health_usable OR (NOT health_out_of_order AND (
+         NOT coalesce(latest_attestation_usable,false)
+         OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds')) THEN
         attestation_nonce := encode(sha256(convert_to(
           p_session_id||'|'||next_seq::text||'|'||signed_nonce,'UTF8')),'hex');
         INSERT INTO public."PrinterAttestation"(

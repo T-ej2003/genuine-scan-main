@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e'
+    AND source_contract_sha256='1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:a555741a42951c726b7abdecf4e553f6db127df961647a229a9b000e9109737e')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:1cb37a1f431dfc30a01e762887fbac1ac6dd817b1f959d5e54b1c8e439129ce1')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10131,6 +10131,7 @@ DECLARE registration record; printer_row record; session_row record;
   latest_attestation_expiry timestamp without time zone;
   latest_attestation_usable boolean;
   health_usable boolean;
+  health_out_of_order boolean;
   health_observed_at timestamp without time zone;
   latest_health_observed_at timestamp without time zone;
   selected text := p_payload->>'selectedPrinterId';
@@ -10286,11 +10287,14 @@ BEGIN
             >pa."createdAt"-interval '20 seconds'
           AND (nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
             <=pa."createdAt"+interval '5 seconds';
-      IF health_observed_at<=latest_health_observed_at THEN
-        RAISE EXCEPTION 'CONNECTOR_HEALTH_OUT_OF_ORDER' USING ERRCODE='42501';
-      END IF;
-      IF NOT health_usable OR NOT coalesce(latest_attestation_usable,false)
-         OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds' THEN
+      health_out_of_order := coalesce(health_observed_at<=latest_health_observed_at,false);
+      -- A newly accepted signed message with unavailable or stale health must
+      -- supersede the previous healthy attestation. Replayed sequences were
+      -- rejected above; a still-fresh but older healthy observation is merely
+      -- consumed and cannot extend authorization or displace newer evidence.
+      IF NOT health_usable OR (NOT health_out_of_order AND (
+         NOT coalesce(latest_attestation_usable,false)
+         OR latest_attestation_expiry IS NULL OR latest_attestation_expiry<=now_at+interval '25 seconds')) THEN
         attestation_nonce := encode(sha256(convert_to(
           p_session_id||'|'||next_seq::text||'|'||signed_nonce,'UTF8')),'hex');
         INSERT INTO public."PrinterAttestation"(
@@ -15131,7 +15135,8 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
+     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')

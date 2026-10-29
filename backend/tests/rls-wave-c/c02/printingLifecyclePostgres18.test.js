@@ -541,22 +541,42 @@ async function main() {
   assert.equal(json(app, `SELECT app_rls.printing_readiness(
     '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
     .eligibleForPrinting, false, "Future health cannot authorize printing");
+  const correctedHealthObservedAt = new Date(Date.now()+1_000).toISOString();
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+    signedHeartbeat(++healthSequence, continuousSession,
+      { observedAt: correctedHealthObservedAt }));
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, true, "Corrected workstation time must recover without waiting for the future timestamp");
+  const beforeOlderHealthy = renewalCount();
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+    signedHeartbeat(++healthSequence, continuousSession,
+      { observedAt: new Date(Date.parse(correctedHealthObservedAt)-500).toISOString() }));
+  assert.equal(renewalCount(), beforeOlderHealthy,
+    "An older but still fresh healthy observation must not replace or extend newer evidence");
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, true, "An older healthy observation must not erase newer verified readiness");
+  const staleHealth = signedHeartbeat(++healthSequence, continuousSession,
+    { observedAt: new Date(Date.now()-60_000).toISOString() });
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, staleHealth);
+  assert.equal(Number(psql(admin, `SELECT "lastMessageSeq" FROM public."PrinterAgentSession" WHERE id='${continuousSession.id}'`)),
+    healthSequence, "A fresh signed message with stale health must be consumed exactly once");
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, false, "Stale health must immediately displace an unexpired healthy attestation");
+  denied(app, sessionSql("CHECK", continuousSession.id, {}), /PRINTER_HEALTH_NOT_READY/);
+  denied(app, socketClaim(continuousSession.id), /PRINTER_ATTESTATION_STALE/);
+  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, staleHealth), /replay/i);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, false, "A replay cannot replace the negative health attestation");
   await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
     signedHeartbeat(++healthSequence, continuousSession,
       { observedAt: new Date(Date.now()+1_000).toISOString() }));
   assert.equal(json(app, `SELECT app_rls.printing_readiness(
     '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
-    .eligibleForPrinting, true, "Corrected workstation time must recover without waiting for the future timestamp");
-  const staleHealth = signedHeartbeat(++healthSequence, continuousSession,
-    { observedAt: new Date(Date.now()-60_000).toISOString() });
-  await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, staleHealth), /verification is unavailable/);
-  assert.equal(Number(psql(admin, `SELECT "lastMessageSeq" FROM public."PrinterAgentSession" WHERE id='${continuousSession.id}'`)),
-    healthSequence-1, "Stale health must not advance the accepted sequence or renew authorization");
-  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
-    WHERE metadata->>'sessionId'='${continuousSession.id}'`);
-  assert.equal(json(app, `SELECT app_rls.printing_readiness(
-    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
-    .eligibleForPrinting, false, "Stale health cannot keep expired authorization ready");
+    .eligibleForPrinting, true, "Fresh signed health restores readiness after stale evidence");
   await signedSessionBoundary.closeTrustedPrinterAgentSession(continuousSession.id, "continuous_operation_complete");
   psql(admin, `DELETE FROM public."PrinterAttestation" WHERE metadata->>'sessionId'='${continuousSession.id}';
     UPDATE public."PrinterAttestation" SET "expiresAt"="expiresAt"+interval '3600 seconds',
