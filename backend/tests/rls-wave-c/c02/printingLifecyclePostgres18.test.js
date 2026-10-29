@@ -342,6 +342,17 @@ async function main() {
   const activeReadiness = json(app, `SELECT app_rls.printing_readiness(
     '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`);
   assert.equal(activeReadiness.eligibleForPrinting, true);
+  const relayedAttestationId = requestId();
+  psql(admin, `INSERT INTO public."PrinterAttestation"
+    (id,"printerRegistrationId","signedPayloadHash","heartbeatNonce","attestedAt","expiresAt",
+     "signatureValid","trustValid",metadata,"createdAt")
+    VALUES ('${relayedAttestationId}','${ids.registration}','${hash("rest-relay")}',
+      '${requestId()}',clock_timestamp(),clock_timestamp()+interval '35 seconds',true,true,
+      '{"source":"REST_HEARTBEAT"}'::jsonb,clock_timestamp()+interval '1 millisecond')`);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, true, "A browser-relayed heartbeat cannot displace active session attestation");
+  psql(admin, `DELETE FROM public."PrinterAttestation" WHERE id='${relayedAttestationId}'`);
   assert.equal(json(app, `SELECT app_rls.printing_connector_identity(
     'LOCAL_AGENT','printing-agent','printing-device','${ids.discoveredPrinter}',NULL,NULL,'VERIFY')`).eligibleForPrinting, true);
   psql(admin, `UPDATE public."PrinterRegistration" SET "orgId"='${ids.orgB}' WHERE id='${ids.registration}'`);
