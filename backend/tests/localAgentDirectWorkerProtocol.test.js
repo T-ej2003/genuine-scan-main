@@ -14,6 +14,7 @@ const {
   normalizeBackendBaseUrl,
   resolveSessionUrl,
   validateClaimedLocalPrintJobForAttempt,
+  startPersistentHeartbeatLoop,
 } = require("../dist/local-print-agent/directPrintWorker");
 const {
   getMissingTransportDiagnosticsCapabilities,
@@ -37,6 +38,10 @@ const assert = (condition, message) => {
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
 const run = async () => {
+  let initialHeartbeats = 0;
+  const heartbeatTimer = startPersistentHeartbeatLoop(() => { initialHeartbeats += 1; }, 15_000);
+  clearInterval(heartbeatTimer);
+  assert(initialHeartbeats === 1, "Session readiness must send a signed heartbeat immediately without waiting for the interval");
   assert(
     isLocalAgentProtocolCompatible(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
     "Current direct-print protocol should be accepted"
