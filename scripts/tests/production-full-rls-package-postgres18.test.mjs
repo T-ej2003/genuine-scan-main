@@ -160,6 +160,9 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   const approvalPath = path.join(temporary, "approval.json");
   fs.writeFileSync(publicKeyPath, publicKey.export({ type: "spki", format: "pem" }), { mode: 0o600 });
   const { sourceContractSha256, migrationSetDigest } = calculateCleanRoomSourceContract();
+  // Capture the canonical certification source before this fixture temporarily
+  // regenerates the SQL files for the production-role package.
+  const c02Package = buildC02SessionPrerequisitePackage({ sourceSha: "a".repeat(40), repositoryRoot: root });
   const issuedAt = new Date();
   const approval = {
     schemaVersion: 1,
@@ -301,7 +304,6 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     const { PrismaClient } = createRequire(new URL("../../backend/package.json", import.meta.url))("@prisma/client");
     const verifier = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, verifierRole) } } });
     const administratorClient = new PrismaClient({ datasources: { db: { url: greenUrl } } });
-    const c02Package = buildC02SessionPrerequisitePackage({ sourceSha: "a".repeat(40), repositoryRoot: root });
     assert.ok(c02Runtime.installed(await c02Runtime.readback(administratorClient, c02Package), c02Package),
       "The production-role C02 successor must match the separately governed session installation contract");
     const maintenanceClient = new PrismaClient({ datasources: { db: { url: databaseUrl(adminUrl, targetDatabase, adminUrl.username) } } });

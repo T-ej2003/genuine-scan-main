@@ -1,5 +1,6 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { assertPrintingSessionPrerequisite, printingSessionPrerequisiteSql } = require("../dist/rls-waves/session-c/c02/printingSessionPrerequisite");
 
@@ -22,7 +23,7 @@ const run = async () => {
   await assert.rejects(assertPrintingSessionPrerequisite({ $queryRawUnsafe: async () => [] }),
     /PRINTING_SESSION_PREREQUISITE_READBACK_INVALID/);
   assert.throws(() => printingSessionPrerequisiteSql("untrusted_"), /ROLE_INVALID/);
-  const source = fs.readFileSync("scripts/rls/sql/generated/20-context-helpers.sql", "utf8");
+  const source = fs.readFileSync(path.resolve(__dirname, "../../scripts/rls/sql/generated/20-context-helpers.sql"), "utf8");
   const start = source.indexOf("CREATE OR REPLACE FUNCTION app_rls.printing_connector_session(");
   const bodyStart = source.indexOf("AS $fn$", start) + 7;
   const bodyEnd = source.indexOf("$fn$;", bodyStart);
@@ -31,7 +32,7 @@ const run = async () => {
   const digest = (value) => createHash("sha256").update(value).digest("hex");
   assert.match(printingSessionPrerequisiteSql("mscqr_rls_cert_"), new RegExp(digest(body)));
   assert.match(printingSessionPrerequisiteSql(), new RegExp(digest(body.replaceAll("mscqr_rls_cert_app", "mscqr_prd_rls_phase2_app"))));
-  const startup = fs.readFileSync("backend/src/index.ts", "utf8");
+  const startup = fs.readFileSync(path.resolve(__dirname, "../src/index.ts"), "utf8");
   const preflight = startup.indexOf("await assertPrintingSessionPrerequisite(prisma)");
   const listener = startup.indexOf("server = app.listen(PORT");
   assert(preflight > 0 && listener > preflight, "C02 readback must complete before backend activation");
