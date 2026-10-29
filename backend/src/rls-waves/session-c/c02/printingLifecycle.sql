@@ -2227,9 +2227,7 @@ BEGIN
             >pa."createdAt"-interval '20 seconds'
           AND (nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
             <=pa."createdAt"+interval '5 seconds';
-      IF health_observed_at>now_at-interval '20 seconds'
-         AND health_observed_at<=now_at+interval '5 seconds'
-         AND health_observed_at<=latest_health_observed_at THEN
+      IF health_observed_at<=latest_health_observed_at THEN
         RAISE EXCEPTION 'CONNECTOR_HEALTH_OUT_OF_ORDER' USING ERRCODE='42501';
       END IF;
       IF NOT health_usable OR NOT coalesce(latest_attestation_usable,false)
