@@ -22,6 +22,7 @@ import { assertProductionSecurityRebaselinePreparationManifest, authenticateProd
 import { createSecurityCatalogueTransportKeyPair, decryptSecurityCatalogueTransport } from "./production-security-rebaseline-transport.mjs";
 import { createProductionRlsProbeRuntimeConfig, PRODUCTION_RLS_PROBE_ENTRYPOINT } from "./production-rls-catalogue-probe-config.mjs";
 import { readImageRepositoryEvidence } from "./production-green-stage-b-image-evidence.mjs";
+import { classifyB03Catalogue } from "./production-b03-catalogue-diagnostic.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const collections = Object.freeze(["routines", "tables", "policies", "schemas", "roles"]);
@@ -193,6 +194,7 @@ export async function waitForCompleteRlsProbeObservation(readMessages, binding, 
 }
 
 export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsReference, awsProfile, securityRebaselineReference = null, preparationReference = null,
+  b03PredecessorReference = null,
   candidateSourceSha, candidateDigest, publicationReference, authorizationReference, securityRebaselineCanonicalOut = null, securityRebaselineLiveOut = null,
   run = (command, args, options) => execFileSync(command, args, options), githubRun = createProductionGithubCommandRunner(), wait = sleep, repositoryRoot = root, env = process.env,
   authenticateImages = authenticateAppOnlyImages }) {
@@ -211,6 +213,16 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsRe
   assert.match(candidateSourceSha || "", /^[a-f0-9]{40}$/, "Explicit candidate source SHA or authenticated preparation manifest is required");
   const { requirements, bytes: requirementsBytes } = authenticateCanonicalProductionRequirementsArtifact({ sourceSha, candidateSourceSha, requirementsReference,
     ...(preparedManifest ? { requirementsArtifactKind: "securityRebaselineRequirements" } : {}), repositoryRoot, githubRun });
+  let b03Predecessor = null;
+  if (b03PredecessorReference) {
+    assert.equal(preparedManifest, null, "B03 diagnostic uses the bounded public-repository probe only");
+    assert.equal(b03PredecessorReference.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
+    assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha: b03PredecessorReference.sourceSha, repositoryRoot });
+    const artifact = downloadAppOnlyArtifact({ kind: "requirements", reference: b03PredecessorReference, repositoryRoot, githubRun });
+    b03Predecessor = JSON.parse(artifact.bytes);
+    assert.equal(b03Predecessor.sourceSha, b03PredecessorReference.sourceSha);
+    assert.equal(b03Predecessor.candidateSourceSha, b03PredecessorReference.sourceSha);
+  }
   const securityMode = Boolean(preparedManifest) || [securityRebaselineReference, securityRebaselineCanonicalOut, securityRebaselineLiveOut].some(Boolean);
   assert.equal(Boolean(securityRebaselineCanonicalOut && securityRebaselineLiveOut), securityMode, "Security inventory output paths are all-or-none");
   assert.equal(Boolean(securityRebaselineReference), securityMode && !preparedManifest, "Legacy canonical reference is required only without a preparation manifest");
@@ -276,6 +288,9 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsRe
   const observation = await waitForCompleteRlsProbeObservation(() => { const pages = []; let requestToken; for (let page = 0; page < 100; page++) { const args = ["logs", "get-log-events", "--region", APP_ONLY.region, "--log-group-name", APP_ONLY_VERIFIER.logGroup, "--log-stream-name", stream, "--start-from-head", "--limit", "10000"]; if (requestToken) args.push("--next-token", requestToken); const response = aws(args); pages.push({ ...response, requestToken }); if (response.nextForwardToken === requestToken) break; requestToken = response.nextForwardToken; } return collectCompleteRlsProbeLogEvents(pages); }, { ...identity, requirementsSha256: requirements.requirementsSha256, securityMode }, { attempts: 12, wait });
   assert.ok(observation, "RLS probe evidence incomplete; do not relaunch automatically"); const { evidence } = observation;
   assert.equal(task.containers[0].exitCode, 0, "RLS probe task failed"); const result = classifyProductionRlsCatalogue(evidence.catalogue, requirements);
+  const b03Diagnostic = b03Predecessor ? classifyB03Catalogue({ probe: evidence,
+    probeIdentity: { sourceSha, candidateSourceSha: requirements.candidateSourceSha, probeImageDigest: identity.probeImageDigest,
+      applicationImageDigest: identity.applicationImageDigest }, predecessor: b03Predecessor, successor: requirements }) : null;
   if (securityMode) { const binding = { sourceSha, candidateSourceSha: requirements.candidateSourceSha, requirementsSha256: requirements.requirementsSha256 }; const catalogue = decryptSecurityCatalogueTransport(observation.chunks, transportKeys.privateKeyPem, binding); const liveInventory = createLiveSecurityRebaselineInventory({ protectedMainSha: sourceSha, candidateSourceSha: requirements.candidateSourceSha, catalogue, canonical: canonicalSecurity.inventory,
       taskEvidence: { taskArn, taskDefinitionArn, containerName: task.containers[0].name, containerExitCode: task.containers[0].exitCode,
         probeRuntimeSourceSha: identity.probeRuntimeSourceSha, probeImageSourceSha: identity.probeImageSourceSha, probeImageDigest: identity.probeImageDigest,
@@ -287,14 +302,16 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsRe
       deltaObjectCount: result.deltaObjects.length, requirementsSha256: requirements.requirementsSha256, inventory: securityRebaselineLogSummary(liveInventory) }; }
   return { status: "PRODUCTION_RLS_CATALOGUE_PROBED", sourceSha, candidateSourceSha: requirements.candidateSourceSha,
     probeImageDigest: identity.probeImageDigest, applicationImageDigest: identity.applicationImageDigest,
-    taskDefinitionArn, taskArn, classification: result.classification, deltaObjects: result.deltaObjects, requirementsSha256: requirements.requirementsSha256 };
+    taskDefinitionArn, taskArn, classification: result.classification, deltaObjects: result.deltaObjects, requirementsSha256: requirements.requirementsSha256,
+    ...(b03Diagnostic ? { b03Diagnostic } : {}) };
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   try {
     const { values } = parseArgs({ options: { "source-sha": { type: "string" }, "candidate-source-sha": { type: "string" }, "candidate-digest": { type: "string" },
       "publication-reference": { type: "string" }, "image-authorization-reference": { type: "string" }, "requirements-reference": { type: "string" }, "aws-profile": { type: "string" },
-      "preparation-reference": { type: "string" }, "security-rebaseline-reference": { type: "string" }, "security-rebaseline-canonical-out": { type: "string" }, "security-rebaseline-live-out": { type: "string" } }, strict: true });
+      "preparation-reference": { type: "string" }, "security-rebaseline-reference": { type: "string" }, "security-rebaseline-canonical-out": { type: "string" }, "security-rebaseline-live-out": { type: "string" },
+      "b03-predecessor-reference": { type: "string" } }, strict: true });
     assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/); assert.ok(values["aws-profile"]);
     const preparationReference = values["preparation-reference"] ? parseAppOnlyArtifactReference(values["preparation-reference"]) : null;
     if (preparationReference) assert.ok(values["security-rebaseline-canonical-out"] && values["security-rebaseline-live-out"]);
@@ -304,9 +321,10 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
     const authorizationReference = values["image-authorization-reference"] ? parseAppOnlyArtifactReference(values["image-authorization-reference"]) : null;
     if (!preparationReference) assert.ok(requirementsReference && publicationReference && authorizationReference);
     const securityRebaselineReference = values["security-rebaseline-reference"] ? parseAppOnlyArtifactReference(values["security-rebaseline-reference"]) : null;
+    const b03PredecessorReference = values["b03-predecessor-reference"] ? parseAppOnlyArtifactReference(values["b03-predecessor-reference"]) : null;
     const result = await runProductionRlsCatalogueProbe({ sourceSha: values["source-sha"], candidateSourceSha: values["candidate-source-sha"], candidateDigest: values["candidate-digest"],
       publicationReference, authorizationReference, requirementsReference, preparationReference, awsProfile: values["aws-profile"], securityRebaselineReference,
-      securityRebaselineCanonicalOut: values["security-rebaseline-canonical-out"], securityRebaselineLiveOut: values["security-rebaseline-live-out"] });
-    process.stdout.write(`${JSON.stringify(result)}\n`); if (result.classification === RLS_PROBE_CLASSIFICATIONS.UNEXPECTED) process.exitCode = 2;
+      securityRebaselineCanonicalOut: values["security-rebaseline-canonical-out"], securityRebaselineLiveOut: values["security-rebaseline-live-out"], b03PredecessorReference });
+    process.stdout.write(`${JSON.stringify(result)}\n`); if (result.classification === RLS_PROBE_CLASSIFICATIONS.UNEXPECTED && !result.b03Diagnostic) process.exitCode = 2;
   } catch { process.stderr.write("Production RLS catalogue probe failed closed; no database mutation was attempted.\n"); process.exitCode = 1; }
 }

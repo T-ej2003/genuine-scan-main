@@ -1,14 +1,43 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "MSCQR Stage B approval artifact",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["schemaVersion", "environment", "account", "region", "releaseSha", "backendImageDigest", "workerImageDigest", "executorImageDigest", "canaryImageDigest", "sourceContractSha256", "migrationSetDigest", "packageChecksumSha256", "deploymentId", "greenDatabaseIdentifier", "greenDatabaseName", "administratorIdentity", "databaseSecurityGroupId", "executorSecurityGroupId", "taskDefinitionArns", "taskDefinitionTemplateHashes", "brokerAliasArn", "brokerVersion", "checkerIdentity", "deployerIdentity", "executorIdentity", "approvalId", "ticketId", "issuedAt", "expiresAt", "nonce", "signatureAlgorithm", "signatureBase64"],
-  "properties": {
-    "schemaVersion": { "const": 2 }, "environment": { "const": "production" }, "account": { "const": "368992683803" }, "region": { "const": "eu-west-2" },
-    "releaseSha": { "type": "string", "pattern": "^[a-f0-9]{40}$" }, "sourceContractSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "migrationSetDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "packageChecksumSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
-    "backendImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" }, "workerImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-worker@sha256:[a-f0-9]{64}$" }, "executorImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" }, "canaryImageDigest": { "pattern": "^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$" },
-    "greenDatabaseIdentifier": { "const": "mscqr-production-rls-green-phase2" }, "greenDatabaseName": { "const": "mscqr_production_rls_green_phase2" }, "administratorIdentity": { "const": "mscqr_prod_admin" }, "databaseSecurityGroupId": { "const": "sg-0703d3f227f35b81c" }, "executorSecurityGroupId": { "const": "sg-051a24aedff773761" },
-    "taskDefinitionArns": { "type": "object" }, "taskDefinitionTemplateHashes": { "type": "object" }, "brokerAliasArn": { "const": "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed" }, "brokerVersion": { "type": "string", "pattern": "^[1-9][0-9]*$" }, "checkerIdentity": { "type": "string" }, "deployerIdentity": { "type": "string" }, "executorIdentity": { "const": "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task" }, "approvalId": { "type": "string" }, "ticketId": { "type": "string" }, "issuedAt": { "type": "string", "format": "date-time" }, "expiresAt": { "type": "string", "format": "date-time" }, "nonce": { "type": "string" }, "signatureAlgorithm": { "const": "RSASSA_PSS_SHA_256" }, "signatureBase64": { "type": "string", "pattern": "^[A-Za-z0-9+/]+={0,2}$" }
+  "title": "MSCQR Stage B operation-specific approval artifact",
+  "oneOf": [{"$ref":"#/$defs/fullRls"},{"$ref":"#/$defs/b03"}],
+  "$defs": {
+    "fullRls": {"type":"object","additionalProperties":false,"required":["schemaVersion","environment","account","region","releaseSha","backendImageDigest","workerImageDigest","executorImageDigest","canaryImageDigest","sourceContractSha256","migrationSetDigest","packageChecksumSha256","deploymentId","greenDatabaseIdentifier","greenDatabaseName","administratorIdentity","databaseSecurityGroupId","executorSecurityGroupId","taskDefinitionArns","taskDefinitionTemplateHashes","brokerAliasArn","brokerVersion","checkerIdentity","deployerIdentity","executorIdentity","approvalId","ticketId","issuedAt","expiresAt","nonce","signatureAlgorithm","signatureBase64"],"properties":{"schemaVersion":{"const":2},"environment":{"const":"production"},"account":{"const":"368992683803"},"region":{"const":"eu-west-2"},"releaseSha":{"type":"string","pattern":"^[a-f0-9]{40}$"},"sourceContractSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"migrationSetDigest":{"type":"string","pattern":"^[a-f0-9]{64}$"},"packageChecksumSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},"backendImageDigest":{"pattern":"^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$"},"workerImageDigest":{"pattern":"^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-worker@sha256:[a-f0-9]{64}$"},"executorImageDigest":{"pattern":"^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$"},"canaryImageDigest":{"pattern":"^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$"},"greenDatabaseIdentifier":{"const":"mscqr-production-rls-green-phase2"},"greenDatabaseName":{"const":"mscqr_production_rls_green_phase2"},"administratorIdentity":{"const":"mscqr_prod_admin"},"databaseSecurityGroupId":{"const":"sg-0703d3f227f35b81c"},"executorSecurityGroupId":{"const":"sg-051a24aedff773761"},"taskDefinitionArns":{"type":"object"},"taskDefinitionTemplateHashes":{"type":"object"},"brokerAliasArn":{"const":"arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-rls-approval-broker:reviewed"},"brokerVersion":{"type":"string","pattern":"^[1-9][0-9]*$"},"checkerIdentity":{"type":"string"},"deployerIdentity":{"type":"string"},"executorIdentity":{"const":"arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-task"},"approvalId":{"type":"string"},"ticketId":{"type":"string"},"issuedAt":{"type":"string","format":"date-time"},"expiresAt":{"type":"string","format":"date-time"},"nonce":{"type":"string"},"signatureAlgorithm":{"const":"RSASSA_PSS_SHA_256"},"signatureBase64":{"type":"string","pattern":"^[A-Za-z0-9+/]+={0,2}$"}}},
+    "b03": {
+      "type":"object", "additionalProperties":false,
+      "required":["schemaVersion", "operation", "approval", "packageGzipBase64"],
+      "properties": {
+        "schemaVersion":{"const":1}, "operation":{"const":"b03-incremental"},
+        "packageGzipBase64":{"type":"string","maxLength":32768,"pattern":"^[A-Za-z0-9+/]+={0,2}$"},
+        "approval": {
+          "type":"object", "additionalProperties":false,
+          "required":["schemaVersion", "operation", "account", "region", "clusterArn", "approvalId", "sourceSha", "backendImage", "taskDefinitionArn", "taskDefinitionSha256", "packageSha256", "database", "databaseHostname", "predecessorCatalogue", "successorCatalogue", "ticketId", "checkerIdentity", "issuedAt", "expiresAt", "nonce", "signatureBase64"],
+          "properties": {
+            "schemaVersion":{"const":1},
+            "operation":{"const":"PRODUCTION_B03_BROKER_APPROVAL"},
+            "account":{"const":"368992683803"},
+            "region":{"const":"eu-west-2"},
+            "clusterArn":{"const":"arn:aws:ecs:eu-west-2:368992683803:cluster/mscqr-prod-euw2-main"},
+            "approvalId":{"type":"string","minLength":1},
+            "sourceSha":{"type":"string","pattern":"^[a-f0-9]{40}$"},
+            "backendImage":{"type":"string","pattern":"^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-backend@sha256:[a-f0-9]{64}$"},
+            "taskDefinitionArn":{"type":"string","pattern":"^arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:[1-9][0-9]*$"},
+            "taskDefinitionSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "packageSha256":{"type":"string","pattern":"^[a-f0-9]{64}$"},
+            "database":{"const":"mscqr_production_rls_green_phase2"},
+            "databaseHostname":{"type":"string","minLength":1},
+            "predecessorCatalogue":{"type":"object","additionalProperties":false,"required":["routines","tables","policies","schemas","roles"],"properties":{"routines":{"type":"string","pattern":"^[a-f0-9]{64}$"},"tables":{"type":"string","pattern":"^[a-f0-9]{64}$"},"policies":{"type":"string","pattern":"^[a-f0-9]{64}$"},"schemas":{"type":"string","pattern":"^[a-f0-9]{64}$"},"roles":{"type":"string","pattern":"^[a-f0-9]{64}$"}}},
+            "successorCatalogue":{"type":"object","additionalProperties":false,"required":["routines","tables","policies","schemas","roles"],"properties":{"routines":{"type":"string","pattern":"^[a-f0-9]{64}$"},"tables":{"type":"string","pattern":"^[a-f0-9]{64}$"},"policies":{"type":"string","pattern":"^[a-f0-9]{64}$"},"schemas":{"type":"string","pattern":"^[a-f0-9]{64}$"},"roles":{"type":"string","pattern":"^[a-f0-9]{64}$"}}},
+            "ticketId":{"type":"string","minLength":1},
+            "checkerIdentity":{"type":"string","minLength":1},
+            "issuedAt":{"type":"string","minLength":1},
+            "expiresAt":{"type":"string","minLength":1},
+            "nonce":{"type":"string","minLength":1},
+            "signatureBase64":{"type":"string","pattern":"^[A-Za-z0-9+/]+={0,2}$"}
+          }
+        }
+      }
+    }
   }
 }

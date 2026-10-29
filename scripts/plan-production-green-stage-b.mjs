@@ -36,6 +36,7 @@ import { STAGE_B_PLAN_APPROVED, STAGE_B_PLAN_CAPTURED, assertStageBFreshImageRef
 import { assertRecoveryOnlyPlan, assertRecoveryPlanDelta, assertVerifiedStageBRecovery, parseCanonicalTerraformSerialCliText, STAGE_B_PARTIAL_APPLY_RECOVERY_ADDRESS } from "./aws/stage-b-partial-apply-recovery-contract.mjs";
 import { captureStageBTerraformJson } from "./aws/capture-stage-b-terraform-json.mjs";
 import { assertStageBPlanSemanticCompleteness } from "./aws/stage-b-plan-semantic-contract.mjs";
+import { B03_TASK_ADDRESS } from "./aws/production-b03-plan-contract.mjs";
 
 const root = "infra/aws/terraform/production-green-stage-b";
 const forbidden = /aws_ecs_service|aws_(lb|alb|elbv2)|aws_db_|aws_rds_|aws_secretsmanager_secret(?:_version)?/;
@@ -429,7 +430,7 @@ function assertInitialBrokerCreatePlan(plan, terraformConfiguration) {
     brokerZipFileSha256,
     plannedBrokerSourceCodeHashBase64: crypto.createHash("sha256").update(packageBytes).digest("base64"),
   };
-  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition" && change.address !== B03_TASK_ADDRESS);
   const currentTaskDefinitionChanges = taskDefinitionChanges.filter((change) => !retainedTaskDefinitionDescriptor(change.address));
   if (currentTaskDefinitionChanges.length !== Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).length
     || new Set(currentTaskDefinitionChanges.map((change) => change.address)).size !== currentTaskDefinitionChanges.length
@@ -736,9 +737,9 @@ export function assertStageBPlan(plan, options = {}) {
     else if (!recoveryOnly && !partialApplyRecovery && !freshImagePartialApplyRecovery && exactActions(brokerActions, ["update"]) && requireReferenceAudit) assertBrokerAuditBinding(plan, brokerChange, referenceAudit, referenceAuditBytes, referenceAuditSha256, planJsonBytes, planJsonSha256, now, terraformConfiguration);
     else if (!exactActions(brokerActions, ["no-op"])) throw new Error(`Stage B broker actions are unsupported: ${JSON.stringify(brokerActions)}`);
   }
-  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition");
+  const taskDefinitionChanges = (plan.resource_changes || []).filter((change) => change.type === "aws_ecs_task_definition" && change.address !== B03_TASK_ADDRESS);
   const taskDefinitionClassification = taskDefinitionChanges.length && !recoveryOnly && !partialApplyRecovery && !freshImagePartialApplyRecovery
-    ? assertTaskDefinitionAppendOnlyPlan(plan, terraformConfiguration, { strict: strictResourceContract })
+    ? assertTaskDefinitionAppendOnlyPlan({ ...plan, resource_changes: plan.resource_changes.filter(c => c.address !== B03_TASK_ADDRESS) }, terraformConfiguration, { strict: strictResourceContract })
     : null;
   const brokerActions = brokerChange?.change?.actions || [];
   if (taskDefinitionClassification && (referenceAudit || (requireReferenceAudit && exactActions(brokerActions, ["update"])))) {
@@ -748,6 +749,7 @@ export function assertStageBPlan(plan, options = {}) {
     const actions = change.change.actions || [];
     if (forbidden.test(change.type)) throw new Error(`Stage B plan rejected: ${change.address}`);
     if (change.type === "aws_ecs_task_definition") {
+      if (change.address === B03_TASK_ADDRESS) continue; // Fully checked by the fixed B03 classifier above.
       if (retainedTaskDefinitionDescriptor(change.address)) {
         assertRetainedTaskDefinition(change);
       } else {

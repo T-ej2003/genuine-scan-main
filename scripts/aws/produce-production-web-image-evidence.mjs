@@ -94,7 +94,7 @@ export function produceGovernedWebEvidence({ sourceSha, stageBAuthorization, pub
   if (typeof verifyStageBAuthorization !== "function") throw new Error("Stage-B authorization verifier is required.");
   verifyStageBAuthorization({ authorization: stageBAuthorization, sourceSha, verifyImageEvidence: verifyStageBImageEvidence || ((options) => verifyImageEvidenceSignature({ ...options, run })), now });
   const impact = stageBAuthorization?.imageReuseEvidence;
-  if (impact?.webPublicationRequired !== true || impact.toolingSha !== sourceSha) throw new Error("Governed web evidence requires authenticated web-required Stage-B impact.");
+  if (typeof impact?.webPublicationRequired !== "boolean" || impact.toolingSha !== sourceSha) throw new Error("Governed web evidence requires authenticated Stage-B impact.");
   const record = assertWebPublicationArtifactBundle({ artifactBytes: publication.artifactBytes, sbomBytes: publication.sbomBytes, provenanceBytes: publication.provenanceBytes, sourceSha, workflowRunId: publication.observed?.workflowRunId, workflowDefinitionSha: publication.observed?.workflowDefinitionSha });
   const identity = buildWebPublicationIdentity({ sourceSha, observed: publication.observed, artifactBytes: publication.artifactBytes, observedAt: now });
   const repositoryEvidence = readRepositoryEvidence(run); const imageReadback = readImageEvidence(run, sourceSha);

@@ -62,15 +62,15 @@ export function assertNormalReleaseAuthorizationTransport({ sourceSha, authoriza
   if (authorization?.schemaVersion !== IMAGE_AUTHORIZATION_SCHEMA_VERSION || authorization.valid !== true || authorization.sourceSha !== sourceSha || authorization.authorizationSha256 !== authorization.evidenceSha256 || authorization.authorizationSha256 !== imageAuthorizationSha256(authorization) || authorization.imageReuseEvidence?.toolingSha !== sourceSha || authorization.imageReuseEvidenceSha256 !== canonicalSha256(authorization.imageReuseEvidence) || authorization.imageReuseEvidence.webPublicationRequired !== webPublicationRequired) throw new Error("Normal release image authorization is stale or not a canonical source-bound envelope.");
   const web = parseBoundWebAuthorization({ sourceSha, authorizationBytes: webAuthorizationBytes, expectedSha256: webExpectedSha256, required: webPublicationRequired });
   if (webPublicationRequired && !web) throw new Error("Web-impacting release requires web image authorization transport.");
-  return Object.freeze({ sourceSha, transportSha256: expectedSha256, webTransportSha256: webExpectedSha256, webPublicationRequired, authenticationDeferredToReleaseGate: true });
+  return Object.freeze({ sourceSha, transportSha256: expectedSha256, webTransportSha256: webExpectedSha256, webPublicationRequired, webActivationAuthorized: Boolean(web), authenticationDeferredToReleaseGate: true });
 }
 
 export function assertNormalReleaseGateInputs({ sourceSha, preserveCurrentFrontend, authorizationBytes, expectedSha256, webAuthorizationBytes, webExpectedSha256, webPublicationRequired = false, authenticateAuthorization, authenticateWebAuthorization } = {}) {
   assertNormalReleaseAuthorizationTransport({ sourceSha, authorizationBytes, expectedSha256, webAuthorizationBytes, webExpectedSha256, webPublicationRequired });
-  if (preserveCurrentFrontend !== !webPublicationRequired) throw new Error("Normal release frontend action does not match canonical web impact.");
+  if (preserveCurrentFrontend !== !webAuthorizationBytes) throw new Error("Normal release frontend action does not match authenticated web authorization.");
   const authorization = JSON.parse(authorizationBytes);
   if (typeof authenticateAuthorization !== "function" || authenticateAuthorization(authorization, sourceSha) !== true) throw new Error("Normal release image authorization was not authenticated by the canonical verifier.");
-  if (webPublicationRequired && (typeof authenticateWebAuthorization !== "function" || authenticateWebAuthorization(JSON.parse(webAuthorizationBytes), sourceSha) !== true)) throw new Error("Web image authorization was not authenticated by the canonical verifier.");
+  if (webAuthorizationBytes && (typeof authenticateWebAuthorization !== "function" || authenticateWebAuthorization(JSON.parse(webAuthorizationBytes), sourceSha) !== true)) throw new Error("Web image authorization was not authenticated by the canonical verifier.");
   return true;
 }
 

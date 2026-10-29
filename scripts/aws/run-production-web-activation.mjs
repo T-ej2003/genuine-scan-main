@@ -77,7 +77,7 @@ export function assertOverlapBackendLiveReadback({ sourceSha, imageReleaseSha, e
 }
 
 export function assertFrontendActivationAuthorized(coordinated) {
-  if (coordinated?.webRequired !== true) throw new Error("Frontend activation is forbidden when authenticated Stage-B impact does not require web publication.");
+  if (coordinated?.webRequired !== true) throw new Error("Frontend activation requires authenticated web authorization.");
   return true;
 }
 

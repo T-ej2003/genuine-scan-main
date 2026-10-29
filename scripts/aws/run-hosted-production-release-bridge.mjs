@@ -305,7 +305,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
    const backendOperationId=gateEcsOperationId({sourceSha:env.TARGET_SHA,rotationId:env.BRIDGE_ROTATION_ID,
     releaseTrainRunId:boundParentRunId,authorizationSha256:auth.authorizationSha256,kind:'BACKEND'});
    const webAuthorization=env.WEB_IMAGE_AUTHORIZATION_JSON?JSON.parse(env.WEB_IMAGE_AUTHORIZATION_JSON):null;
-   const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true;
+   const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true || Boolean(webAuthorization);
    const frontendOperationId=webRequired?gateEcsOperationId({sourceSha:env.TARGET_SHA,
     rotationId:env.BRIDGE_ROTATION_ID,releaseTrainRunId:boundParentRunId,
     authorizationSha256:webAuthorization?.authorizationSha256,kind:'FRONTEND'}):null;
@@ -398,7 +398,7 @@ export async function runHostedBridge({env=process.env,requestCutover=runTermina
  const backendActivation=await artifact(`production-normal-backend-activation-evidence-attempt-${normalChild.run_attempt}`,'backend-deployment.json');
  const liveService=name=>json(run,['ecs','describe-services','--cluster','mscqr-prod-euw2-main','--services',name]).services?.[0];
  const componentState=stateClient.read();
- const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true;
+ const webRequired=auth.imageReuseEvidence?.webPublicationRequired===true || Boolean(env.WEB_IMAGE_AUTHORIZATION_JSON);
  const frontendActivation=webRequired?await artifact(`production-frontend-activation-evidence-attempt-${normalChild.run_attempt}`,'frontend-activation.json'):undefined;
  const deployed=assertNormalGateCompletion({run:normalChild,job:job[0],approvals,releaseTrainRunId:boundParentRunId,
   sourceSha:env.TARGET_SHA,authorization:auth,rlsReceipt,backendActivation,frontendActivation,componentState,

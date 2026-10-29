@@ -18,6 +18,7 @@ import { activateAuthenticatedWebRelease, createAwsFrontendActivationAdapters, c
 import { assertNormalBackendActivationEvidence, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildProductionOverlapDeploymentReceipt } from "../aws/production-overlap-deployment-receipt.mjs";
+import { frontendActivationRequired } from "../aws/verify-production-release-image-authorization.mjs";
 
 const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim(); const digest = `sha256:${"b".repeat(64)}`; const createdAt = "2026-09-16T12:00:00.000Z"; const expiresAt = "2026-09-17T12:00:00.000Z";
 const imageRef = `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/${WEB_RELEASE.repository}@${digest}`;
@@ -83,12 +84,12 @@ test("web release Terraform root uses its dedicated production S3 state and lock
   assert.match(runbook, /MFA-backed, non-root production operator/);
 });
 
-function fixture() {
+function fixture(imageImpact = impact) {
   const artifactBytes = artifact();
   const identity = buildWebPublicationIdentity({ sourceSha, artifactBytes, observedAt: createdAt, observed: { workflowRunId: "12", workflowDatabaseId: "34", workflowFile: WEB_RELEASE.workflowFile, workflowName: WEB_RELEASE.workflowName, event: "workflow_dispatch", workflowDefinitionSha: sourceSha, headBranch: "main", conclusion: "success", artifactId: "56", artifactName: WEB_RELEASE.artifactName, artifactExpired: false, reviewer: "reviewer-one" } });
-  const evidence = buildWebImageEvidence({ publicationIdentity: identity, repositoryEvidence: { repositoryArn: `arn:aws:ecr:${WEB_RELEASE.region}:${WEB_RELEASE.account}:repository/mscqr-web`, repositoryName: "mscqr-web", registryId: WEB_RELEASE.account, imageTagMutability: "IMMUTABLE", imageTagMutabilityExclusionFilters: [] }, imageReadback: { digest, imagePushedAt: createdAt }, imageImpactSha256: canonicalSha256(impact), createdAt, expiresAt });
+  const evidence = buildWebImageEvidence({ publicationIdentity: identity, repositoryEvidence: { repositoryArn: `arn:aws:ecr:${WEB_RELEASE.region}:${WEB_RELEASE.account}:repository/mscqr-web`, repositoryName: "mscqr-web", registryId: WEB_RELEASE.account, imageTagMutability: "IMMUTABLE", imageTagMutabilityExclusionFilters: [] }, imageReadback: { digest, imagePushedAt: createdAt }, imageImpactSha256: canonicalSha256(imageImpact), createdAt, expiresAt });
   const signature = signWebImageEvidence(evidence, { signedAt: createdAt, sign: () => "AQ==" });
-  const authorization = buildWebImageAuthorization({ sourceSha, evidence, signature, imageImpact: impact, reviewer: "reviewer-one", now: createdAt, verify: () => true });
+  const authorization = buildWebImageAuthorization({ sourceSha, evidence, signature, imageImpact, reviewer: "reviewer-one", now: createdAt, verify: () => true });
   return { artifactBytes, identity, evidence, signature, authorization };
 }
 
@@ -147,13 +148,17 @@ test("web authorization cannot wrap valid evidence from another source", () => {
   assert.throws(() => assertWebImageAuthorization(forged, { sourceSha, now: createdAt, verify: () => true }), /invalid/);
 });
 
-test("coordinated release requires matching web authorization only when web publication is required", () => {
+test("coordinated release permits signed activation of an already published current-source web image", () => {
   const { authorization } = fixture(); const stageB = { sourceSha, authorizationSha256: "d".repeat(64), imageReuseEvidence: impact };
   assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }).webRequired, true);
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: { ...authorization, sourceSha: "e".repeat(40) }, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /invalid/);
   assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: { ...stageB, imageReuseEvidence: { ...impact, classifiedFiles: ["src/other.tsx"] } }, webAuthorization: authorization, webPublicationRequired: true, verifyWeb: () => true, now: createdAt }), /image impact/);
-  assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webPublicationRequired: false }).webRequired, false);
-  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: false }), /forbidden/);
+  const reusedImpact = { ...impact, webPublicationRequired: false };
+  const reusedStageB = { ...stageB, imageReuseEvidence: reusedImpact };
+  const reusedAuthorization = fixture(reusedImpact).authorization;
+  assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: reusedStageB, webPublicationRequired: false }).webRequired, false);
+  assert.equal(assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: reusedStageB, webAuthorization: reusedAuthorization, webPublicationRequired: false, verifyWeb: () => true, now: createdAt }).webRequired, true);
+  assert.throws(() => assertCoordinatedImageAuthorization({ sourceSha, stageBAuthorization: stageB, webAuthorization: authorization, webPublicationRequired: false, verifyWeb: () => true, now: createdAt }), /differs/);
 });
 
 test("coordinated web authorization reserves the complete downstream release window", () => {
@@ -168,10 +173,10 @@ test("coordinated web authorization reserves the complete downstream release win
 
 test("frontend activation consumes the authenticated Stage-B web decision before AWS adapters", async () => {
   assert.equal(assertFrontendActivationAuthorized({ webRequired: true }), true);
-  assert.throws(() => assertFrontendActivationAuthorized({ webRequired: false }), /forbidden/);
-  assert.throws(() => assertFrontendActivationAuthorized(undefined), /forbidden/);
+  assert.throws(() => assertFrontendActivationAuthorized({ webRequired: false }), /requires authenticated web authorization/);
+  assert.throws(() => assertFrontendActivationAuthorized(undefined), /requires authenticated web authorization/);
   let adapters = 0;
-  await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization: {}, webAuthorization: {}, verifyWeb: () => true, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => { adapters += 1; throw new Error("must not construct adapters"); } }), /forbidden/);
+  await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization: {}, webAuthorization: {}, verifyWeb: () => true, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => { adapters += 1; throw new Error("must not construct adapters"); } }), /requires authenticated web authorization/);
   assert.equal(adapters, 0);
 });
 
@@ -180,7 +185,7 @@ test("web activation requires completed same-source backend activation evidence"
   const backend = { schemaVersion: 2, operation: "PRODUCTION_NORMAL_BACKEND_ACTIVATION", sourceSha, imageReleaseSha, stageBAuthorizationSha256: "stage-auth", workflowRunId: "12", releaseTrainRunId: "34", sourceArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-backend:20", targetArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", newTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", observedTaskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:21", imageRef: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`, imageDigest: `sha256:${"b".repeat(64)}`, clusterArn: NORMAL_ACTIVATION.clusterArn, serviceArn: NORMAL_ACTIVATION.serviceArn, serviceStable: true, desiredCount: 2, runningCount: 2, pendingCount: 0 };
   Object.assign(backend, { normalActivationSourceArn: backend.sourceArn, previousTaskDefinitionArn: backend.sourceArn, targetTaskDefinitionArn: backend.targetArn });
   const stageBAuthorization = { sourceSha, imageReleaseSha, authorizationSha256: "stage-auth", images: [{ service: "backend", digest: backend.imageDigest }], imageReuseEvidence: { webPublicationRequired: false } };
-  await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization: undefined, backendActivationEvidence: backend, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => assert.fail("web=false must stop before adapters") }), /forbidden/);
+  await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization, webAuthorization: undefined, backendActivationEvidence: backend, verifyCoordinated: async () => ({ webRequired: false }), createAdapters: () => assert.fail("web=false must stop before adapters") }), /requires authenticated web authorization/);
   await assert.rejects(() => activateAuthenticatedWebRelease({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { webPublicationRequired: true } }, webAuthorization: {}, backendActivationEvidence: { ...backend, sourceSha: "c".repeat(40) }, verifyCoordinated: async () => ({ webRequired: true }), createAdapters: () => assert.fail("invalid backend evidence must stop before adapters") }), /backend activation evidence/);
   assert.throws(() => assertBackendActivationLiveReadback({ sourceSha, imageReleaseSha, expectedDigest: backend.imageDigest, backendActivationEvidence: backend, service: { serviceArn: NORMAL_ACTIVATION.serviceArn, clusterArn: NORMAL_ACTIVATION.clusterArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: backend.targetArn, deployments: [{ status: "PRIMARY", taskDefinition: backend.targetArn, rolloutState: "COMPLETED" }] }, tasks: [], healthStatus: 200, healthBody: { status: "ready", release: { gitSha: imageReleaseSha } } }), /stable source-bound/);
   assert.equal(assertNormalBackendActivationEvidence(backend, { sourceSha, stageBAuthorization }), true);
@@ -296,6 +301,17 @@ test("overlap-backed web activation requires authenticated release receipt, matc
 const taskArn = `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:task-definition/mscqr-frontend:20`;
 const task = { taskDefinitionArn: taskArn, family: "mscqr-frontend", revision: 20, status: "ACTIVE", networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "256", memory: "512", executionRoleArn: `arn:aws:iam::${WEB_RELEASE.account}:role/mscqr-ecs-execution-role`, taskRoleArn: `arn:aws:iam::${WEB_RELEASE.account}:role/mscqr-ecs-task-role`, tags: [{ key: "Environment", value: "production" }], containerDefinitions: [{ name: "frontend", image: `${WEB_RELEASE.account}.dkr.ecr.${WEB_RELEASE.region}.amazonaws.com/mscqr-web@sha256:${"1".repeat(64)}`, essential: true, cpu: 0, readonlyRootFilesystem: true, privileged: false, interactive: false, pseudoTerminal: false }] };
 const service = { serviceArn: `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:service/${WEB_RELEASE.cluster}/${WEB_RELEASE.serviceName}`, clusterArn: `arn:aws:ecs:${WEB_RELEASE.region}:${WEB_RELEASE.account}:cluster/${WEB_RELEASE.cluster}`, serviceName: WEB_RELEASE.serviceName, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0, taskDefinition: taskArn, deployments: [{ id: "ecs-svc/opaque", status: "PRIMARY", taskDefinition: taskArn, rolloutState: "COMPLETED" }] };
+
+test("frontend activation compares the stable live digest with the published current-source image", () => {
+  const repository = { repositoryName: WEB_RELEASE.repository, registryId: WEB_RELEASE.account, imageTagMutability: "IMMUTABLE", imageTagMutabilityExclusionFilters: [] };
+  const images = [{ imageDigest: digest, imageTags: [sourceSha] }];
+  assert.equal(frontendActivationRequired({ sourceSha, repository, images, service, taskDefinition: task }), true);
+  assert.equal(frontendActivationRequired({ sourceSha, repository, images, service, taskDefinition: { ...task, containerDefinitions: [{ ...task.containerDefinitions[0], image: imageRef }] } }), false);
+  assert.throws(() => frontendActivationRequired({ sourceSha, repository, images: [{ ...images[0], imageTags: ["0".repeat(40)] }], service, taskDefinition: task }), /absent or ambiguous/);
+  assert.throws(() => frontendActivationRequired({ sourceSha, repository, images: [{ ...images[0], imageDigest: `sha256:${"c".repeat(64)}` }, images[0]], service, taskDefinition: task }), /absent or ambiguous/);
+  assert.throws(() => frontendActivationRequired({ sourceSha, repository: { ...repository, imageTagMutability: "MUTABLE" }, images, service, taskDefinition: task }), /repository identity/);
+  assert.throws(() => frontendActivationRequired({ sourceSha, repository, images, service: { ...service, runningCount: 1 }, taskDefinition: task }), /stable production service/);
+});
 
 test("frontend candidate is image-only, read back exactly, and uses predecessor CAS", () => {
   const { authorization } = fixture(); const authenticatedWebAuthorization = authenticateWebImageAuthorization({ sourceSha, webAuthorization: authorization, verify: () => true, now: createdAt }); const predecessor = captureFrontendPredecessor(service, task); const candidate = buildFrontendCandidate({ predecessor, authenticatedWebAuthorization }); const candidateArn = taskArn.replace(":20", ":21");

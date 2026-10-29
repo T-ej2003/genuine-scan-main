@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 import { performance } from "node:perf_hooks";
 import { assertEcsTaskDefinitionReadback } from "./ecs-task-definition-readback.mjs";
+import { B03_BROKER, authenticatePublishedB03, launchB03Task } from "./b03-approval.mjs";
+import { b03Completion, B03_COMPLETION_OPERATIONS } from "./b03-completion.mjs";
 const { assertBrokerApprovalValidationRequest, assertBrokerRequest, assertStageBBrokerConfigurationBindings, assertStageBBrokerRuntimeBindings, assertStageBBrokerRuntimeVersion, assertStageBBrokerTaskDefinitionMap, canonicalJson, hasCompleteStageBTaskMaps, PRESERVED_INVENTORY_PREDECESSOR, COMPLETED_INVENTORY_PREDECESSOR, STAGE_B, validateStageBApproval } = await import(
   process.env.AWS_LAMBDA_FUNCTION_NAME ? "./stage-b-contract.mjs" : "../../../../../scripts/aws/production-green-stage-b-contract.mjs"
 );
@@ -270,11 +272,22 @@ export function validateBrokerConfiguration(config) {
   return config;
 }
 
-export function createHandler({ config, executingBrokerVersion, readApproval, verifySignature, claimApproval, releaseApproval = async () => {}, markLaunchUncertain = async () => {}, recordTaskStarted = async () => {}, runTask, writeReceipt = async () => {}, now = () => new Date() }) {
+export function createHandler({ config, executingBrokerVersion, readApproval, verifySignature, describeTaskDefinition, describeTasks, claimApproval, readApprovalClaim, recordB03Task, recordB03LaunchReceipt, claimB03Completion, markB03CompletionDurable, releaseApproval = async () => {}, markLaunchUncertain = async () => {}, recordTaskStarted = async () => {}, runTask, writeReceipt = async () => {}, now = () => new Date() }) {
   validateBrokerConfiguration(config);
   const brokerVersion = assertStageBBrokerRuntimeVersion(executingBrokerVersion);
   const approvalExpected = { ...config.approvalExpected, images: config.images, brokerVersion };
   return async (event, context = {}) => {
+    if (B03_COMPLETION_OPERATIONS.includes(event?.operation)) return b03Completion(event, { config, readApproval, readApprovalClaim, recordB03LaunchReceipt, describeTasks,
+      describeTaskDefinition, verifySignature, claimB03Completion, markB03CompletionDurable, writeReceipt, now });
+    if (event?.operation === "validate-b03-approval") {
+      const result = await authenticatePublishedB03(event, { readApproval, now: now(), verifySignature, describeTaskDefinition });
+      if (result.approval.sourceSha !== config.approvalExpected.releaseSha) throw new Error("B03 approval differs from broker source binding");
+      if (result.approval.backendImage !== config.images.backendImageDigest) throw new Error("B03 approval differs from broker image binding");
+      return { status: "validated", approvalId: result.approval.approvalId, sourceSha: result.approval.sourceSha,
+        approvalSha256: event.approvalSha256, approvalContractSha256: result.approvalContractSha256,
+        taskDefinitionArn: result.approval.taskDefinitionArn, backendImage: result.approval.backendImage,
+        packageSha256: result.approval.packageSha256, expiresAt: result.approval.expiresAt };
+    }
     if (event?.operation === "validate-approval") {
       const request = assertBrokerApprovalValidationRequest(event);
       const rawApproval = await readApproval(STAGE_B.approvalSecretArn);
@@ -285,21 +298,34 @@ export function createHandler({ config, executingBrokerVersion, readApproval, ve
       }
       return { status: "validated", approvalId: approval.approval.approvalId, sourceSha: approval.approval.releaseSha, approvalContractSha256: approval.approvalContractSha256, approvalSha256 };
     }
-    const request = assertBrokerRequest(event);
-    const approval = await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), approvalExpected, { now: now(), verifySignature, allowExpiredRollback: request.mode === "full-rls-rollback", requestedMode: request.mode });
-    if (approval.approval.approvalId !== request.approvalId || !exact(approval.approval.taskDefinitionTemplateHashes, config.templateHashes)
-        || !exact(approval.approval.taskDefinitionArns, config.taskDefinitionArns)) {
+    const b03 = event?.operation === B03_BROKER.mode;
+    if (!b03) assertBrokerRequest(event);
+    const approval = b03
+      ? await authenticatePublishedB03(event, { readApproval, now: now(), verifySignature, describeTaskDefinition })
+      : await validateStageBApproval(await readApproval(STAGE_B.approvalSecretArn), approvalExpected, { now: now(), verifySignature,
+        allowExpiredRollback: event?.mode === "full-rls-rollback", requestedMode: event?.mode });
+    const request = b03 ? { approvalId: approval.approval.approvalId, mode: B03_BROKER.mode } : assertBrokerRequest(event);
+    if (b03 && approval.approval.sourceSha !== config.approvalExpected.releaseSha) throw new Error("B03 approval differs from broker source binding");
+    if (b03 && approval.approval.backendImage !== config.images.backendImageDigest) throw new Error("B03 approval differs from broker image binding");
+    if (b03 && Date.parse(approval.approval.expiresAt) <= now().getTime()) throw new Error("B03 authorization expired before execution");
+    if (!b03 && (approval.approval.approvalId !== request.approvalId || !exact(approval.approval.taskDefinitionTemplateHashes, config.templateHashes)
+        || !exact(approval.approval.taskDefinitionArns, config.taskDefinitionArns))) {
       throw new Error("Stage B broker request is not bound to the signed approval.");
     }
-    if (request.historicalRuntimeReferenceSha256 !== approval.approval.historicalRuntimeReferenceSha256) throw new Error("Stage B execution historical runtime differs from signed approval");
-    const taskDefinition = config.taskDefinitionArns[request.mode];
-    await claimApproval({ approvalId: approval.approval.approvalId, nonce: approval.approval.nonce, mode: request.mode, expiresAt: approval.approval.expiresAt });
+    if (!b03 && request.historicalRuntimeReferenceSha256 !== approval.approval.historicalRuntimeReferenceSha256) throw new Error("Stage B execution historical runtime differs from signed approval");
+    const taskDefinition = b03 ? approval.approval.taskDefinitionArn : config.taskDefinitionArns[request.mode];
     const networkConfiguration = { awsvpcConfiguration: {
       subnets: [...config.privateSubnetIds].sort(), securityGroups: [STAGE_B.executorSecurityGroupId], assignPublicIp: "DISABLED",
     } };
+    if (b03) return launchB03Task({ authorization: approval,
+      request: { cluster: STAGE_B.clusterArn, taskDefinition, launchType: "FARGATE", count: 1, networkConfiguration,
+        clientToken: crypto.createHash("sha256").update(`${request.approvalId}:${approval.approval.packageSha256}`).digest("hex") },
+      claim: claimApproval, readClaim: readApprovalClaim, recordTask: recordB03Task, recordReceipt: recordB03LaunchReceipt, runTask, writeReceipt });
+    await claimApproval({ approvalId: approval.approval.approvalId, nonce: approval.approval.nonce, mode: request.mode, expiresAt: approval.approval.expiresAt });
     let response;
     try {
-      response = await runTask({ cluster: STAGE_B.clusterArn, taskDefinition, launchType: "FARGATE", count: 1, networkConfiguration });
+      response = await runTask({ cluster: STAGE_B.clusterArn, taskDefinition, launchType: "FARGATE", count: 1, networkConfiguration,
+        ...(b03 ? { clientToken: crypto.createHash("sha256").update(`${request.approvalId}:${approval.approval.packageSha256}`).digest("hex") } : {}) });
     } catch {
       await markLaunchUncertain({ approvalId: approval.approval.approvalId, nonce: approval.approval.nonce, mode: request.mode });
       throw new Error("Stage B broker launch outcome is uncertain; the approval remains blocked pending reviewed ECS reconciliation.");
@@ -645,8 +671,8 @@ export async function handler(event, context) {
   ]);
   const ecs = new ECSClient({ region: STAGE_B.region }); const secrets = new SecretsManagerClient({ region: STAGE_B.region });
   const kms = new KMSClient({ region: STAGE_B.region }); const dynamo = new DynamoDBClient({ region: STAGE_B.region }); const s3 = new S3Client({ region: STAGE_B.region });
-  const readApproval = async (id) => {
-      const response = await secrets.send(new GetSecretValueCommand({ SecretId: id, VersionStage: "AWSCURRENT" }));
+  const readApproval = async (id, versionId) => {
+      const response = await secrets.send(new GetSecretValueCommand({ SecretId: id, ...(versionId ? { VersionId: versionId } : { VersionStage: "AWSCURRENT" }) }));
       if (!response.SecretString) throw new Error("Stage B approval artifact is missing.");
       return response.SecretString;
   };
@@ -656,8 +682,32 @@ export async function handler(event, context) {
     config,
     readApproval,
     verifySignature,
-    claimApproval: async ({ approvalId, nonce, mode, expiresAt }) => dynamo.send(new PutItemCommand({
-      TableName: config.replayTable, Item: { approvalMode: { S: `${approvalId}#${mode}` }, approvalNonce: { S: nonce }, launchState: { S: "claimed" }, expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) } }, ConditionExpression: "attribute_not_exists(approvalMode)",
+    describeTaskDefinition: async (taskDefinition) => ecs.send(new DescribeTaskDefinitionCommand({ taskDefinition, include: ["TAGS"] })),
+    describeTasks: request => ecs.send(new DescribeTasksCommand(request)),
+    recordB03LaunchReceipt: ({ approvalId, nonce, mode, taskArn, launchReceiptJson }) => dynamo.send(new UpdateItemCommand({
+      TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, UpdateExpression: "SET launchReceiptJson = :receipt",
+      ConditionExpression: "approvalNonce = :nonce AND taskArn = :task AND launchState = :started AND attribute_not_exists(launchReceiptJson)",
+      ExpressionAttributeValues: { ":receipt": { S: launchReceiptJson }, ":nonce": { S: nonce }, ":task": { S: taskArn }, ":started": { S: "started" } },
+    })),
+    claimB03Completion: ({ key, completionSha256, completionJson }) => dynamo.send(new PutItemCommand({ TableName: config.replayTable,
+      Item: { approvalMode: { S: key }, completionSha256: { S: completionSha256 }, completionJson: { S: completionJson } }, ConditionExpression: "attribute_not_exists(approvalMode)" })),
+    markB03CompletionDurable: ({ key, completionSha256 }) => dynamo.send(new UpdateItemCommand({ TableName: config.replayTable,
+      Key: { approvalMode: { S: key } }, UpdateExpression: "SET durable = :yes", ConditionExpression: "completionSha256 = :hash",
+      ExpressionAttributeValues: { ":yes": { S: "yes" }, ":hash": { S: completionSha256 } } })),
+    claimApproval: async ({ approvalId, nonce, mode, expiresAt, approvalContractSha256, requestSha256 }) => dynamo.send(new PutItemCommand({
+      TableName: config.replayTable, Item: { approvalMode: { S: `${approvalId}#${mode}` }, approvalNonce: { S: nonce }, launchState: { S: "claimed" },
+        ...(mode === B03_BROKER.mode ? { authorizationExpiresAt: { S: expiresAt } } : { expiresAt: { N: String(Math.floor(Date.parse(expiresAt) / 1000)) } }),
+        ...(mode === B03_BROKER.mode ? { approvalContractSha256: { S: approvalContractSha256 }, requestSha256: { S: requestSha256 } } : {}) }, ConditionExpression: "attribute_not_exists(approvalMode)",
+    })),
+    readApprovalClaim: async key => {
+      const response = await dynamo.send(new GetItemCommand({ TableName: config.replayTable, Key: { approvalMode: { S: key } }, ConsistentRead: true }));
+      return response.Item && Object.fromEntries(Object.entries(response.Item).map(([key, value]) => [key, value.S ?? Number(value.N)]));
+    },
+    recordB03Task: ({ approvalId, nonce, mode, taskArn, approvalContractSha256, requestSha256 }) => dynamo.send(new UpdateItemCommand({
+      TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } },
+      UpdateExpression: "SET launchState = :started, taskArn = :task",
+      ConditionExpression: "approvalNonce = :nonce AND approvalContractSha256 = :approval AND requestSha256 = :request AND ((launchState = :claimed AND attribute_not_exists(taskArn)) OR (launchState = :started AND taskArn = :task))",
+      ExpressionAttributeValues: { ":started": { S: "started" }, ":claimed": { S: "claimed" }, ":task": { S: taskArn }, ":nonce": { S: nonce }, ":approval": { S: approvalContractSha256 }, ":request": { S: requestSha256 } },
     })),
     releaseApproval: ({ approvalId, nonce, mode }) => dynamo.send(new DeleteItemCommand({
       TableName: config.replayTable, Key: { approvalMode: { S: `${approvalId}#${mode}` } }, ConditionExpression: "approvalNonce = :nonce AND launchState = :claimed", ExpressionAttributeValues: { ":nonce": { S: nonce }, ":claimed": { S: "claimed" } },

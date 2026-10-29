@@ -70,6 +70,22 @@ on:
         description: "Exact signed web-image authorization; required only when canonical impact requires web publication."
         required: false
         type: string
+      database_install_mode:
+        description: "Choose clean-room SQL or the authenticated existing-database B03 delta."
+        required: false
+        type: choice
+        options:
+          - clean-room
+          - incremental-b03
+        default: clean-room
+      b03_approval_reference_json:
+        description: "Compact published B03 authorization reference; required for incremental-b03."
+        required: false
+        type: string
+      b03_compatibility_reference_json:
+        description: "Authenticated post-commit app-only compatibility artifact reference for B03 completion."
+        required: false
+        type: string
       rotation_id:
         description: "Exact authenticated-overlap rotation ID."
         required: false
@@ -410,9 +426,11 @@ jobs:
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
           HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ inputs.historical_runtime_evidence_sha256 }}
           WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
+          DATABASE_INSTALL_MODE: ${{ inputs.database_install_mode }}
         run: |
           set -euo pipefail
           test "${{ inputs.prerequisites_only }}" = false
+          test "$DATABASE_INSTALL_MODE" = clean-room
           test "${{ inputs.release_lifecycle }}" = authenticated-initial-overlap
           test "$TARGET_REF" = main
           node scripts/aws/run-hosted-production-release-bridge.mjs
@@ -429,6 +447,9 @@ jobs:
           HISTORICAL_RUNTIME_EVIDENCE_JSON: ${{ inputs.historical_runtime_evidence_json }}
           HISTORICAL_RUNTIME_EVIDENCE_SHA256: ${{ inputs.historical_runtime_evidence_sha256 }}
           WEB_IMAGE_AUTHORIZATION_JSON: ${{ inputs.web_image_authorization_json }}
+          DATABASE_INSTALL_MODE: ${{ inputs.database_install_mode }}
+          B03_APPROVAL_REFERENCE_JSON: ${{ inputs.b03_approval_reference_json }}
+          B03_COMPATIBILITY_REFERENCE_JSON: ${{ inputs.b03_compatibility_reference_json }}
           RELEASE_LIFECYCLE: ${{ inputs.release_lifecycle }}
           ROTATION_ID: ${{ inputs.rotation_id }}
           ROTATION_STATE_JSON: ${{ inputs.rotation_state_json }}
@@ -478,6 +499,9 @@ jobs:
             ["normal_image_authorization_json", transport.json],
             ["normal_image_authorization_sha256", transport.sha256],
             ["web_image_authorization_json", process.env.WEB_IMAGE_AUTHORIZATION_JSON],
+            ["database_install_mode", process.env.DATABASE_INSTALL_MODE],
+            ["b03_approval_reference_json", process.env.B03_APPROVAL_REFERENCE_JSON],
+            ["b03_compatibility_reference_json", process.env.B03_COMPATIBILITY_REFERENCE_JSON],
             ["rotation_id", process.env.ROTATION_ID], ["rotation_state_json", process.env.ROTATION_STATE_JSON],
             ["rotation_state_sha256", process.env.ROTATION_STATE_SHA256], ["rotation_task_definition_arn", process.env.ROTATION_TASK_DEFINITION_ARN],
             ["rotation_image_digest", process.env.ROTATION_IMAGE_DIGEST], ["rotation_deployment_sha", process.env.ROTATION_DEPLOYMENT_SHA],

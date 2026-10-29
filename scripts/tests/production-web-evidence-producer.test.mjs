@@ -41,23 +41,26 @@ test("web publication can resume an older protected release with current workflo
   assert.equal(result.identity.workflowDefinitionSha, toolingSha);
 });
 
-test("governed web evidence signs exactly once after authenticated publication and rejects drift before signing", () => {
+test("governed web evidence signs published current-source images regardless of build impact and rejects drift", () => {
   let signatures = 0;
   const result = produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication: publication(), run, now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: (ref) => ref === imageRef, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true });
   assert.equal(signatures, 1); assert.equal(result.authorization.sourceSha, sourceSha); assert.equal(result.authorization.imageRef, imageRef);
-  assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: false } }, publication: publication(), run, now, verifyStageBAuthorization: () => true, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true }), /web-required/);
-  assert.equal(signatures, 1);
+  const alreadyPublished = produceGovernedWebEvidence({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: false } }, publication: publication(), run, now, verifyStageBAuthorization: () => true, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true });
+  assert.equal(alreadyPublished.authorization.imageImpact.webPublicationRequired, false);
+  assert.equal(signatures, 2);
+  assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: null } }, publication: publication(), run, now, verifyStageBAuthorization: () => true, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true }), /authenticated Stage-B impact/);
+  assert.equal(signatures, 2);
   assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication: { ...publication(), provenanceBytes: Buffer.from("{}") }, run, now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: () => true, sign: () => "AQ==", verifyWebEvidence: () => true }), /hashes|provenance/);
   for (const [invalidRun, expected] of [
     [() => JSON.stringify({ Arn: "arn:aws:iam::368992683803:role/other", Account: WEB_RELEASE.account }), /signer identity/],
     [(args) => args[1] === "describe-images" ? JSON.stringify({ imageDetails: [{ imageDigest: `sha256:${"e".repeat(64)}`, imagePushedAt: now }] }) : run(args), /supply-chain/],
   ]) assert.throws(() => produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication: publication(), run: (args) => args[0] === "sts" ? invalidRun(args) : invalidRun(args), now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: () => true, sign: () => { signatures += 1; return "AQ=="; }, verifyWebEvidence: () => true }), expected);
-  assert.equal(signatures, 1);
+  assert.equal(signatures, 2);
 });
 
-test("web authorization handoff accepts only the authenticated web-required Stage-B impact", () => {
+test("web authorization handoff binds the exact authenticated Stage-B impact", () => {
   const result = produceGovernedWebEvidence({ sourceSha, stageBAuthorization, publication: publication(), run, now, verifyStageBAuthorization: verifyStageB, verifyArtifacts: () => true, sign: () => "AQ==", verifyWebEvidence: () => true });
   assert.equal(buildGovernedWebImageAuthorization({ sourceSha, evidence: result.evidence, signature: result.signature, stageBAuthorization, now, verify: () => true }).authorizationSha256, result.authorization.authorizationSha256);
-  assert.throws(() => buildGovernedWebImageAuthorization({ sourceSha, evidence: result.evidence, signature: result.signature, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: false } }, now, verify: () => true }), /web-required/);
-  assert.throws(() => buildGovernedWebImageAuthorization({ sourceSha, evidence: { ...result.evidence, reviewer: "other" }, signature: result.signature, stageBAuthorization, now, verify: () => true }), /web-required/);
+  assert.throws(() => buildGovernedWebImageAuthorization({ sourceSha, evidence: result.evidence, signature: result.signature, stageBAuthorization: { ...stageBAuthorization, imageReuseEvidence: { ...stageBAuthorization.imageReuseEvidence, webPublicationRequired: false } }, now, verify: () => true }), /image-impact binding/);
+  assert.throws(() => buildGovernedWebImageAuthorization({ sourceSha, evidence: { ...result.evidence, reviewer: "other" }, signature: result.signature, stageBAuthorization, now, verify: () => true }), /authenticated Stage-B impact/);
 });

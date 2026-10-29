@@ -12,6 +12,7 @@ import { createProductionAwsCredentialEnvironment } from "./production-credentia
 import { normalizeIamPolicyDocument } from "./iam-policy-document.mjs";
 import { iamSimulationContextArgs } from "./iam-simulation-context.mjs";
 import { HISTORICAL_NORMAL_ACTIVATION_TRANSACTION, NORMAL_ACTIVATION, NORMAL_CANDIDATE_ARN, NORMAL_LEGACY_SOURCE_ARN, assertNormalActivationPolicy, assertNormalActivationPolicyTransitionOnly, assertNormalActivationTransactionPolicy, buildNormalActivationPolicy, buildNormalActivationTransactionPolicy, canonicalNormalActivationValue, compactNormalActivationPolicy } from "./production-normal-backend-activation-policy.mjs";
+import { assertB03ReleaseReceipt } from "./production-b03-release-contract.mjs";
 import { stageBApprovalIdForReleaseSha } from "./production-green-stage-b-contract.mjs";
 import { stageBBoundImagesFromBindingReport } from "./generate-production-green-stage-b-tfvars.mjs";
 import { readBoundStageBPrivateJson, readStageBPrivateFileBytes } from "./stage-b-artifact-contract.mjs";
@@ -195,6 +196,8 @@ function oldestDeletablePolicyVersion(versions, defaultVersionId) {
 }
 
 export function assertProductionRlsReleaseReceipt(receipt, { sourceSha, imageDigest }) {
+  if ([3, 4].includes(receipt?.schemaVersion)) return assertB03ReleaseReceipt(receipt, {
+    sourceSha, imageDigest, approvalId: stageBApprovalIdForReleaseSha(sourceSha) });
   const copy = structuredClone(receipt);
   const claimed = copy?.receiptBundleSha256;
   delete copy.receiptBundleSha256;
