@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 import test from "node:test";
@@ -12,12 +13,12 @@ const pkg = buildC02SessionPrerequisitePackage({ sourceSha });
 const initial = { role: "mscqr_prod_admin", session_role: "mscqr_prod_admin",
   database: "mscqr_production_rls_green_phase2", read_only: "off", superuser: false, bypass_rls: false,
   force_rls: true, migration_ready: true,
-  function_body_sha256: null, function_owner: null, security_definer: null, policy_count: 0,
+  function_body_sha256: null, function_owner: null, security_definer: null, search_path_ready: null, policy_count: 0,
   named_policy_count: 0, app_execute: null, no_public_execute: null,
   no_broad_select: true, no_broad_insert: true, no_broad_update: true, no_app_grants: true,
   grants: [], policies: [] };
 const successor = { ...initial, function_body_sha256: pkg.functionBodySha256,
-  function_owner: "mscqr_prd_rls_phase2_auth_owner", security_definer: true,
+  function_owner: "mscqr_prd_rls_phase2_auth_owner", security_definer: true, search_path_ready: true,
   policy_count: 3, named_policy_count: 3, app_execute: true, no_public_execute: true,
   grants: runtime.expectedColumnGrants(pkg), policies: Object.entries(pkg.policyDigests).sort(([a], [b]) => a.localeCompare(b))
     .map(([name, digest]) => ({ name, command: name.endsWith("_select") ? "r" : name.endsWith("_insert") ? "a" : "w",
@@ -56,6 +57,17 @@ test("C02 source package contains only the exact session function, policies and 
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
 });
 
+test("C02 task parses the actual node -e argument layout", () => {
+  const processResult = spawnSync(process.execPath,
+    ["-e", "process.stdout.write(JSON.stringify(process.argv))", "encoded", "digest", "test.invalid"],
+    { encoding: "utf8" });
+  assert.equal(processResult.status, 0);
+  const argv = JSON.parse(processResult.stdout);
+  assert.deepEqual(runtime.parseTaskArguments(argv),
+    { encoded: "encoded", payloadHash: "digest", hostname: "test.invalid" });
+  assert.throws(() => runtime.parseTaskArguments([process.execPath, "encoded", "digest"]));
+});
+
 test("C02 installation requires migration and FORCE RLS, and refuses partial predecessors", async () => {
   for (const missing of ["migration_ready", "force_rls"]) {
     const h = harness({ ...initial, [missing]: false });
@@ -68,6 +80,9 @@ test("C02 installation requires migration and FORCE RLS, and refuses partial pre
     await assert.rejects(runtime.executeC02SessionInstallTransaction({ tx: h.tx, pkg }));
     assert.equal(h.commands.some((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")), false);
   }
+  const unsafeFunction = harness({ ...successor, search_path_ready: false });
+  await assert.rejects(runtime.executeC02SessionInstallTransaction({ tx: unsafeFunction.tx, pkg }));
+  assert.equal(unsafeFunction.commands.some((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")), false);
 });
 
 test("C02 installer uses the established owner split, verifies successor, and is idempotent", async () => {
@@ -82,6 +97,7 @@ test("C02 installer uses the established owner split, verifies successor, and is
   assert.deepEqual(await runtime.executeC02SessionInstallTransaction({ tx: repeated.tx, pkg }),
     { status: "ALREADY_CONVERGED", writeCount: 0 });
   assert.equal(repeated.commands.some((sql) => sql.startsWith("CREATE OR REPLACE FUNCTION")), false);
+  assert.equal(runtime.installed({ ...successor, search_path_ready: false }, pkg), false);
 });
 
 test("C02 installation result must bind exact source and package evidence", () => {

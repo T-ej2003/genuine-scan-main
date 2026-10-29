@@ -61,6 +61,26 @@ try {
   const repeated = await admin.$transaction((tx) => executeC02SessionInstallTransaction({ tx, pkg, contract }));
   assert.equal(repeated.status, "ALREADY_CONVERGED");
 
+  const selectPolicy = pkg.policySql.find((sql) => sql.startsWith(
+    'CREATE POLICY "printing_lifecycle_printeragentsession_select"'));
+  assert.ok(selectPolicy?.includes("FOR SELECT"));
+  await assert.rejects(admin.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_rls_cert_owner");
+    await tx.$executeRawUnsafe('DROP POLICY "printing_lifecycle_printeragentsession_select" ON public."PrinterAgentSession"');
+    await tx.$executeRawUnsafe(selectPolicy.replace("FOR SELECT", "FOR ALL"));
+    await tx.$executeRawUnsafe("RESET ROLE");
+    await assert.rejects(assertPrintingSessionPrerequisite(tx, rolePrefix), /PRINTING_SESSION_PREREQUISITE_MISSING/);
+    throw new Error("rollback policy-command probe");
+  }), /rollback policy-command probe/);
+  await assert.rejects(admin.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_rls_cert_auth_owner");
+    await tx.$executeRawUnsafe("ALTER FUNCTION app_rls.printing_connector_session(text,text,text,jsonb) RESET search_path");
+    await tx.$executeRawUnsafe("RESET ROLE");
+    assert.equal(installed(await readback(tx, pkg, contract), pkg), false);
+    throw new Error("rollback function-search-path probe");
+  }), /rollback function-search-path probe/);
+  await assertPrintingSessionPrerequisite(app, rolePrefix);
+
   await assert.rejects(app.$executeRawUnsafe(`UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=1 WHERE false`));
   await assert.rejects(app.$executeRawUnsafe(`INSERT INTO public."PrinterAgentSession"(id) VALUES ('not-authorized')`));
 

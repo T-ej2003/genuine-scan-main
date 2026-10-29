@@ -79,6 +79,9 @@ async function readback(tx, pkg, contract = { admin, database }) {
       (SELECT r.rolname FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_roles r ON r.oid=p.proowner
         WHERE p.oid=${functionOid}) AS function_owner,
       (SELECT p.prosecdef FROM pg_catalog.pg_proc p WHERE p.oid=${functionOid}) AS security_definer,
+      (SELECT coalesce(pg_catalog.array_length(p.proconfig,1),0)=1
+        AND replace(p.proconfig[1],' ','')='search_path=pg_catalog,public'
+        FROM pg_catalog.pg_proc p WHERE p.oid=${functionOid}) AS search_path_ready,
       (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid=${tableOid}) AS policy_count,
       (SELECT count(*)::integer FROM pg_catalog.pg_policy p WHERE p.polrelid=${tableOid}
         AND p.polname=ANY(ARRAY[${pkg.policyNames.map((name) => `'${name}'`).join(",")}])) AS named_policy_count,
@@ -131,7 +134,8 @@ function installed(state, pkg) {
   const owner = `${pkg.rolePrefix}auth_owner`;
   return state.migration_ready === true && state.force_rls === true &&
     state.function_body_sha256 === pkg.functionBodySha256 && state.function_owner === owner &&
-    state.security_definer === true && state.policy_count === 3 && state.named_policy_count === 3 &&
+    state.security_definer === true && state.search_path_ready === true &&
+    state.policy_count === 3 && state.named_policy_count === 3 &&
     state.app_execute === true && state.no_public_execute === true &&
     state.no_broad_select === true && state.no_broad_insert === true && state.no_broad_update === true &&
     state.no_app_grants === true &&
@@ -180,12 +184,18 @@ async function executeC02SessionInstallTransaction({ tx, pkg, checkpoint = async
   return { status: "APPLIED", writeCount: 15 };
 }
 
+function parseTaskArguments(argv) {
+  // With `node -e <source> ...`, Node omits the eval source from process.argv.
+  assert.equal(argv.length, 4);
+  const [encoded, payloadHash, hostname] = argv.slice(1);
+  assert.match(hostname || "", /^[a-z0-9.-]+$/);
+  return { encoded, payloadHash, hostname };
+}
+
 async function main() {
   let client;
   try {
-    assert.equal(process.argv.length, 5);
-    const [encoded, payloadHash, hostname] = process.argv.slice(2);
-    assert.match(hostname || "", /^[a-z0-9.-]+$/);
+    const { encoded, payloadHash, hostname } = parseTaskArguments(process.argv);
     const pkg = decodePackage(encoded, payloadHash);
     assert.equal(pkg.sourceSha, process.env.RELEASE_GIT_SHA);
     const password = process.env.MSCQR_C02_ADMIN_PASSWORD;
@@ -212,5 +222,6 @@ async function main() {
   } finally { if (client) await client.$disconnect(); }
 }
 
-module.exports = { decodePackage, expectedColumnGrants, executeC02SessionInstallTransaction, installed, readback };
+module.exports = { decodePackage, expectedColumnGrants, executeC02SessionInstallTransaction,
+  installed, parseTaskArguments, readback };
 if (module.id === "[eval]" || require.main === module) main();

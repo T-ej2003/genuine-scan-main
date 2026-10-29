@@ -65,6 +65,11 @@ export const printingSessionPrerequisiteSql = (rolePrefix = "mscqr_prd_rls_phase
       ) AS "rlsReady",
       (SELECT count(*) = 3 AND coalesce(bool_and(
           p.polpermissive AND p.polroles = ARRAY[(SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '${ownerRole}')]::oid[]
+          AND p.polcmd = CASE p.polname
+            WHEN 'printing_lifecycle_printeragentsession_select' THEN 'r'
+            WHEN 'printing_lifecycle_printeragentsession_insert' THEN 'a'
+            WHEN 'printing_lifecycle_printeragentsession_update' THEN 'w'
+            ELSE '' END
           AND encode(pg_catalog.sha256(pg_catalog.convert_to(
             coalesce(pg_catalog.pg_get_expr(p.polqual,p.polrelid),'')||'|'||
             coalesce(pg_catalog.pg_get_expr(p.polwithcheck,p.polrelid),''),'UTF8')),'hex') =
