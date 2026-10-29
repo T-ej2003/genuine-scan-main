@@ -1,5 +1,6 @@
 const { createHash } = require("crypto");
 const { PassThrough } = require("stream");
+const { mock } = require("node:test");
 const {
   buildPersistentSessionConnectDiagnostics,
   buildPersistentSessionRejectReasonCode,
@@ -42,6 +43,22 @@ const run = async () => {
   const heartbeatTimer = startPersistentHeartbeatLoop(() => { initialHeartbeats += 1; }, 15_000);
   clearInterval(heartbeatTimer);
   assert(initialHeartbeats === 1, "Session readiness must send a signed heartbeat immediately without waiting for the interval");
+  mock.timers.enable({ apis: ["setInterval"] });
+  let finishObservation;
+  let observations = 0;
+  const observation = new Promise((resolve) => { finishObservation = resolve; });
+  const observationTimer = startPersistentHeartbeatLoop(() => { observations += 1; return observation; }, 15_000);
+  try {
+    mock.timers.tick(45_000);
+    assert(observations === 1, "Slow discovery must not create overlapping signed heartbeat observations");
+    finishObservation();
+    await new Promise((resolve) => setImmediate(resolve));
+    mock.timers.tick(15_000);
+    assert(observations === 2, "Heartbeat discovery must resume after the prior observation settles");
+  } finally {
+    clearInterval(observationTimer);
+    mock.timers.reset();
+  }
   assert(
     isLocalAgentProtocolCompatible(LOCAL_AGENT_DIRECT_PROTOCOL_VERSION),
     "Current direct-print protocol should be accepted"

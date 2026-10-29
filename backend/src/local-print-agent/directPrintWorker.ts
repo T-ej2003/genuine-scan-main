@@ -99,9 +99,21 @@ const DIRECT_PRINT_ACTIVE_WAKE_RETRY_MS = Math.max(
 );
 const PRINT_AGENT_SESSION_MODE = String(process.env.PRINT_AGENT_SESSION_MODE || "websocket").trim().toLowerCase();
 const PRINT_AGENT_SESSION_HEARTBEAT_MS = Math.max(10_000, Number(process.env.PRINT_AGENT_SESSION_HEARTBEAT_MS || 15_000) || 15_000);
-export const startPersistentHeartbeatLoop = (heartbeat: () => void, intervalMs: number) => {
-  heartbeat();
-  return setInterval(heartbeat, intervalMs);
+export const startPersistentHeartbeatLoop = (heartbeat: () => void | Promise<void>, intervalMs: number) => {
+  let inFlight = false;
+  const tick = () => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      const result = heartbeat();
+      void Promise.resolve(result).finally(() => { inFlight = false; });
+    } catch (error) {
+      inFlight = false;
+      throw error;
+    }
+  };
+  tick();
+  return setInterval(tick, intervalMs);
 };
 const PRINT_AGENT_SESSION_RECONNECT_MAX_MS = Math.max(15_000, Number(process.env.PRINT_AGENT_SESSION_RECONNECT_MAX_MS || 60_000) || 60_000);
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
@@ -1587,7 +1599,7 @@ const startPersistentPrintSessionWorker = () => {
               reconnectAttempt = 0;
               heartbeatTimer = startPersistentHeartbeatLoop(() => {
                 if (!session || ws.readyState !== WebSocket.OPEN) return;
-                void sendSessionMessage(ws, session, selection.selectedPrinterId, {
+                return sendSessionMessage(ws, session, selection.selectedPrinterId, {
                   type: "heartbeat",
                   printerHealth: {
                     deviceName: os.hostname(),
