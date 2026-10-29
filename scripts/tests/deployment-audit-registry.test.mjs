@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { load } from "js-yaml";
-import { readApprovedImages, ciImageReference, assertPinnedImageInputs, assertDisposablePostgresImage, verifyApprovedImage } from "../lib/container-image-identity.mjs";
+import { readApprovedImages, ciImageReference, assertPinnedDockerfiles, assertPinnedImageInputs, assertDisposablePostgresImage, verifyApprovedImage } from "../lib/container-image-identity.mjs";
 
 const images = readApprovedImages();
 const sha = value => `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -72,12 +72,44 @@ test("CI Dockerfiles change only the registry host for exact approved base diges
   const output = mkdtempSync(path.join(os.tmpdir(), "mscqr-ci-dockerfiles-"));
   try {
     execFileSync(process.execPath, ["scripts/ci/render-pinned-dockerfiles.mjs", output]);
-    for (const [file, rendered] of [["Dockerfile", "frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
+    for (const [file, rendered] of [["Dockerfile", "frontend.Dockerfile"], ["Dockerfile.ecs-frontend", "ecs-frontend.Dockerfile"], ["backend/Dockerfile", "backend.Dockerfile"]]) {
       let expected = readFileSync(file, "utf8");
       for (const key of ["node", "nginx"]) expected = expected.replaceAll(images[key].reference, ciImageReference(images[key]));
       assert.equal(readFileSync(path.join(output, rendered), "utf8"), expected);
     }
   } finally { rmSync(output, { recursive: true, force: true }); }
+});
+
+test("production web publication verifies and builds the same pinned mirror inputs", () => {
+  const workflow = load(readFileSync(".github/workflows/production-web-image.yml", "utf8"));
+  const publish = workflow.jobs.publish.steps.find(step => step.name === "Publish exact immutable web image").run;
+  assert.match(publish, /node "\$GITHUB_WORKSPACE\/scripts\/verify-container-image-provenance\.mjs" --production-mirror/);
+  assert.match(publish, /node "\$GITHUB_WORKSPACE\/scripts\/ci\/render-pinned-dockerfiles\.mjs" "\$RUNNER_TEMP\/web-pinned-inputs"/);
+  assert.equal(workflow.jobs.publish.steps.find(step => step.name === "Publish exact immutable web image")["working-directory"], "release-source");
+  assert.match(publish, /--file "\$RUNNER_TEMP\/web-pinned-inputs\/ecs-frontend\.Dockerfile"/);
+  assert.doesNotMatch(publish, /--review-upstream|\|\| true/);
+});
+
+test("trusted renderer accepts a release checkout without the new tooling and preserves its application bytes", () => {
+  const release = mkdtempSync(path.join(os.tmpdir(), "mscqr-historical-release-"));
+  const output = mkdtempSync(path.join(os.tmpdir(), "mscqr-historical-render-"));
+  const renderer = path.resolve("scripts/ci/render-pinned-dockerfiles.mjs");
+  try {
+    for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile", "docker/base-image-identities.json"]) {
+      mkdirSync(path.dirname(path.join(release, file)), { recursive: true });
+      writeFileSync(path.join(release, file), readFileSync(file));
+    }
+    const dockerfile = path.join(release, "Dockerfile.ecs-frontend");
+    const historical = readFileSync(dockerfile, "utf8") + "\nLABEL release-fixture=historical\n";
+    writeFileSync(dockerfile, historical);
+    assert.deepEqual(assertPinnedDockerfiles(release), images);
+    execFileSync(process.execPath, [renderer, output], { cwd: release });
+    let expected = historical;
+    for (const key of ["node", "nginx"]) expected = expected.replaceAll(images[key].reference, ciImageReference(images[key]));
+    assert.equal(readFileSync(path.join(output, "ecs-frontend.Dockerfile"), "utf8"), expected);
+    writeFileSync(dockerfile, historical.replace(images.nginx.reference, "foreign.example/nginx:latest"));
+    assert.throws(() => execFileSync(process.execPath, [renderer, output], { cwd: release, stdio: "pipe" }));
+  } finally { rmSync(release, { recursive: true, force: true }); rmSync(output, { recursive: true, force: true }); }
 });
 
 for (const file of ["Dockerfile", "Dockerfile.ecs-frontend", "backend/Dockerfile"]) {
