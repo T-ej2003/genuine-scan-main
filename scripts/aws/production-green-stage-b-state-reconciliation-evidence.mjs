@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import assert from "node:assert/strict";
-import { WORKER_COMMITTED, committedWorkerExecutionReference, workerReflectionHash } from "./stage-b-worker-policy-reflection.mjs";
+import { WORKER_COMMITTED, committedWorkerExecutionReference, workerReflectionHash, assertWorkerReflectionEvidence } from "./stage-b-worker-policy-reflection.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -48,8 +48,9 @@ function listZip(run, archivePath) { return String(run("unzip", ["-Z1", archiveP
 function unzip(run, archivePath, member) { return Buffer.from(run("unzip", ["-p", archivePath, member], { encoding: null, maxBuffer: 64 * 1024 * 1024 })); }
 function deepFreeze(value) { if (!value || typeof value !== "object" || Object.isFrozen(value)) return value; Object.values(value).forEach(deepFreeze); return Object.freeze(value); }
 
-export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, committedWorkerRecovery = false, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, privateEvidenceRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, committedWorkerRecovery = false, completedWorkerRecovery = false, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, privateEvidenceRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!/^[a-f0-9]{40}$/.test(currentProtectedMainSha || "") || !HEX.test(expectedResultSha256 || "") || !/^sha256:[a-f0-9]{64}$/.test(expectedResultArtifactDigest || "")) throw new Error("Stage B reconciliation evidence references are incomplete.");
+  assert.ok(!(committedWorkerRecovery && completedWorkerRecovery), 'Worker recovery evidence modes cannot be mixed');
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-reconciliation-proof-")); fs.chmodSync(directory, 0o700);
   try {
     const preparationRun = runJson(githubRun, preparationRunId);
@@ -74,7 +75,7 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     if (sha256(preparationBytes) !== sha256(Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`)) || sha256(planBytes) !== preparation.refreshOnlyPlanSha256) throw new Error("Stage B preparation or saved-plan bytes changed.");
     const sourceSha = preparation.sourceSha;
     const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now: preparationMeta.completedAt });
-    if (!committedWorkerRecovery && prepared.reconciliationMode !== STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) throw new Error("FinalApplyWrite successor composition requires OUTPUT_ONLY reconciliation.");
+    if (!committedWorkerRecovery && !completedWorkerRecovery && prepared.reconciliationMode !== STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) throw new Error("FinalApplyWrite successor composition requires OUTPUT_ONLY reconciliation.");
     if (gitRun(["merge-base", "--is-ancestor", sourceSha, currentProtectedMainSha]) !== "") throw new Error("Stage B reconciliation source is not an ancestor of exact protected main.");
 
     const authorizationRun = runJson(githubRun, authorizationRunId);
@@ -97,6 +98,15 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     const resultBytes = unzip(unzipRun, resultArchive, "result.json");
     if (sha256(resultBytes) !== expectedResultSha256) throw new Error("Stage B reconciliation result byte SHA256 is invalid.");
     const result = json(resultBytes, "Stage B reconciliation result");
+    if (completedWorkerRecovery) {
+      assertVerifiedWorkerHistory({ preparation: prepared, authorization: checkedAuthorization, result,
+        preparationRunId, authorizationRunId, executionRunId, expectedResultArtifactId, expectedResultArtifactDigest,
+        expectedResultSha256, now: executionMeta.completedAt });
+      const proof = deepFreeze({ currentProtectedMainSha, recovery: WORKER_COMMITTED.verifiedRecovery,
+        predecessorState: WORKER_COMMITTED.predecessorState, successorState: WORKER_COMMITTED.successorState });
+      authenticated.add(proof);
+      return proof;
+    }
     if (committedWorkerRecovery) {
       assertCommittedWorkerHistory({ preparation: prepared, authorization: checkedAuthorization, result,
         preparationRunId, authorizationRunId, executionRunId, expectedResultArtifactId, expectedResultArtifactDigest, expectedResultSha256 });
@@ -154,4 +164,39 @@ export function assertCommittedWorkerHistory({ preparation, authorization, resul
     status: 'state-write-completed-postverify-failed', sourceSha: WORKER_COMMITTED.sourceSha,
     authorizationSha256: WORKER_COMMITTED.authorizationSha256, predecessorState: WORKER_COMMITTED.predecessorState,
     successorState: null, successorEvidence: null, remoteResourceMutationCount: 0, terraformStateMutationCount: 1 });
+}
+
+export function resolveVerifiedWorkerReflectionSuccessor(options) {
+  const r = WORKER_COMMITTED.verifiedRecovery;
+  return resolveStageBStateReconciliationEvidence({ ...options,
+    preparationRunId: r.preparationRunId, authorizationRunId: r.authorizationRunId, executionRunId: r.executionRunId,
+    expectedResultSha256: r.resultByteSha256, expectedResultArtifactId: r.resultArtifactId,
+    expectedResultArtifactDigest: r.resultArtifactDigest, committedWorkerRecovery: false, completedWorkerRecovery: true });
+}
+export function assertAuthenticatedWorkerReflectionSuccessor(proof, { sourceSha, predecessorState, successorState }) {
+  assert.ok(authenticated.has(proof), 'Worker successor was not authenticated from workflow artifacts');
+  assert.deepEqual(proof, { currentProtectedMainSha: sourceSha, recovery: WORKER_COMMITTED.verifiedRecovery,
+    predecessorState: WORKER_COMMITTED.predecessorState, successorState: WORKER_COMMITTED.successorState });
+  assert.deepEqual(predecessorState, proof.predecessorState);
+  assert.deepEqual(successorState, proof.successorState);
+  return true;
+}
+export function assertVerifiedWorkerHistory({ preparation, authorization, result, preparationRunId, authorizationRunId,
+  executionRunId, expectedResultArtifactId, expectedResultArtifactDigest, expectedResultSha256, now }) {
+  const r = WORKER_COMMITTED.verifiedRecovery;
+  for (const [actual, expected] of [[preparationRunId,r.preparationRunId],[authorizationRunId,r.authorizationRunId],
+    [executionRunId,r.executionRunId],[expectedResultArtifactId,r.resultArtifactId],[expectedResultArtifactDigest,r.resultArtifactDigest],
+    [expectedResultSha256,r.resultByteSha256],[preparation.sourceSha,r.sourceSha],
+    [preparation.refreshOnlyPlanSha256,r.planSha256],[preparation.refreshOnlyPlanJsonSha256,r.planJsonSha256],
+    [authorization.authorizationSha256,r.authorizationSha256]]) assert.equal(actual, expected);
+  assert.deepEqual(preparation.predecessorState, WORKER_COMMITTED.successorState);
+  assert.equal(preparation.reconciliationMode, STAGE_B_STATE_RECONCILIATION_MODES.WORKER_SMTP_POLICY_REFLECTION);
+  const { successorEvidence, ...body } = result;
+  assert.deepEqual(body, { schemaVersion:3, kind:'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT',
+    reconciliationMode:STAGE_B_STATE_RECONCILIATION_MODES.WORKER_SMTP_POLICY_REFLECTION,
+    status:'recovered-complete', sourceSha:r.sourceSha, authorizationSha256:r.authorizationSha256,
+    predecessorState:WORKER_COMMITTED.successorState, successorState:WORKER_COMMITTED.successorState,
+    recoveredExecution:committedWorkerExecutionReference(r.sourceSha), remoteResourceMutationCount:0, terraformStateMutationCount:0 });
+  assertWorkerReflectionEvidence(successorEvidence, { sourceSha:r.sourceSha, now });
+  assert.deepEqual(successorEvidence.stateIdentity, WORKER_COMMITTED.successorState);
 }

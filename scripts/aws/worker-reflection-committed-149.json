@@ -367,5 +367,17 @@
         ]
       }
     ]
+  },
+  "verifiedRecovery": {
+    "sourceSha": "cd7c9f9910f736c851c7be42209986d964404d2e",
+    "preparationRunId": "41133531737",
+    "authorizationRunId": "41133850562",
+    "executionRunId": "41134116891",
+    "resultArtifactId": "13015192056",
+    "resultArtifactDigest": "sha256:6ba17bdab1bab2d8fb38eb2c1047e490768117a21424de5220cb4f05282f2250",
+    "resultByteSha256": "ed13c87378f7f5b58a28d4c66392efb0d600111a5248d55ec73c8e16a000dd16",
+    "planSha256": "c8b4da52852858e72f8c9a47d2f4805de45c2e91d709f84b28f15f91ed6615af",
+    "planJsonSha256": "0ce8cc47df19cfea2e3f311fb2638fc17698b10228c888ccb04eb6425786a672",
+    "authorizationSha256": "632e72646f0c15ceaaf053f81890c1990e9cd27fecefb250ebbb09aa3a9c8be2"
   }
 }

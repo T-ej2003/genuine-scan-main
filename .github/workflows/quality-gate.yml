@@ -317,7 +317,7 @@ jobs:
         run: node --test scripts/tests/production-overlap-task-definition.test.mjs
 
       - name: Test authenticated Stage B reconciliation evidence
-        run: node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs scripts/tests/stage-b-worker-policy-reflection.test.mjs scripts/tests/stage-b-private-evidence.test.mjs
+        run: node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs scripts/tests/stage-b-worker-policy-reflection.test.mjs scripts/tests/stage-b-worker-successor-composition.test.mjs scripts/tests/stage-b-private-evidence.test.mjs
 
       - name: Test governed current-release prerequisite ordering
         run: |
