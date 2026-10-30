@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { canonicalJson } from './production-green-stage-b-contract.mjs';
 import { inspectStageBRefreshChecks } from './stage-b-refresh-contract.mjs';
-export const WORKER_REFLECTION = Object.freeze({ mode: 'WORKER_SMTP_POLICY_REFLECTION', address: 'aws_iam_role.execution["worker"]', role: 'mscqr-production-rls-green-worker-execution', lineage: '4e438e59-8b8b-194d-030c-5ede0c26344a', serial: 148,
+export const WORKER_REFLECTION = Object.freeze({ mode: 'WORKER_SMTP_POLICY_REFLECTION', address: 'aws_iam_role.execution["worker"]', role: 'mscqr-production-rls-green-worker-execution', lineage: '4e438e59-8b8b-194d-030c-5ede0c26344a', serial: 148, invariantStateSha256: '1a0abf17bebcbd9908f5858b665d566abd7096e0f5c0cdf6e46a6732a70c72b5',
     policyName: 'mscqr-support-email-smtp-secret-read', baselineHash: '65d35b18e82a866b663620807f280609153d1df8ca625ebfb4c878b79bd038f2', sourceHash: '7777b1ae6487fd4a6893b7e001eba9a1edcf8ab516da45288d22ee4d7e22d286' });
 const smtp = { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['secretsmanager:GetSecretValue'], Resource: 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6' }] };
 export const workerReflectionHash = x => crypto.createHash('sha256').update(Buffer.isBuffer(x) ? x : canonicalJson(x)).digest('hex');
@@ -61,6 +61,7 @@ export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() 
     assert.ok([148, 149].includes(e.stateIdentity.serial));
     for (const h of [e.invariantStateSha256, e.roleStateSha256, e.stateIdentity.stateSha256])
         assert.match(h, /^[a-f0-9]{64}$/);
+    assert.equal(e.invariantStateSha256, WORKER_REFLECTION.invariantStateSha256, 'State differs from reviewed serial-148 invariant');
     workerReflectionImageArgs(e);
     const age = now.getTime() - Date.parse(e.observedAt);
     assert.ok(age >= 0 && age <= 30 * 60 * 1000, 'Worker evidence expired');
@@ -69,17 +70,18 @@ export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() 
 export function assertWorkerReflectionPlan(plan, { sourceSha, stateIdentity, workerEvidence, now = new Date() } = {}) {
     const e = assertWorkerReflectionEvidence(workerEvidence, { sourceSha, now });
     equal(stateIdentity, e.stateIdentity);
-    assert.equal(stateIdentity.serial, 148);
+    assert.ok([148,149].includes(stateIdentity.serial));
     assert.equal(plan.format_version, '1.2');
     assert.equal(plan.terraform_version, '1.15.8');
     assert.equal(plan.errored, false);
     assert.equal(plan.complete, true);
-    assert.equal(plan.applyable, true);
+    assert.equal(plan.applyable, stateIdentity.serial === 148);
     assert.equal(plan.variables?.tooling_sha?.value, sourceSha);
     for (const [key, image] of Object.entries(e.boundImages)) assert.equal(plan.variables?.[`${key}_image`]?.value, image, 'State-only image retention mismatch');
     assert.equal((plan.resource_changes || []).length, 0);
-    assert.equal(plan.resource_drift?.length, 1);
+    assert.equal(plan.resource_drift?.length, stateIdentity.serial === 148 ? 1 : 0);
     assert.ok(inspectStageBRefreshChecks({ checks: plan.checks }).valid);
+    if (stateIdentity.serial === 148) {
     const r = plan.resource_drift[0];
     assert.equal(r.address, WORKER_REFLECTION.address);
     assert.equal(r.mode, 'managed');
@@ -96,9 +98,10 @@ export function assertWorkerReflectionPlan(plan, { sourceSha, stateIdentity, wor
     equal(before, after);
     assert.equal(after.name, WORKER_REFLECTION.role);
     assert.equal(after.arn, `arn:aws:iam::368992683803:role/${WORKER_REFLECTION.role}`);
+    }
     for (const c of Object.values(plan.output_changes || {}))
         { equal(c.actions, ['no-op']); equal(c.before, c.after); assert.ok(!hasUnknown(c.after_unknown)); }
-    return { refreshOnly: true, remoteResourceMutationCount: 0, resourceStateChangeCount: 1, outputStateChangeCount: 0, address: WORKER_REFLECTION.address, policySha256: hash(smtp), workerEvidenceSha256: e.evidenceSha256 };
+    return { refreshOnly: true, remoteResourceMutationCount: 0, resourceStateChangeCount: stateIdentity.serial === 148 ? 1 : 0, outputStateChangeCount: 0, address: WORKER_REFLECTION.address, policySha256: hash(smtp), workerEvidenceSha256: e.evidenceSha256 };
 }
 const referenceKeys = ['prerequisiteProducerWorkflowRunId', 'prerequisiteProducerWorkflowRunAttempt', 'prerequisiteBundleArtifactId', 'prerequisiteBundleArtifactDigest'];
 const bindingKeys = ['tfvarsSha256', 'bindingSha256', 'preflightSha256', 'runtimeTfvarsSha256', 'runtimeBindingSha256', 'runtimeMaterializationSha256', 'relocationContractSha256', 'prerequisiteManifestSha256', 'brokerPackageSha256', 'brokerManifestSha256', 'stageAInputSha256', 'stageAStateBackupSha256'];
@@ -137,8 +140,8 @@ export function assertWorkerReflectionPreparation(p, { sourceSha, now = new Date
     assert.ok(now.getTime() >= Date.parse(p.createdAt) && now.getTime() < Date.parse(p.expiresAt), 'Preparation expired');
     assertWorkerReflectionEvidence(p.workerEvidence, { sourceSha, now });
     equal(p.predecessorState, p.workerEvidence.stateIdentity);
-    assert.equal(p.predecessorState.serial, 148);
-    equal(p.planSemantics, { refreshOnly: true, remoteResourceMutationCount: 0, resourceStateChangeCount: 1, outputStateChangeCount: 0, address: WORKER_REFLECTION.address, policySha256: hash(smtp), workerEvidenceSha256: p.workerEvidence.evidenceSha256 });
+    assert.ok([148,149].includes(p.predecessorState.serial));
+    equal(p.planSemantics, { refreshOnly: true, remoteResourceMutationCount: 0, resourceStateChangeCount: p.predecessorState.serial === 148 ? 1 : 0, outputStateChangeCount: 0, address: WORKER_REFLECTION.address, policySha256: hash(smtp), workerEvidenceSha256: p.workerEvidence.evidenceSha256 });
     return p;
 }
 export function createWorkerReflectionAuthorization({ preparation, approval, now = new Date() }, validateApproval) {
@@ -167,7 +170,7 @@ export function executeWorkerReflection(o, validateApproval) {
     equal(assertWorkerReflectionPlan(o.planJson, { sourceSha: o.sourceSha, stateIdentity: p.predecessorState, workerEvidence: p.workerEvidence, now: time() }), p.planSemantics);
     const read = () => { const e = o.readWorkerReflectionEvidence(); assertWorkerReflectionEvidence(e, { sourceSha: o.sourceSha, now: time() }); equal(e.livePolicies, p.workerEvidence.livePolicies); assert.equal(e.invariantStateSha256, p.workerEvidence.invariantStateSha256); return e; };
     const before = read();
-    const committed = e => e.stateIdentity.serial === 149 && e.stateIdentity.stateSha256 !== p.predecessorState.stateSha256;
+    const committed = e => e.stateIdentity.serial === 149 && (p.predecessorState.serial === 149 ? e.stateIdentity.stateSha256 === p.predecessorState.stateSha256 : e.stateIdentity.stateSha256 !== p.predecessorState.stateSha256);
     const result = (status, e, writes) => ({ schemaVersion: 3, kind: 'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT', reconciliationMode: WORKER_REFLECTION.mode, status, sourceSha: o.sourceSha, authorizationSha256: o.authorization.authorizationSha256, predecessorState: p.predecessorState, successorState: e?.stateIdentity || null, successorEvidence: e || null, remoteResourceMutationCount: 0, terraformStateMutationCount: writes });
     if (!committed(before))
         equal(before.stateIdentity, p.predecessorState);
@@ -181,7 +184,7 @@ export function executeWorkerReflection(o, validateApproval) {
         assert.equal(closure.format_version, '1.2');
         assert.equal(closure.terraform_version, '1.15.8');
         assert.equal(closure.variables?.tooling_sha?.value, o.sourceSha);
-        assert.equal(closure.errored, false);
+        assert.equal(closure.errored, false); assert.equal(closure.complete, true); assert.equal(closure.applyable, false);
         assert.ok(inspectStageBRefreshChecks({ checks: closure.checks }).valid);
         assert.equal((closure.resource_drift || []).length, 0);
         assert.equal((closure.resource_changes || []).filter(c => canonicalJson(c.change?.actions) !== '["no-op"]').length, 0);

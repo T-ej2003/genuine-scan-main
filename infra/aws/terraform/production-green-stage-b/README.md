@@ -215,3 +215,13 @@ is unchanged, verifies policy equivalence again, and requires a clean refresh
 before completion. An uncertain write is recorded and reconciled before retry;
 a completed successor is verified without another apply. No worker-state read,
 new IAM permission, Terraform resource change or manual state edit is required.
+
+If verification is interrupted beyond the 30-minute authorization window, prepare
+this same mode again at serial 149 and obtain a fresh production approval. That
+preparation requires a complete, non-applyable clean refresh and is verification
+only: it cannot call apply. Both serial-148 execution and serial-149 recovery
+must match the reviewed invariant fingerprint of the authenticated serial-148
+state (all content except serial and the exact worker inline-policy list).
+Fresh recovery therefore cannot bless unrelated changes or reuse an expired
+approval. Original preparation, authorization and execution artifacts remain
+immutable.
