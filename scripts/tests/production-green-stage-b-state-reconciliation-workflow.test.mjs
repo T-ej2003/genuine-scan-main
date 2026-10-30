@@ -66,7 +66,7 @@ test("preparation passes the required dispatch mode explicitly under nounset", (
   const step = workflow.jobs.prepare.steps.find(({ name }) => name === "Prepare and bundle only the authenticated refresh-only transition");
   assert.equal(input.required, true);
   assert.equal(input.default, "HISTORICAL_TEN_ADDRESS");
-  assert.deepEqual(input.options, ["HISTORICAL_TEN_ADDRESS", "OUTPUT_ONLY"]);
+  assert.deepEqual(input.options, ["HISTORICAL_TEN_ADDRESS", "OUTPUT_ONLY", "WORKER_SMTP_POLICY_REFLECTION"]);
   assert.equal(step.env.RECONCILIATION_MODE, "${{ inputs.reconciliation_mode }}");
   assert.match(step.run, /^set -euo pipefail$/m);
   assert.match(step.run, /--reconciliation-mode "\$RECONCILIATION_MODE"/);

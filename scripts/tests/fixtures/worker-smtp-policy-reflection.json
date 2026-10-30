@@ -1,0 +1,18 @@
+{
+  "before": [
+    {
+      "name": "stage-b-exact-image-logs-and-secrets",
+      "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Action\":[\"ecr:GetAuthorizationToken\"],\"Effect\":\"Allow\",\"Resource\":\"*\",\"Sid\":\"EcrAuthorizationRequiredByEcs\"},{\"Action\":[\"ecr:BatchCheckLayerAvailability\",\"ecr:GetDownloadUrlForLayer\",\"ecr:BatchGetImage\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker\",\"Sid\":\"PullOnlyApprovedRepository\"},{\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:log-stream:*\",\"Sid\":\"WriteOnlyExactTaskLogs\"},{\"Action\":[\"secretsmanager:GetSecretValue\"],\"Effect\":\"Allow\",\"Resource\":[\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/worker-9rba4z\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs\"],\"Sid\":\"ReadOnlyExactInjectedSecrets\"}]}"
+    }
+  ],
+  "after": [
+    {
+      "name": "mscqr-support-email-smtp-secret-read",
+      "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Action\":[\"secretsmanager:GetSecretValue\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6\"}]}"
+    },
+    {
+      "name": "stage-b-exact-image-logs-and-secrets",
+      "policy": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Action\":[\"ecr:GetAuthorizationToken\"],\"Effect\":\"Allow\",\"Resource\":\"*\",\"Sid\":\"EcrAuthorizationRequiredByEcs\"},{\"Action\":[\"ecr:BatchCheckLayerAvailability\",\"ecr:GetDownloadUrlForLayer\",\"ecr:BatchGetImage\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker\",\"Sid\":\"PullOnlyApprovedRepository\"},{\"Action\":[\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Effect\":\"Allow\",\"Resource\":\"arn:aws:logs:eu-west-2:368992683803:log-group:/ecs/mscqr-production/rls-green-worker:log-stream:*\",\"Sid\":\"WriteOnlyExactTaskLogs\"},{\"Action\":[\"secretsmanager:GetSecretValue\"],\"Effect\":\"Allow\",\"Resource\":[\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/production/rls-green/phase2/database-url/worker-9rba4z\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/jwt-wBQNqk\",\"arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/redis-i6MoFs\"],\"Sid\":\"ReadOnlyExactInjectedSecrets\"}]}"
+    }
+  ]
+}
