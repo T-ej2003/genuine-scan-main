@@ -727,3 +727,19 @@ test("B03 executor validation belongs to the protected variable inventory", () =
   assert.equal(inspectStageBRefreshChecks({ checks: checks.filter(c => c.address !== "var.b03_executor_definition_json") }).valid, false);
   assert.equal(inspectStageBRefreshChecks({ checks: [...checks, { address: "var.untrusted_executor_definition_json", status: "pass", instances: [{ address: "var.untrusted_executor_definition_json", status: "pass" }] }] }).valid, false);
 });
+
+// Captured Terraform 1.15.8 task instance; the refresh report previously erased its rejected address.
+test("B03 refresh authenticates only the exact counted zero instance", () => {
+  const checks = passingChecks();
+  const b03 = checks.find(c => c.address === "aws_ecs_task_definition.b03");
+  const address = { instance_key: 0, to_display: "aws_ecs_task_definition.b03[0]" };
+  b03.instances = [{ address, status: "pass" }];
+  const result = inspectStageBRefreshChecks({ checks });
+  assert.equal(result.valid, true);
+  assert.equal(inspectStageBRefreshChecks({ checks: result.checks }).valid, true);
+  for (const bad of [{ ...address, instance_key: 1 }, { ...address, to_display: "aws_ecs_task_definition.b03[1]" }, { ...address, instance_key: "0" }, { ...address, to_string: "aws_ecs_task_definition.other[0]" }, { ...address, extra: true }]) {
+    assert.equal(inspectStageBRefreshChecks({ checks: checks.map(c => c === b03 ? { ...c, instances: [{ address: bad, status: "pass" }] } : c) }).valid, false);
+  }
+  assert.equal(inspectStageBRefreshChecks({ checks: checks.map(c => c === b03 ? { ...c, instances: [...c.instances, ...c.instances] } : c) }).valid, false);
+  assert.equal(inspectStageBRefreshChecks({ checks: checks.map(c => c.address === "aws_lambda_function.broker" ? { ...c, instances: [{ address, status: "pass" }] } : c) }).valid, false);
+});
