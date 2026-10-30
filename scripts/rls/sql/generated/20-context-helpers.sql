@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='11b53f1b47526aaf0ee90b75e2905eba5774d37fec8220da5f6d5d915d9e7e5d'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:11b53f1b47526aaf0ee90b75e2905eba5774d37fec8220da5f6d5d915d9e7e5d'
+    AND source_contract_sha256='dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:11b53f1b47526aaf0ee90b75e2905eba5774d37fec8220da5f6d5d915d9e7e5d')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10191,8 +10191,15 @@ BEGIN
   IF p_operation='OPEN' THEN
     IF p_payload->>'connectionId' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
        OR coalesce(length(selected),0)=0 OR length(selected)>180
+       OR coalesce(length(p_payload->>'helloNonce'),0) NOT BETWEEN 8 AND 180
        OR coalesce((p_payload->>'expirySeconds')::integer,0) NOT BETWEEN 60 AND 86400
     THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    -- The registration lock serializes OPEN across backend instances. Retain the
+    -- signed hello nonce on all session rows so a replay cannot replace authority.
+    IF EXISTS (SELECT 1 FROM public."PrinterAgentSession" s
+      WHERE s."registrationId"=registration.id
+        AND s.metadata->>'helloNonce'=p_payload->>'helloNonce')
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_REPLAY' USING ERRCODE='23505'; END IF;
     UPDATE public."PrinterAgentSession" SET "connectionState"='SUPERSEDED',"revokedAt"=now_at,
       "disconnectedAt"=now_at,"closeReason"='session_replaced',"updatedAt"=now_at
       WHERE "registrationId"=registration.id AND "connectionState"='CONNECTED' AND "revokedAt" IS NULL;
@@ -10206,7 +10213,8 @@ BEGIN
       'CONNECTED',0,now_at,now_at,'epoch'::timestamp,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
         'licenseeId',registration."licenseeId",'printerId',printer_row.id,
-        'connectorVersion',left(p_payload->>'connectorVersion',80)),now_at,now_at);
+        'connectorVersion',left(p_payload->>'connectorVersion',80),
+        'helloNonce',p_payload->>'helloNonce'),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
   END IF;
   SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
