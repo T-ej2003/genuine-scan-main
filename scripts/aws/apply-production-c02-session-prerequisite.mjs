@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { buildC02CombinedPackage } from "./production-c02-combined-package.mjs";
+import { authenticateCanonicalProductionRequirementsArtifact } from "./probe-production-rls-catalogue.mjs";
+import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -24,20 +27,28 @@ const containerName = "production-c02-session-prerequisite";
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const json = (value) => JSON.parse(value);
 
-export function buildC02SessionTask({ sourceSha, hostname, repositoryRoot = root } = {}) {
+export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements, repositoryRoot = root } = {}) {
   assert.match(hostname || "", /^[a-z0-9.-]+$/);
-  const pkg = buildC02SessionPrerequisitePackage({ sourceSha, repositoryRoot });
-  const executor = fs.readFileSync(path.join(repositoryRoot, "scripts/aws/production-c02-session-executor.cjs"), "utf8");
+  const pkg = combinedRequirements ? buildC02CombinedPackage({ sourceSha, ...combinedRequirements, repositoryRoot }) : buildC02SessionPrerequisitePackage({ sourceSha, repositoryRoot });
+  let executor = fs.readFileSync(path.join(repositoryRoot, "scripts/aws/production-c02-session-executor.cjs"), "utf8");
+  let runtimeArgument;
+  if (combinedRequirements) {
+    const sources=Object.fromEntries(["production-c02-session-executor.cjs","production-printing-routine-delta-executor.cjs","production-c02-combined-executor.cjs"].map(name=>["./"+name,fs.readFileSync(path.join(repositoryRoot,"scripts/aws",name),"utf8")]));
+    const runtime=`const sources=${JSON.stringify(sources)};const cache=Object.create(null);function load(n){if(cache[n])return cache[n].exports;if(!Object.hasOwn(sources,n))return require(n);const module={exports:{}};cache[n]=module;new Function('module','require',sources[n])(module,load);return module.exports;}load('./production-c02-combined-executor.cjs').main();`;
+    assert.ok(Buffer.byteLength(runtime)<96*1024);
+    runtimeArgument=gzipSync(Buffer.from(runtime),{level:9,mtime:0}).toString("base64");
+    executor="const z=require('node:zlib');const src=z.gunzipSync(Buffer.from(process.argv.splice(1,1)[0],'base64'),{maxOutputLength:98304}).toString('utf8');require('node:vm').runInThisContext(src);";
+  }
   assert.ok(Buffer.byteLength(executor) < 64 * 1024);
   const bytes = Buffer.from(canonicalJson(pkg));
-  assert.ok(bytes.length < 64 * 1024);
+  assert.ok(bytes.length < (combinedRequirements ? 192 : 64) * 1024);
   const encoded = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
   assert.ok(encoded.length <= 32768, "C02 task payload exceeds the reviewed bounded transport");
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn: PRINTING_ROUTINE_DELTA.executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform,
     volumes: [{ name: "executor-tmp" }], containerDefinitions: [{ name: containerName,
       image: PRINTING_ROUTINE_DELTA.executorImage, essential: true, entryPoint: ["node"],
-      command: ["-e", executor, encoded, sha256(bytes), hostname], readonlyRootFilesystem: true,
+      command: ["-e", executor, ...(runtimeArgument ? [runtimeArgument] : []), encoded, sha256(bytes), hostname], readonlyRootFilesystem: true,
       mountPoints: [{ sourceVolume: "executor-tmp", containerPath: "/tmp", readOnly: false }],
       privileged: false, interactive: false, pseudoTerminal: false,
       environment: [{ name: "NODE_ENV", value: "production" }, { name: "RELEASE_GIT_SHA", value: sourceSha }],
@@ -50,19 +61,19 @@ export function buildC02SessionTask({ sourceSha, hostname, repositoryRoot = root
   return Object.freeze({ pkg, definition, serialized });
 }
 
-export function authenticateC02SessionResult(message, { sourceSha, packageSha256 }) {
+export function authenticateC02SessionResult(message, { sourceSha, packageSha256, combined = false }) {
   assert.ok(typeof message === "string" && Buffer.byteLength(message) < 4096);
   const result = JSON.parse(message);
   const { evidenceSha256, ...body } = result;
   assert.equal(evidenceSha256, canonicalSha256(body));
   assert.deepEqual(Object.keys(result).sort(), ["schemaVersion", "kind", "sourceSha", "packageSha256", "database",
     "databaseRole", "status", "writeCount", "evidenceSha256"].sort());
-  assert.equal(result.schemaVersion, 1);
-  assert.equal(result.kind, "PRODUCTION_C02_SESSION_INSTALL_RESULT");
+  assert.equal(result.schemaVersion, combined ? 2 : 1);
+  assert.equal(result.kind, combined ? "PRODUCTION_C02_COMBINED_INSTALL_RESULT" : "PRODUCTION_C02_SESSION_INSTALL_RESULT");
   assert.equal(result.sourceSha, sourceSha); assert.equal(result.packageSha256, packageSha256);
   assert.equal(result.database, "mscqr_production_rls_green_phase2");
   assert.equal(result.databaseRole, PRINTING_ROUTINE_DELTA.administrator);
-  assert.ok(result.status === "APPLIED" && result.writeCount === 15 ||
+  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 28 : 15) ||
     result.status === "ALREADY_CONVERGED" && result.writeCount === 0);
   return result;
 }
@@ -71,7 +82,7 @@ export function authenticateC02SessionResult(message, { sourceSha, packageSha256
 // during CI, normal deployment, or backend startup. The backend independently
 // reads the installed C02 contract before opening its listener.
 export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProfile,
-  receiptOut, repositoryRoot = root, run = execFileSync, wait = sleep, env = process.env } = {}) {
+  receiptOut, predecessorReference, requirementsReference, repositoryRoot = root, run = execFileSync, wait = sleep, env = process.env } = {}) {
   assertProtectedCheckout({ sourceSha, repositoryRoot });
   const awsEnv = createProductionAwsCredentialEnvironment({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
     profile: awsProfile, env });
@@ -90,7 +101,17 @@ export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProf
   authenticatePrintingRoutineExecutorPredecessor({ serviceResponse: service, taskDefinition: predecessor, imageDetails });
   const hostname = aws(["rds", "describe-db-instances", "--region", APP_ONLY.region, "--db-instance-identifier",
     STAGE_B.greenDatabaseIdentifier]).DBInstances?.[0]?.Endpoint?.Address;
-  const task = buildC02SessionTask({ sourceSha, hostname, repositoryRoot });
+  let combinedRequirements;
+  if (predecessorReference || requirementsReference) {
+    assert.ok(predecessorReference && requirementsReference);
+    assert.equal(predecessorReference.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
+    const predecessor = JSON.parse(downloadAppOnlyArtifact({ kind: "requirements", reference: predecessorReference, repositoryRoot }).bytes);
+    assert.equal(predecessor.sourceSha, predecessorReference.sourceSha);
+    const { requirements: successor } = authenticateCanonicalProductionRequirementsArtifact({
+      sourceSha, candidateSourceSha: sourceSha, requirementsReference, repositoryRoot });
+    combinedRequirements = { predecessor, successor };
+  }
+  const task = buildC02SessionTask({ sourceSha, hostname, combinedRequirements, repositoryRoot });
   assertProtectedCheckout({ sourceSha, repositoryRoot });
   const registered = aws(["ecs", "register-task-definition", "--region", APP_ONLY.region,
     "--cli-input-json", task.serialized]).taskDefinition;
@@ -103,6 +124,7 @@ export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProf
   const request = { cluster: APP_ONLY.clusterArn, taskDefinition: arn, launchType: "FARGATE", count: 1,
     enableExecuteCommand: false, clientToken: canonicalSha256({ sourceSha, packageSha256: task.pkg.packageSha256, arn }),
     networkConfiguration: appOnlyVerifierNetwork() };
+  assertProtectedCheckout({ sourceSha, repositoryRoot });
   const launched = aws(["ecs", "run-task", "--region", APP_ONLY.region, "--cli-input-json", JSON.stringify(request)]);
   assert.deepEqual(launched.failures || [], []); assert.equal(launched.tasks?.length, 1);
   const taskArn = launched.tasks[0].taskArn;
@@ -124,10 +146,10 @@ export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProf
     if (logs.events?.length) { assert.equal(logs.events.length, 1); message = logs.events[0].message; }
     else await wait(5000);
   }
-  const result = authenticateC02SessionResult(message, { sourceSha, packageSha256: task.pkg.packageSha256 });
+  const result = authenticateC02SessionResult(message, { sourceSha, packageSha256: task.pkg.packageSha256, combined: Boolean(combinedRequirements) });
   assert.equal(stopped.containers?.[0]?.exitCode, 0);
   const executedAt = new Date();
-  const receipt = { schemaVersion: 1, kind: "PRODUCTION_C02_SESSION_INSTALL_RECEIPT", sourceSha,
+  const receipt = { schemaVersion: combinedRequirements ? 2 : 1, kind: combinedRequirements ? "PRODUCTION_C02_COMBINED_INSTALL_RECEIPT" : "PRODUCTION_C02_SESSION_INSTALL_RECEIPT", sourceSha,
     taskArn, taskDefinitionArn: arn, packageSha256: task.pkg.packageSha256, execution: result,
     executedAt: executedAt.toISOString(), expiresAt: new Date(executedAt.getTime() + 30 * 60 * 1000).toISOString() };
   const completed = { ...receipt, receiptSha256: canonicalSha256(receipt) };
@@ -139,11 +161,13 @@ export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProf
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
   try {
     const { values } = parseArgs({ options: { "source-sha": { type: "string" }, "aws-profile": { type: "string" },
-      "receipt-out": { type: "string" } }, strict: true });
+      "receipt-out": { type: "string" }, "predecessor-reference": { type: "string" }, "requirements-reference": { type: "string" } }, strict: true });
     assert.match(values["source-sha"] || "", /^[a-f0-9]{40}$/);
     assert.ok(values["aws-profile"]); assert.ok(values["receipt-out"]);
     const result = await applyProductionC02SessionPrerequisite({ sourceSha: values["source-sha"],
-      awsProfile: values["aws-profile"], receiptOut: values["receipt-out"] });
+      awsProfile: values["aws-profile"], receiptOut: values["receipt-out"],
+      predecessorReference: values["predecessor-reference"] ? parseAppOnlyArtifactReference(values["predecessor-reference"]) : undefined,
+      requirementsReference: values["requirements-reference"] ? parseAppOnlyArtifactReference(values["requirements-reference"]) : undefined });
     process.stdout.write(`${JSON.stringify({ status: result.execution.status, receiptSha256: result.receiptSha256 })}\n`);
   } catch {
     process.stderr.write("C02 prerequisite installation failed closed; reconcile read-only before retry.\n");

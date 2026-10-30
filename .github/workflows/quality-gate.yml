@@ -150,7 +150,7 @@ jobs:
       - name: Test app-only contracts against real PostgreSQL
         run: |
           node --test scripts/tests/production-app-only-*.test.mjs
-          node --test scripts/tests/production-c02-session-prerequisite.test.mjs
+          node --test scripts/tests/production-c02-session-prerequisite.test.mjs scripts/tests/production-printing-release-boundary.test.mjs
       - name: Certify full production package on disposable PostgreSQL
         env:
           MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST: "true"

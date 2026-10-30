@@ -1,3 +1,4 @@
+import { catalogueAfterPrinting } from "./production-printing-release-boundary.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -42,7 +43,7 @@ function policyStatement(source, table, name) {
 export function buildB03DeltaPackage({ predecessor, successor, repositoryRoot = root } = {}) {
   assert.equal(predecessor?.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
   assert.match(successor?.sourceSha || "", /^[a-f0-9]{40}$/);
-  const oldRows = predecessor.objects, newRows = successor.objects;
+  const oldRows = catalogueAfterPrinting({ predecessor, successor, b03Objects: B03_DELTA_OBJECTS }), newRows = successor.objects;
   const synthetic = { schemaVersion: 1, kind: "PRODUCTION_RLS_CATALOGUE_PROBE", sourceSha: successor.sourceSha,
     candidateSourceSha: successor.sourceSha, requirementsSha256: successor.requirementsSha256,
     probeImageDigest: `sha256:${"0".repeat(64)}`, applicationImageDigest: `sha256:${"0".repeat(64)}`,
@@ -92,6 +93,6 @@ export function buildB03DeltaPackage({ predecessor, successor, repositoryRoot = 
   const body = { schemaVersion: 1, kind: "PRODUCTION_B03_INCREMENTAL_PACKAGE", predecessorSourceSha: predecessor.sourceSha,
     sourceSha: successor.sourceSha, predecessorRequirementsSha256: predecessor.requirementsSha256,
     successorRequirementsSha256: successor.requirementsSha256,
-    predecessorCatalogue: catalogueDigests(predecessor.objects), successorCatalogue: catalogueDigests(successor.objects), mutations };
+    predecessorCatalogue: catalogueDigests(oldRows), successorCatalogue: catalogueDigests(successor.objects), mutations };
   return Object.freeze({ ...body, packageSha256: canonicalSha256(body) });
 }

@@ -15,6 +15,8 @@ import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
 import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "../aws/production-app-only-verifier-command.mjs";
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
 import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
+import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
+import { PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
 import { buildC02SessionPrerequisitePackage } from "../aws/production-c02-session-package.mjs";
 import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildB01ExecutorInput, canonicalB01Prerequisite, collectB01State, executeB01Transaction } from "../aws/apply-production-b01-prerequisite.mjs";
@@ -41,6 +43,7 @@ const randomMfaSecret = () =>
   [...crypto.randomBytes(32)].map((value) => "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"[value & 31]).join("");
 const printingDeltaRuntime = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs");
 const b03DeltaRuntime = createRequire(import.meta.url)("../aws/production-b03-delta-executor.cjs");
+const combinedC02Runtime = createRequire(import.meta.url)("../aws/production-c02-combined-executor.cjs");
 const c02Runtime = createRequire(import.meta.url)("../aws/production-c02-session-executor.cjs");
 const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
 const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
@@ -1374,18 +1377,69 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
         ${[...dropPolicies, ...priorPolicies, ...reverseGrants].join(";\n")};
         RESET ROLE; COMMIT;`], "restore exact historical B03 predecessor in disposable PostgreSQL");
+      // Restore the authenticated printing predecessor as well, not a B03-only
+      // fixture that silently assumes PR #771 was already installed.
+      const printingPolicyDrops = PRINTING_RELEASE_OBJECTS.policies.map(id => {
+        const [table, name] = id.split("."); return `DROP POLICY "${name}" ON public."${table}"`;
+      });
+      const printingReverseGrants = ["SELECT", "INSERT", "UPDATE"].map(privilege => {
+        const columns = [...columnRights(currentGrants, "PrinterAgentSession", privilege)];
+        assert.ok(columns.length > 0);
+        return `REVOKE ${privilege} (${columns.map(c => `"${c}"`).join(",")}) ON public."PrinterAgentSession" FROM mscqr_prd_rls_phase2_auth_owner`;
+      });
+      psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        ${printingPolicyDrops.join(";\n")};
+        ${printingReverseGrants.join(";\n")};
+        ${PRINTING_RELEASE_OBJECTS.policies.slice(0,2).flatMap(selectedOldPolicy).join("\n")}
+        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        DROP FUNCTION app_rls.printing_connector_session(text,text,text,jsonb);
+        ${PRINTING_RELEASE_NAMES.filter(n => n !== "printing_connector_session").map(oldFunction).join("\n")}
+        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
+        ALTER TABLE public."PrinterAgentSession" DROP COLUMN "lastMessageSeq";
+        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_migration;
+        DELETE FROM public."_prisma_migrations" WHERE migration_name='20261028210000_printer_agent_session_sequence';
+        RESET ROLE; COMMIT;`], "restore historical printing state in disposable database only");
       const beforeB03 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
       const oldRequirementBody = { ...requirements, sourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec",
         candidateSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", objects: beforeB03 };
       delete oldRequirementBody.requirementsSha256;
       const oldRequirements = { ...oldRequirementBody, requirementsSha256: canonicalSha256(oldRequirementBody) };
+      const combinedPackage = buildC02CombinedPackage({ sourceSha: requirements.sourceSha,
+        predecessor: oldRequirements, successor: requirements });
+      const preservedTables = ["PrinterAgentSession", "User", "QRCode", "SupportIssueReport", "Notification"];
+      const dataFingerprint = table => scalar(privilegedGreenUrl,
+        `SELECT md5(coalesce(string_agg((to_jsonb(t)-'lastMessageSeq')::text, E'\\n' ORDER BY (to_jsonb(t)-'lastMessageSeq')::text),'')) FROM public."${table}" t`, "preserved row values");
+      const preservedData = preservedTables.map(dataFingerprint);
+      const tableIdentities = preservedTables.map(table => scalar(privilegedGreenUrl,
+        `SELECT c.oid||':'||c.relrowsecurity||':'||c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='${table}'`, "preserved table identity"));
+      const c02Transaction = checkpoint => administratorClient.$transaction(tx =>
+        combinedC02Runtime.executeC02CombinedTransaction({ tx, pkg: combinedPackage, checkpoint }),
+        { maxWait: 10000, timeout: 180000 });
+      for (const stage of ["after-column-migration", "temporary-schema-grant", "after-printing_connector_event", "before-combined-verification"]) {
+        await assert.rejects(c02Transaction(value => { if(value === stage) throw new Error(stage); }), new RegExp(stage));
+        assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
+        assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "C02 rollback grant"), "f");
+      }
+      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 28 });
+      const afterC02 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
+      assert.deepEqual(Object.fromEntries(Object.entries(afterC02).map(([k,v]) => [k,canonicalSha256(v)])), combinedPackage.successorCatalogue);
+      // Commit succeeded but migration-history recording was interrupted: retry
+      // must not repeat DDL, and the supported Prisma resolve repairs the marker.
+      assert.deepEqual(await c02Transaction(), { status: "ALREADY_CONVERGED", writeCount: 0 });
+      await combinedC02Runtime.recordMigration({ client: administratorClient, url: greenUrl,
+        pkg: combinedPackage, cli: path.join(root, "backend/node_modules/prisma/build/index.js") });
+      assert.equal(await administratorClient.$transaction(tx => combinedC02Runtime.migrationState(tx, combinedPackage)), true);
+      assert.deepEqual(await combinedC02Runtime.verifyCommittedCatalogue({ client: administratorClient, pkg: combinedPackage }), combinedPackage.successorCatalogue);
       const packageB03 = buildB03DeltaPackage({ predecessor: oldRequirements, successor: requirements });
       assert.equal(packageB03.mutations.length, 44);
       for (const stage of ["after-temporary-grant", "after-1", "after-22", "after-44"]) {
         await assert.rejects(administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03,
           checkpoint: (value) => { if (value === stage) throw new Error(stage); } }), { maxWait: 10000, timeout: 180000 }), new RegExp(stage));
         assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", `${stage} B03 privilege rollback`), "f");
-        assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
+        assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), afterC02);
       }
       assert.deepEqual(await administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03 }),
         { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 44 });
@@ -1394,6 +1448,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
       assert.deepEqual(["User", "QRCode", "SupportIssueReport", "Notification"].map((table) =>
         scalar(privilegedGreenUrl, `SELECT count(*) FROM public."${table}"`, `B03 ${table} after`)), preservedCounts);
+      assert.deepEqual(await c02Transaction(), { status: "ALREADY_CONVERGED", writeCount: 0 });
+      assert.deepEqual(preservedTables.map(dataFingerprint), preservedData);
+      assert.deepEqual(await combinedC02Runtime.verifyCommittedCatalogue({ client: administratorClient, pkg: combinedPackage }), combinedPackage.finalCatalogue);
+      assert.deepEqual(preservedTables.map(table => scalar(privilegedGreenUrl,
+        `SELECT c.oid||':'||c.relrowsecurity||':'||c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='${table}'`, "table identity after")), tableIdentities);
     } finally { await Promise.all([maintenanceClient.$disconnect(), administratorClient.$disconnect(), verifier.$disconnect()]); }
     restoreDisposableMemberships();
     rdsMembershipsNormalized = false;

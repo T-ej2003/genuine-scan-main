@@ -21,7 +21,7 @@ const certificationPolicyDigests = Object.freeze({
   printing_lifecycle_printeragentsession_update: "6acf53434b36cd11fd09f25c3d768e3a7bf612905175f46097b4065c06fc8be8",
 });
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const read = (repositoryRoot, name) => fs.readFileSync(path.join(repositoryRoot, name), "utf8").replaceAll("\r\n", "\n");
+const read = (repositoryRoot, name) => fs.readFileSync(path.join(repositoryRoot, name), "utf8").replaceAll("\r\n", "\n").replaceAll(productionPrefix, certPrefix);
 const selectedRole = (sql, rolePrefix) => sql.replaceAll(certPrefix, rolePrefix);
 
 const functionSql = (source, rolePrefix) => {

@@ -80,7 +80,7 @@ export function assertWorkerReflectionPlan(plan, { sourceSha, stateIdentity, wor
     for (const [key, image] of Object.entries(e.boundImages)) assert.equal(plan.variables?.[`${key}_image`]?.value, image, 'State-only image retention mismatch');
     assert.equal((plan.resource_changes || []).length, 0);
     assert.equal(plan.resource_drift?.length, stateIdentity.serial === 148 ? 1 : 0);
-    assert.ok(inspectStageBRefreshChecks({ checks: plan.checks }).valid);
+    assert.ok(inspectStageBRefreshChecks({ checks: plan.checks, b03Plan: plan }).valid);
     if (stateIdentity.serial === 148) {
     const r = plan.resource_drift[0];
     assert.equal(r.address, WORKER_REFLECTION.address);
@@ -185,7 +185,7 @@ export function executeWorkerReflection(o, validateApproval) {
         assert.equal(closure.terraform_version, '1.15.8');
         assert.equal(closure.variables?.tooling_sha?.value, o.sourceSha);
         assert.equal(closure.errored, false); assert.equal(closure.complete, true); assert.equal(closure.applyable, false);
-        assert.ok(inspectStageBRefreshChecks({ checks: closure.checks }).valid);
+        assert.ok(inspectStageBRefreshChecks({ checks: closure.checks, b03Plan: closure }).valid);
         assert.equal((closure.resource_drift || []).length, 0);
         assert.equal((closure.resource_changes || []).filter(c => canonicalJson(c.change?.actions) !== '["no-op"]').length, 0);
         for (const c of Object.values(closure.output_changes || {}))
