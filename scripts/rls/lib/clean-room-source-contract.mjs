@@ -17,6 +17,7 @@ export const cleanRoomSourcePaths = [...new Set([
   "backend/prisma/schema.prisma",
   "backend/src/rls-waves/session-a/productionRotationInventory.sql",
   "backend/src/rls-waves/session-a/productionRotationInventoryRollback.sql",
+  "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
   "scripts/rls/lib/rotation-inventory-contract.mjs",
   "scripts/rls/generate-full-rls-sql.mjs",
   "scripts/rls/generate-clean-room-rls-sql.mjs",

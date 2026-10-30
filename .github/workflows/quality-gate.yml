@@ -148,7 +148,9 @@ jobs:
           npm run test:p2:db:up
           node scripts/p2-test-db-tls.mjs
       - name: Test app-only contracts against real PostgreSQL
-        run: node --test scripts/tests/production-app-only-*.test.mjs
+        run: |
+          node --test scripts/tests/production-app-only-*.test.mjs
+          node --test scripts/tests/production-c02-session-prerequisite.test.mjs
       - name: Certify full production package on disposable PostgreSQL
         env:
           MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST: "true"

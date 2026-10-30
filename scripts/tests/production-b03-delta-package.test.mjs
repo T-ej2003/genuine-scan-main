@@ -3,9 +3,24 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import { selectB03GrantDelta } from "../aws/production-b03-delta-package.mjs";
 import { canonicalJson, canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const runtime = createRequire(import.meta.url)("../aws/production-b03-delta-executor.cjs");
+test("B03 excludes only exact separately governed C02 session grants", () => {
+  const normalize = (source) => source.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_");
+  const previous = new Set(normalize(execFileSync("git", ["show", "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec:scripts/rls/sql/generated/21-runtime-grants.sql"], { encoding: "utf8" })).split(/\r?\n/));
+  const changed = normalize(fs.readFileSync("scripts/rls/sql/generated/21-runtime-grants.sql", "utf8"))
+    .split(/\r?\n/).filter((line) => line.startsWith("GRANT ") && !previous.has(line));
+  assert.equal(changed.length, 8);
+  const b03 = selectB03GrantDelta(changed);
+  assert.equal(b03.length, 5);
+  assert.ok(b03.every((line) => !line.includes('public."PrinterAgentSession"')));
+  const escalation = 'GRANT DELETE ON TABLE public."PrinterAgentSession" TO "mscqr_prd_rls_phase2_auth_owner";';
+  assert.ok(selectB03GrantDelta([...changed, escalation]).includes(escalation));
+});
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const empty = () => ({ routines: [], tables: [], policies: [], schemas: [], roles: [] });
 const successor = () => ({ ...empty(), routines: [{ schema: "app_rls", name: "synthetic", arguments: "", body: "new" }] });

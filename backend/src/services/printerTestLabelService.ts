@@ -19,7 +19,7 @@ import {
 } from "./qrTokenService";
 import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
 import { resolvePrinterConfirmationMode, type PrintConfirmationMode } from "./printConfirmationService";
-import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload } from "./printPayloadService";
+import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload, type PrinterPayloadProfile } from "./printPayloadService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
 import { mutatePrintingTestLabelJob } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
@@ -45,6 +45,16 @@ type RegisteredPrinterWithStatus = Printer & {
     activeLanguage?: PrinterLanguageKind | null;
   } | null;
 };
+
+const payloadProfile = (printer: RegisteredPrinterWithStatus): PrinterPayloadProfile => ({
+  ...printer,
+  calibrationProfile: printer.calibrationProfile && typeof printer.calibrationProfile === "object" && !Array.isArray(printer.calibrationProfile)
+    ? printer.calibrationProfile as Record<string, unknown> : null,
+  capabilitySummary: printer.capabilitySummary && typeof printer.capabilitySummary === "object" && !Array.isArray(printer.capabilitySummary)
+    ? printer.capabilitySummary as Record<string, unknown> : null,
+  metadata: printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
+    ? printer.metadata as Record<string, unknown> : null,
+});
 
 export type PrinterTestLabelResult = {
   outcome: "queued" | "confirmed";
@@ -89,6 +99,7 @@ type GatewayPrinterTestJob = {
 };
 
 export type PrinterTestConnectorBoundary = {
+  sessionId?: string;
   registrationId: string;
   agentId: string;
   deviceFingerprint: string;
@@ -145,7 +156,7 @@ const buildDirectTestPayload = (params: {
   context?: ReturnType<typeof buildPrinterTestScanContext>;
 }) => {
   const context = params.context || buildPrinterTestScanContext(params);
-  const payloadType = resolvePayloadType(params.printer as any);
+  const payloadType = resolvePayloadType(payloadProfile(params.printer));
   const calibration = normalizeLabelCalibration((params.printer.calibrationProfile as Record<string, unknown> | null) || null);
   const document = buildCanonicalQrLabel({
     qrId: `${PRINTER_TEST_QR_ID_PREFIX}${params.printer.id}`,
@@ -657,7 +668,7 @@ const dispatchDirectRawTestLabel = async (params: {
   if (!params.printer.ipAddress || !params.printer.port) {
     throw new Error("The saved factory printer is missing its IP address or port.");
   }
-  if (!supportsNetworkDirectPayload(params.printer as any)) {
+  if (!supportsNetworkDirectPayload(payloadProfile(params.printer))) {
     throw new Error("This printer route does not have a certified label-language payload for live testing.");
   }
 

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6'
+    AND source_contract_sha256='dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -274,6 +274,9 @@ GRANT DELETE ON TABLE public."Printer" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "userId", "orgId", "licenseeId", "deviceFingerprint", "agentId", "publicKeyPem", "certFingerprint", "trustStatus", "trustReason", "approvedAt", "revokedAt", "lastSeenAt", "createdAt", "updatedAt") ON TABLE public."PrinterRegistration" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "userId", "orgId", "licenseeId", "deviceFingerprint", "agentId", "publicKeyPem", "certFingerprint", "trustStatus", "trustReason", "approvedAt", "lastSeenAt", "createdAt", "updatedAt") ON TABLE public."PrinterRegistration" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("orgId", "licenseeId", "agentId", "publicKeyPem", "certFingerprint", "trustStatus", "trustReason", "approvedAt", "revokedAt", "lastSeenAt", "updatedAt") ON TABLE public."PrinterRegistration" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "registrationId", "agentId", "deviceFingerprint", "publicKeyFingerprint", "selectedPrinterId", "connectionState", "expiresAt", "revokedAt", "lastMessageSeq", "lastSignedHeartbeatAt", "metadata") ON TABLE public."PrinterAgentSession" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("id", "connectionId", "registrationId", "agentId", "deviceFingerprint", "publicKeyFingerprint", "selectedPrinterId", "selectedPrinterName", "connectorVersion", "connectionState", "lastMessageSeq", "connectedAt", "lastSeenAt", "lastSignedHeartbeatAt", "expiresAt", "metadata", "createdAt", "updatedAt") ON TABLE public."PrinterAgentSession" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("connectionState", "revokedAt", "disconnectedAt", "closeReason", "lastMessageSeq", "lastSeenAt", "lastSignedHeartbeatAt", "updatedAt") ON TABLE public."PrinterAgentSession" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "name", "email", "role", "location", "metadata") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "printerRegistrationId", "heartbeatNonce", "attestedAt", "expiresAt", "signatureValid", "trustValid", "rejectionReason", "metadata", "createdAt") ON TABLE public."PrinterAttestation" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "printerRegistrationId", "signedPayloadHash", "heartbeatNonce", "attestedAt", "expiresAt", "sourceIpHash", "userAgentHash", "mtlsFingerprint", "signatureValid", "trustValid", "rejectionReason", "metadata", "createdAt") ON TABLE public."PrinterAttestation" TO "mscqr_rls_cert_auth_owner";

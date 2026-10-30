@@ -1,7 +1,7 @@
 const assert = require("assert");
 const path = require("path");
 const { generateKeyPairSync } = require("crypto");
-const { PrinterTrustStatus, UserRole } = require("@prisma/client");
+const { Prisma, PrinterTrustStatus, UserRole } = require("@prisma/client");
 const { closeRedisConnections } = require("../dist/services/redisService");
 
 process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
@@ -29,6 +29,7 @@ const now = new Date();
 
 let registration;
 let latestAttestation;
+let latestSession;
 
 const resetState = () => {
   registration = {
@@ -48,18 +49,25 @@ const resetState = () => {
     updatedAt: now,
   };
   latestAttestation = null;
+  latestSession = null;
 };
 
 const registrationWithAttestation = () => ({
   ...registration,
   attestations: latestAttestation ? [latestAttestation] : [],
+  agentSessions: latestSession ? [latestSession] : [],
 });
 
 mockModule("config/database.js", {
   __esModule: true,
   default: {
     printerRegistration: {
-      findFirst: async ({ where }) => {
+      findFirst: async ({ where, include }) => {
+        if (include?.attestations) {
+          assert.deepStrictEqual(include.attestations.where?.metadata?.path, ["operation"],
+            "status must select the same non-operation attestation as SQL authorization");
+          assert.strictEqual(include.attestations.where?.metadata?.equals, Prisma.DbNull);
+        }
         if (where?.userId === registration.userId) return registrationWithAttestation();
         return null;
       },
@@ -187,6 +195,61 @@ const signedHeartbeatInput = (overrides = {}) => {
     valid.status.missingFields.includes("helperConnection") || valid.status.missingFields.includes("securePrinterSession"),
     "fresh signed heartbeat should still report the missing persistent-session readiness field"
   );
+
+  latestSession = {
+    id: "session-launch-1",
+    connectionState: "CONNECTED", revokedAt: null,
+    lastSignedHeartbeatAt: new Date(), expiresAt: new Date(Date.now() + 300_000),
+    selectedPrinterId: "zebra-zd421", selectedPrinterName: "Reference ZPL printer",
+    connectorVersion: LOCAL_AGENT_MIN_VERSION_HINT,
+    printerHealth: { connected: true, selectedPrinterId: "zebra-zd421",
+      printers: [{ printerId: "zebra-zd421", printerName: "Reference ZPL printer", online: true }] },
+  };
+  latestAttestation.metadata.source = "PERSISTENT_SESSION";
+  latestAttestation.metadata.sessionId = latestSession.id;
+  latestAttestation.metadata.printerHealth = { healthVersion: 1, selectedPrinterId: "zebra-zd421",
+    observedAt: new Date().toISOString(), discovered: true, queueAvailable: true, online: true };
+  const validSessionAndAttestation = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(validSessionAndAttestation.eligibleForPrinting, true,
+    "a healthy signed session with a valid attestation remains print eligible");
+  latestAttestation.metadata.printerHealth.online = false;
+  assert.strictEqual((await getPrinterConnectionStatusForUser(registration.userId)).eligibleForPrinting, false,
+    "a fresh connector session must not override signed offline printer evidence");
+  latestAttestation.metadata.printerHealth.online = true;
+  latestAttestation.expiresAt = new Date(Date.now() - 1_000);
+  const expiredAttestationWithSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(expiredAttestationWithSession.connected, true, "signed session remains connected");
+  assert.strictEqual(expiredAttestationWithSession.eligibleForPrinting, false,
+    "an expired SQL attestation must not be described as print eligible");
+  assert.strictEqual(expiredAttestationWithSession.signedAttestation.fresh, false,
+    "session heartbeat is not a replacement for the required printer attestation");
+
+  latestAttestation.expiresAt = new Date(Date.now() + 30_000);
+  latestAttestation.metadata.buildVersion = LOCAL_AGENT_MIN_VERSION_HINT;
+  delete latestAttestation.metadata.capabilities;
+  latestSession.lastSignedHeartbeatAt = new Date(Date.now() - 60_000);
+  const stalePersistentSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(stalePersistentSession.eligibleForPrinting, false);
+  assert.strictEqual(stalePersistentSession.persistentSessionUpdateRequired, false,
+    "a stale heartbeat from a current connector must not request a connector upgrade");
+  assert.match(stalePersistentSession.trustReason || "", /heartbeat.*stale/i);
+
+  latestSession = null;
+  const disconnectedPersistentSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(disconnectedPersistentSession.eligibleForPrinting, false);
+  assert.strictEqual(disconnectedPersistentSession.persistentSessionUpdateRequired, false,
+    "a disconnected current connector must not request a connector upgrade");
+  assert.strictEqual(disconnectedPersistentSession.connectorUpdateRequired, false);
+  assert.match(disconnectedPersistentSession.trustReason || "", /disconnected/i);
+
+  delete latestAttestation.metadata.buildVersion;
+  latestAttestation.metadata.printerHealth.buildVersion = LOCAL_AGENT_MIN_VERSION_HINT;
+  const untrustedVersion = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(untrustedVersion.eligibleForPrinting, false);
+  assert.strictEqual(untrustedVersion.persistentSessionUpdateRequired, false,
+    "unsigned health metadata must not establish connector version or an upgrade requirement");
+  assert.strictEqual(untrustedVersion.persistentSessionCapable, false);
+  assert.match(untrustedVersion.trustReason || "", /version.*unverified/i);
 
   resetState();
   const oldConnector = await upsertPrinterConnectionHeartbeat(

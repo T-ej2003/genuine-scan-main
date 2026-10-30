@@ -53,7 +53,7 @@ const parseBoolEnv = (name: string, fallback: boolean) => {
 };
 
 export const PRINT_AGENT_SESSION_CHUNK_SIZE = parsePositiveIntEnv("PRINT_AGENT_SESSION_CHUNK_SIZE", 50, 1, 100);
-const PRINT_AGENT_SESSION_EXPIRY_SECONDS = parsePositiveIntEnv("PRINT_AGENT_SESSION_EXPIRY_SECONDS", 12 * 60 * 60, 60, 24 * 60 * 60);
+export const PRINT_AGENT_SESSION_EXPIRY_SECONDS = parsePositiveIntEnv("PRINT_AGENT_SESSION_EXPIRY_SECONDS", 12 * 60 * 60, 60, 24 * 60 * 60);
 export const PRINT_AGENT_REQUIRE_MTLS = parseBoolEnv("PRINT_AGENT_REQUIRE_MTLS", false);
 
 export const sessionHelloSchema = z.object({
@@ -457,13 +457,15 @@ export const resolveTrustedPrinterAgentRegistrationForSession = async (
         issuedAt: hello.issuedAt,
         signature: hello.signature,
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const failure = error && typeof error === "object" ? error as { errorCode?: unknown; statusCode?: unknown } : null;
+      const statusCode = Number(failure?.statusCode);
       sawSignatureFailure = true;
       lastSummary = {
         ...selectedBase,
-        reasonCode: error?.errorCode || "bad_session_signature",
+        reasonCode: typeof failure?.errorCode === "string" ? failure.errorCode : "bad_session_signature",
         signatureVerified: false,
-        httpStatus: Number(error?.statusCode || 403),
+        httpStatus: Number.isFinite(statusCode) && statusCode > 0 ? statusCode : 403,
       };
       continue;
     }

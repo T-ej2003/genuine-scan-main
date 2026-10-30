@@ -15,8 +15,8 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6",
-  "migrationSetDigest": "b783cab33f40cddaa8aa9bf3bef3dbbbabb218af5891bbda36eb1724514f8dc9",
+  "sourceContractSha256": "dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7",
+  "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
       "path": "documents/security/rls-program/tables.json",
@@ -52,7 +52,7 @@
     },
     {
       "path": "backend/prisma/schema.prisma",
-      "sha256": "8b7271d5b4da51d70aa6cac59a9e9bc1728fff7dc7f5251c0ac589612b7a94f4"
+      "sha256": "6ebf77a5c33e09bcd4373fe65600876cbb84014660129a9a7fd9b2cb89703c41"
     },
     {
       "path": "backend/src/rls-waves/session-a/productionRotationInventory.sql",
@@ -61,6 +61,10 @@
     {
       "path": "backend/src/rls-waves/session-a/productionRotationInventoryRollback.sql",
       "sha256": "a60a696db5aad8fc88c28794596d2f04e1ee5e99ccf9013d6b1e45e546467ead"
+    },
+    {
+      "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
+      "sha256": "64491da9a011e138161e4dd17168290823e3aabad6428179a87b8c3bce5b2db6"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -88,7 +92,7 @@
     },
     {
       "path": "scripts/rls/lib/clean-room-source-contract.mjs",
-      "sha256": "c2abc93ae7b325281ebf0b7573ae27b99ba0938e037318b376a2b22f9b83d14d"
+      "sha256": "76b6e426455e106644db0c4f5c9104bf45f6ae5f18dcd7a230f238070fe95596"
     },
     {
       "path": "scripts/rls/lib/program-inventory.mjs",
@@ -104,7 +108,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "3b3bf77fcdade696a31b84458b94bc3920de6bef8a62ea35abb78b4dc04401a6"
+      "sha256": "04f6c36b07a10b776190bb213e67f1ec62e19d6a35dbb210607aad97dcad0676"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -390,9 +394,9 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 378,
+    "generatedPolicies": 381,
     "columnPrivilegeCells": 60,
-    "prismaMigrations": 56,
+    "prismaMigrations": 57,
     "prismaEnums": 58,
     "registeredWorkflowCallPaths": 327,
     "applicationPathCertifiedWorkflows": 11
@@ -408,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:bff38fee916ff4836668f8a8222194a2cfb04fe328568f420020553e0c8d82f6",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:dccae9fa244952b32d150533ef53f641ac75b40e9ed8855b49c5abef5595b3e7",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
@@ -659,6 +663,10 @@
     {
       "name": "20261001150000_audit_record_provenance",
       "sha256": "2607802b76e805fcc8f1907fe50e08dfbb1186e7ea70311d77691c0c0d1f17cc"
+    },
+    {
+      "name": "20261028210000_printer_agent_session_sequence",
+      "sha256": "52c375a4da5fc5941505fc3882ecdc511c272991eb3f41feedf02fdcac173b1d"
     }
   ],
   "prohibitions": [

@@ -91,6 +91,7 @@ export const buildPrinterAgentSessionPayload = (input: {
   messageSeq?: number | null;
   nonce: string;
   issuedAt: string;
+  printerHealth?: Record<string, unknown> | null;
 }) =>
   [
     "v1",
@@ -109,6 +110,10 @@ export const buildPrinterAgentSessionPayload = (input: {
     input.messageSeq == null ? "" : String(input.messageSeq),
     input.nonce,
     input.issuedAt,
+    ...(input.printerHealth?.healthVersion === 1 ? ["health-v1", JSON.stringify([
+      input.printerHealth.selectedPrinterId, input.printerHealth.observedAt,
+      input.printerHealth.discovered, input.printerHealth.queueAvailable, input.printerHealth.online,
+    ])] : []),
   ].join("|");
 
 export const signPrinterAgentPayload = (privateKeyPem: string, payload: string) => {

@@ -50,7 +50,7 @@ type PrinterRegistrationWithLatest = {
     trustValid: boolean;
     rejectionReason: string | null;
     mtlsFingerprint: string | null;
-    metadata: any;
+    metadata: unknown;
     createdAt: Date;
   }>;
   agentSessions?: Array<{
@@ -60,7 +60,7 @@ type PrinterRegistrationWithLatest = {
     selectedPrinterName: string | null;
     connectorVersion: string | null;
     trustMode: string;
-    printerHealth: any;
+    printerHealth: unknown;
     lastSeenAt: Date;
     lastSignedHeartbeatAt: Date;
     expiresAt: Date;
@@ -108,7 +108,7 @@ const assessSelectedPrinterEligibility = (payload: ReturnType<typeof normalizeSt
 
 export type PrinterConnectionRealtimeEvent = {
   userId: string;
-  status: PrinterConnectionStatus;
+  status?: PrinterConnectionStatus;
   changedAt: string;
 };
 
@@ -198,13 +198,14 @@ const toFiniteIntArray = (value: unknown, maxItems = 12): number[] => {
   return Array.from(unique).sort((a, b) => a - b);
 };
 
-const stableStringify = (value: any): string => {
+const stableStringify = (value: unknown): string => {
   if (value === null || value === undefined) return "null";
-  if (typeof value !== "object") return JSON.stringify(value);
+  if (typeof value !== "object") return JSON.stringify(value) ?? "null";
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
 
-  const keys = Object.keys(value).sort();
-  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`).join(",")}}`;
 };
 
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -302,7 +303,8 @@ const verifyAgentSignatureAcrossPayloads = (params: {
   return null;
 };
 
-const normalizeCapabilitySummary = (source: any): PrinterCapabilitySummary | null => {
+const normalizeCapabilitySummary = (value: unknown): PrinterCapabilitySummary | null => {
+  const source = value as Record<string, unknown> | null;
   if (!source || typeof source !== "object") return null;
   const transports = toCleanStringArray(source.transports || source.paths || source.connections, 12, 80);
   const protocols = toCleanStringArray(source.protocols, 24, 80);
@@ -326,40 +328,43 @@ const normalizePrinterInventory = (value: unknown): PrinterInventoryDevice[] => 
   const rows: PrinterInventoryDevice[] = [];
   for (const raw of value) {
     if (!raw || typeof raw !== "object") continue;
-    const printerId = toCleanString((raw as any).printerId || (raw as any).id, 180);
-    const printerName = toCleanString((raw as any).printerName || (raw as any).name, 180);
+    const device = raw as Record<string, unknown>;
+    const printerId = toCleanString(device.printerId || device.id, 180);
+    const printerName = toCleanString(device.printerName || device.name, 180);
     if (!printerId || !printerName) continue;
     rows.push({
       printerId,
       printerName,
-      model: toCleanString((raw as any).model, 180) || null,
-      connection: toCleanString((raw as any).connection || (raw as any).transport, 80) || null,
-      online: Boolean((raw as any).online ?? true),
-      isDefault: Boolean((raw as any).isDefault),
-      protocols: toCleanStringArray((raw as any).protocols, 12, 60),
-      languages: toCleanStringArray((raw as any).languages, 12, 60),
-      mediaSizes: toCleanStringArray((raw as any).mediaSizes, 12, 60),
-      dpi: Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
-      deviceUri: toCleanString((raw as any).deviceUri, 512) || null,
-      portName: toCleanString((raw as any).portName, 180) || null,
-      windowsPortName: toCleanString((raw as any).windowsPortName, 180) || null,
-      windowsPortHost: toCleanString((raw as any).windowsPortHost, 180) || null,
-      windowsPortNumber: Number.isFinite(Number((raw as any).windowsPortNumber))
-        ? Number((raw as any).windowsPortNumber)
+      model: toCleanString(device.model, 180) || null,
+      connection: toCleanString(device.connection || device.transport, 80) || null,
+      online: Boolean(device.online ?? true),
+      isDefault: Boolean(device.isDefault),
+      protocols: toCleanStringArray(device.protocols, 12, 60),
+      languages: toCleanStringArray(device.languages, 12, 60),
+      mediaSizes: toCleanStringArray(device.mediaSizes, 12, 60),
+      dpi: Number.isFinite(Number(device.dpi)) ? Number(device.dpi) : null,
+      deviceUri: toCleanString(device.deviceUri, 512) || null,
+      portName: toCleanString(device.portName, 180) || null,
+      windowsPortName: toCleanString(device.windowsPortName, 180) || null,
+      windowsPortHost: toCleanString(device.windowsPortHost, 180) || null,
+      windowsPortNumber: Number.isFinite(Number(device.windowsPortNumber))
+        ? Number(device.windowsPortNumber)
         : null,
-      queueStatus: toCleanString((raw as any).queueStatus, 120) || null,
-      queueHasErrors: Boolean((raw as any).queueHasErrors),
-      stuckJobCount: Number.isFinite(Number((raw as any).stuckJobCount)) ? Number((raw as any).stuckJobCount) : 0,
-      retainedJobCount: Number.isFinite(Number((raw as any).retainedJobCount)) ? Number((raw as any).retainedJobCount) : 0,
-      usbAvailable: Boolean((raw as any).usbAvailable),
+      queueStatus: toCleanString(device.queueStatus, 120) || null,
+      queueHasErrors: Boolean(device.queueHasErrors),
+      stuckJobCount: Number.isFinite(Number(device.stuckJobCount)) ? Number(device.stuckJobCount) : 0,
+      retainedJobCount: Number.isFinite(Number(device.retainedJobCount)) ? Number(device.retainedJobCount) : 0,
+      usbAvailable: Boolean(device.usbAvailable),
     });
     if (rows.length >= 40) break;
   }
   return rows;
 };
 
-const normalizeStatusPayload = (metadata: any) => {
-  const source = metadata && typeof metadata === "object" ? metadata : {};
+const normalizeStatusPayload = (metadata: unknown) => {
+  const source: Record<string, unknown> = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? metadata as Record<string, unknown>
+    : {};
   const capabilities = source.capabilities && typeof source.capabilities === "object"
     ? (source.capabilities as Record<string, unknown>)
     : null;
@@ -381,7 +386,7 @@ const normalizeStatusPayload = (metadata: any) => {
     printers: normalizePrinterInventory(source.printers),
     calibrationProfile:
       source.calibrationProfile && typeof source.calibrationProfile === "object"
-        ? (source.calibrationProfile as Record<string, any>)
+        ? (source.calibrationProfile as Record<string, unknown>)
         : null,
   };
 };
@@ -463,18 +468,24 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
           ...(latestAttestation?.metadata && typeof latestAttestation.metadata === "object" ? latestAttestation.metadata : {}),
           ...sessionHealth,
           connected: true,
-          selectedPrinterId: latestSession?.selectedPrinterId || (sessionHealth as any).selectedPrinterId,
-          selectedPrinterName: latestSession?.selectedPrinterName || (sessionHealth as any).selectedPrinterName,
-          printerId: latestSession?.selectedPrinterId || (sessionHealth as any).printerId,
-          printerName: latestSession?.selectedPrinterName || (sessionHealth as any).printerName,
-          buildVersion: latestSession?.connectorVersion || (sessionHealth as any).buildVersion,
+          selectedPrinterId: latestSession?.selectedPrinterId || sessionHealth.selectedPrinterId,
+          selectedPrinterName: latestSession?.selectedPrinterName || sessionHealth.selectedPrinterName,
+          printerId: latestSession?.selectedPrinterId || sessionHealth.printerId,
+          printerName: latestSession?.selectedPrinterName || sessionHealth.printerName,
+          buildVersion: latestSession?.connectorVersion || sessionHealth.buildVersion,
         }
       : latestAttestation?.metadata || {}
   );
+  const attestationMetadata = latestAttestation?.metadata as Record<string, unknown> | undefined;
+  const persistentAttestation = attestationMetadata?.source === "PERSISTENT_SESSION";
+  const knownBuildVersion = payload.buildVersion || latestSession?.connectorVersion || null;
+  const persistentSessionCapable = isLocalAgentPersistentSessionCapable(knownBuildVersion);
+  const persistentSessionVersionUnverified = Boolean(persistentAttestation && !knownBuildVersion);
   const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
   const connectorUpdateRequired = Boolean(
     payload.connected &&
       !sessionFresh &&
+      !persistentAttestation &&
       !isLocalAgentTransportDiagnosticsCurrent({
         protocolVersion: payload.protocolVersion,
         buildVersion: payload.buildVersion,
@@ -482,14 +493,17 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
         capabilities: payload.capabilities,
       })
   );
-  const persistentSessionCapable = isLocalAgentPersistentSessionCapable(payload.buildVersion || latestSession?.connectorVersion);
-  const persistentSessionUpdateRequired = Boolean(PERSISTENT_SESSION_REQUIRED && payload.connected && !persistentSessionCapable);
+  const persistentSessionUpdateRequired = Boolean(PERSISTENT_SESSION_REQUIRED && payload.connected && knownBuildVersion && !persistentSessionCapable);
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
-  const stale = sessionFresh ? false : ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
+  const stale = sessionFresh ? false : persistentAttestation ? true : ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
 
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
+  const attestationFresh = Boolean(
+    trustedAttestation && latestAttestation?.expiresAt &&
+    new Date(latestAttestation.expiresAt).getTime() > nowMs
+  );
   const trustedPersistentSession = Boolean(sessionFresh && trustedRegistration);
   const selectedPrinterId = payload.selectedPrinterId || payload.printerId || null;
   const printerEligibility = assessSelectedPrinterEligibility(payload);
@@ -498,8 +512,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       payload.connected &&
       persistentSessionCapable &&
       !persistentSessionUpdateRequired &&
-      !sessionFresh
+      !sessionFresh &&
+      !latestSession
   );
+  const persistentSessionHeartbeatStale = Boolean(PERSISTENT_SESSION_REQUIRED && latestSession && !sessionFresh);
   const helperConnection = PERSISTENT_SESSION_REQUIRED
     ? Boolean(payload.connected && sessionFresh && !connectorUpdateRequired && !persistentSessionUpdateRequired)
     : Boolean(payload.connected && (latestAttestation || sessionFresh) && !stale && !connectorUpdateRequired);
@@ -519,14 +535,31 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       registration.trustStatus !== PrinterTrustStatus.REVOKED
   );
   const connected = helperConnection;
-  const eligibleForPrinting = Boolean(trusted && helperConnection && printerEligibility.eligible);
+  const signedHealth = attestationMetadata?.printerHealth as Record<string, unknown> | undefined;
+  const healthObservedAt = typeof signedHealth?.observedAt === "string" ? Date.parse(signedHealth.observedAt) : NaN;
+  const attestationHealthFresh = attestationMetadata?.source !== "PERSISTENT_SESSION"
+    ? !latestSession
+    : Boolean(latestSession?.id) && attestationMetadata?.sessionId === latestSession?.id
+      && signedHealth?.healthVersion === 1 && signedHealth.discovered === true
+      && signedHealth.queueAvailable === true && signedHealth.online === true
+      && signedHealth.selectedPrinterId === latestSession?.selectedPrinterId
+      && Date.now() - healthObservedAt >= -5000 && Date.now() - healthObservedAt < 35000;
+  const eligibleForPrinting = Boolean(trusted && helperConnection && printerEligibility.eligible && attestationFresh && attestationHealthFresh);
 
-  const trustReason = trusted
+  const trustReason = trusted && !attestationFresh
+    ? "Printer attestation expired"
+    : trusted && !attestationHealthFresh
+      ? "Selected printer health is unavailable or stale"
+    : trusted
     ? null
     : registration.revokedAt
       ? "Printer registration revoked"
       : persistentSessionUpdateRequired
         ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionVersionUnverified
+        ? "Persistent printer session disconnected; connector version unverified."
+      : persistentSessionHeartbeatStale
+        ? "Persistent printer session heartbeat is stale."
       : persistentSessionDisconnected
         ? "Persistent printer session is disconnected."
       : connectorUpdateRequired
@@ -537,6 +570,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     ? null
     : persistentSessionUpdateRequired
       ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionVersionUnverified
+        ? "Persistent printer session disconnected; connector version unverified."
+      : persistentSessionHeartbeatStale
+        ? "Persistent printer session heartbeat is stale."
       : persistentSessionDisconnected
         ? "Persistent printer session is disconnected."
       : connected && compatibilityMode
@@ -571,10 +608,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
   });
   const signedAttestation = {
     required: REQUIRE_SIGNATURE,
-    present: Boolean(latestAttestation || sessionFresh),
-    signatureValid: Boolean(latestAttestation?.signatureValid || trustedPersistentSession),
-    fresh: Boolean(((latestAttestation?.signatureValid && latestAttestation?.trustValid) || trustedPersistentSession) && !stale && !connectorUpdateRequired),
-    issuedAt: sessionFresh ? latestSession?.lastSignedHeartbeatAt?.toISOString?.() || null : payload.heartbeatIssuedAt,
+    present: Boolean(latestAttestation),
+    signatureValid: Boolean(latestAttestation?.signatureValid),
+    fresh: Boolean(attestationFresh && !connectorUpdateRequired),
+    issuedAt: latestAttestation?.attestedAt?.toISOString?.() || null,
     rejectReason: latestAttestation?.rejectionReason || null,
   };
 
@@ -634,6 +671,10 @@ const loadLatestRegistrationForUser = async (
     orderBy: [{ approvedAt: "desc" }, { lastSeenAt: "desc" }, { updatedAt: "desc" }],
     include: {
       attestations: {
+        where: { metadata: { path: ["operation"], equals: Prisma.DbNull }, OR: [
+          { metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+          { printerRegistration: { agentSessions: { none: {} } } },
+        ] },
         orderBy: [{ createdAt: "desc" }],
         take: 1,
       },
@@ -654,6 +695,10 @@ const loadRegistrationById = async (
     where: { id: registrationId, revokedAt: null, trustStatus: { not: PrinterTrustStatus.REVOKED } },
     include: {
       attestations: {
+        where: { metadata: { path: ["operation"], equals: Prisma.DbNull }, OR: [
+          { metadata: { path: ["source"], equals: "PERSISTENT_SESSION" } },
+          { printerRegistration: { agentSessions: { none: {} } } },
+        ] },
         orderBy: [{ createdAt: "desc" }],
         take: 1,
       },
@@ -696,10 +741,10 @@ const statusChanged = (a: PrinterConnectionStatus, b: PrinterConnectionStatus) =
     String(a.printerId || "") !== String(b.printerId || "") ||
     String(a.deviceName || "") !== String(b.deviceName || "") ||
     String(a.agentVersion || "") !== String(b.agentVersion || "") ||
-    String((a as any).protocolVersion || "") !== String((b as any).protocolVersion || "") ||
-    String((a as any).buildVersion || "") !== String((b as any).buildVersion || "") ||
-    String((a as any).transportDiagnosticsVersion || "") !== String((b as any).transportDiagnosticsVersion || "") ||
-    Boolean((a as any).connectorUpdateRequired) !== Boolean((b as any).connectorUpdateRequired) ||
+    String(a.protocolVersion || "") !== String(b.protocolVersion || "") ||
+    String(a.buildVersion || "") !== String(b.buildVersion || "") ||
+    String(a.transportDiagnosticsVersion || "") !== String(b.transportDiagnosticsVersion || "") ||
+    Boolean(a.connectorUpdateRequired) !== Boolean(b.connectorUpdateRequired) ||
     String(a.selectedPrinterId || "") !== String(b.selectedPrinterId || "") ||
     String(a.selectedPrinterName || "") !== String(b.selectedPrinterName || "")
   );
@@ -736,6 +781,13 @@ export const publishPrinterConnectionStatusForUser = async (userId: string) => {
   return status;
 };
 
+// Connector heartbeats do not carry a manufacturer database-session capability.
+// Notify authenticated event streams to read their own governed status projection.
+export const publishPrinterConnectionChangeForUser = (userId: string) => {
+  void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
+  emitConnectionEvent({ userId, changedAt: new Date().toISOString() });
+};
+
 export const getPrinterConnectionStatusForRegistration = async (
   registrationId: string,
   db: PrinterConnectionReadClient = prisma
@@ -762,7 +814,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   protocolVersion?: string | null;
   buildVersion?: string | null;
   transportDiagnosticsVersion?: string | null;
-  capabilities?: any;
+  capabilities?: unknown;
   error?: string | null;
   sourceIp?: string | null;
   userAgent?: string | null;
@@ -776,9 +828,9 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
   heartbeatSignature?: string | null;
   selectedPrinterId?: string | null;
   selectedPrinterName?: string | null;
-  capabilitySummary?: any;
-  printers?: any[];
-  calibrationProfile?: any;
+  capabilitySummary?: unknown;
+  printers?: unknown[];
+  calibrationProfile?: unknown;
 }) => {
   const previousStatus = await getPrinterConnectionStatusForUser(input.userId);
 
@@ -822,7 +874,7 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
     printers: normalizePrinterInventory(input.printers),
     calibrationProfile:
       input.calibrationProfile && typeof input.calibrationProfile === "object"
-        ? (input.calibrationProfile as Record<string, any>)
+        ? (input.calibrationProfile as Record<string, unknown>)
         : null,
   };
 
@@ -1132,7 +1184,10 @@ export const upsertPrinterConnectionHeartbeat = async (input: {
 	      selectedPrinterIdPresent: Boolean(metadata.selectedPrinterId || metadata.printerId),
 	      selectedPrinterMatch: Boolean(metadata.selectedPrinterId || metadata.printerId),
 	      buildVersion: metadata.buildVersion,
-	      supportsPersistentPrintSession: metadata.capabilities?.supportsPersistentPrintSession === true,
+	      supportsPersistentPrintSession: Boolean(
+	        metadata.capabilities && "supportsPersistentPrintSession" in metadata.capabilities &&
+	        metadata.capabilities.supportsPersistentPrintSession === true
+	      ),
 	      connectorVersionAccepted: isLocalAgentPersistentSessionCapable(metadata.buildVersion),
 	      httpStatus: trustValid ? 200 : 403,
 	    });

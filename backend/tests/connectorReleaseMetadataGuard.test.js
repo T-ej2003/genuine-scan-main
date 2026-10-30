@@ -1,6 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { execFileSync } = require("node:child_process");
 const JSZip = require("jszip");
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
 
@@ -79,6 +80,18 @@ const run = async () => {
     latestPackagedRelease.platforms.windows ? "windows" : "windowsUnsignedTest",
     { allowInternalArtifacts: !latestPackagedRelease.platforms.windows }
   );
+  if (latestPackagedRelease.platforms.windows) {
+    const releaseDir = path.dirname(resolved.filePath);
+    const checksums = fs.readFileSync(path.join(releaseDir, "SHA256SUMS.txt"), "utf8").trim().split(/\r?\n/);
+    for (const entry of checksums) {
+      const match = /^([0-9a-f]{64})  (.+)$/.exec(entry);
+      assert(match, "Signed release checksum entry must be well formed");
+      const relative = path.posix.join("backend/local-print-agent/releases", latestPackagedRelease.version, "windows", match[2]);
+      const committed = execFileSync("git", ["show", `HEAD:${relative}`], { cwd: path.join(backendRoot, ".."), maxBuffer: 64 * 1024 * 1024 });
+      assert(crypto.createHash("sha256").update(committed).digest("hex") === match[1],
+        `Signed release checksum must match committed bytes: ${match[2]}`);
+    }
+  }
 
   assert(compareConnectorVersions(sourceVersion, "2026.5.19") > 0, "Connector source version must be newer than 2026.5.19");
   assert(manifest.latestVersion === sourceVersion, "Connector manifest latestVersion must match source buildVersion");

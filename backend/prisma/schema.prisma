@@ -970,6 +970,7 @@ model PrinterAgentSession {
   disconnectedAt DateTime?
   lastSeenAt DateTime @default(now())
   lastSignedHeartbeatAt DateTime @default(now())
+  lastMessageSeq Int @default(0)
   expiresAt DateTime?
   revokedAt DateTime?
   closeReason String?

@@ -70,4 +70,28 @@ describe("secure printer readiness", () => {
     expect(readiness.reasonCode).toBe("READY");
     expect(readiness.summary).toContain("ready to print");
   });
+
+  it.each(["refreshPaused", "rateLimited", "degraded"] as const)(
+    "does not present cached verification as current when %s is set",
+    (flag) => {
+      const readiness = buildSecurePrintReadiness({
+        connected: true, trusted: true, eligibleForPrinting: true,
+        securePrinterSession: true, freshHelperHeartbeat: true,
+        helperConnection: true, eligiblePrinter: true, stale: false,
+        connectionClass: "TRUSTED", [flag]: true,
+      });
+      expect(readiness.ready).toBe(false);
+      expect(readiness.badgeLabel).toBe("Needs check");
+    }
+  );
+
+  it("distinguishes a connected signed session from expired print attestation", () => {
+    const readiness = buildSecurePrintReadiness({ connected: true, trusted: true,
+      eligibleForPrinting: false, securePrinterSession: true, freshHelperHeartbeat: true,
+      helperConnection: true, stale: false, connectionClass: "TRUSTED",
+      trustReason: "Printer attestation expired" });
+    expect(readiness.ready).toBe(false);
+    expect(readiness.reasonCode).toBe("VERIFICATION_EXPIRED");
+    expect(readiness.detail).toContain("connector is connected");
+  });
 });

@@ -11,6 +11,7 @@ const bootstrap = "backend/src/rls-waves/session-c/c04/bootstrapConfiguredSuperA
 const operators = "backend/src/rls-waves/session-c/c04/operatorProcedures.sql";
 const operatorRollback = "backend/src/rls-waves/session-c/c04/operatorProceduresRollback.sql";
 const rolloutClassifier = "scripts/aws/exact-ecs-rollout-state.mjs";
+const printingLifecycle = "backend/src/rls-waves/session-c/c02/printingLifecycle.sql";
 const root = process.cwd();
 
 const copyContractInputs = (target) => {
@@ -33,7 +34,7 @@ test("security-sensitive runtime and initial-admin sources bind the clean-room s
   const generated = JSON.parse(fs.readFileSync("documents/security/rls-program/generated/full-rls-implementation-manifest.json", "utf8"));
   assert.equal(generated.sourceContractSha256, baseline);
   assert.equal(calculateCleanRoomSourceContract(fixture).sourceContractSha256, baseline);
-  for (const relative of [bootstrap, operators, operatorRollback, rolloutClassifier]) {
+  for (const relative of [bootstrap, operators, operatorRollback, rolloutClassifier, printingLifecycle]) {
     const candidate = path.join(fixture, relative);
     fs.appendFileSync(candidate, `\n-- contract mutation ${crypto.randomUUID()}\n`);
     assert.notEqual(calculateCleanRoomSourceContract(fixture).sourceContractSha256, generated.sourceContractSha256);

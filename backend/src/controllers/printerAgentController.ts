@@ -91,7 +91,7 @@ const isRecoverableHeartbeatStorageError = (error: unknown) => {
   return false;
 };
 
-const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, currentStatus?: Record<string, any> | null) => {
+const buildDegradedHeartbeatStatus = (input: z.infer<typeof heartbeatSchema>, currentStatus?: Awaited<ReturnType<typeof readPrinterStatus>> | null) => {
   const connected = Boolean(input.connected);
   const nowIso = new Date().toISOString();
   const selectedPrinterId = input.selectedPrinterId || input.printerId || currentStatus?.selectedPrinterId || currentStatus?.printerId || null;
@@ -224,7 +224,7 @@ const quarantinedLegacyPrinterHeartbeat = async (req: AuthRequest, res: Response
 
       console.error("reportPrinterHeartbeat degraded storage fallback:", heartbeatError);
 
-      let currentStatus: Record<string, any> | null = null;
+      let currentStatus: Awaited<ReturnType<typeof readPrinterStatus>> | null = null;
       try {
         currentStatus = await readPrinterStatus(req);
       } catch (statusError) {
@@ -356,9 +356,9 @@ const quarantinedLegacyPrinterHeartbeat = async (req: AuthRequest, res: Response
       success: true,
       data: update.status,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("reportPrinterHeartbeat error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Internal server error" });
   }
 };
 
@@ -458,9 +458,9 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
     emitConnectionEvent({ userId: req.user.userId, status, changedAt: new Date().toISOString() });
     void bumpCacheNamespaceVersion("printer-status").catch(() => undefined);
     return res.json({ success: true, data: status });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("reportPrinterHeartbeat error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Internal server error" });
   }
 };
 
@@ -477,9 +477,9 @@ export const getPrinterConnectionStatus = async (req: AuthRequest, res: Response
         readPrinterStatus(req)
       ),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("getPrinterConnectionStatus error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return res.status(500).json({ success: false, error: error instanceof Error ? error.message : "Internal server error" });
   }
 };
 
@@ -508,19 +508,18 @@ export const printerConnectionEvents = async (req: AuthRequest, res: Response) =
     };
 
     await sendSnapshot("initial");
-
-    const off = onPrinterConnectionEvent(async (event) => {
-      if (event.userId !== req.user!.userId) return;
-      writeSseRealtimeEnvelope(res, {
-        channel: "printer",
-        type: "snapshot",
-        payload: {
-          reason: "changed",
-          status: event.status,
-          serverTime: event.changedAt,
-        },
-        occurredAt: event.changedAt,
-      });
+    let changeGeneration = 0;
+    const publishSnapshot = (reason: string) => {
+      const generation = ++changeGeneration;
+      void readPrinterStatus(req).then((status) => {
+        if (generation !== changeGeneration || res.writableEnded) return;
+        const serverTime = new Date().toISOString();
+        writeSseRealtimeEnvelope(res, { channel: "printer", type: "snapshot",
+          payload: { reason, status, serverTime }, occurredAt: serverTime });
+      }).catch(() => { if (!res.writableEnded) req.destroy(); });
+    };
+    const off = onPrinterConnectionEvent((event) => {
+      if (event.userId === req.user!.userId) publishSnapshot("changed");
     });
 
     const keepAlive = setInterval(() => {
@@ -534,6 +533,7 @@ export const printerConnectionEvents = async (req: AuthRequest, res: Response) =
         },
         occurredAt: nowIso,
       });
+      publishSnapshot("periodic");
     }, 20_000);
 
     req.on("close", () => {

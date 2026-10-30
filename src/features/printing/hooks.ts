@@ -3,7 +3,6 @@ import { useQuery } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
-import { clearRequestCoordinator } from "@/lib/api/request-coordinator";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/query-keys";
@@ -82,7 +81,7 @@ function buildFallbackPrinterStatus(printers: LocalPrinterDTO[], error?: string 
     stale: true,
     requiredForPrinting: true,
     trustStatus: "UNREGISTERED",
-    trustReason: "No trusted printer registration",
+    trustReason: "Printer verification is unavailable. Refresh printer status and try again.",
     lastHeartbeatAt: null,
     ageSeconds: null,
     registrationId: null,
@@ -127,8 +126,14 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
   ]);
 
   const localPrinters = normalizeLocalPrinterRows((localResponse.data as { printers?: unknown[] } | undefined)?.printers || []);
+  const verificationUnavailable = Boolean(
+    remoteResponse.degraded ||
+    String(remoteResponse.code || remoteResponse.errorCode || "").toUpperCase() === "RATE_LIMITED" ||
+    (remoteResponse.data as { refreshPaused?: boolean; rateLimited?: boolean } | undefined)?.refreshPaused ||
+    (remoteResponse.data as { refreshPaused?: boolean; rateLimited?: boolean } | undefined)?.rateLimited
+  );
   const parsedRemoteStatus =
-    remoteResponse.success && remoteResponse.data
+    remoteResponse.success && remoteResponse.data && !verificationUnavailable
       ? unwrapParsedApiResponse(remoteResponse, printerConnectionStatusSchema, "Printer status unavailable")
       : null;
   const remoteStatus =
@@ -140,7 +145,7 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
               ? normalizeLocalPrinterRows(parsedRemoteStatus.printers || [])
               : localPrinters,
         } satisfies PrinterConnectionStatusDTO)
-      : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || localResponse.error || "Printer status unavailable");
+      : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || remoteResponse.message || "Printer verification unavailable");
 
   const detectedPrinters = remoteStatus.printers && remoteStatus.printers.length > 0 ? remoteStatus.printers : localPrinters;
   const preferredPrinterId =
@@ -179,7 +184,6 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
 export async function refreshManufacturerPrinterRuntimeSnapshot(): Promise<ManufacturerPrinterRuntime> {
   const key = queryKeys.printing.runtime(true);
   await queryClient.cancelQueries({ queryKey: key });
-  clearRequestCoordinator(["registered-printers:include-inactive", "printer-agent-status"]);
   const snapshot = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
   queryClient.setQueryData(key, snapshot);
   return snapshot;

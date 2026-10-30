@@ -5,11 +5,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { B03_DELTA_OBJECTS, classifyB03Catalogue } from "./production-b03-catalogue-diagnostic.mjs";
+import { NAMED_SQL_FUNCTION_CONTRACTS } from "../rls/lib/named-sql-function-contracts.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const productionRole = (sql) => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_");
 const functionName = (identity) => /^app_rls\.([a-z0-9_]+)\(/.exec(identity)?.[1];
 const sqlFile = (relativePath, repositoryRoot) => fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
+
+// C02 session grants belong to its separately governed installation, never B03.
+export function selectB03GrantDelta(changedGrants) {
+  const sessionContract = NAMED_SQL_FUNCTION_CONTRACTS.find(({ name }) => name === "printing_connector_session");
+  const sessionGrants = new Set(sessionContract.security.ownerPrivileges
+    .filter(([table]) => table === "PrinterAgentSession")
+    .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
+  return changedGrants.filter((grant) => !sessionGrants.has(grant));
+}
 
 function functionStatement(source, name) {
   const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
@@ -65,7 +75,7 @@ export function buildB03DeltaPackage({ predecessor, successor, repositoryRoot = 
   }
   const oldGrants = new Set(execFileSync("git", ["show", `${predecessor.sourceSha}:scripts/rls/sql/generated/21-runtime-grants.sql`],
     { cwd: repositoryRoot, encoding: "utf8" }).split("\n").map(productionRole));
-  const newGrants = grants.split("\n").filter((line) => line.startsWith("GRANT ")).map(productionRole).filter((line) => !oldGrants.has(line));
+  const newGrants = selectB03GrantDelta(grants.split("\n").filter((line) => line.startsWith("GRANT ")).map(productionRole).filter((line) => !oldGrants.has(line)));
   assert.equal(newGrants.length, 5, "B03 table grant delta changed");
   assert.deepEqual(newGrants.map((line) => /^GRANT (INSERT|SELECT|UPDATE) \(.+\) ON TABLE public\."([^"]+)"/.exec(line)?.[2]).sort(),
     ["Licensee", "Notification", "SupportIssueReport", "SupportIssueReport", "SupportIssueReport"].sort());

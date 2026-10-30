@@ -7,6 +7,8 @@ process.env.PRINT_AGENT_REQUIRE_SIGNATURE = "true";
 process.env.PRINT_AGENT_REQUIRE_MTLS = "false";
 process.env.PRINT_AGENT_SESSION_MODE = "websocket";
 
+const { LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION: currentConnectorVersion } = require("../dist/services/localAgentProtocol");
+
 const distRoot = path.resolve(__dirname, "../dist");
 
 const mockModule = (relativePath, exportsValue) => {
@@ -111,7 +113,7 @@ const { openTrustedPrinterAgentSession, sessionClientMessageSchema } = require("
 
 const signedHello = (overrides = {}) => {
   const issuedAt = new Date().toISOString();
-  const connectorVersion = overrides.connectorVersion || "2026.6.26";
+  const connectorVersion = overrides.connectorVersion || currentConnectorVersion;
   const selectedPrinterId = overrides.selectedPrinterId || printer.nativePrinterId;
   const payload = buildPrinterAgentSessionPayload({
     messageType: "hello",
@@ -146,10 +148,10 @@ const signedHello = (overrides = {}) => {
 (async () => {
 	  const first = await openTrustedPrinterAgentSession(signedHello());
 	  assert.equal(first.registrationId, registration.id, "valid signed hello should open a trusted session");
-	  assert.equal(first.connectorVersion, "2026.6.26", "trusted session should retain connector version");
+	  assert.equal(first.connectorVersion, currentConnectorVersion, "trusted session should retain connector version");
 	  assert.equal(first.publicKeyFingerprint.length, 64, "trusted session should bind the enrolled public-key fingerprint");
 
-  const second = await openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.26" }));
+  const second = await openTrustedPrinterAgentSession(signedHello({ connectorVersion: currentConnectorVersion }));
   assert.equal(second.registrationId, registration.id, "second valid signed hello should open a trusted session");
   assert(
     supersedeCalls.some((call) => call.data.connectionState === "SUPERSEDED"),
@@ -157,7 +159,7 @@ const signedHello = (overrides = {}) => {
   );
 
 	  await assert.rejects(
-	    () => openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.16" })),
+	    () => openTrustedPrinterAgentSession(signedHello({ connectorVersion: "2026.6.26" })),
 	    (error) => error.statusCode === 426 && error.errorCode === "persistent_session_connector_update_required",
 	    "old connector version must not open persistent WebSocket mode"
 	  );
@@ -204,7 +206,7 @@ const signedHello = (overrides = {}) => {
       agentId: registration.agentId,
       deviceFingerprint: registration.deviceFingerprint,
       selectedPrinterId: printer.nativePrinterId,
-      connectorVersion: "2026.6.26",
+      connectorVersion: currentConnectorVersion,
     }).success,
     false,
     "post-hello frames must not include hello-only connector identity fields"

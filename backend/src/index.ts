@@ -28,6 +28,7 @@ import {
   validateQrSigningConfiguration,
 } from "./services/qrTokenService";
 import { validateArtifactSigningConfiguration } from "./services/artifactSigningService";
+import { assertPrintingSessionPrerequisite } from "./rls-waves/session-c/c02/printingSessionPrerequisite";
 
 dotenv.config();
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -360,6 +361,11 @@ const closeHttpServer = async () => {
 };
 
 const startServer = async () => {
+  if (process.env.NODE_ENV === "production") {
+    // Fail before listening or starting workers when the governed C02 boundary
+    // and its Prisma column are not installed in the live database.
+    await assertPrintingSessionPrerequisite(prisma);
+  }
   server = app.listen(PORT, () => {
     let qrSigningProfile: ReturnType<typeof getQrSigningProfile> | null = null;
     try {

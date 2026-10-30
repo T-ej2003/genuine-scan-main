@@ -24,6 +24,7 @@ for (const name of [
   "printing_test_label_job",
   "printing_connector_event",
   "printing_connector_identity",
+  "printing_connector_session",
   "printing_gateway_job",
   "printing_record_sample",
   "printing_release_batch",
@@ -42,7 +43,7 @@ assert.doesNotMatch(sql, /ORG_ADMIN|MANUFACTURER_USER|'MANUFACTURER'/);
 assert.doesNotMatch(sql, /UPDATE\s+public\."QRCode"\s+SET\s+code\b/i);
 assert.doesNotMatch(sql, /USING\s*\(\s*true\s*\)|WITH CHECK\s*\(\s*true\s*\)|BYPASSRLS/i);
 assert.doesNotMatch(rollback, /\bCASCADE\b/i);
-assert.equal([...rollback.matchAll(/^DROP POLICY IF EXISTS printing_lifecycle_/gm)].length, 40);
+assert.equal([...rollback.matchAll(/^DROP POLICY IF EXISTS printing_lifecycle_/gm)].length, 43);
 assert.doesNotMatch(contracts, /GRANT\s+(?:ALL|EXECUTE)\s+ON\s+ALL\s+FUNCTIONS/i);
 assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\('printing_batch_'/);
 assert.match(sql, /p\."licenseeId"=batch_row\."licenseeId"[\s\S]*p\."assignedUserId"=actor\."userId"/);

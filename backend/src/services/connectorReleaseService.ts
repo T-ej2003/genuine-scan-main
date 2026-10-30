@@ -58,7 +58,7 @@ const connectorPlatformSchema = z.object({
 
 const connectorReleaseSchema = z.object({
   version: z.string().min(3),
-  publishedAt: z.string().min(10),
+  publishedAt: z.string().min(10).nullable(),
   requiredProtocolVersion: z.string().min(3).optional(),
   minimumBuildVersion: z.string().min(3).optional(),
   transportDiagnosticsVersion: z.string().min(3).optional(),
