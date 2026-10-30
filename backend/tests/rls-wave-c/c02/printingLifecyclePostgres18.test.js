@@ -340,16 +340,23 @@ async function main() {
   assert.equal(renewalCount(), baselineRenewals + 1, "fresh session-bound attestation must not trigger another write");
   psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
     WHERE "printerRegistrationId"='${ids.registration}' AND metadata->>'sessionId'='${liveSession.id}'`);
-  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession, signedHeartbeat(3));
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(liveSession,
+    signedHeartbeat(3, liveSession, { buildVersion: "0.0.0", capabilities: { supportsPersistentPrintSession: false } }));
   assert.equal(renewalCount(), baselineRenewals + 2, "expired attestation must renew from a signed socket heartbeat");
   const renewedAttestation = json(admin, `SELECT jsonb_build_object(
     'sessionId',metadata->>'sessionId','messageSeq',metadata->>'messageSeq',
-    'selectedPrinterId',metadata->>'selectedPrinterId','signatureValid',"signatureValid",
+    'selectedPrinterId',metadata->>'selectedPrinterId',
+    'buildVersion',metadata->>'buildVersion',
+    'unsignedHealthVersion',metadata->'printerHealth'->>'buildVersion',
+    'capabilitiesPresent',metadata ? 'capabilities',
+    'signatureValid',"signatureValid",
     'trustValid',"trustValid",'fresh',"expiresAt">now())
     FROM public."PrinterAttestation" WHERE "printerRegistrationId"='${ids.registration}'
       AND metadata->>'source'='PERSISTENT_SESSION' ORDER BY "createdAt" DESC LIMIT 1`);
   assert.deepEqual(renewedAttestation, { sessionId: liveSession.id, messageSeq: "3",
-    selectedPrinterId: "printing-native", signatureValid: true, trustValid: true, fresh: true });
+    selectedPrinterId: "printing-native", buildVersion: connectorVersion,
+    unsignedHealthVersion: "0.0.0", capabilitiesPresent: false,
+    signatureValid: true, trustValid: true, fresh: true });
   const activeReadiness = json(app, `SELECT app_rls.printing_readiness(
     '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`);
   assert.equal(activeReadiness.eligibleForPrinting, true);

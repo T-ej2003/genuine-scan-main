@@ -2146,7 +2146,8 @@ BEGIN
       left(p_payload->>'selectedPrinterName',180),left(p_payload->>'connectorVersion',80),
       'CONNECTED',0,now_at,now_at,'epoch'::timestamp,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
-        'licenseeId',registration."licenseeId",'printerId',printer_row.id),now_at,now_at);
+        'licenseeId',registration."licenseeId",'printerId',printer_row.id,
+        'connectorVersion',left(p_payload->>'connectorVersion',80)),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
   END IF;
   SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
@@ -2261,6 +2262,7 @@ BEGIN
             'source','PERSISTENT_SESSION','sessionId',p_session_id,'messageSeq',next_seq,
             'signedMessageNonce',signed_nonce,'signatureHash',p_payload->>'signatureHash',
             'heartbeatIssuedAt',p_payload->>'heartbeatIssuedAt','connected',health_usable,
+            'buildVersion',session_row.metadata->>'connectorVersion',
             'printerHealth',p_payload->'printerHealth',
             'printerId',printer_row.id,'selectedPrinterId',selected,
             'agentId',registration."agentId",'deviceFingerprint',registration."deviceFingerprint",

@@ -224,6 +224,33 @@ const signedHeartbeatInput = (overrides = {}) => {
   assert.strictEqual(expiredAttestationWithSession.signedAttestation.fresh, false,
     "session heartbeat is not a replacement for the required printer attestation");
 
+  latestAttestation.expiresAt = new Date(Date.now() + 30_000);
+  latestAttestation.metadata.buildVersion = LOCAL_AGENT_MIN_VERSION_HINT;
+  delete latestAttestation.metadata.capabilities;
+  latestSession.lastSignedHeartbeatAt = new Date(Date.now() - 60_000);
+  const stalePersistentSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(stalePersistentSession.eligibleForPrinting, false);
+  assert.strictEqual(stalePersistentSession.persistentSessionUpdateRequired, false,
+    "a stale heartbeat from a current connector must not request a connector upgrade");
+  assert.match(stalePersistentSession.trustReason || "", /heartbeat.*stale/i);
+
+  latestSession = null;
+  const disconnectedPersistentSession = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(disconnectedPersistentSession.eligibleForPrinting, false);
+  assert.strictEqual(disconnectedPersistentSession.persistentSessionUpdateRequired, false,
+    "a disconnected current connector must not request a connector upgrade");
+  assert.strictEqual(disconnectedPersistentSession.connectorUpdateRequired, false);
+  assert.match(disconnectedPersistentSession.trustReason || "", /disconnected/i);
+
+  delete latestAttestation.metadata.buildVersion;
+  latestAttestation.metadata.printerHealth.buildVersion = LOCAL_AGENT_MIN_VERSION_HINT;
+  const untrustedVersion = await getPrinterConnectionStatusForUser(registration.userId);
+  assert.strictEqual(untrustedVersion.eligibleForPrinting, false);
+  assert.strictEqual(untrustedVersion.persistentSessionUpdateRequired, false,
+    "unsigned health metadata must not establish connector version or an upgrade requirement");
+  assert.strictEqual(untrustedVersion.persistentSessionCapable, false);
+  assert.match(untrustedVersion.trustReason || "", /version.*unverified/i);
+
   resetState();
   const oldConnector = await upsertPrinterConnectionHeartbeat(
     signedHeartbeatInput({ agentVersion: "2026.6.16", buildVersion: "2026.6.16" })

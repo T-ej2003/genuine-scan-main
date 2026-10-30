@@ -476,10 +476,16 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
         }
       : latestAttestation?.metadata || {}
   );
+  const attestationMetadata = latestAttestation?.metadata as Record<string, unknown> | undefined;
+  const persistentAttestation = attestationMetadata?.source === "PERSISTENT_SESSION";
+  const knownBuildVersion = payload.buildVersion || latestSession?.connectorVersion || null;
+  const persistentSessionCapable = isLocalAgentPersistentSessionCapable(knownBuildVersion);
+  const persistentSessionVersionUnverified = Boolean(persistentAttestation && !knownBuildVersion);
   const missingCapabilities = getMissingTransportDiagnosticsCapabilities(payload.capabilities);
   const connectorUpdateRequired = Boolean(
     payload.connected &&
       !sessionFresh &&
+      !persistentAttestation &&
       !isLocalAgentTransportDiagnosticsCurrent({
         protocolVersion: payload.protocolVersion,
         buildVersion: payload.buildVersion,
@@ -487,11 +493,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
         capabilities: payload.capabilities,
       })
   );
-  const persistentSessionCapable = isLocalAgentPersistentSessionCapable(payload.buildVersion || latestSession?.connectorVersion);
-  const persistentSessionUpdateRequired = Boolean(PERSISTENT_SESSION_REQUIRED && payload.connected && !persistentSessionCapable);
+  const persistentSessionUpdateRequired = Boolean(PERSISTENT_SESSION_REQUIRED && payload.connected && knownBuildVersion && !persistentSessionCapable);
   const attestedMs = latestAttestation?.attestedAt ? new Date(latestAttestation.attestedAt).getTime() : NaN;
   const ageMs = Number.isFinite(attestedMs) ? Math.max(0, nowMs - attestedMs) : null;
-  const stale = sessionFresh ? false : ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
+  const stale = sessionFresh ? false : persistentAttestation ? true : ageMs == null ? true : ageMs > HEARTBEAT_TTL_MS;
 
   const trustedRegistration = registration.trustStatus === PrinterTrustStatus.TRUSTED && !registration.revokedAt;
   const trustedAttestation = Boolean(latestAttestation?.trustValid && latestAttestation?.signatureValid);
@@ -507,8 +512,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       payload.connected &&
       persistentSessionCapable &&
       !persistentSessionUpdateRequired &&
-      !sessionFresh
+      !sessionFresh &&
+      !latestSession
   );
+  const persistentSessionHeartbeatStale = Boolean(PERSISTENT_SESSION_REQUIRED && latestSession && !sessionFresh);
   const helperConnection = PERSISTENT_SESSION_REQUIRED
     ? Boolean(payload.connected && sessionFresh && !connectorUpdateRequired && !persistentSessionUpdateRequired)
     : Boolean(payload.connected && (latestAttestation || sessionFresh) && !stale && !connectorUpdateRequired);
@@ -528,7 +535,6 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       registration.trustStatus !== PrinterTrustStatus.REVOKED
   );
   const connected = helperConnection;
-  const attestationMetadata = latestAttestation?.metadata as Record<string, unknown> | undefined;
   const signedHealth = attestationMetadata?.printerHealth as Record<string, unknown> | undefined;
   const healthObservedAt = typeof signedHealth?.observedAt === "string" ? Date.parse(signedHealth.observedAt) : NaN;
   const attestationHealthFresh = attestationMetadata?.source !== "PERSISTENT_SESSION"
@@ -550,6 +556,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
       ? "Printer registration revoked"
       : persistentSessionUpdateRequired
         ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionVersionUnverified
+        ? "Persistent printer session disconnected; connector version unverified."
+      : persistentSessionHeartbeatStale
+        ? "Persistent printer session heartbeat is stale."
       : persistentSessionDisconnected
         ? "Persistent printer session is disconnected."
       : connectorUpdateRequired
@@ -560,6 +570,10 @@ const buildStatus = (registration: PrinterRegistrationWithLatest | null | undefi
     ? null
     : persistentSessionUpdateRequired
       ? CONNECTOR_PERSISTENT_SESSION_UPDATE_REQUIRED_MESSAGE
+      : persistentSessionVersionUnverified
+        ? "Persistent printer session disconnected; connector version unverified."
+      : persistentSessionHeartbeatStale
+        ? "Persistent printer session heartbeat is stale."
       : persistentSessionDisconnected
         ? "Persistent printer session is disconnected."
       : connected && compatibilityMode

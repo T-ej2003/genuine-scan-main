@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='048773cfcf620a6025d81a824088150eb149c34fa9f0d487b780dd8b463ec710'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:048773cfcf620a6025d81a824088150eb149c34fa9f0d487b780dd8b463ec710'
+    AND source_contract_sha256='58b12b60175e14b38b1cc49b80223251c3d0e059c74b4c84d4d57e9cfa0c8a37'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:58b12b60175e14b38b1cc49b80223251c3d0e059c74b4c84d4d57e9cfa0c8a37'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:048773cfcf620a6025d81a824088150eb149c34fa9f0d487b780dd8b463ec710')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:58b12b60175e14b38b1cc49b80223251c3d0e059c74b4c84d4d57e9cfa0c8a37')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10205,7 +10205,8 @@ BEGIN
       left(p_payload->>'selectedPrinterName',180),left(p_payload->>'connectorVersion',80),
       'CONNECTED',0,now_at,now_at,'epoch'::timestamp,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
-        'licenseeId',registration."licenseeId",'printerId',printer_row.id),now_at,now_at);
+        'licenseeId',registration."licenseeId",'printerId',printer_row.id,
+        'connectorVersion',left(p_payload->>'connectorVersion',80)),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
   END IF;
   SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
@@ -10320,6 +10321,7 @@ BEGIN
             'source','PERSISTENT_SESSION','sessionId',p_session_id,'messageSeq',next_seq,
             'signedMessageNonce',signed_nonce,'signatureHash',p_payload->>'signatureHash',
             'heartbeatIssuedAt',p_payload->>'heartbeatIssuedAt','connected',health_usable,
+            'buildVersion',session_row.metadata->>'connectorVersion',
             'printerHealth',p_payload->'printerHealth',
             'printerId',printer_row.id,'selectedPrinterId',selected,
             'agentId',registration."agentId",'deviceFingerprint',registration."deviceFingerprint",
