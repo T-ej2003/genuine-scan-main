@@ -430,7 +430,13 @@ export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreco
         && expectedResourcePreconditionAddresses.includes(address) && check.status === "pass"
         && instances.length === 1 && instance?.status === "pass"
         && Object.keys(instance).length === 1;
-      const instanceAddress = b03AggregatePass ? address : refreshCheckAddress(instance?.address).address;
+      const b03CountedPass = category === "resource" && address === "aws_ecs_task_definition.b03"
+        && expectedResourcePreconditionAddresses.includes(address) && check.status === "pass"
+        && instances.length === 1 && instance?.status === "pass"
+        && instance.address?.instance_key === 0
+        && instance.address?.to_display === "aws_ecs_task_definition.b03[0]"
+        && Object.keys(instance.address).sort().join(",") === "instance_key,to_display";
+      const instanceAddress = b03AggregatePass || b03CountedPass ? address : refreshCheckAddress(instance?.address).address;
       const problems = instance?.problems;
       normalizedInstances.push({ address: instanceAddress, status: instance?.status });
       const malformedInstance = !instance || typeof instance !== "object" || Array.isArray(instance) || !instanceAddress || instanceAddress !== address || (problems !== undefined && !Array.isArray(problems));

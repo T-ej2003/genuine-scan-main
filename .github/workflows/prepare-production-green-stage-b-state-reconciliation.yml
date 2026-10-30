@@ -9,7 +9,7 @@ on:
         required: true
         type: choice
         default: HISTORICAL_TEN_ADDRESS
-        options: [HISTORICAL_TEN_ADDRESS, OUTPUT_ONLY]
+        options: [HISTORICAL_TEN_ADDRESS, OUTPUT_ONLY, WORKER_SMTP_POLICY_REFLECTION]
       ticket_id: { description: Externally issued change-ticket identifier, required: true, type: string }
       prerequisite_bundle_artifact_id: { description: Exact canonical prerequisite artifact ID, required: true, type: string }
       prerequisite_bundle_artifact_digest: { description: Exact canonical prerequisite artifact digest, required: true, type: string }

@@ -1,3 +1,4 @@
+import { WORKER_REFLECTION, assertWorkerReflectionPlan, createWorkerReflectionPreparation, assertWorkerReflectionPreparation, createWorkerReflectionAuthorization, assertWorkerReflectionAuthorization, executeWorkerReflection } from "./stage-b-worker-policy-reflection.mjs";
 import crypto from "node:crypto";
 import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
@@ -61,6 +62,7 @@ export const STAGE_B_STATE_RECONCILIATION = Object.freeze({
 export const STAGE_B_STATE_RECONCILIATION_MODES = Object.freeze({
   HISTORICAL_TEN_ADDRESS: "HISTORICAL_TEN_ADDRESS",
   OUTPUT_ONLY: "OUTPUT_ONLY",
+  WORKER_SMTP_POLICY_REFLECTION: WORKER_REFLECTION.mode,
 });
 
 const addressSet = new Set(STAGE_B_STATE_RECONCILIATION.addresses);
@@ -256,7 +258,15 @@ function assertPendingStageBConvergence(normalPlan, refreshPlan, { sourceSha, te
   return semantics;
 }
 
+function validateWorkerApproval(approval, sourceSha, now) {
+  assertProductionEnvironmentApprovalIdentity(approval, { sourceSha, repository: STAGE_B_STATE_RECONCILIATION.repository });
+  assertProductionEnvironmentApprovalFreshness(approval, { now });
+  if (approval.workflowRef !== workflowRef(STAGE_B_STATE_RECONCILIATION.authorizationWorkflowPath)) throw new Error("Worker reflection requires the dedicated production environment authorization.");
+  return assertProductionEnvironmentActualReviewer(approval, { sourceSha, repository: STAGE_B_STATE_RECONCILIATION.repository, executionActor: approval.executionActor });
+}
+
 export function assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentity, tfvarsSha256, bindingSha256, bindingReport, expectedPolicyValueHashes, reconciliationMode = STAGE_B_STATE_RECONCILIATION_MODES.HISTORICAL_TEN_ADDRESS, outputOnlyEvidence } = {}) {
+  if (reconciliationMode === WORKER_REFLECTION.mode) return assertWorkerReflectionPlan(plan, arguments[1]);
   if (!SHA40.test(sourceSha || "") || !SHA256.test(tfvarsSha256 || "") || !SHA256.test(bindingSha256 || "")) throw new Error("Stage B state reconciliation plan bindings are malformed.");
   if (reconciliationMode === STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) {
     assertOutputOnlyStateIdentity(stateIdentity);
@@ -282,6 +292,7 @@ export function assertExactStageBRefreshOnlyPlan(plan, { sourceSha, stateIdentit
 
 export function assertStageBStateReconciliationSourceAlignment(refreshPlan, normalPlan, options = {}) {
   const semantics = assertExactStageBRefreshOnlyPlan(refreshPlan, options);
+  if (options.reconciliationMode === WORKER_REFLECTION.mode) return { reviewedPolicyValueHashes: {}, pendingConvergenceSemantics: null, planSemantics: semantics };
   if (options.reconciliationMode === STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) return Object.freeze({ reviewedPolicyValueHashes: {}, pendingConvergenceSemantics: null, planSemantics: semantics });
   return Object.freeze({ reviewedPolicyValueHashes: policyValueHashes(refreshPlan), pendingConvergenceSemantics: assertPendingStageBConvergence(normalPlan, refreshPlan, options) });
 }
@@ -292,6 +303,7 @@ export function assertCleanStageBRefreshClosurePlan(plan, { sourceSha } = {}) {
 }
 
 export function createStageBStateReconciliationPreparation({ sourceSha, ticketId, stateIdentity, tfvarsSha256, bindingSha256, bindingReport, terraformConfiguration, preflightSha256, runtimeTfvarsSha256, runtimeBindingSha256, runtimeMaterializationSha256, relocationContractSha256, prerequisiteManifestSha256, brokerPackageSha256, brokerManifestSha256, stageAInputSha256, stageAStateBackupSha256, prerequisiteProducerWorkflowRunId, prerequisiteProducerWorkflowRunAttempt, prerequisiteBundleArtifactId, prerequisiteBundleArtifactDigest, planBytes, planJson, normalPlan, reconciliationMode = STAGE_B_STATE_RECONCILIATION_MODES.HISTORICAL_TEN_ADDRESS, outputOnlyEvidence, createdAt = new Date().toISOString() } = {}) {
+  if (reconciliationMode === WORKER_REFLECTION.mode) return createWorkerReflectionPreparation(arguments[0]);
   if (!TICKET.test(ticketId || "") || ![preflightSha256, runtimeTfvarsSha256, runtimeBindingSha256, runtimeMaterializationSha256, relocationContractSha256, prerequisiteManifestSha256, brokerPackageSha256, brokerManifestSha256, stageAInputSha256, stageAStateBackupSha256].every((value) => SHA256.test(value || "")) || !/^\d+$/.test(String(prerequisiteProducerWorkflowRunId)) || String(prerequisiteProducerWorkflowRunAttempt) !== "1" || !/^\d+$/.test(String(prerequisiteBundleArtifactId)) || !/^sha256:[a-f0-9]{64}$/.test(prerequisiteBundleArtifactDigest || "") || !Buffer.isBuffer(planBytes) || !planBytes.length) throw new Error("Stage B state reconciliation preparation inputs are invalid.");
   const options = { sourceSha, stateIdentity, tfvarsSha256: runtimeTfvarsSha256, bindingSha256: runtimeBindingSha256, bindingReport, terraformConfiguration, reconciliationMode, outputOnlyEvidence };
   const semantics = assertExactStageBRefreshOnlyPlan(planJson, options);
@@ -306,6 +318,7 @@ export function createStageBStateReconciliationPreparation({ sourceSha, ticketId
 }
 
 export function assertStageBStateReconciliationPreparation(value, { sourceSha, now = new Date() } = {}) {
+  if (value?.schemaVersion === 3 || value?.reconciliationMode === WORKER_REFLECTION.mode) return assertWorkerReflectionPreparation(value, { sourceSha, now });
   if (value?.schemaVersion === 2 || value?.reconciliationMode !== undefined) {
     const fields = ["schemaVersion", "kind", "operation", "sourceSha", "ticketId", "terraformRoot", "predecessorState", "tfvarsSha256", "bindingSha256", "preflightSha256", "runtimeTfvarsSha256", "runtimeBindingSha256", "runtimeMaterializationSha256", "relocationContractSha256", "prerequisiteManifestSha256", "brokerPackageSha256", "brokerManifestSha256", "stageAInputSha256", "stageAStateBackupSha256", "prerequisiteProducerWorkflowRunId", "prerequisiteProducerWorkflowRunAttempt", "prerequisiteBundleArtifactId", "prerequisiteBundleArtifactDigest", "refreshOnlyPlanSha256", "refreshOnlyPlanJsonSha256", "boundImagesTransition", "planSemantics", "reconciliationMode", "expectedSuccessorState", "outputAllowlist", "outputOnlyEvidence", "createdAt", "expiresAt", "preparationSha256"];
     exactKeys(value, fields, "Stage B output-only reconciliation preparation");
@@ -326,6 +339,7 @@ export function assertStageBStateReconciliationPreparation(value, { sourceSha, n
 }
 
 export function createStageBStateReconciliationAuthorization({ preparation, approval, now = new Date() } = {}) {
+  if (preparation?.reconciliationMode === WORKER_REFLECTION.mode) return createWorkerReflectionAuthorization(arguments[0], validateWorkerApproval);
   const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha: preparation?.sourceSha, now });
   assertProductionEnvironmentApprovalIdentity(approval, { sourceSha: prepared.sourceSha, repository: STAGE_B_STATE_RECONCILIATION.repository }); assertProductionEnvironmentApprovalFreshness(approval, { now });
   if (approval.workflowRef !== workflowRef(STAGE_B_STATE_RECONCILIATION.authorizationWorkflowPath)) throw new Error("Stage B state reconciliation requires its dedicated protected-environment workflow.");
@@ -338,6 +352,7 @@ export function createStageBStateReconciliationAuthorization({ preparation, appr
 }
 
 export function assertStageBStateReconciliationAuthorization(value, { preparation, sourceSha, now = new Date() } = {}) {
+  if (preparation?.reconciliationMode === WORKER_REFLECTION.mode) return assertWorkerReflectionAuthorization(value, { preparation, sourceSha, now }, validateWorkerApproval);
   const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now });
   if (prepared.reconciliationMode === STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) {
     const fields = ["schemaVersion", "kind", "operation", "sourceSha", "ticketId", "preparationSha256", "stateLineage", "preOperationStateSerial", "predecessorStateSha256", "refreshOnlyPlanSha256", "boundImagesTransitionSha256", "tfvarsSha256", "bindingSha256", "preflightSha256", "runtimeTfvarsSha256", "runtimeBindingSha256", "runtimeMaterializationSha256", "relocationContractSha256", "prerequisiteManifestSha256", "brokerPackageSha256", "brokerManifestSha256", "stageAInputSha256", "stageAStateBackupSha256", "prerequisiteProducerWorkflowRunId", "prerequisiteProducerWorkflowRunAttempt", "prerequisiteBundleArtifactId", "prerequisiteBundleArtifactDigest", "reconciliationMode", "expectedPostOperationStateSerial", "outputAllowlist", "registeredSuccessorEvidenceSha256", "approvedBy", "protectedEnvironmentApprovalEvidence", "protectedEnvironmentApprovalEvidenceSha256", "authorizationSha256"];
@@ -374,6 +389,7 @@ export function assertStageBOutputOnlyReconciliationResult(value, { preparation,
 }
 
 export function executeStageBStateReconciliation({ sourceSha, preparation, authorization, bindings, terraformConfiguration, planBytes, planJson, readState, readOutputOnlyEvidence, applyRefreshOnlyPlan, renderPreApplyNormalPlan, renderRefreshClosurePlan, renderNormalClosurePlan, reauthenticateSource, now = new Date() } = {}) {
+  if (preparation?.reconciliationMode === WORKER_REFLECTION.mode) return executeWorkerReflection(arguments[0], validateWorkerApproval);
   const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now });
   const outputOnly = prepared.reconciliationMode === STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY;
   const requiredAdapters = outputOnly ? [readOutputOnlyEvidence, applyRefreshOnlyPlan, renderRefreshClosurePlan, reauthenticateSource] : [readState, applyRefreshOnlyPlan, renderPreApplyNormalPlan, renderRefreshClosurePlan, renderNormalClosurePlan, reauthenticateSource];
