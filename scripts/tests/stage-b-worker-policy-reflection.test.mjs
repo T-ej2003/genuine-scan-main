@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
+import { WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionImageArgs, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
 import { STAGE_B_EXPECTED_CHECK_INVENTORY } from '../aws/stage-b-refresh-contract.mjs';
 import { createStageBStateReconciliationPreparation as prepare, createStageBStateReconciliationAuthorization as authorize, executeStageBStateReconciliation as execute, assertStageBStateReconciliationAuthorization as verify, assertExactStageBRefreshOnlyPlan as verifyPlan, STAGE_B_STATE_RECONCILIATION as contract } from '../aws/production-green-stage-b-state-reconciliation.mjs';
 import { createProductionEnvironmentApprovalEvidence } from '../aws/production-github-environment-approval.mjs';
 const sourceSha = 'a'.repeat(40), now = new Date('2026-10-30T01:00:00.000Z'), digest = 'b'.repeat(64), policy = JSON.parse(fs.readFileSync('scripts/tests/fixtures/worker-smtp-policy-reflection.json'));
-const state = serial => ({ lineage: C.lineage, serial, resources: [{ mode: 'managed', type: 'aws_iam_role', name: 'execution', instances: [{ index_key: 'worker', attributes: { name: C.role, arn: `arn:aws:iam::368992683803:role/${C.role}`, inline_policy: structuredClone(serial === 148 ? policy.before : policy.after) } }] }], outputs: { keep: { value: 'unchanged' } } });
+const retainedImages = Object.fromEntries(['backend','canary','executor','read_only_canary','worker'].map(k=>[k,`368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-${k==='worker'?'worker':'backend'}@sha256:${'a'.repeat(64)}`]));
+const state = serial => ({ lineage: C.lineage, serial, resources: [{ mode: 'managed', type: 'aws_iam_role', name: 'execution', instances: [{ index_key: 'worker', attributes: { name: C.role, arn: `arn:aws:iam::368992683803:role/${C.role}`, inline_policy: structuredClone(serial === 148 ? policy.before : policy.after) } }] }], outputs: { bound_images: {value:retainedImages}, keep: { value: 'unchanged' } } });
 const evidence = (serial = 148) => createWorkerReflectionEvidence({ stateBytes: Buffer.from(JSON.stringify(state(serial))), livePolicies: policy.after, sourceSha, observedAt: now.toISOString() });
 const checks = () => STAGE_B_EXPECTED_CHECK_INVENTORY.map(address => ({ address, status: 'pass', instances: [{ address, status: 'pass' }] }));
-const plan = () => ({ format_version: '1.2', terraform_version: '1.15.8', errored: false, complete: true, applyable: true, variables: { tooling_sha: { value: sourceSha } }, resource_changes: [], resource_drift: [{ address: C.address, type: 'aws_iam_role', mode: 'managed', change: { actions: ['update'], before: state(148).resources[0].instances[0].attributes, after: state(149).resources[0].instances[0].attributes } }], output_changes: {}, checks: checks() });
+const plan = () => ({ format_version: '1.2', terraform_version: '1.15.8', errored: false, complete: true, applyable: true, variables: { tooling_sha: { value: sourceSha }, ...Object.fromEntries(Object.entries(retainedImages).map(([k,v])=>[k+'_image',{value:v}])) }, resource_changes: [], resource_drift: [{ address: C.address, type: 'aws_iam_role', mode: 'managed', change: { actions: ['update'], before: state(148).resources[0].instances[0].attributes, after: state(149).resources[0].instances[0].attributes } }], output_changes: {}, checks: checks() });
 const keys = ['tfvarsSha256', 'bindingSha256', 'preflightSha256', 'runtimeTfvarsSha256', 'runtimeBindingSha256', 'runtimeMaterializationSha256', 'relocationContractSha256', 'prerequisiteManifestSha256', 'brokerPackageSha256', 'brokerManifestSha256', 'stageAInputSha256', 'stageAStateBackupSha256'];
 const bindings = () => Object.fromEntries(keys.map(k => [k, digest]));
 const input = () => ({ ...bindings(), prerequisiteProducerWorkflowRunId: '88', prerequisiteProducerWorkflowRunAttempt: '1', prerequisiteBundleArtifactId: '89', prerequisiteBundleArtifactDigest: 'sha256:' + digest, sourceSha, ticketId: 'CHG-20261028-001', reconciliationMode: C.mode, stateIdentity: evidence().stateIdentity, workerEvidence: evidence(), planBytes: Buffer.from('reviewed-refresh-only-plan'), planJson: plan(), createdAt: now.toISOString() });
@@ -34,4 +35,10 @@ test('postcommit verification rejects unrelated state changes without another ap
 test('unknown successor values and disguised output writes fail closed', () => {
     const i = input(); i.planJson.resource_drift[0].change.after_unknown = {inline_policy: true}; assert.throws(() => prepare(i));
     const j = input(); j.planJson.output_changes = {bound_images: {actions: ['no-op'], before: 'old', after: 'new'}}; assert.throws(() => prepare(j));
+});
+
+test('state-only image retention rejects substitution and unsafe registry input', () => {
+    const e=evidence(); assert.equal(workerReflectionImageArgs(e).length,5);
+    const i=input(); i.planJson.variables.backend_image.value=retainedImages.worker; assert.throws(()=>prepare(i));
+    assert.throws(()=>workerReflectionImageArgs({...e,boundImages:{...e.boundImages,backend:'evil.example/image@sha256:'+digest}}));
 });

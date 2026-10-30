@@ -19,6 +19,15 @@ function assertPolicies(list, reflected) {
         equal(all.find(p => p.name === WORKER_REFLECTION.policyName)?.policy, smtp);
     return all;
 }
+export function workerReflectionImageArgs(evidence) {
+    const images = evidence.boundImages;
+    assert.deepEqual(Object.keys(images).sort(), ['backend', 'canary', 'executor', 'read_only_canary', 'worker']);
+    return Object.entries(images).map(([key, image]) => {
+        const repo = key === 'worker' ? 'worker' : 'backend';
+        assert.match(image, new RegExp(`^368992683803\\.dkr\\.ecr\\.eu-west-2\\.amazonaws\\.com/mscqr-${repo}@sha256:[a-f0-9]{64}$`));
+        return `-var=${key}_image=${image}`;
+    });
+}
 export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourceSha, observedAt = new Date().toISOString() }) {
     assert.match(sourceSha, /^[a-f0-9]{40}$/);
     assert.equal(hash(fs.readFileSync(new URL('../../infra/aws/terraform/production-support-email-worker/main.tf', import.meta.url))), WORKER_REFLECTION.sourceHash, 'Reviewed worker source changed');
@@ -37,11 +46,11 @@ export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourc
     const invariant = structuredClone(state);
     delete invariant.serial;
     invariant.resources.filter(r => r.mode === 'managed' && r.type === 'aws_iam_role' && r.name === 'execution').flatMap(r => r.instances).filter(i => i.index_key === 'worker' && !i.deposed).forEach(i => { delete i.attributes.inline_policy; });
-    const body = { sourceSha, observedAt, stateIdentity: { lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, invariantStateSha256: hash(invariant), roleStateSha256: hash(a), sourcePolicySha256: hash(smtp), livePolicies: live };
+    const body = { sourceSha, observedAt, stateIdentity: { lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, boundImages: state.outputs.bound_images.value, invariantStateSha256: hash(invariant), roleStateSha256: hash(a), sourcePolicySha256: hash(smtp), livePolicies: live };
     return { ...body, evidenceSha256: hash(body) };
 }
 export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() } = {}) {
-    assert.deepEqual(Object.keys(e).sort(), ['sourceSha', 'observedAt', 'stateIdentity', 'invariantStateSha256', 'roleStateSha256', 'sourcePolicySha256', 'livePolicies', 'evidenceSha256'].sort());
+    assert.deepEqual(Object.keys(e).sort(), ['sourceSha', 'observedAt', 'stateIdentity', 'invariantStateSha256', 'roleStateSha256', 'boundImages', 'sourcePolicySha256', 'livePolicies', 'evidenceSha256'].sort());
     const { evidenceSha256, ...body } = e;
     assert.equal(evidenceSha256, hash(body));
     assert.equal(e.sourceSha, sourceSha);
@@ -52,6 +61,7 @@ export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() 
     assert.ok([148, 149].includes(e.stateIdentity.serial));
     for (const h of [e.invariantStateSha256, e.roleStateSha256, e.stateIdentity.stateSha256])
         assert.match(h, /^[a-f0-9]{64}$/);
+    workerReflectionImageArgs(e);
     const age = now.getTime() - Date.parse(e.observedAt);
     assert.ok(age >= 0 && age <= 30 * 60 * 1000, 'Worker evidence expired');
     return e;
@@ -66,6 +76,7 @@ export function assertWorkerReflectionPlan(plan, { sourceSha, stateIdentity, wor
     assert.equal(plan.complete, true);
     assert.equal(plan.applyable, true);
     assert.equal(plan.variables?.tooling_sha?.value, sourceSha);
+    for (const [key, image] of Object.entries(e.boundImages)) assert.equal(plan.variables?.[`${key}_image`]?.value, image, 'State-only image retention mismatch');
     assert.equal((plan.resource_changes || []).length, 0);
     assert.equal(plan.resource_drift?.length, 1);
     assert.ok(inspectStageBRefreshChecks({ checks: plan.checks }).valid);

@@ -195,11 +195,13 @@ secret-read policy already managed by the worker root. It grants no permissions
 and never calls IAM mutation APIs. Historical ten-address and output-only
 approvals cannot authorize this mode.
 
-Use current-source canonical prerequisites with authenticated reusable image
-bindings equal to the existing state outputs. This reconciliation rejects **all
-output changes**, including `bound_images`; image rotation and B03 registration
-are later operations. Do not use new-image tfvars merely to obtain a passing
-refresh plan. Select the mode in the existing preparation workflow, inspect its
+Use current-source canonical prerequisites. Only this state-only mode overrides
+the five image variables with the exact authenticated state output values during
+refresh-only planning and closure checks. The approval binds those retained
+values, and the plan verifier independently checks every variable. This does not
+authorize image reuse for deployment. The reconciliation rejects **all output
+changes**, including `bound_images`; image rotation and B03 registration remain
+later operations. Select the mode in the existing preparation workflow, inspect its
 saved refresh-only plan, then obtain a fresh approval through the existing
 state-reconciliation authorization workflow before execution.
 
