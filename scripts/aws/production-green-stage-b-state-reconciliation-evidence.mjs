@@ -1,4 +1,6 @@
 import crypto from "node:crypto";
+import assert from "node:assert/strict";
+import { WORKER_COMMITTED, committedWorkerExecutionReference, workerReflectionHash } from "./stage-b-worker-policy-reflection.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,9 +19,9 @@ const fileBytes = (run, args, options) => Buffer.from(run("gh", args, options));
 const json = (bytes, label) => { try { return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { throw new Error(`${label} is malformed.`); } };
 const timestamp = (value, label) => { const date = new Date(value); const normalized = Number.isFinite(date.getTime()) ? date.toISOString() : ""; if (typeof value !== "string" || (normalized !== value && normalized.replace(".000Z", "Z") !== value)) throw new Error(`${label} is invalid.`); return date; };
 
-function assertRun(run, { runId, attempt, workflowPath, sourceSha, completedBefore } = {}) {
+function assertRun(run, { runId, attempt, workflowPath, sourceSha, completedBefore, conclusion = "success" } = {}) {
   if (!RUN_ID.test(String(runId || "")) || String(run.id) !== String(runId) || String(run.run_attempt) !== String(attempt) || String(attempt) !== "1"
-    || run.path !== workflowPath || run.head_sha !== sourceSha || run.event !== "workflow_dispatch" || run.status !== "completed" || run.conclusion !== "success"
+    || run.path !== workflowPath || run.head_sha !== sourceSha || run.event !== "workflow_dispatch" || run.status !== "completed" || run.conclusion !== conclusion
     || !Number.isSafeInteger(run.repository?.id) || run.repository?.full_name !== CONTRACT.repository) throw new Error("Stage B reconciliation workflow provenance is invalid.");
   const createdAt = timestamp(run.created_at, "Stage B workflow creation time");
   const startedAt = timestamp(run.run_started_at, "Stage B workflow start time");
@@ -46,7 +48,7 @@ function listZip(run, archivePath) { return String(run("unzip", ["-Z1", archiveP
 function unzip(run, archivePath, member) { return Buffer.from(run("unzip", ["-p", archivePath, member], { encoding: null, maxBuffer: 64 * 1024 * 1024 })); }
 function deepFreeze(value) { if (!value || typeof value !== "object" || Object.isFrozen(value)) return value; Object.values(value).forEach(deepFreeze); return Object.freeze(value); }
 
-export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, privateEvidenceRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
+export function resolveStageBStateReconciliationEvidence({ currentProtectedMainSha, preparationRunId, preparationRunAttempt = "1", authorizationRunId, authorizationRunAttempt = "1", executionRunId, executionRunAttempt = "1", expectedResultSha256, expectedResultArtifactId, expectedResultArtifactDigest, committedWorkerRecovery = false, githubRun = createProductionGithubCommandRunner(), unzipRun = localUnzip, privateEvidenceRun, gitRun = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }) } = {}) {
   if (!/^[a-f0-9]{40}$/.test(currentProtectedMainSha || "") || !HEX.test(expectedResultSha256 || "") || !/^sha256:[a-f0-9]{64}$/.test(expectedResultArtifactDigest || "")) throw new Error("Stage B reconciliation evidence references are incomplete.");
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-stage-b-reconciliation-proof-")); fs.chmodSync(directory, 0o700);
   try {
@@ -72,7 +74,7 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     if (sha256(preparationBytes) !== sha256(Buffer.from(`${JSON.stringify(preparation, null, 2)}\n`)) || sha256(planBytes) !== preparation.refreshOnlyPlanSha256) throw new Error("Stage B preparation or saved-plan bytes changed.");
     const sourceSha = preparation.sourceSha;
     const prepared = assertStageBStateReconciliationPreparation(preparation, { sourceSha, now: preparationMeta.completedAt });
-    if (prepared.reconciliationMode !== STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) throw new Error("FinalApplyWrite successor composition requires OUTPUT_ONLY reconciliation.");
+    if (!committedWorkerRecovery && prepared.reconciliationMode !== STAGE_B_STATE_RECONCILIATION_MODES.OUTPUT_ONLY) throw new Error("FinalApplyWrite successor composition requires OUTPUT_ONLY reconciliation.");
     if (gitRun(["merge-base", "--is-ancestor", sourceSha, currentProtectedMainSha]) !== "") throw new Error("Stage B reconciliation source is not an ancestor of exact protected main.");
 
     const authorizationRun = runJson(githubRun, authorizationRunId);
@@ -86,7 +88,7 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     if (authorization.protectedEnvironmentApprovalEvidence?.workflowRunId !== String(authorizationRunId) || authorization.protectedEnvironmentApprovalEvidence?.workflowRunAttempt !== String(authorizationRunAttempt)) throw new Error("Stage B environment approval is not bound to the authenticated authorization run.");
 
     const executionRun = runJson(githubRun, executionRunId);
-    const executionMeta = assertRun(executionRun, { runId: executionRunId, attempt: executionRunAttempt, workflowPath: CONTRACT.executionWorkflowPath, sourceSha });
+    const executionMeta = assertRun(executionRun, { runId: executionRunId, attempt: executionRunAttempt, workflowPath: CONTRACT.executionWorkflowPath, sourceSha, conclusion: committedWorkerRecovery ? "failure" : "success" });
     if (authorizationRun.repository.id !== executionRun.repository?.id || authorizationMeta.completedAt > executionMeta.startedAt) throw new Error("Stage B authorization and execution workflow order/provenance is invalid.");
     const checkedAuthorization = assertStageBStateReconciliationAuthorization(authorization, { preparation: prepared, sourceSha, now: executionMeta.startedAt });
     const resultArtifact = exactArtifact(githubRun, { runId: executionRunId, runAttempt: executionRunAttempt, sourceSha, runMetadata: executionMeta, name: "production-green-stage-b-state-reconciliation-result", expectedId: expectedResultArtifactId, expectedDigest: expectedResultArtifactDigest });
@@ -95,6 +97,13 @@ export function resolveStageBStateReconciliationEvidence({ currentProtectedMainS
     const resultBytes = unzip(unzipRun, resultArchive, "result.json");
     if (sha256(resultBytes) !== expectedResultSha256) throw new Error("Stage B reconciliation result byte SHA256 is invalid.");
     const result = json(resultBytes, "Stage B reconciliation result");
+    if (committedWorkerRecovery) {
+      assertCommittedWorkerHistory({ preparation: prepared, authorization: checkedAuthorization, result,
+        preparationRunId, authorizationRunId, executionRunId, expectedResultArtifactId, expectedResultArtifactDigest, expectedResultSha256 });
+      const proof = deepFreeze(committedWorkerExecutionReference(currentProtectedMainSha));
+      authenticated.add(proof);
+      return proof;
+    }
     const proof = assertStageBOutputOnlyReconciliationResult(result, { preparation: prepared, authorization: checkedAuthorization, sourceSha, now: executionMeta.startedAt });
     if (preparationRun.repository.id !== executionRun.repository?.id || prepArtifact.metadata.workflow_run?.head_sha !== sourceSha) throw new Error("Stage B reconciliation evidence crosses repository/source identities.");
     const authenticatedProof = deepFreeze({ ...proof, artifactProvenance: { preparationRunId: String(preparationRunId), authorizationRunId: String(authorizationRunId), executionRunId: String(executionRunId), resultArtifactId: String(resultArtifact.metadata.id), resultArtifactDigest: resultArtifact.metadata.digest, resultByteSha256: expectedResultSha256, currentProtectedMainSha } });
@@ -111,4 +120,38 @@ export function assertAuthenticatedStageBOutputOnlySuccessor(proof, { currentPro
     || !equal(prepared.boundImagesTransition.before, historicalBoundImages) || !equal(prepared.boundImagesTransition.after, expectedBoundImages)
     || !equal(prepared.outputOnlyEvidence.boundImages, historicalBoundImages)) throw new Error("Stage B reconciliation result does not authenticate this exact historical-to-live successor chain.");
   return Object.freeze({ sourceSha: proof.sourceSha, predecessorState: result.predecessorState, successorState: result.successorState, savedPlanSha256: proof.savedPlanSha256, boundImagesTransitionSha256: result.boundImagesTransitionSha256, resultByteSha256: proof.artifactProvenance.resultByteSha256 });
+}
+
+// Historical failure is evidence of a committed write, never fresh execution authority.
+export function resolveCommittedWorkerReflectionEvidence(options) {
+  return resolveStageBStateReconciliationEvidence({ ...options,
+    preparationRunId: WORKER_COMMITTED.preparationRunId, authorizationRunId: WORKER_COMMITTED.authorizationRunId,
+    executionRunId: WORKER_COMMITTED.executionRunId, expectedResultSha256: WORKER_COMMITTED.resultByteSha256,
+    expectedResultArtifactId: WORKER_COMMITTED.resultArtifactId, expectedResultArtifactDigest: WORKER_COMMITTED.resultArtifactDigest,
+    committedWorkerRecovery: true });
+}
+export function assertAuthenticatedCommittedWorkerEvidence(proof, sourceSha) {
+  assert.ok(authenticated.has(proof), 'Committed worker evidence was not authenticated from workflow artifacts');
+  assert.equal(workerReflectionHash(proof), workerReflectionHash(committedWorkerExecutionReference(sourceSha)));
+  return proof;
+}
+
+export function assertCommittedWorkerHistory({ preparation, authorization, result, preparationRunId, authorizationRunId, executionRunId, expectedResultArtifactId, expectedResultArtifactDigest, expectedResultSha256 }) {
+  assert.equal(preparationRunId, WORKER_COMMITTED.preparationRunId);
+  assert.equal(authorizationRunId, WORKER_COMMITTED.authorizationRunId);
+  assert.equal(executionRunId, WORKER_COMMITTED.executionRunId);
+  assert.equal(preparation.sourceSha, WORKER_COMMITTED.sourceSha);
+  assert.equal(preparation.reconciliationMode, STAGE_B_STATE_RECONCILIATION_MODES.WORKER_SMTP_POLICY_REFLECTION);
+  assert.deepEqual(preparation.predecessorState, WORKER_COMMITTED.predecessorState);
+  assert.equal(preparation.refreshOnlyPlanSha256, WORKER_COMMITTED.planSha256);
+  assert.equal(preparation.refreshOnlyPlanJsonSha256, WORKER_COMMITTED.planJsonSha256);
+  assert.equal(expectedResultArtifactId, WORKER_COMMITTED.resultArtifactId);
+  assert.equal(expectedResultArtifactDigest, WORKER_COMMITTED.resultArtifactDigest);
+  assert.equal(expectedResultSha256, WORKER_COMMITTED.resultByteSha256);
+  assert.equal(authorization.authorizationSha256, WORKER_COMMITTED.authorizationSha256);
+  assert.deepEqual(result, { schemaVersion: 3, kind: 'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT',
+    reconciliationMode: STAGE_B_STATE_RECONCILIATION_MODES.WORKER_SMTP_POLICY_REFLECTION,
+    status: 'state-write-completed-postverify-failed', sourceSha: WORKER_COMMITTED.sourceSha,
+    authorizationSha256: WORKER_COMMITTED.authorizationSha256, predecessorState: WORKER_COMMITTED.predecessorState,
+    successorState: null, successorEvidence: null, remoteResourceMutationCount: 0, terraformStateMutationCount: 1 });
 }

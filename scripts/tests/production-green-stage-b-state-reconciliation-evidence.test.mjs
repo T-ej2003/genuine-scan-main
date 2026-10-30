@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { WORKER_COMMITTED as COMMITTED } from "../aws/stage-b-worker-policy-reflection.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -11,7 +12,7 @@ import {brokerDigest} from "../aws/stage-b-staged-broker-contract.mjs";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { assertHistoricalFinalApplyWriteV16Successor, HISTORICAL_FINAL_APPLY_WRITE_V16, readHistoricalFinalApplyWriteV16Artifacts, buildNormalActivationPolicy, NORMAL_ACTIVATION } from "../aws/production-normal-backend-activation.mjs";
 import { stageBBoundImagesFromBindingReport } from "../aws/generate-production-green-stage-b-tfvars.mjs";
-import { assertAuthenticatedStageBOutputOnlySuccessor, resolveStageBStateReconciliationEvidence } from "../aws/production-green-stage-b-state-reconciliation-evidence.mjs";
+import { assertCommittedWorkerHistory, assertAuthenticatedCommittedWorkerEvidence, assertAuthenticatedStageBOutputOnlySuccessor, resolveStageBStateReconciliationEvidence } from "../aws/production-green-stage-b-state-reconciliation-evidence.mjs";
 import { STAGE_B_STATE_RECONCILIATION as CONTRACT, STAGE_B_STATE_RECONCILIATION_MODES, assertStageBOutputOnlyReconciliationResult, createStageBStateReconciliationAuthorization, createStageBStateReconciliationPreparation, stageBStateReconciliationSha256 } from "../aws/production-green-stage-b-state-reconciliation.mjs";
 import { STAGE_B_TASK_DEFINITION_FAMILIES } from "../aws/stage-b-reference-audit-contract.mjs";
 
@@ -214,3 +215,25 @@ test("local convergence composes the same explicit administrator runner into pri
  assert.match(branch,/const run = createProductionCommandRunner\(\{ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: required\(values, "--admin-profile"\)/);
  assert.match(branch,/privateEvidenceRun: run/);assert.match(branch,/convergeNormalActivationPolicy\(\{ run, sourceSha/);
 });
+
+function committedHistory() {
+  return {preparationRunId:COMMITTED.preparationRunId,authorizationRunId:COMMITTED.authorizationRunId,executionRunId:COMMITTED.executionRunId,
+    expectedResultArtifactId:COMMITTED.resultArtifactId,expectedResultArtifactDigest:COMMITTED.resultArtifactDigest,expectedResultSha256:COMMITTED.resultByteSha256,
+    preparation:{sourceSha:COMMITTED.sourceSha,reconciliationMode:'WORKER_SMTP_POLICY_REFLECTION',predecessorState:structuredClone(COMMITTED.predecessorState),refreshOnlyPlanSha256:COMMITTED.planSha256,refreshOnlyPlanJsonSha256:COMMITTED.planJsonSha256},
+    authorization:{authorizationSha256:COMMITTED.authorizationSha256},
+    result:{schemaVersion:3,kind:'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT',reconciliationMode:'WORKER_SMTP_POLICY_REFLECTION',status:'state-write-completed-postverify-failed',
+      sourceSha:COMMITTED.sourceSha,authorizationSha256:COMMITTED.authorizationSha256,predecessorState:structuredClone(COMMITTED.predecessorState),successorState:null,successorEvidence:null,remoteResourceMutationCount:0,terraformStateMutationCount:1}};
+}
+test('only the exact failed worker execution can prove the historical committed write',()=>{
+  const h=committedHistory(); assert.doesNotThrow(()=>assertCommittedWorkerHistory(h));
+  assert.throws(()=>assertAuthenticatedCommittedWorkerEvidence(h,COMMITTED.sourceSha),/not authenticated/);
+});
+for(const [name,mutate] of Object.entries({
+  preparation:h=>h.preparationRunId='1',authorizationRun:h=>h.authorizationRunId='1',execution:h=>h.executionRunId='1',artifact:h=>h.expectedResultArtifactId='1',
+  archive:h=>h.expectedResultArtifactDigest='sha256:'+'0'.repeat(64),receiptBytes:h=>h.expectedResultSha256='0'.repeat(64),
+  source:h=>h.preparation.sourceSha='0'.repeat(40),mode:h=>h.preparation.reconciliationMode='OUTPUT_ONLY',serial:h=>h.preparation.predecessorState.serial=147,
+  lineage:h=>h.preparation.predecessorState.lineage='wrong',predecessor:h=>h.preparation.predecessorState.stateSha256='0'.repeat(64),
+  plan:h=>h.preparation.refreshOnlyPlanSha256='0'.repeat(64),planJson:h=>h.preparation.refreshOnlyPlanJsonSha256='0'.repeat(64),approval:h=>h.authorization.authorizationSha256='0'.repeat(64),
+  unknownOutcome:h=>h.result.status='state-write-outcome-ambiguous',completed:h=>h.result.status='complete',noWrite:h=>h.result.terraformStateMutationCount=0,
+  remoteWrite:h=>h.result.remoteResourceMutationCount=1,receiptSubstitution:h=>h.result.authorizationSha256='0'.repeat(64),extra:h=>h.result.untrusted=true
+}))test(`committed worker history rejects ${name}`,()=>{const h=committedHistory();mutate(h);assert.throws(()=>assertCommittedWorkerHistory(h));});

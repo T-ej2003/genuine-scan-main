@@ -57,7 +57,7 @@ test("Stage B closure CI runs the authenticated reconciliation evidence regressi
   const workflow = yaml.load(fs.readFileSync(path.join(root, ".github/workflows/quality-gate.yml"), "utf8"));
   const steps = workflow.jobs["stage-b-deployment-closure"].steps;
   const testStep = steps.find(({ name }) => name === "Test authenticated Stage B reconciliation evidence");
-  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs scripts/tests/stage-b-private-evidence.test.mjs");
+  assert.equal(testStep.run, "node --test scripts/tests/production-green-stage-b-state-reconciliation-evidence.test.mjs scripts/tests/stage-b-worker-policy-reflection.test.mjs scripts/tests/stage-b-private-evidence.test.mjs");
 });
 
 test("preparation passes the required dispatch mode explicitly under nounset", () => {
@@ -230,4 +230,14 @@ test("state-bearing bundles stay encrypted while hosted artifacts contain only r
     assert.equal(job.steps[credentials].with["role-to-assume"], "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
     assert.equal(job.steps[hydration].env.GITHUB_TOKEN, "${{ github.token }}");
   }
+});
+
+test('committed worker recovery reauthenticates the historical receipt in the existing protected execution step',()=>{
+  const workflow=parse('execute-production-green-stage-b-state-reconciliation.yml');
+  const step=workflow.jobs.execute.steps.find(s=>s.run?.includes('--mode execute'));
+  assert.equal(step.env.GITHUB_TOKEN,'${{ github.token }}');
+  const cli=fs.readFileSync(path.join(root,'scripts/aws/reconcile-production-green-stage-b-state.mjs'),'utf8');
+  assert.match(cli,/assertAuthenticatedCommittedWorkerEvidence\(resolveCommittedWorkerReflectionEvidence/);
+  assert.match(cli,/privateEvidenceRun: run/);
+  assert.match(cli,/serial === 149/);
 });
