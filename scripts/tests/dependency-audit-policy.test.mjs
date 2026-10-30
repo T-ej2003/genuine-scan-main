@@ -113,7 +113,7 @@ test("lockfile retains optional WASM dependency records required by Linux npm ci
   }
 });
 
-// These consumers use named minimatch APIs; v11 is not a general replacement for v3's callable export.
+// Project tooling uses named APIs; v11 is not a general replacement for v3's callable/default export.
 test("scoped minimatch remediation resolves patched copies through every owning tool", () => {
   const require = createRequire(import.meta.url);
   const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -135,7 +135,7 @@ test("scoped minimatch remediation resolves patched copies through every owning 
 
 test("patched minimatch preserves ESLint file enumeration and legacy include/exclude matching", async () => {
   const require = createRequire(import.meta.url);
-  const { ESLint } = require("eslint");
+  const { ESLint } = await import("eslint");
   const { OverrideTester } = require("@eslint/eslintrc").Legacy;
   const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-eslint-minimatch-"));
   try {
@@ -155,9 +155,8 @@ test("patched minimatch preserves ESLint file enumeration and legacy include/exc
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("patched minimatch preserves TypeScript project-service default-project selection", () => {
-  const require = createRequire(import.meta.url);
-  const parser = require("@typescript-eslint/typescript-estree");
+test("patched minimatch preserves TypeScript project-service default-project selection", async () => {
+  const parser = await import("@typescript-eslint/typescript-estree");
   const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-typescript-minimatch-"));
   try {
     writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true }, include: ["included.ts"] }));
