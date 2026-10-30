@@ -203,6 +203,9 @@ async function main() {
   denied(app, open(sessionA, sessionA));
   psql(admin, `UPDATE public."Printer" SET "licenseeId"='${ids.licenseeA}' WHERE id='${ids.discoveredPrinter}'`);
   assert.equal(json(app, open(sessionA, sessionA)).state, "CONNECTED");
+  denied(app, sessionSql("OPEN", sessionB, { connectionId: sessionB,
+    helloNonce: `signed_hello_${sessionA}`, expirySeconds: 3600 }), /CONNECTOR_SESSION_REPLAY/);
+  assert.equal(psql(admin, `SELECT id FROM public."PrinterAgentSession" WHERE "registrationId"='${ids.registration}' AND "connectionState"='CONNECTED'`), sessionA);
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
@@ -312,7 +315,6 @@ async function main() {
   const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
   await assert.rejects(
     signedSessionBoundary.openTrustedPrinterAgentSession(signedHello),
-    /CONNECTOR_SESSION_REPLAY/,
     "An accepted signed hello must not replace its own live session on replay",
   );
   assert.equal(psql(admin, `SELECT id FROM public."PrinterAgentSession" WHERE "registrationId"='${ids.registration}' AND "connectionState"='CONNECTED'`), liveSession.id);
