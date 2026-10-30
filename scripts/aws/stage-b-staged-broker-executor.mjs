@@ -1,3 +1,5 @@
+import { WORKER_COMMITTED } from './stage-b-worker-policy-reflection.mjs';
+import { resolveVerifiedWorkerReflectionSuccessor, assertAuthenticatedWorkerReflectionSuccessor } from './production-green-stage-b-state-reconciliation-evidence.mjs';
 import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,6 +58,19 @@ export function assertReceiptBoundPolicyTerraformState(phase, current, adopted) 
   assert.ok(current.serial > adopted.serial, 'Receipt-bound policy Terraform state did not advance');
   assert.match(current.stateSha256 || '', /^[a-f0-9]{64}$/);
   return true;
+}
+// Keep historical receipt bytes; only the recorded, completed worker recovery can bridge this unchanged task map.
+export async function prepublicationPolicyCorroboratedState({ phase, predecessorOnly, authenticatedBindingTransition,
+  historicalState, currentState, authenticateWorkerSuccessor }) {
+  if (predecessorOnly && (authenticatedBindingTransition || ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase))) return historicalState;
+  if (predecessorOnly && ['PREPARATION','REGISTRATION'].includes(phase)
+      && canonicalJson(historicalState) === canonicalJson(WORKER_COMMITTED.predecessorState)
+      && canonicalJson(currentState) === canonicalJson(WORKER_COMMITTED.successorState)) {
+    assert.equal(typeof authenticateWorkerSuccessor, 'function');
+    assert.equal(await authenticateWorkerSuccessor(), true, 'Verified worker successor evidence is required');
+    return historicalState;
+  }
+  return currentState;
 }
 export function assertReceiptBoundHistoricalToolingTree(sourceSha, treeSha256, derive = deriveStageBToolingInputTreeSha256) {
   assert.match(sourceSha || '', /^[a-f0-9]{40}$/); assert.match(treeSha256 || '', /^[a-f0-9]{64}$/);
@@ -767,7 +782,11 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(live.policy.Statement && brokerDigest(live.policy), brokerDigest(terminal.policy));
     assert.equal(live.version, terminal.successorIdentity.policyVersion);
     const state = await adapter.readStateIdentity(), policyState = stateResource('aws_iam_policy.broker');
-    const corroboratedState = predecessorOnly && (authenticatedBindingTransition || ['REGISTRATION_RECOVERY','ADOPTION'].includes(phase)) ? terminal.reconciliation?.state : state;
+    const corroboratedState = await prepublicationPolicyCorroboratedState({ phase, predecessorOnly, authenticatedBindingTransition,
+      historicalState: terminal.reconciliation?.state, currentState: state,
+      authenticateWorkerSuccessor: () => assertAuthenticatedWorkerReflectionSuccessor(
+        resolveVerifiedWorkerReflectionSuccessor({ currentProtectedMainSha: release.sourceSha, privateEvidenceRun: runAws }),
+        { sourceSha: release.sourceSha, predecessorState: terminal.reconciliation?.state, successorState: state }) });
     assert.ok(corroboratedState);
     assertReceiptBoundPolicyTerraformState(phase, state, corroboratedState);
     equal(terminal.reconciliation?.state, corroboratedState, 'Durable convergence result does not bind authenticated Terraform state');

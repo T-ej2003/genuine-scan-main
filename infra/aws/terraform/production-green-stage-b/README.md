@@ -271,3 +271,28 @@ The failed receipt remains immutable. The fresh result reconciles it by referenc
 it does not overwrite history or reset state. If state, policy, source contract,
 metadata or durable evidence differs, stop for review. B03 infrastructure and
 C02 → B03 installation remain separate, subsequently authorized operations.
+
+### Pre-publication continuation after worker recovery
+
+A historical broker policy receipt remains bound to serial 148. When its twelve
+registered task bindings are unchanged, the pre-publication path previously
+required that exact state and rejected the completed worker-only serial 149
+successor. It now authenticates the pinned verification-only recovery
+(preparation 41133531737, authorization 41133850562, execution 41134116891) through
+the existing GitHub artifact and encrypted evidence readers. Run identity, source
+ancestry, saved plan, approval, artifact bytes, exact successor state and both
+zero-mutation counters are required; unavailable or substituted evidence blocks
+continuation. Historical approval is checked at its execution time and never
+serves as authority for a new mutation.
+
+This exception is restricted to pre-publication PREPARATION/REGISTRATION and the
+exact recorded 148→149 state identities in `worker-reflection-committed-149.json`.
+The old policy receipt and its state 148 metadata remain immutable. Fresh broker
+registration preparation still binds live state 149 and requires its own
+current-source approval. The completed worker recovery is historical evidence;
+advancing main does not require repeating it. Other state changes retain their
+existing checks. The historical registration/policy transactions must also be
+independently authenticated using
+the existing paired `prepublication_predecessor_source_sha` and
+`prepublication_predecessor_ticket_id` Release Train inputs. This adds no IAM,
+Terraform resource, SQL or runtime deployment operation.
