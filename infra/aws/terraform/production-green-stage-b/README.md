@@ -184,3 +184,32 @@ broker persists the completion in its existing DynamoDB and S3 receipt stores;
 backend activation rechecks that broker record and verifier artifact. An expired
 completion requires a new read-only verifier artifact; the migration task is
 still one-use. Unknown task outcomes and missing proof stop the release.
+
+## Worker SMTP policy state reflection
+
+`WORKER_SMTP_POLICY_REFLECTION` extends the existing preparation → production
+approval → execution workflows for one state-only transition: Stage B lineage
+`4e438e59-8b8b-194d-030c-5ede0c26344a`, serial 148 → 149, and only
+`aws_iam_role.execution["worker"].inline_policy`. It records the exact SMTP
+secret-read policy already managed by the worker root. It grants no permissions
+and never calls IAM mutation APIs. Historical ten-address and output-only
+approvals cannot authorize this mode.
+
+Use current-source canonical prerequisites with authenticated reusable image
+bindings equal to the existing state outputs. This reconciliation rejects **all
+output changes**, including `bound_images`; image rotation and B03 registration
+are later operations. Do not use new-image tfvars merely to obtain a passing
+refresh plan. Select the mode in the existing preparation workflow, inspect its
+saved refresh-only plan, then obtain a fresh approval through the existing
+state-reconciliation authorization workflow before execution.
+
+Preparation and execution independently read the exact Stage B state and live
+inline policies through the scoped release role. The protected worker source
+file and baseline policy are fingerprinted; missing, extra or changed permissions
+fail closed. Authorization binds the source, saved plan bytes, artifact bindings,
+state identity and fresh policy evidence. The executor accepts only the exact
+predecessor or verified serial-149 successor. It checks all other state content
+is unchanged, verifies policy equivalence again, and requires a clean refresh
+before completion. An uncertain write is recorded and reconciled before retry;
+a completed successor is verified without another apply. No worker-state read,
+new IAM permission, Terraform resource change or manual state edit is required.
