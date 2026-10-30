@@ -212,6 +212,7 @@ export const openTrustedPrinterAgentSession = async (
       selectedPrinterId: session.selectedPrinterId, selectedPrinterName: session.selectedPrinterName,
       agentId: session.agentId, deviceFingerprint: session.deviceFingerprint,
       publicKeyFingerprint: session.publicKeyFingerprint, connectorVersion: session.connectorVersion,
+      helloNonce: hello.nonce,
       expirySeconds: PRINT_AGENT_SESSION_EXPIRY_SECONDS,
     },
   });

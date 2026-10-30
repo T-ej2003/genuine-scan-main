@@ -183,7 +183,7 @@ async function main() {
     `SELECT app_rls.printing_connector_session('${operation}','${id}','${reg}','${sessionPayload(payload)}'::jsonb)`;
   assert.equal(psql(admin, `SELECT data_type FROM information_schema.columns
     WHERE table_schema='public' AND table_name='PrinterAgentSession' AND column_name='lastMessageSeq'`), "integer");
-  const open = (id, connectionId) => sessionSql("OPEN", id, { connectionId, expirySeconds: 3600 });
+  const open = (id, connectionId) => sessionSql("OPEN", id, { connectionId, helloNonce: `signed_hello_${connectionId}`, expirySeconds: 3600 });
   const advance = (id, messageSeq) => sessionSql("ADVANCE", id, {
     messageSeq, messageType: "heartbeat", signatureVerified: true,
     signedPayloadHash: hash(`${id}:${messageSeq}:payload`),
@@ -310,6 +310,12 @@ async function main() {
   signedHello.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
     sessionSigning.buildPrinterAgentSessionPayload({ ...signedHello, messageType: "hello" }));
   const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
+  await assert.rejects(
+    signedSessionBoundary.openTrustedPrinterAgentSession(signedHello),
+    /CONNECTOR_SESSION_REPLAY/,
+    "An accepted signed hello must not replace its own live session on replay",
+  );
+  assert.equal(psql(admin, `SELECT id FROM public."PrinterAgentSession" WHERE "registrationId"='${ids.registration}' AND "connectionState"='CONNECTED'`), liveSession.id);
   assert.equal(await signedSessionBoundary.buildNextPrintChunkForSession(liveSession), null,
     "A signed hello alone must wait for health, without claiming or closing the session");
   const signedHeartbeat = (messageSeq, targetSession = liveSession, health = {}, rawHealth) => {

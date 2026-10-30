@@ -128,6 +128,14 @@ const writeChecksums = (releaseDir, signedArtifactPath) => {
   const releaseFiles = listFiles(releaseDir)
     .filter((filePath) => !["SHA256SUMS.txt", "SIGNED_ARTIFACTS_SHA256SUMS.txt"].includes(path.basename(filePath)))
     .sort((left, right) => left.localeCompare(right));
+  // Git stores these release documents with LF endings. Hash the exact bytes
+  // that will be committed and downloaded, regardless of the Windows checkout.
+  for (const filePath of releaseFiles) {
+    if (/\.(?:txt|json)$/i.test(filePath)) {
+      const contents = fs.readFileSync(filePath, "utf8");
+      fs.writeFileSync(filePath, contents.replace(/\r\n/g, "\n"), "utf8");
+    }
+  }
   writeAsciiFile(path.join(releaseDir, "SHA256SUMS.txt"), `${releaseFiles.map(checksumLine).join("\n")}\n`);
 };
 

@@ -2132,8 +2132,15 @@ BEGIN
   IF p_operation='OPEN' THEN
     IF p_payload->>'connectionId' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
        OR coalesce(length(selected),0)=0 OR length(selected)>180
+       OR coalesce(length(p_payload->>'helloNonce'),0) NOT BETWEEN 8 AND 180
        OR coalesce((p_payload->>'expirySeconds')::integer,0) NOT BETWEEN 60 AND 86400
     THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
+    -- The registration lock serializes OPEN across backend instances. Retain the
+    -- signed hello nonce on all session rows so a replay cannot replace authority.
+    IF EXISTS (SELECT 1 FROM public."PrinterAgentSession" s
+      WHERE s."registrationId"=registration.id
+        AND s.metadata->>'helloNonce'=p_payload->>'helloNonce')
+    THEN RAISE EXCEPTION 'CONNECTOR_SESSION_REPLAY' USING ERRCODE='23505'; END IF;
     UPDATE public."PrinterAgentSession" SET "connectionState"='SUPERSEDED',"revokedAt"=now_at,
       "disconnectedAt"=now_at,"closeReason"='session_replaced',"updatedAt"=now_at
       WHERE "registrationId"=registration.id AND "connectionState"='CONNECTED' AND "revokedAt" IS NULL;
@@ -2147,7 +2154,8 @@ BEGIN
       'CONNECTED',0,now_at,now_at,'epoch'::timestamp,now_at+make_interval(secs=>(p_payload->>'expirySeconds')::integer),
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
         'licenseeId',registration."licenseeId",'printerId',printer_row.id,
-        'connectorVersion',left(p_payload->>'connectorVersion',80)),now_at,now_at);
+        'connectorVersion',left(p_payload->>'connectorVersion',80),
+        'helloNonce',p_payload->>'helloNonce'),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
   END IF;
   SELECT s.id,s."registrationId",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",
