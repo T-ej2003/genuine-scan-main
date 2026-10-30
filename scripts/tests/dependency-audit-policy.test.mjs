@@ -1,6 +1,7 @@
 import { readApprovedImages } from "../lib/container-image-identity.mjs";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -110,4 +111,63 @@ test("lockfile retains optional WASM dependency records required by Linux npm ci
     assert.ok(lock.packages[`node_modules/${name}`], name);
     assert.match(lock.packages[`node_modules/${name}`].integrity, /^sha512-/);
   }
+});
+
+// These consumers use named minimatch APIs; v11 is not a general replacement for v3's callable export.
+test("scoped minimatch remediation resolves patched copies through every owning tool", () => {
+  const require = createRequire(import.meta.url);
+  const manifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
+  const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+  const copies = Object.entries(lock.packages).filter(([name]) => name.endsWith("/minimatch"));
+  assert.ok(copies.length > 0);
+  for (const [, copy] of copies) { assert.equal(copy.version, "11.0.3"); assert.equal(copy.dev, true); }
+  for (const owner of ["eslint", "@eslint/config-array", "@eslint/eslintrc", "@typescript-eslint/typescript-estree"]) {
+    assert.deepEqual(manifest.overrides[owner], { minimatch: "11.0.3" });
+    const resolve = createRequire(require.resolve(owner));
+    assert.equal(resolve("minimatch/package.json").version, "11.0.3");
+    const { Minimatch, minimatch } = resolve("minimatch");
+    assert.equal(minimatch(".hidden.ts", "*.ts", { dot: true }), true);
+    assert.equal(new Minimatch("src/**/!(*.test).{js,ts}", { dot: true }).match("src/nested/app.ts"), true);
+    assert.equal(new Minimatch("src/**/!(*.test).{js,ts}", { dot: true }).match("src/app.test.ts"), false);
+    assert.equal(new Minimatch("src/**/*.ts", { dot: true }).match("src/nested", true), true);
+  }
+});
+
+test("patched minimatch preserves ESLint file enumeration and legacy include/exclude matching", async () => {
+  const require = createRequire(import.meta.url);
+  const { ESLint } = require("eslint");
+  const { OverrideTester } = require("@eslint/eslintrc").Legacy;
+  const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-eslint-minimatch-"));
+  try {
+    mkdirSync(path.join(dir, "src/generated"), { recursive: true });
+    writeFileSync(path.join(dir, "src/app.js"), "const unused = 1;");
+    writeFileSync(path.join(dir, "src/valid.mjs"), "export const used = 1;");
+    writeFileSync(path.join(dir, "src/generated/skip.js"), "not valid JavaScript {{{");
+    const eslint = new ESLint({ cwd: dir, overrideConfigFile: true, overrideConfig: [
+      { ignores: ["**/generated/**"] }, { files: ["src/**/*.{js,mjs}"], rules: { "no-unused-vars": "error" } },
+    ] });
+    const results = await eslint.lintFiles(["src/**/*.{js,mjs}"]);
+    assert.deepEqual(results.map(result => path.basename(result.filePath)).sort(), ["app.js", "valid.mjs"]);
+    assert.deepEqual(results.flatMap(result => result.messages.map(message => message.ruleId)), ["no-unused-vars"]);
+    const legacy = OverrideTester.create(["src/**/*.{js,mjs}"], ["**/generated/**"], dir);
+    assert.equal(legacy.test(path.join(dir, "src/app.js")), true);
+    assert.equal(legacy.test(path.join(dir, "src/generated/skip.js")), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("patched minimatch preserves TypeScript project-service default-project selection", () => {
+  const require = createRequire(import.meta.url);
+  const parser = require("@typescript-eslint/typescript-estree");
+  const dir = mkdtempSync(path.join(os.tmpdir(), "mscqr-typescript-minimatch-"));
+  try {
+    writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true }, include: ["included.ts"] }));
+    writeFileSync(path.join(dir, "included.ts"), "export const included = true;");
+    const filePath = path.join(dir, "outside.ts");
+    const code = "const answer: number = 42;";
+    writeFileSync(filePath, code);
+    const parsed = parser.parseAndGenerateServices(code, { filePath, tsconfigRootDir: dir,
+      projectService: { allowDefaultProject: ["outside.ts"] } });
+    assert.ok(parsed.services.program);
+    assert.equal(parsed.ast.body[0].type, "VariableDeclaration");
+  } finally { parser.clearCaches(); rmSync(dir, { recursive: true, force: true }); }
 });
