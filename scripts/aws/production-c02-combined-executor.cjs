@@ -63,7 +63,7 @@ async function migrationState(tx, pkg) {
     }
     return rows.length === 1;
 }
-async function recordMigration({ client, url, pkg, cli = '/app/backend/node_modules/prisma/build/index.js' }) {
+async function recordMigration({ client, url, pkg, cli = '/app/node_modules/prisma/build/index.js' }) {
     const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), { execFileSync } = require('node:child_process');
     if (await client.$transaction(tx => migrationState(tx, pkg)))
         return;
@@ -135,12 +135,12 @@ async function main() {
         assert.equal(canonicalJson(JSON.parse(bytes)), bytes.toString());
         const pkg = validatePackage(JSON.parse(bytes));
         assert.equal(hash(pkg.migrationSql + '\n'), pkg.sessionPackage.migrationSha256);
-        assert.ok(require('node:fs').existsSync('/app/backend/node_modules/prisma/build/index.js'));
+        assert.ok(require('node:fs').existsSync('/app/node_modules/prisma/build/index.js'));
         assert.equal(pkg.sourceSha, process.env.RELEASE_GIT_SHA);
         assert.ok(process.env.MSCQR_C02_ADMIN_PASSWORD);
         const u = new URL('postgresql://mscqr_prod_admin@' + host + ':5432/mscqr_production_rls_green_phase2?sslmode=require');
         u.password = process.env.MSCQR_C02_ADMIN_PASSWORD;
-        const { PrismaClient } = require('/app/backend/node_modules/@prisma/client');
+        const { PrismaClient } = require('@prisma/client');
         client = new PrismaClient({ datasources: { db: { url: u.toString() } }, log: [] });
         const result = await client.$transaction(tx => executeC02CombinedTransaction({ tx, pkg }), { maxWait: 10000, timeout: 180000 });
         await recordMigration({ client, url: u.toString(), pkg });

@@ -8,6 +8,8 @@ import { buildC02SessionTask } from "../aws/apply-production-c02-session-prerequ
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
+import fs from "node:fs";
+import vm from "node:vm";
 const runtime = createRequire(import.meta.url)("../aws/production-c02-combined-executor.cjs");
 const oldSha = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", sourceSha = "a".repeat(40);
 const seal = body => { const { requirementsSha256, ...rest } = body; return { ...rest, requirementsSha256: canonicalSha256(rest) }; };
@@ -78,4 +80,54 @@ test("combined C02 refuses contradictory, uncommitted or duplicated Prisma histo
   }
   assert.equal(await runtime.migrationState({ $executeRawUnsafe: async () => {}, $queryRawUnsafe: async () => [] }, pkg), false);
   assert.equal(await runtime.migrationState({ $executeRawUnsafe: async () => {}, $queryRawUnsafe: async () => [row] }, pkg), true);
+});
+
+
+test("embedded ECS entrypoint resolves Prisma from the actual /app runtime layout", async () => {
+  const task = buildC02SessionTask({ sourceSha, hostname: "test.invalid", combinedRequirements: { predecessor, successor } });
+  const command = task.definition.containerDefinitions[0].command;
+  const probes = [], imports = [];
+  let clientReached = false, stderr = "", context;
+  const nativeRequire = createRequire(import.meta.url);
+  const sandboxRequire = name => {
+    imports.push(name);
+    if (name === "node:fs") return { existsSync: path => {
+      probes.push(path); return path === "/app/node_modules/prisma/build/index.js";
+    } };
+    if (name === "@prisma/client") return { PrismaClient: class {
+      constructor() { clientReached = true; throw new Error("stop before database access"); }
+    } };
+    if (name === "node:vm") return { runInThisContext: code => vm.runInContext(code, context) };
+    return nativeRequire(name);
+  };
+  context = vm.createContext({ require: sandboxRequire, Buffer, URL, process: {
+    argv: [process.execPath, ...command.slice(2)],
+    env: { RELEASE_GIT_SHA: sourceSha, MSCQR_C02_ADMIN_PASSWORD: "local-test-only" },
+    stderr: { write: value => { stderr += value; } }, stdout: { write: () => assert.fail("No success before database access") },
+  } });
+  await vm.runInContext(command[1], context);
+  assert.equal(clientReached, true, JSON.stringify({ imports, probes, stderr }));
+  assert.deepEqual(probes, ["/app/node_modules/prisma/build/index.js"]);
+  assert.ok(imports.includes("@prisma/client"));
+  assert.ok(!imports.some(name => name.includes("/app/backend")));
+  assert.equal(stderr.trim(), '{"status":"blocked","reason":"c02-combined-failed-closed"}');
+  const dockerfile = fs.readFileSync("backend/Dockerfile", "utf8");
+  assert.match(dockerfile, /WORKDIR \/app/);
+  assert.match(dockerfile, /COPY --from=builder --chown=node:node \/workspace\/backend\/node_modules \.\/node_modules/);
+});
+
+test("migration-history reconciliation uses the image CLI path without a checkout override", async () => {
+  const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
+  let resolved = false, invokedCli;
+  const nativeRequire = createRequire(new URL("../aws/production-c02-combined-executor.cjs", import.meta.url)), module = { exports: {} };
+  vm.runInNewContext(fs.readFileSync("scripts/aws/production-c02-combined-executor.cjs", "utf8"), {
+    module, Buffer, URL, process, require: name => name === "node:child_process" ? { execFileSync: (_node, args) => {
+      invokedCli = args[0]; resolved = true;
+    } } : nativeRequire(name),
+  });
+  const tx = { $executeRawUnsafe: async () => {}, $queryRawUnsafe: async () => resolved ?
+    [{ checksum: pkg.sessionPackage.migrationSha256, finished_at: new Date(), rolled_back_at: null }] : [] };
+  await module.exports.recordMigration({ client: { $transaction: run => run(tx) },
+    url: "postgresql://mscqr_prod_admin@localhost:55432/disposable_test", pkg });
+  assert.equal(invokedCli, "/app/node_modules/prisma/build/index.js");
 });
