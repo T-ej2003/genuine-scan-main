@@ -312,10 +312,12 @@ async function main() {
   const liveSession = await signedSessionBoundary.openTrustedPrinterAgentSession(signedHello);
   assert.equal(await signedSessionBoundary.buildNextPrintChunkForSession(liveSession), null,
     "A signed hello alone must wait for health, without claiming or closing the session");
-  const signedHeartbeat = (messageSeq, targetSession = liveSession, health = {}) => {
+  const signedHeartbeat = (messageSeq, targetSession = liveSession, health = {}, rawHealth) => {
     const message = { type: "heartbeat", sessionId: targetSession.id, messageSeq,
-      printerHealth: { healthVersion: 1, selectedPrinterId: "printing-native", observedAt: new Date().toISOString(),
-        discovered: true, queueAvailable: true, online: true, ...health },
+      printerHealth: rawHealth === undefined
+        ? { healthVersion: 1, selectedPrinterId: "printing-native", observedAt: new Date().toISOString(),
+          discovered: true, queueAvailable: true, online: true, ...health }
+        : rawHealth,
       nonce: randomUUID(), issuedAt: new Date().toISOString() };
     message.signature = sessionSigning.signPrinterAgentPayload(signingPrivateKey,
       sessionSigning.buildPrinterAgentSessionPayload({ ...message, messageType: "heartbeat",
@@ -577,6 +579,43 @@ async function main() {
   assert.equal(json(app, `SELECT app_rls.printing_readiness(
     '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
     .eligibleForPrinting, true, "Fresh signed health restores readiness after stale evidence");
+  for (const [label, observedAt] of [
+    ["missing", undefined], ["empty", ""], ["invalid date", "not-a-date"],
+    ["invalid timezone", "2026-10-30T00:00:00+99:00"],
+    ["impossible date", "2026-02-30T00:00:00Z"],
+    ["out of range", "99999-01-01T00:00:00Z"],
+    ["unexpected number", 42], ["unexpected object", { value: "old" }],
+  ]) {
+    const malformed = signedHeartbeat(++healthSequence, continuousSession, { observedAt });
+    await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, malformed);
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+      .eligibleForPrinting, false, `${label} must immediately displace an unexpired healthy attestation`);
+    denied(app, sessionSql("CHECK", continuousSession.id, {}), /PRINTER_HEALTH_NOT_READY/);
+    denied(app, socketClaim(continuousSession.id), /PRINTER_ATTESTATION_STALE/);
+    denied(app, socketTestClaim(continuousSession.id), /PRINTER_ATTESTATION_STALE/);
+    if (label === "missing") denied(app, `SELECT app_rls.printing_create_job(
+      '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.discoveredPrinter}',1,
+      'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+      '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("malformed-health")}","tokenExpiresAt":"${new Date(Date.now()+3_600_000).toISOString()}"}]'::jsonb
+    )`, /PRINTER_ATTESTATION_STALE/, "Malformed health must block print-job creation");
+    await assert.rejects(signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, malformed), /replay/i);
+    await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+      signedHeartbeat(++healthSequence, continuousSession,
+        { observedAt: new Date(Date.now()+1_000).toISOString() }));
+    assert.equal(json(app, `SELECT app_rls.printing_readiness(
+      '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+      .eligibleForPrinting, true, `${label} recovery requires fresh signed health`);
+  }
+  const malformedObject = signedHeartbeat(++healthSequence, continuousSession, {}, "not-an-object");
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession, malformedObject);
+  denied(app, sessionSql("CHECK", continuousSession.id, {}), /PRINTER_HEALTH_NOT_READY/);
+  assert.equal(json(app, `SELECT app_rls.printing_readiness(
+    '${caps.maker}','printing-readiness','${requestId()}','PRINTER_STATUS','${ids.maker}','{}'::jsonb)`)
+    .eligibleForPrinting, false, "A signed non-object health payload must fail closed");
+  await signedSessionBoundary.recordTrustedSessionHeartbeat(continuousSession,
+    signedHeartbeat(++healthSequence, continuousSession,
+      { observedAt: new Date(Date.now()+1_000).toISOString() }));
   await signedSessionBoundary.closeTrustedPrinterAgentSession(continuousSession.id, "continuous_operation_complete");
   psql(admin, `DELETE FROM public."PrinterAttestation" WHERE metadata->>'sessionId'='${continuousSession.id}';
     UPDATE public."PrinterAttestation" SET "expiresAt"="expiresAt"+interval '3600 seconds',

@@ -2073,6 +2073,7 @@ DECLARE registration record; printer_row record; session_row record;
   latest_attestation_usable boolean;
   health_usable boolean;
   health_out_of_order boolean;
+  health_observed_text text;
   health_observed_at timestamp without time zone;
   latest_health_observed_at timestamp without time zone;
   selected text := p_payload->>'selectedPrinterId';
@@ -2193,7 +2194,15 @@ BEGIN
          OR heartbeat_issued_at IS NULL
          OR abs(extract(epoch FROM (clock_timestamp()-heartbeat_issued_at)))>180
       THEN RAISE EXCEPTION 'CONNECTOR_SESSION_DENIED' USING ERRCODE='42501'; END IF;
-      health_observed_at := nullif(p_payload->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC';
+      health_observed_text := p_payload->'printerHealth'->>'observedAt';
+      health_observed_at := NULL;
+      IF jsonb_typeof(p_payload->'printerHealth')='object'
+         AND jsonb_typeof(p_payload->'printerHealth'->'observedAt')='string'
+         AND health_observed_text ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+         AND pg_catalog.pg_input_is_valid(health_observed_text,'timestamp with time zone')
+      THEN
+        health_observed_at := health_observed_text::timestamptz AT TIME ZONE 'UTC';
+      END IF;
       health_usable := coalesce(
         p_payload->'printerHealth'->>'healthVersion'='1'
         AND p_payload->'printerHealth'->>'selectedPrinterId'=selected
@@ -2219,15 +2228,19 @@ BEGIN
         FROM public."PrinterAttestation" pa
         WHERE pa."printerRegistrationId"=registration.id AND NOT (pa.metadata ? 'operation')
         ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1;
-      SELECT max(nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
-        INTO latest_health_observed_at FROM public."PrinterAttestation" pa
-        WHERE pa."printerRegistrationId"=registration.id AND pa.metadata->>'sessionId'=p_session_id
-          AND pa.metadata->>'source'='PERSISTENT_SESSION'
-          AND pa.metadata->'printerHealth'->>'healthVersion'='1'
-          AND (nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
-            >pa."createdAt"-interval '20 seconds'
-          AND (nullif(pa.metadata->'printerHealth'->>'observedAt','')::timestamptz AT TIME ZONE 'UTC')
-            <=pa."createdAt"+interval '5 seconds';
+      SELECT max(candidate.observed_at) INTO latest_health_observed_at
+        FROM (SELECT pa."createdAt",
+          CASE WHEN jsonb_typeof(pa.metadata->'printerHealth'->'observedAt')='string'
+            AND pa.metadata->'printerHealth'->>'observedAt' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$'
+            AND pg_catalog.pg_input_is_valid(pa.metadata->'printerHealth'->>'observedAt','timestamp with time zone')
+          THEN (pa.metadata->'printerHealth'->>'observedAt')::timestamptz AT TIME ZONE 'UTC'
+          END AS observed_at
+          FROM public."PrinterAttestation" pa
+          WHERE pa."printerRegistrationId"=registration.id AND pa.metadata->>'sessionId'=p_session_id
+            AND pa.metadata->>'source'='PERSISTENT_SESSION'
+            AND pa.metadata->'printerHealth'->>'healthVersion'='1') candidate
+        WHERE candidate.observed_at>candidate."createdAt"-interval '20 seconds'
+          AND candidate.observed_at<=candidate."createdAt"+interval '5 seconds';
       health_out_of_order := coalesce(health_observed_at<=latest_health_observed_at,false);
       -- A newly accepted signed message with unavailable or stale health must
       -- supersede the previous healthy attestation. Replayed sequences were
