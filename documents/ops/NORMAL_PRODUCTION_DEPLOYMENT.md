@@ -219,3 +219,45 @@ A permanent public-verification fixture must use the normal QR lifecycle: the de
 ## Operator response
 
 If classification selects Lane B, use the appropriate reviewed privileged process. If deployment fails and rollback succeeds, fix forward in a new PR. If rollback refuses because ECS targets an unrelated task definition, stop and reconcile live ECS state before any retry.
+
+### Combined B03/C02 predecessor convergence
+
+For the authenticated `d785aa7f1e154f37c0dc621082e3f6c46d5d5aec` predecessor,
+PR #771 changes thirteen printing catalogue objects in addition to B03's eighteen.
+The original session-only C02 command cannot replace those existing routines;
+B03 authorization must not absorb C02's grants or accept their old definitions.
+
+Use the existing root-authorized C02 command with both immutable artifact references
+(compact JSON objects with `sourceSha`, `runId`, `runAttempt`, `artifactId`,
+`fileSha256` and `artifactDigest`, as accepted by the canonical artifact reader):
+
+```bash
+npm run production:apply-c02-session-prerequisite -- --source-sha <current-main> --aws-profile mscqr-production-root --predecessor-reference <authenticated-predecessor-requirements-reference> --requirements-reference <current-source-requirements-reference> --receipt-out <new-private-receipt-path>
+```
+
+This explicit combined mode authenticates the complete predecessor catalogue,
+then transactionally applies only the reviewed additive session-column migration,
+the existing C02 session package, six reviewed printing function replacements and
+two printing policy replacements. It preserves table OIDs, data, FORCE RLS and
+existing grants; unknown or partially installed catalogues fail closed. Package
+checksums bind both original requirements artifacts and the exact SQL. No IAM,
+Terraform, broker or normal release-role privilege expansion is required.
+
+Order: fresh protected-main and artifact authentication → separately authorized
+combined C02 operation → committed read-only catalogue verification → fresh B03
+probe/authorization → existing 44-statement B03 broker execution → independent
+full successor verification → compatible backend → frontend → authorized worker.
+B03 still owns only its original eighteen objects. The session-only command and
+clean-room path retain their existing contracts.
+
+The combined transaction uses the existing C02 advisory lock and SERIALIZABLE
+isolation. Failures before commit roll back DDL and temporary grants. After SQL
+commit, Prisma's supported `migrate resolve --applied` records the exact existing
+migration checksum through the migration role. If this marker phase is interrupted,
+no success receipt is issued: a fresh authenticated retry recognizes only the exact
+intermediate or final catalogue, skips DDL, and completes/validates that marker.
+Conflicting migration history or a serialization failure blocks; reauthenticate
+current state before retrying. Never edit Prisma history or rerun unknown SQL by hand.
+The command emits success only after a separate read-only committed catalogue check;
+retain its authenticated ECS execution evidence and obtain the normal independent
+catalogue probe before application activation.

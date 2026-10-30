@@ -743,3 +743,17 @@ test("B03 refresh authenticates only the exact counted zero instance", () => {
   assert.equal(inspectStageBRefreshChecks({ checks: checks.map(c => c === b03 ? { ...c, instances: [...c.instances, ...c.instances] } : c) }).valid, false);
   assert.equal(inspectStageBRefreshChecks({ checks: checks.map(c => c.address === "aws_lambda_function.broker" ? { ...c, instances: [{ address, status: "pass" }] } : c) }).valid, false);
 });
+
+test("disabled B03 accepts absent or empty instances only with zero-count plan proof", () => {
+  for (const instances of [undefined, []]) {
+    const plan=noChangePlan();plan.variables={b03_executor_definition_json:{value:null}};
+    const check=plan.checks.find(c=>c.address==='aws_ecs_task_definition.b03');check.address={kind:'resource',mode:'managed',name:'b03',type:'aws_ecs_task_definition',to_display:'aws_ecs_task_definition.b03'};delete check.instances;if(instances)check.instances=instances;
+    assert.equal(inspectStageBRefreshChecks({checks:plan.checks,b03Plan:plan}).valid,true);
+    assert.equal(inspectStageBRefreshChecks({checks:plan.checks}).valid,false);
+    const omitted=structuredClone(plan);delete omitted.resource_changes;delete omitted.resource_drift;assert.equal(inspectStageBRefreshChecks({checks:omitted.checks,b03Plan:omitted}).valid,true);
+    for(const mutate of [p=>p.checks.find(c=>c.address?.name==='b03').problems=['contradiction'],p=>p.checks.find(c=>c.address?.name==='b03').address.extra='untrusted',p=>p.planned_values.root_module.resources=null,p=>p.planned_values.root_module.child_modules=[{resources:[{type:'aws_ecs_task_definition',name:'b03',address:'malformed'}]}],p=>delete p.planned_values,p=>p.resource_changes=null,p=>p.resource_drift=null,p=>p.variables.b03_executor_definition_json.value='{}',p=>delete p.variables,p=>p.planned_values.root_module.resources=[{address:'aws_ecs_task_definition.b03[0]'}],p=>p.checks.find(c=>c.address?.name==='b03').status='unknown',p=>p.checks.find(c=>c.address?.name==='b03').instances=null]) {
+      const bad=structuredClone(plan);mutate(bad);assert.equal(inspectStageBRefreshChecks({checks:bad.checks,b03Plan:bad}).valid,false);
+    }
+    const normalized=inspectStageBRefreshChecks({checks:plan.checks,b03Plan:plan});assert.equal(inspectStageBRefreshChecks({checks:normalized.checks}).valid,true);
+  }
+});

@@ -375,7 +375,26 @@ function checkMessage(value) {
   return "Terraform check did not provide a usable message.";
 }
 
-export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreconditionAddresses = STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES } = {}) {
+function disabledB03Resource(plan) {
+  if (plan?.variables?.b03_executor_definition_json?.value !== null
+    || !plan.planned_values?.root_module || typeof plan.planned_values.root_module !== "object"
+    || plan.resource_changes !== undefined && !Array.isArray(plan.resource_changes)
+    || plan.resource_drift !== undefined && !Array.isArray(plan.resource_drift)) return false;
+  const isB03 = resource => resource?.address === "aws_ecs_task_definition.b03"
+    || resource?.address?.startsWith("aws_ecs_task_definition.b03[")
+    || resource?.type === "aws_ecs_task_definition" && resource?.name === "b03";
+  const absent = module => {
+    if (!module || typeof module !== "object" || Array.isArray(module)) return false;
+    if (module.resources !== undefined && !Array.isArray(module.resources)) return false;
+    if (module.child_modules !== undefined && !Array.isArray(module.child_modules)) return false;
+    return !(module.resources || []).some(isB03) && (module.child_modules || []).every(absent);
+  };
+  return absent(plan.planned_values.root_module)
+    && (plan.prior_state?.values?.root_module === undefined || absent(plan.prior_state.values.root_module))
+    && ![...(plan.resource_changes || []), ...(plan.resource_drift || [])].some(isB03);
+}
+
+export function inspectStageBRefreshChecks({ checks, checksSource, b03Plan, resourcePreconditionAddresses = STAGE_B_EXPECTED_RESOURCE_PRECONDITION_ADDRESSES } = {}) {
   const expectedInfrastructureCheckAddresses = checksSource ? checkAddressesFromSource(checksSource) : STAGE_B_EXPECTED_CHECK_ADDRESSES;
   const expectedVariableCheckAddresses = checksSource ? STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES : STAGE_B_EXPECTED_VARIABLE_CHECK_ADDRESSES;
   const expectedResourcePreconditionAddresses = [...new Set(checksSource ? resourcePreconditionAddressesFromSource(checksSource) : resourcePreconditionAddresses)].sort();
@@ -416,11 +435,16 @@ export function inspectStageBRefreshChecks({ checks, checksSource, resourcePreco
       if (check?.status === undefined || check?.status === null) missingCheckCount += 1;
       issues.push({ address: address || "<unknown>", status: check?.status ?? "missing", message: checkMessage(check?.message || check?.problem) });
     }
-    if (!Array.isArray(check?.instances) || check.instances.length === 0) {
+    const disabledB03Pass = address === "aws_ecs_task_definition.b03" && category === "resource"
+      && expectedResourcePreconditionAddresses.includes(address) && check.status === "pass" && disabledB03Resource(b03Plan)
+      && Object.keys(check).every(key => ["address", "status", "instances"].includes(key))
+      && (typeof check.address === "string" || Object.keys(check.address).every(key => ["kind", "mode", "name", "type", "to_display", "to_string"].includes(key)))
+      && (!Object.hasOwn(check, "instances") || Array.isArray(check.instances) && check.instances.length === 0);
+    if ((!Array.isArray(check?.instances) || check.instances.length === 0) && !disabledB03Pass) {
       malformed = true;
       issues.push({ address: address || "<unknown>", status: "malformed", message: "Terraform check instances are missing or malformed." });
     }
-    const instances = Array.isArray(check?.instances) ? check.instances : [];
+    const instances = disabledB03Pass ? [{ address, status: "pass" }] : Array.isArray(check?.instances) ? check.instances : [];
     const normalizedInstances = [];
     const seenInstanceAddresses = new Set();
     for (const instance of instances) {
@@ -578,7 +602,7 @@ export function classifyStageBRefreshResult({ plan, terraformExitCode = 0, terra
     if (terraformExitCode !== 0 && terraformExitCode !== 2) return { status: terraformExitCode === 1 ? "FAILED_CHECK" : "PROVIDER_OR_BACKEND_FAILURE", reason: "Terraform refresh-only exited unsuccessfully.", checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     plan = normalizeStageBRefreshPlan(plan);
     if (terraformExitCode === 2 && (plan.complete === false || plan.errored === true)) return { status: "MALFORMED_RESULT", reason: "Terraform detailed exit code returned an incomplete or errored refresh plan.", checkCount: 0, passedCheckCount: 0, failedCheckCount: 0, malformedCheckCount: 0, failedChecks: [], checks: [], resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
-    const checkResult = inspectStageBRefreshChecks({ checks: plan.checks });
+    const checkResult = inspectStageBRefreshChecks({ checks: plan.checks, b03Plan: plan });
     if (!checkResult.valid) return { status: "FAILED_CHECK", reason: "Terraform refresh-only contains failed or malformed production checks.", ...checkResult, resourceChanges: { nonNoOp: 0, changes: [] }, outputChanges: [] };
     const resourceChanges = [...plan.resource_changes, ...plan.resource_drift].filter((change) => !Array.isArray(change.change?.actions) || change.change.actions.some((action) => action !== "no-op"));
     if (resourceChanges.length) return { status: "RESOURCE_DRIFT", reason: "Terraform reported managed-resource actions.", ...checkResult, resourceChanges: { nonNoOp: resourceChanges.length, changes: resourceChanges.map(({ address, type, change }) => ({ address, type, actions: change?.actions || [] })) }, outputChanges: [] };

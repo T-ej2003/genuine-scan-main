@@ -1,3 +1,4 @@
+import { PRINTING_RELEASE_OBJECTS } from "./production-printing-release-boundary.mjs";
 import assert from "node:assert/strict";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
 import { APP_ONLY_VERIFIER } from "./production-app-only-policy.mjs";
@@ -74,6 +75,11 @@ export function classifyB03Catalogue({ probe, probeIdentity, predecessor, succes
       const before = oldRows.get(identity), after = newRows.get(identity), observed = liveRows.get(identity);
       if (before === after) {
         assert.equal(observed, before, `Unexpected ${collection} catalogue drift: ${identity}`);
+        continue;
+      }
+      if (!allow.has(identity) && PRINTING_RELEASE_OBJECTS[collection].includes(identity)) {
+        assert.ok(after, `Printing successor object is missing: ${identity}`);
+        assert.equal(observed, after, `Printing prerequisite must be independently installed before B03: ${identity}`);
         continue;
       }
       assert.ok(allow.has(identity), `Unapproved ${collection} delta: ${identity}`);

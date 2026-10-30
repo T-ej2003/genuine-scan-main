@@ -153,7 +153,7 @@ function installed(state, pkg) {
 }
 
 async function executeC02SessionInstallTransaction({ tx, pkg, checkpoint = async () => {},
-  contract = { admin, database, schemaOwner, authOwner, appRole } }) {
+  contract = { admin, database, schemaOwner, authOwner, appRole }, initialize = async () => {} }) {
   assert.ok(["mscqr_prd_rls_phase2_", "mscqr_rls_cert_"].includes(pkg.rolePrefix));
   assert.equal(contract.authOwner, `${pkg.rolePrefix}auth_owner`);
   assert.equal(contract.appRole, `${pkg.rolePrefix}app`);
@@ -161,6 +161,7 @@ async function executeC02SessionInstallTransaction({ tx, pkg, checkpoint = async
   await tx.$executeRawUnsafe("SET LOCAL lock_timeout='15s'");
   await tx.$executeRawUnsafe("SET LOCAL statement_timeout='60s'");
   await tx.$executeRawUnsafe("SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('mscqr-production-c02-session-prerequisite',0))");
+  await initialize(tx);
   const before = await readback(tx, pkg, contract); assertIdentity(before, contract);
   assert.equal(before.read_only, "off");
   assert.equal(before.migration_ready, true, "Prisma migration must precede C02 installation");
