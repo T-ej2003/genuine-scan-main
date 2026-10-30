@@ -98,3 +98,26 @@ test('recorded metadata matches the unchanged reviewed Terraform dependency cont
     assert.equal(WORKER_COMMITTED.metadata.successorChecks.length,18);
     assert.ok(WORKER_COMMITTED.metadata.successorChecks.every(c=>c.status==='pass'&&(c.objects??[]).every(o=>o.status==='pass')));
 });
+
+test('Terraform no-change plan may omit resource_drift during verification-only recovery', () => {
+    const i=input(),current=evidence(149); i.workerEvidence=current; i.stateIdentity=current.stateIdentity;
+    i.planJson={...plan(),applyable:false}; delete i.planJson.resource_drift;
+    const p=prepare(i),a=authorize({preparation:p,approval:approval(),now});let writes=0;
+    const result=execute({sourceSha,preparation:p,authorization:a,bindings:bindings(),planBytes:i.planBytes,planJson:i.planJson,now,
+        readWorkerReflectionEvidence:()=>current,reauthenticateSource:()=>{},applyRefreshOnlyPlan:()=>{writes++;},renderRefreshClosurePlan:()=>i.planJson});
+    assert.equal(result.status,'recovered-complete'); assert.equal(result.terraformStateMutationCount,0); assert.equal(writes,0);
+});
+for(const invalid of [null,false,{},'none',{length:0}]) test(`reject malformed resource_drift ${JSON.stringify(invalid)}`,()=>{
+    const i=input(),current=evidence(149);i.workerEvidence=current;i.stateIdentity=current.stateIdentity;
+    i.planJson={...plan(),applyable:false,resource_drift:invalid}; assert.throws(()=>prepare(i));
+});
+test('omitted resource_drift cannot authorize a serial148 reflection',()=>{
+    const i=input();delete i.planJson.resource_drift;assert.throws(()=>prepare(i));
+});
+
+test('closure rejects malformed resource_drift rather than treating it as empty',()=>{
+    for(const value of [null,false,{},'none',{length:0}]) {
+        const r=run({renderRefreshClosurePlan:()=>({...plan(),applyable:false,resource_drift:value})});
+        assert.throws(r.result,e=>e.reconciliationResult?.status==='state-write-completed-postverify-failed');
+    }
+});
