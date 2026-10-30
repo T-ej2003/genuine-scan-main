@@ -1,0 +1,371 @@
+{
+  "sourceSha": "6728cc6709f50c4dc3b49ba8bfefb79042e2b82a",
+  "terraformConfigurationSha256": "6e5ef7e9c4e713a7ea1c4addea4f20d9cb2a0ee63bba7a2bbf87855a43df035c",
+  "preparationRunId": "41120039644",
+  "authorizationRunId": "41120581293",
+  "executionRunId": "41122064795",
+  "resultArtifactId": "13009157281",
+  "resultArtifactDigest": "sha256:3627df45c4a74167750774f3bae2548e2c46c307f3851df75fa646fac5c4df65",
+  "resultByteSha256": "b3d4bcc3a3d7401e11183c475501a14b202aab46843fcabb6320d69a6328b7f3",
+  "planSha256": "260ad34dd01a19f9ee818ee1d78444a6261f7d0b27aa3f4182ac049f1a3352dc",
+  "planJsonSha256": "2f5073eb56b3e7e97ce8837b1cf11049f7df05a94a0de4c46b9aeccfef73b5b0",
+  "predecessorState": {
+    "lineage": "4e438e59-8b8b-194d-030c-5ede0c26344a",
+    "serial": 148,
+    "stateSha256": "b40afecf6c199bbdeca3a3ce0c51d4c51684b9aed327fbde9aecd0423dcce656"
+  },
+  "successorState": {
+    "lineage": "4e438e59-8b8b-194d-030c-5ede0c26344a",
+    "serial": 149,
+    "stateSha256": "460f16abd11468edbd6681f968eb87e030b27d37f844e58976fe0cc12a4ba9ce"
+  },
+  "authorizationSha256": "79b1499dd3a039c57d8051c44ac0467e7e3eca6d1c05c9619347426b81229e84",
+  "metadata": {
+    "predecessorChecks": [
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_release_resources",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_bindings",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "resource",
+        "config_addr": "aws_lambda_function.broker",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.read_only_canary_secret",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.recovery_mode_bindings",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.release_bindings",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.retained_candidate_task_definitions",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.production_rotation_secret_value_from",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.production_rotation_secret_value_from",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.production_rotation_contract",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.immutable_images",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.stage_b_recovery_alias_target_version",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.retained_executor_task_definitions",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.overlap_execution_role_secret_contract",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.retained_task_definition_families",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.production_only",
+        "status": "unknown",
+        "objects": null
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_runtime_secrets",
+        "status": "unknown",
+        "objects": null
+      }
+    ],
+    "successorChecks": [
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_release_resources",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.stage_a_release_resources",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.production_rotation_secret_value_from",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.production_rotation_secret_value_from",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.retained_executor_task_definitions",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.retained_executor_task_definitions",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.retained_candidate_task_definitions",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.retained_candidate_task_definitions",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.recovery_mode_bindings",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.recovery_mode_bindings",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.production_rotation_contract",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.production_rotation_contract",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.read_only_canary_secret",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.read_only_canary_secret",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "resource",
+        "config_addr": "aws_ecs_task_definition.b03",
+        "status": "pass",
+        "objects": null
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.stage_b_recovery_alias_target_version",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.stage_b_recovery_alias_target_version",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.retained_task_definition_families",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.retained_task_definition_families",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.production_only",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.production_only",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "var",
+        "config_addr": "var.b03_executor_definition_json",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "var.b03_executor_definition_json",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.overlap_execution_role_secret_contract",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.overlap_execution_role_secret_contract",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_runtime_secrets",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.stage_a_runtime_secrets",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.immutable_images",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.immutable_images",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.stage_a_bindings",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.stage_a_bindings",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "check",
+        "config_addr": "check.release_bindings",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "check.release_bindings",
+            "status": "pass"
+          }
+        ]
+      },
+      {
+        "object_kind": "resource",
+        "config_addr": "aws_lambda_function.broker",
+        "status": "pass",
+        "objects": [
+          {
+            "object_addr": "aws_lambda_function.broker",
+            "status": "pass"
+          }
+        ]
+      }
+    ],
+    "dependencies": [
+      {
+        "mode": "managed",
+        "type": "aws_iam_policy",
+        "name": "broker",
+        "before": [
+          "aws_cloudwatch_log_group.stage_b",
+          "aws_dynamodb_table.replay",
+          "aws_ecs_task_definition.candidate",
+          "aws_ecs_task_definition.executor",
+          "aws_iam_role.execution",
+          "aws_iam_role.task"
+        ],
+        "after": [
+          "aws_cloudwatch_log_group.stage_b",
+          "aws_dynamodb_table.replay",
+          "aws_ecs_task_definition.b03",
+          "aws_ecs_task_definition.candidate",
+          "aws_ecs_task_definition.executor",
+          "aws_iam_role.execution",
+          "aws_iam_role.task"
+        ]
+      },
+      {
+        "mode": "managed",
+        "type": "aws_iam_role_policy_attachment",
+        "name": "broker",
+        "before": [
+          "aws_cloudwatch_log_group.stage_b",
+          "aws_dynamodb_table.replay",
+          "aws_ecs_task_definition.candidate",
+          "aws_ecs_task_definition.executor",
+          "aws_iam_policy.broker",
+          "aws_iam_role.execution",
+          "aws_iam_role.task"
+        ],
+        "after": [
+          "aws_cloudwatch_log_group.stage_b",
+          "aws_dynamodb_table.replay",
+          "aws_ecs_task_definition.b03",
+          "aws_ecs_task_definition.candidate",
+          "aws_ecs_task_definition.executor",
+          "aws_iam_policy.broker",
+          "aws_iam_role.execution",
+          "aws_iam_role.task"
+        ]
+      }
+    ]
+  }
+}

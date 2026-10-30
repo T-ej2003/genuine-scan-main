@@ -92,8 +92,9 @@ jobs:
           artifact="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .id' <<<"$artifacts")"; digest="$(jq -r '.artifacts[] | select(.name == "production-green-stage-b-state-reconciliation-authorization" and .expired == false) | .digest' <<<"$artifacts")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact/zip" > "$d/authorization.zip"; test "sha256:$(sha256sum "$d/authorization.zip" | awk '{print $1}')" = "$digest"
           test "$(unzip -Z1 "$d/authorization.zip")" = authorization.json; install -m 600 /dev/null "$d/authorization.json"; unzip -p "$d/authorization.zip" authorization.json > "$d/authorization.json"
-      - name: Apply only the reviewed refresh-only state transition
+      - name: Apply or verify only the reviewed refresh-only state transition
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail

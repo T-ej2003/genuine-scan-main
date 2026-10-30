@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionImageArgs, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
+import { WORKER_COMMITTED, committedWorkerExecutionReference, restoreCommittedWorkerMetadata, WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionImageArgs, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
 import { STAGE_B_EXPECTED_CHECK_INVENTORY } from '../aws/stage-b-refresh-contract.mjs';
 import { createStageBStateReconciliationPreparation as prepare, createStageBStateReconciliationAuthorization as authorize, executeStageBStateReconciliation as execute, assertStageBStateReconciliationAuthorization as verify, assertExactStageBRefreshOnlyPlan as verifyPlan, STAGE_B_STATE_RECONCILIATION as contract } from '../aws/production-green-stage-b-state-reconciliation.mjs';
 import { createProductionEnvironmentApprovalEvidence } from '../aws/production-github-environment-approval.mjs';
@@ -9,7 +9,13 @@ const sourceSha = 'a'.repeat(40), now = new Date('2026-10-30T01:00:00.000Z'), di
 const retainedImages = Object.fromEntries(['backend','canary','executor','read_only_canary','worker'].map(k=>[k,`368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-${k==='worker'?'worker':'backend'}@sha256:${'a'.repeat(64)}`]));
 const state = serial => ({ lineage: C.lineage, serial, resources: [{ mode: 'managed', type: 'aws_iam_role', name: 'execution', instances: [{ index_key: 'worker', attributes: { name: C.role, arn: `arn:aws:iam::368992683803:role/${C.role}`, inline_policy: structuredClone(serial === 148 ? policy.before : policy.after) } }] }], outputs: { bound_images: {value:retainedImages}, keep: { value: 'unchanged' } } });
 // Unit adapters model the authenticated production state's opaque invariant digest.
-const simulatedEvidence = options => { const e=createWorkerReflectionEvidence(options); e.invariantStateSha256=C.invariantStateSha256; const {evidenceSha256,...body}=e; return {...body,evidenceSha256:hash(body)}; };
+const simulatedEvidence = options => {
+    const s=JSON.parse(options.stateBytes), isSuccessor=s.serial===149;
+    const e=createWorkerReflectionEvidence({...options,stateBytes:Buffer.from(JSON.stringify(state(148)))});
+    if(isSuccessor) { e.stateIdentity=structuredClone(WORKER_COMMITTED.successorState); e.committedExecution=committedWorkerExecutionReference(options.sourceSha); }
+    e.invariantStateSha256=C.invariantStateSha256;
+    const {evidenceSha256,...body}=e; return {...body,evidenceSha256:hash(body)};
+};
 const evidence = (serial = 148) => simulatedEvidence({ stateBytes: Buffer.from(JSON.stringify(state(serial))), livePolicies: policy.after, sourceSha, observedAt: now.toISOString() });
 const checks = () => STAGE_B_EXPECTED_CHECK_INVENTORY.map(address => ({ address, status: 'pass', instances: [{ address, status: 'pass' }] }));
 const plan = () => ({ format_version: '1.2', terraform_version: '1.15.8', errored: false, complete: true, applyable: true, variables: { tooling_sha: { value: sourceSha }, ...Object.fromEntries(Object.entries(retainedImages).map(([k,v])=>[k+'_image',{value:v}])) }, resource_changes: [], resource_drift: [{ address: C.address, type: 'aws_iam_role', mode: 'managed', change: { actions: ['update'], before: state(148).resources[0].instances[0].attributes, after: state(149).resources[0].instances[0].attributes } }], output_changes: {}, checks: checks() });
@@ -53,4 +59,42 @@ test('fresh serial149 approval verifies an expired interrupted transition withou
     const current=simulatedEvidence({stateBytes:Buffer.from(JSON.stringify(state(149))),livePolicies:policy.after,sourceSha,observedAt:freshNow.toISOString()});
     const i=input(); i.createdAt=freshNow.toISOString(); i.workerEvidence=current; i.stateIdentity=current.stateIdentity; i.planJson={...plan(),resource_drift:[],applyable:false}; const p=prepare(i); const a=authorize({preparation:p,approval:approval(freshNow),now:freshNow}); let writes=0;
     const r=execute({sourceSha,preparation:p,authorization:a,bindings:bindings(),planBytes:i.planBytes,planJson:i.planJson,now:freshNow,readWorkerReflectionEvidence:()=>current,reauthenticateSource:()=>{},applyRefreshOnlyPlan:()=>{writes++;},renderRefreshClosurePlan:()=>i.planJson});assert.equal(r.status,'recovered-complete');assert.equal(writes,0);
+});
+
+const metadataState = () => ({serial:149,lineage:C.lineage,check_results:structuredClone(WORKER_COMMITTED.metadata.successorChecks),
+    resources:WORKER_COMMITTED.metadata.dependencies.map(d=>({mode:d.mode,type:d.type,name:d.name,instances:[{dependencies:structuredClone(d.after),attributes:{unchanged:true}}]}))});
+test('restore only exact recorded check metadata and two B03 dependencies',()=>{
+    const s=metadataState(), before=structuredClone(s), restored=restoreCommittedWorkerMetadata(s);
+    assert.deepEqual(s,before); assert.deepEqual(restored.check_results,WORKER_COMMITTED.metadata.predecessorChecks);
+    restored.resources.forEach((r,i)=>{assert.deepEqual(r.instances[0].dependencies,WORKER_COMMITTED.metadata.dependencies[i].before);assert.deepEqual(r.instances[0].attributes,{unchanged:true});});
+});
+for(const [name,mutate] of Object.entries({
+    serial:s=>s.serial=150,lineage:s=>s.lineage='wrong',check:s=>s.check_results[0].status='fail',unknownCheck:s=>s.check_results.push({status:'pass'}),
+    contradictory:s=>s.check_results[0].objects[0].status='fail',missingCheck:s=>s.check_results.pop(),
+    dependency:s=>s.resources[0].instances[0].dependencies.push('aws_iam_policy.unrelated'),missingDependency:s=>s.resources[0].instances[0].dependencies.pop(),
+    wrongResource:s=>s.resources[0].name='other',duplicate:s=>s.resources.push(structuredClone(s.resources[0])),module:s=>s.resources[0].module='module.other',
+    counted:s=>s.resources[0].instances[0].index_key=0,deposed:s=>s.resources[0].instances[0].deposed='old',extraInstance:s=>s.resources[0].instances.push(structuredClone(s.resources[0].instances[0]))
+})) test(`committed metadata rejects ${name}`,()=>{const s=metadataState();mutate(s);assert.throws(()=>restoreCommittedWorkerMetadata(s));});
+test('serial149 evidence requires exact state bytes and authenticated execution reference',()=>{
+    assert.throws(()=>createWorkerReflectionEvidence({stateBytes:Buffer.from(JSON.stringify(state(149))),livePolicies:policy.after,sourceSha,committedExecution:committedWorkerExecutionReference(sourceSha)}));
+    for(const mutate of [e=>delete e.committedExecution,e=>e.committedExecution.executionRunId='999',e=>e.committedExecution.currentProtectedMainSha='0'.repeat(40),e=>e.stateIdentity.stateSha256='0'.repeat(64)]) {
+        const e=evidence(149);mutate(e);const {evidenceSha256,...body}=e;e.evidenceSha256=hash(body);assert.throws(()=>assertWorkerReflectionEvidence(e,{sourceSha,now}));
+    }
+});
+test('serial149 recovery fails closed if live state reverted or changes during closure; never applies',()=>{
+    const current=evidence(149),i=input();i.stateIdentity=current.stateIdentity;i.workerEvidence=current;i.planJson={...plan(),resource_drift:[],applyable:false};
+    const p=prepare(i),a=authorize({preparation:p,approval:approval(),now});let writes=0;
+    const o={sourceSha,preparation:p,authorization:a,bindings:bindings(),planBytes:i.planBytes,planJson:i.planJson,now,readWorkerReflectionEvidence:()=>evidence(148),reauthenticateSource:()=>{},applyRefreshOnlyPlan:()=>{writes++;},renderRefreshClosurePlan:()=>i.planJson};
+    assert.throws(()=>execute(o));assert.equal(writes,0);
+    let reads=0;o.readWorkerReflectionEvidence=()=>++reads>=4?evidence(148):current;
+    assert.throws(()=>execute(o));assert.equal(writes,0);
+});
+
+test('recorded metadata matches the unchanged reviewed Terraform dependency contract',()=>{
+    const source=fs.readFileSync('infra/aws/terraform/production-green-stage-b/main.tf');
+    assert.equal(hash(source),WORKER_COMMITTED.terraformConfigurationSha256);
+    assert.match(source.toString(),/Resource = concat\(values\(local.active_broker_task_definition_arns\), aws_ecs_task_definition.b03\[\*\].arn\)/);
+    for(const d of WORKER_COMMITTED.metadata.dependencies)assert.deepEqual(d.after,d.before.flatMap((v,i)=>i===2?['aws_ecs_task_definition.b03',v]:[v]));
+    assert.equal(WORKER_COMMITTED.metadata.successorChecks.length,18);
+    assert.ok(WORKER_COMMITTED.metadata.successorChecks.every(c=>c.status==='pass'&&(c.objects??[]).every(o=>o.status==='pass')));
 });

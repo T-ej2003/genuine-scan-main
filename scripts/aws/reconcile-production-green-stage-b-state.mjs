@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { WORKER_REFLECTION, createWorkerReflectionEvidence, workerReflectionImageArgs } from "./stage-b-worker-policy-reflection.mjs";
+import { resolveCommittedWorkerReflectionEvidence, assertAuthenticatedCommittedWorkerEvidence } from "./production-green-stage-b-state-reconciliation-evidence.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -62,7 +63,11 @@ function workerReflectionEvidence(run, sourceSha) {
       if (response.RoleName !== WORKER_REFLECTION.role || response.PolicyName !== name) throw new Error("Worker IAM readback identity mismatch.");
       return { name, policy: response.PolicyDocument };
     });
-    return createWorkerReflectionEvidence({ stateBytes: fs.readFileSync(output), livePolicies, sourceSha });
+    const stateBytes = fs.readFileSync(output);
+    const committedExecution = JSON.parse(stateBytes).serial === 149
+      ? assertAuthenticatedCommittedWorkerEvidence(resolveCommittedWorkerReflectionEvidence({ currentProtectedMainSha: sourceSha, privateEvidenceRun: run }), sourceSha)
+      : undefined;
+    return createWorkerReflectionEvidence({ stateBytes, livePolicies, sourceSha, committedExecution });
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 

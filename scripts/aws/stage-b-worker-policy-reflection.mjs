@@ -8,6 +8,32 @@ export const WORKER_REFLECTION = Object.freeze({ mode: 'WORKER_SMTP_POLICY_REFLE
 const smtp = { Version: '2012-10-17', Statement: [{ Effect: 'Allow', Action: ['secretsmanager:GetSecretValue'], Resource: 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6' }] };
 export const workerReflectionHash = x => crypto.createHash('sha256').update(Buffer.isBuffer(x) ? x : canonicalJson(x)).digest('hex');
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
+const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
+export const WORKER_COMMITTED = freeze(JSON.parse(fs.readFileSync(new URL('./worker-reflection-committed-149.json', import.meta.url))));
+export function committedWorkerExecutionReference(sourceSha) {
+    return { currentProtectedMainSha: sourceSha, historicalSourceSha: WORKER_COMMITTED.sourceSha,
+        executionRunId: WORKER_COMMITTED.executionRunId, resultArtifactId: WORKER_COMMITTED.resultArtifactId,
+        resultArtifactDigest: WORKER_COMMITTED.resultArtifactDigest, resultByteSha256: WORKER_COMMITTED.resultByteSha256,
+        authorizationSha256: WORKER_COMMITTED.authorizationSha256, planSha256: WORKER_COMMITTED.planSha256 };
+}
+export function restoreCommittedWorkerMetadata(state) {
+    assert.equal(state.serial, 149);
+    assert.equal(state.lineage, WORKER_REFLECTION.lineage);
+    equal(state.check_results, WORKER_COMMITTED.metadata.successorChecks);
+    const restored = structuredClone(state);
+    restored.check_results = structuredClone(WORKER_COMMITTED.metadata.predecessorChecks);
+    for (const delta of WORKER_COMMITTED.metadata.dependencies) {
+        const resources = restored.resources.filter(r => r.mode === delta.mode && r.type === delta.type && r.name === delta.name && !r.module);
+        assert.equal(resources.length, 1, 'Committed metadata resource identity changed');
+        assert.equal(resources[0].instances.length, 1);
+        const instance = resources[0].instances[0];
+        assert.equal(instance.index_key, undefined); assert.equal(instance.deposed, undefined);
+        equal(instance.dependencies, delta.after);
+        instance.dependencies = structuredClone(delta.before);
+    }
+    return restored;
+}
+
 const hasUnknown = value => value === true || !!(value && typeof value === 'object' && Object.values(value).some(hasUnknown));
 const hash = workerReflectionHash;
 const policies = list => { assert.ok(Array.isArray(list)); const x = list.map(p => { assert.deepEqual(Object.keys(p).sort(), ['name', 'policy']); return { name: p.name, policy: typeof p.policy === 'string' ? JSON.parse(p.policy) : p.policy }; }).sort((a, b) => a.name.localeCompare(b.name)); assert.equal(new Set(x.map(p => p.name)).size, x.length); return x; };
@@ -28,7 +54,7 @@ export function workerReflectionImageArgs(evidence) {
         return `-var=${key}_image=${image}`;
     });
 }
-export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourceSha, observedAt = new Date().toISOString() }) {
+export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourceSha, observedAt = new Date().toISOString(), committedExecution }) {
     assert.match(sourceSha, /^[a-f0-9]{40}$/);
     assert.equal(hash(fs.readFileSync(new URL('../../infra/aws/terraform/production-support-email-worker/main.tf', import.meta.url))), WORKER_REFLECTION.sourceHash, 'Reviewed worker source changed');
     const state = JSON.parse(stateBytes);
@@ -43,14 +69,20 @@ export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourc
     const reflected = state.serial === 149;
     assertPolicies(a.inline_policy, reflected);
     const live = assertPolicies(livePolicies, true);
-    const invariant = structuredClone(state);
+    // Only this recorded successor may restore its exact Terraform-generated metadata.
+    if (reflected) {
+        equal({ lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, WORKER_COMMITTED.successorState);
+        equal(committedExecution, committedWorkerExecutionReference(sourceSha));
+        assert.equal(hash(fs.readFileSync(new URL('../../infra/aws/terraform/production-green-stage-b/main.tf', import.meta.url))), WORKER_COMMITTED.terraformConfigurationSha256, 'Reviewed Terraform source changed');
+    } else assert.equal(committedExecution, undefined);
+    const invariant = reflected ? restoreCommittedWorkerMetadata(state) : structuredClone(state);
     delete invariant.serial;
     invariant.resources.filter(r => r.mode === 'managed' && r.type === 'aws_iam_role' && r.name === 'execution').flatMap(r => r.instances).filter(i => i.index_key === 'worker' && !i.deposed).forEach(i => { delete i.attributes.inline_policy; });
-    const body = { sourceSha, observedAt, stateIdentity: { lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, boundImages: state.outputs.bound_images.value, invariantStateSha256: hash(invariant), roleStateSha256: hash(a), sourcePolicySha256: hash(smtp), livePolicies: live };
+    const body = { sourceSha, observedAt, stateIdentity: { lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, boundImages: state.outputs.bound_images.value, invariantStateSha256: hash(invariant), roleStateSha256: hash(a), sourcePolicySha256: hash(smtp), livePolicies: live, ...(reflected ? { committedExecution } : {}) };
     return { ...body, evidenceSha256: hash(body) };
 }
 export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() } = {}) {
-    assert.deepEqual(Object.keys(e).sort(), ['sourceSha', 'observedAt', 'stateIdentity', 'invariantStateSha256', 'roleStateSha256', 'boundImages', 'sourcePolicySha256', 'livePolicies', 'evidenceSha256'].sort());
+    assert.deepEqual(Object.keys(e).sort(), ['sourceSha', 'observedAt', 'stateIdentity', 'invariantStateSha256', 'roleStateSha256', 'boundImages', 'sourcePolicySha256', 'livePolicies', 'evidenceSha256', ...(e.stateIdentity?.serial === 149 ? ['committedExecution'] : [])].sort());
     const { evidenceSha256, ...body } = e;
     assert.equal(evidenceSha256, hash(body));
     assert.equal(e.sourceSha, sourceSha);
@@ -61,6 +93,10 @@ export function assertWorkerReflectionEvidence(e, { sourceSha, now = new Date() 
     assert.ok([148, 149].includes(e.stateIdentity.serial));
     for (const h of [e.invariantStateSha256, e.roleStateSha256, e.stateIdentity.stateSha256])
         assert.match(h, /^[a-f0-9]{64}$/);
+    if (e.stateIdentity.serial === 149) {
+        equal(e.stateIdentity, WORKER_COMMITTED.successorState);
+        equal(e.committedExecution, committedWorkerExecutionReference(sourceSha));
+    }
     assert.equal(e.invariantStateSha256, WORKER_REFLECTION.invariantStateSha256, 'State differs from reviewed serial-148 invariant');
     workerReflectionImageArgs(e);
     const age = now.getTime() - Date.parse(e.observedAt);
@@ -170,8 +206,9 @@ export function executeWorkerReflection(o, validateApproval) {
     equal(assertWorkerReflectionPlan(o.planJson, { sourceSha: o.sourceSha, stateIdentity: p.predecessorState, workerEvidence: p.workerEvidence, now: time() }), p.planSemantics);
     const read = () => { const e = o.readWorkerReflectionEvidence(); assertWorkerReflectionEvidence(e, { sourceSha: o.sourceSha, now: time() }); equal(e.livePolicies, p.workerEvidence.livePolicies); assert.equal(e.invariantStateSha256, p.workerEvidence.invariantStateSha256); return e; };
     const before = read();
+    if (p.predecessorState.serial === 149) equal(before.stateIdentity, p.predecessorState);
     const committed = e => e.stateIdentity.serial === 149 && (p.predecessorState.serial === 149 ? e.stateIdentity.stateSha256 === p.predecessorState.stateSha256 : e.stateIdentity.stateSha256 !== p.predecessorState.stateSha256);
-    const result = (status, e, writes) => ({ schemaVersion: 3, kind: 'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT', reconciliationMode: WORKER_REFLECTION.mode, status, sourceSha: o.sourceSha, authorizationSha256: o.authorization.authorizationSha256, predecessorState: p.predecessorState, successorState: e?.stateIdentity || null, successorEvidence: e || null, remoteResourceMutationCount: 0, terraformStateMutationCount: writes });
+    const result = (status, e, writes) => ({ schemaVersion: 3, kind: 'PRODUCTION_GREEN_STAGE_B_WORKER_REFLECTION_RESULT', reconciliationMode: WORKER_REFLECTION.mode, status, sourceSha: o.sourceSha, authorizationSha256: o.authorization.authorizationSha256, predecessorState: p.predecessorState, successorState: e?.stateIdentity || null, successorEvidence: e || null, ...(e?.committedExecution ? { recoveredExecution: e.committedExecution } : {}), remoteResourceMutationCount: 0, terraformStateMutationCount: writes });
     if (!committed(before))
         equal(before.stateIdentity, p.predecessorState);
     o.reauthenticateSource();
@@ -190,6 +227,7 @@ export function executeWorkerReflection(o, validateApproval) {
         assert.equal((closure.resource_changes || []).filter(c => canonicalJson(c.change?.actions) !== '["no-op"]').length, 0);
         for (const c of Object.values(closure.output_changes || {}))
             { equal(c.actions, ['no-op']); equal(c.before, c.after); assert.ok(!hasUnknown(c.after_unknown)); }
+        equal(read().stateIdentity, after.stateIdentity);
         return result(status, after, writes);
     }
     catch (e) {

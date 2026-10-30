@@ -225,3 +225,49 @@ state (all content except serial and the exact worker inline-policy list).
 Fresh recovery therefore cannot bless unrelated changes or reuse an expired
 approval. Original preparation, authorization and execution artifacts remain
 immutable.
+
+### Verification-only recovery of the committed serial 149
+
+Run `41122064795` committed serial 149 but reported
+`state-write-completed-postverify-failed`. Terraform 1.15.8 also persisted the
+18 evaluated checks (including the disabled B03 counted task and protected B03
+variable) and added `aws_ecs_task_definition.b03` to the dependency lists of
+`aws_iam_policy.broker` and `aws_iam_role_policy_attachment.broker`. The reviewed
+broker policy references that task through `local.broker_runtime_policy`; its
+attachment inherits the dependency. These are state metadata updates, not
+permission changes. The original invariant incorrectly included those fields
+as unchanged bytes.
+
+`worker-reflection-committed-149.json` pins the exact predecessor, committed
+successor, metadata, original source, plan, authorization and failed execution
+artifact. The verifier restores only those two exact dependency lists and the
+exact recorded check results before comparing the original whole-state invariant.
+It also requires the exact serial-149 raw state digest, unchanged Terraform and
+worker-policy source, and current live IAM equivalence. It does not generally
+ignore check results or dependencies. No raw state, credentials or secret values
+are embedded in this manifest.
+
+After this correction is merged:
+
+1. Authenticate protected main and read live state; it must remain the pinned
+   lineage and serial 149. **Never apply the old serial-148 plan again.**
+2. Produce current-source prerequisites/preflight, then prepare
+   `WORKER_SMTP_POLICY_REFLECTION` through the existing governed workflow.
+   It reauthenticates original preparation `41120039644`, authorization
+   `41120581293` and failed execution `41122064795` through GitHub artifact
+   provenance, checksums, the private evidence transport and historical approval
+   validity at execution time. Missing, expired or substituted artifacts block
+   recovery. Historical authorization is evidence only, not current authority.
+3. Inspect the fresh non-applyable refresh-only plan: no resource drift, resource
+   changes or output changes. Obtain **fresh current-source production approval**
+   through the existing authorization and execution workflows.
+4. Execution requires the exact prepared serial-149 identity. It verifies live IAM,
+   authenticates the historical receipt, runs read-only refresh closure, rechecks
+   state identity and emits `recovered-complete` with
+   `terraformStateMutationCount: 0` and the historical execution reference.
+   This branch cannot call Terraform apply, even if live state returns to 148.
+
+The failed receipt remains immutable. The fresh result reconciles it by reference;
+it does not overwrite history or reset state. If state, policy, source contract,
+metadata or durable evidence differs, stop for review. B03 infrastructure and
+C02 → B03 installation remain separate, subsequently authorized operations.
