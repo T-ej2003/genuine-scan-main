@@ -1,6 +1,7 @@
 import { stageBStaticConfiguration as configuration } from './fixtures/stage-b-static-configuration.mjs';
 import assert from "node:assert/strict";
 import { fixture as b03PlanFixture, b03Configuration } from "./fixtures/production-b03-plan.mjs";
+import { assertB03PlanConfiguration } from "../aws/production-b03-plan-contract.mjs";
 import fs from "node:fs";
 import test from "node:test";
 import {
@@ -1540,6 +1541,38 @@ test("B03 fixed executor participates in the canonical semantic census without w
   containers[0].command = ["sh"];
   change.change.after.container_definitions = JSON.stringify(containers);
   assert.throws(() => assertStageBPlanSemanticCompleteness(wrongCommand), /B03/);
+});
+
+test("B03 validates literal Terraform block expressions even when its count is zero", () => {
+  const plan = { variables: { b03_executor_definition_json: { value: null } }, resource_changes: [],
+    configuration: { root_module: { resources: [b03Configuration()] } } };
+  assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
+  const expressions = plan.configuration.root_module.resources[0].expressions;
+  expressions.runtime_platform = { constant_value: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }] };
+  expressions.volume = { constant_value: [{ name: "executor-tmp" }] };
+  assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
+});
+
+for (const [name, mutate] of Object.entries({
+  "architecture substitution": e => { e.runtime_platform[0].cpu_architecture.constant_value = "ARM64"; },
+  "operating system substitution": e => { e.runtime_platform[0].operating_system_family.constant_value = "WINDOWS_SERVER_2022_CORE"; },
+  "computed architecture": e => { e.runtime_platform[0].cpu_architecture = { references: ["var.architecture"] }; },
+  "mixed constant and reference": e => { e.runtime_platform[0].cpu_architecture.references = ["var.architecture"]; },
+  "unexpected platform field": e => { e.runtime_platform[0].unreviewed = { constant_value: true }; },
+  "multiple platforms": e => { e.runtime_platform.push(structuredClone(e.runtime_platform[0])); },
+  "missing platform": e => { e.runtime_platform = []; },
+  "unwrapped literal": e => { e.runtime_platform[0].cpu_architecture = "X86_64"; },
+  "volume substitution": e => { e.volume[0].name.constant_value = "other"; },
+  "computed volume": e => { e.volume[0].name = { references: ["var.volume"] }; },
+  "host mount": e => { e.volume[0].host_path = { constant_value: "/var/run/docker.sock" }; },
+  "multiple volumes": e => { e.volume.push(structuredClone(e.volume[0])); },
+  "missing volume": e => { e.volume = []; },
+  "dynamic volume expression": e => { e.volume = { references: ["var.volume"] }; },
+})) test(`B03 block configuration rejects ${name} while disabled`, () => {
+  const resource = b03Configuration(); mutate(resource.expressions);
+  const plan = { variables: { b03_executor_definition_json: { value: null } }, resource_changes: [],
+    configuration: { root_module: { resources: [resource] } } };
+  assert.throws(() => assertB03PlanConfiguration(plan));
 });
 
 test("B03 broker IAM permits exactly the validated planned revision without widening PassRole", async () => {
