@@ -26,8 +26,8 @@ export function b03Configuration() {
       container_definitions: { references: ["local.b03_definition.containerDefinitions", "local.b03_definition"] },
       execution_role_arn: { references: ['aws_iam_role.execution["executor"].arn', 'aws_iam_role.execution["executor"]', "aws_iam_role.execution"] },
       network_mode: { constant_value: "awsvpc" }, requires_compatibilities: { constant_value: ["FARGATE"] }, cpu: { constant_value: "1024" },
-      memory: { constant_value: "2048" }, skip_destroy: { constant_value: true }, volume: { constant_value: [{ name: "executor-tmp" }] },
-      runtime_platform: { constant_value: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }] },
+      memory: { constant_value: "2048" }, skip_destroy: { constant_value: true }, volume: [{ name: { constant_value: "executor-tmp" } }],
+      runtime_platform: [{ operating_system_family: { constant_value: "LINUX" }, cpu_architecture: { constant_value: "X86_64" } }],
       tags: { constant_value: { Environment: "production", ManagedBy: "Terraform", Component: "b03-incremental-release" } },
     } };
 }

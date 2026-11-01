@@ -124,7 +124,14 @@ export function assertB03PlanConfiguration(plan) {
   const refs = { family: "local.b03_definition.family", container_definitions: "local.b03_definition.containerDefinitions",
     execution_role_arn: 'aws_iam_role.execution["executor"].arn' };
   equal(Object.keys(resource.expressions || {}).sort(), [...Object.keys(constants), ...Object.keys(refs)].sort());
-  for (const [key, value] of Object.entries(constants)) equal(resource.expressions[key], { constant_value: value });
+  for (const [key, value] of Object.entries(constants)) {
+    const expression = resource.expressions[key];
+    // Terraform represents schema blocks as lists of attribute expressions.
+    const expected = ["runtime_platform", "volume"].includes(key) && Array.isArray(expression)
+      ? value.map(block => Object.fromEntries(Object.entries(block).map(([name, literal]) => [name, { constant_value: literal }])))
+      : { constant_value: value };
+    equal(expression, expected);
+  }
   const checkRefs = (expression, expected) => {
     equal(Object.keys(expression || {}), ["references"]);
     assert.ok(expression.references.includes(expected));
