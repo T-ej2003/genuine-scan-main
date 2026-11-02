@@ -903,7 +903,7 @@ test("production-shaped plan requires and binds the exact account and region var
     ["staged-broker-iam-listrolepolicies", "iam:ListRolePolicies", roleArn],
     ["staged-broker-iam-getrolepolicy", "iam:GetRolePolicy", roleArn],
   ].sort());
-  assert.equal(report.forbiddenEvaluations.length, 38);
+  assert.equal(report.forbiddenEvaluations.length, 41);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(

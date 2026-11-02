@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
+import { compactNormalActivationPolicy } from '../aws/production-normal-backend-activation-policy.mjs';
 import { RELEASE_POLICY_SOURCES } from '../aws/validate-production-green-stage-b-permissions.mjs';
 const file='documents/ops/iam/MSCQRProductionGreenStageBB03Registration-v1.json';
 const policy=JSON.parse(fs.readFileSync(file));
@@ -30,10 +31,18 @@ test('policy split preserves every prior permission and fits AWS quotas without 
  const final='documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json';
  const baseline=JSON.parse(execFileSync('git',['show',`9b901d072f64b680db4e979ecf3641f701023e91:${final}`],{encoding:'utf8'}));
  const current=JSON.parse(fs.readFileSync(final));
- const moved=policy.Statement.find(s=>s.Sid==='OwnExactBrokerPolicyMutationDomain');assert.ok(moved);
- assert.deepEqual([...current.Statement,moved],baseline.Statement);
- for(const {sourcePath}of RELEASE_POLICY_SOURCES)assert.ok(JSON.stringify(JSON.parse(fs.readFileSync(sourcePath))).replace(/\s/g,'').length<=6144,sourcePath);
+ assert.deepEqual(current,baseline,'Existing normal-activation and broker ownership authority is unchanged');
+ for(const {sourcePath}of RELEASE_POLICY_SOURCES){const document=JSON.parse(fs.readFileSync(sourcePath));
+  const published=sourcePath===final?compactNormalActivationPolicy(document):document;
+  assert.ok(JSON.stringify(published).replace(/\s/g,'').length<=6144,sourcePath);}
  assert.equal(RELEASE_POLICY_SOURCES.length,10,'Uses the existing role managed-policy capacity; no new role');
  const read=JSON.parse(fs.readFileSync('documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json'));
  assert.ok(read.Statement.find(s=>s.Sid==='ReadExactStagedBrokerCallerPolicies').Resource.includes('arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration'));
+});
+
+test('canonical native preflight checks explicit denial of B03 launches and administrator secret reads',()=>{
+ const manifest=JSON.parse(fs.readFileSync('documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json'));
+ const entries=manifest.forbidden.filter(e=>e.id.startsWith('b03-deny-'));
+ assert.deepEqual(entries.map(e=>e.action).sort(),['ecs:RunTask','ecs:StartTask','secretsmanager:GetSecretValue']);
+ for(const entry of entries){assert.equal(entry.expectedDecision,'explicitDeny');assert.deepEqual(entry.expectedMissingContextValues,[]);assert.notDeepEqual(entry.resources,['*']);}
 });

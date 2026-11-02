@@ -146,11 +146,10 @@ before execution. This runbook does not grant that authority.
 
 The existing release role is `arn:aws:iam::368992683803:role/mscqr-production-release-deployer`.
 Its old twelve-family registration policy cannot register the fixed B03 executor.
-The reviewed sources add `MSCQRProductionGreenStageBB03Registration-v1.json`,
-remove only `OwnExactBrokerPolicyMutationDomain` from FinalApplyWrite (move it
-unchanged into the new policy), and add only the new policy metadata ARN to
-ProviderReadOnly. Existing PassRole targets do not change. All source managed
-policies fit6,144 compact characters; ten managed attachments is the expected
+The reviewed sources add `MSCQRProductionGreenStageBB03Registration-v1.json`
+and add only the new policy metadata ARN to ProviderReadOnly. FinalApplyWrite, its
+existing canonical publisher, broker ownership permissions and all PassRole
+targets remain unchanged. Published documents fit6,144 characters. Ten managed attachments is the expected
 maximum and must be checked live, not assumed.
 
 There is **no existing governed create-and-attach workflow for this new managed
@@ -159,7 +158,7 @@ staged runtime-policy broker cannot install caller permissions. Do not extend
 those authorities or run the commands below under the release role. This is the
 smallest separately reviewed privileged installation package, **not permission
 to execute it**. Obtain explicit root-scoped approval binding the merged source,
-three canonical policy hashes, exact live predecessor version/document hashes,
+two canonical policy hashes, exact live predecessor version/document hashes,
 role attachments, change ticket and a new one-use execution journal. Reauthenticate
 root MFA and source immediately before each approved write. Stop if live state
 or policy versions differ from that package.
@@ -175,9 +174,9 @@ aws iam list-role-policies --profile mscqr-ops-admin --region eu-west-2 --role-n
 ```
 
 Exact managed ARNs: `arn:aws:iam::368992683803:policy/` followed by
-`MSCQRProductionGreenStageBB03Registration`,
-`MSCQRProductionGreenStageBFinalApplyWrite`, or
-`MSCQRProductionGreenStageBProviderReadOnly`.
+`MSCQRProductionGreenStageBB03Registration` or
+`MSCQRProductionGreenStageBProviderReadOnly`. Read FinalApplyWrite as unchanged
+corroborating evidence; do not replace its governed activation transaction.
 Prepare policy files only from authenticated merged Git blobs. Record SHA-256 of
 both bytes and canonical parsed JSON, expected `DefaultVersionId`, all versions,
 and exact semantic delta. Reject existing unknown new-policy documents, extra
@@ -198,24 +197,17 @@ Approved execution ordering (each response and native readback must be journaled
    GetSecretValue, and unrelated-family/task-role rejection. IAM cannot bind image
    or command: those remain protected by exact plan authorization and the fixed
    broker task-map readback. No service execution occurs here.
-4. Publish only the approved FinalApplyWrite source as a new default version using
-   `iam create-policy-version --policy-arn <exact-FinalApplyWrite-ARN>
-   --policy-document file://<verified-final-write-policy> --set-as-default`.
-   The moved ownership statement is now supplied by the attached new policy;
-   require exact union-equivalence of all pre-existing allows. Never delete old
-   versions automatically. Lost response: authenticate document/default/version
-   inventory before deciding whether any retry is needed.
-5. Use the **existing** ProviderReadOnly prepare → environment authorization →
+4. Use the **existing** ProviderReadOnly prepare → environment authorization →
    execute workflow for its one-ARN metadata-read delta. Do not manually install it
    or reuse a historical consumed authorization. Its predecessor must be the
    reviewed `f739b408…` document; any different live policy stops preparation.
-6. Read back exact policies, versions, attachments, unchanged trust/PassRole and
+5. Read back exact policies, versions, attachments, unchanged trust/PassRole and
    secret permissions; rerun canonical permission preflight. Persist hashes,
    execution identities and native CloudTrail evidence. Only then permit staged
    task registration. On interruption, reconcile these readbacks first.
 
 Until this package is explicitly reviewed and authorized, registration is blocked.
 It does not authorize Terraform state changes, task launches, SQL or ECS rollout.
-Rollback also needs approval: preserve the original default version and restore
-it before detaching the new policy; never remove the ownership permission first.
+Rollback also needs approval: never detach the new policy while registration or
+broker rollout is in flight. Preserve existing default versions and permissions.
 Do not delete a new policy that has unknown attachments or any in-flight execution.

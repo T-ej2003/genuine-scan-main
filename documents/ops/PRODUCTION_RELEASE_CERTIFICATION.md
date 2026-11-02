@@ -69,7 +69,7 @@ is not a prerequisite of this selected, existing release lane.
 | Image authorization / `production-image-authorization.mjs` | Root-signed report; baseline authorization41307938481 | Root-only KMS Sign; independent pinned/KMS verification; `production` approval | 24-hour evidence; never reuse baseline authorization for the merged correction source |
 | State / refresh and committed149 contracts | Lineage4e438e59-8b8b-194d-030c-5ede0c26344a, serial149, raw SHA460f16abd11468edbd6681f968eb87e030b27d37f844e58976fe0cc12a4ba9ce | Read-only refresh/plan; existing recovered receipt retained | Any serial/lineage change requires fresh preparation, not forced state; existing IAM permissions independently unchanged |
 | Fixed B03 preparation / `produce-production-b03-executor-definition.mjs` | Authenticated d785aa7f predecessor and exact-current-source successor artifact references; immutable backend image; native RDS identity | Read-only; no SQL or secret values; references checked before expensive workflow gates | Canonical fixed definition embedded and sealed in tfvars; missing/mismatched references fail closed; installed B03 remains retained |
-| Registration IAM / source managed policies | B03 registration was absent from the twelve-family manifest; FinalApplyWrite exceeded the 6,144-character managed-policy limit | New exact-family registration/tag policy; existing exact execution-role PassRole reused; explicit deny of direct B03 RunTask/StartTask and administrator-secret reads. Move only unchanged broker ownership statement out of FinalApplyWrite | Separate reviewed privileged installation approval required; attach new policy before removing the moved statement; read back all policies/attachments and run native permission simulations. This is a prerequisite, not an implicit coordinator permission |
+| Registration IAM / source managed policies | B03 registration was absent from the twelve-family manifest; the existing twelve-family grant excludes B03 | New exact-family registration/tag policy; existing exact execution-role PassRole reused; explicit deny of direct B03 RunTask/StartTask and administrator-secret reads. FinalApplyWrite and existing ownership permissions remain unchanged | Separate reviewed privileged installation approval required; use the existing reviewed root/admin installation boundary for only this new policy; read back all policies/attachments and run native permission simulations. This is a prerequisite, not an implicit coordinator permission |
 | Registration / staged broker contracts | Exact pinned-provider plan: twelve reviewed rotations plus optional fixed B03 create/no-op | `production` phase approval; exact saved plan/KMS authorization, reservation and state lock; task registration only | Authenticated native ECS readback and one-use registration receipt include all13 definitions; legacy12 receipts remain supported; no service desired-count change |
 | Policy / `deriveBrokerPolicy` | Nine fixed full-RLS revisions plus exactly the registered B03 revision, when present | Separate governed policy/pruning approval; exact IAM document, least-privilege PassRole unchanged | No wildcard B03 revision, no normal Release Gate privileged launch grant; policy receipt and historical handoff authenticate the new set |
 | Broker / coordinator publication, cutover and closure | Reviewed alias v21; source-bound package, registration, policy and alias RevisionId | Separate publication and CAS approvals; immutable version, then CAS; state-only closure | Native code/config/hash/alias readbacks, signed durable receipts and converged state required; restart adopts completed phases, never republishes blindly |
@@ -105,14 +105,14 @@ is not a prerequisite of this selected, existing release lane.
    retention expires; independently verify the committed DB separately. An absent
    archive plus unavailable native evidence remains blocked, never auto-reexecuted.
 
-6. The permission manifest omitted B03 registration, and FinalApplyWrite was
-   6,634 compact characters (AWS limit6,144). Add the one exact-family mapping and
-   a bounded B03 registration policy; move its existing broker-ownership statement
-   unchanged so all managed documents fit. The normal role gains registration/tag
-   authority, **not** privileged execution or secret access. ProviderReadOnly gains
-   only metadata reads of that exact new policy through its existing reconciler.
-   No installer may silently attach the policy: fresh privileged approval and
-   native permission verification are mandatory before task registration.
+6. The permission manifest and registration grant omitted B03. Add the exact-family
+   mapping and a bounded B03 registration policy. Existing FinalApplyWrite and
+   broker-ownership permissions remain unchanged; its existing canonical publisher
+   already fits AWS's policy quota (6,135 characters). The normal role gains only
+   registration/tag authority, not privileged execution or secret access.
+   ProviderReadOnly gains only metadata reads of the exact new policy through its
+   existing reconciler. Fresh privileged installation approval and native required/
+   forbidden permission verification remain mandatory before registration.
 
 Run41308092478 failed before infrastructure apply. Its failed-step logs are
 preserved privately. It did not publish a failed-plan artifact: the reconstruction

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { compactNormalActivationPolicy } from "../aws/production-normal-backend-activation-policy.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import test from "node:test";
@@ -113,7 +114,7 @@ test("v4 and the companion policy fit the AWS managed-policy document limit", ()
   assert.equal(awsCharacterCount(policies.v3), 6651);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.equal(awsCharacterCount(policies.audit), 5706);
-  assert.ok(awsCharacterCount(policies.finalWrite) < 6144);
+  assert.ok(awsCharacterCount(compactNormalActivationPolicy(policies.finalWrite)) < 6144);
   assert.ok(awsCharacterCount(policies.v4) < 6144);
   assert.ok(awsCharacterCount(policies.audit) < 6144);
 });
@@ -130,7 +131,7 @@ test("backend recovery tagging is split from the broad provider tag authority", 
 test("the split keeps the reviewed policy boundaries and adds exact backend recovery authority", () => {
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid), [...stageALiveEvidenceSids, movedSids[0], "ReadExactLegacyExecutionRoleRuntimePolicies", "ReadEcsManagedExecutionPolicy", "DescribeCandidateRuntimeSecrets", "ReadCandidateRuntimeRepositoryPolicies", "ReadNormalActivationPolicy", "ReadCandidateRuntimeKmsPolicy", ...movedSids.slice(1, 3), "ListExactBackendServiceDeployments", "DescribeExactBackendServiceDeployments", "DescribeExactBackendServiceRevisions", ...movedSids.slice(3, -1), "ListStageBTaskDefinitionsReadOnly", movedSids.at(-1), ...auditAdditionSids]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid), controlSids);
-  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["ActivateBackendCandidate", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets"]);
+  assert.deepEqual(policies.finalWrite.Statement.map(({ Sid }) => Sid), ["ActivateBackendCandidate", ...finalWriteSids, "BootstrapExactProductionSecretContainers", "TagExactInitialRotationSecretContainers", "ManageExactProductionSecretValues", "ManageExactLegacyCurrentRotationSecrets", "OwnExactBrokerPolicyMutationDomain"]);
   assert.deepEqual(policies.v4.Statement.map(({ Sid }) => Sid).filter((sid) => movedSids.includes(sid)), []);
   assert.deepEqual(policies.audit.Statement.map(({ Sid }) => Sid).filter((sid) => controlSids.includes(sid)), []);
   assert.ok(statementOf(policies.audit, "ListStageBTaskDefinitionsReadOnly"));
@@ -145,7 +146,7 @@ test("the split keeps the reviewed policy boundaries and adds exact backend reco
 });
 
 test("pre-deployment inventory policy documents fit AWS size limits and keep tag authority exact", () => {
-  assert.ok(awsCharacterCount(parse(paths.finalWrite)) <= 6144);
+  assert.ok(awsCharacterCount(compactNormalActivationPolicy(parse(paths.finalWrite))) <= 6144);
   assert.ok(awsCharacterCount(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json")) <= 6144);
   assert.equal(statementOf(policies.finalWrite, "TagExactPreDeploymentInventoryTaskDefinition"), undefined);
   assert.equal(statementOf(parse("documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"), "TagExactPreDeploymentInventoryTaskDefinition").Resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-predeployment-inventory:*");
