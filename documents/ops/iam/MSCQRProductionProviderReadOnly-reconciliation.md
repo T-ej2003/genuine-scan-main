@@ -131,3 +131,60 @@ and journal consumption. The executor does not run Access Analyzer or IAM
 simulations. After separately authorized execution, run the existing Stage-B
 permission preflight independently to prove required reads and forbidden actions.
 Merging this correction does not authorize or execute an IAM change.
+
+## Bounded journal export (separate production approval)
+
+`execute-production-provider-readonly-policy-reconciliation.yml` also supports
+`operation=export-journals`. This is an isolated job, not reconciliation or
+retirement authorization. It accepts only the six source-enumerated objects for
+operations `4961bf0f…` and `daeb6710…`. No key, bucket, command, policy or role
+inputs exist. All reconciliation inputs must be empty. The default operation
+remains `reconcile`; its existing preparation and authorization checks remain.
+
+Generate an RSA3072 recipient key locally using
+`createSecurityCatalogueTransportKeyPair()` from the existing
+`production-security-rebaseline-transport.mjs`. Keep the private key locally in a
+0600 file outside the repository. Supply only the base64 SPKI public PEM as
+`recipient_public_key_base64` and SHA256 of its SPKI DER bytes as
+`recipient_public_key_sha256`. The required production reviewer must check that
+fingerprint and the exact merged `source_sha` in the dispatch. Run attempt must
+be1, workflow revision must equal current protected main, and actual approval
+and environment protections are authenticated through the existing helper.
+Preparing this code does not authorize dispatch or approval of a production run.
+
+The existing reconciler role is assumed with a session policy allowing only
+`s3:GetObject` for those six exact ARNs. Its IAM permissions/trust and bucket
+policy are unchanged. The exporter calls only STS identity and the fixed S3 GETs;
+it imports no reconciliation executor. It reads each object twice, requiring
+identical version ID, ETag and bytes, canonical journal checksums, historical
+operation/source identity and completed terminal status. No reconciliation,
+Terraform, IAM mutation, archive writes or retirement selection occurs.
+
+Only the existing RSA-OAEP/AES-GCM encrypted transport is uploaded, as artifact
+`production-provider-readonly-encrypted-journal-export` (90-day retention).
+Raw journals and approval evidence never enter logs or public artifacts. The
+payload includes AWS identity, S3 version/ETag, content checksums, source, run,
+recipient fingerprint and actual environment approval. Partial failure publishes
+nothing and removes temporary plaintext. This authenticates an export, not a
+retirement decision or authority to delete policy versions.
+
+Before accepting a downloaded export, independently authenticate the successful
+GitHub run's repository, workflow, exact protected source, attempt1 and production
+approval. Check the artifact archive against GitHub's authenticated SHA256 digest.
+Use `decryptSecurityCatalogueTransport(chunks, privateKeyPem, expectedBinding)`;
+expected binding is the exact run source in both source fields and the
+source-owned `JOURNAL_EXPORT_REQUIREMENTS_SHA256`. Compare decrypted run identity,
+six object keys and recipient fingerprint with the reviewed dispatch. Never
+accept checksums alone as proof of provenance. Archive the authenticated encrypted
+artifact and verification evidence privately before its GitHub retention expires;
+the original protected S3 journals remain the durable authority. This export is
+not the required durable pre-deletion policy-version archive and supplies no
+rollback or retirement authorization.
+
+Focused certification: `node --test
+scripts/tests/production-provider-readonly-journal-export.test.mjs
+scripts/tests/production-provider-readonly-policy-reconciliation.test.mjs
+scripts/tests/workflow-yaml.test.mjs`. Tests use disposable local files and fake
+AWS reads; they do not certify live production access. Production execution
+requires this change merged, exact-source reauthentication and a separate
+production approval.
