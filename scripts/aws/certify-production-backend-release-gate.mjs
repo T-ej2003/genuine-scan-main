@@ -120,7 +120,7 @@ export function assertApplicationReleaseWorkflowGraph({ train, gate, web } = {})
   assert.match(script, /if \[\[ "\$b03_mode" == start \]\]/);
   const b03 = script.slice(script.indexOf('if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]'), script.indexOf("elif [["));
   assert.ok(b03.includes("apply-production-b03-incremental-release.mjs"));
-  assert.doesNotMatch(b03, /apply-production-rls|aws ecs run-task|register-task-definition/);
+  assert.doesNotMatch(b03, /apply-production-rls|aws\s+ecs\s+run-task|register-task-definition/);
   const authenticateWeb = web.jobs.activate?.steps?.find(step => step.name === "Authenticate coordinated Stage-B and web evidence")
     || Object.values(web.jobs).flatMap(job => job.steps || []).find(step => step.name === "Authenticate coordinated Stage-B and web evidence");
   assert.equal(authenticateWeb?.env.BACKEND_ACTIVATION_EVIDENCE_JSON, "${{ inputs.backend_activation_evidence_json }}");
