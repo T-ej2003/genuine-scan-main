@@ -56,7 +56,7 @@ export function assertB03TaskPlan(change, plan) {
     equal(JSON.parse(value.container_definitions), expected.containerDefinitions);
     assert.equal(value.volume?.length, 1); assert.equal(value.volume[0].name, "executor-tmp");
     for (const [key, item] of Object.entries(value.volume[0])) {
-      assert.ok(["name", "host_path", "configure_at_launch", "docker_volume_configuration", "efs_volume_configuration", "fsx_windows_file_server_volume_configuration"].includes(key), "B03 unclassified volume field");
+      assert.ok(["name", "host_path", "configure_at_launch", "docker_volume_configuration", "efs_volume_configuration", "fsx_windows_file_server_volume_configuration", "s3files_volume_configuration"].includes(key), "B03 unclassified volume field");
       if (key !== "name") assert.ok(item === null || item === "" || key === "configure_at_launch" && item === false || Array.isArray(item) && item.length === 0, "B03 unexpected volume configuration");
     }
     for (const [key, item] of Object.entries(value)) {
@@ -67,7 +67,8 @@ export function assertB03TaskPlan(change, plan) {
           else if (key === "revision") assert.ok(Number.isInteger(item) && item > 0);
           else assert.equal(item, expected.family);
         }
-      } else if (key in optional) assert.ok(item === null || item === "" && ["task_role_arn", "ipc_mode", "pid_mode"].includes(key) || canonicalJson(item) === canonicalJson(optional[key]), `B03 unsupported ${key}`);
+      } else if (key === "region") assert.equal(item, "eu-west-2", "B03 wrong provider region");
+      else if (key in optional) assert.ok(item === null || item === "" && ["task_role_arn", "ipc_mode", "pid_mode"].includes(key) || canonicalJson(item) === canonicalJson(optional[key]), `B03 unsupported ${key}`);
       else assert.ok(key in required || ["container_definitions", "volume"].includes(key), `B03 unclassified field ${key}`);
     }
   };
@@ -118,8 +119,8 @@ export function assertB03PlanConfiguration(plan) {
   }
   const resource = matches[0];
   assert.equal(resource.type, "aws_ecs_task_definition"); assert.equal(resource.mode, "managed");
-  const constants = { network_mode: "awsvpc", requires_compatibilities: ["FARGATE"], cpu: "1024", memory: "2048", skip_destroy: true,
-    runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], volume: [{ name: "executor-tmp" }],
+  const constants = { network_mode: "awsvpc", requires_compatibilities: ["FARGATE"], cpu: "1024", memory: "2048", skip_destroy: true, enable_fault_injection: false,
+    runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], volume: [{ name: "executor-tmp", configure_at_launch: false }],
     tags: { Environment: "production", ManagedBy: "Terraform", Component: "b03-incremental-release" } };
   const refs = { family: "local.b03_definition.family", container_definitions: "local.b03_definition.containerDefinitions",
     execution_role_arn: 'aws_iam_role.execution["executor"].arn' };

@@ -332,6 +332,28 @@ const canaryEnvironmentAdditions = Object.freeze(new Map([
   ["CLIENT_IP_TRUST_MODE", "direct-loopback-canary"],
   ["MSCQR_PRODUCTION_GREEN_APPLICATION_CANARY", "true"],
 ]));
+const workerAddress = 'aws_ecs_task_definition.candidate["worker"]';
+const workerRuntimeEnvironment = new Map([
+  ["MSCQR_WORKER_DATABASE_ROLE", "mscqr_prd_rls_phase2_worker"],
+  ["SMTP_HOST", "mail.privateemail.com"], ["SMTP_PORT", "587"],
+  ["SMTP_SECURE", "false"], ["SMTP_REQUIRE_TLS", "true"],
+  ["SMTP_USER", "administration@mscqr.com"], ["SMTP_FROM", "administration@mscqr.com"],
+]);
+const workerSmtpSecret = { name: "SMTP_PASS", valueFrom: "arn:aws:secretsmanager:eu-west-2:368992683803:secret:mscqr/prod/smtp-pass-arDHq6" };
+
+// Register the reviewed worker runtime; this never changes a service desired count.
+function isWorkerRuntimeUpgrade(address, before, after) {
+  if (address !== workerAddress) return false;
+  const oldEnvironment = before.environment || [];
+  const addedEnvironment = after.environment?.filter(item => workerRuntimeEnvironment.has(item?.name)) || [];
+  const oldSecrets = before.secrets || [], newSecrets = after.secrets || [];
+  if (oldEnvironment.some(item => workerRuntimeEnvironment.has(item?.name)) || oldSecrets.some(item => item?.name === "SMTP_PASS")) return false;
+  if (addedEnvironment.length !== workerRuntimeEnvironment.size
+    || new Set(addedEnvironment.map(item => item.name)).size !== workerRuntimeEnvironment.size
+    || addedEnvironment.some(item => Object.keys(item).sort().join() !== "name,value" || workerRuntimeEnvironment.get(item.name) !== item.value)) return false;
+  const addedSecrets = newSecrets.filter(item => item?.name === "SMTP_PASS");
+  return addedSecrets.length === 1 && JSON.stringify(stableTaskDefinitionValue(addedSecrets[0])) === JSON.stringify(stableTaskDefinitionValue(workerSmtpSecret));
+}
 export const STAGE_B_TASK_DEFINITION_ROTATION_IMMUTABLE_FIELDS = Object.freeze([
   "family", "network_mode", "requires_compatibilities", "cpu", "memory",
   "execution_role_arn", "task_role_arn", "runtime_platform", "volume", "ipc_mode", "pid_mode", "tags",
@@ -451,10 +473,11 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
     if (strict && actualImage !== expectedImage) throw new Error(`Stage B task-definition rotation image is not bound to the plan input: ${address}`);
     const beforeEnvironment = new Map((beforeContainer.environment || []).map((item) => [item?.name, item?.value]));
     const afterEnvironment = new Map((afterContainer.environment || []).map((item) => [item?.name, item?.value]));
+    const workerRuntimeUpgrade = isWorkerRuntimeUpgrade(address, beforeContainer, afterContainer);
     const additions = [...afterEnvironment].filter(([environmentName]) => !beforeEnvironment.has(environmentName));
     if (beforeEnvironment.size !== (beforeContainer.environment || []).length || afterEnvironment.size !== (afterContainer.environment || []).length
       || [...beforeEnvironment.keys()].some((name) => !afterEnvironment.has(name))) throw new Error(`Stage B task-definition rotation changes environment identity: ${address}`);
-    if (additions.length && (address !== canaryAddress || JSON.stringify(additions.sort(([left], [right]) => left.localeCompare(right))) !== JSON.stringify([...canaryEnvironmentAdditions].sort(([left], [right]) => left.localeCompare(right))))) throw new Error(`Stage B task-definition rotation adds an unreviewed environment binding: ${address}`);
+    if (additions.length && !workerRuntimeUpgrade && (address !== canaryAddress || JSON.stringify(additions.sort(([left], [right]) => left.localeCompare(right))) !== JSON.stringify([...canaryEnvironmentAdditions].sort(([left], [right]) => left.localeCompare(right))))) throw new Error(`Stage B task-definition rotation adds an unreviewed environment binding: ${address}`);
     for (const [environmentName, beforeEnvironmentValue] of beforeEnvironment) {
       const afterEnvironmentValue = afterEnvironment.get(environmentName);
       const variable = rotationMutableEnvironment.get(environmentName);
@@ -466,6 +489,10 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
       delete copy.image;
       for (const field of rotationContainerEmptyArrayDefaults) if (copy[field] === undefined || copy[field] === null) copy[field] = [];
       if (Array.isArray(copy.environment)) copy.environment = copy.environment.map((item) => rotationMutableEnvironment.has(item?.name) ? { ...item, value: "<reviewed-provenance>" } : item);
+      if (workerRuntimeUpgrade) {
+        copy.environment = copy.environment.filter(item => !workerRuntimeEnvironment.has(item?.name));
+        copy.secrets = (copy.secrets || []).filter(item => item?.name !== "SMTP_PASS");
+      }
       if (address === canaryAddress && Array.isArray(copy.environment)) copy.environment = copy.environment.filter((item) => !canaryEnvironmentAdditions.has(item?.name));
       if (address === backendTaskDefinitionAddress
         && JSON.stringify(beforeContainer.portMappings) === "[]"
@@ -473,7 +500,7 @@ function assertRotationContainers(beforeValue, afterValue, plan, address, strict
       return stableTaskDefinitionValue(copy);
     };
     if (JSON.stringify(normalize(beforeContainer)) !== JSON.stringify(normalize(afterContainer))) throw new Error(`Stage B task-definition rotation contains an unreviewed container field change: ${address}`);
-    if (JSON.stringify(stableTaskDefinitionValue(beforeContainer.secrets)) !== JSON.stringify(stableTaskDefinitionValue(afterContainer.secrets))) throw new Error(`Stage B task-definition rotation changes secret sources: ${address}`);
+    if (!workerRuntimeUpgrade && JSON.stringify(stableTaskDefinitionValue(beforeContainer.secrets)) !== JSON.stringify(stableTaskDefinitionValue(afterContainer.secrets))) throw new Error(`Stage B task-definition rotation changes secret sources: ${address}`);
   }
   if (JSON.stringify(stableTaskDefinitionValue(before)) === JSON.stringify(stableTaskDefinitionValue(after))) throw new Error(`Stage B task-definition rotation has no semantic container change: ${address}`);
 }

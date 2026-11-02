@@ -78,6 +78,10 @@ on:
           - clean-room
           - incremental-b03
         default: clean-room
+      b03_requirements_reference_json:
+        description: "Compact authenticated predecessor and exact-source successor requirements references for fixed B03 task registration."
+        required: false
+        type: string
       b03_approval_reference_json:
         description: "Compact published B03 authorization reference; required for incremental-b03."
         required: false
@@ -192,6 +196,19 @@ jobs:
           echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
           echo "Release Train target ref: $target_ref"
           echo "Release Train target SHA: $target_sha"
+
+      - name: Validate B03 requirements before dispatching expensive gates
+        if: ${{ inputs.database_install_mode == 'incremental-b03' }}
+        env:
+          TARGET_SHA: ${{ steps.resolve.outputs.target_sha }}
+          B03_REQUIREMENTS_REFERENCE_JSON: ${{ inputs.b03_requirements_reference_json }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { validateB03RequirementReferences } from './scripts/aws/produce-production-b03-executor-definition.mjs';
+          const raw = process.env.B03_REQUIREMENTS_REFERENCE_JSON || '';
+          if (Buffer.byteLength(raw) > 4096) throw new Error('Oversized B03 requirements reference');
+          validateB03RequirementReferences(JSON.parse(raw), process.env.TARGET_SHA);
+          NODE
 
       - name: Trigger required workflow gates
         id: gate_runs
@@ -337,6 +354,8 @@ jobs:
       PREPUBLICATION_PREDECESSOR_TICKET_ID: ${{ inputs.prepublication_predecessor_ticket_id }}
       RELEASE_LIFECYCLE: ${{ (inputs.prerequisites_only || inputs.trusted_terminal_cutover) && 'prerequisites' || inputs.release_lifecycle }}
       RELEASE_PREREQUISITES_ONLY: ${{ inputs.prerequisites_only || inputs.trusted_terminal_cutover }}
+      DATABASE_INSTALL_MODE: ${{ inputs.database_install_mode }}
+      B03_REQUIREMENTS_REFERENCE_JSON: ${{ inputs.b03_requirements_reference_json }}
       NORMAL_IMAGE_AUTHORIZATION_JSON: ${{ inputs.normal_image_authorization_json }}
       NORMAL_IMAGE_AUTHORIZATION_SHA256: ${{ inputs.normal_image_authorization_sha256 }}
       REQUIRED_GATE_RUN_IDS_JSON: ${{ needs.gates.outputs.gate_run_ids_json }}

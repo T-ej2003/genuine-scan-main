@@ -26,48 +26,92 @@ export async function b03Completion(event, deps) {
   assert.equal(approval.backendImage, config.images.backendImageDigest);
   const claim = await readApprovalClaim(`${event.approvalId}#${B03_BROKER.mode}`);
   assert.equal(claim?.launchState, "started"); assert.equal(claim.approvalNonce, approval.nonce); assert.match(claim.taskArn || "", taskPattern);
-  const response = await describeTasks({ cluster: STAGE_B.clusterArn, tasks: [claim.taskArn] });
-  exact(response.failures || [], []); assert.equal(response.tasks?.length, 1);
-  const task = response.tasks[0];
-  assert.equal(task.taskArn, claim.taskArn); assert.equal(task.clusterArn, STAGE_B.clusterArn);
-  assert.equal(task.taskDefinitionArn, approval.taskDefinitionArn); assert.equal(task.launchType, "FARGATE");
-  assert.equal(task.enableExecuteCommand, false);
-  const createdAt = time(task.createdAt);
-  assert.ok(createdAt >= time(approval.issuedAt) && createdAt < time(approval.expiresAt));
-  // Historical signature verification authenticates the original launch, never a new execution.
-  const authenticated = await authenticateB03BrokerRequest(signed, { now: new Date(createdAt), verifySignature, describeTaskDefinition });
-  assert.equal(claim.approvalContractSha256, authenticated.approvalContractSha256);
-  assert.match(claim.requestSha256 || "", /^[a-f0-9]{64}$/);
-  assert.equal(task.lastStatus, "STOPPED", "B03 outcome is pending/unknown; do not relaunch SQL");
-  assert.equal(task.stopCode, "EssentialContainerExited");
-  assert.equal(task.containers?.length, 1); const container = task.containers[0];
-  assert.equal(container.name, B03_BROKER.container); assert.equal(container.exitCode, 0);
-  assert.equal(container.image, approval.backendImage); assert.equal(container.imageDigest, approval.backendImage.split("@")[1]);
-  exact(task.overrides, { containerOverrides: [{ name: B03_BROKER.container }], inferenceAcceleratorOverrides: [] });
-  assert.ok(time(task.startedAt) >= createdAt && time(task.stoppedAt) >= time(task.startedAt) && time(task.stoppedAt) <= now().getTime());
-  let launchRow = claim;
-  if (!claim.launchReceiptJson) {
-    // Recover evidence after an interrupted receipt write; never call RunTask here.
-    const recovered = { schemaVersion: 1, environment: "production", event: "b03-broker-start", mode: B03_BROKER.mode,
-      approvalId: event.approvalId, taskArn: task.taskArn, taskDefinitionArn: approval.taskDefinitionArn,
-      approvalContractSha256: authenticated.approvalContractSha256, requestSha256: claim.requestSha256, nonce: randomUUID() };
-    await writeReceipt(recovered);
-    try { await recordB03LaunchReceipt({ approvalId: event.approvalId, nonce: claim.approvalNonce, mode: B03_BROKER.mode,
-      taskArn: task.taskArn, launchReceiptJson: JSON.stringify(recovered) }); }
-    catch (error) { if (error?.name !== "ConditionalCheckFailedException") throw error; }
-    launchRow = await readApprovalClaim(`${event.approvalId}#${B03_BROKER.mode}`);
+  const executionKey = `${event.approvalId}#b03-execution`;
+  let executionRow = await readApprovalClaim(executionKey);
+  let execution;
+  if (executionRow) {
+    // Broker-owned conditional evidence survives ECS stopped-task retention.
+    const record = JSON.parse(executionRow.completionJson);
+    exact(Object.keys(record).sort(), ["approvalSha256", "execution", "kind"].sort());
+    assert.equal(record.kind, "B03_AUTHENTICATED_EXECUTION");
+    assert.equal(record.approvalSha256, event.approvalSha256);
+    assert.equal(canonicalSha256(record), executionRow.completionSha256);
+    execution = record.execution;
+    exact(Object.keys(execution).sort(), ["sourceSha", "backendImage", "taskArn", "taskDefinitionArn", "packageSha256", "database", "databaseHostname", "approvalContractSha256", "successorRequirementsSha256", "successorCatalogue", "createdAt", "stoppedAt", "launchReceiptSha256"].sort());
+    for (const key of ["sourceSha", "backendImage", "taskDefinitionArn", "packageSha256", "database", "databaseHostname", "successorCatalogue"]) exact(execution[key], approval[key]);
+    assert.equal(execution.taskArn, claim.taskArn);
+    assert.equal(execution.successorRequirementsSha256, signed.package.successorRequirementsSha256);
+    assert.equal(execution.launchReceiptSha256, canonicalSha256(JSON.parse(claim.launchReceiptJson)));
+    assert.ok(time(execution.createdAt) >= time(approval.issuedAt) && time(execution.createdAt) < time(approval.expiresAt));
+    assert.ok(time(execution.stoppedAt) >= time(execution.createdAt) && time(execution.stoppedAt) <= now().getTime());
+    const authenticated = await authenticateB03BrokerRequest(signed, { now: new Date(execution.createdAt), verifySignature, describeTaskDefinition });
+    assert.equal(execution.approvalContractSha256, authenticated.approvalContractSha256);
+    assert.equal(claim.approvalContractSha256, authenticated.approvalContractSha256);
+  } else {
+    execution = await (async () => {
+      const response = await describeTasks({ cluster: STAGE_B.clusterArn, tasks: [claim.taskArn] });
+      exact(response.failures || [], []); assert.equal(response.tasks?.length, 1);
+      const task = response.tasks[0];
+      assert.equal(task.taskArn, claim.taskArn); assert.equal(task.clusterArn, STAGE_B.clusterArn);
+      assert.equal(task.taskDefinitionArn, approval.taskDefinitionArn); assert.equal(task.launchType, "FARGATE");
+      assert.equal(task.enableExecuteCommand, false);
+      const createdAt = time(task.createdAt);
+      assert.ok(createdAt >= time(approval.issuedAt) && createdAt < time(approval.expiresAt));
+      // Historical signature verification authenticates the original launch, never a new execution.
+      const authenticated = await authenticateB03BrokerRequest(signed, { now: new Date(createdAt), verifySignature, describeTaskDefinition });
+      assert.equal(claim.approvalContractSha256, authenticated.approvalContractSha256);
+      assert.match(claim.requestSha256 || "", /^[a-f0-9]{64}$/);
+      if (task.lastStatus !== "STOPPED") {
+        assert.ok(["PROVISIONING", "PENDING", "ACTIVATING", "RUNNING", "DEACTIVATING", "STOPPING", "DEPROVISIONING"].includes(task.lastStatus), "B03 task state is unknown; do not relaunch SQL");
+        return { pending: true };
+      }
+      assert.equal(task.stopCode, "EssentialContainerExited");
+      assert.equal(task.containers?.length, 1); const container = task.containers[0];
+      assert.equal(container.name, B03_BROKER.container); assert.equal(container.exitCode, 0);
+      assert.equal(container.image, approval.backendImage); assert.equal(container.imageDigest, approval.backendImage.split("@")[1]);
+      exact(task.overrides, { containerOverrides: [{ name: B03_BROKER.container }], inferenceAcceleratorOverrides: [] });
+      assert.ok(time(task.startedAt) >= createdAt && time(task.stoppedAt) >= time(task.startedAt) && time(task.stoppedAt) <= now().getTime());
+      let launchRow = claim;
+      if (!claim.launchReceiptJson) {
+        // Recover evidence after an interrupted receipt write; never call RunTask here.
+        const recovered = { schemaVersion: 1, environment: "production", event: "b03-broker-start", mode: B03_BROKER.mode,
+          approvalId: event.approvalId, taskArn: task.taskArn, taskDefinitionArn: approval.taskDefinitionArn,
+          approvalContractSha256: authenticated.approvalContractSha256, requestSha256: claim.requestSha256, nonce: randomUUID() };
+        await writeReceipt(recovered);
+        try { await recordB03LaunchReceipt({ approvalId: event.approvalId, nonce: claim.approvalNonce, mode: B03_BROKER.mode,
+          taskArn: task.taskArn, launchReceiptJson: JSON.stringify(recovered) }); }
+        catch (error) { if (error?.name !== "ConditionalCheckFailedException") throw error; }
+        launchRow = await readApprovalClaim(`${event.approvalId}#${B03_BROKER.mode}`);
+      }
+      const launch = JSON.parse(launchRow?.launchReceiptJson || "null");
+      assert.equal(launch?.taskArn, task.taskArn); assert.equal(launch.taskDefinitionArn, approval.taskDefinitionArn);
+      assert.equal(launch.approvalContractSha256, authenticated.approvalContractSha256);
+      assert.equal(launch.requestSha256, claim.requestSha256); assert.equal(launch.approvalId, event.approvalId);
+      assert.equal(launch.mode, B03_BROKER.mode); assert.equal(launch.event, "b03-broker-start");
+      const execution = { sourceSha: approval.sourceSha, backendImage: approval.backendImage, taskArn: task.taskArn,
+        taskDefinitionArn: approval.taskDefinitionArn, packageSha256: approval.packageSha256, database: approval.database,
+        databaseHostname: approval.databaseHostname, approvalContractSha256: authenticated.approvalContractSha256,
+        successorRequirementsSha256: signed.package.successorRequirementsSha256, successorCatalogue: approval.successorCatalogue,
+        createdAt: new Date(createdAt).toISOString(), stoppedAt: new Date(task.stoppedAt).toISOString(), launchReceiptSha256: canonicalSha256(launch) };
+      assert.match(execution.successorRequirementsSha256 || "", /^[a-f0-9]{64}$/);
+      return execution;
+    })();
+    if (execution.pending) return { status: "EXECUTION_PENDING" };
+    const record = { kind: "B03_AUTHENTICATED_EXECUTION", approvalSha256: event.approvalSha256, execution };
+    executionRow = { completionJson: JSON.stringify(record), completionSha256: canonicalSha256(record) };
+    try { await claimB03Completion({ key: executionKey, ...executionRow }); }
+    catch (error) {
+      if (error?.name !== "ConditionalCheckFailedException") throw error;
+      const existing = await readApprovalClaim(executionKey);
+      assert.equal(existing?.completionSha256, executionRow.completionSha256, "B03 execution evidence conflict");
+      exact(JSON.parse(existing.completionJson), record);
+      executionRow = existing;
+    }
   }
-  const launch = JSON.parse(launchRow?.launchReceiptJson || "null");
-  assert.equal(launch?.taskArn, task.taskArn); assert.equal(launch.taskDefinitionArn, approval.taskDefinitionArn);
-  assert.equal(launch.approvalContractSha256, authenticated.approvalContractSha256);
-  assert.equal(launch.requestSha256, claim.requestSha256); assert.equal(launch.approvalId, event.approvalId);
-  assert.equal(launch.mode, B03_BROKER.mode); assert.equal(launch.event, "b03-broker-start");
-  const execution = { sourceSha: approval.sourceSha, backendImage: approval.backendImage, taskArn: task.taskArn,
-    taskDefinitionArn: approval.taskDefinitionArn, packageSha256: approval.packageSha256, database: approval.database,
-    databaseHostname: approval.databaseHostname, approvalContractSha256: authenticated.approvalContractSha256,
-    successorRequirementsSha256: signed.package.successorRequirementsSha256, successorCatalogue: approval.successorCatalogue,
-    createdAt: new Date(createdAt).toISOString(), stoppedAt: new Date(task.stoppedAt).toISOString(), launchReceiptSha256: canonicalSha256(launch) };
-  assert.match(execution.successorRequirementsSha256 || "", /^[a-f0-9]{64}$/);
+  if (executionRow.durable !== "yes") {
+    await writeReceipt({ ...JSON.parse(executionRow.completionJson), mode: "b03-execution", nonce: randomUUID(), completionSha256: executionRow.completionSha256 });
+    await markB03CompletionDurable({ key: executionKey, completionSha256: executionRow.completionSha256 });
+  }
   if (event.operation === "b03-completion-status") return { status: "EXECUTION_VERIFIED", execution };
   for (const value of [event.workflowRunId, event.releaseTrainRunId]) assert.match(value || "", /^[1-9][0-9]*$/);
   const artifactId = event.operation === "b03-completion-check" ? event.artifactId : event.verification?.artifactReference?.artifactId;

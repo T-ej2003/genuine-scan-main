@@ -101,6 +101,49 @@ export function assertBackendRecoveryWorkflowGraph(workflow, operation = yaml.lo
   return true;
 }
 
+// A non-authorizing graph check; AWS writes still require their native plan/approval gates.
+export function assertApplicationReleaseWorkflowGraph({ train, gate, web } = {}) {
+  const read = file => yaml.load(fs.readFileSync(path.join(root, ".github/workflows", file), "utf8"));
+  train ||= read("release-train.yml"); gate ||= read("release-gate.yml"); web ||= read("production-web-activation.yml");
+  assert.equal(train.jobs.orchestrate.environment, "production");
+  assert.equal(train.jobs.orchestrate.env.B03_REQUIREMENTS_REFERENCE_JSON, "${{ inputs.b03_requirements_reference_json }}");
+  assert.equal(train.jobs.orchestrate.env.DATABASE_INSTALL_MODE, "${{ inputs.database_install_mode }}");
+  const upfront = train.jobs.gates.steps.find(step => step.name === "Validate B03 requirements before dispatching expensive gates");
+  assert.ok(upfront?.run.includes("validateB03RequirementReferences"));
+  assert.ok(train.jobs.gates.steps.indexOf(upfront) < train.jobs.gates.steps.findIndex(step => step.name === "Trigger required workflow gates"));
+  const steps = gate.jobs["deploy-production-ecs"].steps;
+  const sql = steps.findIndex(step => step.run?.includes("apply-production-b03-incremental-release.mjs"));
+  const backend = steps.findIndex(step => step.name === "Prepare governed green backend recovery handoff");
+  assert.ok(sql >= 0 && backend > sql, "Verified SQL must precede backend activation");
+  const script = steps[sql].run;
+  assert.match(script, /--mode "\$b03_mode"/); assert.match(script, /--compatibility-reference/);
+  assert.match(script, /if \[\[ "\$b03_mode" == start \]\]/);
+  const b03 = script.slice(script.indexOf('if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]'), script.indexOf("elif [["));
+  assert.ok(b03.includes("apply-production-b03-incremental-release.mjs"));
+  assert.doesNotMatch(b03, /apply-production-rls|aws ecs run-task|register-task-definition/);
+  const authenticateWeb = web.jobs.activate?.steps?.find(step => step.name === "Authenticate coordinated Stage-B and web evidence")
+    || Object.values(web.jobs).flatMap(job => job.steps || []).find(step => step.name === "Authenticate coordinated Stage-B and web evidence");
+  assert.equal(authenticateWeb?.env.BACKEND_ACTIVATION_EVIDENCE_JSON, "${{ inputs.backend_activation_evidence_json }}");
+  const sequence = [
+    ["source", []], ["security", ["source"]], ["images", ["source", "security"]],
+    ["image-authorization", ["images"]], ["canonical-sql-requirements", ["source"]],
+    ["state149-proof", ["source"]], ["registration-plan", ["state149-proof", "image-authorization", "canonical-sql-requirements"]],
+    ["bounded-registration-iam-installation", ["source", "security"]],
+    ["registration", ["registration-plan", "bounded-registration-iam-installation"]], ["policy-capacity-and-convergence", ["registration"]],
+    ["immutable-broker-publication", ["policy-capacity-and-convergence"]], ["alias-cas-and-state-closure", ["immutable-broker-publication"]],
+    ["live-predecessor-probe", ["image-authorization"]], ["c02", ["live-predecessor-probe", "canonical-sql-requirements"]],
+    ["c02-independent-verification", ["c02"]], ["b03-authorization", ["c02-independent-verification", "alias-cas-and-state-closure"]],
+    ["b03-execution-and-archive", ["b03-authorization"]], ["b03-independent-verification", ["b03-execution-and-archive"]],
+    ["b03-completion", ["b03-independent-verification"]], ["backend-and-smoke", ["b03-completion"]],
+    ["frontend-and-smoke", ["backend-and-smoke"]], ["worker-plan-and-readiness", ["frontend-and-smoke"]],
+    ["worker-activation", ["worker-plan-and-readiness"]], ["independent-final-verification", ["worker-activation"]],
+  ];
+  const visited = new Set();
+  for (const [id, needs] of sequence) { assert.ok(needs.every(id => visited.has(id))); assert.ok(!visited.has(id)); visited.add(id); }
+  return { nodes: sequence.map(([id, needs]) => ({ id, needs })), productionExecutionReady: false,
+    liveOnly: ["separately approved B03 registration policy installation and native IAM verification", "fresh plans and exact-plan approvals", "native post-apply identity and broker CAS", "committed SQL catalogue", "running ECS digests, health and application smoke", "SMTP delivery monitoring"] };
+}
+
 export function assertSourceCertificationWorkflowGraph(workflow) {
   const job = workflow?.jobs?.["backend-recovery-certification"];
   assert.ok(job, "Source certification job is missing");
@@ -182,6 +225,11 @@ export function main(argv = process.argv.slice(2)) {
   if (!sourceOnly) {
     assertStageBCanonicalRepositoryUrl(execFileSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8" }).trim());
     readFreshProtectedMainIdentity({ cwd: root, expectedSourceSha: sourceSha });
+  }
+  const releaseGraph = assertApplicationReleaseWorkflowGraph();
+  if (options.includes("--graph-only")) {
+    assert.ok(sourceOnly && liveArgs.length === 0, "Graph-only certification never authorizes live execution");
+    process.stdout.write(`${JSON.stringify({ status: "SOURCE_GRAPH_CHECKED", sourceSha, ...releaseGraph })}\n`); return;
   }
   assertBackendRecoveryWorkflowGraph(yaml.load(fs.readFileSync(workflowPath, "utf8")));
   if (!sourceOnly) {

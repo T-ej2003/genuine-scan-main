@@ -1195,7 +1195,7 @@ test('durable registration selector rejects missing, substituted and cross-relea
   const incomplete=structuredClone(f.completedRegistration.result);delete incomplete.definitions[Object.keys(incomplete.definitions)[0]];
   const incompleteHash=brokerDigest(incomplete);
   await assert.rejects(()=>readDurableCompletedRegistration({...query,store:{...f.coordinatorStore,
-   readStep:()=>({...record,result:incompleteHash}),getArtifact:hash=>hash===incompleteHash?incomplete:f.coordinatorStore.getArtifact(hash)}}),/Incomplete predecessor/);
+   readStep:()=>({...record,result:incompleteHash}),getArtifact:hash=>hash===incompleteHash?incomplete:f.coordinatorStore.getArtifact(hash)}}),/Incomplete or unknown registration definition/);
   assert.equal(release.sourceSha,sourceSha);assert.equal(f.snapshot().registrationApplyCalls,priorCalls);
  }finally{f.dispose();}
 });

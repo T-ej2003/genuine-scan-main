@@ -56,6 +56,17 @@ const STAGED_TARGET = "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116
 const STAGED_PREDECESSOR = "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade";
 const STAGED_SIDS = ["ReadExactStageBRoles", "ReadExactStageBBrokerFunction", "ReadExactStageBBrokerAlias", "ListRegionalBrokerEventMappings", "ReadExactStagedBrokerCallerPolicies"];
 function stagedInventoryTransition(document) {
+  if (sha256(document) === "d0641ed7f164486796b9361667176ebe2c250d52fff358e4b979cca9e43ef164") {
+    const before = structuredClone(document);
+    const matches = before.Statement.filter(s => s.Sid === "ReadExactStagedBrokerCallerPolicies");
+    if (matches.length !== 1) throw new Error("B03 registration policy reader is ambiguous");
+    const statement = matches[0], after = structuredClone(statement);
+    const arn = "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration";
+    if (statement.Resource.filter(value => value === arn).length !== 1) throw new Error("B03 registration read must be exact");
+    statement.Resource = statement.Resource.filter(value => value !== arn);
+    if (sha256(before) !== STAGED_TARGET) throw new Error("B03 registration read changed unrelated authority");
+    return { document: before, hash: STAGED_TARGET, delta: { add: [], remove: [], change: [{ sid: statement.Sid, before: statement, after }] } };
+  }
   if (sha256(document) !== STAGED_TARGET) throw new Error("ProviderReadOnly canonical target requires independent transition review.");
   const before = structuredClone(document);
   const statement = sid => {

@@ -1,3 +1,5 @@
+import { registrationAddressesFromPlan, registrationAddressesFromDefinitions, taskRegistrationFamily, brokerRegisteredTaskArns, B03_TASK_FAMILY } from './stage-b-task-registration-contract.mjs';
+import { B03_TASK_ADDRESS, assertB03TaskPlan } from './production-b03-plan-contract.mjs';
 import assert from 'node:assert/strict';
 import { canonicalJson, STAGE_B, assertStageBBrokerTaskDefinitionMap } from './production-green-stage-b-contract.mjs';
 import { STAGE_B_TASK_DEFINITION_FAMILIES, assertStageBTaskDefinitionRotation, canonicalizeEcsTaskDefinitionVolumes } from './stage-b-reference-audit-contract.mjs';
@@ -33,15 +35,19 @@ export function assertPrerequisitePlan(plan, preparation) {
   assert.equal((plan.deferred_changes || []).length, 0); assert.equal((plan.resource_drift || []).length, 0);
   const changes = plan.resource_changes; assert.ok(Array.isArray(changes));
   assert.equal(new Set(changes.map(c => c.address)).size, changes.length);
-  if (preparation.purpose === TASK_REGISTRATION) equal(changes.filter(c => TASK_REGISTRATION_ADDRESSES.includes(c.address)).map(c => c.address).sort(), TASK_REGISTRATION_ADDRESSES, 'Incomplete registration prerequisite census');
+  if (preparation.purpose === TASK_REGISTRATION) equal(changes.filter(c => registrationAddressesFromPlan(plan).includes(c.address)).map(c => c.address).sort(), registrationAddressesFromPlan(plan), 'Incomplete registration prerequisite census');
   for (const c of changes) {
     assert.ok(preparation.canonicalAddresses.includes(c.address)); assert.equal(c.mode, 'managed'); assert.equal(c.deposed, undefined);
+    if (c.address === B03_TASK_ADDRESS) assertB03TaskPlan(c, plan);
     if (canonicalJson(c.change.actions) === '["no-op"]') { equal(c.change.before, c.change.after); requireKnown(c.change); continue; }
     if (preparation.purpose === TASK_REGISTRATION) {
-      assert.ok(TASK_REGISTRATION_ADDRESSES.includes(c.address), 'Registration phase cannot mutate services, tasks, IAM or broker');
+      assert.ok(registrationAddressesFromPlan(plan).includes(c.address), 'Registration phase cannot mutate services, tasks, IAM or broker');
       assert.equal(c.change.after.skip_destroy, true, 'Registration must retain predecessors');
-      assert.equal(c.change.before.skip_destroy, true, 'Registration cannot deregister its predecessor');
-      assertStageBTaskDefinitionRotation(c, plan, { strict: true });
+      if (c.address === B03_TASK_ADDRESS) assertB03TaskPlan(c, plan);
+      else {
+        assert.equal(c.change.before.skip_destroy, true, 'Registration cannot deregister its predecessor');
+        assertStageBTaskDefinitionRotation(c, plan, { strict: true });
+      }
     } else {
       assert.equal(preparation.purpose, BROKER_POLICY_CONVERGENCE); assert.equal(c.address, 'aws_iam_policy.broker');
       equal(c.change.actions, ['update']); assert.equal(c.change.before.arn, STAGE_B_BROKER_POLICY.arn);
@@ -68,10 +74,10 @@ export function taskMapFromRegisteredDefinitions(definitions) {
   assertStageBBrokerTaskDefinitionMap(map); return map;
 }
 
-export function deriveBrokerPolicy(predecessor, taskMap) {
+export function deriveBrokerPolicy(predecessor, taskMap, definitions) {
   assertStageBBrokerPolicyDocument(predecessor); assertStageBBrokerTaskDefinitionMap(taskMap);
   const target = structuredClone(predecessor);
-  target.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions').Resource = Object.keys(taskMap).sort().map(mode => taskMap[mode]);
+  target.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions').Resource = brokerRegisteredTaskArns(taskMap, definitions);
   assertStageBBrokerPolicyDocument(target); return target;
 }
 
@@ -131,7 +137,8 @@ function canonicalContainers(value) {
     return c;
   });
 }
-function canonicalVolumes(value, aws = false) {
+function canonicalVolumes(value, aws = false, b03 = false) {
+  if (b03 && !aws) value = value.map(v => v.host_path === null ? { ...v, host_path: "" } : v);
   const volumes = aws ? value.map(v => {
     assert.ok(v && typeof v === 'object' && !Array.isArray(v));
     assert.ok(Object.keys(v).every(k => ['name', 'host', 'configureAtLaunch'].includes(k)), 'Unapproved ECS volume field');
@@ -155,7 +162,7 @@ const faultInjection = value => {
 function canonicalDefinition(value) {
   const copy = structuredClone(value);
   copy.container_definitions = canonicalContainers(copy.container_definitions);
-  copy.volume = canonicalVolumes(copy.volume ?? []);
+  copy.volume = canonicalVolumes(copy.volume ?? [], false, copy.family === B03_TASK_FAMILY);
   copy.enable_fault_injection = faultInjection(copy.enable_fault_injection);
   copy.ipc_mode = absentMode(copy.ipc_mode); copy.pid_mode = absentMode(copy.pid_mode);
   return copy;
@@ -195,19 +202,19 @@ export function assertRegisteredTaskDefinitionState(desired, state, unknown) {
 // Exact normalised input fields, shared with Terraform's canonical task templates.
 // Concrete identity is taken from this execution's state/readback, never a family lookup.
 export function authenticateRegisteredDefinition({ address, desired, observed, state }) {
-  assert.equal(desired.family, STAGE_B_TASK_DEFINITION_FAMILIES[address]);
+  assert.equal(desired.family, taskRegistrationFamily(address));
   const arn = observed.taskDefinitionArn;
   assert.match(arn || '', new RegExp(`^arn:aws:ecs:${STAGE_B.region}:${STAGE_B.account}:task-definition/${desired.family}:[1-9][0-9]*$`));
   assert.equal(state.arn, arn); assert.equal(state.revision, observed.revision);
   assert.equal(arn.split(':').at(-1), String(observed.revision)); assert.equal(observed.status, 'ACTIVE');
   for (const [tf, aws] of [['family', 'family'], ['task_role_arn', 'taskRoleArn'], ['execution_role_arn', 'executionRoleArn'], ['network_mode', 'networkMode'], ['cpu', 'cpu'], ['memory', 'memory']]) {
-    equal(desired[tf], observed[aws], `Registered definition mismatch: ${tf}`); equal(state[tf], desired[tf]);
+    equal(address === B03_TASK_ADDRESS && tf === "task_role_arn" && !desired[tf] ? undefined : desired[tf], observed[aws], `Registered definition mismatch: ${tf}`); equal(state[tf], desired[tf]);
   }
   equal([...desired.requires_compatibilities].sort(), [...observed.requiresCompatibilities].sort());
   const platform = Array.isArray(desired.runtime_platform) ? desired.runtime_platform[0] : desired.runtime_platform;
   equal(observed.runtimePlatform, { operatingSystemFamily: platform.operating_system_family, cpuArchitecture: platform.cpu_architecture });
   // Canonical Stage B volumes are empty named task-local volumes, not EFS/host mounts.
-  equal(canonicalVolumes(observed.volumes, true), canonicalVolumes(desired.volume ?? []));
+  equal(canonicalVolumes(observed.volumes, true), canonicalVolumes(desired.volume ?? [], false, address === B03_TASK_ADDRESS));
   equal(absentMode(observed.ipcMode), absentMode(desired.ipc_mode)); equal(absentMode(observed.pidMode), absentMode(desired.pid_mode));
   equal(faultInjection(observed.enableFaultInjection), faultInjection(desired.enable_fault_injection));
   assertRegisteredTaskDefinitionState(desired, state);
@@ -255,7 +262,7 @@ export async function executeTaskRegistration({ preparation: p, authorization },
   // A thrown/uncertain apply remains reserved. Diagnosis cannot authorise a retry.
   await deps.applyTaskRegistration(artifacts.bytes);
   const definitions = {};
-  for (const address of TASK_REGISTRATION_ADDRESSES) {
+  for (const address of registrationAddressesFromPlan(artifacts.plan)) {
     const c = artifacts.plan.resource_changes.find(c => c.address === address); assert.ok(c, 'Incomplete task registration profile');
     const state = await deps.readRegisteredTaskDefinition(address);
     definitions[address] = authenticateRegisteredDefinition({ address, desired: c.change.after, state,
@@ -295,10 +302,10 @@ export async function recoverTaskRegistration({ preparation: p, authorization },
   assert.equal(stateBefore.lineage, p.state.lineage); assert.ok(stateBefore.serial > p.state.serial, 'Registration predecessor has not observably completed');
   await deps.authenticateRegistrationState(artifacts.plan);
   const definitions = {};
-  for (const address of TASK_REGISTRATION_ADDRESSES) {
+  for (const address of registrationAddressesFromPlan(artifacts.plan)) {
     const c = artifacts.plan.resource_changes.find(c => c.address === address); assert.ok(c);
     const state = await deps.readRegisteredTaskDefinition(address);
-    if (mutations.includes(address)) assert.notEqual(state.arn, c.change.before.arn, 'Partial/predecessor registration cannot authenticate success');
+    if (mutations.includes(address)) assert.notEqual(state.arn, c.change.before?.arn, 'Partial/predecessor registration cannot authenticate success');
     else assert.equal(state.arn, c.change.after.arn);
     definitions[address] = authenticateRegisteredDefinition({ address, desired: c.change.after, state, observed: await deps.describeTaskDefinition(state.arn) });
   }
@@ -327,12 +334,12 @@ export function adoptRegisteredOutputs(entry, release, plan, imageImpact) {
   assertBrokerImageReuseCompatibility(imageImpact, p.sourceSha, release);
   assert.equal(plan.variables.tooling_sha.value, release.sourceSha); assert.equal(plan.errored, false);
   equal(plan.deferred_changes || [], []);
-  assert.ok(!(plan.resource_drift || []).some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address)), 'Registration state drift');
-  equal(Object.keys(result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+  assert.ok(!(plan.resource_drift || []).some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address) || c.address === B03_TASK_ADDRESS), 'Registration state drift');
+  equal(registrationAddressesFromDefinitions(result.definitions), registrationAddressesFromPlan(plan));
   equal(result.taskMap, taskMapFromRegisteredDefinitions(result.definitions));
   const changes = plan.resource_changes; assert.ok(Array.isArray(changes));
   assert.equal(new Set(changes.map(c => c.address)).size, changes.length);
-  for (const address of TASK_REGISTRATION_ADDRESSES) {
+  for (const address of registrationAddressesFromDefinitions(result.definitions)) {
     const c = changes.find(c => c.address === address); assert.ok(c, 'Incomplete current-main registration census');
     assert.equal(c.mode, 'managed'); assert.equal(c.deposed, undefined);
     equal(c.change.actions, ['no-op'], 'Current main requires different task definitions');

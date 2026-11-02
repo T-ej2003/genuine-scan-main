@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createProductionAwsCommandRunner, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { generateStageAPrerequisites, STAGE_A_STATE_OBJECT } from "./generate-production-green-stage-a-prerequisites.mjs";
-import { generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
+import { b03DefinitionFromAuthenticatedState, generateStageBTfvars } from "./generate-production-green-stage-b-tfvars.mjs";
 import { packageStageBBroker } from "./package-production-green-stage-b-broker.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
 import { verifyProductionReleaseImageAuthorization } from "./verify-production-release-image-authorization.mjs";
@@ -13,6 +13,7 @@ import { deriveStageBToolingInputTreeSha256 } from "./validate-stage-b-image-reu
 import { createStageBPrerequisiteBundle, STAGE_B_PREREQUISITE_BUNDLE_WORKFLOW } from "./stage-b-prerequisite-bundle.mjs";
 import { ensureStageBPrivateDirectory, ensureStageBPrivateFile, readBoundStageBPrivateJson } from "./stage-b-artifact-contract.mjs";
 import { STAGE_B_TERRAFORM_BACKEND, writeStageBTerraformStateBackup } from "./stage-b-terraform-backend-contract.mjs";
+import { produceB03ExecutorDefinition } from "./produce-production-b03-executor-definition.mjs";
 import { STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
@@ -27,7 +28,7 @@ export async function produceStageBPrerequisiteBundle({ sourceSha, ticketId, ima
 
 // The governed Release Train and the existing bundle workflow use the same
 // source-bound package and tfvars producer. Only the latter claims bundle-workflow provenance.
-export async function materializeStageBPrerequisiteFiles({ sourceSha, imageAuthorizationPath, imageAuthorizationSha256, outputDirectory, existingBrokerPackagePath, run, packageBroker = packageStageBBroker, deriveToolingTree = deriveStageBToolingInputTreeSha256, verifyAuthorization = verifyProductionReleaseImageAuthorization, verifyImageEvidence = verifyImageEvidenceSignature, generateTfvars = generateStageBTfvars } = {}) {
+export async function materializeStageBPrerequisiteFiles({ sourceSha, imageAuthorizationPath, imageAuthorizationSha256, outputDirectory, existingBrokerPackagePath, b03Requirements, run, packageBroker = packageStageBBroker, deriveToolingTree = deriveStageBToolingInputTreeSha256, verifyAuthorization = verifyProductionReleaseImageAuthorization, verifyImageEvidence = verifyImageEvidenceSignature, generateTfvars = generateStageBTfvars } = {}) {
   if (!/^[a-f0-9]{40}$/.test(sourceSha || "") || !/^[a-f0-9]{64}$/.test(imageAuthorizationSha256 || "") || typeof run !== "function") throw new Error("Stage B prerequisite source, image authorization, or reader is invalid.");
   if (!path.isAbsolute(outputDirectory || "") || outputDirectory.startsWith(`${root}${path.sep}`)) throw new Error("Stage B prerequisite producer output must be an absolute private runner path.");
   ensureStageBPrivateDirectory({ directory: outputDirectory, repositoryRoot: root, create: true, normalize: true });
@@ -45,7 +46,15 @@ export async function materializeStageBPrerequisiteFiles({ sourceSha, imageAutho
   } else await packageBroker({ outputPath: brokerPackagePath, manifestPath: brokerManifestPath, toolingSha: sourceSha, toolingTreeSha256, repositoryRoot: root });
   const imageEvidencePath = path.join(outputDirectory, "image-evidence.json"); const imageEvidenceSignaturePath = path.join(outputDirectory, "image-evidence-signature.json");
   fs.writeFileSync(imageEvidencePath, `${JSON.stringify(authorization.imageEvidence)}\n`, { mode: 0o600, flag: "wx" }); fs.writeFileSync(imageEvidenceSignaturePath, `${JSON.stringify(authorization.imageEvidenceSignature)}\n`, { mode: 0o600, flag: "wx" });
-  generateTfvars({ imageEvidence: imageEvidencePath, imageEvidenceSignature: imageEvidenceSignaturePath, stateBackup: stageBStateBackupPath, stageAInput: stageAInputPath, stageAStateBackup: stageAStateBackupPath, brokerPackagePath, toolingSha: sourceSha, toolingTreeSha256, imageReleaseSha: authorization.imageEvidence.publicationIdentity.imageReleaseSha, workflowRunId: authorization.imageEvidence.workflowRunId, canonicalArtifactSha256: authorization.imageEvidence.canonicalArtifactSha256, outputPath: tfvarsPath, bindingReportPath, verifySignature: (options) => verifyImageEvidence({ ...options, run }) });
+  let b03DefinitionPath;
+  if (b03Requirements && !b03DefinitionFromAuthenticatedState(JSON.parse(fs.readFileSync(stageBStateBackupPath)), { toolingSha: sourceSha, imageReleaseSha: authorization.imageReleaseSha })) {
+    const definition = produceB03ExecutorDefinition({ sourceSha,
+      backendImage: `${STAGE_B.account}.dkr.ecr.${STAGE_B.region}.amazonaws.com/mscqr-backend@${authorization.backendDigest}`,
+      references: b03Requirements, run, repositoryRoot: root });
+    b03DefinitionPath = path.join(outputDirectory, "b03-definition.json");
+    fs.writeFileSync(b03DefinitionPath, `${JSON.stringify(definition)}\n`, { mode: 0o600, flag: "wx" });
+  }
+  generateTfvars({ ...(b03DefinitionPath ? { b03DefinitionPath } : {}), imageEvidence: imageEvidencePath, imageEvidenceSignature: imageEvidenceSignaturePath, stateBackup: stageBStateBackupPath, stageAInput: stageAInputPath, stageAStateBackup: stageAStateBackupPath, brokerPackagePath, toolingSha: sourceSha, toolingTreeSha256, imageReleaseSha: authorization.imageEvidence.publicationIdentity.imageReleaseSha, workflowRunId: authorization.imageEvidence.workflowRunId, canonicalArtifactSha256: authorization.imageEvidence.canonicalArtifactSha256, outputPath: tfvarsPath, bindingReportPath, verifySignature: (options) => verifyImageEvidence({ ...options, run }) });
   return { bundlePath, stageAInputPath, stageAStateBackupPath, stageBStateBackupPath, brokerPackagePath, brokerManifestPath, tfvarsPath, bindingReportPath, imageReleaseSha: authorization.imageEvidence.publicationIdentity.imageReleaseSha, toolingTreeSha256 };
 }
 

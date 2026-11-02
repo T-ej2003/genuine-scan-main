@@ -180,7 +180,8 @@
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBFinalApplyWrite",
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBTaskDefinitionRegistration",
         "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBWorkspaceState",
-        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime"
+        "arn:aws:iam::368992683803:policy/mscqr-production-rls-approval-broker-runtime",
+        "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration"
       ]
     }
   ]

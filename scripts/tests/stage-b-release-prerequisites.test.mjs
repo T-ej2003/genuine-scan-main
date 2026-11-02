@@ -479,6 +479,7 @@ for (const [name, change] of [
   ['missing definition', x => x.plan.resource_changes.pop()],
   ['unknown definition', x => x.plan.resource_changes[0].change.after_unknown = { container_definitions: true }],
   ['partial registration', x => delete x.entry.result.definitions[TASK_REGISTRATION_ADDRESSES[0]]],
+  ['B03 drift', x => x.plan.resource_drift = [{ address: 'aws_ecs_task_definition.b03[0]' }]],
 ]) test(`current-main adoption rejects ${name}`, async () => {
   const x = await handoffRig(); change(x); assert.throws(() => adoptRegisteredOutputs(x.entry, x.release, x.plan, x.impact)); assert.equal(x.r.writes(), 1);
 });

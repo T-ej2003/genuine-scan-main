@@ -1549,7 +1549,7 @@ test("B03 validates literal Terraform block expressions even when its count is z
   assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
   const expressions = plan.configuration.root_module.resources[0].expressions;
   expressions.runtime_platform = { constant_value: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }] };
-  expressions.volume = { constant_value: [{ name: "executor-tmp" }] };
+  expressions.volume = { constant_value: [{ name: "executor-tmp", configure_at_launch: false }] };
   assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
 });
 

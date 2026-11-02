@@ -63,3 +63,10 @@ test("B03 accepts structural provider markers while rejecting unknown executable
   p.resource_changes[0].change.after_unknown.volume[0].name = true;
   assert.throws(() => assertStageBPlan(p, options));
 });
+
+test('B03 accepts only the empty pinned-provider S3 Files volume representation', () => {
+  const plan = fixture();
+  assert.equal(assertStageBPlan(plan, options).unclassifiedResources.length, 0);
+  plan.resource_changes[0].change.after.volume[0].s3files_volume_configuration = [{ role_arn: 'arn:aws:iam::368992683803:role/other' }];
+  assert.throws(() => assertStageBPlan(plan, options), /B03 unexpected volume/);
+});

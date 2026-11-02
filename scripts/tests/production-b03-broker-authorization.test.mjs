@@ -10,7 +10,7 @@ const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend
 const taskDefinitionArn = `arn:aws:ecs:eu-west-2:368992683803:task-definition/${B03_BROKER.family}:3`;
 const catalogue = Object.fromEntries(["routines", "tables", "policies", "schemas", "roles"].map((key) => [key, "b".repeat(64)]));
 const body = { schemaVersion: 1, kind: "PRODUCTION_B03_INCREMENTAL_PACKAGE", predecessorSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec",
-  sourceSha, predecessorCatalogue: catalogue, successorCatalogue: catalogue, mutations: Array.from({ length: 44 }, () => ({ owner: "auth", sql: "SELECT 1" })) };
+  sourceSha, predecessorRequirementsSha256: "b".repeat(64), successorRequirementsSha256: "b".repeat(64), predecessorCatalogue: catalogue, successorCatalogue: catalogue, mutations: Array.from({ length: 44 }, () => ({ owner: "auth", sql: "SELECT 1" })) };
 const pkg = { ...body, packageSha256: canonicalSha256(body) };
 const task = { ...buildB03ExecutorDefinition({ sourceSha, backendImage, package: pkg, databaseHostname: "db.example.internal" }),
   taskDefinitionArn, revision: 3, status: "ACTIVE" };
@@ -100,6 +100,7 @@ test("canonical Stage B issuer/publication/proof/broker path authenticates B03 a
     authenticateSourceAndPackage: async () => {}, caller: async () => ({ Arn: approval.checkerIdentity }),
     sign: async ({ message }) => crypto.sign("sha256", message, { key: privateKey, padding: crypto.constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }).toString("base64") });
   let current, writes = 0, launches = 0, row, clock = options.now;
+  const completionRows = new Map();
   const publish = bytes => publishStageBApproval({ approvalPath: "/synthetic/approval", expectedSourceSha: sourceSha,
     callerArn: approval.checkerIdentity, now: options.now, verifySignature, describeTaskDefinition: options.describeTaskDefinition,
     readFile: () => bytes, assertSource: () => {}, putSecretValue: async request => {
@@ -121,7 +122,15 @@ test("canonical Stage B issuer/publication/proof/broker path authenticates B03 a
     claimApproval: async identity => {
       if (row) throw Object.assign(new Error("replay"), { name: "ConditionalCheckFailedException" });
       row = { approvalNonce: identity.nonce, approvalContractSha256: identity.approvalContractSha256, requestSha256: identity.requestSha256, launchState: "claimed" };
-    }, readApprovalClaim: async () => row,
+    }, readApprovalClaim: async key => key.endsWith("#b03-incremental") ? row : completionRows.get(key),
+    recordB03LaunchReceipt: async ({ launchReceiptJson }) => { row.launchReceiptJson = launchReceiptJson; },
+    claimB03Completion: async value => { assert.ok(!completionRows.has(value.key)); completionRows.set(value.key, value); },
+    markB03CompletionDurable: async ({ key }) => { completionRows.get(key).durable = "yes"; },
+    describeTasks: async () => ({ tasks: [{ taskArn: row.taskArn, taskDefinitionArn, clusterArn: STAGE_B.clusterArn,
+      launchType: "FARGATE", enableExecuteCommand: false, lastStatus: "STOPPED", stopCode: "EssentialContainerExited",
+      createdAt: signed.artifact.approval.issuedAt, startedAt: signed.artifact.approval.issuedAt, stoppedAt: signed.artifact.approval.issuedAt,
+      containers: [{ name: B03_BROKER.container, exitCode: 0, image: backendImage, imageDigest: backendImage.split("@")[1] }],
+      overrides: { containerOverrides: [{ name: B03_BROKER.container }], inferenceAcceleratorOverrides: [] } }] }),
     recordB03Task: async ({ taskArn }) => { row = { ...row, taskArn, launchState: "started" }; },
     runTask: async request => {
       launches++; assert.equal(request.taskDefinition, taskDefinitionArn); assert.equal(request.overrides, undefined);

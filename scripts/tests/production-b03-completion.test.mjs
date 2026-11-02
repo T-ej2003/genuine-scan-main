@@ -98,7 +98,7 @@ test("authenticated B03 completion binds durable launch, independent verifier an
   const receipt = await completeProductionB03Release({ sourceSha, request: { ...f.request, operation: B03_BROKER.mode }, compatibilityReference: v.reference,
     releaseTrainRunId: "77", environment: { GITHUB_RUN_ID: "88" }, runner: v.options.run, authenticateSource: async () => {},
     authorize: async () => ({ backend: image }), independent, invoke: invocation });
-  assert.equal(f.writes.length, 1); assert.equal(receipt.schemaVersion, 4);
+  assert.equal(f.writes.length, 2); assert.equal(receipt.schemaVersion, 4);
   const proof = await b03Completion({ ...f.request, operation: "b03-completion-check", workflowRunId: "88", releaseTrainRunId: "77", completionSha256: receipt.completionSha256,
     artifactId: receipt.completion.verification.artifactReference.artifactId }, f.deps);
   assert.equal(assertAuthenticatedB03Receipt(receipt, { sourceSha, imageDigest: image.split("@")[1], workflowRunId: "88", run: v.options.run,
@@ -125,7 +125,7 @@ test("authenticated B03 completion binds durable launch, independent verifier an
 for (const [name, mutate] of Object.entries({
   "unavailable stopped task": f => f.deps.describeTasks = async () => ({ failures: [{ arn: taskArn, reason: "MISSING" }], tasks: [] }),
   "failed task": f => f.task.containers[0].exitCode = 1,
-  "unknown outcome": f => f.task.lastStatus = "RUNNING",
+  "unknown outcome": f => f.task.lastStatus = "UNKNOWN",
   "different task": f => f.task.taskArn = verifierTaskArn,
   "different image": f => f.task.containers[0].imageDigest = `sha256:${"0".repeat(64)}`,
   "runtime override": f => f.task.overrides.containerOverrides[0].command = ["sh"],
@@ -138,7 +138,7 @@ test("interrupted launch receipt is recovered from the signed claim and native t
   const f = fixture(); delete f.launchRow.launchReceiptJson;
   const result = await b03Completion(f.request, f.deps);
   assert.equal(result.status, "EXECUTION_VERIFIED");
-  assert.equal(f.writes.length, 1); assert.equal(JSON.parse(f.launchRow.launchReceiptJson).taskArn, taskArn);
+  assert.equal(f.writes.length, 2); assert.equal(JSON.parse(f.launchRow.launchReceiptJson).taskArn, taskArn);
 });
 
 for (const [name, mutate] of Object.entries({
@@ -157,9 +157,9 @@ test("completion recovers a durable-write interruption, and expires without reru
   const f = fixture(), v = await independentFixture(f), verification = verifyB03IndependentCatalogue(v.options);
   const event = { ...f.request, operation: "b03-completion-record", workflowRunId: "88", releaseTrainRunId: "77", verification };
   const write = f.deps.writeReceipt; f.deps.writeReceipt = async () => { throw new Error("storage unavailable"); };
-  await assert.rejects(b03Completion(event, f.deps)); assert.equal(f.rows.size, 1);
+  await assert.rejects(b03Completion(event, f.deps)); assert.equal(f.rows.size, 2);
   f.deps.writeReceipt = write; const result = await b03Completion(event, f.deps);
-  await b03Completion(event, f.deps); assert.equal(f.writes.length, 1);
+  await b03Completion(event, f.deps); assert.equal(f.writes.length, 2);
   f.deps.now = () => new Date("2026-10-29T13:00:00Z");
   await assert.rejects(b03Completion({ ...f.request, operation: "b03-completion-check", workflowRunId: "88", releaseTrainRunId: "77", completionSha256: result.completionSha256,
     artifactId: verification.artifactReference.artifactId }, f.deps), /expired/);
@@ -167,7 +167,7 @@ test("completion recovers a durable-write interruption, and expires without reru
   const newer = { ...verification, artifactReference: { ...verification.artifactReference, artifactId: "457" }, generatedAt: "2026-10-29T13:05:00Z" };
   const renewed = await b03Completion({ ...event, workflowRunId: "89", verification: newer }, f.deps);
   assert.equal(renewed.completion.execution.taskArn, result.completion.execution.taskArn);
-  assert.equal(f.rows.size, 2); assert.equal(f.writes.length, 2);
+  assert.equal(f.rows.size, 3); assert.equal(f.writes.length, 3);
 });
 
 test("broker refuses to seal a stale independent verification", async () => {
@@ -175,5 +175,33 @@ test("broker refuses to seal a stale independent verification", async () => {
   f.deps.now = () => new Date("2026-10-29T12:28:00Z");
   await assert.rejects(b03Completion({ ...f.request, operation: "b03-completion-record", workflowRunId: "88", releaseTrainRunId: "77",
     verification: verifyB03IndependentCatalogue(v.options) }, f.deps));
+  assert.equal(f.rows.size, 1); assert.equal(f.writes.length, 1);
+});
+
+test('broker archives execution before ECS retention expires; historical proof cannot launch SQL', async () => {
+  const f = fixture(); const original = await b03Completion(f.request, f.deps);
+  assert.equal(f.writes.length, 1);
+  f.deps.describeTasks = async () => { assert.fail('Expired stopped task must not be needed after archival'); };
+  f.deps.now = () => new Date('2026-10-30T12:20:00Z');
+  const restored = await b03Completion(f.request, f.deps);
+  assert.deepEqual(restored, original); assert.equal(f.writes.length, 1);
+});
+test('pending task cannot become completion evidence', async () => {
+  const f = fixture(); f.task.lastStatus = 'RUNNING';
+  assert.deepEqual(await b03Completion(f.request, f.deps), { status: 'EXECUTION_PENDING' });
   assert.equal(f.rows.size, 0); assert.equal(f.writes.length, 0);
+});
+for (const field of ['sourceSha', 'backendImage', 'taskArn', 'taskDefinitionArn', 'packageSha256', 'database', 'databaseHostname', 'approvalContractSha256', 'successorRequirementsSha256', 'createdAt', 'launchReceiptSha256'])
+  test(`archived execution rejects substituted ${field} even with a recomputed hash`, async () => {
+    const f = fixture(); await b03Completion(f.request, f.deps);
+    const row = f.rows.get(`${f.request.approvalId}#b03-execution`), record = JSON.parse(row.completionJson);
+    record.execution[field] = 'forged'; row.completionJson = JSON.stringify(record); row.completionSha256 = canonicalSha256(record);
+    await assert.rejects(b03Completion(f.request, f.deps));
+  });
+test('interrupted execution archive is sealed on retry without SQL or stopped-task reuse', async () => {
+  const f = fixture(), write = f.deps.writeReceipt; f.deps.writeReceipt = async () => { throw Error('storage unavailable'); };
+  await assert.rejects(b03Completion(f.request, f.deps));
+  f.deps.writeReceipt = write; f.deps.describeTasks = async () => assert.fail('Reuse authenticated broker-owned execution claim');
+  assert.equal((await b03Completion(f.request, f.deps)).status, 'EXECUTION_VERIFIED');
+  assert.equal(f.writes.length, 1);
 });
