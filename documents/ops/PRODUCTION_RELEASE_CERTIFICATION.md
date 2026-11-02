@@ -148,3 +148,9 @@ native write/readback/smoke checks explicitly even then. Follow the separate
 - Exact-head remote CI and independent review are still required. AWS session
   expired after read-only collection; live identities must be refreshed before
   any approved production operation. No deployment is claimed by these results.
+
+Generated SQL/package evidence is regenerated because `release-train.yml` is an
+existing authoritative clean-room source-contract input. SQL executable definitions,
+policies, grants and tables are unchanged: only source-contract markers and derived
+checksums change. Retaining the old generated package would fail mandatory source
+verification; these generated files are required, not a new SQL migration.
