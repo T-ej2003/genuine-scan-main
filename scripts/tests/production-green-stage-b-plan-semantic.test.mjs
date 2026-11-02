@@ -1549,7 +1549,7 @@ test("B03 validates literal Terraform block expressions even when its count is z
   assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
   const expressions = plan.configuration.root_module.resources[0].expressions;
   expressions.runtime_platform = { constant_value: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }] };
-  expressions.volume = { constant_value: [{ name: "executor-tmp" }] };
+  expressions.volume = { constant_value: [{ name: "executor-tmp", configure_at_launch: false }] };
   assert.doesNotThrow(() => assertB03PlanConfiguration(plan));
 });
 
@@ -1583,7 +1583,7 @@ test("B03 broker IAM permits exactly the validated planned revision without wide
   const policy = canonicalBrokerPolicy();
   policy.Statement.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions").Resource.push(taskArn);
   assert.equal(assertStageBBrokerPolicyDocument(policy, p), true);
-  assert.throws(() => assertStageBBrokerPolicyDocument(policy));
+  assert.equal(assertStageBBrokerPolicyDocument(policy), true); // Shape only; the plan above binds the exact B03 revision.
   for (const substitute of [taskArn.replace(":7", ":8"), taskArn.replace(":7", ":*"), "*"]) {
     const bad = structuredClone(policy); bad.Statement[0].Resource[bad.Statement[0].Resource.length - 1] = substitute;
     assert.throws(() => assertStageBBrokerPolicyDocument(bad, p));

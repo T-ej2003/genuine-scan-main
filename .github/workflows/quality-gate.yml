@@ -307,6 +307,9 @@ jobs:
           terraform -chdir=infra/aws/terraform/production-support-email-worker init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/aws/terraform/production-support-email-worker validate -no-color
 
+      - name: Certify application release graph and fixed B03 registration
+        run: node --test scripts/tests/production-release-preexecution.test.mjs scripts/tests/stage-b-worker-runtime-rotation.test.mjs scripts/tests/stage-b-b03-registration.test.mjs scripts/tests/production-b03-registration-policy.test.mjs scripts/tests/production-provider-readonly-policy-reconciliation.test.mjs scripts/tests/production-b03-broker-workflow.test.mjs scripts/tests/production-b03-completion.test.mjs
+
       - name: Validate complete Stage B deployment closure
         run: npm run stage-b:deployment-closure:pull-request
 

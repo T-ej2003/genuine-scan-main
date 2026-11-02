@@ -10,6 +10,17 @@ export const workerReflectionHash = x => crypto.createHash('sha256').update(Buff
 const equal = (a, b) => assert.equal(canonicalJson(a), canonicalJson(b));
 const freeze = value => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 export const WORKER_COMMITTED = freeze(JSON.parse(fs.readFileSync(new URL('./worker-reflection-committed-149.json', import.meta.url))));
+// Authenticate historical dependency metadata without pretending the current IAM template is unchanged.
+export function committedWorkerTerraformConfiguration(source) {
+    const bytes = Buffer.from(source);
+    if (workerReflectionHash(bytes) === WORKER_COMMITTED.terraformConfigurationSha256) return bytes;
+    assert.equal(workerReflectionHash(bytes), 'e93ec212af5551f895e29cb144892dc30e5764d12c063310df91edf1b6cfc750', 'Reviewed Terraform source changed');
+    const filter = '      # The support-worker root owns the exact SMTP grant.\n      if kind != "worker" || secret.name != "SMTP_PASS"\n';
+    const text = bytes.toString(); assert.equal(text.split(filter).length, 2, 'Worker SMTP source transition is ambiguous');
+    const historical = Buffer.from(text.replace(filter, ''));
+    assert.equal(workerReflectionHash(historical), WORKER_COMMITTED.terraformConfigurationSha256, 'Unrelated Terraform source evolution');
+    return historical;
+}
 export function committedWorkerExecutionReference(sourceSha) {
     return { currentProtectedMainSha: sourceSha, historicalSourceSha: WORKER_COMMITTED.sourceSha,
         executionRunId: WORKER_COMMITTED.executionRunId, resultArtifactId: WORKER_COMMITTED.resultArtifactId,
@@ -73,7 +84,7 @@ export function createWorkerReflectionEvidence({ stateBytes, livePolicies, sourc
     if (reflected) {
         equal({ lineage: state.lineage, serial: state.serial, stateSha256: hash(stateBytes) }, WORKER_COMMITTED.successorState);
         equal(committedExecution, committedWorkerExecutionReference(sourceSha));
-        assert.equal(hash(fs.readFileSync(new URL('../../infra/aws/terraform/production-green-stage-b/main.tf', import.meta.url))), WORKER_COMMITTED.terraformConfigurationSha256, 'Reviewed Terraform source changed');
+        committedWorkerTerraformConfiguration(fs.readFileSync(new URL('../../infra/aws/terraform/production-green-stage-b/main.tf', import.meta.url)));
     } else assert.equal(committedExecution, undefined);
     const invariant = reflected ? restoreCommittedWorkerMetadata(state) : structuredClone(state);
     delete invariant.serial;

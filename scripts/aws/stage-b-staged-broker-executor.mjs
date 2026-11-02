@@ -1,3 +1,5 @@
+import { registrationAddressesFromDefinitions, brokerRegisteredTaskArns } from './stage-b-task-registration-contract.mjs';
+import { B03_TASK_ADDRESS } from './production-b03-plan-contract.mjs';
 import { WORKER_COMMITTED } from './stage-b-worker-policy-reflection.mjs';
 import { resolveVerifiedWorkerReflectionSuccessor, assertAuthenticatedWorkerReflectionSuccessor } from './production-green-stage-b-state-reconciliation-evidence.mjs';
 import { readProductionReceiptObject, receiptAbsentError } from './production-receipt-read.mjs';
@@ -591,7 +593,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
   const authenticateRegistrationForAdoption = async (entry, checkout) => {
     assert.equal(phase, 'ADOPTION');
     await readHistoricalRegistration(entry, checkout);
-    equal(Object.keys(entry.result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+    registrationAddressesFromDefinitions(entry.result.definitions);
     equal(entry.result.taskMap, taskMapFromRegisteredDefinitions(entry.result.definitions));
     for (const [address, definition] of Object.entries(entry.result.definitions)) {
       equal(authenticateReceiptBoundRegisteredDefinition({ address, desired: definition.desired,
@@ -711,7 +713,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     assert.equal(reg.reservation.value.purpose, TASK_REGISTRATION);
     assert.equal(reg.reservation.value.preparationSha256, result.preparationSha256);
     assert.equal(result.authorizationSha256, registrationId); assert.equal(result.status, 'REGISTERED_NONTERMINAL');
-    assert.equal(result.savedPlanSha256, savedPlanSha256); assert.equal(result.definitions && Object.keys(result.definitions).length, 12);
+    assert.equal(result.savedPlanSha256, savedPlanSha256); registrationAddressesFromDefinitions(result.definitions);
     equal(result.taskMap, taskMapFromRegisteredDefinitions(result.definitions));
     assertReceiptBoundGitAncestry({ historicalSourceSha: result.sourceSha, consumerSourceSha: release.sourceSha, exec, cwd: root });
     assert.equal(deriveStageBToolingInputTreeSha256(result.sourceSha), result.treeSha256);
@@ -735,7 +737,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       receiptChainSha256: brokerDigest({ transactionId: registrationId, historicalPreparationSha256: result.preparationSha256,
         historicalAuthorizationSha256: registrationId, historicalResultSha256: brokerDigest(result),
         receiptObjects: { reservation: reg.reservation.object, intent: reg.intent.object, result: reg.result.object } }),
-      registeredOutputCount: 12, definitionsSha256: brokerDigest(result.definitions), liveCorroborationSha256: '0'.repeat(64),
+      registeredOutputCount: registrationAddressesFromDefinitions(result.definitions).length, definitionsSha256: brokerDigest(result.definitions), liveCorroborationSha256: '0'.repeat(64),
       originalMutationReplayable: false, originalMutationAuthorizationAvailable: false, freshHandoffOnly: true,
     } };
     const authenticatedBindingTransition = predecessorOnly && ['PREPARATION','REGISTRATION'].includes(phase)
@@ -847,7 +849,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     equal(terminal.successorIdentity.taskMap, result.taskMap,
       'Authenticated policy successor does not identify the historical registered outputs');
     const permittedTasks = terminal.policy.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions')?.Resource;
-    equal([...permittedTasks].sort(), Object.values(result.taskMap).sort(),
+    equal([...permittedTasks].sort(), brokerRegisteredTaskArns(result.taskMap, result.definitions).sort(),
       'Authenticated policy document does not authorize exactly the historical registered outputs');
     equal(prerequisites.taskMap, result.taskMap, 'Policy task map differs from authenticated registration outputs');
     const registrationPredecessor = {
@@ -876,12 +878,12 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     await verifyReceiptBoundRegistration(chain.registration, release);
     await verifyReceiptBoundPolicy(chain.policy, release);
     const definitions = chain.registration.result.definitions;
-    equal(Object.keys(definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+    registrationAddressesFromDefinitions(definitions);
     equal(chain.registration.result.taskMap, taskMapFromRegisteredDefinitions(definitions));
     equal(chain.policy.terminal.successorIdentity.taskMap, chain.registration.result.taskMap,
       'Terminal policy successor does not authorize the receipt-bound registration outputs');
     const allowed = chain.policy.terminal.policy.Statement.find(s => s.Sid === 'RunOnlyApprovedExecutorAndCanaryRevisions')?.Resource;
-    equal([...allowed].sort(), Object.values(chain.registration.result.taskMap).sort(),
+    equal([...allowed].sort(), brokerRegisteredTaskArns(chain.registration.result.taskMap, chain.registration.result.definitions).sort(),
       'Terminal policy task revisions differ from authenticated registered outputs');
     assert.equal(chain.registration.receiptBoundAdoption.consumerSourceSha, release.sourceSha);
     assert.equal(chain.policy.receiptBoundAdoption.consumerSourceSha, release.sourceSha);
@@ -897,7 +899,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
     const historicalRegistration = p.prerequisiteChain.registration;
     assertHistoricalPolicyRegistrationHandoff(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
     equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
-    equal(p.target.policy, deriveBrokerPolicy(p.prerequisites.policy, historicalRegistration.result.taskMap));
+    equal(p.target.policy, deriveBrokerPolicy(p.prerequisites.policy, historicalRegistration.result.taskMap, historicalRegistration.result.definitions));
     await readHistoricalRegistration(historicalRegistration, { sourceSha: p.sourceSha, treeSha256: p.treeSha256 });
 
     const id = await assertBrokerAuthorization(auth, p, { verify: kms.verify, now: new Date(result.authorizedAt) });
@@ -1182,7 +1184,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       if (prerequisiteChain?.registration) {
         await adapter.authenticatePrerequisiteChain(prerequisiteChain);
         const live = readBrokerPolicyInventory(runAws).policy;
-        if (canonicalJson(live) === canonicalJson(deriveBrokerPolicy(live, prerequisiteChain.registration.result.taskMap))) authenticatedTaskMap = prerequisiteChain.registration.result.taskMap;
+        if (canonicalJson(live) === canonicalJson(deriveBrokerPolicy(live, prerequisiteChain.registration.result.taskMap, prerequisiteChain.registration.result.definitions))) authenticatedTaskMap = prerequisiteChain.registration.result.taskMap;
         if (prerequisiteChain.policy) equal(live, prerequisiteChain.policy.adoption || prerequisiteChain.policy.receiptBoundAdoption
           ? prerequisiteChain.policy.terminal.policy : prerequisiteChain.policy.result.policy);
       }
@@ -1342,7 +1344,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       catch (error) { if (String(error.stderr).includes('PreconditionFailedException')) error.name = 'PreconditionFailedException'; throw error; }
     },
     capturePublicationPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('publication', ['-target=aws_lambda_function.broker']); },
-    captureTaskRegistrationPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('registration', TASK_REGISTRATION_ADDRESSES.map(a => `-target=${a}`)); },
+    captureTaskRegistrationPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('registration', [...TASK_REGISTRATION_ADDRESSES, 'aws_ecs_task_definition.b03'].map(a => `-target=${a}`)); },
     captureBrokerPolicyPlan: async () => { assert.equal(phase, 'PREPARATION'); return capture('broker-policy', ['-target=aws_iam_policy.broker']); },
     captureBrokerPolicyPruningPlan: async versionId => {
       assert.equal(phase, 'PREPARATION'); assert.match(versionId || '', /^v[1-9][0-9]*$/);
@@ -1352,7 +1354,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       const file = path.join(directory, `policy-pruning-${randomUUID()}.json`);
       const bytes = Buffer.from(canonicalJson(plan)); fs.writeFileSync(file, bytes, { mode: 0o600, flag: 'wx' }); return { file, bytes, plan };
     },
-    readRegisteredTaskDefinition: async address => { assert.ok(TASK_REGISTRATION_ADDRESSES.includes(address)); return stateResource(address); },
+    readRegisteredTaskDefinition: async address => { assert.ok((TASK_REGISTRATION_ADDRESSES.includes(address) || address === B03_TASK_ADDRESS)); return stateResource(address); },
     describeTaskDefinition: async arn => {
       assert.match(arn || '', /^arn:aws:ecs:eu-west-2:368992683803:task-definition\/[a-z0-9-]+:[1-9][0-9]*$/);
       const response = json(['ecs', 'describe-task-definition', '--task-definition', arn, '--include', 'TAGS']);
@@ -1485,7 +1487,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         assert.equal(result.status, name === 'registration' ? 'REGISTERED_NONTERMINAL' : 'BROKER_POLICY_CONVERGED_NONTERMINAL');
         readReceipt(id, name === 'registration' ? 'TASK_REGISTERED' : 'BROKER_POLICY_CONVERGED', result);
       }
-      equal(Object.keys(chain.registration.result.definitions).sort(), TASK_REGISTRATION_ADDRESSES);
+      registrationAddressesFromDefinitions(chain.registration.result.definitions);
       equal(chain.registration.result.taskMap, taskMapFromRegisteredDefinitions(chain.registration.result.definitions));
       for (const [address, definition] of Object.entries(chain.registration.result.definitions)) {
         const state = await adapter.readRegisteredTaskDefinition(address), observed = await adapter.describeTaskDefinition(definition.arn);
@@ -1501,7 +1503,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         equal(historicalRegistration.result.taskMap, taskMapFromRegisteredDefinitions(historicalRegistration.result.definitions));
         equal(historicalRegistration.result.taskMap, chain.registration.result.taskMap);
         equal(chain.policy.adoption ? chain.policy.terminal.policy : chain.policy.result.policy,
-          deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, historicalRegistration.result.taskMap));
+          deriveBrokerPolicy(chain.policy.preparation.prerequisites.policy, historicalRegistration.result.taskMap, historicalRegistration.result.definitions));
       }
       await assertCheckoutUnchanged();
     },
@@ -1543,7 +1545,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
         const before = prior.resources.find(v => v.address === r.address), c = plan.resource_changes.find(v => v.address === r.address);
         assert.equal(r.mode, before.mode); assert.equal(r.type, before.type);
         if (!c || c.change.actions[0] === 'no-op') { equal(r.values, before.values); continue; }
-        assert.ok(phase === 'REGISTRATION_RECOVERY' ? TASK_REGISTRATION_ADDRESSES.includes(r.address) : r.address === BROKER_FUNCTION);
+        assert.ok(phase === 'REGISTRATION_RECOVERY' ? (TASK_REGISTRATION_ADDRESSES.includes(r.address) || r.address === B03_TASK_ADDRESS) : r.address === BROKER_FUNCTION);
         if (phase === 'REGISTRATION_RECOVERY') {
           assertRegisteredTaskDefinitionState(c.change.after, r.values, c.change.after_unknown); continue;
         }
@@ -1598,7 +1600,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
       assert.equal(brokerDigest(initial.plan), preparation.logicalPlanSha256);
       if (!assertPrerequisitePlan(initial.plan, preparation).length) {
         await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
-        equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap));
+        equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap, preparation.prerequisiteChain.registration.result.definitions));
         await adapter.reserve(id, { purpose: preparation.purpose, nonce: authorization.nonce, preparationSha256: brokerDigest(preparation) });
         const authorizedAt = new Date().toISOString();
         await adapter.record(id, 'BROKER_POLICY_INTENT', { savedPlanSha256: preparation.savedPlanSha256, authorizedAt, noOp: true });
@@ -1640,7 +1642,7 @@ export function createStagedBrokerExecutor({ phase, operation, preparation, auth
             policyOwnershipTransition = { owner, operation: ownedOperation };
           }
           await adapter.authenticatePrerequisiteAuthorization(preparation, authorization);
-          equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap));
+          equal(preparation.target.policy, deriveBrokerPolicy(preparation.prerequisites.policy, preparation.prerequisiteChain.registration.result.taskMap, preparation.prerequisiteChain.registration.result.definitions));
           const artifacts = await adapter.readPlan(); assert.equal(brokerDigest(artifacts.bytes), preparation.savedPlanSha256);
           assert.equal(brokerDigest(artifacts.plan), preparation.logicalPlanSha256); assertPrerequisitePlan(artifacts.plan, preparation);
           assert.ok(readBrokerPolicyInventory(runAws).versions.length < 5, 'Separately approved pruning is required; do not auto-prune');

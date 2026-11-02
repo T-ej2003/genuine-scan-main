@@ -1,3 +1,4 @@
+import { isB03TaskArn } from './stage-b-task-registration-contract.mjs';
 import { STAGE_B, canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { assertStageBImportedBackendRolloverActions, assertStageBTaskDefinitionRotation, isStageBTaskDefinitionRotationActionsValue, STAGE_B_TASK_DEFINITION_FAMILIES } from "./stage-b-reference-audit-contract.mjs";
 import { BROKER_PUBLICATION, BROKER_CUTOVER, BROKER_CENSUS, assertBrokerPreparation, assertBrokerPublicationPlan, assertBrokerCutoverPlan } from './stage-b-staged-broker-contract.mjs';
@@ -339,6 +340,12 @@ function normalizedPolicyShape(document) {
 export function assertStageBBrokerPolicyDocument(document, plan) {
   const copy = structuredClone(document);
   const b03Arn = plan && b03TaskArnFromPlan(plan);
+  if (!plan) {
+    const statement = copy.Statement?.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions");
+    const b03 = Array.isArray(statement?.Resource) ? statement.Resource.filter(isB03TaskArn) : [];
+    if (b03.length > 1) throw new Error("Duplicate B03 broker permission");
+    if (b03.length) statement.Resource = statement.Resource.filter(arn => !isB03TaskArn(arn));
+  }
   if (b03Arn) {
     const statement = copy.Statement?.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions");
     if (!Array.isArray(statement?.Resource) || statement.Resource.filter(value => value === b03Arn).length !== 1) throw new Error("B03 broker policy must bind exactly its planned revision");

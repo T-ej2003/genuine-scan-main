@@ -337,14 +337,14 @@ export function selectReleasePolicyDeletion({inventory, protectedVersionIds, obs
  return oldest[0].versionId;
 }
 
-const transitions = Object.freeze([
+export const RELEASE_PREREQUISITE_TRANSITIONS = Object.freeze([
  ['registration', 'prepare-registration', 'register', 'recover-registration'],
  ['pruning', 'prepare-pruning', 'prune', 'recover-policy'],
  ['policy', 'prepare-policy', 'converge-policy', 'recover-policy'],
  ['publication', 'prepare-publication', 'publish', 'recover-publication'],
  ['cutover', 'prepare-cutover', 'cutover', 'recover-cutover'],
  ['closure', null, 'reconcile', 'recover-reconciliation'],
-]);
+].map(row => Object.freeze(row)));
 
 // The runtime supplies authenticated external reads, durable conditional storage
 // and the existing Stage-B public operation. Callers cannot supply phase order.
@@ -409,7 +409,7 @@ export async function runReleaseCoordinator(request, runtime) {
   assert.ok(completedRegistration, 'Completed broker closure requires the authenticated registration');
   assert.equal(await readStep('REGISTRATION_ADOPTED'),null,'Broker closure adoption cannot mix registration attempts');
   assert.equal(await readStep('pruning:skipped'),null,'Broker closure adoption cannot mix pruning history');
-  for (const [name] of transitions) {
+  for (const [name] of RELEASE_PREREQUISITE_TRANSITIONS) {
    for (const suffix of ['prepared', 'result'])
     assert.equal(await readStep(`${name}:${suffix}`), null, 'Broker closure adoption cannot mix coordinator mutations');
   }
@@ -436,7 +436,7 @@ export async function runReleaseCoordinator(request, runtime) {
    preparationReference:brokerDigest(prepared),authorizationRound:round},'Authorization substituted release/phase identity');
  };
  const packages = {};
- for (const [name, prepare, execute, recover] of transitions) {
+ for (const [name, prepare, execute, recover] of RELEASE_PREREQUISITE_TRANSITIONS) {
   if (name === 'registration' && completedRegistration) {
    const adopted = await once('REGISTRATION_ADOPTED', async () => {
     if (completedRegistration.preparation.sourceSha === release.sourceSha) {

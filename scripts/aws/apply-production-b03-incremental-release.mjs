@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { setTimeout as sleep } from "node:timers/promises";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -37,7 +38,7 @@ function authorizeB03Start({ sourceSha, authorization, approvalEvidence, release
 // Initiation evidence is deliberately not a successful SQL-installation receipt.
 export async function startProductionB03BrokerExecution({ sourceSha, authorization, approvalEvidence, releaseTrainRunId, request,
   environment = process.env, repositoryRoot = root, runner = createReleaseGateImageAuthorizationRunner(),
-  authenticateSource = authenticateExecutionSource, authorize = authorizeB03Start, invoke = invokeProductionApprovalBroker, now = () => new Date() } = {}) {
+  authenticateSource = authenticateExecutionSource, authorize = authorizeB03Start, invoke = invokeProductionApprovalBroker, now = () => new Date(), wait = sleep } = {}) {
   assert.ok(request && Object.keys(request).sort().join(",") === "approvalId,approvalSha256,operation,sourceSha");
   assert.equal(request.operation, B03_BROKER.mode); assert.equal(request.sourceSha, sourceSha);
   assert.match(sourceSha || "", /^[a-f0-9]{40}$/); assert.match(request.approvalSha256 || "", /^[a-f0-9]{64}$/);
@@ -72,8 +73,27 @@ export async function startProductionB03BrokerExecution({ sourceSha, authorizati
     assert.match(response.nonce || "", /^[a-f0-9-]{16,64}$/);
     return response;
   });
+  // Persist native completion while ECS still retains the stopped task.
+  let execution;
+  for (let attempt = 0; attempt < 40; attempt++) {
+    const status = await invoke(runner, { ...request, operation: "b03-completion-status" }, (response, invocation) => {
+      assert.equal(invocation.ExecutedVersion, version, "Broker alias changed during completion capture");
+      assert.ok(["EXECUTION_PENDING", "EXECUTION_VERIFIED"].includes(response.status), "B03 outcome unknown; do not relaunch SQL");
+      if (response.status === "EXECUTION_PENDING") {
+        assert.deepEqual(Object.keys(response), ["status"]); return response;
+      }
+      assert.deepEqual(Object.keys(response).sort(), ["execution", "status"]);
+      for (const [key, value] of Object.entries({ sourceSha, backendImage: images.backend, taskArn: started.taskArn,
+        taskDefinitionArn: proof.taskDefinitionArn, packageSha256: proof.packageSha256, approvalContractSha256: proof.approvalContractSha256 }))
+        assert.equal(response.execution?.[key], value, `B03 completion ${key} differs from launch`);
+      return response;
+    });
+    if (status.status === "EXECUTION_VERIFIED") { execution = status.execution; break; }
+    if (attempt < 39) await wait(15000);
+  }
+  assert.ok(execution, "B03 completion capture timed out; query authenticated status before any retry; never relaunch SQL");
   return { status: "STARTED_UNVERIFIED", sourceSha, backendImage: images.backend, brokerVersion: version,
-    approvalSha256: request.approvalSha256, initiation: started };
+    approvalSha256: request.approvalSha256, initiation: started, execution };
 }
 
 const root = fileURLToPath(new URL("../../", import.meta.url));

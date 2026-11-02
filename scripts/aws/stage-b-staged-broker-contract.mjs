@@ -1,3 +1,4 @@
+import { registrationAddressesFromDefinitions, isB03TaskArn } from './stage-b-task-registration-contract.mjs';
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { STAGE_B, STAGE_B_APPROVAL_ALGORITHM, canonicalJson, assertStageBBrokerTaskDefinitionMap, assertStageBBrokerLambdaConfiguration } from "./production-green-stage-b-contract.mjs";
@@ -161,7 +162,7 @@ export function brokerPrerequisiteIdentity(snapshot) {
   equal(snapshot.traffic, { reviewedAliasOnly: true, unqualifiedRoutes: [], otherVersionRoutes: [], functionUrls: [], eventSourceMappings: [] });
   assertStageBBrokerTaskDefinitionMap(snapshot.taskMap);
   const allowedTasks = snapshot.policy.Statement.find(s => s.Sid === "RunOnlyApprovedExecutorAndCanaryRevisions").Resource;
-  equal([...allowedTasks].sort(), Object.values(snapshot.taskMap).sort(), "IAM task revisions differ from task map");
+  equal(allowedTasks.filter(arn => !isB03TaskArn(arn)).sort(), Object.values(snapshot.taskMap).sort(), "IAM task revisions differ from task map");
   return structuredClone(snapshot);
 }
 
@@ -264,9 +265,7 @@ export function assertReceiptBoundRegistrationAdoption(entry, release) {
   assert.equal(result.sourceSha, r.historicalSourceSha); assert.equal(result.treeSha256, r.toolingTreeSha256);
   assert.equal(result.savedPlanSha256, r.savedPlanSha256); assert.equal(result.preparationSha256, r.historicalPreparationSha256);
   assert.equal(result.authorizationSha256, r.authorizationId); assert.equal(brokerDigest(result), r.historicalResultSha256);
-  assert.equal(Object.keys(result.definitions || {}).length, 12);
-  equal(Object.keys(result.definitions).sort(), Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort());
-  assert.equal(r.registeredOutputCount, 12);
+  assert.equal(r.registeredOutputCount, registrationAddressesFromDefinitions(result.definitions).length);
   assertStageBBrokerTaskDefinitionMap(result.taskMap);
   hash(r.definitionsSha256); assert.equal(r.definitionsSha256, brokerDigest(result.definitions));
   assertBrokerImageReuseCompatibility(r.imageImpactReport, r.historicalSourceSha, release);
@@ -305,7 +304,7 @@ export function assertReceiptBoundRegistrationPredecessorReceipts(entry, release
   assert.equal(r.durableReceiptChainVerified, true); assert.equal(r.liveSuccessorCorroborated, true);
   assert.equal(r.freshIndependentCheckerRequired, true); assert.equal(r.originalMutationReplayable, false);
   assert.equal(r.originalMutationAuthorizationAvailable, false); assert.equal(r.freshHandoffOnly, true);
-  assert.equal(r.historicalPurpose, 'STAGE_B_TASK_REGISTRATION'); assert.equal(r.registeredOutputCount, 12);
+  assert.equal(r.historicalPurpose, 'STAGE_B_TASK_REGISTRATION'); assert.ok([12, 13].includes(r.registeredOutputCount));
   assert.equal(r.historicalSourceSha, result.value.sourceSha);
   assert.equal(r.transactionId, result.envelope.id); assert.equal(r.authorizationId, r.transactionId);
   assert.equal(r.historicalAuthorizationSha256, r.authorizationId);
@@ -326,7 +325,7 @@ export function assertReceiptBoundRegistrationPredecessorReceipts(entry, release
   assert.equal(r.receiptChainSha256, brokerDigest({ transactionId: r.transactionId,
     historicalPreparationSha256: r.historicalPreparationSha256, historicalAuthorizationSha256: r.historicalAuthorizationSha256,
     historicalResultSha256: r.historicalResultSha256, receiptObjects: r.receiptObjects }));
-  equal(Object.keys(result.value.definitions).sort(), Object.keys(STAGE_B_TASK_DEFINITION_FAMILIES).sort());
+  assert.equal(r.registeredOutputCount, registrationAddressesFromDefinitions(result.value.definitions).length);
   const taskMap = Object.fromEntries(Object.entries(STAGE_B_TASK_DEFINITION_FAMILIES)
     .filter(([address]) => address.includes('.executor[') || address.endsWith('candidate["canary"]'))
     .map(([address]) => [address.includes('.executor[') ? address.match(/\["([^"]+)"\]$/)[1] : 'full-rls-application-canary', result.value.definitions[address].arn]));

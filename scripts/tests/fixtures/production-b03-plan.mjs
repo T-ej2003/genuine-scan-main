@@ -8,10 +8,10 @@ export function fixture() {
   const pkg = { ...body, packageSha256: canonicalSha256(body) };
   const definition = buildB03ExecutorDefinition({ sourceSha: source, backendImage: image, package: pkg, databaseHostname: "db.example.internal" });
   const tags = { Environment: "production", ManagedBy: "Terraform", Component: "b03-incremental-release" };
-  const after = { family: definition.family, network_mode: "awsvpc", requires_compatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
+  const after = { region: "eu-west-2", family: definition.family, network_mode: "awsvpc", requires_compatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     execution_role_arn: definition.executionRoleArn, task_role_arn: "", container_definitions: JSON.stringify(definition.containerDefinitions),
-    volume: [{ name: "executor-tmp", host_path: null, efs_volume_configuration: [], docker_volume_configuration: [] }],
-    runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], tags, tags_all: tags, skip_destroy: true };
+    volume: [{ name: "executor-tmp", host_path: null, efs_volume_configuration: [], docker_volume_configuration: [], s3files_volume_configuration: [] }],
+    runtime_platform: [{ operating_system_family: "LINUX", cpu_architecture: "X86_64" }], tags, tags_all: tags, skip_destroy: true, enable_fault_injection: false };
   return { variables: { account_id: { value: "368992683803" }, aws_region: { value: "eu-west-2" }, deployment_environment: { value: "production" },
     tooling_sha: { value: source }, image_release_sha: { value: source }, backend_image: { value: image },
     b03_executor_definition_json: { value: JSON.stringify(definition) } },
@@ -26,7 +26,7 @@ export function b03Configuration() {
       container_definitions: { references: ["local.b03_definition.containerDefinitions", "local.b03_definition"] },
       execution_role_arn: { references: ['aws_iam_role.execution["executor"].arn', 'aws_iam_role.execution["executor"]', "aws_iam_role.execution"] },
       network_mode: { constant_value: "awsvpc" }, requires_compatibilities: { constant_value: ["FARGATE"] }, cpu: { constant_value: "1024" },
-      memory: { constant_value: "2048" }, skip_destroy: { constant_value: true }, volume: [{ name: { constant_value: "executor-tmp" } }],
+      memory: { constant_value: "2048" }, skip_destroy: { constant_value: true }, enable_fault_injection: { constant_value: false }, volume: [{ name: { constant_value: "executor-tmp" }, configure_at_launch: { constant_value: false } }],
       runtime_platform: [{ operating_system_family: { constant_value: "LINUX" }, cpu_architecture: { constant_value: "X86_64" } }],
       tags: { constant_value: { Environment: "production", ManagedBy: "Terraform", Component: "b03-incremental-release" } },
     } };

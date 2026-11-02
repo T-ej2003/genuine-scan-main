@@ -23,7 +23,10 @@ function fixture({ proof = {}, start = {}, metadata = {}, authorize, authenticat
       assert.deepEqual(Object.keys(event).sort(), ["approvalId", "approvalSha256", "operation", "sourceSha"]);
       calls.push(event);
       const validation = event.operation === "validate-b03-approval";
-      const response = validation ? { status: "validated", approvalId: request.approvalId, sourceSha,
+      const completion = event.operation === "b03-completion-status";
+      const response = completion ? { status: "EXECUTION_VERIFIED", execution: { sourceSha, backendImage: image,
+        taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${"f".repeat(32)}`, taskDefinitionArn,
+        packageSha256: "d".repeat(64), approvalContractSha256: "c".repeat(64) } } : validation ? { status: "validated", approvalId: request.approvalId, sourceSha,
         approvalSha256: request.approvalSha256, approvalContractSha256: "c".repeat(64), taskDefinitionArn,
         backendImage: image, packageSha256: "d".repeat(64), expiresAt: "2026-10-28T12:30:00Z", ...proof }
         : { status: "started", schemaVersion: 1, environment: "production", event: "b03-broker-start", mode: "b03-incremental",
@@ -39,7 +42,7 @@ test("Release Gate start validates published approval then invokes only the fixe
   const { input, calls } = fixture();
   const result = await startProductionB03BrokerExecution(input);
   assert.equal(result.status, "STARTED_UNVERIFIED"); assert.equal(result.initiation.taskDefinitionArn, taskDefinitionArn);
-  assert.deepEqual(calls.map(c => c.operation), ["validate-b03-approval", "b03-incremental"]);
+  assert.deepEqual(calls.map(c => c.operation), ["validate-b03-approval", "b03-incremental", "b03-completion-status"]);
   assert.deepEqual(calls[1], request);
 });
 

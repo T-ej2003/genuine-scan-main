@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "kind": "BOUNDED_B03_REGISTRATION_IAM_INSTALLATION",
+  "changeTicket": "CHG-20261028-001",
+  "account": "368992683803",
+  "region": "eu-west-2",
+  "executionPrincipal": "arn:aws:iam::368992683803:root",
+  "operator": "T-ej2003",
+  "roleArn": "arn:aws:iam::368992683803:role/mscqr-production-release-deployer",
+  "policyName": "MSCQRProductionGreenStageBB03Registration",
+  "policyArn": "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration",
+  "policyFile": "documents/ops/iam/MSCQRProductionGreenStageBB03Registration-v1.json",
+  "policyFileSha256": "83fad42584493b19a27c1a841333067bce729a090074e087b2c310ad52f97220",
+  "mutatingActions": [
+    "iam:CreatePolicy",
+    "iam:AttachRolePolicy"
+  ],
+  "existingProcedure": "documents/ops/iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md",
+  "executionProcedure": "documents/ops/PRODUCTION_RELEASE_RECOVERY_RUNBOOK.md",
+  "authorization": "Fresh explicit approval of this new operation, exact protected-main source and prepared native predecessor; no historical authorization is reusable. Root authentication and fresh operator MFA remain mandatory.",
+  "automation": "MANUAL_ROOT_ADMIN_PROCEDURE_NOT_AUTOMATED_RECONCILER",
+  "requiredSimulationIds": [
+    "b03-register",
+    "b03-tag",
+    "b03-pass-execution"
+  ],
+  "forbiddenSimulationIds": [
+    "b03-deny-runtask",
+    "b03-deny-starttask",
+    "b03-deny-administrator-secret-read"
+  ],
+  "beforeRegistration": true,
+  "noExistingPolicyUpdates": true,
+  "noTaskLaunchOrSecretRead": true,
+  "completion": "Authenticate full native policy, exact role-only attachment, unchanged existing IAM, required/forbidden native simulations and immutable journal before Stage B registration."
+}

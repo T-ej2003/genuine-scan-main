@@ -119,6 +119,8 @@ locals {
     kind => distinct([
       for secret in definition.containerDefinitions[0].secrets :
       regex("^arn:aws:secretsmanager:[^:]+:[^:]+:secret:[^:]+", secret.valueFrom)
+      # The support-worker root owns the exact SMTP grant.
+      if kind != "worker" || secret.name != "SMTP_PASS"
     ])
   }
   active_execution_secret_arns = var.stage_b_recovery_only ? var.stage_b_recovery_execution_secret_arns : local.execution_secret_arns

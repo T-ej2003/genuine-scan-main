@@ -1,0 +1,70 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "RegisterOnlyFixedB03Family",
+      "Effect": "Allow",
+      "Action": "ecs:RegisterTaskDefinition",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "b03-incremental-release",
+          "ecs:privileged": "false"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Environment",
+            "ManagedBy",
+            "Component"
+          ],
+          "ecs:compute-compatibility": [
+            "FARGATE"
+          ]
+        },
+        "NumericEquals": {
+          "ecs:task-cpu": 1024,
+          "ecs:task-memory": 2048
+        }
+      }
+    },
+    {
+      "Sid": "TagOnlyFixedB03Family",
+      "Effect": "Allow",
+      "Action": "ecs:TagResource",
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "eu-west-2",
+          "aws:RequestTag/Environment": "production",
+          "aws:RequestTag/ManagedBy": "Terraform",
+          "aws:RequestTag/Component": "b03-incremental-release"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "Environment",
+            "ManagedBy",
+            "Component"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "DenyDirectB03Execution",
+      "Effect": "Deny",
+      "Action": [
+        "ecs:RunTask",
+        "ecs:StartTask"
+      ],
+      "Resource": "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:*"
+    },
+    {
+      "Sid": "DenyDirectB03AdministratorSecretRead",
+      "Effect": "Deny",
+      "Action": "secretsmanager:GetSecretValue",
+      "Resource": "arn:aws:secretsmanager:eu-west-2:368992683803:secret:rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo"
+    }
+  ]
+}

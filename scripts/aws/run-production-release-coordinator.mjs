@@ -5,6 +5,8 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {validateB03RequirementReferences} from './produce-production-b03-executor-definition.mjs';
+import {registrationAddressesFromDefinitions} from './stage-b-task-registration-contract.mjs';
 import {runReleaseCoordinator,createReleaseCoordinatorStore,readHostedReleaseSource,authenticateHostedStageBImages,HOSTED_RELEASE_ROOT,
  authenticateReleaseGateRuns,captureReleasePhaseMaterial,hydrateReleasePhaseMaterial,
  obtainReleaseTransitionAuthorization} from './production-release-coordinator.mjs';
@@ -65,7 +67,7 @@ export async function readDurableCompletedRegistration({store,sourceSha,ticketId
  const entry={preparation:prepared.preparation,authorization,result};
  assertRegistrationHandoff(entry,{sourceSha,treeSha256:entry.preparation.treeSha256});
  assert.equal(result.status,'REGISTERED_NONTERMINAL');assert.equal(result.savedPlanSha256,entry.preparation.savedPlanSha256);
- assert.deepEqual(Object.keys(result.definitions).sort(),TASK_REGISTRATION_ADDRESSES.slice().sort(),'Incomplete predecessor registration');
+ registrationAddressesFromDefinitions(result.definitions);
  if(authorization.schemaVersion===2){
   assert.equal(authorization.release.releaseId,releaseId);assert.equal(authorization.release.phase,'registration');
   assert.equal(authorization.release.preparationReference,brokerDigest(prepared));
@@ -148,6 +150,10 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
  assert.ok(path.isAbsolute(env.RUNNER_TEMP||''));assert.ok(/^\d+$/.test(env.GITHUB_RUN_ID||''));
  assert.equal(typeof awsRun,'function');assert.equal(typeof ghRun,'function');
  ensureStageBPrivateDirectory({directory:HOSTED_RELEASE_ROOT,repositoryRoot:root,create:true});
+ if(env.DATABASE_INSTALL_MODE==='incremental-b03'){
+  const references=JSON.parse(env.B03_REQUIREMENTS_REFERENCE_JSON||'null');
+  validateB03RequirementReferences(references,sourceSha);
+ }
  const store=createStore({run:awsRun,directory:HOSTED_RELEASE_ROOT,repositoryRoot:root});
  const checker=createBrokerKmsAuthorizationBoundary({run:awsRun,githubRun:ghRun});
  const verify=verifyAuthorization||checker.verify;
@@ -223,6 +229,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    else writeStageBPrivateFileAtomic({filePath:authorizationFile,bytes:Buffer.from(artifacts.authorizationJson),repositoryRoot:root,label:'Release image authorization'});
    const produced=await materialize({sourceSha:release.sourceSha,imageAuthorizationPath:authorizationFile,
     imageAuthorizationSha256:artifacts.authorizationRawSha256,outputDirectory:directory,
+    ...(env.DATABASE_INSTALL_MODE==='incremental-b03'?{b03Requirements:JSON.parse(env.B03_REQUIREMENTS_REFERENCE_JSON||'null')} : {}),
     ...(phase==='cutover'?{existingBrokerPackagePath:files.package}:{}),run:awsRun});
    const backendConfig=path.join(directory,'backend.hcl');generateStageBTerraformBackendConfig({outputPath:backendConfig});
    shell('terraform',[`-chdir=${terraformRoot}`,'init',`-backend-config=${backendConfig}`,'-input=false','-lockfile=readonly','-no-color'],
@@ -387,7 +394,7 @@ export function createHostedReleaseRuntime({sourceSha,ticketId,imageTransportJso
    });
    const nonDefault=inventory.filter(v=>!v.isDefault).sort((a,b)=>Date.parse(b.createDate)-Date.parse(a.createDate));
    const protectedVersionIds=[live.version,...nonDefault.slice(0,1).map(v=>v.versionId)];
-   const noOpPolicyCandidate=chain?.registration&&brokerDigest(deriveBrokerPolicy(live.policy,chain.registration.result.taskMap))===brokerDigest(live.policy);
+   const noOpPolicyCandidate=chain?.registration&&brokerDigest(deriveBrokerPolicy(live.policy,chain.registration.result.taskMap,chain.registration.result.definitions))===brokerDigest(live.policy);
    return {inventory,protectedVersionIds,obsoleteVersionIds:nonDefault.slice(1).map(v=>v.versionId),
     ...(inventory.length===5?{noOpPolicyCandidate:Boolean(noOpPolicyCandidate)}:{})};
   },

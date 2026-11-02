@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { B03_TASK_ADDRESS } from './production-b03-plan-contract.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,9 +145,9 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
     }
     const mutations = diagnostic.plan.resource_changes.filter(c => JSON.stringify(c.change.actions) !== '["no-op"]');
     if (operation === 'prepare-publication') {
-      const allowed = [...TASK_REGISTRATION_ADDRESSES, 'aws_iam_policy.broker', BROKER_FUNCTION, BROKER_ALIAS];
+      const allowed = [...TASK_REGISTRATION_ADDRESSES, B03_TASK_ADDRESS, 'aws_iam_policy.broker', BROKER_FUNCTION, BROKER_ALIAS];
       assert.ok(mutations.every(c => allowed.includes(c.address)), 'Unknown prerequisite mutation');
-      const next = mutations.some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address)) ? 'prepare-registration'
+      const next = mutations.some(c => TASK_REGISTRATION_ADDRESSES.includes(c.address) || c.address === B03_TASK_ADDRESS) ? 'prepare-registration'
         : mutations.some(c => c.address === 'aws_iam_policy.broker') || prerequisiteChain?.registration && !prerequisiteChain.policy ? 'prepare-policy' : null;
       if (next) return { ...await runStagedBrokerRequest({ ...request, operation: next }, { adapterFactory, checker, planningInputs }), nextAuthorizationPhase: next };
     }
@@ -160,7 +161,7 @@ export async function runStagedBrokerRequest(request, { adapterFactory = createS
         artifactSetSha256: stagedBrokerArtifactSet(files, root), state, packageSha256: brokerDigest(fs.readFileSync(files.package)),
         alias: await deps.getAlias(), prerequisites, canonicalAddresses: diagnostic.plan.resource_changes.map(c => c.address).sort(),
         configuration: diagnostic.plan.resource_changes.find(c => c.address === BROKER_FUNCTION).change.before.environment[0].variables,
-        publication: null, target: registration ? null : pruning ? { versionId: request.versionId, inventory: captured.plan.inventory } : { policy: deriveBrokerPolicy(prerequisites.policy, prerequisiteChain.registration.result.taskMap) },
+        publication: null, target: registration ? null : pruning ? { versionId: request.versionId, inventory: captured.plan.inventory } : { policy: deriveBrokerPolicy(prerequisites.policy, prerequisiteChain.registration.result.taskMap, prerequisiteChain.registration.result.definitions) },
         prerequisiteChain: registration ? null : prerequisiteChain || null,
         ...(registration && registrationPredecessorEvidence ? { registrationPredecessor: registrationPredecessorEvidence.registrationPredecessor, registrationPolicyPredecessor: registrationPredecessorEvidence.policy } : {}) };
       assertBrokerPreparation(p); const mutationAddresses = pruning ? assertBrokerPolicyPruningPlan(captured.plan, p) : assertPrerequisitePlan(captured.plan, p);

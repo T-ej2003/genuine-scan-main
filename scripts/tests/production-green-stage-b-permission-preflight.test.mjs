@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { fixture as b03PlanFixture } from "./fixtures/production-b03-plan.mjs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -379,8 +380,8 @@ const validReport = () => runPermissionPreflight({
 
 test("manifest is source-controlled, exact-accounted, and has no wildcard PassRole", () => {
   assert.equal(validateManifest(manifest), true);
-  assert.equal(manifest.taskDefinitionMappings.length, 12);
-  assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 12);
+  assert.equal(manifest.taskDefinitionMappings.length, 13);
+  assert.equal(new Set(manifest.taskDefinitionMappings.map((entry) => entry.address)).size, 13);
   assert.equal(manifest.taskDefinitionMappings.filter((entry) => entry.family === "mscqr-production-full-rls-green-read-only-canary").length, 1);
   assert.equal(REVIEWED_SIMULATION_CONTEXT_REGISTRY.length, 22);
   assert.equal(assertReviewedSimulationContextRegistry().length, 22);
@@ -902,7 +903,7 @@ test("production-shaped plan requires and binds the exact account and region var
     ["staged-broker-iam-listrolepolicies", "iam:ListRolePolicies", roleArn],
     ["staged-broker-iam-getrolepolicy", "iam:GetRolePolicy", roleArn],
   ].sort());
-  assert.equal(report.forbiddenEvaluations.length, 38);
+  assert.equal(report.forbiddenEvaluations.length, 41);
   for (const evaluation of report.requiredEvaluations) {
     for (const context of evaluation.context.filter(({ key }) => key === "aws:RequestedRegion")) assert.deepEqual(context.values, ["eu-west-2"]);
     if (evaluation.resource.startsWith("arn:aws:") && !evaluation.resource.startsWith("arn:aws:s3:::")) assert.ok(
@@ -1275,7 +1276,7 @@ test("all Lambda write manifest entries require the exact four resource-tag cont
 });
 
 test("the exact twelve task-definition creates expand to registration, tagging, and both PassRole evaluations", () => {
-  const fullPlan = { ...plan, resource_changes: [...manifest.taskDefinitionMappings.map((mapping) => ({
+  const fullPlan = { ...plan, resource_changes: [...manifest.taskDefinitionMappings.filter(mapping => mapping.id !== "b03").map((mapping) => ({
     address: mapping.address,
     type: "aws_ecs_task_definition",
     change: { actions: ["create"], after: taskDefinitionAfter(mapping) },
@@ -2925,4 +2926,33 @@ test("apply wrapper rejects a non-STS caller during verification-only mode", () 
     env: { MSCQR_STAGE_B_APPLY_ENABLED: "true", MSCQR_STAGE_B_APPLY_CONFIRM: "MSCQR_APPLY_PRODUCTION_GREEN_STAGE_B_ONCE", TF_WORKSPACE: "default", TF_DATA_DIR: fixture.directory },
     deps: { getCaller: () => roleArn, currentHead: () => "b".repeat(40), showPlan: () => fixture.shownBytes, validatePlan: () => {}, verifyPermissionSignature: () => true, apply: () => { throw new Error("apply must not be reached"); } },
   }), /STS assumed-role/);
+});
+
+// B03 registration extends the existing twelve contexts; it never gives this caller SQL execution.
+function withB03Registration() {
+  const value = structuredClone(fixture), b03 = b03PlanFixture();
+  value.variables = { ...value.variables, ...b03.variables };
+  value.resource_changes.push(...b03.resource_changes);
+  return value;
+}
+test("B03 permission derivation binds the thirteenth registration and only its execution role", () => {
+  const value = withB03Registration();
+  assertTaskDefinitionRegistrationContexts(value, manifest, { terraformConfiguration });
+  const derived = deriveRequiredEvaluations(value, manifest, { terraformConfiguration });
+  const b03 = derived.required.filter(entry => entry.manifestId?.startsWith("b03-"));
+  assert.deepEqual(b03.map(entry => entry.action).sort(), ["ecs:RegisterTaskDefinition", "ecs:TagResource", "iam:PassRole"].sort());
+  assert.equal(b03.find(entry => entry.action === "ecs:RegisterTaskDefinition").resource, "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:*");
+  assert.equal(b03.find(entry => entry.action === "iam:PassRole").resource, "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution");
+  assert.equal(derived.required.some(entry => entry.manifestId === "b03-pass-task"), false);
+});
+for (const [name, mutate] of Object.entries({
+  "extra task role": p => { p.resource_changes.at(-1).change.after.task_role_arn = "arn:aws:iam::368992683803:role/other"; },
+  "substituted image": p => { const a=p.resource_changes.at(-1).change.after;const c=JSON.parse(a.container_definitions);c[0].image=c[0].image.replace(/a{64}/,"b".repeat(64));a.container_definitions=JSON.stringify(c); },
+  "wrong component": p => { p.resource_changes.at(-1).change.after.tags.Component="full-rls-green-stage-b"; },
+  "source mismatch": p => { p.variables.tooling_sha.value="f".repeat(40); },
+  "missing enabled task": p => { p.resource_changes.pop(); },
+  "duplicate task": p => { p.resource_changes.push(structuredClone(p.resource_changes.at(-1))); },
+})) test(`B03 registration contexts reject ${name}`, () => {
+  const value=withB03Registration();mutate(value);
+  assert.throws(() => assertTaskDefinitionRegistrationContexts(value, manifest, { terraformConfiguration }));
 });

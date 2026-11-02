@@ -458,15 +458,15 @@ test("executor policy is exact and grants no deletion, default setter, or arbitr
 
 const stagedState = (change = {}) => state({ document: desired.stagedPredecessorDocument, ...change });
 const stagedPreparation = () => createProviderReadonlyPreparation({ sourceSha, liveState: stagedState(), preparedAt: now.toISOString() });
-test("staged inventory transition binds the exact five semantic changes and existing role actions", () => {
+test("B03 registration read transition adds exactly one policy ARN and no action", () => {
   const prep = stagedPreparation();
-  assert.equal(prep.currentDefaultDocumentSha256, "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade");
-  assert.equal(prep.desiredDocumentSha256, "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5");
-  assert.equal(prep.semanticDelta.add.length, 2); assert.equal(prep.semanticDelta.change.length, 3);
-  const roles = prep.semanticDelta.change.find(s => s.sid === "ReadExactStageBRoles");
-  assert.ok(roles.before.Action.includes("iam:ListRolePolicies"));
-  assert.deepEqual(roles.before.Action, roles.after.Action);
-  assert.deepEqual(roles.after.Resource.filter(r => !roles.before.Resource.includes(r)), [CONTRACT.releaseRoleArn]);
+  assert.equal(prep.currentDefaultDocumentSha256, "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5");
+  assert.equal(prep.desiredDocumentSha256, "d0641ed7f164486796b9361667176ebe2c250d52fff358e4b979cca9e43ef164");
+  assert.equal(prep.semanticDelta.add.length, 0); assert.equal(prep.semanticDelta.change.length, 1);
+  const change = prep.semanticDelta.change[0];
+  assert.equal(change.sid, "ReadExactStagedBrokerCallerPolicies");
+  assert.deepEqual(change.before.Action, change.after.Action);
+  assert.deepEqual(change.after.Resource.filter(r => !change.before.Resource.includes(r)), ["arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration"]);
   assertProviderReadonlyAuthorization(authorization(prep), prep, { sourceSha, now });
 });
 const changeStatement = (doc, sid) => doc.Statement.find(s => s.Sid === sid);
@@ -495,7 +495,7 @@ const hostileTargets = [
   ["event region absent", d => delete changeStatement(d, "ListRegionalBrokerEventMappings").Condition],
   ["event region wrong", d => changeStatement(d, "ListRegionalBrokerEventMappings").Condition.StringEquals["aws:RequestedRegion"] = "us-east-1"],
   ["eleven policy ARNs", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource.push("arn:aws:iam::368992683803:policy/other")],
-  ["nine policy ARNs", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource.pop()],
+  ["missing existing policy ARN", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource.shift()],
   ["wildcard policy ARN", d => changeStatement(d, "ReadExactStagedBrokerCallerPolicies").Resource = "arn:aws:iam::368992683803:policy/*"],
   ["missing expected action", d => changeStatement(d, "ReadExactStageBBrokerFunction").Action.pop()],
 ];
@@ -530,4 +530,17 @@ test("staged transition preserves exact post-state and replay never writes twice
   assert.equal((await executeProviderReadonlyReconciliation(args)).status, "COMPLETED");
   assert.equal((await executeProviderReadonlyReconciliation(args)).status, "CONSUMED");
   assert.equal(writes, 1);
+});
+
+test("historical reviewed policy target remains the exact historical transition only", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "readonly-historical-target-"));
+  try {
+    const file = path.join(directory, CONTRACT.sourcePath); fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(desired.stagedPredecessorDocument));
+    const historical = readProviderReadonlyDesiredPolicy({ repositoryRoot: directory });
+    assert.equal(historical.sourcePolicySha256, "f739b4088b62ab8ec8b3d819d84b995bd4da105d14fe1b0eef9df2116e76f5c5");
+    assert.equal(historical.stagedPredecessorPolicySha256, "7e3aa1018b6fb8317d9640dd8b0f3c80f9a22b9ce220e8c92266e41b5153eade");
+    assert.equal(historical.stagedSemanticDelta.add.length, 2);
+    assert.equal(historical.stagedSemanticDelta.change.length, 3);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

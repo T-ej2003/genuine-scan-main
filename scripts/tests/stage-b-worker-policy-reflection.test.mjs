@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
-import { WORKER_COMMITTED, committedWorkerExecutionReference, restoreCommittedWorkerMetadata, WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionImageArgs, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
+import { WORKER_COMMITTED, committedWorkerTerraformConfiguration, committedWorkerExecutionReference, restoreCommittedWorkerMetadata, WORKER_REFLECTION as C, createWorkerReflectionEvidence, assertWorkerReflectionEvidence, workerReflectionImageArgs, workerReflectionHash as hash } from '../aws/stage-b-worker-policy-reflection.mjs';
 import { STAGE_B_EXPECTED_CHECK_INVENTORY } from '../aws/stage-b-refresh-contract.mjs';
 import { createStageBStateReconciliationPreparation as prepare, createStageBStateReconciliationAuthorization as authorize, executeStageBStateReconciliation as execute, assertStageBStateReconciliationAuthorization as verify, assertExactStageBRefreshOnlyPlan as verifyPlan, STAGE_B_STATE_RECONCILIATION as contract } from '../aws/production-green-stage-b-state-reconciliation.mjs';
 import { createProductionEnvironmentApprovalEvidence } from '../aws/production-github-environment-approval.mjs';
@@ -90,8 +90,8 @@ test('serial149 recovery fails closed if live state reverted or changes during c
     assert.throws(()=>execute(o));assert.equal(writes,0);
 });
 
-test('recorded metadata matches the unchanged reviewed Terraform dependency contract',()=>{
-    const source=fs.readFileSync('infra/aws/terraform/production-green-stage-b/main.tf');
+test('recorded metadata authenticates historical dependencies through the exact SMTP de-duplication',()=>{
+    const source=committedWorkerTerraformConfiguration(fs.readFileSync('infra/aws/terraform/production-green-stage-b/main.tf'));
     assert.equal(hash(source),WORKER_COMMITTED.terraformConfigurationSha256);
     assert.match(source.toString(),/Resource = concat\(values\(local.active_broker_task_definition_arns\), aws_ecs_task_definition.b03\[\*\].arn\)/);
     for(const d of WORKER_COMMITTED.metadata.dependencies)assert.deepEqual(d.after,d.before.flatMap((v,i)=>i===2?['aws_ecs_task_definition.b03',v]:[v]));
@@ -120,4 +120,12 @@ test('closure rejects malformed resource_drift rather than treating it as empty'
         const r=run({renderRefreshClosurePlan:()=>({...plan(),applyable:false,resource_drift:value})});
         assert.throws(r.result,e=>e.reconciliationResult?.status==='state-write-completed-postverify-failed');
     }
+});
+
+test('committed-state compatibility rejects every unrelated Terraform edit without changing historical metadata',()=>{
+ const current=fs.readFileSync('infra/aws/terraform/production-green-stage-b/main.tf');
+ const historical=committedWorkerTerraformConfiguration(current);
+ assert.deepEqual(committedWorkerTerraformConfiguration(historical),historical);
+ for(const change of [s=>s+'\n',s=>s.replace('aws_ecs_task_definition.b03[*].arn','[]'),s=>s.replace('secret.name != "SMTP_PASS"','true'),s=>s.replace('kind != "worker"','true'),s=>s.replace('executorSecurityGroup','unreviewedSecurityGroup')+'# unrelated'])assert.throws(()=>committedWorkerTerraformConfiguration(Buffer.from(change(current.toString()))));
+ assert.equal(hash(historical),WORKER_COMMITTED.terraformConfigurationSha256);
 });

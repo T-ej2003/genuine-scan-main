@@ -68,7 +68,8 @@ test("initial capability evidence needs no plan approval and is not plan-bound",
   assert.deepEqual(report.requiredEvaluations.filter(({ manifestId }) => manifestId === "conditional-ecs-registration-audit-read").map(({ action, resource, phase, decision }) => ({ action, resource, phase, decision })), [{
     action: "cloudtrail:LookupEvents", resource: "*", phase: "recovery-read", decision: "allowed",
   }]);
-  assert.equal(report.forbiddenDeniedCount, 38);
+  assert.equal(report.forbiddenDeniedCount, 41);
+  assert.equal(report.forbiddenEvaluations.filter(item => item.manifestId.startsWith("b03-deny-") && item.decision === "explicitDeny").length, 3);
   assert.equal(report.principalEvaluations.ecsExecVerifier.status, "valid");
   assert.equal(report.cutoverCritical.stageAIngress, "allowed");
   assert.equal(report.cutoverCritical.stageACheckerRoleChain, "allowed");

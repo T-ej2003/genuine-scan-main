@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { B03_TASK_ADDRESS, assertB03TaskPlan } from "./production-b03-plan-contract.mjs";
 import crypto from "node:crypto";
 import { BROKER_POLICY_OWNERSHIP_KEY } from './stage-b-broker-policy-ownership.mjs';
 import { assertHistoricalRuntimeReference } from "./production-historical-runtime-contract.mjs";
@@ -111,10 +112,11 @@ const TASK_DEFINITION_MAPPINGS = Object.freeze([
   ["full-rls-rollback", 'aws_ecs_task_definition.executor["full-rls-rollback"]', "mscqr-production-full-rls-green-full-rls-rollback", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
   ["full-rls-runtime-policy", 'aws_ecs_task_definition.executor["full-rls-runtime-policy"]', "mscqr-production-full-rls-green-full-rls-runtime-policy", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
   ["full-rls-verification", 'aws_ecs_task_definition.executor["full-rls-verification"]', "mscqr-production-full-rls-green-full-rls-verification", "mscqr-production-full-rls-green-executor-execution", "mscqr-production-full-rls-green-executor-task", "1024", "2048"],
-].map(([id, address, family, executionRoleName, taskRoleName, cpu, memory]) => Object.freeze({ id, address, family, cpu, memory, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` })));
+  ["b03", B03_TASK_ADDRESS, "mscqr-production-b03-incremental", "mscqr-production-full-rls-green-executor-execution", null, "1024", "2048"],
+].map(([id, address, family, executionRoleName, taskRoleName, cpu, memory]) => Object.freeze({ id, address, family, cpu, memory, resource: `arn:aws:ecs:${REGION}:${ACCOUNT}:task-definition/${family}:*`, executionRoleArn: `arn:aws:iam::${ACCOUNT}:role/${executionRoleName}`, taskRoleArn: taskRoleName ? `arn:aws:iam::${ACCOUNT}:role/${taskRoleName}` : null })));
 
 const taskDefinitionRegisterContext = ({ id, cpu, memory }) => [
-  { key: "aws:RequestTag/Component", type: "string", values: [TASK_DEFINITION_TAGS.Component] },
+  { key: "aws:RequestTag/Component", type: "string", values: [id === "b03" ? "b03-incremental-release" : TASK_DEFINITION_TAGS.Component] },
   { key: "aws:RequestTag/Environment", type: "string", values: [TASK_DEFINITION_TAGS.Environment] },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: [TASK_DEFINITION_TAGS.ManagedBy] },
   ...(id === "backend" ? [{ key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: [BACKEND_TASK_DEFINITION_TAGS.MSCQRExecTarget] }] : []),
@@ -140,6 +142,7 @@ export const RELEASE_POLICY_SOURCES = Object.freeze([
   ["MSCQRProductionGreenStageBProviderReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBProviderReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBReferenceAuditReadOnly", "documents/ops/iam/MSCQRProductionGreenStageBReferenceAuditReadOnly-v1.json"],
   ["MSCQRProductionGreenStageBFinalApplyWrite", "documents/ops/iam/MSCQRProductionGreenStageBFinalApplyWrite-v1.json"],
+  ["MSCQRProductionGreenStageBB03Registration", "documents/ops/iam/MSCQRProductionGreenStageBB03Registration-v1.json"],
   ["MSCQRProductionGreenStageBTaskDefinitionRegistration", "documents/ops/iam/MSCQRProductionGreenStageBTaskDefinitionRegistration-v1.json"],
   ["MSCQRProductionGreenStageBWorkspaceState", "documents/ops/iam/MSCQRProductionGreenStageBWorkspaceState-v2.json"],
 ].map(([name, sourcePath]) => Object.freeze({ name, arn: `arn:aws:iam::${ACCOUNT}:policy/${name}`, sourcePath })));
@@ -457,7 +460,7 @@ function sameStringSet(left, right) {
 export const REVIEWED_SIMULATION_CONTEXT_REGISTRY = Object.freeze([
   { key: "aws:PrincipalTag/MSCQRReceiptReleaseSha", type: "string", values: Object.freeze(["a".repeat(40)]) },
   { key: "dynamodb:LeadingKeys", type: "stringList", values: Object.freeze([BROKER_POLICY_OWNERSHIP_KEY]) },
-  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b"]) },
+  { key: "aws:RequestTag/Component", type: "string", values: Object.freeze(["full-rls-green-stage-a", "full-rls-green-stage-b", "b03-incremental-release"]) },
   { key: "aws:RequestTag/Environment", type: "string", values: Object.freeze(["production"]) },
   { key: "aws:RequestTag/ManagedBy", type: "string", values: Object.freeze(["Terraform"]) },
   { key: "aws:RequestTag/MSCQRExecTarget", type: "string", values: Object.freeze(["production-backend"]) },
@@ -779,11 +782,11 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
       throw new Error("Checker approval publication capability is not exact.");
     }
   }
-  if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain exactly twelve task-definition mappings.");
+  if (!Array.isArray(manifest.taskDefinitionMappings) || manifest.taskDefinitionMappings.length !== TASK_DEFINITION_MAPPINGS.length) throw new Error("Permission manifest must contain the exact twelve task-definition mappings and fixed B03 mapping.");
   if (JSON.stringify(manifest.taskDefinitionRotationContract?.actions) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_ACTIONS)
     || JSON.stringify(manifest.taskDefinitionRotationContract?.replacePaths) !== JSON.stringify(STAGE_B_TASK_DEFINITION_ROTATION_REPLACE_PATHS)
     || manifest.taskDefinitionRotationContract?.authorization !== "ecs:RegisterTaskDefinition only; ecs:DeregisterTaskDefinition remains forbidden"
-    || manifest.taskDefinitionRotationContract?.scope !== "exact twelve root-managed Stage B task-definition addresses") {
+    || manifest.taskDefinitionRotationContract?.scope !== "exact twelve root-managed Stage B task-definition addresses plus fixed B03") {
     throw new Error("Permission manifest task-definition rotation contract is not exact.");
   }
   const expectedMappings = new Map(TASK_DEFINITION_MAPPINGS.map((mapping) => [mapping.address, mapping]));
@@ -809,7 +812,7 @@ export function validateManifest(manifest, { account = ACCOUNT, region = REGION,
     { id: `${mapping.id}-register`, action: "ecs:RegisterTaskDefinition", resources: [mapping.resource], context: mapping.registerContext, generated: true },
     { id: `${mapping.id}-tag`, action: "ecs:TagResource", resources: [mapping.resource], context: taskDefinitionTagContext(mapping.registerContext), generated: true },
     { id: `${mapping.id}-pass-execution`, action: "iam:PassRole", resources: [mapping.executionRoleArn], context: mapping.passRoleContext, generated: true },
-    { id: `${mapping.id}-pass-task`, action: "iam:PassRole", resources: [mapping.taskRoleArn], context: mapping.passRoleContext, generated: true },
+    ...(mapping.taskRoleArn ? [{ id: `${mapping.id}-pass-task`, action: "iam:PassRole", resources: [mapping.taskRoleArn], context: mapping.passRoleContext, generated: true }] : []),
   ]);
   assertNoDuplicateOrOverlap([...manifest.required, ...generatedRequired], manifest.forbidden);
   return true;
@@ -844,6 +847,7 @@ export function createStageBMutationManifest(plan, manifest, { planProfile, plan
     } else if (change.type === "aws_ecs_task_definition") {
       const mapping = manifest.taskDefinitionMappings.find((candidate) => candidate.address === change.address);
       if (!mapping || !(exactActions(actions, ["create"]) || isStageBTaskDefinitionRotationActionsValue(actions))) throw new Error(`Mutation manifest rejects unreviewed task-definition change ${change.address}.`);
+      if (change.address === B03_TASK_ADDRESS) assertB03TaskPlan(change, plan);
       contextFromTaskDefinitionPlan(change, mapping);
       classification = "stage-b-task-definition-registration";
       requiredPermissions = ["ecs:RegisterTaskDefinition", "ecs:TagResource", "iam:PassRole"];
@@ -940,8 +944,8 @@ function contextFromTaskDefinitionPlan(change, manifestMapping) {
   if (isStageBTaskDefinitionRotationActionsValue(change.change?.actions)) assertStageBTaskDefinitionRotation(change, { variables: {} }, { strict: false });
   if (!after || after.family !== mapping.family || String(after.cpu) !== mapping.cpu || String(after.memory) !== mapping.memory
     || JSON.stringify(after.requires_compatibilities) !== JSON.stringify(["FARGATE"])
-    || after.execution_role_arn !== mapping.executionRoleArn || after.task_role_arn !== mapping.taskRoleArn
-    || canonicalizeJson(after.tags) !== canonicalizeJson(mapping.id === "backend" ? BACKEND_TASK_DEFINITION_TAGS : TASK_DEFINITION_TAGS)) {
+    || after.execution_role_arn !== mapping.executionRoleArn || (mapping.id === "b03" ? after.task_role_arn != null && after.task_role_arn !== "" : after.task_role_arn !== mapping.taskRoleArn)
+    || canonicalizeJson(after.tags) !== canonicalizeJson(mapping.id === "backend" ? BACKEND_TASK_DEFINITION_TAGS : mapping.id === "b03" ? { ...TASK_DEFINITION_TAGS, Component: "b03-incremental-release" } : TASK_DEFINITION_TAGS)) {
     throw new Error(`${change.address} task-definition registration context does not match the reviewed family contract.`);
   }
   let containers;
@@ -976,9 +980,14 @@ export function assertTaskDefinitionRegistrationContexts(plan, manifest, { permi
     return Boolean(retained && TASK_DEFINITION_MAPPINGS.some((mapping) => mapping.address === `${retained[1]}["${retained[3]}"]`));
   };
   if (taskDefinitionChanges.some((change) => !registrations.includes(change) && !reviewedDeposedCleanups.includes(change) && !allowedMetadataChange(change) && !allowedNoOp(change))) throw new Error("Selected plan contains an unreviewed task-definition change.");
-  const requiredMappings = importedBackendNormalization
-    ? manifest.taskDefinitionMappings.filter((mapping) => mapping.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS)
-    : manifest.taskDefinitionMappings;
+  const b03Changes = taskDefinitionChanges.filter(change => change.address === B03_TASK_ADDRESS);
+  if (plan.variables?.b03_executor_definition_json?.value != null && b03Changes.length !== 1)
+    throw new Error("Enabled B03 definition requires exactly one task");
+  if (b03Changes.length > 1) throw new Error("Duplicate B03 task");
+  for (const change of b03Changes) assertB03TaskPlan(change, plan);
+  const requiredMappings = manifest.taskDefinitionMappings.filter(mapping =>
+    (!importedBackendNormalization || mapping.address !== STAGE_B_IMPORTED_BACKEND_CANDIDATE_ADDRESS)
+    && (mapping.address !== B03_TASK_ADDRESS || b03Changes[0]?.change.actions[0] === "create"));
   for (const mapping of requiredMappings) {
     const matches = registrations.filter((change) => change.address === mapping.address);
     if (matches.length !== 1) throw new Error(`Selected plan must contain exactly one reviewed task-definition registration for ${mapping.address}.`);
@@ -1076,11 +1085,12 @@ export function deriveRequiredEvaluations(plan, manifest, { permissionProfile = 
     if (change.type === "aws_ecs_task_definition" && !taskMapping) throw new Error(`No permission manifest entry covers ${change.address} ${JSON.stringify(actions)}.`);
     if (taskMapping) {
       if (permissionProfile === "RECOVERY_ALIAS_ONLY") throw new Error(`RECOVERY_ALIAS_ONLY rejects ECS task-definition mutation: ${change.address}.`);
+      if (change.address === B03_TASK_ADDRESS) assertB03TaskPlan(change, plan);
       const registerContext = contextFromTaskDefinitionPlan(change, taskMapping);
       required.push(evaluation({ id: `${taskMapping.id}-register`, action: "ecs:RegisterTaskDefinition", context: registerContext, phase: "apply" }, taskMapping.resource, { contextRegistry }));
       required.push(evaluation({ id: `${taskMapping.id}-tag`, action: "ecs:TagResource", context: taskDefinitionTagContext(registerContext), phase: "apply" }, taskMapping.resource, { contextRegistry }));
       required.push(evaluation({ id: `${taskMapping.id}-pass-execution`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.executionRoleArn, { contextRegistry }));
-      required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn, { contextRegistry }));
+      if (taskMapping.taskRoleArn) required.push(evaluation({ id: `${taskMapping.id}-pass-task`, action: "iam:PassRole", context: taskMapping.passRoleContext, phase: "apply" }, taskMapping.taskRoleArn, { contextRegistry }));
       coveredChanges.push(stageBMutationInstanceIdentity(change));
       continue;
     }

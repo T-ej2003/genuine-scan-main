@@ -21,6 +21,7 @@ locals {
 resource "aws_ecs_task_definition" "b03" {
   count                    = var.b03_executor_definition_json == null ? 0 : 1
   skip_destroy             = true
+  enable_fault_injection   = false
   family                   = local.b03_definition.family
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
@@ -28,7 +29,10 @@ resource "aws_ecs_task_definition" "b03" {
   memory                   = "2048"
   execution_role_arn       = aws_iam_role.execution["executor"].arn
   container_definitions    = jsonencode(local.b03_definition.containerDefinitions)
-  volume { name = "executor-tmp" }
+  volume {
+    name                = "executor-tmp"
+    configure_at_launch = false
+  }
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
