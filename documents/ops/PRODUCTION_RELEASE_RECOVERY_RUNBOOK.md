@@ -149,8 +149,8 @@ Its old twelve-family registration policy cannot register the fixed B03 executor
 The reviewed sources add `MSCQRProductionGreenStageBB03Registration-v1.json`
 and add only the new policy metadata ARN to ProviderReadOnly. FinalApplyWrite, its
 existing canonical publisher, broker ownership permissions and all PassRole
-targets remain unchanged. Published documents fit6,144 characters. Ten managed attachments is the expected
-maximum and must be checked live, not assumed.
+targets remain unchanged. Published documents fit6,144 characters. Ten exact source-owned managed attachments are expected after this operation;
+verify the native inventory and current account quota, not a historical limit.
 
 There is **no existing governed create-and-attach workflow for this new managed
 policy**. The ProviderReadOnly reconciler can change only its own document; the
@@ -211,3 +211,114 @@ It does not authorize Terraform state changes, task launches, SQL or ECS rollout
 Rollback also needs approval: never detach the new policy while registration or
 broker rollout is in flight. Preserve existing default versions and permissions.
 Do not delete a new policy that has unknown attachments or any in-flight execution.
+
+## Exact installation package and native permission verification
+
+The reviewed package is
+[`MSCQRProductionGreenStageBB03RegistrationInstallation-v1.json`](iam/MSCQRProductionGreenStageBB03RegistrationInstallation-v1.json).
+Its target file hash, role, root principal, two permitted mutation actions and six
+required/forbidden simulation IDs are checked by source certification. It reuses
+the root/admin create-and-attach procedure documented in
+[`PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md`](iam/PRODUCTION_GREEN_STAGE_B_PROVIDER_RECOVERY_2026-07-29.md).
+That procedure is manual; the web and initial-activation reconcilers explicitly
+reject this new target and must not be invoked with substituted arguments.
+
+**External authorization dependency:** this is a proposed new, bounded use of that
+manual root/admin procedure. It is not covered by historical web, lifecycle,
+state149 or deployment approvals. Before execution, obtain explicit approval of
+this mechanism and then fresh approval binding the merged SHA, package bytes,
+policy bytes, exact native predecessor and operator MFA evidence. The approval
+must specify its validity window and be retained with the operator's immutable
+execution journal and native CloudTrail records. If this manual authorization
+model is not approved, installation remains BLOCKED: no existing automated lane
+can create and attach this policy. Do not start Release Train in that state.
+Self-approval by T-ej2003 is the documented solo-operator exception, not independent
+human review; independent exact-head technical review remains mandatory.
+
+Use the reviewed package to set only these values in a clean exact-main checkout:
+
+```sh
+set -euo pipefail
+b03_source=$(git rev-parse HEAD)
+test -z "$(git status --porcelain=v1 --untracked-files=all)"
+test "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .protected)" = true
+test "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)" = "$b03_source"
+b03_package=documents/ops/iam/MSCQRProductionGreenStageBB03RegistrationInstallation-v1.json
+b03_policy=documents/ops/iam/MSCQRProductionGreenStageBB03Registration-v1.json
+b03_expected_policy_hash=$(jq -er .policyFileSha256 "$b03_package")
+test "$(shasum -a 256 "$b03_policy" | awk '{print $1}')" = "$b03_expected_policy_hash"
+b03_policy_name=MSCQRProductionGreenStageBB03Registration
+b03_policy_arn=arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageBB03Registration
+b03_release_role=arn:aws:iam::368992683803:role/mscqr-production-release-deployer
+b03_execution_role=arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-executor-execution
+b03_task_family=arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-b03-incremental:1
+test "$(aws sts get-caller-identity --profile mscqr-production-root --region eu-west-2 --query Account --output text)" = 368992683803
+test "$(aws sts get-caller-identity --profile mscqr-production-root --region eu-west-2 --query Arn --output text)" = arn:aws:iam::368992683803:root
+```
+
+Identity alone does not prove MFA or approval. Authenticate those separately via
+the existing privileged operational controls before the two commands below.
+Recheck exact protected main, policy/package hashes, native predecessor and fresh
+authority immediately before **each** write. Preserve native snapshots first.
+Only when the policy is authenticated absent and the explicit approval is valid:
+
+```sh
+AWS_MAX_ATTEMPTS=1 AWS_RETRY_MODE=standard aws iam create-policy \
+  --profile mscqr-production-root --region eu-west-2 \
+  --policy-name "$b03_policy_name" --policy-document "file://$b03_policy"
+# Authenticate returned ARN, exact document/default version, zero users/groups/
+# boundary use, and the journaled successful creation before attachment.
+AWS_MAX_ATTEMPTS=1 AWS_RETRY_MODE=standard aws iam attach-role-policy \
+  --profile mscqr-production-root --region eu-west-2 \
+  --role-name mscqr-production-release-deployer --policy-arn "$b03_policy_arn"
+```
+
+These commands do not update existing policies. A lost response is UNKNOWN until
+native readback and the original approval/journal/CloudTrail identity reconcile
+it. Never create a different name or issue `CreatePolicyVersion` to repair an
+unknown existing document. An already correct policy requires authenticated
+original creation/attachment evidence; do not replay completed operations.
+
+For native verification, generate the private simulation context from the exact
+canonical manifest. Authenticate the native receipt principal tag before using it:
+
+```sh
+b03_private_dir=$(mktemp -d "${TMPDIR:-/tmp}/mscqr-b03-iam.XXXXXX")
+chmod 700 "$b03_private_dir"
+b03_register_context_file="$b03_private_dir/register-context.json"
+b03_receipt_tag=$(aws iam get-role --profile mscqr-production-root --region eu-west-2 \
+  --role-name mscqr-production-release-deployer \
+  --query "Role.Tags[?Key=='MSCQRReceiptReleaseSha'].Value | [0]" --output text)
+[[ "$b03_receipt_tag" =~ ^[a-f0-9]{40}$ ]]
+jq --arg tag "$b03_receipt_tag" '[.taskDefinitionMappings[] | select(.id=="b03") | .registerContext[] | {ContextKeyName:.key,ContextKeyType:.type,ContextKeyValues:.values}] + [{ContextKeyName:"aws:PrincipalTag/MSCQRReceiptReleaseSha",ContextKeyType:"string",ContextKeyValues:[$tag]}]' \
+  documents/ops/iam/MSCQRProductionGreenStageBPermissionManifest-v1.json > "$b03_register_context_file"
+chmod 600 "$b03_register_context_file"
+```
+
+Then run the following read-only simulations:
+
+```sh
+aws iam simulate-principal-policy --profile mscqr-production-root --region eu-west-2 \
+  --policy-source-arn "$b03_release_role" --action-names ecs:RegisterTaskDefinition ecs:TagResource \
+  --resource-arns "$b03_task_family" --context-entries "file://$b03_register_context_file"
+aws iam simulate-principal-policy --profile mscqr-production-root --region eu-west-2 \
+  --policy-source-arn "$b03_release_role" --action-names iam:PassRole \
+  --resource-arns "$b03_execution_role" \
+  --context-entries ContextKeyName=iam:PassedToService,ContextKeyType=string,ContextKeyValues=ecs-tasks.amazonaws.com
+aws iam simulate-principal-policy --profile mscqr-production-root --region eu-west-2 \
+  --policy-source-arn "$b03_release_role" --action-names ecs:RunTask ecs:StartTask \
+  --resource-arns "$b03_task_family"
+aws iam simulate-principal-policy --profile mscqr-production-root --region eu-west-2 \
+  --policy-source-arn "$b03_release_role" --action-names secretsmanager:GetSecretValue \
+  --resource-arns 'arn:aws:secretsmanager:eu-west-2:368992683803:secret:rds!db-70d459ec-4f6f-45da-aafc-618e83d660a1-Dy9GLo'
+```
+
+Assert all required results are `allowed`, all three forbidden results are
+`explicitDeny`, with no unexplained `MissingContextValues`; otherwise stop.
+Revision1 is only an IAM simulation resource, not permission to execute or select
+that task. The subsequent existing **plan-bound** administrator preflight binds
+the actual approved task/image/source and repeats the exact required/forbidden
+checks. Verify `list-entities-for-policy` shows only the intended release role,
+no users/groups/boundary use; compare all old policies, trust and inline grants
+against the prepared native predecessor. Preserve native outputs and the source-
+bound independently signed preflight receipt before registration.

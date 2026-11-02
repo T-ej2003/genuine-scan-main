@@ -17,6 +17,12 @@ node scripts/aws/certify-production-backend-release-gate.mjs --source-only --gra
 npm run release:certify:source
 ```
 
+The observed graph is extracted from actual workflow jobs, `needs`, ordered steps,
+the composite coordinator action and the immutable phase table consumed by the
+production coordinator. Removed/reordered stages fail certification. C02, worker
+and IAM installation are explicitly reported as external approved operations;
+they are not fabricated workflow stages or certified live writes.
+
 The aggregate runs the existing Stage B closure checks, adjacent release-contract
 suites, and the actual PostgreSQL integration test with skipping disabled. It
 fails if its disposable-database URL is absent. CI also runs the graph, worker
@@ -154,3 +160,26 @@ existing authoritative clean-room source-contract input. SQL executable definiti
 policies, grants and tables are unchanged: only source-contract markers and derived
 checksums change. Retaining the old generated package would fail mandatory source
 verification; these generated files are required, not a new SQL migration.
+
+The graph follows GitHub's actual [job dependency semantics](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-jobs).
+Native evidence handling follows [ECS DescribeTasks retention](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DescribeTasks.html);
+Terraform checks use [the documented JSON representations](https://developer.hashicorp.com/terraform/internals/json-format)
+and the actual pinned provider. PostgreSQL concurrency behavior is checked against
+[transaction-scoped advisory locks](https://www.postgresql.org/docs/18/functions-admin.html)
+and real PostgreSQL18. The official [IAM quotas](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_iam-quotas.html)
+apply to published documents and native role capacity; do not infer a quota from
+historical policy counts.
+
+7. Serial149's historical dependency verifier pinned the entire old Terraform
+   file. Authenticate that immutable historical hash after reversing **only**
+   the exact reviewed SMTP de-duplication edit; bind the current file to its exact
+   reviewed hash as well. Other changes still fail. The committed state/receipt
+   and historical metadata are unchanged; this permits no recovery write.
+
+The exact aggregate command also runs the credential/initial-activation suite and
+committed-worker metadata tests executed by the Stage B CI job, so those adjacent
+checks are included before a release attempt. The observed DAG regression suite
+covers removed, reordered and skipped jobs/steps, altered coordinator phases,
+missing approval environments, completion containment and manual IAM package
+substitution. Pending external operations are reported explicitly, never as
+successful automated stages.

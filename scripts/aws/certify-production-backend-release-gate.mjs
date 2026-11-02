@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import yaml from "js-yaml";
+import { RELEASE_PREREQUISITE_TRANSITIONS } from "./production-release-coordinator.mjs";
 import { ciImageReference, readApprovedImages } from "../lib/container-image-identity.mjs";
 import { assertSafeAdminUrl } from "../rls/certify-clean-room-database.mjs";
 import { assertStageBCanonicalRepositoryUrl, readFreshProtectedMainIdentity } from "./stage-b-deployment-identity.mjs";
@@ -102,10 +104,16 @@ export function assertBackendRecoveryWorkflowGraph(workflow, operation = yaml.lo
 }
 
 // A non-authorizing graph check; AWS writes still require their native plan/approval gates.
-export function assertApplicationReleaseWorkflowGraph({ train, gate, web } = {}) {
+export function assertApplicationReleaseWorkflowGraph({ train, gate, web, coordinatorAction, transitions = RELEASE_PREREQUISITE_TRANSITIONS, iamInstallation } = {}) {
   const read = file => yaml.load(fs.readFileSync(path.join(root, ".github/workflows", file), "utf8"));
   train ||= read("release-train.yml"); gate ||= read("release-gate.yml"); web ||= read("production-web-activation.yml");
+  coordinatorAction ||= yaml.load(fs.readFileSync(path.join(root, ".github/actions/converge-stage-b-prerequisites/action.yml"), "utf8"));
   assert.equal(train.jobs.orchestrate.environment, "production");
+  assert.equal(gate.jobs["deploy-production-ecs"].environment, "production");
+  assert.equal(web.jobs.activate.environment, "production");
+  assert.equal(train.jobs.orchestrate.if, undefined);
+  assert.equal(web.jobs.activate.if, undefined);
+  assert.equal(gate.jobs["deploy-production-ecs"].if, "${{ needs.resolve-deploy-target.outputs.deploy_sha != '' }}");
   assert.equal(train.jobs.orchestrate.env.B03_REQUIREMENTS_REFERENCE_JSON, "${{ inputs.b03_requirements_reference_json }}");
   assert.equal(train.jobs.orchestrate.env.DATABASE_INSTALL_MODE, "${{ inputs.database_install_mode }}");
   const upfront = train.jobs.gates.steps.find(step => step.name === "Validate B03 requirements before dispatching expensive gates");
@@ -121,27 +129,138 @@ export function assertApplicationReleaseWorkflowGraph({ train, gate, web } = {})
   const b03 = script.slice(script.indexOf('if [[ -n "$B03_APPROVAL_REFERENCE_JSON" ]]'), script.indexOf("elif [["));
   assert.ok(b03.includes("apply-production-b03-incremental-release.mjs"));
   assert.doesNotMatch(b03, /apply-production-rls|aws\s+ecs\s+run-task|register-task-definition/);
+  const installationFile = "documents/ops/iam/MSCQRProductionGreenStageBB03RegistrationInstallation-v1.json";
+  iamInstallation ||= JSON.parse(fs.readFileSync(path.join(root, installationFile), "utf8"));
+  assert.equal(iamInstallation.kind, "BOUNDED_B03_REGISTRATION_IAM_INSTALLATION");
+  assert.equal(iamInstallation.account, "368992683803"); assert.equal(iamInstallation.region, "eu-west-2");
+  assert.equal(iamInstallation.executionPrincipal, "arn:aws:iam::368992683803:root");
+  assert.equal(iamInstallation.operator, "T-ej2003");
+  assert.equal(iamInstallation.roleArn, "arn:aws:iam::368992683803:role/mscqr-production-release-deployer");
+  assert.equal(iamInstallation.policyName, "MSCQRProductionGreenStageBB03Registration");
+  assert.equal(iamInstallation.policyArn, `arn:aws:iam::368992683803:policy/${iamInstallation.policyName}`);
+  assert.equal(iamInstallation.policyFile, "documents/ops/iam/MSCQRProductionGreenStageBB03Registration-v1.json");
+  assert.equal(iamInstallation.policyFileSha256, createHash("sha256").update(fs.readFileSync(path.join(root, iamInstallation.policyFile))).digest("hex"));
+  assert.deepEqual(iamInstallation.mutatingActions, ["iam:CreatePolicy", "iam:AttachRolePolicy"]);
+  assert.deepEqual(iamInstallation.requiredSimulationIds, ["b03-register", "b03-tag", "b03-pass-execution"]);
+  assert.deepEqual(iamInstallation.forbiddenSimulationIds, ["b03-deny-runtask", "b03-deny-starttask", "b03-deny-administrator-secret-read"]);
+  assert.equal(iamInstallation.beforeRegistration, true); assert.equal(iamInstallation.noExistingPolicyUpdates, true);
+  assert.equal(iamInstallation.noTaskLaunchOrSecretRead, true);
+  assert.equal(iamInstallation.automation, "MANUAL_ROOT_ADMIN_PROCEDURE_NOT_AUTOMATED_RECONCILER");
   const authenticateWeb = web.jobs.activate?.steps?.find(step => step.name === "Authenticate coordinated Stage-B and web evidence")
     || Object.values(web.jobs).flatMap(job => job.steps || []).find(step => step.name === "Authenticate coordinated Stage-B and web evidence");
   assert.equal(authenticateWeb?.env.BACKEND_ACTIVATION_EVIDENCE_JSON, "${{ inputs.backend_activation_evidence_json }}");
-  const sequence = [
-    ["source", []], ["security", ["source"]], ["images", ["source", "security"]],
-    ["image-authorization", ["images"]], ["canonical-sql-requirements", ["source"]],
-    ["state149-proof", ["source"]], ["registration-plan", ["state149-proof", "image-authorization", "canonical-sql-requirements"]],
-    ["bounded-registration-iam-installation", ["source", "security"]],
-    ["registration", ["registration-plan", "bounded-registration-iam-installation"]], ["policy-capacity-and-convergence", ["registration"]],
-    ["immutable-broker-publication", ["policy-capacity-and-convergence"]], ["alias-cas-and-state-closure", ["immutable-broker-publication"]],
-    ["live-predecessor-probe", ["image-authorization"]], ["c02", ["live-predecessor-probe", "canonical-sql-requirements"]],
-    ["c02-independent-verification", ["c02"]], ["b03-authorization", ["c02-independent-verification", "alias-cas-and-state-closure"]],
-    ["b03-execution-and-archive", ["b03-authorization"]], ["b03-independent-verification", ["b03-execution-and-archive"]],
-    ["b03-completion", ["b03-independent-verification"]], ["backend-and-smoke", ["b03-completion"]],
-    ["frontend-and-smoke", ["backend-and-smoke"]], ["worker-plan-and-readiness", ["frontend-and-smoke"]],
-    ["worker-activation", ["worker-plan-and-readiness"]], ["independent-final-verification", ["worker-activation"]],
-  ];
-  const visited = new Set();
-  for (const [id, needs] of sequence) { assert.ok(needs.every(id => visited.has(id))); assert.ok(!visited.has(id)); visited.add(id); }
-  return { nodes: sequence.map(([id, needs]) => ({ id, needs })), productionExecutionReady: false,
+  // Derive scheduling edges from actual jobs.needs and sequential steps, not a proposed rollout list.
+  const nodes = [], locations = new Map();
+  const addWorkflow = (name, workflow) => {
+    const ends = new Map();
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+      const start = `${name}:${jobId}`;
+      const node = { id: start, kind: "job", source: name, needs: [], uses: job.uses, condition: job.if };
+      nodes.push(node);
+      let previous = start;
+      for (const [index, step] of (job.steps || []).entries()) {
+        const id = `${start}:${index}`;
+        nodes.push({ id, kind: "step", source: name, job: jobId, index, name: step.name, uses: step.uses, condition: step.if, needs: [previous] });
+        if (step.name) {
+          const key = `${start}:${step.name}`;
+          assert.ok(!locations.has(key), `Ambiguous release step ${key}`);
+          locations.set(key, { id, step });
+        }
+        previous = id;
+      }
+      ends.set(jobId, previous);
+    }
+    for (const [jobId, job] of Object.entries(workflow.jobs)) {
+      const needs = job.needs === undefined ? [] : Array.isArray(job.needs) ? job.needs : [job.needs];
+      assert.ok(needs.every(id => ends.has(id)), `Unknown ${name} job dependency`);
+      nodes.find(node => node.id === `${name}:${jobId}`).needs = needs.map(id => ends.get(id));
+    }
+    return ends;
+  };
+  addWorkflow("train", train); addWorkflow("gate", gate); addWorkflow("web", web);
+  const locate = (workflow, job, name) => {
+    const value = locations.get(`${workflow}:${job}:${name}`);
+    assert.notEqual(value?.step["continue-on-error"], true, "Mandatory release operation cannot continue on error");
+    assert.ok(value, `Missing release operation ${workflow}/${job}/${name}`); return value;
+  };
+  const node = id => { const value = nodes.find(node => node.id === id); assert.ok(value, `Missing graph node ${id}`); return value; };
+  const dependsOn = (id, predecessor, visited = new Set()) => {
+    assert.ok(!visited.has(id), `Release dependency cycle at ${id}`);
+    if (id === predecessor) return true;
+    return node(id).needs.some(parent => dependsOn(parent, predecessor, new Set([...visited, id])));
+  };
+  const requireOrder = operations => {
+    operations.slice(1).forEach((operation, index) => assert.ok(dependsOn(operation.id, operations[index].id),
+      `Release operation is out of order: ${operation.step.name}`));
+  };
+  const trainOp = name => locate("train", "orchestrate", name);
+  const converge = trainOp("Converge exact Stage B prerequisites");
+  assert.equal(converge.step.uses, "./.github/actions/converge-stage-b-prerequisites");
+  assert.equal(coordinatorAction.runs?.using, "composite");
+  const actionEnds = addWorkflow("coordinator-action", { jobs: { run: { steps: coordinatorAction.runs.steps } } });
+  node("coordinator-action:run").needs.push(converge.id);
+  const command = locate("coordinator-action", "run", "Resume exact release coordinator");
+  assert.match(command.step.run, /node scripts\/aws\/run-production-release-coordinator\.mjs/);
+  assert.deepEqual(transitions, [
+    ["registration", "prepare-registration", "register", "recover-registration"],
+    ["pruning", "prepare-pruning", "prune", "recover-policy"],
+    ["policy", "prepare-policy", "converge-policy", "recover-policy"],
+    ["publication", "prepare-publication", "publish", "recover-publication"],
+    ["cutover", "prepare-cutover", "cutover", "recover-cutover"],
+    ["closure", null, "reconcile", "recover-reconciliation"],
+  ], "Production coordinator phase operations/order changed");
+  let previous = command.id;
+  for (const [phase, prepare, execute, recover] of transitions) {
+    const id = `coordinator:${phase}`;
+    nodes.push({ id, kind: "coordinator-phase", source: "scripts/aws/production-release-coordinator.mjs", prepare, execute, recover, needs: [previous] });
+    previous = id;
+  }
+  // The composite result cannot be consumed before its production phase loop returns.
+  const next = nodes.find(n => n.source === "train" && n.needs.includes(converge.id));
+  assert.ok(next, "Missing coordinator closure consumer");
+  next.needs = next.needs.map(id => id === converge.id ? previous : id);
+  assert.equal(actionEnds.get("run"), command.id, "Coordinator command must remain the final composite step");
+  const closure = trainOp("Require authenticated prerequisite closure"), dispatch = trainOp("Trigger final Release Gate");
+  assert.match(closure.step.run, /PREREQUISITES_CONVERGED/);
+  assert.match(dispatch.step.run, /node scripts\/github\/dispatch-protected-main-release-gate\.mjs/);
+  requireOrder([locate("train", "gates", "Wait for required workflow gates"), trainOp("Authenticate unchanged protected source"), converge, closure, dispatch]);
+  node("gate:resolve-deploy-target").needs.push(dispatch.id);
+  const gateOp = name => locate("gate", "deploy-production-ecs", name);
+  const sqlOp = gateOp("Apply and verify checksum-bound production RLS package");
+  assert.equal(sqlOp.id, locate("gate", "deploy-production-ecs", steps[sql].name).id);
+  const startBranch = script.match(/if \[\[ "\$b03_mode" == start \]\]; then([\s\S]*?)\n\s*fi/);
+  assert.match(startBranch?.[1] || "", /^\s*exit 1\s*$/m, "B03 initiation cannot continue to backend activation");
+  requireOrder([locate("gate", "resolve-deploy-target", "Final required-gate sanity check"),
+    gateOp("Authenticate production environment approval boundary"), gateOp("Authenticate normal release image authorization"), sqlOp,
+    gateOp("Upload immutable production database receipt"), gateOp("Activate exact Stage-B backend candidate"),
+    gateOp("Verify backend health"), gateOp("Activate authenticated frontend image"), gateOp("Verify production after frontend activation")]);
+  assert.match(gateOp("Activate exact Stage-B backend candidate").step.run, /--mode execute/);
+  assert.match(gateOp("Verify backend health").step.run, /verify-production-smoke\.sh/);
+  assert.match(gateOp("Activate authenticated frontend image").step.run, /--backend-activation-evidence/);
+  assert.match(gateOp("Verify production after frontend activation").step.run, /run-production-release-gate-smoke\.mjs/);
+  for (const [operation, condition] of [
+    [trainOp("Authenticate unchanged protected source"), undefined],
+    [converge, "needs.gates.outputs.target_ref == 'main'"],
+    [closure, "needs.gates.outputs.target_ref == 'main'"],
+    [dispatch, "${{ !inputs.prerequisites_only && !inputs.trusted_terminal_cutover }}"],
+    ...[sqlOp, gateOp("Upload immutable production database receipt"), gateOp("Activate exact Stage-B backend candidate"), gateOp("Verify production after frontend activation")]
+      .map(operation => [operation, "${{ inputs.release_mode == 'normal' }}"]),
+    [gateOp("Verify backend health"), "${{ inputs.release_mode != 'backend-health-recovery' || !contains(inputs.backend_recovery_current_task_definition_arn, '/mscqr-production-rls-green-backend-candidate:') }}"],
+    [gateOp("Activate authenticated frontend image"), "${{ inputs.release_mode == 'normal' && steps.images.outputs.web_required == 'true' }}"],
+  ]) assert.equal(operation.step.if, condition, `Release execution condition changed: ${operation.step.name}`);
+  const webOp = locate("web", "activate", "Authenticate coordinated Stage-B and web evidence");
+  assert.equal(webOp.step.if, undefined);
+  assert.match(webOp.step.run, /--backend-activation-evidence/);
+  node(webOp.id).needs.push(gateOp("Verify backend health").id);
+  for (const value of nodes) for (const dependency of value.needs) { node(dependency); assert.ok(!dependsOn(dependency, value.id), "Release graph contains a cycle"); }
+  return { nodes, productionExecutionReady: false,
+    externalOperations: [
+      { id: "bounded-registration-iam-installation", before: "coordinator:registration", source: installationFile, package: iamInstallation, status: "SEPARATE_PRIVILEGED_APPROVAL_REQUIRED" },
+      { id: "c02-independent-verification", before: sqlOp.id, source: "scripts/aws/apply-production-c02-session-prerequisite.mjs", status: "SEPARATE_ROOT_APPROVAL_AND_RECEIPT_REQUIRED" },
+      { id: "worker-activation", after: gateOp("Verify production after frontend activation").id, source: "infra/aws/terraform/production-support-email-worker/main.tf", status: "SEPARATE_STATE_LOCKED_PLAN_APPROVAL_REQUIRED" },
+    ],
     liveOnly: ["separately approved B03 registration policy installation and native IAM verification", "fresh plans and exact-plan approvals", "native post-apply identity and broker CAS", "committed SQL catalogue", "running ECS digests, health and application smoke", "SMTP delivery monitoring"] };
+
 }
 
 export function assertSourceCertificationWorkflowGraph(workflow) {
