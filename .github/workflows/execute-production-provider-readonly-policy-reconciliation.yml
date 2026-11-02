@@ -3,11 +3,14 @@ name: Execute production ProviderReadOnly policy reconciliation
 on:
   workflow_dispatch:
     inputs:
+      operation: { description: Isolated operation, type: choice, options: [reconcile, export-journals], default: reconcile, required: true }
+      recipient_public_key_base64: { description: Export recipient RSA public key only, type: string, required: false }
+      recipient_public_key_sha256: { description: Export recipient SPKI DER SHA256, type: string, required: false }
       source_sha: { description: Protected main source SHA, required: true, type: string }
-      preparation_json_base64: { description: Exact preparation artifact, required: true, type: string }
-      preparation_file_sha256: { description: Exact preparation file SHA256, required: true, type: string }
-      authorization_workflow_run_id: { description: Completed authorization workflow run ID, required: true, type: string }
-      authorization_workflow_run_attempt: { description: Authorization workflow run attempt, required: true, type: string }
+      preparation_json_base64: { description: Exact preparation artifact, required: false, type: string }
+      preparation_file_sha256: { description: Exact preparation file SHA256, required: false, type: string }
+      authorization_workflow_run_id: { description: Completed authorization workflow run ID, required: false, type: string }
+      authorization_workflow_run_attempt: { description: Authorization workflow run attempt, required: false, type: string }
 
 permissions:
   actions: read
@@ -20,6 +23,7 @@ concurrency:
 
 jobs:
   execute:
+    if: ${{ inputs.operation == 'reconcile' || inputs.operation == '' }}
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -89,5 +93,68 @@ jobs:
         with:
           name: production-provider-readonly-policy-reconciliation-result
           path: ${{ runner.temp }}/provider-readonly/result.json
+          if-no-files-found: error
+          retention-days: 90
+
+  export-journals:
+    if: ${{ inputs.operation == 'export-journals' }}
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      OPERATION: ${{ inputs.operation }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      RECIPIENT_PUBLIC_KEY_BASE64: ${{ inputs.recipient_public_key_base64 }}
+      RECIPIENT_PUBLIC_KEY_SHA256: ${{ inputs.recipient_public_key_sha256 }}
+      PREPARATION_JSON_BASE64: ${{ inputs.preparation_json_base64 }}
+      PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
+      AUTHORIZATION_WORKFLOW_RUN_ID: ${{ inputs.authorization_workflow_run_id }}
+      AUTHORIZATION_WORKFLOW_RUN_ATTEMPT: ${{ inputs.authorization_workflow_run_attempt }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate exact protected source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Reauthenticate source after dependency installation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+      - name: Reject write inputs and invalid recipient before AWS authentication
+        run: node --input-type=module -e "import {validateExportRequest} from './scripts/aws/export-production-provider-readonly-journals.mjs'; validateExportRequest(process.env)"
+      - name: Configure read-only six-object session
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-region: eu-west-2
+          role-to-assume: arn:aws:iam::368992683803:role/mscqr-production-initial-activation-policy-reconciler
+          inline-session-policy: >-
+            {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"s3:GetObject","Resource":["arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/4961bf0f8ad5a8d08c09622b74c484671e148010a669eb683f699f70032f08ae/reservation.json","arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/4961bf0f8ad5a8d08c09622b74c484671e148010a669eb683f699f70032f08ae/write-attempt.json","arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/4961bf0f8ad5a8d08c09622b74c484671e148010a669eb683f699f70032f08ae/terminal.json","arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/daeb6710b40064667f5a722828ccc303945ec993b0bf8c0be93be2075adba888/reservation.json","arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/daeb6710b40064667f5a722828ccc303945ec993b0bf8c0be93be2075adba888/write-attempt.json","arn:aws:s3:::mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an/production-provider-readonly-policy-reconciliation/daeb6710b40064667f5a722828ccc303945ec993b0bf8c0be93be2075adba888/terminal.json"]}]}
+      - name: Export encrypted authenticated journals only
+        run: node scripts/aws/export-production-provider-readonly-journals.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-provider-readonly-encrypted-journal-export
+          path: ${{ runner.temp }}/provider-readonly-export/encrypted-export.json
           if-no-files-found: error
           retention-days: 90

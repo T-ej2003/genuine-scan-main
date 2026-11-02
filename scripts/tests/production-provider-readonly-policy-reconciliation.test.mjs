@@ -435,7 +435,7 @@ test("workflow is authorization-only and target contract exposes no arbitrary po
   assert.doesNotMatch(cli, /required\(argv, "--policy-(?:arn|document)"\)/);
   const executeWorkflow = fs.readFileSync(".github/workflows/execute-production-provider-readonly-policy-reconciliation.yml", "utf8");
   assert.match(executeWorkflow, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-initial-activation-policy-reconciler/);
-  assert.equal((executeWorkflow.match(/git status --porcelain=v1 --untracked-files=all/g) || []).length, 2);
+  for (const job of Object.values(yaml.load(executeWorkflow).jobs)) assert.equal(job.steps.filter(step => /git status --porcelain=v1 --untracked-files=all/.test(step.run || "")).length, 2);
   assert.doesNotMatch(executeWorkflow, /policy_arn|policy_document|executor-profile/);
 });
 
