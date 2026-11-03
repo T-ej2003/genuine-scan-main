@@ -20,12 +20,20 @@ const fields = Object.freeze([
 const exactKeys = (value, expected) => value && typeof value === "object" && !Array.isArray(value)
   && Object.keys(value).sort().join(",") === [...expected].sort().join(",");
 
+function canonicalB03Gzip(bytes) {
+  const compressed = gzipSync(bytes, { level: 9, mtime: 0 });
+  compressed.fill(0, 4, 8);
+  // Pin the B03 v1 header used by existing approvals and executor revisions, independent of the host OS.
+  compressed[9] = 19;
+  return compressed;
+}
+
 export function encodeB03Approval(request) {
   assert.ok(exactKeys(request, ["operation", "approval", "package"]));
   assert.equal(request.operation, "b03-incremental");
   const bytes = Buffer.from(canonicalJson(request.package));
   assert.ok(bytes.length <= 96 * 1024);
-  const packageGzipBase64 = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
+  const packageGzipBase64 = canonicalB03Gzip(bytes).toString("base64");
   assert.ok(packageGzipBase64.length <= 32768);
   return Buffer.from(`${canonicalJson({ schemaVersion: 1, operation: request.operation, approval: request.approval, packageGzipBase64 })}\n`);
 }
@@ -83,7 +91,7 @@ export function buildB03ExecutorDefinition({ sourceSha, backendImage, package: p
   assert.equal(pkg?.sourceSha, sourceSha);
   const bytes = Buffer.from(canonicalJson(pkg));
   assert.ok(bytes.length <= 96 * 1024);
-  const encoded = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
+  const encoded = canonicalB03Gzip(bytes).toString("base64");
   assert.ok(encoded.length <= 32768, "B03 executor transport exceeds ECS limit");
   const value = { family: B03_BROKER.family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"],
     cpu: "1024", memory: "2048", executionRoleArn: B03_BROKER.executionRoleArn,
