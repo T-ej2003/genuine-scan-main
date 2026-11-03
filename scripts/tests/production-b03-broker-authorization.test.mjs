@@ -161,6 +161,16 @@ test("canonical Stage B issuer/publication/proof/broker path authenticates B03 a
     await assert.rejects(publish(bytes), field);
     current = bytes.toString(); await assert.rejects(handler(b03PublicationRequest(bytes)), field);
   }
+  const changedPackage = decodeB03Approval(signed.artifactBytes);
+  changedPackage.package.mutations[0].sql = "SELECT 'substituted SQL'";
+  const { packageSha256: originalPackageHash, ...changedBody } = changedPackage.package;
+  changedPackage.package.packageSha256 = canonicalSha256(changedBody);
+  assert.notEqual(changedPackage.package.packageSha256, originalPackageHash);
+  changedPackage.approval.packageSha256 = changedPackage.package.packageSha256;
+  const changedBytes = encodeB03Approval(changedPackage);
+  await assert.rejects(publish(changedBytes), /KMS signature failed/);
+  current = changedBytes.toString();
+  await assert.rejects(handler(b03PublicationRequest(changedBytes)), /KMS signature failed/);
   current = signed.artifactBytes.toString();
   const missing = decodeB03Approval(signed.artifactBytes); delete missing.approval.signatureBase64;
   await assert.rejects(publish(encodeB03Approval(missing)));
@@ -172,6 +182,55 @@ test("canonical Stage B issuer/publication/proof/broker path authenticates B03 a
   await assert.rejects(handler({ ...execute, approvalSha256: "0".repeat(64) }));
   current = ""; await assert.rejects(handler(execute));
   assert.equal(writes, 1); assert.equal(launches, 1);
+});
+
+test("B03 issuer, broker and executor share the existing v1 gzip bytes on macOS and Linux", async () => {
+  const { createRequire, syncBuiltinESMExports } = await import("node:module");
+  const zlib = createRequire(import.meta.url)("node:zlib");
+  const { encodeB03Approval, decodeB03Approval, b03ApprovalMessage } = await import("../../infra/aws/terraform/lambda/production-rls-approval-broker/b03-approval.mjs");
+  const originalGzip = zlib.gzipSync;
+  const request = { operation: B03_BROKER.mode, approval, package: pkg };
+  const before = b03ApprovalMessage(approval);
+  const encodings = [];
+  try {
+    for (const osByte of [3, 19]) {
+      zlib.gzipSync = (...args) => {
+        const compressed = originalGzip(...args);
+        compressed[9] = osByte;
+        compressed.writeUInt32LE(1234, 4);
+        return compressed;
+      };
+      syncBuiltinESMExports();
+      const bytes = encodeB03Approval(request);
+      const compressed = Buffer.from(JSON.parse(bytes).packageGzipBase64, "base64");
+      assert.equal(compressed[9], 19, "retain the existing v1 executor header, never the host OS");
+      assert.equal(compressed.readUInt32LE(4), 0);
+      assert.deepEqual(decodeB03Approval(bytes), request);
+      const definition = buildB03ExecutorDefinition({ sourceSha, backendImage, package: pkg, databaseHostname: approval.databaseHostname });
+      assert.equal(definition.containerDefinitions[0].entryPoint[9], compressed.toString("base64"));
+      assert.equal(b03TaskDefinitionSha256({ ...definition, taskDefinitionArn }), approval.taskDefinitionSha256);
+      await authenticateB03BrokerRequest(request, options);
+      assert.ok(b03ApprovalMessage(approval).equals(before), "signed payload is unchanged");
+      encodings.push(bytes);
+    }
+  } finally {
+    zlib.gzipSync = originalGzip;
+    syncBuiltinESMExports();
+  }
+  assert.ok(encodings[0].equals(encodings[1]));
+  const changedHeader = JSON.parse(encodings[0]);
+  const compressed = Buffer.from(changedHeader.packageGzipBase64, "base64");
+  compressed[9] = 3;
+  changedHeader.packageGzipBase64 = compressed.toString("base64");
+  const { canonicalJson } = await import("../aws/production-green-stage-b-contract.mjs");
+  assert.throws(() => decodeB03Approval(Buffer.from(`${canonicalJson(changedHeader)}\n`)), /canonical bytes/);
+});
+
+test("B03 gzip compatibility retains the exact thirty-minute authorization boundary", async () => {
+  const request = { operation: B03_BROKER.mode, approval, package: pkg };
+  await authenticateB03BrokerRequest(request, { ...options, now: new Date("2026-10-28T12:29:59.999Z") });
+  await assert.rejects(authenticateB03BrokerRequest(request, { ...options, now: new Date(approval.expiresAt) }), /expired or malformed/);
+  await assert.rejects(authenticateB03BrokerRequest({ ...request, approval: { ...approval, expiresAt: "2026-10-28T12:30:00.001Z" } }, options), /expired or malformed/);
 });
 
 test("B03 transport is bounded, canonical and independent of ECS metadata representation", async () => {
