@@ -5,6 +5,8 @@ function New-MscqrUpgradeBackup {
   param(
     [Parameter(Mandatory = $true)][string]$BackupDirectory,
     [Parameter(Mandatory = $true)][string]$RuntimeFile,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$RuntimeSha256,
+    [Parameter(Mandatory = $true)][string]$RuntimeSignerSubject,
     [Parameter(Mandatory = $true)][string]$EnvironmentFile,
     [Parameter(Mandatory = $true)][string]$StateFile,
     [Parameter(Mandatory = $true)][string]$StartupFile
@@ -12,6 +14,12 @@ function New-MscqrUpgradeBackup {
   $ErrorActionPreference = 'Stop'
   $inputs = [ordered]@{ runtime = $RuntimeFile; environment = $EnvironmentFile; state = $StateFile; startup = $StartupFile }
   if (-not (Test-Path -LiteralPath $RuntimeFile -PathType Leaf)) { throw 'Existing runtime is required for backup.' }
+  $runtimeSignature = Get-AuthenticodeSignature -FilePath $RuntimeFile
+  if ($runtimeSignature.Status -ne 'Valid' -or -not $runtimeSignature.SignerCertificate -or
+      -not $runtimeSignature.TimeStamperCertificate -or $runtimeSignature.SignerCertificate.Subject -ne $RuntimeSignerSubject -or
+      (Get-FileHash -LiteralPath $RuntimeFile -Algorithm SHA256).Hash -ine $RuntimeSha256) {
+    throw 'Existing runtime signature, timestamp, signer or hash is invalid.'
+  }
   if (Test-Path -LiteralPath $BackupDirectory) { throw 'Backup directory already exists.' }
   $paths = @($inputs.Values | ForEach-Object { [IO.Path]::GetFullPath($_) })
   if (($paths | Select-Object -Unique).Count -ne $paths.Count) { throw 'Backup inputs must be distinct.' }
@@ -46,6 +54,7 @@ function New-MscqrUpgradeBackup {
     $originalHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
     $backupHash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
     if ($originalHash -ne $backupHash) { throw "Backup verification failed: $name" }
+    if ($name -eq 'runtime' -and $backupHash -ine $RuntimeSha256) { throw 'Previous runtime changed during backup.' }
     $records += [pscustomobject]@{ name = $name; original = $source; backup = $dest; sha256 = $backupHash }
   }
   return $records

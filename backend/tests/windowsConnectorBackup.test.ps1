@@ -8,11 +8,14 @@ try {
   $state = Join-Path $fixture 'state.json'
   $startup = Join-Path $fixture 'startup.vbs'
   $backup = Join-Path $fixture 'snapshot'
-  [IO.File]::WriteAllText($runtime, 'old runtime')
+  $signed = "$PSScriptRoot\..\local-print-agent\releases\2026.10.29.1\windows\MSCQR-Connector-Windows-2026.10.29.1.exe"
+  Copy-Item -LiteralPath $signed -Destination $runtime
+  $runtimeHash = (Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash
+  $runtimeSigner = (Get-AuthenticodeSignature -FilePath $runtime).SignerCertificate.Subject
   [IO.File]::WriteAllText($envFile, 'synthetic credential')
   [IO.File]::WriteAllText($state, 'synthetic identity and calibration')
   [IO.File]::WriteAllText($startup, 'synthetic launcher')
-  $argsForBackup = @{ BackupDirectory = $backup; RuntimeFile = $runtime; EnvironmentFile = $envFile; StateFile = $state; StartupFile = $startup }
+  $argsForBackup = @{ BackupDirectory = $backup; RuntimeFile = $runtime; RuntimeSha256 = $runtimeHash; RuntimeSignerSubject = $runtimeSigner; EnvironmentFile = $envFile; StateFile = $state; StartupFile = $startup }
   $records = @(New-MscqrUpgradeBackup @argsForBackup)
   if ($records.Count -ne 4) { throw 'Expected four backup records.' }
   $failed = $false
@@ -36,7 +39,7 @@ try {
   } finally { $lock.Dispose() }
   if ([IO.File]::ReadAllText($runtime) -ne 'replacement' -or -not (Test-Path -LiteralPath $stateBackup)) { throw 'Failed restore must preserve the snapshot.' }
   Restore-MscqrUpgradeBackup -Records $records
-  if ([IO.File]::ReadAllText($runtime) -ne 'old runtime' -or
+  if ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash -ne $runtimeHash -or
       [IO.File]::ReadAllText($envFile) -ne 'synthetic credential' -or
       [IO.File]::ReadAllText($state) -ne 'synthetic identity and calibration' -or
       [IO.File]::ReadAllText($startup) -ne 'synthetic launcher') { throw 'Restore did not preserve the original fixture.' }
