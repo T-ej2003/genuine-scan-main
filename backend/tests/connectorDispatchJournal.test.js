@@ -25,7 +25,7 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     assert.equal(await worker(), 2, 'incomplete evidence must also block replay');
     process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR = root;
     const { createHash } = require('node:crypto');
-    const { runPersistentPrintChunk } = require('../dist/local-print-agent/directPrintWorker');
+    const { runPersistentPrintChunk, runPersistentDiagnosticTestJob } = require('../dist/local-print-agent/directPrintWorker');
     const zpl = '^XA^FDLOCAL-SYNTHETIC^FS^XZ';
     const payloadHash = createHash('sha256').update(zpl).digest('hex');
     const payload = { chunkId: 'first-chunk', printJobId: 'synthetic-job', printer: {}, labels: [{
@@ -48,6 +48,20 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       { errorCode: 'dispatch_reconciliation_required' });
     assert.equal(spools, 1, 'reconnect must not submit a second automatic physical attempt');
     assert(!events.includes('label_failed') && !events.includes('chunk_failed'), 'uncertain delivery must not be classified as failed');
+    let testSpools = 0;
+    const diagnosticEvents = [];
+    const diagnostic = { testJobId: 'diagnostic-item', payloadContent: zpl, payloadHash, payloadType: 'ZPL' };
+    const diagnosticAdapters = {
+      send: async (_ws, _session, _printer, event) => diagnosticEvents.push(event.type),
+      print: async () => { testSpools++; return { printPath: 'USB_RAW', labelLanguage: 'ZPL', jobRef: 'simulated' }; },
+      wait: async () => ({ confirmed: false, confirmationUnavailable: true }),
+    };
+    await assert.rejects(runPersistentDiagnosticTestJob({}, session(), diagnostic, 'simulator', diagnosticAdapters),
+      { errorCode: 'queue_confirmation_unavailable' });
+    await assert.rejects(runPersistentDiagnosticTestJob({}, session(), diagnostic, 'simulator', diagnosticAdapters),
+      { errorCode: 'dispatch_reconciliation_required' });
+    assert.equal(testSpools, 1);
+    assert.deepEqual(diagnosticEvents, ['test_ack'], 'spool acceptance alone must not confirm or fail the diagnostic');
     console.log('Connector dispatch journal concurrency and restart tests passed');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

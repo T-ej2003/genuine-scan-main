@@ -29,9 +29,19 @@ attempt. An existing record (including an incomplete record) refuses automatic
 replay. Persistent transport errors after entering the print call no longer
 emit failed receipts for an uncertain physical attempt. The multi-process and
 lost-receipt/reconnected-session tests use real filesystem records and a
-simulated spool function. They do not prove hardware completion, cover gateway
-or diagnostic dispatch, or establish a backend maintenance fence. Journal
+simulated spool function. Gateway direct/IPP, gateway diagnostics and local
+diagnostics now also reserve before submission. Diagnostic confirmation waits
+for queue-completion evidence rather than confirming at spool acceptance.
+These checks do not prove hardware completion or establish a backend maintenance fence. Journal
 records must be retained across upgrade/rollback and never automatically reset.
+
+`gatewayDispatchJournal.test.js` exercises direct and IPP gateway cycles and
+their diagnostic paths with a simulated transport disconnect after submission;
+each replay is refused without a second transport call or failed receipt.
+`connectorDispatchJournal.test.js` also verifies an uncertain persistent
+diagnostic is not confirmed or retried. Automatic reservation deletion is not
+provided. The governed reconciliation and reissue path remains to be connected
+to these records; until then they are retained and require manual investigation.
 
 The signed workflow has a candidate-only mode under the existing protected
 signing environment. Publishing mode and tag-triggered execution still hit
