@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import { devNull } from "node:os";
+import { promisify } from "node:util";
 import vm from "node:vm";
 import ts from "typescript";
 import { APP_ONLY, APP_ONLY_DOMAINS, buildAppOnlyCandidate, buildAppOnlyRegistrationRequest, assertAppOnlyCandidate, assertRegisteredAppOnlyCandidate, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyEvidenceIdentity, evaluateAppOnlyDomains, assertAppOnlyRollbackOwnership, appOnlyExpectedHealthSourceSha } from "../aws/production-app-only-contract.mjs";
@@ -66,7 +70,7 @@ test("only the backend image changes, and AWS defaults are normalized on readbac
   candidate.containerDefinitions[0].logConfiguration.secretOptions = [];
   assert.equal(assertRegisteredAppOnlyCandidate(definition, candidate, newDigest), true);
 });
-test("the actual green registration serializer omits only empty tags and passes the ECS CLI input model", () => {
+test("the actual green registration serializer omits only empty tags and passes the ECS CLI input model without generated output", async (t) => {
   const { definition } = fixture();
   definition.tags = [];
   definition.volumes = [{ name: "uploads", host: {} }];
@@ -87,24 +91,54 @@ test("the actual green registration serializer omits only empty tags and passes 
   assert.equal(request.taskRoleArn, definition.taskRoleArn);
   assert.equal(request.executionRoleArn, definition.executionRoleArn);
   assert.deepEqual(candidate.tags, [], "Signed candidate remains unchanged");
-  const validate = (payload) => execFileSync("aws", ["ecs", "register-task-definition", "--region", APP_ONLY.region,
-    "--endpoint-url", "http://127.0.0.1:9", "--cli-input-json", JSON.stringify(payload),
-    "--generate-cli-skeleton", "output", "--query", "taskDefinition.family", "--output", "text"],
-  { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, AWS_ACCESS_KEY_ID: "fake", AWS_SECRET_ACCESS_KEY: "fake", AWS_EC2_METADATA_DISABLED: "true" } });
-  assert.equal(validate(request).trim(), "family");
+  const received = [];
+  // Keep native input validation; AWS-generated output skeletons can violate their own model constraints.
+  const server = createServer(async (req, res) => {
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    received.push({ target: req.headers["x-amz-target"], body: JSON.parse(body) });
+    res.writeHead(200, { "Content-Type": "application/x-amz-json-1.1" });
+    res.end(JSON.stringify({ taskDefinition: { family: APP_ONLY.family } }));
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const run = promisify(execFile);
+  const options = { encoding: "utf8", timeout: 15000, env: { PATH: process.env.PATH,
+    AWS_ACCESS_KEY_ID: "fake", AWS_SECRET_ACCESS_KEY: "fake", AWS_EC2_METADATA_DISABLED: "true",
+    AWS_CONFIG_FILE: devNull, AWS_SHARED_CREDENTIALS_FILE: devNull, AWS_MAX_ATTEMPTS: "1", AWS_CLI_AUTO_PROMPT: "off" } };
+  t.diagnostic((await run("aws", ["--version"], options)).stdout.trim());
+  const validate = async (payload) => {
+    const before = received.length;
+    const { stdout } = await run("aws", ["ecs", "register-task-definition", "--region", APP_ONLY.region,
+      "--endpoint-url", `http://127.0.0.1:${server.address().port}`, "--cli-input-json", JSON.stringify(payload),
+      "--query", "taskDefinition.family", "--output", "text", "--no-cli-pager"], options);
+    assert.equal(received.length, before + 1);
+    assert.deepEqual(received.at(-1), { target: "AmazonEC2ContainerServiceV20141113.RegisterTaskDefinition", body: payload });
+    return stdout;
+  };
+  assert.equal((await validate(request)).trim(), APP_ONLY.family);
   for (const tags of [undefined, [{ key: "Environment", value: "production" }], [{ key: "Owner" }]]) {
     const changed = structuredClone(candidate);
     if (tags === undefined) delete changed.tags; else changed.tags = tags;
     const serialized = buildAppOnlyRegistrationRequest(changed);
     assert.deepEqual(serialized.tags, tags);
-    assert.equal(validate(serialized).trim(), "family");
+    assert.equal((await validate(serialized)).trim(), APP_ONLY.family);
   }
   for (const tags of [null, {}, [{ key: "", value: "x" }], [{ key: "x", value: 1 }], [{ key: "x", value: "y", extra: true }], [{ key: "x", value: "1" }, { key: "x", value: "2" }], [{ key: "aws:owner", value: "x" }]]) {
     assert.throws(() => buildAppOnlyRegistrationRequest({ ...candidate, tags }));
   }
   for (const [field, value] of [["registeredAt", "now"], ["revision", 25], ["taskDefinitionArn", arn(25)], ["proxyConfiguration", null]])
     assert.throws(() => buildAppOnlyRegistrationRequest({ ...candidate, [field]: value }));
-  assert.throws(() => validate({ ...request, unsupportedField: true }));
+  const acceptedRequests = received.length;
+  await assert.rejects(() => validate({ ...request, unsupportedField: true }), /Unknown parameter in input/);
+  const invalidContainer = structuredClone(request);
+  invalidContainer.containerDefinitions[0].unsupportedField = true;
+  await assert.rejects(() => validate(invalidContainer), /Unknown parameter in containerDefinitions/);
+  const invalidSharing = structuredClone(request);
+  invalidSharing.containerDefinitions[0].resourceRequirements[0].sharingStrategy = { nvidiaMps: { memory: 0, maxComputePercent: 0 } };
+  await assert.rejects(() => validate(invalidSharing), /Parameter validation failed/);
+  assert.equal(received.length, acceptedRequests, "Malformed input must fail native validation before transport");
 });
 for (const field of ["taskRoleArn", "executionRoleArn", "networkMode", "family", "runtimePlatform", "cpu", "memory", "volumes", "ephemeralStorage", "pidMode", "ipcMode", "proxyConfiguration", "inferenceAccelerators", "placementConstraints", "requiresCompatibilities", "enableFaultInjection", "tags"]) {
   test(`rejects root task-definition change: ${field}`, () => {
