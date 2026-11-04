@@ -9,11 +9,21 @@ on:
       - 'backend/tests/windowsConnector*test.ps1'
       - '.github/workflows/windows-connector-repair-tests.yml'
       - '.github/workflows/windows-connector-signed-release.yml'
+      - 'scripts/tests/windows-candidate-workflow.test.cjs'
 
 permissions:
   contents: read
 
 jobs:
+  candidate-workflow-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: node --test scripts/tests/windows-candidate-workflow.test.cjs
   windows-fixtures:
     runs-on: windows-2022
     steps:

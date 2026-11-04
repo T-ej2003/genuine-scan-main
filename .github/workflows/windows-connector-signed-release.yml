@@ -3,6 +3,14 @@ name: Windows Connector Signed Release
 on:
   workflow_dispatch:
     inputs:
+      execution_mode:
+        description: "Candidate build requires production-signing approval; publishing remains blocked."
+        type: choice
+        required: true
+        default: build_verify_only
+        options:
+          - build_verify_only
+          - publish
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
@@ -35,6 +43,11 @@ env:
 jobs:
   build-sign-windows:
     name: Build and sign Windows connector
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: windows-2022
     # Configure this GitHub Environment with required reviewers before production use.
     # The job will pause here before Azure OIDC login and signing can access the certificate profile.
@@ -48,6 +61,7 @@ jobs:
       # Remove only after the maintenance fence, transactional installer and
       # signed-artifact Windows certification have been reviewed and passed.
       - name: Block release while upgrade safety is incomplete
+        if: github.event_name != 'workflow_dispatch' || inputs.execution_mode != 'build_verify_only'
         shell: pwsh
         run: |
           throw "Windows connector release is blocked: upgrade safety and embedded-signature certification are incomplete."
@@ -314,6 +328,7 @@ jobs:
           "WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH=$reportPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish signed Windows connector manifest
+        if: inputs.execution_mode == 'publish'
         shell: pwsh
         env:
           WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
@@ -335,11 +350,12 @@ jobs:
           npm --prefix backend run connector:windows:publish-signed
 
       - name: Smoke-check published connector metadata
+        if: inputs.execution_mode == 'publish'
         shell: pwsh
         run: npm --prefix backend run connector:smoke
 
       - name: Commit signed connector release files
-        if: github.ref_type == 'branch'
+        if: inputs.execution_mode == 'publish' && github.ref_type == 'branch'
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
@@ -413,8 +429,7 @@ jobs:
       - name: Upload signed Windows connector artifact
         uses: actions/upload-artifact@v7
         with:
-          name: mscqr-windows-connector-signed-${{ steps.release_settings.outputs.connector_release_version }}
+          name: mscqr-windows-candidate-${{ steps.release_settings.outputs.connector_release_version }}-${{ github.sha }}
           path: |
             ${{ steps.release_settings.outputs.windows_release_output_dir }}
-            backend/local-print-agent/releases/manifest.json
           if-no-files-found: error

@@ -22,6 +22,23 @@ The live initialization path now preserves legacy registrations and unknown
 state rather than deleting them. It refuses a running connector rather than
 terminating it. These are safety refusals, not successful legacy upgrade support.
 
+Automatic REST item and persistent-chunk dispatch now reserve the print item
+in a local append-only dispatch journal before calling the printer transport.
+Exclusive creation serializes processes; file synchronization precedes the
+attempt. An existing record (including an incomplete record) refuses automatic
+replay. Persistent transport errors after entering the print call no longer
+emit failed receipts for an uncertain physical attempt. The multi-process and
+lost-receipt/reconnected-session tests use real filesystem records and a
+simulated spool function. They do not prove hardware completion, cover gateway
+or diagnostic dispatch, or establish a backend maintenance fence. Journal
+records must be retained across upgrade/rollback and never automatically reset.
+
+The signed workflow has a candidate-only mode under the existing protected
+signing environment. Publishing mode and tag-triggered execution still hit
+the unconditional release block. Candidate mode skips manifest publication and
+repository commits, retains provenance/checksums, and uploads a candidate named
+with the source SHA. This path has not been invoked with production signing.
+
 ## Dispatch inventory
 
 The legacy connector can use signed REST local-agent claims, persistent
