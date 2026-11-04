@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import type { IncomingMessage } from "http";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
+import { reserveAutomaticDispatch } from "./dispatchJournal";
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, buildPrinterAgentSessionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
@@ -839,6 +840,7 @@ export const isPreSpoolAckRejection = (error: unknown) =>
     String(errorInfo(error).errorCode || "") === "connector_update_required");
 
 export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean) => {
+  if (spoolerAttempted) return false;
   if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
   return true;
 };
@@ -1086,6 +1088,11 @@ export const runPersistentPrintChunk = async (
       printItemId,
       payloadDiagnostics,
     });
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: selectedPrinterId, payloadHash })) {
+      throw Object.assign(new Error("Previously reserved dispatch requires reconciliation; automatic spool was refused."), {
+        errorCode: "dispatch_reconciliation_required",
+      });
+    }
     try {
       const result = await print({
         printerId: selectedPrinterId,
@@ -1139,20 +1146,9 @@ export const runPersistentPrintChunk = async (
         bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
       });
     } catch (error: unknown) {
-      await send(ws, session, selectedPrinterId, {
-        type: "label_failed",
-        chunkId,
-        printJobId,
-        printItemId,
-        payloadHash,
-        error: errorInfo(error).message || "Persistent print label failed.",
-      }).catch(() => undefined);
-      await send(ws, session, selectedPrinterId, {
-        type: "chunk_failed",
-        chunkId,
-        printJobId,
-        error: errorInfo(error).message || "Persistent print chunk failed.",
-      }).catch(() => undefined);
+      // A print call can throw after submitting bytes. Do not turn an
+      // ambiguous physical attempt into a failed/retryable backend item.
+      console.error("persistent dispatch requires reconciliation", { chunkId, printJobId, printItemId });
       throw error;
     }
   }
@@ -1300,6 +1296,10 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       payloadType: payload.payloadType || null,
       payloadDiagnostics,
     });
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId, payloadHash: validated.payloadHash })) {
+      console.error("automatic dispatch refused: prior attempt requires reconciliation", { printJobId, printItemId });
+      return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
+    }
     spoolerAttempted = true;
     const result = await printLabel({
       printerId,

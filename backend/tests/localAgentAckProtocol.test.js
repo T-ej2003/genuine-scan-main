@@ -88,8 +88,8 @@ const run = () => {
     "Connector must not report a fake print failure when backend rejects first ACK before spooler handoff"
   );
   assert(
-    shouldReportLocalPrintFailureToBackend(preSpoolAckError, true),
-    "Connector should still report failures after spooler work has been attempted"
+    !shouldReportLocalPrintFailureToBackend(preSpoolAckError, true),
+    "Connector must preserve uncertainty after spooler work has been attempted"
   );
 
   console.log("local agent ACK protocol tests passed");
