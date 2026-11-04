@@ -17,6 +17,11 @@ try {
   $failed = $false
   try { & $verifier @argsForVerification | Out-Null } catch { $failed = $true }
   if (-not $failed) { throw 'Unsigned bundled DLL passed verification.' }
+  Remove-Item -LiteralPath "$fixture\payload\bin\bad.dll"
+  [IO.File]::WriteAllText("$fixture\payload\bin\hidden.dat", 'MZ unsigned fixture')
+  $failed = $false
+  try { & $verifier @argsForVerification | Out-Null } catch { $failed = $true }
+  if (-not $failed) { throw 'Executable-like payload with an unexpected extension passed verification.' }
   Write-Host 'Windows connector component verifier tests passed with synthetic component fixtures.'
 } finally {
   Remove-Item -LiteralPath $fixture -Recurse -Force

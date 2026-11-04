@@ -49,7 +49,8 @@ jobs:
       # signed-artifact Windows certification have been reviewed and passed.
       - name: Block release while upgrade safety is incomplete
         shell: pwsh
-        run: throw "Windows connector release is blocked: upgrade safety and embedded-signature certification are incomplete."
+        run: |
+          throw "Windows connector release is blocked: upgrade safety and embedded-signature certification are incomplete."
 
       - name: Validate Azure signing configuration
         shell: pwsh
@@ -192,7 +193,13 @@ jobs:
         run: |
           $publisher = $env:WINDOWS_CONNECTOR_PUBLISHER_NAME
           if (-not $publisher) { $publisher = 'L&D Health Ltd' }
-          $files = @(Get-ChildItem -LiteralPath $env:WINDOWS_INSTALLER_STAGE_DIR -File -Recurse | Where-Object { $_.Extension -in '.exe', '.dll', '.msi', '.sys' })
+          $entries = @(Get-ChildItem -LiteralPath $env:WINDOWS_INSTALLER_STAGE_DIR -Force -Recurse)
+          if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Staged payload contains a reparse point.' }
+          $files = @(foreach ($entry in $entries | Where-Object { -not $_.PSIsContainer }) {
+            $stream = [IO.File]::Open($entry.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try { $first = $stream.ReadByte(); $second = $stream.ReadByte() } finally { $stream.Dispose() }
+            if (($first -eq 0x4d -and $second -eq 0x5a) -or $entry.Extension -in '.exe', '.dll', '.sys', '.msi') { $entry }
+          })
           if ($files.Count -eq 0) { throw 'No staged executable payloads found.' }
           foreach ($file in $files) {
             $sig = Get-AuthenticodeSignature -FilePath $file.FullName
