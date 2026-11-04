@@ -6,6 +6,22 @@ artifact-level Windows certification are complete. The staging and backup
 helpers are fixture-tested building blocks; they are not invoked by the
 installer, and they are not an upgrade state machine.
 
+## Requirement traceability
+
+| Requirement | Implementation and missing behavior | Executable test | Release acceptance |
+| --- | --- | --- | --- |
+| Inno signing | `sign-inno-file.ps1`, signed-release workflow, pinned 6.7.1 template; real signed extraction remains unverified | signing-hook and component-verifier fixtures; actual 6.7.1 failed-hook compile | Authorized Azure signatures on outer, temporary Setup, uninstaller and all payloads, bound to artifact hash |
+| Mandatory initialization | Template runs initialization from `CurStepChanged`, checks exit code in both modes; full installed-runtime certification remains outstanding | synthetic Inno compile, installer regression | Actual interactive and silent installation, including nonzero verification failures |
+| Safe legacy refusal | `PrepareToInstall` and initialization preflight refuse existing state; process inspection fails closed | initialization safety fixtures | Durable authenticated maintenance and reconciliation proof before permitting upgrade |
+| State preservation | No broad deletion or force-stop in initialization; state loader rejects corrupt/inconsistent identity and uses temporary-file replacement on updates | identity preservation and initialization safety tests | Representative legacy migration with unchanged identity/configuration and pending/uncertain records |
+| Stage/backup/restore | Separate signed staging, restricted backup, file restoration and cleanup helpers; not wired into a transaction | staging, backup, cleanup fixtures including locked runtime and corrupt backup | Durable installer state machine and independent operational rollback verification |
+| Maintenance fence | Dispatch inventory and design only; not implemented | No fence race certification yet | Authenticated durable enforcement in every authoritative claim/dispatch path, including gateway diagnostics |
+| Physical printing | Blocked by missing production isolation | No physical test performed | Exclusive bounded synthetic test, physical output and QR scan verification |
+
+The live initialization path now preserves legacy registrations and unknown
+state rather than deleting them. It refuses a running connector rather than
+terminating it. These are safety refusals, not successful legacy upgrade support.
+
 ## Dispatch inventory
 
 The legacy connector can use signed REST local-agent claims, persistent

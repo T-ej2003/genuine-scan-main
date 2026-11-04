@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+if /I "%~1"=="/MSCQRSILENT" set "MSCQR_SETUP_SILENT=1"
 cd /d "%~dp0"
 
 set "INSTALL_SCRIPT=%~dp0install-startup-task.ps1"
@@ -55,5 +56,6 @@ echo MSCQR Connector setup is complete.
 exit /b 0
 
 :show_dialog
+if "%MSCQR_SETUP_SILENT%"=="1" exit /b 0
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.MessageBox]::Show($env:DIALOG_MESSAGE, $env:DIALOG_TITLE, [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::%DIALOG_ICON%) | Out-Null" >nul 2>&1
 exit /b 0

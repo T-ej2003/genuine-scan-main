@@ -6,6 +6,8 @@ AppPublisher=MSCQR
 DefaultDirName={localappdata}\MSCQR\local-print-agent
 DefaultGroupName=MSCQR Connector
 DisableProgramGroupPage=yes
+DisableDirPage=yes
+UsePreviousAppDir=no
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest
@@ -28,8 +30,32 @@ Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "{app}"; Flags: recursesubdirs ignor
 Name: "{group}\MSCQR Connector"; Filename: "{app}\Install Connector.cmd"
 Name: "{group}\Uninstall MSCQR Connector"; Filename: "{app}\Uninstall Connector.cmd"
 
-[Run]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Install Connector.cmd"""; Flags: runhidden waituntilterminated postinstall skipifsilent
-
 [UninstallRun]
 Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated
+
+[Code]
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if DirExists(ExpandConstant('{app}')) or
+     FileExists(ExpandConstant('{userprofile}\.mscqr\local-print-agent-state.json')) or
+     FileExists(ExpandConstant('{userprofile}\.authenticqr\local-print-agent-state.json')) then
+    Result := 'Existing connector installation or identity requires authenticated maintenance and reconciliation. No upgrade was performed.';
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Parameters: String;
+begin
+  if CurStep = ssPostInstall then begin
+    Parameters := '/c ""' + ExpandConstant('{app}\Install Connector.cmd') + '"';
+    if WizardSilent then Parameters := Parameters + ' /MSCQRSILENT';
+    Parameters := Parameters + '"';
+    if not Exec(ExpandConstant('{cmd}'), Parameters, ExpandConstant('{app}'), SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Connector initialization could not be started.');
+    if ResultCode <> 0 then
+      RaiseException('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + '). Review the connector setup log.');
+  end;
+end;

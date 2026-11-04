@@ -1,0 +1,34 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const { generateKeyPairSync } = require('node:crypto');
+
+(async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mscqr-identity-test-'));
+  const stateFile = path.join(root, 'state.json');
+  process.env.PRINT_AGENT_STATE_FILE = stateFile;
+  const { loadAgentState, saveAgentState } = require('../dist/local-print-agent/state');
+  try {
+    const first = await loadAgentState();
+    first.selectedPrinterId = 'synthetic-printer';
+    first.calibrationProfiles = { 'synthetic-printer': { dpi: 300, offsetXmm: 1 } };
+    await saveAgentState(first);
+    const restored = await loadAgentState();
+    for (const key of ['agentId', 'deviceFingerprint', 'publicKeyPem', 'privateKeyPem', 'selectedPrinterId']) {
+      assert.equal(restored[key], first[key], `preserved field ${key}`);
+    }
+    assert.equal(restored.calibrationProfiles['synthetic-printer'].dpi, 300);
+    const mismatched = { ...first, publicKeyPem: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString() };
+    for (const bad of ['{interrupted', JSON.stringify({ agentId: first.agentId }), JSON.stringify(mismatched)]) {
+      await fs.writeFile(stateFile, bad);
+      await assert.rejects(loadAgentState());
+      assert.equal(await fs.readFile(stateFile, 'utf8'), bad, 'unreadable identity must never be overwritten');
+    }
+    await fs.rm(stateFile);
+    await fs.mkdir(stateFile);
+    await assert.rejects(loadAgentState());
+    assert((await fs.stat(stateFile)).isDirectory(), 'I/O errors must not replace state');
+    console.log('Connector identity preservation tests passed');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+})().catch(error => { console.error(error); process.exitCode = 1; });

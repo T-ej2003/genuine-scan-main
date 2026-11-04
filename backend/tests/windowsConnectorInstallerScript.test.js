@@ -225,10 +225,9 @@ const run = async () => {
     "Windows installer should implement a PRINTER_UNAVAILABLE partial-success path"
   );
   assert(
-    installScript.includes("Run the installer as Administrator") &&
-      installScript.includes("could not be removed") &&
-      installScript.includes("old connector startup path can be replaced"),
-    "Windows installer should fail visibly when legacy startup cleanup needs elevation"
+    installScript.includes("requires verified migration; it has been preserved") &&
+      !installScript.includes("Unregister-ScheduledTask") && !installScript.includes("sc.exe delete"),
+    "Windows installer must preserve unverified legacy registrations"
   );
   assert(
     installScript.includes("Stop-RunningAgent") &&
@@ -236,13 +235,13 @@ const run = async () => {
       installScript.includes("Remove-LegacyStartupEntries") &&
       installScript.includes("Cleanup-LegacyServices") &&
       installScript.includes("Remove-LegacyRunRegistryEntries"),
-    "Windows installer should stop old connectors and remove stale runtime/startup paths before installing"
+    "Windows installer must check legacy paths before initialization"
   );
   assert(
     installScript.includes('Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"') &&
       installScript.includes('Join-Path $env:LOCALAPPDATA "Programs\\MSCQR Connector"') &&
       installScript.includes('Join-Path $env:PROGRAMDATA "Genuine Scan"'),
-    "Windows installer should use one canonical path and clean legacy MSCQR/Genuine Scan install roots"
+    "Windows installer must identify canonical and legacy roots"
   );
   assert(
     installScript.includes("agentId") === false &&
@@ -251,12 +250,14 @@ const run = async () => {
     "Windows installer script should not read or log connector private identity material"
   );
   assert(
-    installScript.includes("heartbeat-cache.json") &&
-      installScript.includes("active-job.json") &&
-      installScript.includes("release-metadata.json") &&
-      installScript.includes("mscqr-local-print-agent.lock"),
-    "Windows installer should clear stale runtime state that can confuse readiness"
+    !installScript.includes("Remove-Item -Path $root") &&
+      !installScript.includes("Stop-Process") &&
+      installScript.includes("Preserving install path and all unknown, pending and recovery data"),
+    "Windows installer must preserve uncertain state and never force-stop a connector"
   );
+  assert(!installerTemplate.includes('postinstall skipifsilent') && installerTemplate.includes('ResultCode <> 0') &&
+    installerTemplate.includes('PrepareToInstall') && installerTemplate.includes('WizardSilent'),
+    'Mandatory initialization must run in both modes and propagate failure, with pre-copy upgrade refusal');
   assert(
     installScript.includes("supportsPersistentPrintSession") &&
       installScript.includes("websocket.supported") &&
