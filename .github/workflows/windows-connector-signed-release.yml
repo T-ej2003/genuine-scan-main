@@ -45,6 +45,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Remove only after the maintenance fence, transactional installer and
+      # signed-artifact Windows certification have been reviewed and passed.
+      - name: Block release while upgrade safety is incomplete
+        shell: pwsh
+        run: throw "Windows connector release is blocked: upgrade safety and embedded-signature certification are incomplete."
+
       - name: Validate Azure signing configuration
         shell: pwsh
         env:
@@ -173,18 +179,37 @@ jobs:
           # This is where build-windows-installer.mjs stages files before Inno Setup packages them.
           # If the app's output directory changes, adjust WINDOWS_INSTALLER_STAGE_DIR above.
           files-folder: ${{ steps.release_settings.outputs.windows_installer_stage_dir }}
-          files-folder-filter: exe,dll,msi
+          files-folder-filter: exe,dll,msi,sys
           files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Verify signed staged executables
+        shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
+        run: |
+          $publisher = $env:WINDOWS_CONNECTOR_PUBLISHER_NAME
+          if (-not $publisher) { $publisher = 'L&D Health Ltd' }
+          $files = @(Get-ChildItem -LiteralPath $env:WINDOWS_INSTALLER_STAGE_DIR -File -Recurse | Where-Object { $_.Extension -in '.exe', '.dll', '.msi', '.sys' })
+          if ($files.Count -eq 0) { throw 'No staged executable payloads found.' }
+          foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate -or -not $sig.TimeStamperCertificate -or
+                $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -ne $publisher) {
+              throw "Invalid or untimestamped staged payload: $($file.FullName)"
+            }
+          }
+
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
 
       - name: Compile Windows installer
         shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
         run: |
           if (-not (Test-Path $env:WINDOWS_INSTALLER_PROJECT)) {
             throw "Inno Setup project was not generated: $env:WINDOWS_INSTALLER_PROJECT"
@@ -199,7 +224,12 @@ jobs:
             throw "ISCC.exe was not found after installing Inno Setup."
           }
 
-          & $iscc $env:WINDOWS_INSTALLER_PROJECT
+          $signScript = Join-Path $env:GITHUB_WORKSPACE 'backend\local-print-agent\packaging\sign-inno-file.ps1'
+          if (-not (Test-Path -LiteralPath $signScript -PathType Leaf)) {
+            throw "Inno signing hook not found: $signScript"
+          }
+          $signTool = 'mscqr=pwsh.exe -NoProfile -NonInteractive -File $q' + $signScript + '$q $f'
+          & $iscc '/DMSCQR_SIGNED_RELEASE' "/S$signTool" $env:WINDOWS_INSTALLER_PROJECT
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -217,21 +247,6 @@ jobs:
               throw "Windows release artifact is too small: $($artifact.FullName) $($artifact.Length) bytes"
             }
           }
-
-      - name: Sign final Windows release artifacts
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ env.AZURE_ARTIFACT_SIGNING_PROFILE }}
-          # Final installer output is generated here by the existing packaging script.
-          # If the artifact path changes, adjust WINDOWS_RELEASE_OUTPUT_DIR in Resolve connector release settings.
-          files-folder: ${{ steps.release_settings.outputs.windows_release_output_dir }}
-          files-folder-filter: exe,dll,msi
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: Normalize signed installer name and verify signatures
         shell: pwsh
@@ -267,8 +282,8 @@ jobs:
             throw "Normalized signed Windows installer was not found: $mainInstaller"
           }
           $mainSignature = Get-AuthenticodeSignature -FilePath $mainInstaller
-          if ($mainSignature.Status -ne "Valid" -or -not $mainSignature.SignerCertificate) {
-            throw "Signed Windows installer does not have a valid signer certificate."
+          if ($mainSignature.Status -ne "Valid" -or -not $mainSignature.SignerCertificate -or -not $mainSignature.TimeStamperCertificate) {
+            throw "Signed Windows installer does not have a valid signer and timestamp certificate."
           }
           $reportPath = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "signature-report.json"
           [ordered]@{

@@ -10,6 +10,13 @@ Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest
 WizardStyle=modern
+#ifdef MSCQR_SIGNED_RELEASE
+#if Ver != 0x06070100
+#error Signed releases require Inno Setup 6.7.1.
+#endif
+SignTool=mscqr
+SignedUninstaller=yes
+#endif
 OutputDir=__WINDOWS_OUTPUT_DIR__
 OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION__-unsigned
 UninstallDisplayIcon={app}\bin\mscqr-local-print-agent.exe
