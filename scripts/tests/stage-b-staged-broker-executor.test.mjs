@@ -72,7 +72,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
     objects.set(stageBApplyAttemptS3Key(stagedBrokerSourceReservation(sourceSha)), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_SOURCE', sourceSha, preparation:source, authorization:pubAuth })));
     objects.set(stageBAttemptStepS3ObjectKey(brokerDigest(pubAuth),3), Buffer.from(JSON.stringify({ kind:'STAGED_BROKER_STEP', id:brokerDigest(pubAuth), status:'PUBLISHED', value:p.publication })));
   }
-  let mode = 'success', kmsVerifications = 0, currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
+  let mode = 'success', kmsVerifications = 0, onKmsVerification, currentAlias = ['RECONCILIATION', 'RECONCILIATION_RECOVERY'].includes(phase) ? { ...structuredClone(alias), FunctionVersion: p.target.version, RevisionId: 'new-revision' } : structuredClone(alias);
   let currentShow = publicationPriorState ? { values: { root_module: structuredClone(plan.prior_state.values.root_module) } } : undefined;
   const capturedPlans = new Map(), refreshPlan = (await r.deps.captureRefreshOnlyPlan()).plan;
   const exec = (command, args, options) => {
@@ -93,7 +93,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
     }
     assert.equal(command, 'aws');
     const value = name => args[args.indexOf(name)+1];
-    if (args[0] === 'kms') { assert.equal(args[1], 'verify'); if (mode === 'slow-final-kms' && ++kmsVerifications === 3) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,2200); return JSON.stringify({ SignatureValid: mode !== 'invalid-kms' }); }
+    if (args[0] === 'kms') { assert.equal(args[1], 'verify'); kmsVerifications+=1; onKmsVerification?.(kmsVerifications); return JSON.stringify({ SignatureValid: mode !== 'invalid-kms' }); }
     if (args[0] === 's3api') {
       const key = value('--key');
       if (args[1] === 'put-object') { assert.equal(value('--if-none-match'), '*'); if (objects.has(key)) throw Object.assign(new Error('Occupied'),{stderr:'PreconditionFailed (412)'}); objects.set(key, fs.readFileSync(value('--body'))); }
@@ -129,7 +129,7 @@ async function native(phase = "CUTOVER", { omitRefreshChanges = false, publicati
   const makeAdapter = (selectedPhase=phase, selectedAuth=auth, operation, environment={}) => createStagedBrokerExecutor({ phase:selectedPhase, operation, planPath, preparation:p, authorization:selectedAuth, files, directory, terraformDataDir:directory, env:{ PATH:process.env.PATH, HOME:process.env.HOME, TF_WORKSPACE:'default',...environment }, exec });
   const adapter = makeAdapter();
   const input = { FunctionName: raw.FunctionArn.replace(/:[0-9]+$/, ''), Name: alias.Name, FunctionVersion: raw.Version, RevisionId: alias.RevisionId, Description: alias.Description, RoutingConfig: alias.RoutingConfig };
-  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; kmsVerifications=0; }, getKmsVerifications:()=>kmsVerifications, setAlias: v => { currentAlias=v; } };
+  return { adapter, input, binary, calls, p, auth, objects, makeAdapter, exec, setShow: value=>{currentShow=value;}, setMode: v => { mode=v; kmsVerifications=0; }, setKmsVerificationHook: hook => { onKmsVerification=hook; kmsVerifications=0; }, getKmsVerifications:()=>kmsVerifications, setAlias: v => { currentAlias=v; } };
 }
 async function reserve(r) {
   const id = brokerDigest(r.auth);
@@ -442,12 +442,22 @@ test('approval expiring during native predecessor checks cannot claim publicatio
  await assertNoPublicationDispatch(context,/Approval expired\/invalid/);
  assert.ok(context.r.calls.some(c=>c.args[1]==='get-function-configuration'));
 });
-test('approval expiring during signature verification cannot claim publication dispatch',async()=>{
- const context=await publicationRecovery(2000);
- context.r.setMode('slow-final-kms');
- await assertNoPublicationDispatch(context,/Approval expired/);
- assert.equal(context.r.getKmsVerifications(),3);
-});
+for (const verification of [1,2,3]) for (const pastExpiryMs of [0,1]) {
+ test(`approval expiring during signature verification cannot claim publication dispatch (verification ${verification}, expiry +${pastExpiryMs}ms)`,async t=>{
+  t.mock.timers.enable({apis:['Date'],now:Date.now()});
+  const context=await publicationRecovery(2000);
+  const callsBefore=context.r.calls.length;
+  context.r.setKmsVerificationHook(count=>{
+   if(count===verification) t.mock.timers.setTime(Date.parse(context.r.auth.expiresAt)+pastExpiryMs);
+  });
+  const failure=verification===3?/Approval expired at mutation boundary/:/Approval expired\/invalid/;
+  await assertNoPublicationDispatch(context,failure);
+  assert.equal(context.r.getKmsVerifications(),verification);
+  await assertNoPublicationDispatch(context,/Approval expired\/invalid/);
+  assert.equal(context.r.getKmsVerifications(),verification);
+  assert.equal(context.r.calls.slice(callsBefore).filter(c=>c.command==='aws'&&c.args[0]==='s3api'&&c.args[1]==='put-object').length,0);
+ });
+}
 test('recovery rechecks the signed authorization at dispatch and rejects invalid signature',async()=>{
  const context=await publicationRecovery();
  context.r.setMode('invalid-kms');
