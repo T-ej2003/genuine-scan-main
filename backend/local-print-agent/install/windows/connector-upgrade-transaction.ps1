@@ -90,6 +90,10 @@ function Get-MscqrPayloadDigest([string]$Payload) {
   try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($lines)))).Replace('-','').ToLowerInvariant() } finally {$sha.Dispose()}
 }
 function Assert-MscqrBackupBindings($Journal) {
+  $stateSource=@($Journal.stateDiscovery.candidates | Where-Object {$_.path -ieq $Journal.stateFile})
+  if($stateSource.Count -ne 1 -or $stateSource[0].ownerSid -notin @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,'S-1-5-18') -or
+      @($Journal.records | Where-Object {$_.name -ceq 'state' -and $_.ownerSid -ceq $stateSource[0].ownerSid}).Count -ne 1 -or
+      (Get-MscqrStateDiscoveryDigest $Journal.stateDiscovery.candidates) -cne $Journal.binding.stateDiscoverySha256) {throw 'Backup state owner differs from authenticated discovery.'}
   $expected=@{runtime=@($Journal.runtime,$Journal.binding.sourceSha256);environment=@($Journal.environmentFile,$Journal.binding.configurationSha256);state=@($Journal.stateFile,$Journal.binding.stateSha256);startup=@($Journal.startup,$Journal.binding.startupSha256);wrapper=@($Journal.wrapper,$Journal.binding.wrapperSha256)}
   $live=[IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Journal.runtime))
   $expected.uninstaller=@((Join-Path $live 'unins000.exe'),$Journal.binding.uninstallerSha256)

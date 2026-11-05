@@ -60,7 +60,9 @@ function New-MscqrUpgradeBackup {
     $backupHash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash
     if ($originalHash -ne $backupHash) { throw "Backup verification failed: $name" }
     if ($name -eq 'runtime' -and $backupHash -ine $RuntimeSha256) { throw 'Previous runtime changed during backup.' }
-    $records += [pscustomobject]@{ name = $name; original = $source; backup = $dest; sha256 = $backupHash }
+    $record=[pscustomobject]@{ name = $name; original = $source; backup = $dest; sha256 = $backupHash }
+    if($name -eq 'state') {$record | Add-Member ownerSid ((Get-Acl -LiteralPath $source).GetOwner([Security.Principal.SecurityIdentifier]).Value)}
+    $records += $record
   }
   return $records
 }
@@ -81,6 +83,12 @@ function Restore-MscqrUpgradeBackup {
     $temp = "$destination.restore-$([guid]::NewGuid().ToString('N'))"
     try {
       [IO.File]::Copy([string]$record.backup, $temp, $false)
+      if($record.name -eq 'state') {
+        if($record.ownerSid -notin @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,'S-1-5-18')) {throw 'State backup owner is not trusted.'}
+        $security=Get-Acl -LiteralPath $temp
+        $security.SetOwner((New-Object Security.Principal.SecurityIdentifier([string]$record.ownerSid)))
+        Set-Acl -LiteralPath $temp -AclObject $security
+      }
       if ((Get-FileHash -LiteralPath $temp -Algorithm SHA256).Hash -ne $record.sha256) { throw 'Restore staging hash mismatch.' }
       if (Test-Path -LiteralPath $destination -PathType Leaf) {
         $displaced = "$destination.displaced-$([guid]::NewGuid().ToString('N'))"

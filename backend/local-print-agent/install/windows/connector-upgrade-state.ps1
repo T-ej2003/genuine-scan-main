@@ -13,13 +13,13 @@ function Get-MscqrStateSnapshot([string[]]$Paths) {
     $full=[IO.Path]::GetFullPath($p)
     Assert-MscqrPlainPath $full
     $exists=Test-Path -LiteralPath $full
-    $hash='MISSING'
-    if($exists){Assert-MscqrStateOwnership $full;$hash=(Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()}
-    [pscustomobject]@{path=$full;exists=[bool]$exists;sha256=$hash}
+    $hash='MISSING';$ownerSid=''
+    if($exists){Assert-MscqrStateOwnership $full;$hash=(Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant();$ownerSid=(Get-Acl -LiteralPath $full).GetOwner([Security.Principal.SecurityIdentifier]).Value}
+    [pscustomobject]@{path=$full;exists=[bool]$exists;sha256=$hash;ownerSid=$ownerSid}
   })
 }
 function Get-MscqrStateDiscoveryDigest($Snapshot) {
-  $text=(@($Snapshot | Sort-Object path | ForEach-Object {"$($_.path.ToLowerInvariant())|$($_.sha256)`n"}) -join '')
+  $text=(@($Snapshot | Sort-Object path | ForEach-Object {"$($_.path.ToLowerInvariant())|$($_.sha256)|$($_.ownerSid)`n"}) -join '')
   $sha=[Security.Cryptography.SHA256]::Create()
   try {return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($text)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()}
 }
