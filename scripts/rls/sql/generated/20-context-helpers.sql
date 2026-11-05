@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='38319ddbcba3c63f48b95f5628bf2512140208acf0a1e0d90d75baba720852b5'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:38319ddbcba3c63f48b95f5628bf2512140208acf0a1e0d90d75baba720852b5'
+    AND source_contract_sha256='50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:38319ddbcba3c63f48b95f5628bf2512140208acf0a1e0d90d75baba720852b5')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8096,9 +8096,10 @@ BEGIN
     IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
     THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='LEASE' THEN
-      IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId') OR
-        EXISTS (SELECT 1 FROM jsonb_each(coalesce(current_value->'diagnostics','{}'::jsonb)) lease
-        WHERE lease.value->>'state'='ACCEPTED')
+      -- A reservation permanently blocks replay of that request, not a fresh,
+      -- separately authorized diagnostic intent. All unresolved reservations
+      -- remain in the maintenance inventory and require signed reconciliation.
+      IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId')
       THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
       current_value:=jsonb_set(current_value,'{diagnostics}',coalesce(current_value->'diagnostics','{}'::jsonb)||
         jsonb_build_object(p_details->>'requestId',jsonb_build_object('state','ACCEPTED','actor',p_actor,'acceptedAt',clock_timestamp())),true);
