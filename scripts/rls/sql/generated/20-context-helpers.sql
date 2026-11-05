@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7'
+    AND source_contract_sha256='53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8072,8 +8072,8 @@ AS $fn$
 DECLARE checkpoint_key text; current_value jsonb;
 BEGIN
   IF session_user NOT IN ('mscqr_rls_cert_app','mscqr_rls_cert_worker')
-     OR p_operation NOT IN ('CHECK','REQUEST','STATUS','LEASE','COMPLETE','AUTHORIZE','CONSUME','VERIFY','RELEASE') OR length(coalesce(p_scope,'')) NOT BETWEEN 1 AND 2048
-     OR (p_operation IN ('REQUEST','LEASE','COMPLETE','AUTHORIZE','CONSUME','VERIFY','RELEASE') AND nullif(p_actor,'') IS NULL)
+     OR p_operation NOT IN ('CHECK','REQUEST','STATUS','LEASE','COMPLETE','ABORT','AUTHORIZE','CONSUME','VERIFY','RELEASE') OR length(coalesce(p_scope,'')) NOT BETWEEN 1 AND 2048
+     OR (p_operation IN ('REQUEST','LEASE','COMPLETE','ABORT','AUTHORIZE','CONSUME','VERIFY','RELEASE') AND nullif(p_actor,'') IS NULL)
   THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
   checkpoint_key:='connector-maintenance:'||encode(sha256(convert_to(p_scope,'UTF8')),'hex');
   PERFORM set_config('app.printing_maintenance_key',checkpoint_key,true);
@@ -8099,6 +8099,7 @@ BEGIN
     IF EXISTS (SELECT 1 FROM jsonb_each(coalesce(current_value->'diagnostics','{}'::jsonb)) lease
       WHERE (lease.value->>'printerId'=p_details->>'printerId' OR lease.value->>'printerId' IS NULL)
         AND lease.value->>'state' IS DISTINCT FROM 'CONFIRMED'
+        AND lease.value->>'state' IS DISTINCT FROM 'REJECTED_PRE_DISPATCH'
         AND NOT coalesce(lease.key=p_details->>'diagnosticRequestId' AND
           lease.value->>'printerId'=p_details->>'printerId' AND lease.value->>'state'='ACCEPTED',false))
     THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
@@ -8114,7 +8115,7 @@ BEGIN
           p.metadata->'pendingLocalAgentTestLabel'->>'status' IN ('CLAIMED','ACKED'))
     ) THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
   END IF;
-  IF p_operation IN ('LEASE','COMPLETE') THEN
+  IF p_operation IN ('LEASE','COMPLETE','ABORT') THEN
     IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
     THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='LEASE' THEN
@@ -8137,11 +8138,14 @@ BEGIN
       IF current_value->'diagnostics'->(p_details->>'requestId')->>'actor' IS DISTINCT FROM p_actor OR
          current_value->'diagnostics'->(p_details->>'requestId')->>'printerId' IS DISTINCT FROM p_details->>'printerId' OR
          current_value->'diagnostics'->(p_details->>'requestId')->>'state' IS DISTINCT FROM 'ACCEPTED' OR
-         p_details->>'outcome' IS DISTINCT FROM 'confirmed' OR nullif(p_details->>'deviceJobRef','') IS NULL
+         (p_operation='COMPLETE' AND (p_details->>'outcome' IS DISTINCT FROM 'confirmed' OR nullif(p_details->>'deviceJobRef','') IS NULL)) OR
+         (p_operation='ABORT' AND (p_details->>'outcome' IS DISTINCT FROM 'pre_dispatch_rejected' OR
+           length(btrim(coalesce(p_details->>'reason',''))) NOT BETWEEN 1 AND 500))
       THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
       current_value:=jsonb_set(current_value,ARRAY['diagnostics',p_details->>'requestId'],
-        current_value->'diagnostics'->(p_details->>'requestId')||jsonb_build_object(
-          'state','CONFIRMED','deviceJobRef',p_details->>'deviceJobRef','confirmedAt',clock_timestamp()),false);
+        current_value->'diagnostics'->(p_details->>'requestId')||CASE WHEN p_operation='COMPLETE' THEN jsonb_build_object(
+          'state','CONFIRMED','deviceJobRef',p_details->>'deviceJobRef','confirmedAt',clock_timestamp()) ELSE jsonb_build_object(
+          'state','REJECTED_PRE_DISPATCH','reason',p_details->>'reason','rejectedAt',clock_timestamp()) END,false);
     END IF;
     UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
   END IF;
@@ -8950,7 +8954,7 @@ DECLARE
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
-       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
+       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
        'AUDIT_TEST','AUDIT_TEST_LABEL_ATTENTION','AUDIT_TEST_LABEL_CONFIRMED',
        'AUDIT_TEST_LABEL_QUEUED','AUDIT_DISCOVERY'
      )
@@ -8999,7 +9003,7 @@ BEGIN
         ))
       )
       OR (
-        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
+        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
         AND EXISTS (
           SELECT 1 FROM public."ManufacturerLicenseeLink" ml
           WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer_row."licenseeId"
@@ -9012,7 +9016,7 @@ BEGIN
 
   PERFORM set_config('app.printing_licensee_id',coalesce(scope_licensee,''),true),
           set_config('app.printing_organization_id',coalesce(scope_org,''),true);
-  IF p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
+  IF p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
     IF printer_row."printerRegistrationId" IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr WHERE pr.id=printer_row."printerRegistrationId"
         AND pr."userId" IS NOT DISTINCT FROM printer_row."assignedUserId"
@@ -9056,9 +9060,9 @@ BEGIN
       maintenance_inventory:=maintenance_inventory||jsonb_build_object(
         'diagnostics',(SELECT coalesce(jsonb_object_agg(lease.key,lease.value),'{}'::jsonb)
           FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
-          WHERE lease.value->>'state' IS DISTINCT FROM 'CONFIRMED'),
+          WHERE lease.value->>'state' IS DISTINCT FROM 'CONFIRMED' AND lease.value->>'state' IS DISTINCT FROM 'REJECTED_PRE_DISPATCH'),
         'settledDiagnostics',(SELECT count(*) FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
-          WHERE lease.value->>'state'='CONFIRMED'),
+          WHERE lease.value->>'state' IN ('CONFIRMED','REJECTED_PRE_DISPATCH')),
         'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
           FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'
             AND p.metadata->'pendingLocalAgentTestLabel'->>'status' IS DISTINCT FROM 'CONFIRMED'),'[]'::jsonb));
@@ -9122,7 +9126,7 @@ BEGIN
           'expiresAt',p_payload->'evidence'->>'expiresAt','evidence',p_payload->'evidence'));
     END IF;
     RETURN app_rls.printing_maintenance_gate(maintenance_scope,
-      CASE p_operation WHEN 'MAINTENANCE_REQUEST' THEN 'REQUEST' WHEN 'DIAGNOSTIC_LEASE' THEN 'LEASE' WHEN 'DIAGNOSTIC_COMPLETE' THEN 'COMPLETE' ELSE 'STATUS' END,
+      CASE p_operation WHEN 'MAINTENANCE_REQUEST' THEN 'REQUEST' WHEN 'DIAGNOSTIC_LEASE' THEN 'LEASE' WHEN 'DIAGNOSTIC_COMPLETE' THEN 'COMPLETE' WHEN 'DIAGNOSTIC_ABORT' THEN 'ABORT' ELSE 'STATUS' END,
       actor."userId",p_payload||jsonb_build_object('requestId',p_request_id,'printerId',printer_row.id));
   END IF;
   IF p_operation IN ('UPDATE','DELETE','RELINK') THEN

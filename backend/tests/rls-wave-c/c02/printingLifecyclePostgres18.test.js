@@ -995,9 +995,21 @@ async function main() {
   const nextDiagnostic=requestId();
   denied(app,reserveDiagnostic(nextDiagnostic),/DIAGNOSTIC_RECONCILIATION_REQUIRED/);
   const completeDiagnostic=id=>`SELECT app_rls.printing_printer_administration('${caps.maker}','printing-printer-admin','${id}','DIAGNOSTIC_COMPLETE','${ids.printer}','{"outcome":"confirmed","deviceJobRef":"synthetic-odometer:1"}'::jsonb)`;
+  const abortDiagnostic=id=>`SELECT app_rls.printing_printer_administration('${caps.maker}','printing-printer-admin','${id}','DIAGNOSTIC_ABORT','${ids.printer}','{"outcome":"pre_dispatch_rejected","reason":"synthetic baseline unavailable before transmission"}'::jsonb)`;
+  const rejectedDiagnostic=requestId();
+  denied(app,abortDiagnostic(requestId()),/PRINTING_MAINTENANCE_DENIED/);
+  denied(app,abortDiagnostic(diagnosticReservation).replace('pre_dispatch_rejected','uncertain'),/PRINTING_MAINTENANCE_DENIED/);
+  denied(app,`SELECT app_rls.printing_printer_administration('${caps.outsider}','printing-printer-admin','${diagnosticReservation}','DIAGNOSTIC_ABORT','${ids.printer}',
+    '{"outcome":"pre_dispatch_rejected","reason":"forged"}'::jsonb)`,/PRINTING_BOUNDARY_DENIED/);
   json(app,completeDiagnostic(diagnosticReservation));
+  json(app,reserveDiagnostic(rejectedDiagnostic));
+  json(app,abortDiagnostic(rejectedDiagnostic));
+  denied(app,abortDiagnostic(rejectedDiagnostic),/PRINTING_MAINTENANCE_DENIED/);
+  denied(app,completeDiagnostic(rejectedDiagnostic),/PRINTING_MAINTENANCE_DENIED/);
+  denied(app,reserveDiagnostic(rejectedDiagnostic),/DIAGNOSTIC_RECONCILIATION_REQUIRED/);
   const diagnosticInventory=json(app,reserveDiagnostic(nextDiagnostic));
   assert.equal(diagnosticInventory.diagnostics[diagnosticReservation].state,'CONFIRMED','completed diagnostic history remains durable');
+  assert.equal(diagnosticInventory.diagnostics[rejectedDiagnostic].state,'REJECTED_PRE_DISPATCH','proved pre-dispatch failure is terminal and auditable');
   assert.equal(diagnosticInventory.diagnostics[nextDiagnostic].state,'ACCEPTED');
   psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,ARRAY['diagnostics','${nextDiagnostic}','acceptedAt'],
     to_jsonb(now()-interval '2 days'),false) WHERE key LIKE 'connector-maintenance:%' AND value->'diagnostics' ? '${nextDiagnostic}'`);

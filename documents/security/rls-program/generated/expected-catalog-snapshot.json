@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7",
+  "sourceContractSha256": "53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "4d01a534f65ff76f90ad489e841481e518b938a338121eb12399497198f0b8b0"
+      "sha256": "7fb1fd8f3e408a8609806696be2e101a49d59501406cf1a53d3d2fea90ecc006"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "d6314e37c196d9966954b0fa4cd4247a535dfbb9e1683fc0c5a9430c27b4f1ba"
+      "sha256": "9915af81f577c406c29202ae627c33e810bee3496a6a190b13cf24a2dd0bad75"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -8021,7 +8021,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true) IN ('printing-printer-admin-update','printing-test-label-queue','printing-printer-admin-maintenance_request','printing-printer-admin-maintenance_status','printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release','printing-printer-admin-diagnostic_lease','printing-printer-admin-diagnostic_complete') AND id=current_setting('app.printing_printer_id',true)) OR (current_setting('app.printing_operation',true)='printing-printer-admin-relink' AND (id=current_setting('app.printing_printer_id',true) OR \"assignedUserId\"=current_setting('app.printing_user_id',true))) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-session','printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-gateway-check_dispatch','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=current_setting('app.printing_printer_id',true) OR (current_setting('app.printing_operation',true) IN ('printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail') AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (\"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true))))",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND ((current_setting('app.printing_operation',true) IN ('printing-printer-admin-update','printing-test-label-queue','printing-printer-admin-maintenance_request','printing-printer-admin-maintenance_status','printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release','printing-printer-admin-diagnostic_lease','printing-printer-admin-diagnostic_complete','printing-printer-admin-diagnostic_abort') AND id=current_setting('app.printing_printer_id',true)) OR (current_setting('app.printing_operation',true)='printing-printer-admin-relink' AND (id=current_setting('app.printing_printer_id',true) OR \"assignedUserId\"=current_setting('app.printing_user_id',true))) OR (current_setting('app.printing_operation',true)='printing-connector-registration-heartbeat' AND \"assignedUserId\"=current_setting('app.printing_user_id',true) AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND current_setting('app.printing_operation',true) IN ('printing-connector-identity','printing-connector-session','printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail','printing-connector-gateway-claim','printing-connector-gateway-ack','printing-connector-gateway-confirm','printing-connector-gateway-fail','printing-connector-gateway-check_dispatch','printing-connector-test-label-claim','printing-connector-test-label-ack','printing-connector-test-label-confirm','printing-connector-test-label-fail') AND (id=current_setting('app.printing_printer_id',true) OR (current_setting('app.printing_operation',true) IN ('printing-connector-claim','printing-connector-ack','printing-connector-confirm','printing-connector-fail') AND \"printerRegistrationId\"=current_setting('app.printing_registration_id',true)) OR (\"gatewayId\"=current_setting('app.printing_gateway_id',true) AND \"gatewaySecretHash\"=current_setting('app.printing_gateway_secret_hash',true))))",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-identity:Printer:UPDATE",
@@ -12814,55 +12814,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:5f03668104234f97c3119a0cee5021b8504f8934748263f50bf4f0e68924e5e7"
+      "marker": "mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef"
     }
   ]
 }

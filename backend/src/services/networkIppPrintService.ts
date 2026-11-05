@@ -19,12 +19,13 @@ const dispatchChunk = async (jobId?: string | null) => {
     details: { limit: 25 },
   });
   if (!claim?.available) return false;
-  let physicalAttemptStarted=false;
+  let itemIndex=0;
   let reservationStarted=false;
   try {
     const connection=buildIppConnectionInfo(claim.printer);
     if(!connection.host || !Number.isInteger(connection.port) || connection.port<1 || connection.port>65535)throw new Error('Invalid IPP printer configuration.');
     for (const item of claim.items) {
+      reservationStarted=false;
       const context = buildApprovedPrintContext({
         qr: {
           id: item.qrCodeId,
@@ -49,7 +50,6 @@ const dispatchChunk = async (jobId?: string | null) => {
       });
       reservationStarted=true;
       await runNetworkPrintingWorker({operation:'RESERVE_DISPATCH',requestId:randomUUID(),jobId:claim.job.id,details:{itemIds:[item.id]}});
-      physicalAttemptStarted=true;
       const submitted = await submitPdfToIppPrinter({
         profile: claim.printer,
         pdf,
@@ -76,16 +76,26 @@ const dispatchChunk = async (jobId?: string | null) => {
         await new Promise(resolve=>setTimeout(resolve,1500));
       }
       if(!completed)throw new Error('IPP device completion is uncertain; automatic replay refused.');
+      itemIndex+=1;
     }
   } catch (error: any) {
-    if(!physicalAttemptStarted && !reservationStarted) {
-      await runNetworkPrintingWorker({
-        operation: "FAIL",
-        requestId: randomUUID(),
-        jobId: claim.job.id,
-        details: { itemIds: claim.items.map((item:any)=>item.id),failureClassification:'PRE_DISPATCH_FAILURE', reason: String(error?.message || "ipp_preparation_failed").slice(0, 500) },
-      });
-    } else {
+    // Earlier items may be confirmed while the current item's preparation is
+    // still definite pre-dispatch. A thrown reservation write is ambiguous for
+    // that item, but every later item has never reached reservation.
+    const unreserved=claim.items.slice(itemIndex+(reservationStarted?1:0)).map((item:any)=>item.id);
+    if(unreserved.length) {
+      try {
+        await runNetworkPrintingWorker({
+          operation: "FAIL",
+          requestId: randomUUID(),
+          jobId: claim.job.id,
+          details: { itemIds: unreserved,failureClassification:'PRE_DISPATCH_FAILURE', reason: String(error?.message || "ipp_preparation_failed").slice(0, 500) },
+        });
+      } catch (failureReportError) {
+        throw new AggregateError([error, failureReportError], 'IPP preparation failed and authoritative failure reporting is unverified; reconciliation required.');
+      }
+    }
+    if(reservationStarted) {
       logger.error('IPP physical outcome requires reconciliation',{jobId:claim.job.id});
     }
     throw error;
