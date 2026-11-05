@@ -1,6 +1,12 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1"
 $realWriteTransaction=(Get-Command Write-MscqrTransaction).ScriptBlock
+$realFlushSnapshot=(Get-Command Flush-MscqrUpgradeSnapshot).ScriptBlock
+function Flush-MscqrUpgradeSnapshot {
+  param($Stream)
+  if($script:injection -eq 'backup-flush') {throw 'fixture backup flush failed'}
+  & $realFlushSnapshot $Stream
+}
 function Write-MscqrTransaction {
   param($Path,$Journal,$Phase)
   if($script:injection -eq 'journal-full' -and $Phase -in @('ACTIVATED','ROLLBACK')) {throw 'fixture journal disk full'}
@@ -65,7 +71,7 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','backup-flush','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
@@ -116,10 +122,19 @@ try {
       Protect-MscqrDirectory "$case\connector-upgrade"
       $operationLock=[IO.File]::Open("$case\connector-upgrade\operation.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     }
-    try { Invoke-MscqrUpgradeTransaction -Phase Prepare @args } catch { $failed=$true; if($scenario -notin @('authorization','stage','extra-startup','concurrent')){throw} } finally {if($operationLock){$operationLock.Dispose()}}
-    if($scenario -in @('authorization','stage','extra-startup','concurrent')) {
+    try { Invoke-MscqrUpgradeTransaction -Phase Prepare @args } catch { $failed=$true; if($scenario -notin @('authorization','stage','backup-flush','extra-startup','concurrent')){throw} } finally {if($operationLock){$operationLock.Dispose()}}
+    if($scenario -in @('authorization','stage','backup-flush','extra-startup','concurrent')) {
       if(-not $failed -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256 -or $script:processes -ne 1) {throw 'preflight mutated active installation'}
-      if($scenario -eq 'stage'){Invoke-MscqrUpgradeTransaction -Phase Recover @args}
+      if($scenario -eq 'backup-flush') {
+        $phase=(Get-Content -LiteralPath "$case\connector-upgrade\transaction.json" -Raw|ConvertFrom-Json).phase
+        if($phase -ne 'STAGED') {throw 'Backup flush failure advanced the upgrade past STAGED.'}
+      }
+      if($scenario -in @('stage','backup-flush')) {
+        Invoke-MscqrUpgradeTransaction -Phase Recover @args
+        if((Get-Content -LiteralPath "$case\connector-upgrade\transaction.json" -Raw|ConvertFrom-Json).phase -ne 'ABORTED') {
+          throw 'Interrupted pre-activation upgrade did not record recovery.'
+        }
+      }
       Write-Host "PASS transaction $scenario refusal before live mutation"
       continue
     }

@@ -19,8 +19,28 @@ try {
   Set-Acl -LiteralPath $state -AclObject $stateAcl
   [IO.File]::WriteAllText($startup, 'synthetic launcher')
   $argsForBackup = @{ BackupDirectory = $backup; RuntimeFile = $runtime; RuntimeSha256 = $runtimeHash; RuntimeSignerSubject = $runtimeSigner; EnvironmentFile = $envFile; StateFile = $state; StartupFile = $startup }
+  $realFlush=(Get-Command Flush-MscqrUpgradeSnapshot).ScriptBlock
+  $script:backupOrder=New-Object 'System.Collections.Generic.List[string]'
+  function Flush-MscqrUpgradeSnapshot {
+    param($Stream)
+    & $realFlush $Stream
+    $script:backupOrder.Add("flush:$([IO.Path]::GetFileName($Stream.Name))")
+  }
+  function Get-FileHash {
+    param([Parameter(Position=0)][string]$Path,[string]$LiteralPath,[string]$Algorithm='SHA256')
+    $target=if($LiteralPath){$LiteralPath}else{$Path}
+    if($target -like '*.bak') {$script:backupOrder.Add("hash:$([IO.Path]::GetFileName($target))")}
+    if($LiteralPath){Microsoft.PowerShell.Utility\Get-FileHash -LiteralPath $LiteralPath -Algorithm $Algorithm}
+    else {Microsoft.PowerShell.Utility\Get-FileHash -Path $Path -Algorithm $Algorithm}
+  }
   $records = @(New-MscqrUpgradeBackup @argsForBackup)
   if ($records.Count -ne 4) { throw 'Expected four backup records.' }
+  foreach($record in $records) {
+    $name=[IO.Path]::GetFileName($record.backup)
+    $flush=$script:backupOrder.IndexOf("flush:$name")
+    $hash=$script:backupOrder.IndexOf("hash:$name")
+    if($flush -lt 0 -or $hash -le $flush){throw "Backup snapshot $name was hashed before durable flush."}
+  }
   $failed = $false
   try { New-MscqrUpgradeBackup @argsForBackup | Out-Null } catch { $failed = $true }
   if (-not $failed) { throw 'Existing backup should not be overwritten.' }

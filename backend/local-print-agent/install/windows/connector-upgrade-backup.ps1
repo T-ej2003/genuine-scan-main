@@ -1,5 +1,12 @@
 # These helpers only preserve and restore explicitly named existing files.
 # They do not decide that a connector is idle or authorize activation.
+function Flush-MscqrUpgradeSnapshot([IO.FileStream]$Stream) {
+  # Windows PowerShell 5.1 / .NET Framework supports Flush(Boolean). A plain
+  # Dispose does not establish the required pre-BACKED_UP durability barrier.
+  # This flushes the file and its metadata; it does not certify power-loss
+  # persistence of every newly created parent directory on every filesystem.
+  $Stream.Flush($true)
+}
 function New-MscqrUpgradeBackup {
   [CmdletBinding()]
   param(
@@ -53,8 +60,11 @@ function New-MscqrUpgradeBackup {
     # the restricted ACL, rather than copying a potentially broader file ACL.
     $inputStream = [IO.File]::Open($source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
     try {
-      $outputStream = [IO.File]::Open($dest, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-      try { $inputStream.CopyTo($outputStream) } finally { $outputStream.Dispose() }
+      $outputStream = New-Object IO.FileStream($dest,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
+      try {
+        $inputStream.CopyTo($outputStream)
+        Flush-MscqrUpgradeSnapshot $outputStream
+      } finally { $outputStream.Dispose() }
     } finally { $inputStream.Dispose() }
     $originalHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
     $backupHash = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash

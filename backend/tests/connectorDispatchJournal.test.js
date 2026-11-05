@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { constants } = require('node:fs');
 const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
 
 (async () => {
@@ -40,6 +41,53 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       });
     } finally {fs.open=realOpen;}
     assert.equal(await reserveAutomaticDispatch({...input,printItemId:'fsync-uncertain'}),false,'partial write must remain non-replayable');
+    fs.open=async(...args)=>{
+      const handle=await realOpen(...args);
+      if(String(args[0]).endsWith('.json')) {
+        const close=handle.close.bind(handle);
+        handle.close=async()=>{await close();throw Error('injected close uncertainty');};
+      }
+      return handle;
+    };
+    try {await assert.rejects(reserveAutomaticDispatch({...input,printItemId:'close-uncertain'}),
+      {errorCode:'dispatch_reconciliation_required'});} finally {fs.open=realOpen;}
+    assert.equal(await reserveAutomaticDispatch({...input,printItemId:'close-uncertain'}),false,
+      'close failure cannot authorize a second attempt');
+    const ordering = [];
+    fs.open = async (...args) => {
+      const handle = await realOpen(...args);
+      if (String(args[0]).endsWith('.json')) {
+        if(process.platform==='win32') assert.equal(args[1],'wx','Windows must retain exclusive creation');
+        else assert(Number(args[1]) & constants.O_SYNC, 'POSIX reservation creation must request synchronized metadata writes');
+        const write = handle.writeFile.bind(handle), sync = handle.sync.bind(handle);
+        handle.writeFile = async (...writeArgs) => { ordering.push('FILE_WRITE'); return write(...writeArgs); };
+        handle.sync = async () => { ordering.push('FILE_SYNC'); return sync(); };
+      } else {
+        const sync = handle.sync.bind(handle);
+        handle.sync = async () => { ordering.push('DIRECTORY_SYNC'); return sync(); };
+      }
+      return handle;
+    };
+    try {
+      assert.equal(await reserveAutomaticDispatch({...input,printItemId:'ordered'}),true);
+      ordering.push('DISPATCH');
+    } finally { fs.open=realOpen; }
+    assert.deepEqual(ordering,process.platform==='win32' ? ['FILE_WRITE','FILE_SYNC','DISPATCH'] :
+      ['FILE_WRITE','FILE_SYNC','DIRECTORY_SYNC','DISPATCH']);
+    if (process.platform !== 'win32') {
+      fs.open = async (...args) => {
+        const handle=await realOpen(...args);
+        if (String(args[0])===root) handle.sync=async()=>{throw Error('injected directory sync failure');};
+        return handle;
+      };
+      try {
+        await assert.rejects(reserveAutomaticDispatch({...input,printItemId:'directory-uncertain'}),error=>{
+          assert.equal(error.errorCode,'dispatch_reconciliation_required'); return true;
+        });
+      } finally {fs.open=realOpen;}
+      assert.equal(await reserveAutomaticDispatch({...input,printItemId:'directory-uncertain'}),false,
+        'failed directory sync cannot authorize a second physical attempt');
+    }
     assert.equal(await reserveAutomaticDispatch({...input,printJobId:'new-governed-reissue'}),true,'governed replacement job may retain the existing item identity');
     assert.equal(await reserveAutomaticDispatch({...input,printJobId:'new-governed-reissue'}),false,'replacement job is itself at most once');
     const {legacyDispatchKey}=require(modulePath);
@@ -85,6 +133,23 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       { errorCode: 'dispatch_reconciliation_required' });
     assert.equal(testSpools, 1);
     assert.deepEqual(diagnosticEvents, ['test_ack'], 'spool acceptance alone must not confirm or fail the diagnostic');
+    if (process.platform !== 'win32') {
+      const newRoot=path.join(root,'created-parent','journal');
+      const synced=[];
+      process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR=newRoot;
+      fs.open=async (...args)=>{
+        const handle=await realOpen(...args);
+        if(!String(args[0]).endsWith('.json')) {
+          const sync=handle.sync.bind(handle);
+          handle.sync=async()=>{synced.push(String(args[0]));return sync();};
+        }
+        return handle;
+      };
+      try {assert.equal(await reserveAutomaticDispatch({...input,printItemId:'new-root'}),true);}
+      finally {fs.open=realOpen;process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR=root;}
+      assert(synced.includes(root) && synced.includes(path.join(root,'created-parent')) && synced.includes(newRoot),
+        'new journal ancestors and the reservation directory must be synced');
+    }
     console.log('Connector dispatch journal concurrency and restart tests passed');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
