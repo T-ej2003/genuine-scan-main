@@ -132,6 +132,20 @@ USER node
 ENTRYPOINT ["node", "scripts/production-full-rls-green-executor.mjs"]
 CMD []
 
+FROM docker.io/library/node@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS d15-catalog-readback
+WORKDIR /app
+ARG RELEASE_GIT_SHA=unknown
+ENV RELEASE_GIT_SHA=${RELEASE_GIT_SHA}
+ENV D15_EXECUTOR_SOURCE_SHA=${RELEASE_GIT_SHA}
+LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA}
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+COPY --chown=node:node scripts/aws/d15-catalog-readback-contract.mjs scripts/aws/d15-catalog-readback-runtime.mjs scripts/aws/read-production-printing-catalog.sql ./scripts/aws/
+COPY --chown=node:node scripts/aws/keys/mscqr-production-rls-approval-public.pub scripts/aws/keys/eu-west-2-rds-ca.crt ./scripts/aws/keys/
+USER node
+ENTRYPOINT ["node", "/app/scripts/aws/d15-catalog-readback-runtime.mjs"]
+CMD []
+
 FROM runtime AS production-rls-canary
 
 ARG GIT_SHA=unknown
