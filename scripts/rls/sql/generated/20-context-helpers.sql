@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217'
+    AND source_contract_sha256='0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11149,6 +11149,9 @@ BEGIN
       WHERE (p_job_id IS NULL OR j.id=p_job_id) AND j."printMode"=mode_value
         AND j.status IN ('PENDING','SENT')
         AND j."printerId" IN (SELECT p.id FROM public."Printer" p WHERE p."deliveryMode"='DIRECT' AND p."isActive" AND p."connectionType"=mode_value::text::public."PrinterConnectionType")
+        AND NOT EXISTS(SELECT 1 FROM public."PrintJob" pending_job JOIN public."PrintSession" pending_session ON pending_session."printJobId"=pending_job.id
+          JOIN public."PrintItem" pending_item ON pending_item."printSessionId"=pending_session.id
+          WHERE pending_job."printerId"=j."printerId" AND pending_item.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
         AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
           WHERE ps."printJobId"=j.id AND pi.state='RESERVED'
