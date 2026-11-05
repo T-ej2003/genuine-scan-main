@@ -1053,7 +1053,8 @@ async function main() {
     await postMaintenance(null,{action:'inventory'},401);
     await postMaintenance('outsider',{action:'inventory'},403);
     const snapshot=(await postMaintenance('maker',{action:'inventory'},200)).data;
-    assert(snapshot.inventory.items.length>0,'inventory must see real FORCE-RLS protected work');
+    assert(snapshot.inventory.settledHistory.items>0,'inventory summary must see real FORCE-RLS protected history');
+    assert.equal(snapshot.inventory.items.length,0,'the previously confirmed items are settled, not unresolved work');
     const binding={printerId:ids.printer,registrationId:ids.registration,tenantId:ids.orgA,manufacturerId:ids.maker,
       agentId:'printing-agent',deviceFingerprint:'printing-device',publicKeySha256:hash(signingPublicKey),fenceRequestId:snapshot.requestId,attemptId:randomUUID(),
       statePath:'C:\\isolated-fixture\\.authenticqr\\local-print-agent-state.json',sourceVersion:'2026.6.26',targetVersion:'2026.10.29.1',protocolVersion:'local-agent-direct-v2',...Object.fromEntries(['sourceSha256','targetSha256','installerSha256','stateSha256','stateDiscoverySha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256'].map(field=>[field,hash(field)]))};
@@ -1064,7 +1065,8 @@ async function main() {
       isolationEvidence:[{kind:'dispatch-isolation',sha256:hash('isolated'),reference:'disposable-environment'},{kind:'connector-work-inventory',sha256:hash('inventory'),reference:'simulated-transport'}],reconciliations};
     const signedEvidence=value=>{const statement=JSON.stringify(value);return {statement,signature:require('crypto').sign(null,Buffer.from(statement),authority.privateKey).toString('base64')};};
     await postMaintenance('maker',{action:'authorize',evidence:{...signedEvidence(statement),signature:'AAAA'}},409);
-    await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,reconciliations:[]})},409);
+    // Empty reconciliation is valid for this now-settled workset. The history
+    // fixture below requires every entry for a real three-item unresolved set.
     await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,binding:{...binding,tenantId:ids.orgB}})},409);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
     let token=authorityResult.data.token;

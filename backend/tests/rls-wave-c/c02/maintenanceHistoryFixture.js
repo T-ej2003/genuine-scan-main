@@ -7,7 +7,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   const call=(body,expected)=>postMaintenance('maker',body,expected,printer);
   const clone=(table,template,changes)=>`INSERT INTO public."${table}" SELECT (jsonb_populate_record(NULL::public."${table}",to_jsonb(t)||'${JSON.stringify(changes)}'::jsonb)).* FROM public."${table}" t WHERE id='${template}';`;
   psql(admin,clone('PrinterRegistration',ids.registration,{id:registration,deviceFingerprint:device,agentId:agent})+
-    clone('Printer',ids.printer,{id:printer,printerRegistrationId:registration,deviceFingerprint:device,agentId:agent,nativePrinterId:'history-fixture-native'})+
+    clone('Printer',ids.printer,{id:printer,printerRegistrationId:registration,deviceFingerprint:device,agentId:agent,nativePrinterId:'history-fixture-native',metadata:{}})+
     clone('PrintJob',templateJobId,{id:job,jobNumber:`H-${job}`,printerId:printer,status:'SENT',confirmedAt:null,completedAt:null})+
     clone('PrintSession',psql(admin,`SELECT id FROM public."PrintSession" WHERE "printJobId"='${templateJobId}'`),{id:session,printJobId:job,printerId:printer,printerRegistrationId:registration,status:'ACTIVE',confirmedItems:0,totalItems:3})+
     clone('PrintJob',job,{id:historyJob,jobNumber:`H-${historyJob}`,status:'CONFIRMED'})+
@@ -43,6 +43,9 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   assert.equal(snapshot.inventory.settledHistory.items,100000);
   assert.deepEqual(snapshot.inventory.items.map(i=>i.id).sort(),[first,second,third].sort());
   assert.deepEqual(snapshot.inventory.jobs.map(j=>j.id),[job],'settled jobs must not create an unbounded JSON inventory');
+  psql(admin,`UPDATE public."Printer" SET metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('pendingLocalAgentTestLabel',jsonb_build_object('testJobId','${randomUUID()}','recovery',repeat('x',1000001))) WHERE id='${printer}'`);
+  assert.equal((await call({action:'inventory'},409)).code,'MAINTENANCE_WORKSET_TOO_LARGE','diagnostic evidence is part of the same inventory byte bound');
+  psql(admin,`UPDATE public."Printer" SET metadata=metadata-'pendingLocalAgentTestLabel' WHERE id='${printer}'`);
   const binding={...baseBinding,printerId:printer,registrationId:registration,agentId:agent,deviceFingerprint:device,fenceRequestId:snapshot.requestId,attemptId:randomUUID()};
   const reconciliations=snapshot.inventory.items.map(i=>({itemId:i.id,outcome:'VOID_NO_REPLAY',reference:'independently-verified-synthetic-isolation'}));
   const statement={...baseStatement,binding,workDigest:snapshot.workDigest,verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+600000).toISOString(),reconciliations};

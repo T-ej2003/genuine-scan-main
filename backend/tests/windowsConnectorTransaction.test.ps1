@@ -52,10 +52,11 @@ function Start-MscqrVerifiedRuntime {
   param($Wrapper)
   if($script:injection -eq 'start' -and [IO.File]::ReadAllText((Join-Path ([IO.Path]::GetDirectoryName($Wrapper)) 'mscqr-local-print-agent.exe')).StartsWith('replacement')) {throw 'fixture replacement startup failed'}
   $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' }
+  if($script:injection -eq 'partial-unverified') {return 10}
 }
 function Wait-MscqrRuntime {
   param($Journal)
-  if ($script:injection -in @('verify','restore-verify','legacy-rollback') -and $Journal.expectedVersion -ne '2026.6.26') { throw 'fixture replacement health failure' }
+  if ($script:injection -in @('verify','restore-verify','legacy-rollback','partial-unverified') -and $Journal.expectedVersion -ne '2026.6.26') { throw 'fixture replacement health failure (partial initialization is not verification)' }
   if ($script:injection -eq 'restore-verify') { throw 'fixture restoration health failure' }
   if ($script:processes -ne 1) { throw 'fixture cardinality failure' }
   return [pscustomobject]@{protocolVersion='1'}
@@ -64,7 +65,7 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','stop','start','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','stop','start','locked','locked-helper','journal-full','verify','partial-unverified','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'

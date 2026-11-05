@@ -958,14 +958,14 @@ BEGIN
           JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
           WHERE ps."printerId"=ANY(maintenance_printers) AND pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL)))
         INTO maintenance_inventory;
+      maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
+        'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
+          FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
       -- LIMIT is a detection bound, never a truncated authorizable inventory.
       IF jsonb_array_length(maintenance_inventory->'items')>512 OR octet_length(maintenance_inventory::text)>1000000
       THEN RAISE EXCEPTION 'MAINTENANCE_WORKSET_TOO_LARGE' USING ERRCODE='54000',
         HINT='Keep dispatch fenced. Reconcile accepted work through its authenticated confirmation lifecycle. Do not split evidence, discard records or reset uncertain items; larger unresolved sets require a separately governed bounded reconciliation protocol.';
       END IF;
-      maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
-        'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
-          FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
       IF p_operation='MAINTENANCE_INVENTORY' THEN
         RETURN maintenance_snapshot||jsonb_build_object('inventory',maintenance_inventory,
           'workDigest',encode(sha256(convert_to(maintenance_inventory::text,'UTF8')),'hex'));
