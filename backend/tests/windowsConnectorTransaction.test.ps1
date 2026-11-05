@@ -80,6 +80,12 @@ try {
     [IO.File]::WriteAllText("$live\bin\start-local-print-agent.cmd",'fixture startup wrapper')
     [IO.File]::WriteAllText($startup,"$live\bin\start-local-print-agent.cmd")
     [IO.File]::WriteAllText($state,'{"agentId":"synthetic","deviceFingerprint":"synthetic-device","backendUrl":"https://isolated.example.invalid","selectedPrinterId":"synthetic-printer","unknownRecovery":{"uncertain":true}}')
+    # Elevated CI tokens default new file ownership to Administrators. Model
+    # the supported per-user installation explicitly, without relaxing runtime
+    # ownership validation to trust every administrator-owned state file.
+    $stateAcl=Get-Acl -LiteralPath $state
+    $stateAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+    Set-Acl -LiteralPath $state -AclObject $stateAcl
     [IO.File]::WriteAllText("$live\unknown-pending.json",'preserve uncertain evidence')
     $binding=[pscustomobject]@{ targetVersion='2026.10.29.1';sourceVersion='2026.6.26';attemptId=[guid]::NewGuid().ToString();agentId='synthetic';deviceFingerprint='synthetic-device';sourceSha256=(Get-FileHash $runtime).Hash;targetSha256=(Get-FileHash "$payload\bin\mscqr-local-print-agent.exe").Hash;installerSha256=(Get-FileHash $installer).Hash;stateSha256=(Get-FileHash $state).Hash;configurationSha256=(Get-FileHash "$live\agent.env").Hash;startupSha256=(Get-FileHash $startup).Hash;wrapperSha256=(Get-FileHash "$live\bin\start-local-print-agent.cmd").Hash }
     $binding | Add-Member payloadSha256 (Get-MscqrPayloadDigest $payload)

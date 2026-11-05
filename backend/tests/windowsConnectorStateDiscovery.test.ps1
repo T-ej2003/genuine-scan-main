@@ -23,6 +23,11 @@ try {
       $custom=Join-Path $profile 'custom.json';[IO.File]::WriteAllText($custom,'{"agentId":"synthetic"}')
       [IO.File]::WriteAllText("$live\agent.env","PRINT_AGENT_STATE_FILE=$custom")
     }
+    foreach($file in @($modern,$legacy,$(if($scenario -eq 'configured'){$custom})) | Where-Object {$_ -and (Test-Path -LiteralPath $_ -PathType Leaf)}) {
+      $acl=Get-Acl -LiteralPath $file
+      $acl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+      Set-Acl -LiteralPath $file -AclObject $acl
+    }
     $failed=$false;$found=$null
     try {$found=Resolve-MscqrUpgradeState $profile $live 'fixture'}catch{$failed=$true}
     if($scenario -in @('conflict','missing','corrupt-modern','corrupt-legacy')){if(-not $failed){throw "Accepted unsafe $scenario"}}
