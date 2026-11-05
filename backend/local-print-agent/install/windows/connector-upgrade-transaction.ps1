@@ -109,6 +109,8 @@ function Get-MscqrUninstallSnapshot([string]$Live) {
   if($matches.Count -ne 1 -or -not (Test-Path -LiteralPath $path)) {throw 'Expected exactly one owned uninstall entry.'}
   $key=Get-Item -LiteralPath $path
   if([IO.Path]::GetFullPath([string]$key.GetValue('InstallLocation')).TrimEnd('\') -ine $Live) {throw 'Uninstall registration ownership mismatch.'}
+  $uninstaller=Join-Path $Live 'unins000.exe'
+  if([string]$key.GetValue('UninstallString') -notin @($uninstaller,('"'+$uninstaller+'"'))) {throw 'Uninstall command does not target the canonical owned uninstaller.'}
   return @($key.GetValueNames() | ForEach-Object { [pscustomobject]@{name=$_;kind=$key.GetValueKind($_).ToString();value=$key.GetValue($_,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)} })
 }
 function Restore-MscqrUninstallSnapshot($Snapshot) {
@@ -157,9 +159,13 @@ function Invoke-MscqrMaintenance($Auth, [string]$Action, $Binding) {
   # or bearer authorization is written into the transaction journal or logs.
   $body = @{ action=$Action; token=$Auth.token; binding=$Binding } | ConvertTo-Json -Depth 20
   $headers = @{}
-  foreach ($property in $Auth.headers.PSObject.Properties) { $headers[$property.Name] = [string]$property.Value }
+  foreach ($property in $Auth.headers.PSObject.Properties) {
+    if($property.Name -notin @('Authorization','X-Database-Session-Capability','X-CSRF-Token','Cookie')) {throw 'Unexpected maintenance authentication header.'}
+    $headers[$property.Name] = [string]$property.Value
+  }
   $reply = Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -ContentType 'application/json' -Body $body -TimeoutSec 20 -MaximumRedirection 0
-  if (-not $reply.success -or -not $reply.data.authorized -or -not $reply.data.dispatchFenced -or
+  if ($reply.success -isnot [bool] -or -not $reply.success -or $reply.data.authorized -isnot [bool] -or -not $reply.data.authorized -or
+      $reply.data.dispatchFenced -isnot [bool] -or -not $reply.data.dispatchFenced -or
       @($reply.data.binding.PSObject.Properties).Count -ne @($Binding.PSObject.Properties).Count) { throw 'Backend maintenance authorization was not verified.' }
   foreach ($property in $Binding.PSObject.Properties) {
     if ($reply.data.binding.($property.Name) -cne $property.Value) { throw 'Backend maintenance binding mismatch.' }
@@ -344,6 +350,7 @@ function Invoke-MscqrUpgradeTransaction {
       $status = Assert-MscqrRuntime $runtime $oldVersion $StateFile $StartupFile $startupHash
       if($status.protocolVersion -cne $binding.protocolVersion) {throw 'Authorized connector protocol mismatch.'}
       $uninstall = Get-MscqrUninstallSnapshot $live
+      if(($uninstall | Where-Object name -eq 'DisplayVersion').value -cne $binding.sourceVersion) {throw 'Previous uninstall version mismatch.'}
       if((Get-MscqrUninstallDigest $uninstall) -cne $binding.uninstallRegistrationSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
@@ -415,7 +422,8 @@ function Invoke-MscqrUpgradeTransaction {
     } elseif ($Phase -eq 'Commit') {
       if ($journal.phase -cne 'VERIFIED') { throw 'Unverified upgrade cannot commit.' }
       Wait-MscqrRuntime $journal | Out-Null
-      Get-MscqrUninstallSnapshot $live | Out-Null
+      $uninstall=Get-MscqrUninstallSnapshot $live
+      if(($uninstall | Where-Object name -eq 'DisplayVersion').value -cne $journal.binding.targetVersion) {throw 'Replacement uninstall registration version mismatch.'}
       Assert-MscqrSignedFile (Join-Path $live 'unins000.exe') (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe') -Algorithm SHA256).Hash
       Write-MscqrTransaction $journalPath $journal 'COMMITTED'
     }

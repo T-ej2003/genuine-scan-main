@@ -23,7 +23,11 @@ function Get-MscqrRuntimeVersion { param($Runtime) return '2026.6.26' }
 function Assert-MscqrExistingIdentity {param($Candidate,$StateFile,$Binding)}
 function Get-ScheduledTask { return @() }
 function Get-CimInstance { param($ClassName) return @() }
-function Get-MscqrUninstallSnapshot { param($Live) return @([pscustomobject]@{name='fixture';value='fixture';kind='String'}) }
+function Get-MscqrUninstallSnapshot {
+  param($Live)
+  $version=if([IO.File]::ReadAllText("$Live\bin\mscqr-local-print-agent.exe").StartsWith('replacement')) {'2026.10.29.1'} else {'2026.6.26'}
+  return @([pscustomobject]@{name='DisplayVersion';value=$version;kind='String'},[pscustomobject]@{name='fixture';value='fixture';kind='String'})
+}
 function Restore-MscqrUninstallSnapshot { param($Snapshot) }
 function Invoke-MscqrMaintenance {
   param($Auth,$Action,$Binding)
@@ -152,6 +156,38 @@ try {
     if($scenario -ne 'success' -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
     if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence' -or [IO.File]::ReadAllText("$journal.next") -ne 'unrelated recovery evidence') {throw 'identity, pending evidence or cardinality lost'}
     Write-Host "PASS transaction $scenario (external boundaries simulated)"
+  }
+  # Execute the actual pinned HTTPS client contract with only its transport
+  # mocked. Never permit a local header to redirect the authenticated authority,
+  # or truthy JSON strings to stand in for verified Boolean results.
+  $parseErrors=$null
+  $ast=[Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1",[ref]$null,[ref]$parseErrors)
+  if($parseErrors){throw 'Production transaction script did not parse.'}
+  $wire=$ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-MscqrMaintenance'},$true)
+  Invoke-Expression $wire.Extent.Text.Replace('function Invoke-MscqrMaintenance','function Invoke-MscqrMaintenanceWireFixture').Replace('__MSCQR_MAINTENANCE_API_ORIGIN__','https://isolated.example.invalid')
+  function Invoke-RestMethod {param($Uri,$Method,$Headers,$ContentType,$Body,$TimeoutSec,$MaximumRedirection) $script:wireCalls++;return $script:wireReply}
+  $wireBinding=[pscustomobject]@{printerId='synthetic';tenantId='synthetic-tenant'}
+  $wireAuth=[pscustomobject]@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance';token='synthetic';headers=[pscustomobject]@{Authorization='Bearer synthetic'}}
+  $script:wireCalls=0
+  $script:wireReply=[pscustomobject]@{success=$true;data=[pscustomobject]@{authorized=$true;dispatchFenced=$true;binding=$wireBinding}}
+  Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding
+  foreach($attack in @('host-header','wrong-origin','string-authorization','unfenced','wrong-tenant')) {
+    $callsBefore=$script:wireCalls
+    $wireAuth.headers=[pscustomobject]@{Authorization='Bearer synthetic'}
+    $wireAuth.endpoint='https://isolated.example.invalid/api/manufacturer/printers/synthetic/maintenance'
+    $script:wireReply.data.authorized=$true;$script:wireReply.data.dispatchFenced=$true;$script:wireReply.data.binding=$wireBinding
+    switch($attack) {
+      'host-header' {$wireAuth.headers | Add-Member Host 'attacker.example.invalid'}
+      'wrong-origin' {$wireAuth.endpoint='https://attacker.example.invalid/api/manufacturer/printers/synthetic/maintenance'}
+      'string-authorization' {$script:wireReply.data.authorized='true'}
+      'unfenced' {$script:wireReply.data.dispatchFenced=$false}
+      'wrong-tenant' {$script:wireReply.data.binding=[pscustomobject]@{printerId='synthetic';tenantId='wrong'}}
+    }
+    $failed=$false
+    try {Invoke-MscqrMaintenanceWireFixture $wireAuth 'verify' $wireBinding}catch{$failed=$true}
+    if(-not $failed){throw "Maintenance wire attack accepted: $attack"}
+    if($attack -in @('host-header','wrong-origin') -and $script:wireCalls -ne $callsBefore){throw 'Invalid authority reached the transport'}
+    Write-Host "PASS maintenance client $attack rejection (transport simulated)"
   }
 } finally {
   $resolved=[IO.Path]::GetFullPath($fixture)

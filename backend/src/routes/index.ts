@@ -1,3 +1,4 @@
+import { requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
@@ -208,7 +209,6 @@ import {
   testPrinter,
   testPrinterLabel,
   updateNetworkPrinter,
-  requestConnectorMaintenance,
 } from "../controllers/printerController";
 import { relinkLocalAgentPrinter } from "../controllers/printerRelinkController";
 import {
