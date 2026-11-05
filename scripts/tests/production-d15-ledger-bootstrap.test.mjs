@@ -85,7 +85,7 @@ test("authenticated source copy contains the real ledger runtime dependency clos
     git(["init", "--quiet"]); git(["config", "user.email", "test@example.invalid"]); git(["config", "user.name", "test"]);
     fs.mkdirSync(path.join(repo, ".git/objects/info"), { recursive: true });
     const objects = execFileSync("/usr/bin/git", ["-C", sourceRoot, "rev-parse", "--git-path", "objects"], { encoding: "utf8" }).trim();
-    fs.writeFileSync(path.join(repo, ".git/objects/info/alternates"), `${objects}\n`);
+    fs.writeFileSync(path.join(repo, ".git/objects/info/alternates"), `${fs.realpathSync(path.resolve(sourceRoot, objects))}\n`);
     git(["update-ref", "refs/heads/main", "d15b79e4779d64be4c6c7ec905caea1e91d410f2"]);
     git(["symbolic-ref", "HEAD", "refs/heads/main"]);
     git(["read-tree", "d15b79e4779d64be4c6c7ec905caea1e91d410f2"]);
