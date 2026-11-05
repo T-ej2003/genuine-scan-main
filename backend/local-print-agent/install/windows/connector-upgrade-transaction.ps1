@@ -316,12 +316,25 @@ function Invoke-MscqrUpgradeTransaction {
       if (-not (Get-Content -LiteralPath $StartupFile -Raw).Contains($wrapper)) { throw 'Unrecognized startup ownership.' }
       # Only this known startup arrangement is supported. Unknown registrations
       # must be migrated separately; never delete or silently duplicate them.
-      if (@(Get-ScheduledTask -ErrorAction Stop | Where-Object { ($_.Actions.Execute -join ' ') -match 'mscqr|local-print-agent' }).Count -or
-          @(Get-CimInstance Win32_Service -ErrorAction Stop | Where-Object { $_.PathName -match 'mscqr|local-print-agent' }).Count) { throw 'Additional startup registration requires explicit migration.' }
+      $related='mscqr|local-print-agent|authenticqr|genuine.?scan'
+      if (@(Get-ScheduledTask -ErrorAction Stop | Where-Object { "$($_.TaskName) $($_.TaskPath) $($_.Actions.Execute -join ' ') $($_.Actions.Arguments -join ' ')" -match $related }).Count -or
+          @(Get-CimInstance Win32_Service -ErrorAction Stop | Where-Object { "$($_.Name) $($_.DisplayName) $($_.PathName)" -match $related }).Count) { throw 'Additional startup registration requires explicit migration.' }
       foreach ($key in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:\Software\Microsoft\Windows\CurrentVersion\Run')) {
         if (Test-Path -LiteralPath $key) {
-          if (@((Get-ItemProperty -LiteralPath $key).PSObject.Properties | Where-Object { [string]$_.Value -match 'mscqr|local-print-agent' }).Count) { throw 'Additional Run registration requires explicit migration.' }
+          if (@((Get-ItemProperty -LiteralPath $key).PSObject.Properties | Where-Object { "$($_.Name) $($_.Value)" -match $related }).Count) { throw 'Additional Run registration requires explicit migration.' }
         }
+      }
+      foreach($entry in Get-ChildItem -LiteralPath ([IO.Path]::GetDirectoryName($StartupFile)) -File -Force) {
+        if($entry.FullName -ieq $StartupFile) {continue}
+        $description=$entry.Name
+        if($entry.Extension -in @('.vbs','.cmd','.bat','.ps1','.lnk')) {
+          Assert-MscqrPlainPath $entry.FullName
+          if($entry.Extension -eq '.lnk') {
+            $shortcut=(New-Object -ComObject WScript.Shell).CreateShortcut($entry.FullName)
+            $description+=" $($shortcut.TargetPath) $($shortcut.Arguments)"
+          } else {$description+=' '+[IO.File]::ReadAllText($entry.FullName)}
+        }
+        if($description -match $related) {throw 'Additional Startup folder entry requires verified migration; it has been preserved.'}
       }
       $drive = New-Object IO.DriveInfo([IO.Path]::GetPathRoot($live))
       if ($drive.AvailableFreeSpace -lt ((Get-Item -LiteralPath $runtime).Length + (Get-Item -LiteralPath $source).Length)*3 + 104857600) { throw 'Insufficient space for verified staging and rollback.' }
@@ -385,7 +398,18 @@ function Invoke-MscqrUpgradeTransaction {
         Write-MscqrTransaction $journalPath $journal 'VERIFIED'
       } catch {
         $failure = $_
-        try { Restore-MscqrTransaction $journal $journalPath } catch { throw "Upgrade failed; restoration is NOT verified. Keep dispatch fenced. $($_.Exception.Message)" }
+        try { Restore-MscqrTransaction $journal $journalPath } catch {
+          $restorationFailure=$_
+          # Journal persistence itself can fail (for example a full disk).
+          # Still stop a provably owned runtime; do not leave a replacement
+          # running merely because the failure state could not be written.
+          try {
+            $hash=(Get-FileHash -LiteralPath $journal.runtime -Algorithm SHA256).Hash
+            if($hash -notin @($journal.binding.sourceSha256,$journal.binding.targetSha256)) {throw 'Unrecognized executable after failed restoration.'}
+            Stop-MscqrVerifiedRuntime $journal.runtime $hash
+          } catch { throw "Upgrade and restoration failed; runtime shutdown is NOT verified. Keep dispatch fenced. $($_.Exception.Message)" }
+          throw "Upgrade failed; restoration is NOT verified and the owned runtime is stopped. Keep dispatch fenced. $($restorationFailure.Exception.Message)"
+        }
         throw "Upgrade failed; previous runtime restoration verified. Dispatch remains fenced. $($failure.Exception.Message)"
       }
     } elseif ($Phase -eq 'Commit') {

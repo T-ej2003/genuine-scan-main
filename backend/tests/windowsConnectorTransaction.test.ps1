@@ -1,5 +1,11 @@
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1"
+$realWriteTransaction=(Get-Command Write-MscqrTransaction).ScriptBlock
+function Write-MscqrTransaction {
+  param($Path,$Journal,$Phase)
+  if($script:injection -eq 'journal-full' -and $Phase -in @('ACTIVATED','ROLLBACK')) {throw 'fixture journal disk full'}
+  & $realWriteTransaction $Path $Journal $Phase
+}
 
 # Execute the production orchestration and real filesystem replacement/backup/
 # journal. Only external certificate, backend, process and health boundaries are
@@ -49,7 +55,7 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','authorization','stage','locked','locked-helper','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','authorization','stage','extra-startup','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
@@ -79,13 +85,14 @@ try {
     [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     $args=@{LiveDirectory=$live;Payload=$payload;Installer=$installer;AuthFile=$auth;Version=$binding.targetVersion;StateFile=$state;StartupFile=$startup}
     $failed=$false
+    if($scenario -eq 'extra-startup'){[IO.File]::WriteAllText("$case\unknown-legacy.vbs","$runtime")}
     $operationLock=$null
     if($scenario -eq 'concurrent') {
       Protect-MscqrDirectory "$case\connector-upgrade"
       $operationLock=[IO.File]::Open("$case\connector-upgrade\operation.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
     }
-    try { Invoke-MscqrUpgradeTransaction -Phase Prepare @args } catch { $failed=$true; if($scenario -notin @('authorization','stage','concurrent')){throw} } finally {if($operationLock){$operationLock.Dispose()}}
-    if($scenario -in @('authorization','stage','concurrent')) {
+    try { Invoke-MscqrUpgradeTransaction -Phase Prepare @args } catch { $failed=$true; if($scenario -notin @('authorization','stage','extra-startup','concurrent')){throw} } finally {if($operationLock){$operationLock.Dispose()}}
+    if($scenario -in @('authorization','stage','extra-startup','concurrent')) {
       if(-not $failed -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256 -or $script:processes -ne 1) {throw 'preflight mutated active installation'}
       if($scenario -eq 'stage'){Invoke-MscqrUpgradeTransaction -Phase Recover @args}
       Write-Host "PASS transaction $scenario refusal before live mutation"
@@ -125,7 +132,11 @@ try {
       if($scenario -eq 'locked') { $fileLock=[IO.File]::Open($runtime,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read) }
       if($scenario -eq 'locked-helper') { $fileLock=[IO.File]::Open("$live\Install Connector.cmd",[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read) }
       try { Invoke-MscqrUpgradeTransaction -Phase Activate @args } catch { $failed=$true } finally {if($fileLock){$fileLock.Dispose()}}
-      if($scenario -in @('locked','locked-helper')) {
+      if($scenario -eq 'journal-full') {
+        if(-not $failed -or $script:processes -ne 0){throw 'journal persistence failure left a runtime running'}
+        $script:injection='none'
+        Invoke-MscqrUpgradeTransaction -Phase Recover @args
+      } elseif($scenario -in @('locked','locked-helper')) {
         if(-not $failed){throw 'locked executable unexpectedly activated'}
         Invoke-MscqrUpgradeTransaction -Phase Recover @args
       } elseif($scenario -eq 'restore-verify') {
