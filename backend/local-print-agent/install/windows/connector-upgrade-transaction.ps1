@@ -84,6 +84,9 @@ function Assert-MscqrBackupBindings($Journal) {
   $live=[IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Journal.runtime))
   $expected.uninstaller=@((Join-Path $live 'unins000.exe'),$Journal.binding.uninstallerSha256)
   $expected.uninstallData=@((Join-Path $live 'unins000.dat'),$Journal.binding.uninstallDataSha256)
+  $names=@($expected.Keys)+@((Get-MscqrSetupFiles).Keys)
+  if($Journal.records.Count -ne $names.Count -or @($Journal.records.name | Select-Object -Unique).Count -ne $names.Count -or
+      @($Journal.records | Where-Object {$_.name -notin $names}).Count) {throw 'Unexpected or duplicate backup manifest records.'}
   if((Get-MscqrUninstallDigest $Journal.uninstall) -cne $Journal.binding.uninstallRegistrationSha256) {throw 'Uninstall backup differs from authenticated binding.'}
   foreach($name in $expected.Keys) {
     $records=@($Journal.records | Where-Object {$_.name -ceq $name})
@@ -138,8 +141,10 @@ function Write-MscqrTransaction([string]$Path, $Journal, [string]$Phase) {
   $Journal.phase = $Phase
   $Journal.updatedAt = [DateTime]::UtcNow.ToString('o')
   $bytes = [Text.Encoding]::UTF8.GetBytes(($Journal | ConvertTo-Json -Depth 30))
-  $temp = "$Path.next"
-  $stream = New-Object IO.FileStream($temp,[IO.FileMode]::Create,[IO.FileAccess]::Write,[IO.FileShare]::None)
+  Assert-MscqrPlainPath $Path
+  Assert-MscqrPlainPath "$Path.previous"
+  $temp = "$Path.$([guid]::NewGuid().ToString('N')).next"
+  $stream = New-Object IO.FileStream($temp,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
   try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
   if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp,$Path,"$Path.previous") } else { [IO.File]::Move($temp,$Path) }
 }
@@ -217,6 +222,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   Assert-MscqrSignedFile (Join-Path ([IO.Path]::GetDirectoryName($JournalPath)) 'backup\runtime.bak') $Journal.binding.sourceSha256
   Stop-MscqrVerifiedRuntime $Journal.runtime $liveHash
   Restore-MscqrUpgradeBackup -Records $Journal.records
+  Assert-MscqrSignedFile $Journal.runtime $Journal.binding.sourceSha256
   Restore-MscqrUninstallSnapshot $Journal.uninstall
   Write-MscqrTransaction $JournalPath $Journal 'RESTORED'
   $Journal.expectedVersion = $Journal.binding.sourceVersion
@@ -248,6 +254,7 @@ function Invoke-MscqrUpgradeTransaction {
   $lock = [IO.File]::Open((Join-Path $root 'operation.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
   try {
     $journalPath = Join-Path $root 'transaction.json'
+    Assert-MscqrPlainPath $journalPath
     if (Test-Path -LiteralPath $journalPath) {
       $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
@@ -340,7 +347,7 @@ function Invoke-MscqrUpgradeTransaction {
       $extras = [ordered]@{ wrapper=$wrapper; uninstaller=(Join-Path $live 'unins000.exe'); uninstallData=(Join-Path $live 'unins000.dat') }
       foreach($name in (Get-MscqrSetupFiles).Keys) {$extras[$name]=Join-Path $live (Get-MscqrSetupFiles)[$name]}
       $journal.records = @(New-MscqrUpgradeBackup -BackupDirectory (Join-Path $root 'backup') -RuntimeFile $runtime -RuntimeSha256 $binding.sourceSha256 -RuntimeSignerSubject (Get-AuthenticodeSignature -LiteralPath $runtime).SignerCertificate.Subject -EnvironmentFile $environmentFile -StateFile $StateFile -StartupFile $StartupFile -AdditionalFiles $extras)
-      if (@($journal.records | Where-Object { $_.name -in @('runtime','environment','state','startup','wrapper') }).Count -ne 5) { throw 'Required persistent backup is incomplete.' }
+      Assert-MscqrBackupBindings $journal
       Write-MscqrTransaction $journalPath $journal 'BACKED_UP'
       return
     }

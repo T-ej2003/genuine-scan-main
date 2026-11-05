@@ -49,7 +49,7 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','authorization','stage','locked','locked-helper','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','authorization','stage','locked','locked-helper','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
@@ -92,6 +92,7 @@ try {
       continue
     }
     $journal="$case\connector-upgrade\transaction.json"
+    [IO.File]::WriteAllText("$journal.next",'unrelated recovery evidence')
     if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'BACKED_UP') {throw 'real orchestration did not stage and back up'}
     if($scenario -in @('interrupted','interrupted-activated')) {
       # Persist the actual pre-replacement interruption state and execute the
@@ -100,9 +101,16 @@ try {
       Write-MscqrTransaction $journal $record 'STOPPED'; $script:processes=0
       if($scenario -eq 'interrupted-activated') {[IO.File]::Replace("$case\connector-upgrade\stage\mscqr-local-print-agent.exe",$runtime,"$case\connector-upgrade\crash-displaced.exe")}
       Invoke-MscqrUpgradeTransaction -Phase Recover @args
-    } elseif($scenario -in @('corrupt','tampered-manifest','changed-identity')) {
+    } elseif($scenario -in @('corrupt','tampered-manifest','duplicate-record','changed-identity')) {
       if($scenario -eq 'changed-identity') {[IO.File]::WriteAllText($state,'changed identity evidence')}
-      [IO.File]::WriteAllText("$case\connector-upgrade\backup\state.bak",'corrupt')
+      if($scenario -ne 'duplicate-record') {[IO.File]::WriteAllText("$case\connector-upgrade\backup\state.bak",'corrupt')}
+      if($scenario -eq 'duplicate-record') {
+        $record=Get-Content $journal -Raw|ConvertFrom-Json
+        $injected=($record.records | Where-Object name -eq 'runtime') | ConvertTo-Json | ConvertFrom-Json
+        $injected.name='injected'
+        $record.records=@($record.records)+@($injected)
+        Write-MscqrTransaction $journal $record 'BACKED_UP'
+      }
       if($scenario -eq 'tampered-manifest') {
         $record=Get-Content $journal -Raw|ConvertFrom-Json
         ($record.records | Where-Object name -eq 'state').sha256=(Get-FileHash "$case\connector-upgrade\backup\state.bak").Hash
@@ -131,7 +139,7 @@ try {
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
     if($scenario -ne 'success' -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
-    if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence') {throw 'identity, pending evidence or cardinality lost'}
+    if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence' -or [IO.File]::ReadAllText("$journal.next") -ne 'unrelated recovery evidence') {throw 'identity, pending evidence or cardinality lost'}
     Write-Host "PASS transaction $scenario (external boundaries simulated)"
   }
 } finally {
