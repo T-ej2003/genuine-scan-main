@@ -10,7 +10,7 @@ import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stag
 import { appOnlyVerifierNetwork } from "./production-app-only-policy.mjs";
 import { B01_PREREQUISITE } from "./production-b01-prerequisite-contract.mjs";
 import { collectCompleteRlsProbeLogEvents } from "./probe-production-rls-catalogue.mjs";
-import { createProductionAwsCommandRunner, createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
+import { createProductionAwsCommandRunner, createProductionGithubCommandRunner, productionAwsExecutable } from "./production-credential-source-contract.mjs";
 import { authenticateRootAttestationKey, createPinnedRootAttestationVerifier, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "./production-root-attestation-key.mjs";
 import { createRootAttestationKmsSigner } from "./production-root-attestation-signer.mjs";
 
@@ -32,7 +32,16 @@ const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const exact = (value, keys) => assert.deepEqual(Object.keys(value || {}).sort(), [...keys].sort());
 const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 const write = (file, value) => fs.writeFileSync(file, `${JSON.stringify(value)}\n`, { flag: "wx", mode: 0o600 });
-const aws = createProductionAwsCommandRunner({ credentialSource: "named-profile", profile: "default" });
+const taskArnPattern = /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/;
+export const ledgerStartedBy = (nonce) => { assert.match(nonce || "", /^[a-f0-9]{64}$/); return `d15-ledger-${nonce.slice(0, 24)}`; };
+export function createPinnedAwsExecutor({ exec = execFileSync, executable = productionAwsExecutable() } = {}) {
+  return (command, args, options) => { assert.equal(command, "aws"); return exec(executable, args, options); };
+}
+let awsRunner;
+const aws = (args) => {
+  awsRunner ??= createProductionAwsCommandRunner({ credentialSource: "named-profile", profile: "default", exec: createPinnedAwsExecutor() });
+  return awsRunner(args);
+};
 const awsJson = (args) => JSON.parse(aws([...args, "--output", "json", "--no-cli-pager"]));
 
 export function assertFixedLedgerDefinition(definition) {
@@ -82,7 +91,21 @@ export function assertLedgerAuthorization(value, { toolingSourceSha, now = Date.
   return b;
 }
 
-export function assertLedgerEvidence(value, repositoryRoot = root) {
+export function d15MigrationChecksums(gitRun = createPinnedGitRunner()) {
+  const files = gitRun(["ls-tree", "-r", "--name-only", LEDGER.sourceSha, "--", "backend/prisma/migrations"]).trim().split("\n")
+    .filter((file) => file.endsWith("/migration.sql"));
+  assert.equal(files.length, 57);
+  assert.equal(new Set(files).size, files.length);
+  const expected = new Map();
+  for (const file of files) {
+    assert.match(file, /^backend\/prisma\/migrations\/[A-Za-z0-9_-]{1,200}\/migration\.sql$/);
+    const name = file.split("/")[3];
+    expected.set(name, hash(gitRun(["show", `${LEDGER.sourceSha}:${file}`], { encoding: null })));
+  }
+  return expected;
+}
+
+export function assertLedgerEvidence(value, { gitRun = createPinnedGitRunner() } = {}) {
   exact(value, ["kind", "sourceSha", "database", "databaseRole", "sessionRole", "readOnly", "rows", "evidenceSha256"]);
   const { evidenceSha256, ...body } = value;
   assert.equal(hash(JSON.stringify(body)), evidenceSha256);
@@ -91,9 +114,7 @@ export function assertLedgerEvidence(value, repositoryRoot = root) {
   assert.equal(body.database, LEDGER.database);
   assert.equal(body.databaseRole, "mscqr_prd_rls_phase2_migration");
   assert.equal(body.sessionRole, "mscqr_prod_admin"); assert.equal(body.readOnly, true);
-  const dir = path.join(repositoryRoot, "backend/prisma/migrations");
-  const expected = new Map(fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory() && fs.existsSync(path.join(dir, entry.name, "migration.sql")))
-    .map((entry) => [entry.name, hash(fs.readFileSync(path.join(dir, entry.name, "migration.sql")))]));
+  const expected = d15MigrationChecksums(gitRun);
   assert.equal(expected.size, 57); assert.equal(body.rows?.length, expected.size);
   assert.equal(new Set(body.rows.map((row) => row.migration_name)).size, expected.size);
   for (const row of body.rows) {
@@ -140,13 +161,14 @@ export function assertLedgerReceipt(value, authorization, { toolingSourceSha, no
   const request = assertLedgerAuthorization(authorization, { toolingSourceSha, now, historical: true, verify });
   exact(value, ["body", "receiptSha256", "signatureBase64", "signingKeyAliasArn", "signingAlgorithm"]);
   const b = value.body;
-  exact(b, ["kind", "sourceSha", "toolingSourceSha", "runtimeSourceSha", "authorizationSha256", "nonce", "taskArn", "taskDefinitionArn", "createdAt", "startedAt", "stoppedAt", "database", "evidence", "logEventsSha256"]);
+  exact(b, ["kind", "sourceSha", "toolingSourceSha", "runtimeSourceSha", "authorizationSha256", "nonce", "startedBy", "taskArn", "taskDefinitionArn", "createdAt", "startedAt", "stoppedAt", "database", "evidence", "logEventsSha256"]);
   assert.equal(b.kind, "D15_FIXED_MIGRATION_LEDGER_READBACK_RECEIPT");
   assert.equal(b.sourceSha, LEDGER.sourceSha); assert.equal(b.toolingSourceSha, toolingSourceSha);
   assert.equal(b.runtimeSourceSha, LEDGER.runtimeSha); assert.equal(b.authorizationSha256, authorization.authorizationSha256);
   assert.equal(b.nonce, request.nonce); assert.equal(b.database, LEDGER.database);
+  assert.equal(b.startedBy, ledgerStartedBy(request.nonce));
   assert.equal(b.taskDefinitionArn, LEDGER.taskDefinitionArn);
-  assert.match(b.taskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+  assert.match(b.taskArn || "", taskArnPattern);
   assert.match(b.logEventsSha256 || "", /^[a-f0-9]{64}$/);
   const created = Date.parse(b.createdAt), started = Date.parse(b.startedAt), stopped = Date.parse(b.stoppedAt);
   assert.ok(created >= Date.parse(request.issuedAt) && created <= started && started <= stopped && stopped <= now && stopped < Date.parse(request.expiresAt));
@@ -159,9 +181,29 @@ export function assertLedgerReceipt(value, authorization, { toolingSourceSha, no
   return b;
 }
 
+export function assertLedgerIntent(intent, authorization) {
+  exact(intent, ["authorizationSha256", "nonce", "startedBy", "createdAt"]);
+  assert.equal(intent.authorizationSha256, authorization.authorizationSha256);
+  assert.equal(intent.nonce, authorization.body.nonce);
+  assert.equal(intent.startedBy, ledgerStartedBy(intent.nonce));
+  const at = Date.parse(intent.createdAt);
+  assert.ok(at >= Date.parse(authorization.body.issuedAt) && at < Date.parse(authorization.body.expiresAt));
+  return intent;
+}
+
+export function assertLedgerTaskRecord(value, authorization) {
+  exact(value, ["taskArn", "authorizationSha256"]);
+  assert.match(value.taskArn || "", taskArnPattern);
+  assert.equal(value.authorizationSha256, authorization.authorizationSha256);
+  return value.taskArn;
+}
+
 export function createPinnedGitRunner({ exec = execFileSync, env = process.env } = {}) {
-  return (args) => exec("/usr/bin/git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  return (args, { encoding = "utf8" } = {}) => {
+    assert.ok(encoding === "utf8" || encoding === null);
+    return exec("/usr/bin/git", ["-C", root, ...args], { encoding, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
     env: { HOME: env.HOME, PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" } });
+  };
 }
 
 export function assertProtectedToolingSource({ requireCurrentMain = true, gitRun = createPinnedGitRunner(), githubRun = createProductionGithubCommandRunner() } = {}) {
@@ -180,26 +222,62 @@ export function assertProtectedToolingSource({ requireCurrentMain = true, gitRun
   return sha;
 }
 
+export function assertRootIdentity(id) {
+  assert.equal(id?.Account, "368992683803"); assert.equal(id.Arn, "arn:aws:iam::368992683803:root");
+  return true;
+}
+
 function rootRunner() {
-  const id = awsJson(["sts", "get-caller-identity"]);
-  assert.equal(id.Account, "368992683803"); assert.equal(id.Arn, "arn:aws:iam::368992683803:root");
+  assertRootIdentity(awsJson(["sts", "get-caller-identity"]));
   authenticateRootAttestationKey({ run: aws });
   return aws;
 }
 
 function sign(body, label) {
   const digest = canonicalSha256(body);
-  const signer = createRootAttestationKmsSigner({ run: createProductionAwsCommandRunner({ credentialSource: "named-profile", profile: "default", singleAttemptKmsSign: true }) });
+  const signer = createRootAttestationKmsSigner({ run: createProductionAwsCommandRunner({ credentialSource: "named-profile",
+    profile: "default", singleAttemptKmsSign: true, exec: createPinnedAwsExecutor() }) });
   const signatureBase64 = signer({ digest: Buffer.from(digest, "hex") });
   assert.match(signatureBase64 || "", /^[A-Za-z0-9+/]+={0,2}$/);
   return { body, [label]: digest, signatureBase64, signingKeyAliasArn: ROOT_ATTESTATION_KEY_ALIAS_ARN,
     signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM };
 }
 
+async function completeLedgerReadback({ authorization, request, toolingSourceSha, receiptPath, taskArn, intent }) {
+  let task;
+  for (let i = 0; i < 60; i++) {
+    const result = awsJson(["ecs", "describe-tasks", "--cluster", LEDGER.cluster, "--tasks", taskArn]);
+    assert.deepEqual(result.failures || [], []); assert.equal(result.tasks?.length, 1);
+    task = result.tasks[0];
+    if (task.lastStatus === "STOPPED") break;
+    await sleep(5000);
+  }
+  assert.equal(task?.lastStatus, "STOPPED"); assert.equal(task.stopCode, "EssentialContainerExited");
+  assert.equal(task.taskArn, taskArn); assert.equal(task.startedBy, intent.startedBy);
+  assert.equal(task.taskDefinitionArn, LEDGER.taskDefinitionArn);
+  assert.equal(task.clusterArn, LEDGER.cluster); assert.equal(task.launchType, "FARGATE");
+  assert.equal(task.containers?.length, 1); assert.equal(task.containers[0].exitCode, 0);
+  const { createdAt, startedAt, stoppedAt } = task;
+  assert.ok(Date.parse(createdAt) >= Date.parse(intent.createdAt) && Date.parse(stoppedAt) < Date.parse(request.expiresAt));
+  const stream = `${LEDGER.logPrefix}/production-c02-session-prerequisite/${taskArn.split("/").at(-1)}`;
+  const pages = await waitForLedgerLogPages((token) => awsJson(["logs", "get-log-events", "--log-group-name", LEDGER.logGroup,
+    "--log-stream-name", stream, "--start-from-head", "--limit", "10000", ...(token ? ["--next-token", token] : [])]));
+  const { evidence, logEventsSha256 } = authenticateLedgerLogPages(pages, createdAt, stoppedAt);
+  const body = { kind: "D15_FIXED_MIGRATION_LEDGER_READBACK_RECEIPT", sourceSha: LEDGER.sourceSha, toolingSourceSha,
+    runtimeSourceSha: LEDGER.runtimeSha, authorizationSha256: authorization.authorizationSha256, nonce: request.nonce,
+    startedBy: intent.startedBy, taskArn, taskDefinitionArn: LEDGER.taskDefinitionArn, createdAt, startedAt, stoppedAt,
+    database: LEDGER.database, evidence, logEventsSha256 };
+  write(`${receiptPath}.sign-intent`, { receiptSha256: canonicalSha256(body), taskArn });
+  const receipt = sign(body, "receiptSha256");
+  assertLedgerReceipt(receipt, authorization, { toolingSourceSha });
+  write(receiptPath, receipt);
+  return { status: "VERIFIED", receiptSha256: receipt.receiptSha256 };
+}
+
 async function main(mode, authPath, receiptPath) {
-  assert.ok(["authorize", "run", "verify"].includes(mode));
+  assert.ok(["authorize", "run", "recover", "verify"].includes(mode));
   assert.ok(path.isAbsolute(authPath) && (!receiptPath || path.isAbsolute(receiptPath)));
-  const toolingSourceSha = assertProtectedToolingSource({ requireCurrentMain: mode !== "verify" });
+  const toolingSourceSha = assertProtectedToolingSource({ requireCurrentMain: mode === "authorize" || mode === "run" });
   if (mode === "authorize") {
     assert.equal(receiptPath, undefined);
     assert.equal(fs.existsSync(authPath), false, "Authorization destination already exists");
@@ -229,40 +307,28 @@ async function main(mode, authPath, receiptPath) {
   assertFixedLedgerDefinition(awsJson(["ecs", "describe-task-definition", "--task-definition", LEDGER.taskDefinitionArn]).taskDefinition);
   const intentPath = `${receiptPath}.intent`;
   assert.equal(fs.existsSync(receiptPath), false, "Receipt already exists");
-  write(intentPath, { authorizationSha256: authorization.authorizationSha256, nonce: request.nonce, createdAt: new Date().toISOString() });
+  if (mode === "recover") {
+    const intent = assertLedgerIntent(read(intentPath), authorization);
+    assert.equal(fs.existsSync(`${receiptPath}.sign-intent`), false, "KMS receipt signing already attempted; inspect audit before retry");
+    assert.ok(fs.existsSync(`${receiptPath}.task`), "Task identity missing; reconcile RunTask via CloudTrail before any new authorization");
+    const taskArn = assertLedgerTaskRecord(read(`${receiptPath}.task`), authorization);
+    return completeLedgerReadback({ authorization, request, toolingSourceSha, receiptPath, taskArn, intent });
+  }
+  const intent = { authorizationSha256: authorization.authorizationSha256, nonce: request.nonce,
+    startedBy: ledgerStartedBy(request.nonce), createdAt: new Date().toISOString() };
+  assertLedgerIntent(intent, authorization);
+  for (const file of [intentPath, `${receiptPath}.task`, `${receiptPath}.sign-intent`])
+    assert.equal(fs.existsSync(file), false, "Existing execution evidence requires read-only recovery");
+  write(intentPath, intent);
   const launch = { cluster: LEDGER.cluster, taskDefinition: LEDGER.taskDefinitionArn, launchType: "FARGATE", count: 1,
-    enableExecuteCommand: false, clientToken: authorization.authorizationSha256, networkConfiguration: appOnlyVerifierNetwork() };
+    enableExecuteCommand: false, clientToken: authorization.authorizationSha256, startedBy: intent.startedBy,
+    networkConfiguration: appOnlyVerifierNetwork() };
   const response = awsJson(["ecs", "run-task", "--cli-input-json", JSON.stringify(launch)]);
   assert.deepEqual(response.failures || [], []); assert.equal(response.tasks?.length, 1);
   const taskArn = response.tasks[0].taskArn;
-  assert.match(taskArn || "", /^arn:aws:ecs:eu-west-2:368992683803:task\/mscqr-prod-euw2-main\/[a-f0-9]{32}$/);
+  assert.match(taskArn || "", taskArnPattern);
   write(`${receiptPath}.task`, { taskArn, authorizationSha256: authorization.authorizationSha256 });
-  let task;
-  for (let i = 0; i < 60; i++) {
-    const result = awsJson(["ecs", "describe-tasks", "--cluster", LEDGER.cluster, "--tasks", taskArn]);
-    assert.deepEqual(result.failures || [], []); assert.equal(result.tasks?.length, 1);
-    task = result.tasks[0];
-    if (task.lastStatus === "STOPPED") break;
-    await sleep(5000);
-  }
-  assert.equal(task?.lastStatus, "STOPPED"); assert.equal(task.stopCode, "EssentialContainerExited");
-  assert.equal(task.taskDefinitionArn, LEDGER.taskDefinitionArn);
-  assert.equal(task.clusterArn, LEDGER.cluster); assert.equal(task.launchType, "FARGATE");
-  assert.equal(task.containers?.length, 1); assert.equal(task.containers[0].exitCode, 0);
-  const { createdAt, startedAt, stoppedAt } = task;
-  assert.ok(Date.parse(createdAt) >= Date.parse(request.issuedAt) && Date.parse(stoppedAt) < Date.parse(request.expiresAt));
-  const stream = `${LEDGER.logPrefix}/production-c02-session-prerequisite/${taskArn.split("/").at(-1)}`;
-  const pages = await waitForLedgerLogPages((token) => awsJson(["logs", "get-log-events", "--log-group-name", LEDGER.logGroup,
-    "--log-stream-name", stream, "--start-from-head", "--limit", "10000", ...(token ? ["--next-token", token] : [])]));
-  const { evidence, logEventsSha256 } = authenticateLedgerLogPages(pages, createdAt, stoppedAt);
-  const body = { kind: "D15_FIXED_MIGRATION_LEDGER_READBACK_RECEIPT", sourceSha: LEDGER.sourceSha, toolingSourceSha,
-    runtimeSourceSha: LEDGER.runtimeSha, authorizationSha256: authorization.authorizationSha256, nonce: request.nonce,
-    taskArn, taskDefinitionArn: LEDGER.taskDefinitionArn, createdAt, startedAt, stoppedAt, database: LEDGER.database,
-    evidence, logEventsSha256 };
-  const receipt = sign(body, "receiptSha256");
-  assertLedgerReceipt(receipt, authorization, { toolingSourceSha });
-  write(receiptPath, receipt);
-  return { status: "VERIFIED", receiptSha256: receipt.receiptSha256 };
+  return completeLedgerReadback({ authorization, request, toolingSourceSha, receiptPath, taskArn, intent });
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

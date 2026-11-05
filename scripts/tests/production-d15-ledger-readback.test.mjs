@@ -1,14 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { LEDGER, assertLedgerAuthorization, assertLedgerEvidence, assertLedgerReceipt, assertFixedLedgerDefinition, authenticateLedgerLogPages,
   assertProtectedToolingSource, createPinnedGitRunner, waitForLedgerLogPages } from "../aws/production-d15-ledger-readback.mjs";
+import { createPinnedAwsExecutor, d15MigrationChecksums, assertRootIdentity, assertLedgerIntent, assertLedgerTaskRecord, ledgerStartedBy } from "../aws/production-d15-ledger-readback.mjs";
 import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
-import { createProductionGithubCommandRunner, productionGithubExecutable } from "../aws/production-credential-source-contract.mjs";
+import { createProductionGithubCommandRunner, productionGithubExecutable, productionAwsExecutable } from "../aws/production-credential-source-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const toolingSourceSha = "a".repeat(40);
@@ -22,15 +21,14 @@ const authorization = () => sign({ kind: "D15_FIXED_MIGRATION_LEDGER_READBACK_AU
   imageDigest: LEDGER.imageDigest, commandSha256: LEDGER.commandSha256, nonce: "b".repeat(64), issuedAt,
   expiresAt: "2026-11-05T20:15:00.000Z" }, "authorizationSha256");
 const evidence = () => {
-  const migrations = path.join(root, "backend/prisma/migrations");
-  const rows = fs.readdirSync(migrations, { withFileTypes: true }).filter((entry) => entry.isDirectory() && fs.existsSync(path.join(migrations, entry.name, "migration.sql")))
-    .map((entry) => ({ migration_name: entry.name, checksum: crypto.createHash("sha256").update(fs.readFileSync(path.join(migrations, entry.name, "migration.sql"))).digest("hex"), finished: true, rolled_back: false }));
+  const rows = [...d15MigrationChecksums()].map(([migration_name, checksum]) => ({ migration_name, checksum, finished: true, rolled_back: false }));
   const body = { kind: "PRODUCTION_MIGRATION_LEDGER_READ_ONLY", sourceSha: LEDGER.runtimeSha, database: LEDGER.database,
     databaseRole: "mscqr_prd_rls_phase2_migration", sessionRole: "mscqr_prod_admin", readOnly: true, rows };
   return { ...body, evidenceSha256: crypto.createHash("sha256").update(JSON.stringify(body)).digest("hex") };
 };
 const receipt = (auth = authorization()) => sign({ kind: "D15_FIXED_MIGRATION_LEDGER_READBACK_RECEIPT", sourceSha: LEDGER.sourceSha,
   toolingSourceSha, runtimeSourceSha: LEDGER.runtimeSha, authorizationSha256: auth.authorizationSha256, nonce: auth.body.nonce,
+  startedBy: ledgerStartedBy(auth.body.nonce),
   taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "c".repeat(32),
   taskDefinitionArn: LEDGER.taskDefinitionArn, createdAt: "2026-11-05T20:00:10.000Z", startedAt: "2026-11-05T20:00:20.000Z",
   stoppedAt: "2026-11-05T20:00:30.000Z", database: LEDGER.database, evidence: evidence(), logEventsSha256: "d".repeat(64) }, "receiptSha256");
@@ -64,6 +62,7 @@ test("receipt rejects replay against a fresh request, forged signature, missing 
   const replay = changed(a, (x) => { x.body.nonce = "e".repeat(64); }, "authorizationSha256");
   assert.throws(() => checkReceipt(r, replay), "Receipt must be bound to the exact request and nonce");
   assert.throws(() => checkReceipt({ ...r, signatureBase64: Buffer.from("forgery").toString("base64") }, a));
+  assert.throws(() => assertLedgerReceipt(r, a, { toolingSourceSha, now, verify: () => false }), "Failed KMS verification");
   assert.throws(() => checkReceipt(changed(r, (x) => { delete x.body.logEventsSha256; }, "receiptSha256"), a));
   assert.throws(() => checkReceipt(changed(r, (x) => { x.body.evidence.rows[0].checksum = "0".repeat(64); }, "receiptSha256"), a));
   assert.throws(() => checkReceipt(changed(r, (x) => { x.body.createdAt = "2026-11-05T19:59:59.000Z"; }, "receiptSha256"), a));
@@ -71,7 +70,8 @@ test("receipt rejects replay against a fresh request, forged signature, missing 
 
 test("ledger evidence fails closed for altered migration state and incomplete output", () => {
   const e = evidence(); assert.equal(assertLedgerEvidence(e).rows.length, 57);
-  for (const mutate of [(x) => { x.rows.pop(); }, (x) => { x.rows[0].finished = false; },
+  for (const mutate of [(x) => { x.rows.pop(); }, (x) => { x.rows.push({ migration_name: "20990101000000_unapproved", checksum: "0".repeat(64), finished: true, rolled_back: false }); },
+    (x) => { x.rows[0].finished = false; },
     (x) => { x.rows[0].checksum = "0".repeat(64); }, (x) => { x.sourceSha = LEDGER.sourceSha; }]) {
     const x = structuredClone(e); mutate(x);
     x.evidenceSha256 = crypto.createHash("sha256").update(JSON.stringify(Object.fromEntries(Object.entries(x).filter(([k]) => k !== "evidenceSha256")))).digest("hex");
@@ -142,4 +142,46 @@ test("bounded log polling handles missing streams, empty pages, delay, and timeo
     { wait: async () => {}, attempts: 2 }), /AccessDenied/);
   assert.throws(() => authenticateLedgerLogPages([{ requestToken: undefined, nextForwardToken: "t", events: [event] }],
     "2026-11-05T20:00:10.000Z", "2026-11-05T20:00:30.000Z"));
+});
+
+test("root AWS runner pins the safelisted executable and rejects a shadowed PATH", () => {
+  let command, options;
+  createPinnedAwsExecutor({ executable: "/usr/bin/aws", exec: (file, _args, runtime) => { command = file; options = runtime; return "{}"; } })("aws", ["sts", "get-caller-identity"], { env: { PATH: "/tmp/attacker" } });
+  assert.equal(command, "/usr/bin/aws"); assert.equal(options.env.PATH, "/tmp/attacker");
+  assert.throws(() => createPinnedAwsExecutor({ executable: "/usr/bin/aws", exec: () => "" })("/tmp/attacker/aws", [], {}));
+  assert.throws(() => productionAwsExecutable({ existsSync: () => true, realpathSync: () => "/tmp/attacker/aws",
+    statSync: () => ({ isFile: () => true, mode: 0o755 }) }));
+  assertRootIdentity({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:root" });
+  assert.throws(() => assertRootIdentity({ Account: "368992683803", Arn: "arn:aws:iam::368992683803:user/operator" }));
+});
+
+test("migration manifest is fixed to D15 despite newer tooling migrations", () => {
+  const real = createPinnedGitRunner(), calls = [];
+  const pinned = (args, options) => { calls.push(args); return real(args, options); };
+  const expected = d15MigrationChecksums(pinned);
+  assert.equal(expected.size, 57);
+  assert.ok(calls.every((args) => args.includes(LEDGER.sourceSha) || args.some((value) => value.startsWith(`${LEDGER.sourceSha}:`))));
+  const list = real(["ls-tree", "-r", "--name-only", LEDGER.sourceSha, "--", "backend/prisma/migrations"]);
+  const removed = list.split("\n").filter((line) => line && line !== [...expected.keys()].map((name) => `backend/prisma/migrations/${name}/migration.sql`)[0]).join("\n");
+  assert.throws(() => d15MigrationChecksums((args, options) => args[0] === "ls-tree" ? removed : real(args, options)));
+  const extra = `${list.trim()}\nbackend/prisma/migrations/20990101000000_future/migration.sql\n`;
+  assert.throws(() => d15MigrationChecksums((args, options) => args[0] === "ls-tree" ? extra : real(args, options)));
+  const changed = (args, options) => args[0] === "show" ? Buffer.from("modified D15 migration") : real(args, options);
+  assert.throws(() => assertLedgerEvidence(evidence(), { gitRun: changed }));
+  assert.equal(assertLedgerEvidence(evidence(), { gitRun: pinned }).rows.length, 57);
+});
+
+test("recovery accepts only the original authorization and native task identity", () => {
+  const auth = authorization();
+  const intent = { authorizationSha256: auth.authorizationSha256, nonce: auth.body.nonce,
+    startedBy: ledgerStartedBy(auth.body.nonce), createdAt: "2026-11-05T20:00:05.000Z" };
+  const task = { taskArn: "arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/" + "c".repeat(32),
+    authorizationSha256: auth.authorizationSha256 };
+  assert.deepEqual(assertLedgerIntent(intent, auth), intent);
+  assert.equal(assertLedgerTaskRecord(task, auth), task.taskArn);
+  assert.throws(() => assertLedgerIntent({ ...intent, nonce: "e".repeat(64) }, auth));
+  assert.throws(() => assertLedgerIntent({ ...intent, createdAt: "2026-11-05T19:59:59.000Z" }, auth));
+  assert.throws(() => assertLedgerTaskRecord({ ...task, authorizationSha256: "e".repeat(64) }, auth));
+  assert.throws(() => assertLedgerTaskRecord({ ...task, taskArn: "other" }, auth));
+  assert.throws(() => checkReceipt(changed(receipt(auth), (x) => { x.body.startedBy = "other"; }, "receiptSha256"), auth));
 });
