@@ -21,10 +21,11 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
   const job=psql(admin,`SELECT id FROM public."PrintJob" WHERE "batchId"='${batchId}' LIMIT 1`);
   const item=psql(admin,`SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId"='${job}' LIMIT 1`);
   const reset=mode=>psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}',"ipAddress"='127.0.0.2',host='127.0.0.2',port=1,"printerUri"='ipp://127.0.0.2:1/fixture' WHERE id='${printerId}';
-    UPDATE public."PrintJob" SET "printerId"='${printerId}',"printMode"='${mode}',status='PENDING',"pipelineState"='QUEUED' WHERE id='${job}';
-    UPDATE public."PrintSession" SET "printerId"='${printerId}',status='ACTIVE' WHERE "printJobId"='${job}';
-    UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"dispatchMetadata"=NULL,"confirmationEvidence"=NULL WHERE id='${item}';
-    UPDATE public."QRCode" SET status='ALLOCATED' WHERE id=(SELECT "qrCodeId" FROM public."PrintItem" WHERE id='${item}');`);
+    UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"printedAt"=NULL WHERE id='${batchId}';
+    UPDATE public."PrintJob" SET "printerId"='${printerId}',"printMode"='${mode}',status='PENDING',"pipelineState"='QUEUED',"failureReason"=NULL,"sentAt"=NULL,"completedAt"=NULL,"confirmedAt"=NULL WHERE id='${job}';
+    UPDATE public."PrintSession" SET "printerId"='${printerId}',status='ACTIVE',"completedAt"=NULL,"failedReason"=NULL,"confirmedItems"=0,"issuedItems"=0 WHERE "printJobId"='${job}';
+    UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"dispatchMetadata"=NULL,"confirmationEvidence"=NULL,"deviceJobRef"=NULL,"issuedAt"=NULL,"dispatchedAt"=NULL,"agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL,"printConfirmedAt"=NULL,"closedAt"=NULL,"frozenAt"=NULL,"failedAt"=NULL,"failureReason"=NULL WHERE id='${item}';
+    UPDATE public."QRCode" SET status='ALLOCATED',"printedAt"=NULL,"printedByUserId"=NULL WHERE id=(SELECT "qrCodeId" FROM public."PrintItem" WHERE id='${item}');`);
   const state=()=>psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${item}'`);
   const qrState=()=>psql(admin,`SELECT q.status FROM public."QRCode" q JOIN public."PrintItem" pi ON pi."qrCodeId"=q.id WHERE pi.id='${item}'`);
   try {
@@ -51,6 +52,28 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
     await assert.rejects(saved.run({operation:'FAIL',requestId:randomUUID(),jobId:job,details:{itemIds:[item],reason:'ambiguous'},client}),/NETWORK_PRINT_RECONCILIATION_REQUIRED/);
     await assert.rejects(saved.run({operation:'ACK',requestId:randomUUID(),jobId:job,details:{itemIds:[foreignItemId],transportReference:'tcp:100'},client}),/PRINTING_WORKER_ITEM_SCOPE_DENIED/);
     assert.equal(state(),'AGENT_ACKED');assert.equal(qrState(),'ALLOCATED');
+    // A blocked oldest printer must not starve a healthy printer. Create the
+    // second job through the actual authenticated manufacturer SQL boundary.
+    const healthyPrinter=randomUUID(),healthyBatch=randomUUID(),healthyQr=randomUUID(),extraQr=randomUUID(),extraItem=randomUUID();
+    const owner=JSON.parse(psql(admin,`SELECT jsonb_build_object('manufacturer',j."manufacturerId",'licensee',p."licenseeId",'org',p."orgId") FROM public."PrintJob" j JOIN public."Printer" p ON p.id=j."printerId" WHERE j.id='${job}'`));
+    psql(admin,`INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","deliveryMode","orgId","licenseeId","assignedUserId","ipAddress",port,"isActive","updatedAt") VALUES('${healthyPrinter}','isolated healthy scheduler','NETWORK_DIRECT','ZPL','DIRECT','${owner.org}','${owner.licensee}','${owner.manufacturer}','127.0.0.3',1,true,now());
+      INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","lifecycleState","sampleScanPolicy","updatedAt") VALUES('${healthyBatch}','isolated healthy batch','${owner.licensee}','${owner.manufacturer}','LBL-0999','LBL-0999',1,'CODES_GENERATED','{"mode":"ONE_PER_PRINT_JOB"}',now());
+      INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt") VALUES('${healthyQr}','synthetic-scheduler-${healthyQr}','LBL-0999','${owner.licensee}','${healthyBatch}','ALLOCATED',now()),('${extraQr}','synthetic-extra-${extraQr}','LBL-0003','${owner.licensee}','${batchId}','RESERVED',now());
+      UPDATE public."QRCode" SET "printJobId"='${job}' WHERE id='${extraQr}';
+      INSERT INTO public."PrintItem" SELECT (jsonb_populate_record(NULL::public."PrintItem",to_jsonb(pi)||jsonb_build_object('id','${extraItem}','qrCodeId','${extraQr}','code','synthetic-extra-${extraQr}','state','RESERVED','pipelineState','QUEUED','issueSequence',2,'attemptCount',0,'dispatchMetadata',NULL,'confirmationEvidence',NULL,'issuedAt',NULL,'agentAckedAt',NULL,'dispatchedAt',NULL,'confirmationDeadlineAt',NULL))).* FROM public."PrintItem" pi WHERE pi.id='${item}';
+      UPDATE public."Batch" SET "totalCodes"=2,"endCode"='LBL-0003' WHERE id='${batchId}';UPDATE public."PrintJob" SET quantity=2,"itemCount"=2,"rangeEnd"='LBL-0003' WHERE id='${job}';UPDATE public."PrintSession" SET "totalItems"=2 WHERE "printJobId"='${job}';`);
+    const issued=new Date(),expires=new Date(issued.getTime()+3600000),nonce=require('crypto').randomBytes(32).toString('hex');
+    const token=require('../../../dist/services/qrTokenService');
+    const tokenHash=token.hashToken(token.signQrPayload({qr_id:healthyQr,batch_id:healthyBatch,licensee_id:owner.licensee,manufacturer_id:owner.manufacturer,iat:Math.floor(+issued/1000),exp:Math.floor(+expires/1000),nonce,epoch:1}));
+    const inputs=JSON.stringify([{qrCodeId:healthyQr,tokenNonce:nonce,tokenHash,tokenIssuedAt:issued.toISOString(),tokenExpiresAt:expires.toISOString()}]);
+    const healthyJob=JSON.parse(psql(app,`SELECT app_rls.printing_create_job('${capability}','printing-create-job','${randomUUID()}','${healthyBatch}','${healthyPrinter}',1,'LBL-0999','LBL-0999','NETWORK_DIRECT','ZPL',NULL,'${inputs}'::jsonb)`)).job.id;
+    const scheduled=await saved.run({operation:'CLAIM_DIRECT',requestId:randomUUID(),client});
+    assert.equal(scheduled.job?.id,healthyJob,'unresolved work on one printer cannot deny work to another printer');
+    assert.equal(state(),'AGENT_ACKED');assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${extraItem}'`),'RESERVED');
+    psql(admin,`DELETE FROM public."PrintAuditEvent" WHERE "printJobId"='${healthyJob}';DELETE FROM public."PrintItem" WHERE id='${extraItem}' OR "printSessionId" IN(SELECT id FROM public."PrintSession" WHERE "printJobId"='${healthyJob}');
+      DELETE FROM public."QRCode" WHERE id IN('${healthyQr}','${extraQr}');DELETE FROM public."PrintSession" WHERE "printJobId"='${healthyJob}';DELETE FROM public."PrintJob" WHERE id='${healthyJob}';DELETE FROM public."Batch" WHERE id='${healthyBatch}';DELETE FROM public."Printer" WHERE id='${healthyPrinter}';
+      UPDATE public."Batch" SET "totalCodes"=1,"endCode"='LBL-0002' WHERE id='${batchId}';UPDATE public."PrintJob" SET quantity=1,"itemCount"=1,"rangeEnd"='LBL-0002' WHERE id='${job}';UPDATE public."PrintSession" SET "totalItems"=1 WHERE "printJobId"='${job}';`);
+    console.log('PASS PostgreSQL unresolved printer isolation and authenticated healthy-job scheduling');
     reset('NETWORK_DIRECT');psql(admin,`UPDATE public."PrintJob" SET "printerId"='${gatewayPrinterId}' WHERE id='${job}';UPDATE public."PrintSession" SET "printerId"='${gatewayPrinterId}' WHERE "printJobId"='${job}'`);
     assert.equal((await saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client})).available,false,'backend worker must never consume site-gateway work');
     await assert.rejects(saved.run({operation:'ACK',jobId:job,requestId:randomUUID(),details:{itemIds:[item],transportReference:'forged-worker-reference'},client}),/PRINTING_WORKER_SCOPE_DENIED/);

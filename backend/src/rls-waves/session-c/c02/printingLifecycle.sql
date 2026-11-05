@@ -3090,6 +3090,9 @@ BEGIN
       WHERE (p_job_id IS NULL OR j.id=p_job_id) AND j."printMode"=mode_value
         AND j.status IN ('PENDING','SENT')
         AND j."printerId" IN (SELECT p.id FROM public."Printer" p WHERE p."deliveryMode"='DIRECT' AND p."isActive" AND p."connectionType"=mode_value::text::public."PrinterConnectionType")
+        AND NOT EXISTS(SELECT 1 FROM public."PrintJob" pending_job JOIN public."PrintSession" pending_session ON pending_session."printJobId"=pending_job.id
+          JOIN public."PrintItem" pending_item ON pending_item."printSessionId"=pending_session.id
+          WHERE pending_job."printerId"=j."printerId" AND pending_item.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
         AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
           WHERE ps."printJobId"=j.id AND pi.state='RESERVED'
