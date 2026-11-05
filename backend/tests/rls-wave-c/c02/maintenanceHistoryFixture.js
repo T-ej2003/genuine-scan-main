@@ -1,10 +1,14 @@
 // PostgreSQL 18 + actual authenticated HTTP/SQL maintenance paths. Only the
 // independently trusted isolation signer is a disposable fixture authority.
-module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templateJobId,postMaintenance,binding:baseBinding,statement:baseStatement,signedEvidence,hash}) {
+module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capability,templateJobId,postMaintenance,binding:baseBinding,statement:baseStatement,signedEvidence,hash}) {
   const assert=require('node:assert/strict'),{randomUUID}=require('node:crypto');
   const printer=randomUUID(),registration=randomUUID(),job=randomUUID(),session=randomUUID(),historyJob=randomUUID(),historySession=randomUUID();
   const device=`history-device-${registration}`,agent=`history-agent-${registration}`;
   const call=(body,expected)=>postMaintenance('maker',body,expected,printer);
+  // Exercise classification through the actual capability-authenticated SQL
+  // boundary, without consuming HTTP mutation-rate budget for each state.
+  // High-volume delivery, signatures, authorization and errors still use HTTP.
+  const inventory=()=>JSON.parse(psql(app,`SELECT app_rls.printing_printer_administration('${capability}','printing-printer-admin','${randomUUID()}','MAINTENANCE_INVENTORY','${printer}','{}'::jsonb)`));
   const clone=(table,template,changes)=>`INSERT INTO public."${table}" SELECT (jsonb_populate_record(NULL::public."${table}",to_jsonb(t)||'${JSON.stringify(changes)}'::jsonb)).* FROM public."${table}" t WHERE id='${template}';`;
   psql(admin,clone('PrinterRegistration',ids.registration,{id:registration,deviceFingerprint:device,agentId:agent})+
     clone('Printer',ids.printer,{id:printer,printerRegistrationId:registration,deviceFingerprint:device,agentId:agent,nativePrinterId:'history-fixture-native',metadata:{}})+
@@ -14,7 +18,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
     clone('PrintSession',session,{id:historySession,printJobId:historyJob,status:'COMPLETED',confirmedItems:100000,totalItems:100000}));
   await postMaintenance('outsider',{action:'inventory'},403,printer);
   await call({action:'request'},200);
-  let snapshot=(await call({action:'inventory'},200)).data;
+  let snapshot=inventory();
   assert.deepEqual(snapshot.inventory.items,[]);assert.deepEqual(snapshot.inventory.jobs,[]);assert.equal(snapshot.inventory.settledHistory.items,0);
   const batch=psql(admin,`SELECT "batchId" FROM public."PrintJob" WHERE id='${job}'`);
   const newItem=(state,count=1)=>{
@@ -26,11 +30,11 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   const first=newItem('RESERVED',0);
   for(const state of ['RESERVED','ISSUED','AGENT_ACKED','FROZEN','FAILED','CANCELLED','PRINT_CONFIRMED','CLOSED']) {
     psql(admin,`UPDATE public."PrintItem" SET state='${state}',"attemptCount"=1,"printConfirmedAt"=${['PRINT_CONFIRMED','CLOSED'].includes(state)?'now()':'NULL'} WHERE id='${first}'`);
-    snapshot=(await call({action:'inventory'},200)).data;
+    snapshot=inventory();
     assert.equal(snapshot.inventory.items.length,['PRINT_CONFIRMED','CLOSED'].includes(state)?0:1,`${state}: authoritative eligibility`);
   }
   psql(admin,`UPDATE public."PrintItem" SET "printConfirmedAt"=NULL WHERE id='${first}'`);
-  assert.equal((await call({action:'inventory'},200)).data.inventory.items.length,1,'terminal-looking state without durable confirmation remains unresolved');
+  assert.equal(inventory().inventory.items.length,1,'terminal-looking state without durable confirmation remains unresolved');
   psql(admin,`UPDATE public."PrintItem" SET state='ISSUED',"printConfirmedAt"=NULL WHERE id='${first}'`);
   const second=newItem('AGENT_ACKED'),third=newItem('FAILED');
   // Bulk insertion changes only synthetic rows. The final authorization still
@@ -66,7 +70,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   const [,confirmation]=await Promise.all([call({action:'inventory'},200),psqlAsync(app,confirm)]);
   assert.equal(confirmation.status,0,confirmation.output);
   await call({action:'verify',token:authorization.data.token,binding},403);
-  snapshot=(await call({action:'inventory'},200)).data;
+  snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
   const claimed=await psqlAsync(app,`SELECT app_rls.printing_connector_event('${registration}','${agent}','${device}','history_fenced_claim_nonce',now()::timestamp,'${randomUUID()}','CLAIM','${randomUUID()}',NULL,'${printer}',NULL,NULL,'{}'::jsonb)`);
   assert.notEqual(claimed.status,0);assert.match(claimed.output,/CONNECTOR_MAINTENANCE_FENCED/);

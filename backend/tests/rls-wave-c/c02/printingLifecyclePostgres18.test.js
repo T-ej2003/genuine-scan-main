@@ -1093,7 +1093,7 @@ async function main() {
     const released=await postMaintenance('maker',{action:'release',evidence:signedEvidence(releaseStatement)},200);
     assert.equal(released.data.dispatchFenced,false);
     assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
-    await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
+    await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,capability:caps.maker,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
   } finally {await new Promise(resolve=>maintenanceServer.close(resolve));delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;}
 
   const catalog = json(admin, `SELECT jsonb_build_object(
