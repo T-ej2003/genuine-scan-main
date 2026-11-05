@@ -29,7 +29,7 @@ const { generateKeyPairSync } = require('node:crypto');
     assert.equal(validation.status,0,validation.stderr);
     assert.equal(JSON.parse(validation.stdout).agentId,first.agentId);
     const originalEvidence=JSON.parse(validation.stdout);
-    await fs.writeFile(stateFile,JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(beforeValidation)).reverse()))));
+    await fs.writeFile(stateFile,JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(beforeValidation)).reverse())));
     const reorderedEvidence=JSON.parse(validate().stdout);
     assert.equal(reorderedEvidence.stateSemanticSha256,originalEvidence.stateSemanticSha256,'matching state semantics must not depend on JSON field order');
     assert.notEqual(reorderedEvidence.stateSha256,originalEvidence.stateSha256,'transaction still binds the exact original bytes');

@@ -18,7 +18,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
   const saved={send:socket.sendRawPayloadToNetworkPrinter,status:zebra.getZebraTotalLabelCount,render:renderer.renderPdfLabelBuffer};
   let submitted=0,scenario,mustClaim;
   socket.sendRawPayloadToNetworkPrinter=async()=>{submitted++;if(scenario==='lost-ack')return {bytesWritten:1};throw new Error('fixture disconnect after physical boundary');};
-  zebra.getZebraTotalLabelCount=async()=>{if(scenario==='status')throw new Error('fixture status unavailable');return 0;};
+  zebra.getZebraTotalLabelCount=async()=>{if(['status','lost-failure-response'].includes(scenario))throw new Error('fixture status unavailable');return 0;};
   renderer.renderPdfLabelBuffer=async()=>{throw new Error('fixture rendering failed');};
   const gatewayPath=require.resolve('../../../dist/local-print-agent/gateway');delete require.cache[gatewayPath];
   const {runGatewayCycle}=require(gatewayPath);
