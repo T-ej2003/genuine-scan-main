@@ -256,7 +256,9 @@ const run = async () => {
     "Windows installer must preserve uncertain state and never force-stop a connector"
   );
   assert(!installerTemplate.includes('postinstall skipifsilent') && installerTemplate.includes('ResultCode <> 0') &&
-    installerTemplate.includes('PrepareToInstall') && installerTemplate.includes('WizardSilent'),
+    installerTemplate.includes('PrepareToInstall') && installerTemplate.includes('WizardSilent') &&
+    installerTemplate.includes('if ResultCode = 10 then begin') && installerTemplate.includes('end else if ResultCode <> 0 then') &&
+    installerTemplate.includes('Result := Result and (Code = 0)') && installerTemplate.indexOf("RunUpgrade('Activate')") < installerTemplate.indexOf('if ResultCode = 10 then begin'),
     'Mandatory initialization must run in both modes and propagate failure, with pre-copy upgrade refusal');
   assert(
     installScript.includes("supportsPersistentPrintSession") &&

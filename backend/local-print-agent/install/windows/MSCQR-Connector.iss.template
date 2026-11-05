@@ -115,7 +115,15 @@ begin
     if not Exec(ExpandConstant('{cmd}'), Parameters, ExpandConstant('{app}'), SW_HIDE,
       ewWaitUntilTerminated, ResultCode) then
       RaiseException('Connector initialization could not be started.');
-    if ResultCode <> 0 then
+    { Exit 10 is emitted only after startup registration, version/protocol and
+      exactly-one-process verification. It does not certify printer readiness.
+      This fresh-install contract never applies to RunUpgrade: every upgrade
+      phase still requires exit 0 and independent transaction verification. }
+    if ResultCode = 10 then begin
+      Log('Connector installed and runtime verified; printer setup needs attention. Open MSCQR Printer Setup and check the selected printer.');
+      if not WizardSilent then
+        MsgBox('MSCQR Connector is installed and running. Printer setup needs attention: open MSCQR Printer Setup, select a printer and check that Windows reports it online. Printing readiness has not been verified. See the connector setup log and install-result.json.', mbInformation, MB_OK);
+    end else if ResultCode <> 0 then
       RaiseException('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + '). Review the connector setup log.');
   end;
   if CurStep = ssDone then begin

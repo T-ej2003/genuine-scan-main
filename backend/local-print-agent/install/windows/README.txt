@@ -23,6 +23,14 @@ What the result means:
 - Needs attention: connector installed and running, but Windows is not currently exposing a usable printer
 - Failure: install or agent startup did not complete; review the local log and try again
 
+Fresh setup exit codes: 0 means installed and printer ready; 10 means installed
+and runtime verified but printer setup needs attention. All other nonzero codes
+mean failure. Signed Setup accepts 10 for fresh installation, logs a warning in
+silent mode and preserves install-result.json; 10 is not printer certification.
+Upgrade phases require 0 plus authenticated maintenance and independent runtime,
+identity and startup verification. Fresh-install partial success cannot commit
+an upgrade or release its maintenance fence.
+
 Printer Setup URL:
 __MSCQR_WEB_APP_BASE_URL__/printer-diagnostics
 

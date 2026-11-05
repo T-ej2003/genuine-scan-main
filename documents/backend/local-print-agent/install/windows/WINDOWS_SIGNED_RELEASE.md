@@ -25,3 +25,40 @@ The approved workflow signs the runtime and PowerShell payload, then compiles wi
 Release and production backend deployment require separate authorization. Do not raise minimum versions before a verified replacement is available. Physical Zebra certification additionally requires independently verified production isolation and reconciled connector-side work.
 
 Automatic uninstall is intentionally refused before mutation in both Inno and the standalone removal script. The former remover force-stopped work and recursively deleted the runtime directory. Upgrade authorization must not be repurposed as removal authority. Removal requires a separately governed isolation/reconciliation procedure; this release does not claim an automated removal contract.
+
+## Partial fresh setup and bounded maintenance inventory
+
+Fresh setup accepts initialization exit 0 (runtime verified and printer ready) or
+10 (runtime/startup verified; printer missing or unavailable). Exit 10 preserves
+the installation, logs an actionable warning in silent Setup and leaves the
+installer's install-result.json marked partial. Every other nonzero exit fails.
+Upgrade phases continue to require exit 0, backend authorization and independent
+identity/version/protocol/startup verification; fresh partial success is never an
+upgrade-commit credential. Real signed interactive/silent certification remains
+a separate gate.
+
+The schema states are RESERVED, ISSUED, AGENT_ACKED, PRINT_CONFIRMED, CLOSED,
+FROZEN, FAILED and CANCELLED. Only PRINT_CONFIRMED/CLOSED with a non-null durable
+printConfirmedAt are settled history. The legacy backfill writes this timestamp
+without requiring JSON confirmation evidence. Failed/frozen/cancelled work remains
+reissuable through governance; all such records, pending items and terminal-looking
+records without confirmation remain unresolved and individually reconciled.
+Inventory, authorization, consumption and verification use the same SQL workset.
+Settled rows stay in the database/audit history; a bounded count is authenticated
+by the signed workDigest. A changed inventory invalidates stale evidence/tokens.
+
+The signed statement limit remains 100,000 characters. Inventory supports at most
+512 unresolved items and 1,000,000 serialized inventory bytes. The 513-row query
+bound is detection only: oversized work raises MAINTENANCE_WORKSET_TOO_LARGE and
+returns no authorizable slice. Oversized statements return
+MAINTENANCE_EVIDENCE_TOO_LARGE. Neither error releases the fence.
+
+Governed continuation: retain the fence and original records; previously accepted
+work may still acknowledge/confirm through its authenticated device lifecycle
+after its real outcome is established. Obtain a fresh inventory and independently
+signed isolation/reconciliation evidence after those durable transitions. Never
+reset or replay uncertain work, split a statement into independently authorizing
+subsets, or edit states to fit a limit. If uncertainty cannot be resolved and the
+remaining work exceeds these bounds, automated upgrade remains blocked. Supporting
+that workload requires a separately reviewed durable, paged reconciliation
+protocol bound to the complete inventory; this PR does not claim such a protocol.

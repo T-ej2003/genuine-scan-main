@@ -1039,12 +1039,12 @@ async function main() {
   const authority=generateKeyPairSync('ed25519');
   process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM=authority.publicKey.export({type:'spki',format:'pem'}).toString();
   const maintenanceServer=await new Promise(resolve=>{const server=createBackendApp().listen(0,'127.0.0.1',()=>resolve(server));});
-  const postMaintenance=async(name,body,expected)=>{
+  const postMaintenance=async(name,body,expected,printerId=ids.printer)=>{
     const role=name==='maker'?'MANUFACTURER_ADMIN':'LICENSEE_ADMIN';
     const scopeVersion=name==='maker'?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
     const headers=name?{authorization:`Bearer ${signAccessToken({userId:ids[name],email:'printing-http@example.invalid',role,sessionId:ids[`${name}Refresh`],orgId:name==='outsider'?ids.orgB:ids.orgA,licenseeId:name==='outsider'?ids.licenseeB:ids.licenseeA,scopeVersion,authenticatedAt:new Date().toISOString()})}`,
       'x-database-session-capability':sealCookieToken(caps[name],'auth.database-session'),'content-type':'application/json'}:{'content-type':'application/json'};
-    const response=await fetch(`http://127.0.0.1:${maintenanceServer.address().port}/api/manufacturer/printers/${ids.printer}/maintenance`,{method:'POST',headers,body:JSON.stringify(body)});
+    const response=await fetch(`http://127.0.0.1:${maintenanceServer.address().port}/api/manufacturer/printers/${printerId}/maintenance`,{method:'POST',headers,body:JSON.stringify(body)});
     const result=await response.json();
     if(expected!==undefined)assert.equal(response.status,expected,JSON.stringify(result));
     return {status:response.status,...result};
@@ -1089,6 +1089,7 @@ async function main() {
     const released=await postMaintenance('maker',{action:'release',evidence:signedEvidence(releaseStatement)},200);
     assert.equal(released.data.dispatchFenced,false);
     assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
+    await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
   } finally {await new Promise(resolve=>maintenanceServer.close(resolve));delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;}
 
   const catalog = json(admin, `SELECT jsonb_build_object(

@@ -850,7 +850,6 @@ DECLARE
   audit_action text;
   maintenance_scope text;
   maintenance_printers text[];
-  maintenance_sessions text[];
   maintenance_inventory jsonb;
   maintenance_snapshot jsonb;
   maintenance_binding jsonb;
@@ -936,14 +935,34 @@ BEGIN
             AND p."assignedUserId" IS NOT DISTINCT FROM printer_row."assignedUserId"
           ELSE p.id=printer_row.id END;
       PERFORM set_config('app.printing_maintenance_printers',to_json(maintenance_printers)::text,true);
-      SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.id),'[]'::jsonb) INTO maintenance_inventory
-        FROM (SELECT id,status,"printerId","pipelineState" FROM public."PrintJob" WHERE "printerId"=ANY(maintenance_printers)) j;
-      SELECT array_agg(id ORDER BY id) INTO maintenance_sessions FROM public."PrintSession" WHERE "printerId"=ANY(maintenance_printers);
-      PERFORM set_config('app.printing_maintenance_sessions',coalesce(to_json(maintenance_sessions)::text,'[]'),true);
-      SELECT jsonb_build_object('jobs',maintenance_inventory,'items',coalesce(jsonb_agg(to_jsonb(i) ORDER BY i.id),'[]'::jsonb))
-        INTO maintenance_inventory FROM (SELECT id,state,"attemptCount","printSessionId","deviceJobRef","failureReason",
-          "pipelineState","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","dispatchMetadata","confirmationEvidence"
-          FROM public."PrintItem" WHERE "printSessionId"=ANY(maintenance_sessions)) i;
+      -- Only PRINT_CONFIRMED/CLOSED with a durable confirmation timestamp are
+      -- settled. Legacy backfill also writes that timestamp (without JSON
+      -- evidence). FAILED/FROZEN/CANCELLED remain governably reissuable; even a
+      -- never-issued RESERVED item is pending work and must be reconciled.
+      -- One bounded workset feeds inventory, authorization and consumption.
+      WITH unresolved AS MATERIALIZED (
+        SELECT pi.id,pi.state,pi."attemptCount",pi."printSessionId",pi."deviceJobRef",pi."failureReason",
+          pi."pipelineState",pi."issuedAt",pi."dispatchedAt",pi."agentAckedAt",pi."confirmationDeadlineAt",
+          pi."printConfirmedAt",pi."dispatchMetadata",pi."confirmationEvidence",ps."printJobId"
+        FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+        WHERE ps."printerId"=ANY(maintenance_printers)
+          AND NOT (pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL)
+        ORDER BY pi.id LIMIT 513
+      )
+      SELECT jsonb_build_object(
+        'jobs',coalesce((SELECT jsonb_agg(to_jsonb(j) ORDER BY j.id) FROM (
+          SELECT id,status,"printerId","pipelineState" FROM public."PrintJob"
+          WHERE id IN (SELECT "printJobId" FROM unresolved)) j),'[]'::jsonb),
+        'items',coalesce((SELECT jsonb_agg(to_jsonb(i)-'printJobId' ORDER BY i.id) FROM unresolved i),'[]'::jsonb),
+        'settledHistory',jsonb_build_object('items',(SELECT count(*) FROM public."PrintItem" pi
+          JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+          WHERE ps."printerId"=ANY(maintenance_printers) AND pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL)))
+        INTO maintenance_inventory;
+      -- LIMIT is a detection bound, never a truncated authorizable inventory.
+      IF jsonb_array_length(maintenance_inventory->'items')>512 OR octet_length(maintenance_inventory::text)>1000000
+      THEN RAISE EXCEPTION 'MAINTENANCE_WORKSET_TOO_LARGE' USING ERRCODE='54000',
+        HINT='Keep dispatch fenced. Reconcile accepted work through its authenticated confirmation lifecycle. Do not split evidence, discard records or reset uncertain items; larger unresolved sets require a separately governed bounded reconciliation protocol.';
+      END IF;
       maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
         'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
           FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
@@ -988,8 +1007,7 @@ BEGIN
       -- Reconciliation is an audit record, never a retry/reset instruction or
       -- a claim that the legacy binary supports native drain acknowledgement.
       IF EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'items') item
-        WHERE (item->>'state' NOT IN ('RESERVED','CONFIRMED') OR (item->>'attemptCount')::integer>0)
-        AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
+        WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
           WHERE r->>'itemId'=item->>'id' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
         OR EXISTS(SELECT 1 FROM jsonb_each(maintenance_inventory->'diagnostics') lease
           WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r

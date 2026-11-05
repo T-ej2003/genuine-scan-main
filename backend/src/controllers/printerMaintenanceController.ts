@@ -35,7 +35,13 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
     res.setHeader("Cache-Control", "no-store");
     return res.json({ success: true, data: { ...data, ...(token ? { token } : {}) } });
   } catch (error: any) {
+    if (error instanceof z.ZodError && error.issues.some(issue => issue.code === 'too_big' && issue.path.join('.') === 'evidence.statement')) {
+      return res.status(400).json({success:false,code:'MAINTENANCE_EVIDENCE_TOO_LARGE',error:'Signed maintenance evidence exceeds 100,000 characters. Keep dispatch fenced; partial evidence cannot authorize an upgrade.'});
+    }
     if (error instanceof z.ZodError) return res.status(400).json({ success: false, error: "Invalid maintenance request." });
+    if (/MAINTENANCE_WORKSET_TOO_LARGE/.test(String(error?.message))) {
+      return res.status(409).json({success:false,code:'MAINTENANCE_WORKSET_TOO_LARGE',error:'Unresolved maintenance work exceeds the supported bounded inventory. Keep dispatch fenced and reconcile accepted work through authenticated confirmation. Do not reset uncertain work or submit partial inventories; contact MSCQR support for governed continuation.'});
+    }
     const denied = /DENIED|permission|NO_DATA|query returned no rows|No .*found/i.test(String(error?.message));
     return res.status(denied ? 403 : 409).json({ success: false,
       error: denied ? "Connector maintenance is not authorized." : "Connector maintenance could not be established." });
