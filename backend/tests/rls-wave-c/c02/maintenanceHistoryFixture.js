@@ -8,7 +8,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   const clone=(table,template,changes)=>`INSERT INTO public."${table}" SELECT (jsonb_populate_record(NULL::public."${table}",to_jsonb(t)||'${JSON.stringify(changes)}'::jsonb)).* FROM public."${table}" t WHERE id='${template}';`;
   psql(admin,clone('PrinterRegistration',ids.registration,{id:registration,deviceFingerprint:device,agentId:agent})+
     clone('Printer',ids.printer,{id:printer,printerRegistrationId:registration,deviceFingerprint:device,agentId:agent,nativePrinterId:'history-fixture-native',metadata:{}})+
-    clone('PrintJob',templateJobId,{id:job,jobNumber:`H-${job}`,printerId:printer,status:'SENT',confirmedAt:null,completedAt:null})+
+    clone('PrintJob',templateJobId,{id:job,jobNumber:`H-${job}`,printLockTokenHash:null,printerId:printer,status:'SENT',confirmedAt:null,completedAt:null})+
     clone('PrintSession',psql(admin,`SELECT id FROM public."PrintSession" WHERE "printJobId"='${templateJobId}'`),{id:session,printJobId:job,printerId:printer,printerRegistrationId:registration,status:'ACTIVE',confirmedItems:0,totalItems:3})+
     clone('PrintJob',job,{id:historyJob,jobNumber:`H-${historyJob}`,status:'CONFIRMED'})+
     clone('PrintSession',session,{id:historySession,printJobId:historyJob,status:'COMPLETED',confirmedItems:100000,totalItems:100000}));
@@ -78,6 +78,6 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,templ
   assert(JSON.stringify(huge).length>100000);
   assert.equal((await call({action:'authorize',evidence:signedEvidence(huge)},400)).code,'MAINTENANCE_EVIDENCE_TOO_LARGE');
   assert.equal((await call({action:'authorize',evidence:signedEvidence(statement)},409)).code,'MAINTENANCE_WORKSET_TOO_LARGE');
-  assert.equal((await call({action:'request'},200)).data.dispatchFenced,true);
+  assert.equal((await call({action:'request'},200)).data.state,'DISPATCH_FENCED');
   console.log('PASS PostgreSQL maintenance: 100000 settled / 3 unresolved, all states, signed size boundary, stale/replayed/partial evidence, confirmation race and oversized refusal');
 };
