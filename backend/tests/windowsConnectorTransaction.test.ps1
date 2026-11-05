@@ -48,7 +48,11 @@ function Stop-MscqrVerifiedRuntime {
   if ($script:injection -eq 'stop') { throw 'fixture stop failed' }
   $script:processes=0
 }
-function Start-MscqrVerifiedRuntime { param($Wrapper) $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' } }
+function Start-MscqrVerifiedRuntime {
+  param($Wrapper)
+  if($script:injection -eq 'start' -and [IO.File]::ReadAllText((Join-Path ([IO.Path]::GetDirectoryName($Wrapper)) 'mscqr-local-print-agent.exe')).StartsWith('replacement')) {throw 'fixture replacement startup failed'}
+  $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' }
+}
 function Wait-MscqrRuntime {
   param($Journal)
   if ($script:injection -in @('verify','restore-verify','legacy-rollback') -and $Journal.expectedVersion -ne '2026.6.26') { throw 'fixture replacement health failure' }
@@ -60,7 +64,7 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','stop','start','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
@@ -152,7 +156,11 @@ try {
       if($scenario -eq 'locked') { $fileLock=[IO.File]::Open($runtime,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read) }
       if($scenario -eq 'locked-helper') { $fileLock=[IO.File]::Open("$live\Install Connector.cmd",[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read) }
       try { Invoke-MscqrUpgradeTransaction -Phase Activate @args } catch { $failed=$true } finally {if($fileLock){$fileLock.Dispose()}}
-      if($scenario -eq 'journal-full') {
+      if($scenario -eq 'stop') {
+        if(-not $failed -or $script:processes -ne 1 -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256) {throw 'Shutdown failure activated or damaged the replacement'}
+        $script:injection='none'
+        Invoke-MscqrUpgradeTransaction -Phase Recover @args
+      } elseif($scenario -eq 'journal-full') {
         if(-not $failed -or $script:processes -ne 0){throw 'journal persistence failure left a runtime running'}
         $script:injection='none'
         Invoke-MscqrUpgradeTransaction -Phase Recover @args
