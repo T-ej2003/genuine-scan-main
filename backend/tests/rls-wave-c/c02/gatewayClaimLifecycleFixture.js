@@ -54,7 +54,8 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
       psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}',"printerUri"='ipp://127.0.0.1:1/fixture' WHERE id='${printerId}';
         UPDATE public."PrintJob" SET status='PENDING',"printMode"='${mode}',"pipelineState"='QUEUED' WHERE id='${job}';
         UPDATE public."PrintSession" SET status='ACTIVE' WHERE "printJobId"='${job}';
-        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED' WHERE id='${item}';`);
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"agentAckedAt"=NULL,
+          "dispatchedAt"=NULL,"dispatchMetadata"=NULL,"printConfirmedAt"=NULL WHERE id='${item}';`);
       let lost=false;
       if(scenario==='existing-reservation') {
         await fs.mkdir(process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR,{recursive:true});

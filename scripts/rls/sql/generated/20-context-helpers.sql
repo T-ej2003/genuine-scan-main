@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37'
+    AND source_contract_sha256='a36fc59b2e7c2deb9a861c889e177143fa13b2a41ebe6a98921004b4b70f5682'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:a36fc59b2e7c2deb9a861c889e177143fa13b2a41ebe6a98921004b4b70f5682'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:a36fc59b2e7c2deb9a861c889e177143fa13b2a41ebe6a98921004b4b70f5682')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8092,6 +8092,17 @@ BEGIN
   END IF;
   IF p_operation IN ('CHECK','LEASE') AND current_value->>'state'<>'ACTIVE'
   THEN RAISE EXCEPTION 'CONNECTOR_MAINTENANCE_FENCED' USING ERRCODE='55000'; END IF;
+  -- The checkpoint row serializes diagnostic leases with automatic claims and
+  -- dispatch reservations on this physical printer. An expired client request
+  -- is still ambiguous; only a confirmed diagnostic releases its evidence.
+  IF p_operation IN ('CHECK','LEASE') AND nullif(p_details->>'printerId','') IS NOT NULL THEN
+    IF EXISTS (SELECT 1 FROM jsonb_each(coalesce(current_value->'diagnostics','{}'::jsonb)) lease
+      WHERE (lease.value->>'printerId'=p_details->>'printerId' OR lease.value->>'printerId' IS NULL)
+        AND lease.value->>'state' IS DISTINCT FROM 'CONFIRMED'
+        AND NOT coalesce(lease.key=p_details->>'diagnosticRequestId' AND
+          lease.value->>'printerId'=p_details->>'printerId' AND lease.value->>'state'='ACCEPTED',false))
+    THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+  END IF;
   IF p_operation IN ('LEASE','COMPLETE') THEN
     IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
     THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
@@ -8101,13 +8112,25 @@ BEGIN
       -- remain in the maintenance inventory and require signed reconciliation.
       IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId')
       THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+      IF nullif(p_details->>'printerId','') IS NULL OR EXISTS (
+        SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+        WHERE ps."printerId"=p_details->>'printerId' AND (
+          pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') OR
+          (pi."printConfirmedAt" IS NULL AND (pi."dispatchedAt" IS NOT NULL OR
+            pi."agentAckedAt" IS NOT NULL OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))))
+      THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
       current_value:=jsonb_set(current_value,'{diagnostics}',coalesce(current_value->'diagnostics','{}'::jsonb)||
-        jsonb_build_object(p_details->>'requestId',jsonb_build_object('state','ACCEPTED','actor',p_actor,'acceptedAt',clock_timestamp())),true);
+        jsonb_build_object(p_details->>'requestId',jsonb_build_object('state','ACCEPTED','actor',p_actor,
+          'printerId',p_details->>'printerId','acceptedAt',clock_timestamp())),true);
     ELSE
       IF current_value->'diagnostics'->(p_details->>'requestId')->>'actor' IS DISTINCT FROM p_actor OR
+         current_value->'diagnostics'->(p_details->>'requestId')->>'printerId' IS DISTINCT FROM p_details->>'printerId' OR
+         current_value->'diagnostics'->(p_details->>'requestId')->>'state' IS DISTINCT FROM 'ACCEPTED' OR
          p_details->>'outcome' IS DISTINCT FROM 'confirmed' OR nullif(p_details->>'deviceJobRef','') IS NULL
       THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
-      current_value:=jsonb_set(current_value,ARRAY['diagnostics',p_details->>'requestId','state'],to_jsonb('CONFIRMED'::text),false);
+      current_value:=jsonb_set(current_value,ARRAY['diagnostics',p_details->>'requestId'],
+        current_value->'diagnostics'->(p_details->>'requestId')||jsonb_build_object(
+          'state','CONFIRMED','deviceJobRef',p_details->>'deviceJobRef','confirmedAt',clock_timestamp()),false);
     END IF;
     UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
   END IF;
@@ -9017,7 +9040,14 @@ BEGIN
           JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
           WHERE ps."printerId"=ANY(maintenance_printers) AND pi.state IN ('PRINT_CONFIRMED','CLOSED') AND pi."printConfirmedAt" IS NOT NULL)))
         INTO maintenance_inventory;
-      maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
+      -- Completed diagnostic leases remain in the checkpoint audit history;
+      -- only ambiguous leases require per-operation reconciliation evidence.
+      maintenance_inventory:=maintenance_inventory||jsonb_build_object(
+        'diagnostics',(SELECT coalesce(jsonb_object_agg(lease.key,lease.value),'{}'::jsonb)
+          FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
+          WHERE lease.value->>'state' IS DISTINCT FROM 'CONFIRMED'),
+        'settledDiagnostics',(SELECT count(*) FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
+          WHERE lease.value->>'state'='CONFIRMED'),
         'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
           FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
       -- LIMIT is a detection bound, never a truncated authorizable inventory.
@@ -9081,10 +9111,10 @@ BEGIN
     END IF;
     RETURN app_rls.printing_maintenance_gate(maintenance_scope,
       CASE p_operation WHEN 'MAINTENANCE_REQUEST' THEN 'REQUEST' WHEN 'DIAGNOSTIC_LEASE' THEN 'LEASE' WHEN 'DIAGNOSTIC_COMPLETE' THEN 'COMPLETE' ELSE 'STATUS' END,
-      actor."userId",p_payload||jsonb_build_object('requestId',p_request_id));
+      actor."userId",p_payload||jsonb_build_object('requestId',p_request_id,'printerId',printer_row.id));
   END IF;
   IF p_operation IN ('UPDATE','DELETE','RELINK') THEN
-    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
   END IF;
 
   IF p_operation='CREATE' THEN
@@ -10615,10 +10645,18 @@ BEGIN
   UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
     "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
   IF p_operation IN ('CLAIM','CHECK_DISPATCH') THEN
-    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,
+      jsonb_build_object('printerId',printer_row.id)||CASE WHEN p_operation='CHECK_DISPATCH' THEN jsonb_build_object('diagnosticRequestId',p_details->>'diagnosticRequestId') ELSE '{}'::jsonb END);
     IF p_operation='CHECK_DISPATCH' THEN RETURN jsonb_build_object('allowed',true); END IF;
   END IF;
   IF p_operation='CLAIM' THEN
+    -- A previous gateway claim may already have reached the printer. Its
+    -- odometer evidence cannot be shared with another automatic operation.
+    IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      WHERE ps."printerId"=printer_row.id AND (pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') OR
+        (pi."printConfirmedAt" IS NULL AND (pi."dispatchedAt" IS NOT NULL OR
+          pi."agentAckedAt" IS NOT NULL OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))))
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
       j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
       j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
@@ -11169,7 +11207,9 @@ BEGIN
         AND j."printerId" IN (SELECT p.id FROM public."Printer" p WHERE p."deliveryMode"='DIRECT' AND p."isActive" AND p."connectionType"=mode_value::text::public."PrinterConnectionType")
         AND NOT EXISTS(SELECT 1 FROM public."PrintJob" pending_job JOIN public."PrintSession" pending_session ON pending_session."printJobId"=pending_job.id
           JOIN public."PrintItem" pending_item ON pending_item."printSessionId"=pending_session.id
-          WHERE pending_job."printerId"=j."printerId" AND pending_item.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
+          WHERE pending_job."printerId"=j."printerId" AND (pending_item.state IN ('ISSUED','AGENT_ACKED','FROZEN') OR
+            (pending_item."printConfirmedAt" IS NULL AND (pending_item."dispatchedAt" IS NOT NULL OR
+              pending_item."agentAckedAt" IS NOT NULL OR nullif(pending_item."dispatchMetadata"->>'transportReference','') IS NOT NULL))))
         AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
           WHERE ps."printJobId"=j.id AND pi.state='RESERVED'
@@ -11184,9 +11224,11 @@ BEGIN
     PERFORM app_rls.printing_maintenance_gate(
       CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
       WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
-      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
+      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,jsonb_build_object('printerId',maintenance_printer.id));
     IF EXISTS(SELECT 1 FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
-      WHERE j."printerId"=job_row."printerId" AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
+      WHERE j."printerId"=job_row."printerId" AND (pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') OR
+        (pi."printConfirmedAt" IS NULL AND (pi."dispatchedAt" IS NOT NULL OR pi."agentAckedAt" IS NOT NULL OR
+          nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))))
     THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
       ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
@@ -11260,7 +11302,7 @@ BEGIN
     PERFORM app_rls.printing_maintenance_gate(
       CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
       WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
-      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
+      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,jsonb_build_object('printerId',maintenance_printer.id));
     IF EXISTS(SELECT 1 FROM public."PrintItem" WHERE id=ANY(item_ids) AND state<>'ISSUED')
     THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='AGENT_ACKED',"dispatchedAt"=now_at,"agentAckedAt"=now_at,"confirmationDeadlineAt"=now_at+interval '10 minutes',"updatedAt"=now_at
@@ -15446,7 +15488,8 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
+     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')

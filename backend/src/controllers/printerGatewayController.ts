@@ -15,6 +15,7 @@ import {
   claimGatewayPrinterTestJob,
   confirmGatewayPrinterTestJob,
   failGatewayPrinterTestJob,
+  pendingGatewayPrinterTestLease,
 } from "../services/printerTestLabelService";
 
 const credentials = (req: Request) => ({
@@ -156,9 +157,11 @@ const testGateway = async (req: Request) => {
 export const claimGatewayTestJob = async (req: Request, res: Response) => {
   try {
     const auth = await testGateway(req);
+    const diagnosticRequestId = pendingGatewayPrinterTestLease(auth.printer.id);
+    if (!diagnosticRequestId) return res.json({ success: true, data: null });
     const data = await prisma.$transaction(async tx => {
       await recordGatewayPrintingEvent({ ...auth, requestId: randomUUID(), operation: "CHECK_DISPATCH",
-        mode: modeFor(auth.printer.connectionType), client: tx });
+        mode: modeFor(auth.printer.connectionType), details: { diagnosticRequestId }, client: tx });
       return claimGatewayPrinterTestJob({ printerId: auth.printer.id, connectionType: auth.printer.connectionType });
     });
     return res.json({ success: true, data });

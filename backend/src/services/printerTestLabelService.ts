@@ -85,6 +85,7 @@ type GatewayPrinterTestClaim = {
 
 type GatewayPrinterTestJob = {
   id: string;
+  leaseRequestId: string;
   printerId: string;
   connectionType: "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT";
   createdAt: number;
@@ -268,6 +269,7 @@ const getGatewayPrinterTestJob = (printerId: string) => {
 const enqueueGatewayPrinterTestJob = (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
+  boundary: { capability: string; requestId: string };
 }) => {
   const existing = getGatewayPrinterTestJob(params.printer.id);
   if (existing) {
@@ -362,6 +364,7 @@ const enqueueGatewayPrinterTestJob = (params: {
 
   const job: GatewayPrinterTestJob = {
     id: jobId,
+    leaseRequestId: params.boundary.requestId,
     printerId: params.printer.id,
     connectionType: params.printer.connectionType as "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT",
     createdAt: Date.now(),
@@ -442,6 +445,11 @@ export const claimGatewayPrinterTestJob = (params: {
   }
   job.status = "CLAIMED";
   return job.claim;
+};
+
+export const pendingGatewayPrinterTestLease = (printerId: string) => {
+  const job = getGatewayPrinterTestJob(printerId);
+  return job?.status === "PENDING" ? job.leaseRequestId : null;
 };
 
 export const claimLocalAgentPrinterTestJob = async (params: {
@@ -600,6 +608,7 @@ export const failLocalAgentPrinterTestJob = async (params: {
 const dispatchGatewayPrinterTestLabel = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
+  boundary: { capability: string; requestId: string };
 }) => {
   const job = enqueueGatewayPrinterTestJob(params);
   return job.promise;
