@@ -71,12 +71,21 @@ export function createRootAttestationKmsVerifier({ run } = {}) {
   };
 }
 
-export function createPinnedRootAttestationVerifier({ execute = execFileSync } = {}) {
+export function trustedRootAttestationOpenSsl(fsOps = fs) {
+  const executable = "/usr/bin/openssl";
+  if (!fsOps.existsSync(executable) || fsOps.realpathSync(executable) !== executable) throw new Error("Trusted OpenSSL executable is unavailable.");
+  const stat = fsOps.statSync(executable);
+  if (!stat.isFile() || !(stat.mode & 0o111) || (stat.mode & 0o022) || stat.uid !== 0) throw new Error("Trusted OpenSSL executable is unsafe.");
+  return executable;
+}
+
+export function createPinnedRootAttestationVerifier({ execute = execFileSync, executable = trustedRootAttestationOpenSsl() } = {}) {
   return ({ keyArn, signingAlgorithm, digest, signature } = {}) => {
     if (keyArn !== ROOT_ATTESTATION_KEY_ALIAS_ARN || signingAlgorithm !== ROOT_ATTESTATION_SIGNING_ALGORITHM || !Buffer.isBuffer(digest) || digest.length !== 32 || !Buffer.isBuffer(signature) || signature.length === 0) return false;
     return withBytes("mscqr-root-attestation-offline-", { publicKey: Buffer.from(ROOT_ATTESTATION_PUBLIC_KEY_DER_BASE64, "base64"), digest, signature }, ({ publicKey, digest: digestFile, signature: signatureFile }) => {
       try {
-        execute("openssl", ["pkeyutl", "-verify", "-pubin", "-keyform", "DER", "-inkey", publicKey, "-in", digestFile, "-sigfile", signatureFile, "-pkeyopt", "digest:sha256", "-pkeyopt", "rsa_padding_mode:pss", "-pkeyopt", "rsa_pss_saltlen:32"], { stdio: "ignore" });
+        execute(executable, ["pkeyutl", "-verify", "-pubin", "-keyform", "DER", "-inkey", publicKey, "-in", digestFile, "-sigfile", signatureFile, "-pkeyopt", "digest:sha256", "-pkeyopt", "rsa_padding_mode:pss", "-pkeyopt", "rsa_pss_saltlen:32"],
+          { stdio: "ignore", env: { PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" } });
         return true;
       } catch { return false; }
     });

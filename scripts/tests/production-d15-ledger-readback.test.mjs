@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { LEDGER, assertLedgerAuthorization, assertLedgerEvidence, assertLedgerReceipt, assertFixedLedgerDefinition, authenticateLedgerLogPages,
   assertProtectedToolingSource, createPinnedGitRunner, waitForLedgerLogPages } from "../aws/production-d15-ledger-readback.mjs";
 import { createPinnedAwsExecutor, d15MigrationChecksums, assertRootIdentity, assertLedgerIntent, assertLedgerTaskRecord, ledgerStartedBy } from "../aws/production-d15-ledger-readback.mjs";
-import { ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
+import { createPinnedRootAttestationVerifier, trustedRootAttestationOpenSsl, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
 import { createProductionGithubCommandRunner, productionGithubExecutable, productionAwsExecutable } from "../aws/production-credential-source-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -55,6 +59,32 @@ test("authorization rejects forged signature, wrong source, tooling, task, datab
   assert.throws(() => checkAuth(a, Date.parse("2026-11-05T20:15:00.000Z")), "Expired authorization cannot launch");
   assert.throws(() => assertLedgerAuthorization(a, { toolingSourceSha, now: Date.parse("2026-11-05T20:09:00.000Z"),
     minimumRemainingMs: 7 * 60_000, verify }), "Launch needs enough time for the fixed task");
+});
+
+test("root authorization rejects shadowed OpenSSL and forged or expired signatures", () => {
+  let command, environment;
+  const verifier = createPinnedRootAttestationVerifier({ execute: (file, _args, options) => {
+    command = file; environment = options.env; throw new Error("invalid signature");
+  } });
+  const a = authorization();
+  assert.throws(() => assertLedgerAuthorization(a, { toolingSourceSha, now, verify: verifier }));
+  assert.equal(command, "/usr/bin/openssl");
+  assert.equal(environment.PATH, "/usr/bin:/bin");
+  assert.equal(environment.OPENSSL_CONF, undefined);
+  const shadow = fs.mkdtempSync(path.join(os.tmpdir(), "d15-openssl-shadow-"));
+  const previousPath = process.env.PATH;
+  try {
+    fs.writeFileSync(path.join(shadow, "openssl"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    process.env.PATH = `${shadow}:${previousPath}`;
+    assert.throws(() => assertLedgerAuthorization(a, { toolingSourceSha, now }), "PATH shadow must not validate a forged signature");
+  } finally { process.env.PATH = previousPath; fs.rmSync(shadow, { recursive: true, force: true }); }
+  assert.throws(() => assertLedgerAuthorization(changed(a, (x) => { x.body.nonce = "e".repeat(64); }, "authorizationSha256"),
+    { toolingSourceSha, now }), "Modified signed payload must fail");
+  assert.throws(() => assertLedgerAuthorization(a, { toolingSourceSha, now: Date.parse(a.body.expiresAt) }));
+  assert.equal(createPinnedRootAttestationVerifier()({ keyArn: "wrong", signingAlgorithm: ROOT_ATTESTATION_SIGNING_ALGORITHM,
+    digest: Buffer.alloc(32), signature: Buffer.from("forgery") }), false);
+  assert.throws(() => trustedRootAttestationOpenSsl({ existsSync: () => false }));
+  assert.throws(() => trustedRootAttestationOpenSsl({ existsSync: () => true, realpathSync: () => "/tmp/openssl" }));
 });
 
 test("receipt rejects replay against a fresh request, forged signature, missing audit, and altered rows", () => {
@@ -121,6 +151,29 @@ test("protected-main gate pins GitHub host, repository, SHA, and executables", (
   assert.equal(gitCommand, "/usr/bin/git");
   assert.equal(gitEnvironment.PATH, "/usr/bin:/bin");
   assert.equal(gitEnvironment.GIT_DIR, undefined);
+  assert.equal(gitEnvironment.GIT_NO_REPLACE_OBJECTS, "1");
+  assert.equal(gitEnvironment.GIT_CONFIG_GLOBAL, "/dev/null");
+  assert.equal(gitEnvironment.HOME, "/nonexistent");
+});
+
+test("D15 Git runner disables replacement objects and hostile Git configuration", () => {
+  let cleanEnvironment;
+  createPinnedGitRunner({ env: { HOME: "/tmp/attacker", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.fsmonitor", GIT_CONFIG_VALUE_0: "/tmp/attacker/hook", GIT_NO_REPLACE_OBJECTS: "0" },
+    exec: (_file, args, options) => { cleanEnvironment = options.env; assert.deepEqual(args.slice(2, 4), ["-c", "core.fsmonitor=false"]); return ""; } })(["status", "--porcelain=v1"]);
+  assert.equal(cleanEnvironment.GIT_NO_REPLACE_OBJECTS, "1");
+  assert.equal(cleanEnvironment.GIT_CONFIG_COUNT, undefined);
+  assert.equal(cleanEnvironment.GIT_CONFIG_KEY_0, undefined);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "d15-git-replace-"));
+  const git = (args, env) => execFileSync("/usr/bin/git", ["-C", directory, ...args], { encoding: "utf8", env });
+  try {
+    git(["init", "--quiet"]); git(["config", "user.email", "test@example.invalid"]); git(["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(directory, "migration.sql"), "authentic D15 SQL\n"); git(["add", "migration.sql"]); git(["commit", "--quiet", "-m", "original"]);
+    const original = git(["rev-parse", "HEAD"]).trim();
+    fs.writeFileSync(path.join(directory, "migration.sql"), "malicious replacement SQL\n"); git(["add", "migration.sql"]); git(["commit", "--quiet", "-m", "replacement"]);
+    git(["replace", original, "HEAD"]);
+    assert.equal(git(["show", `${original}:migration.sql`]), "malicious replacement SQL\n");
+    assert.equal(git(["show", `${original}:migration.sql`], cleanEnvironment), "authentic D15 SQL\n");
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("bounded log polling handles missing streams, empty pages, delay, and timeout without launching a task", async () => {

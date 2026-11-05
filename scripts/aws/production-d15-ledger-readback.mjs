@@ -201,8 +201,8 @@ export function assertLedgerTaskRecord(value, authorization) {
 export function createPinnedGitRunner({ exec = execFileSync, env = process.env } = {}) {
   return (args, { encoding = "utf8" } = {}) => {
     assert.ok(encoding === "utf8" || encoding === null);
-    return exec("/usr/bin/git", ["-C", root, ...args], { encoding, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
-    env: { HOME: env.HOME, PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C" } });
+    return exec("/usr/bin/git", ["-C", root, "-c", "core.fsmonitor=false", ...args], { encoding, maxBuffer: 8 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"],
+    env: { HOME: "/nonexistent", PATH: "/usr/bin:/bin", LANG: "C", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_NO_REPLACE_OBJECTS: "1" } });
   };
 }
 
