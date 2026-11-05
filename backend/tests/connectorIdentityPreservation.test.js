@@ -36,6 +36,8 @@ const { generateKeyPairSync } = require('node:crypto');
       await assert.rejects(loadAgentState());
       assert.equal(await fs.readFile(stateFile, 'utf8'), bad, 'unreadable identity must never be overwritten');
     }
+    await fs.writeFile(stateFile,'{"privateKeyPem":"synthetic-sensitive-key-fragment');
+    await assert.rejects(loadAgentState(),error=>!error.message.includes('synthetic-sensitive-key-fragment'),'malformed private JSON must not appear in an error');
     await fs.rm(stateFile);
     assert.notEqual(validate().status,0,'missing state must fail read-only validation');
     await assert.rejects(fs.stat(stateFile),'validation must not initialize a replacement identity');

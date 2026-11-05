@@ -160,6 +160,14 @@ try {
   # Execute the actual pinned HTTPS client contract with only its transport
   # mocked. Never permit a local header to redirect the authenticated authority,
   # or truthy JSON strings to stand in for verified Boolean results.
+  $malformed=Join-Path $fixture 'malformed-private.json'
+  [IO.File]::WriteAllText($malformed,'{"token":"synthetic-sensitive-token-fragment')
+  $failed=$false
+  try {Read-MscqrJson $malformed | Out-Null}catch{
+    $failed=$true
+    if($_.Exception.Message.Contains('synthetic-sensitive-token-fragment')){throw 'Private JSON leaked into diagnostics'}
+  }
+  if(-not $failed){throw 'Malformed private JSON was accepted'}
   $parseErrors=$null
   $ast=[Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot\..\local-print-agent\install\windows\connector-upgrade-transaction.ps1",[ref]$null,[ref]$parseErrors)
   if($parseErrors){throw 'Production transaction script did not parse.'}

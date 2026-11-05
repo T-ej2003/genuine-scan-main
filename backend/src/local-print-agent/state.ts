@@ -99,7 +99,10 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
       return initializeAgentState();
     }
   }
-  const parsed = JSON.parse(raw);
+  let parsed: any;
+  try { parsed = JSON.parse(raw); } catch {
+    throw new Error("Connector identity JSON is invalid; preserve the state file and reconcile before starting.");
+  }
   for (const key of ["agentId", "deviceFingerprint", "publicKeyPem", "privateKeyPem"] as const) {
     if (typeof parsed?.[key] !== "string" || !parsed[key].trim()) {
       throw new Error("Connector identity is incomplete; preserve the state file and reconcile before starting.");

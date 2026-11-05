@@ -30,6 +30,15 @@ function Assert-MscqrPrivatePath([string]$Path) {
     }
   }
 }
+function Read-MscqrJson([string]$Path) {
+  Assert-MscqrPlainPath $Path
+  try {return [IO.File]::ReadAllText($Path) | ConvertFrom-Json -ErrorAction Stop}
+  catch {throw 'Connector authorization, journal or identity JSON could not be read. Inspect the protected file locally; its contents have not been logged.'}
+}
+function Read-MscqrAuthorization([string]$Path) {
+  Assert-MscqrPrivatePath $Path
+  return Read-MscqrJson $Path
+}
 function Protect-MscqrDirectory([string]$Path) {
   Assert-MscqrPlainPath $Path
   New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
@@ -132,7 +141,7 @@ function Assert-MscqrRuntime([string]$Runtime, [string]$Version, [string]$StateF
   if(@($listeners.OwningProcess | Select-Object -Unique).Count -ne 1 -or $listeners[0].OwningProcess -ne $processes[0].ProcessId -or
       @($listeners | Where-Object {$_.LocalAddress -notin @('127.0.0.1','::1')}).Count) {throw 'Local health endpoint is not owned exclusively by the intended connector.'}
   if ((Get-FileHash -LiteralPath $Startup -Algorithm SHA256).Hash -ine $StartupHash) { throw 'Startup registration changed.' }
-  $identity = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+  $identity = Read-MscqrJson $StateFile
   $status = Invoke-RestMethod -Uri 'http://127.0.0.1:17866/status' -TimeoutSec 5 -ErrorAction Stop
   if ($status.buildVersion -cne $Version -or $status.agentId -cne $identity.agentId -or
       $status.deviceFingerprint -cne $identity.deviceFingerprint -or
@@ -262,11 +271,11 @@ function Invoke-MscqrUpgradeTransaction {
     $journalPath = Join-Path $root 'transaction.json'
     Assert-MscqrPlainPath $journalPath
     if (Test-Path -LiteralPath $journalPath) {
-      $journal = Get-Content -LiteralPath $journalPath -Raw | ConvertFrom-Json
+      $journal = Read-MscqrJson $journalPath
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
       if ($Phase -eq 'Recover') {
         if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
-          $auth = Get-Content -LiteralPath $AuthFile -Raw | ConvertFrom-Json
+          $auth = Read-MscqrAuthorization $AuthFile
           # A fresh, independently evidenced renewal can recover an expired
           # interrupted attempt. It retains exactly the same immutable binding.
           try { Invoke-MscqrMaintenance $auth 'verify' $journal.binding } catch {
@@ -290,8 +299,8 @@ function Invoke-MscqrUpgradeTransaction {
       }
     } elseif ($Phase -ne 'Prepare') { throw 'Upgrade journal is missing.' }
     if ($Phase -eq 'Prepare') {
-      $auth = Get-Content -LiteralPath $AuthFile -Raw | ConvertFrom-Json
       Assert-MscqrPrivatePath $AuthFile
+      $auth = Read-MscqrAuthorization $AuthFile
       $binding = $auth.binding
       $runtime = Join-Path $live 'bin\mscqr-local-print-agent.exe'
       $environmentFile = Join-Path $live 'agent.env'
@@ -313,7 +322,7 @@ function Invoke-MscqrUpgradeTransaction {
       }
       $oldVersion = Get-MscqrRuntimeVersion $runtime
       if ($oldVersion -cne $binding.sourceVersion) { throw 'Previous runtime version mismatch.' }
-      $identity = Get-Content -LiteralPath $StateFile -Raw | ConvertFrom-Json
+      $identity = Read-MscqrJson $StateFile
       if ([string]::IsNullOrWhiteSpace($identity.backendUrl) -or
           ([Uri]$auth.endpoint).GetLeftPart([UriPartial]::Authority) -cne ([Uri]$identity.backendUrl).GetLeftPart([UriPartial]::Authority)) { throw 'Maintenance authority does not match the paired backend.' }
       if ($identity.agentId -cne $binding.agentId -or $identity.deviceFingerprint -cne $binding.deviceFingerprint -or
@@ -373,7 +382,7 @@ function Invoke-MscqrUpgradeTransaction {
     }
     if ($Phase -eq 'Activate') {
       if ($journal.phase -cne 'BACKED_UP') { throw 'Upgrade is not ready for activation.' }
-      $auth = Get-Content -LiteralPath $AuthFile -Raw | ConvertFrom-Json
+      $auth = Read-MscqrAuthorization $AuthFile
       Invoke-MscqrMaintenance $auth 'verify' $journal.binding
       Assert-MscqrBackupBindings $journal
       foreach ($record in $journal.records) {
