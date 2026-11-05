@@ -97,11 +97,11 @@ export async function runD15LedgerBootstrap({ toolingSha, sourceRepository, mode
     process.chdir(copy);
     const { runD15LedgerReadback } = await load(ledger);
     assert.equal(typeof runD15LedgerReadback, "function");
-    return runD15LedgerReadback(mode, ...args);
+    return await runD15LedgerReadback(mode, ...args);
   } finally { process.chdir(originalCwd); fs.rmSync(copy, { recursive: true, force: true }); }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url))) {
   try {
     assert.ok(process.argv.length === 6 || process.argv.length === 7);
     const [, , toolingSha, sourceRepository, mode, ...args] = process.argv;

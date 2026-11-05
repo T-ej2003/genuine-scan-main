@@ -22,6 +22,16 @@ test("trusted bootstrap rejects wrong GitHub identity and executable substitutio
     realpathSync: () => "/tmp/attacker/git", statSync: () => ({ isFile: () => true, uid: 0, mode: 0o755 }) }));
 });
 
+test("trusted bootstrap CLI fails closed through a symlinked /tmp entry point", () => {
+  const dir = fs.mkdtempSync("/tmp/mscqr-d15-cli-test-");
+  try {
+    const entry = path.join(dir, "bootstrap.mjs");
+    fs.symlinkSync(bootstrap, entry);
+    assert.throws(() => execFileSync(process.execPath, [entry], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+      (error) => error.status === 1 && /D15 trusted bootstrap failed closed/.test(error.stderr));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("trusted bootstrap loads only the authenticated dependency closure and fails closed on tampering", async () => {
   const repo = fs.realpathSync(fs.mkdtempSync("/tmp/mscqr-d15-bootstrap-test-"));
   const marker = path.join(repo, "dependency-executed");
@@ -48,6 +58,11 @@ test("trusted bootstrap loads only the authenticated dependency closure and fail
     fs.writeFileSync(path.join(awsDir, "dependency.mjs"), `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(marker)}, 'checkout tampering');\n`);
     assert.deepEqual(await run(), { status: "VERIFIED" });
     assert.equal(fs.readFileSync(marker, "utf8"), "authenticated", "The copied dependency came from the approved tree");
+    assert.deepEqual(await run(approved, { load: async (file) => ({ runD15LedgerReadback: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      assert.equal(fs.existsSync(file), true, "Authenticated source must remain until receipt verification finishes");
+      return { status: "VERIFIED" };
+    } }) }), { status: "VERIFIED" });
     fs.unlinkSync(marker);
     await assert.rejects(run(approved, { beforeLoad: (copy) => fs.writeFileSync(path.join(copy, "scripts/aws/dependency.mjs"), "tampered\n") }), /source copy changed/);
     assert.equal(fs.existsSync(marker), false, "Mutation between copy and import did not execute");
