@@ -44,7 +44,8 @@ function Resolve-MscqrUpgradeState([string]$UserProfile,[string]$LiveDirectory,[
   $environmentFile=Join-Path $LiveDirectory 'agent.env'
   if(Test-Path -LiteralPath $environmentFile) {
     Assert-MscqrPlainPath $environmentFile
-    $settings=@([IO.File]::ReadAllLines($environmentFile) | Where-Object {$_ -match '(?i)^PRINT_AGENT_STATE_FILE='})
+    # The installed CMD wrapper uses %%~A, which also accepts a quoted key.
+    $settings=@([IO.File]::ReadAllLines($environmentFile) | Where-Object {$_ -match '(?i)^(?:PRINT_AGENT_STATE_FILE|"PRINT_AGENT_STATE_FILE")='})
     if($settings.Count -gt 1){throw 'Multiple configured connector state locations require reconciliation.'}
     if($settings.Count -eq 1) {
       $configured=$settings[0].Substring($settings[0].IndexOf('=')+1).Trim('"')

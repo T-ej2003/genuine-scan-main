@@ -11,7 +11,7 @@ $previous=$env:PRINT_AGENT_STATE_FILE;$env:PRINT_AGENT_STATE_FILE=$null
 $root=Join-Path ([IO.Path]::GetTempPath()) ('mscqr-state-discovery-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $root|Out-Null
 try {
-  foreach($scenario in @('modern','legacy','matching','conflict','missing','corrupt-modern','corrupt-legacy','configured')) {
+  foreach($scenario in @('modern','legacy','matching','conflict','missing','corrupt-modern','corrupt-legacy','configured','configured-quoted-key')) {
     $profile=Join-Path $root $scenario;$live=Join-Path $profile 'live'
     New-Item -ItemType Directory "$profile\.mscqr","$profile\.authenticqr",$live|Out-Null
     $modern="$profile\.mscqr\local-print-agent-state.json";$legacy="$profile\.authenticqr\local-print-agent-state.json"
@@ -19,11 +19,12 @@ try {
     if($scenario -in @('legacy','matching','conflict','corrupt-legacy')){[IO.File]::WriteAllText($legacy,'{"agentId":"synthetic","pending":"preserve"}')}
     if($scenario -eq 'conflict'){[IO.File]::WriteAllText($legacy,'{"agentId":"other"}')}
     if($scenario -like 'corrupt-*'){[IO.File]::WriteAllText($(if($scenario -eq 'corrupt-modern'){$modern}else{$legacy}),'{private-invalid')}
-    if($scenario -eq 'configured') {
+    if($scenario -like 'configured*') {
       $custom=Join-Path $profile 'custom.json';[IO.File]::WriteAllText($custom,'{"agentId":"synthetic"}')
-      [IO.File]::WriteAllText("$live\agent.env","PRINT_AGENT_STATE_FILE=$custom")
+      $key=if($scenario -eq 'configured-quoted-key'){'"PRINT_AGENT_STATE_FILE"'}else{'PRINT_AGENT_STATE_FILE'}
+      [IO.File]::WriteAllText("$live\agent.env","$key=$custom")
     }
-    foreach($file in @($modern,$legacy,$(if($scenario -eq 'configured'){$custom})) | Where-Object {$_ -and (Test-Path -LiteralPath $_ -PathType Leaf)}) {
+    foreach($file in @($modern,$legacy,$(if($scenario -like 'configured*'){$custom})) | Where-Object {$_ -and (Test-Path -LiteralPath $_ -PathType Leaf)}) {
       $acl=Get-Acl -LiteralPath $file
       $acl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
       Set-Acl -LiteralPath $file -AclObject $acl
@@ -33,7 +34,7 @@ try {
     if($scenario -in @('conflict','missing','corrupt-modern','corrupt-legacy')){if(-not $failed){throw "Accepted unsafe $scenario"}}
     else {
       if($failed){throw "Rejected supported $scenario"}
-      $expected=if($scenario -eq 'legacy'){$legacy}elseif($scenario -eq 'configured'){$custom}else{$modern}
+      $expected=if($scenario -eq 'legacy'){$legacy}elseif($scenario -like 'configured*'){$custom}else{$modern}
       if($found.selectedPath -ine $expected){throw 'Wrong state source selected'}
       Assert-MscqrStateDiscovery $found
       if($scenario -eq 'legacy') {
