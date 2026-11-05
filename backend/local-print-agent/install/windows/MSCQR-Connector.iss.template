@@ -69,6 +69,13 @@ begin
       exit;
     end;
     ExtractTemporaryFiles('mscqr-payload\*');
+    if ExpandConstant('{param:MSCQRRECOVER|}') = '1' then begin
+      if RunUpgrade('Recover') then
+        Result := 'Previous installation restoration was verified. This upgrade remains cancelled and dispatch remains fenced. Review the journal before another attempt.'
+      else
+        Result := 'Interrupted upgrade restoration could not be verified. Keep dispatch fenced and inspect the durable journal.';
+      exit;
+    end;
     if not RunUpgrade('Prepare') then
       Result := 'Upgrade preflight, backend authorization, staging or backup failed. The existing runtime has not been replaced.'
     else UpgradePrepared := True;

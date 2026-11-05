@@ -940,7 +940,8 @@ BEGIN
       SELECT array_agg(id ORDER BY id) INTO maintenance_sessions FROM public."PrintSession" WHERE "printerId"=ANY(maintenance_printers);
       PERFORM set_config('app.printing_maintenance_sessions',coalesce(to_json(maintenance_sessions)::text,'[]'),true);
       SELECT jsonb_build_object('jobs',maintenance_inventory,'items',coalesce(jsonb_agg(to_jsonb(i) ORDER BY i.id),'[]'::jsonb))
-        INTO maintenance_inventory FROM (SELECT id,state,"attemptCount","printSessionId","deviceJobRef","failureReason"
+        INTO maintenance_inventory FROM (SELECT id,state,"attemptCount","printSessionId","deviceJobRef","failureReason",
+          "pipelineState","issuedAt","dispatchedAt","agentAckedAt","confirmationDeadlineAt","printConfirmedAt","dispatchMetadata","confirmationEvidence"
           FROM public."PrintItem" WHERE "printSessionId"=ANY(maintenance_sessions)) i;
       maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
         'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
