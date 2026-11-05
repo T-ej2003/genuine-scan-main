@@ -19,6 +19,7 @@ if($ChildCase) {
     Set-Item "function:$name" -Value { }
   }
   function Install-PackagedAgentFiles {if($ChildCase -eq 'copy-failure'){throw 'fixture copy failure'}}
+  function Initialize-AgentIdentity {if($ChildCase -eq 'identity-failure'){throw 'fixture identity failure'};[IO.File]::WriteAllText("$CaseDirectory\identity-initialized",'synthetic identity')}
   function Register-StartupLauncher {if($ChildCase -eq 'startup-failure'){throw 'fixture registration failure'};[IO.File]::WriteAllText($StartupLauncher,'fixture startup')}
   function Start-AgentProcess {[IO.File]::WriteAllText("$CaseDirectory\started",'one fixture start')}
   function Wait-ForVerifiedStatus {
@@ -41,7 +42,7 @@ if($ChildCase) {
 $fixture=Join-Path ([IO.Path]::GetTempPath()) ('mscqr-init-results-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $fixture|Out-Null
 try {
-  foreach($mode in @('interactive','silent')) {foreach($case in @('READY','NO_PRINTERS','PRINTER_UNAVAILABLE','copy-failure','startup-failure','health-failure','process-failure')) {
+  foreach($mode in @('interactive','silent')) {foreach($case in @('READY','NO_PRINTERS','PRINTER_UNAVAILABLE','copy-failure','identity-failure','startup-failure','health-failure','process-failure')) {
     $dir=Join-Path $fixture "$mode-$case";New-Item -ItemType Directory $dir|Out-Null
     $params=@('-NoProfile','-NonInteractive','-File',$PSCommandPath,'-ChildCase',$case,'-CaseDirectory',$dir)
     if($mode -eq 'silent'){$params+='-SilentFixture'}
@@ -51,6 +52,7 @@ try {
     $result=Get-Content "$dir\install-result.json" -Raw|ConvertFrom-Json
     if($expected -in @(0,10)) {
       if(-not (Test-Path "$dir\startup\fixture.vbs")){throw 'Startup registration missing'}
+      if(-not (Test-Path "$dir\identity-initialized")){throw 'First-install identity initialization was skipped'}
       if(-not (Test-Path "$dir\started") -or -not $result.localhostStatusOk){throw 'Partial success bypassed initialization'}
       if($result.outcome -ne $(if($expected -eq 10){'partial'}else{'success'})){throw 'Incorrect install outcome'}
     } elseif($result.outcome -ne 'failure' -or $result.localhostStatusOk){throw 'False installation success'}
@@ -58,6 +60,7 @@ try {
     if($mode -eq 'silent' -and (Test-Path "$dir\browser")){throw 'Silent setup opened a browser'}
     if($mode -eq 'interactive' -and $expected -in @(0,10) -and -not (Test-Path "$dir\browser")){throw 'Interactive Printer Setup was not offered'}
     if($case -eq 'startup-failure' -and (Test-Path "$dir\started")){throw 'Registration failure started runtime'}
+    if($case -eq 'identity-failure' -and ((Test-Path "$dir\startup\fixture.vbs") -or (Test-Path "$dir\started"))){throw 'Failed identity initialization registered or started runtime'}
     Write-Host "PASS fresh initialization $mode/$case exit=$expected (external boundaries simulated)"
   }}
   foreach($case in @('missing-script','missing-runtime')) {

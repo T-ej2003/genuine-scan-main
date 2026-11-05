@@ -93,7 +93,7 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
   } catch (error: any) {
     if (error?.code !== "ENOENT") throw error;
     if (process.env.PRINT_AGENT_STATE_FILE) {
-      if (options.initialize === false) throw new Error("Existing connector identity is missing.");
+      if (options.initialize !== true) throw new Error("Existing connector identity is missing.");
       return initializeAgentState();
     }
     try {
@@ -101,7 +101,7 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
       source = LEGACY_STATE_FILE;
     } catch (legacyError: any) {
       if (legacyError?.code !== "ENOENT") throw legacyError;
-      if (options.initialize === false) throw new Error("Existing connector identity is missing.");
+      if (options.initialize !== true) throw new Error("Existing connector identity is missing.");
       return initializeAgentState();
     }
   }

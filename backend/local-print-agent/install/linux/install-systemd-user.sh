@@ -25,6 +25,27 @@ SERVICE_FILE="$SERVICE_DIR/mscqr-local-print-agent.service"
 
 mkdir -p "$BIN_DIR" "$LOG_DIR" "$SERVICE_DIR"
 
+EXISTING_CONFIG=0
+if [ -e "$ENV_FILE" ]; then EXISTING_CONFIG=1; fi
+if [ ! -f "$ENV_FILE" ]; then
+  cat > "$ENV_FILE" <<EOF
+# Optional MSCQR local print agent overrides.
+# Example:
+# PRINT_GATEWAY_BACKEND_URL=https://mscqr.example.com/api
+# PRINT_GATEWAY_ID=gw_1234567890
+# PRINT_GATEWAY_SECRET=replace-with-bootstrap-secret
+EOF
+fi
+set -a
+# shellcheck disable=SC1090
+. "$ENV_FILE"
+set +a
+if [ "$EXISTING_CONFIG" -eq 1 ] || [ -e "$WRAPPER" ] || [ -e "$SERVICE_FILE" ]; then
+  "$NODE_BIN" "$BACKEND_DIR/dist/local-print-agent/index.js" --validate-state >/dev/null
+else
+  "$NODE_BIN" "$BACKEND_DIR/dist/local-print-agent/index.js" --initialize-state >/dev/null
+fi
+
 cat > "$WRAPPER" <<EOF
 #!/bin/sh
 set -eu
@@ -42,16 +63,6 @@ export PRINT_AGENT_PORT="\${PRINT_AGENT_PORT:-17866}"
 exec "$NODE_BIN" "$BACKEND_DIR/dist/local-print-agent/index.js" >> "$LOG_DIR/agent.log" 2>&1
 EOF
 chmod +x "$WRAPPER"
-
-if [ ! -f "$ENV_FILE" ]; then
-  cat > "$ENV_FILE" <<EOF
-# Optional MSCQR local print agent overrides.
-# Example:
-# PRINT_GATEWAY_BACKEND_URL=https://mscqr.example.com/api
-# PRINT_GATEWAY_ID=gw_1234567890
-# PRINT_GATEWAY_SECRET=replace-with-bootstrap-secret
-EOF
-fi
 
 cat > "$SERVICE_FILE" <<EOF
 [Unit]

@@ -458,6 +458,26 @@ function Ensure-AgentEnvFile {
   }
 }
 
+function Initialize-AgentIdentity {
+  if ($PackagedInstall) {
+    $output = & $CanonicalAgentExe --initialize-state 2>&1
+  } else {
+    $backendDir = (Resolve-Path (Join-Path $ScriptRoot "..\..\..")).Path
+    $nodeCommand = Get-Command node -ErrorAction Stop
+    Push-Location $backendDir
+    try { $output = & $nodeCommand.Source (Join-Path $backendDir 'dist\local-print-agent\index.js') --initialize-state 2>&1 }
+    finally { Pop-Location }
+  }
+  if ($LASTEXITCODE -ne 0) { throw 'Connector first-install identity initialization failed; inspect the configured state path before retrying.' }
+  $evidence = ($output | Out-String) | ConvertFrom-Json -ErrorAction Stop
+  $expectedStateFile = Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'
+  if (-not $evidence.ok -or -not (Test-SamePath -Left ([string]$evidence.statePath) -Right $expectedStateFile) -or
+      [string]$evidence.stateSha256 -notmatch '^[a-fA-F0-9]{64}$') {
+    throw 'Connector first-install identity evidence does not match the expected state location.'
+  }
+  Write-UpgradeLog 'Connector first-install identity initialized and validated at the canonical state location.'
+}
+
 function Register-StartupLauncher {
   Write-UpgradeLog "Registering startup launcher: $StartupLauncher"
   $LauncherBody = @"
@@ -576,6 +596,9 @@ function Complete-Install {
 
 # Refuse an uncoordinated legacy upgrade before writing installation state.
 # This is not an idle snapshot or a substitute for a server maintenance fence.
+if (-not [string]::IsNullOrWhiteSpace([string]$env:PRINT_AGENT_STATE_FILE)) {
+  throw 'An ambient connector state override requires verified persistent startup configuration; fresh initialization is refused.'
+}
 if ((Test-Path -LiteralPath $EnvFile) -or
     (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or
     (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) {
@@ -615,6 +638,7 @@ try {
     Install-StandaloneAgentFiles
   }
 
+  Initialize-AgentIdentity
   Register-StartupLauncher
   Start-AgentProcess
 

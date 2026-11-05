@@ -10,7 +10,9 @@ const { generateKeyPairSync } = require('node:crypto');
   process.env.PRINT_AGENT_STATE_FILE = stateFile;
   const { loadAgentState, saveAgentState } = require('../dist/local-print-agent/state');
   try {
-    const first = await loadAgentState();
+    await assert.rejects(loadAgentState(), /Existing connector identity is missing/);
+    await assert.rejects(fs.stat(stateFile), 'ordinary state access must not initialize identity');
+    const first = await loadAgentState({ initialize: true });
     first.selectedPrinterId = 'synthetic-printer';
     first.calibrationProfiles = { 'synthetic-printer': { dpi: 300, offsetXmm: 1 } };
     first.unknownRecovery = { uncertainJob: 'synthetic-do-not-replay' };
@@ -55,8 +57,28 @@ const { generateKeyPairSync } = require('node:crypto');
     await fs.writeFile(stateFile,'{"privateKeyPem":"synthetic-sensitive-key-fragment');
     await assert.rejects(loadAgentState(),error=>!error.message.includes('synthetic-sensitive-key-fragment'),'malformed private JSON must not appear in an error');
     await fs.rm(stateFile);
+    await assert.rejects(loadAgentState(), /Existing connector identity is missing/);
+    const missingStart=spawnSync(process.execPath,[path.resolve(__dirname,'../dist/local-print-agent/index.js')],{
+      encoding:'utf8',timeout:5000,env:{...process.env,PRINT_AGENT_STATE_FILE:stateFile,PRINT_AGENT_LOCK_DIR:path.join(root,'missing-lock'),PRINT_AGENT_PORT:'0'}});
+    assert.equal(missingStart.status,1,'normal startup must fail before listening when configured identity disappears');
+    await assert.rejects(fs.stat(stateFile),'normal startup must not generate a replacement identity');
     assert.notEqual(validate().status,0,'missing state must fail read-only validation');
     await assert.rejects(fs.stat(stateFile),'validation must not initialize a replacement identity');
+    const initializeLockDir=path.join(root,'initialize-lock');
+    await fs.mkdir(initializeLockDir);
+    const initializeLock=path.join(initializeLockDir,'mscqr-local-print-agent.lock');
+    await fs.writeFile(initializeLock,JSON.stringify({pid:process.pid}));
+    const concurrentInitialize=spawnSync(process.execPath,[path.resolve(__dirname,'../dist/local-print-agent/index.js'),'--initialize-state'],{
+      encoding:'utf8',timeout:5000,env:{...process.env,PRINT_AGENT_STATE_FILE:stateFile,PRINT_AGENT_LOCK_DIR:initializeLockDir}});
+    assert.equal(concurrentInitialize.status,75,'explicit initialization must not run alongside an active connector');
+    await assert.rejects(fs.stat(stateFile),'rejected concurrent initialization must not create identity');
+    await fs.rm(initializeLock);
+    const cliInitialize=spawnSync(process.execPath,[path.resolve(__dirname,'../dist/local-print-agent/index.js'),'--initialize-state'],{
+      encoding:'utf8',timeout:5000,env:{...process.env,PRINT_AGENT_STATE_FILE:stateFile,PRINT_AGENT_LOCK_DIR:initializeLockDir}});
+    assert.equal(cliInitialize.status,0,cliInitialize.stderr);
+    assert.equal(JSON.parse(cliInitialize.stdout).ok,true,'explicit first-install mode validates the initialized identity');
+    assert.notEqual(JSON.parse(cliInitialize.stdout).agentId,first.agentId,'explicit recovery does not silently reuse a missing identity');
+    await fs.rm(stateFile);
     await fs.mkdir(stateFile);
     await assert.rejects(loadAgentState());
     assert((await fs.stat(stateFile)).isDirectory(), 'I/O errors must not replace state');

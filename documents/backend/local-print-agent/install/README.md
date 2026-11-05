@@ -73,6 +73,8 @@ Supported rollout paths:
 
 For engineering and release packaging from the `backend` folder:
 
+The installers initialize identity explicitly on a first installation and validate the existing identity before starting an installed service. Ordinary connector startup refuses a missing state file. For a standalone development run, build first, run `npm run print:agent:init` once for a new isolated profile, then run `npm run print:agent`. Never use initialization to replace a missing identity from an existing installation.
+
 ```bash
 npm run print:agent:install:macos
 npm run print:agent:install:linux
