@@ -10,6 +10,9 @@ DROP POLICY IF EXISTS printing_lifecycle_organization_select ON public."Organiza
 DROP POLICY IF EXISTS printing_lifecycle_printauditevent_insert ON public."PrintAuditEvent";
 DROP POLICY IF EXISTS printing_lifecycle_printauditevent_select ON public."PrintAuditEvent";
 DROP POLICY IF EXISTS printing_lifecycle_printer_delete ON public."Printer";
+DROP POLICY IF EXISTS printing_lifecycle_systemcheckpoint_select ON public."SystemCheckpoint";
+DROP POLICY IF EXISTS printing_lifecycle_systemcheckpoint_insert ON public."SystemCheckpoint";
+DROP POLICY IF EXISTS printing_lifecycle_systemcheckpoint_update ON public."SystemCheckpoint";
 DROP POLICY IF EXISTS printing_lifecycle_printer_insert ON public."Printer";
 DROP POLICY IF EXISTS printing_lifecycle_printer_select ON public."Printer";
 DROP POLICY IF EXISTS printing_lifecycle_printer_update ON public."Printer";
@@ -48,6 +51,8 @@ REVOKE ALL ON FUNCTION app_rls.printing_control_job(text,text,text,text,text,tex
 REVOKE ALL ON FUNCTION app_rls.printing_printer_administration(text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_idempotency(text,text,text,text,text,text,text,integer,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb) FROM PUBLIC;
+DROP FUNCTION IF EXISTS app_rls.printing_maintenance_gate(text,text,text,jsonb);
 REVOKE ALL ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_connector_session(text,text,text,jsonb) FROM PUBLIC;

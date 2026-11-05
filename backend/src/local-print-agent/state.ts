@@ -42,6 +42,7 @@ const sanitizeCalibrationProfile = (value: unknown): CalibrationProfile => {
   };
 
   return {
+    ...source,
     dpi: toNumber("dpi"),
     labelWidthMm: toNumber("labelWidthMm"),
     labelHeightMm: toNumber("labelHeightMm"),
@@ -80,19 +81,21 @@ const initializeAgentState = async (): Promise<AgentState> => {
   }
 };
 
-export const loadAgentState = async (): Promise<AgentState> => {
+export const loadAgentState = async (options: { initialize?: boolean } = {}): Promise<AgentState> => {
   let raw: string;
   try {
     raw = await fs.readFile(STATE_FILE, "utf8");
   } catch (error: any) {
     if (error?.code !== "ENOENT") throw error;
     if (process.env.PRINT_AGENT_STATE_FILE) {
+      if (options.initialize === false) throw new Error("Existing connector identity is missing.");
       return initializeAgentState();
     }
     try {
       raw = await fs.readFile(LEGACY_STATE_FILE, "utf8");
     } catch (legacyError: any) {
       if (legacyError?.code !== "ENOENT") throw legacyError;
+      if (options.initialize === false) throw new Error("Existing connector identity is missing.");
       return initializeAgentState();
     }
   }
@@ -113,6 +116,7 @@ export const loadAgentState = async (): Promise<AgentState> => {
     throw new Error("Connector identity keys are invalid; preserve the state file and reconcile before starting.");
   }
   return {
+    ...parsed,
     agentId: parsed.agentId,
     deviceFingerprint: parsed.deviceFingerprint,
     selectedPrinterId: parsed?.selectedPrinterId ? String(parsed.selectedPrinterId) : null,
@@ -139,6 +143,7 @@ export const saveAgentState = async (state: AgentState) => {
       temporaryFile,
       JSON.stringify(
         {
+          ...state,
           agentId: state.agentId,
           deviceFingerprint: state.deviceFingerprint,
           selectedPrinterId: state.selectedPrinterId,

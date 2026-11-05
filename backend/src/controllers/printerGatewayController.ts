@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import prisma from "../config/database";
 
 import { PrintDispatchMode, PrinterConnectionType } from "@prisma/client";
 import { Request, Response } from "express";
@@ -140,10 +141,12 @@ const testGateway = async (req: Request) => {
 export const claimGatewayTestJob = async (req: Request, res: Response) => {
   try {
     const auth = await testGateway(req);
-    return res.json({ success: true, data: claimGatewayPrinterTestJob({
-      printerId: auth.printer.id,
-      connectionType: auth.printer.connectionType,
-    }) });
+    const data = await prisma.$transaction(async tx => {
+      await recordGatewayPrintingEvent({ ...auth, requestId: randomUUID(), operation: "CHECK_DISPATCH",
+        mode: modeFor(auth.printer.connectionType), client: tx });
+      return claimGatewayPrinterTestJob({ printerId: auth.printer.id, connectionType: auth.printer.connectionType });
+    });
+    return res.json({ success: true, data });
   } catch (error: any) {
     return res.status(error.statusCode || 400).json({ success: false, error: error.message });
   }

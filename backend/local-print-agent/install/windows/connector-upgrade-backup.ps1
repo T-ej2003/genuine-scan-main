@@ -9,10 +9,15 @@ function New-MscqrUpgradeBackup {
     [Parameter(Mandatory = $true)][string]$RuntimeSignerSubject,
     [Parameter(Mandatory = $true)][string]$EnvironmentFile,
     [Parameter(Mandatory = $true)][string]$StateFile,
-    [Parameter(Mandatory = $true)][string]$StartupFile
+    [Parameter(Mandatory = $true)][string]$StartupFile,
+    [System.Collections.IDictionary]$AdditionalFiles = @{}
   )
   $ErrorActionPreference = 'Stop'
   $inputs = [ordered]@{ runtime = $RuntimeFile; environment = $EnvironmentFile; state = $StateFile; startup = $StartupFile }
+  foreach ($name in $AdditionalFiles.Keys) {
+    if ($name -notin @('wrapper','uninstaller','uninstallData','setupScript','uninstallScript','installCommand','uninstallCommand')) { throw 'Unexpected additional backup file.' }
+    $inputs[$name] = $AdditionalFiles[$name]
+  }
   if (-not (Test-Path -LiteralPath $RuntimeFile -PathType Leaf)) { throw 'Existing runtime is required for backup.' }
   $runtimeSignature = Get-AuthenticodeSignature -FilePath $RuntimeFile
   if ($runtimeSignature.Status -ne 'Valid' -or -not $runtimeSignature.SignerCertificate -or

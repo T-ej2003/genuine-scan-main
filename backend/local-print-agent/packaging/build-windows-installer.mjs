@@ -15,6 +15,11 @@ const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
+const maintenanceApiUrl = new URL(String(process.env.MSCQR_MAINTENANCE_API_ORIGIN || ""));
+if (maintenanceApiUrl.protocol !== "https:" || maintenanceApiUrl.username || maintenanceApiUrl.password ||
+    maintenanceApiUrl.search || maintenanceApiUrl.hash || maintenanceApiUrl.pathname !== "/") {
+  throw new Error("MSCQR_MAINTENANCE_API_ORIGIN must be the approved HTTPS backend origin, without a path.");
+}
 const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
 const minWindowsBinaryBytes = 1_000_000;
 const pkgBinary = process.platform === "win32"
@@ -171,6 +176,7 @@ const readWindowsAssetTemplate = (assetName) => {
   return fs
     .readFileSync(templatePath, "utf8")
     .replace(/__MSCQR_WEB_APP_BASE_URL__/g, webAppBaseUrl)
+    .replace(/__MSCQR_MAINTENANCE_API_ORIGIN__/g, maintenanceApiUrl.origin)
     .replace(/__MSCQR_CONNECTOR_VERSION__/g, version);
 };
 
@@ -256,6 +262,9 @@ const main = () => {
   writeAsciiFile(path.join(stageDir, "Install Connector.cmd"), readWindowsAssetTemplate("Install Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "Uninstall Connector.cmd"), readWindowsAssetTemplate("Uninstall Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "README.txt"), readWindowsAssetTemplate("README.txt"));
+  for (const name of ['connector-upgrade-staging.ps1', 'connector-upgrade-backup.ps1', 'connector-upgrade-transaction.ps1']) {
+    writeAsciiFile(path.join(stageDir, name), readWindowsAssetTemplate(name));
+  }
   copyLegalDocuments(stageDir);
   writeAsciiFile(issOutputPath, renderInstallerScript(issTemplatePath, stageDir, outputDir));
 

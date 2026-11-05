@@ -36,5 +36,6 @@ jobs:
           & ./backend/tests/windowsConnectorBackup.test.ps1
           & ./backend/tests/windowsConnectorCleanup.test.ps1
           & ./backend/tests/windowsConnectorInitializationSafety.test.ps1
+          & ./backend/tests/windowsConnectorTransaction.test.ps1
           & ./backend/tests/windowsConnectorSigningHook.test.ps1
           & ./backend/tests/windowsConnectorComponentVerification.test.ps1

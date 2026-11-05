@@ -939,7 +939,7 @@ async function main() {
     const role=name==="maker"?"MANUFACTURER_ADMIN":"LICENSEE_ADMIN";
     const scopeVersion=name==="maker"?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
     const headers=name?{
-      authorization:`Bearer ${signAccessToken({userId:ids[name],email:"printing-http@example.invalid",role,sessionId:ids[`${name}Refresh`],orgId:name==="outsider"?ids.orgB:ids.orgA,licenseeId:name==="outsider"?ids.licenseeB:ids.licenseeA,scopeVersion})}`,
+      authorization:`Bearer ${signAccessToken({userId:ids[name],email:"printing-http@example.invalid",role,sessionId:ids[`${name}Refresh`],orgId:name==="outsider"?ids.orgB:ids.orgA,licenseeId:name==="outsider"?ids.licenseeB:ids.licenseeA,scopeVersion,authenticatedAt:new Date().toISOString()})}`,
       "x-database-session-capability":sealCookieToken(caps[name],"auth.database-session"),...extraHeaders,
     }:extraHeaders;
     const response=await fetch(`http://127.0.0.1:${server.address().port}/api/manufacturer/print-reissue-requests`,{headers});
@@ -957,6 +957,125 @@ async function main() {
     await httpList("checker",401);
     psql(admin,`UPDATE public."User" SET "isActive"=true WHERE id='${ids.checker}'`);
   } finally { await new Promise(resolve=>server.close(resolve)); }
+
+  // Fence an eligible queued job while concurrent authenticated claims race
+  // the request. Already accepted work remains acknowledgeable/confirmable.
+  const maintenanceSql = (capability, operation) => `SELECT app_rls.printing_printer_administration(
+    '${capability}','printing-printer-admin','${requestId()}','${operation}','${ids.printer}','{}'::jsonb)`;
+  denied(app, maintenanceSql(caps.outsider, 'MAINTENANCE_REQUEST'), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  denied(app, `SELECT app_rls.printing_maintenance_gate('forged','REQUEST','forged','{}'::jsonb)`, /permission denied/);
+  psql(admin, `UPDATE public."PrintJob" SET status='SENT' WHERE id='${created.job.id}';
+    UPDATE public."PrintSession" SET status='ACTIVE' WHERE "printJobId"='${created.job.id}';
+    UPDATE public."PrintItem" SET state='ISSUED' WHERE id='${claim.printItemId}';`);
+  const issuedBefore = psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE state='ISSUED'`);
+  const fencing = psqlAsync(app, `BEGIN; ${maintenanceSql(caps.maker,'MAINTENANCE_REQUEST')};
+    SELECT pg_sleep(1.5) /* connector_maintenance_race */; COMMIT;`);
+  let fenceHeld = false;
+  for (let probe = 0; probe < 100 && !fenceHeld; probe++) {
+    fenceHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity WHERE pid<>pg_backend_pid()
+      AND query LIKE '%connector_maintenance_race%' AND wait_event='PgSleep'`)) > 0;
+    if (!fenceHeld) await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  if(!fenceHeld) assert.equal((await fencing).status,0,'maintenance request must succeed before its race can be certified');
+  assert(fenceHeld, 'maintenance transaction must hold its lock before racing claims');
+  const fencedClaims = await Promise.all(Array.from({ length: 4 }, (_, index) => psqlAsync(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','maintenance_race_${index}',now()::timestamp,
+    '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.printer}',NULL,NULL,'{}'::jsonb)`)));
+  assert.equal((await fencing).status, 0);
+  for (const result of fencedClaims) {
+    assert.notEqual(result.status, 0);
+    assert.match(result.output, /CONNECTOR_MAINTENANCE_FENCED/);
+  }
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE state='ISSUED'`), issuedBefore);
+  const fenceStatus = json(app, maintenanceSql(caps.maker,'MAINTENANCE_STATUS'));
+  assert.equal(fenceStatus.state,'DISPATCH_FENCED');
+  assert.equal(fenceStatus.upgradeAllowed,false,'backend fencing alone must never authorize legacy replacement');
+  const fencedAck = json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','maintenance_ack_1',now()::timestamp,
+    '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash('maint-ack')}','synthetic-spool','{}'::jsonb)`);
+  assert.equal(fencedAck.operation,'ACK');
+  const fencedConfirmation = json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','maintenance_confirm',now()::timestamp,
+    '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash('maint-confirm')}','synthetic-spool','{}'::jsonb)`);
+  assert.equal(fencedConfirmation.operation,'CONFIRM');
+
+  const maintainedSession=requestId();
+  json(app,open(maintainedSession,maintainedSession).replaceAll(ids.discoveredPrinter,ids.printer));
+  json(app,advance(maintainedSession,1).replaceAll(ids.discoveredPrinter,ids.printer));
+  denied(app,socketClaim(maintainedSession).replaceAll(ids.discoveredPrinter,ids.printer),/CONNECTOR_MAINTENANCE_FENCED/);
+  denied(app, `SELECT app_rls.printing_test_label_job(NULL,'${requestId()}','CLAIM','${ids.printer}',
+    jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent','deviceFingerprint','printing-device',
+      'nonce','maintenance_diagnostic_claim','issuedAt',now()),'{}'::jsonb)`,/CONNECTOR_MAINTENANCE_FENCED/);
+  const gatewayPrinter=randomUUID(), directPrinter=randomUUID(),gatewaySecret=hash('disposable-maintenance-gateway');
+  psql(admin,`INSERT INTO public."Printer"(id,name,"connectionType","commandLanguage","deliveryMode","gatewayId","gatewaySecretHash","orgId","licenseeId","assignedUserId","isActive","updatedAt")
+    VALUES('${gatewayPrinter}','isolated gateway','NETWORK_DIRECT','ZPL','SITE_GATEWAY','isolated-maintenance-gateway','${gatewaySecret}','${ids.orgA}','${ids.licenseeA}','${ids.maker}',true,now()),
+    ('${directPrinter}','isolated direct','NETWORK_DIRECT','ZPL','DIRECT',NULL,NULL,'${ids.orgA}','${ids.licenseeA}','${ids.maker}',true,now());
+    UPDATE public."PrintJob" SET "printerId"='${directPrinter}',"printMode"='NETWORK_DIRECT' WHERE "batchId"='${ids.raceBatch}';
+    UPDATE public."PrintSession" SET "printerId"='${directPrinter}' WHERE "batchId"='${ids.raceBatch}';`);
+  json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,gatewayPrinter));
+  json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,directPrinter));
+  const networkAttempts=psql(admin,`SELECT sum("attemptCount") FROM public."PrintItem"`);
+  for(const operation of ['CLAIM','CHECK_DISPATCH']) {
+    denied(app,`SELECT app_rls.printing_gateway_job('isolated-maintenance-gateway','${gatewaySecret}','${requestId()}','${operation}','NETWORK_DIRECT',NULL,NULL,'{}'::jsonb)`,/CONNECTOR_MAINTENANCE_FENCED/);
+  }
+  denied(worker,`SELECT app_rls.printing_worker_network_job('CLAIM_DIRECT','${requestId()}',NULL,'{}'::jsonb)`,/CONNECTOR_MAINTENANCE_FENCED/);
+  denied(app,maintenanceSql(caps.maker,'DIAGNOSTIC_LEASE').replace(ids.printer,directPrinter),/CONNECTOR_MAINTENANCE_FENCED/);
+  assert.equal(psql(admin,`SELECT sum("attemptCount") FROM public."PrintItem"`),networkAttempts,'fenced gateway, worker and diagnostic paths cannot reserve additional physical work');
+  // Real authenticated route and FORCE-RLS database; disposable evidence key.
+  const authority=generateKeyPairSync('ed25519');
+  process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM=authority.publicKey.export({type:'spki',format:'pem'}).toString();
+  const maintenanceServer=await new Promise(resolve=>{const server=createBackendApp().listen(0,'127.0.0.1',()=>resolve(server));});
+  const postMaintenance=async(name,body,expected)=>{
+    const role=name==='maker'?'MANUFACTURER_ADMIN':'LICENSEE_ADMIN';
+    const scopeVersion=name==='maker'?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
+    const headers=name?{authorization:`Bearer ${signAccessToken({userId:ids[name],email:'printing-http@example.invalid',role,sessionId:ids[`${name}Refresh`],orgId:name==='outsider'?ids.orgB:ids.orgA,licenseeId:name==='outsider'?ids.licenseeB:ids.licenseeA,scopeVersion,authenticatedAt:new Date().toISOString()})}`,
+      'x-database-session-capability':sealCookieToken(caps[name],'auth.database-session'),'content-type':'application/json'}:{'content-type':'application/json'};
+    const response=await fetch(`http://127.0.0.1:${maintenanceServer.address().port}/api/manufacturer/printers/${ids.printer}/maintenance`,{method:'POST',headers,body:JSON.stringify(body)});
+    const result=await response.json();
+    if(expected!==undefined)assert.equal(response.status,expected,JSON.stringify(result));
+    return {status:response.status,...result};
+  };
+  try {
+    await postMaintenance(null,{action:'inventory'},401);
+    await postMaintenance('outsider',{action:'inventory'},403);
+    const snapshot=(await postMaintenance('maker',{action:'inventory'},200)).data;
+    assert(snapshot.inventory.items.length>0,'inventory must see real FORCE-RLS protected work');
+    const binding={printerId:ids.printer,registrationId:ids.registration,tenantId:ids.orgA,manufacturerId:ids.maker,
+      agentId:'printing-agent',deviceFingerprint:'printing-device',publicKeySha256:hash(signingPublicKey),fenceRequestId:snapshot.requestId,attemptId:randomUUID(),
+      sourceVersion:'2026.6.26',targetVersion:'2026.10.29.1',protocolVersion:'local-agent-direct-v2',...Object.fromEntries(['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256'].map(field=>[field,hash(field)]))};
+    const reconciliations=[...snapshot.inventory.items.map(item=>({itemId:item.id,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-reconciliation'})),
+      ...Object.keys(snapshot.inventory.diagnostics).map(diagnosticId=>({diagnosticId,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-diagnostic'})),
+      ...snapshot.inventory.localDiagnostics.map(entry=>({diagnosticId:entry.job.testJobId,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-local-diagnostic'}))];
+    const statement={purpose:'mscqr-legacy-connector-isolation-v1',binding,workDigest:snapshot.workDigest,verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+600000).toISOString(),
+      isolationEvidence:[{kind:'dispatch-isolation',sha256:hash('isolated'),reference:'disposable-environment'},{kind:'connector-work-inventory',sha256:hash('inventory'),reference:'simulated-transport'}],reconciliations};
+    const signedEvidence=value=>{const statement=JSON.stringify(value);return {statement,signature:require('crypto').sign(null,Buffer.from(statement),authority.privateKey).toString('base64')};};
+    await postMaintenance('maker',{action:'authorize',evidence:{...signedEvidence(statement),signature:'AAAA'}},409);
+    await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,reconciliations:[]})},409);
+    await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,binding:{...binding,tenantId:ids.orgB}})},409);
+    const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
+    let token=authorityResult.data.token;
+    await postMaintenance('maker',{action:'consume',token,binding:{...binding,attemptId:randomUUID()}},403);
+    const consumeResults=await Promise.all([postMaintenance('maker',{action:'consume',token,binding}),postMaintenance('maker',{action:'consume',token,binding})]);
+    assert.deepEqual(consumeResults.map(result=>result.status).sort(),[200,403],'exactly one concurrent consumption may succeed');
+    await postMaintenance('maker',{action:'verify',token,binding},200);
+    const expiredToken=token;
+    psql(admin,`UPDATE public."SystemCheckpoint" SET value=jsonb_set(value,'{upgrade,expiresAt}',to_jsonb((clock_timestamp()-interval '1 second')::text))
+      WHERE key LIKE 'connector-maintenance:%' AND value->'upgrade'->'binding'->>'attemptId'='${binding.attemptId}'`);
+    await postMaintenance('maker',{action:'verify',token,binding},403);
+    const renewal={...statement,verifiedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+600000).toISOString()};
+    token=(await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(renewal)},200)).data.token;
+    await postMaintenance('maker',{action:'consume',token,binding},200);
+    await postMaintenance('maker',{action:'verify',token:expiredToken,binding},403);
+    await postMaintenance('maker',{action:'verify',token,binding},200);
+    assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${claim.printItemId}'`),'PRINT_CONFIRMED','authorization must not reset lifecycle records');
+    const releaseStatement={...statement,purpose:'mscqr-upgrade-verification-v1',runtime:{version:binding.targetVersion,sha256:binding.targetSha256,
+      agentId:binding.agentId,deviceFingerprint:binding.deviceFingerprint,processCount:1,verificationSha256:hash('disposable-runtime-verification')}};
+    await postMaintenance('maker',{action:'release',evidence:signedEvidence(statement)},409);
+    await postMaintenance('maker',{action:'release',evidence:signedEvidence({...releaseStatement,runtime:{...releaseStatement.runtime,processCount:2}})},403);
+    const released=await postMaintenance('maker',{action:'release',evidence:signedEvidence(releaseStatement)},200);
+    assert.equal(released.data.dispatchFenced,false);
+    assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
+  } finally {await new Promise(resolve=>maintenanceServer.close(resolve));delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;}
 
   const catalog = json(admin, `SELECT jsonb_build_object(
     'force',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace

@@ -13,12 +13,23 @@ const { generateKeyPairSync } = require('node:crypto');
     const first = await loadAgentState();
     first.selectedPrinterId = 'synthetic-printer';
     first.calibrationProfiles = { 'synthetic-printer': { dpi: 300, offsetXmm: 1 } };
+    first.unknownRecovery = { uncertainJob: 'synthetic-do-not-replay' };
     await saveAgentState(first);
     const restored = await loadAgentState();
     for (const key of ['agentId', 'deviceFingerprint', 'publicKeyPem', 'privateKeyPem', 'selectedPrinterId']) {
       assert.equal(restored[key], first[key], `preserved field ${key}`);
     }
     assert.equal(restored.calibrationProfiles['synthetic-printer'].dpi, 300);
+    assert.deepEqual(restored.unknownRecovery, first.unknownRecovery);
+    const {spawnSync}=require('node:child_process');
+    const validate=()=>spawnSync(process.execPath,[path.resolve(__dirname,'../dist/local-print-agent/index.js'),'--validate-state'],{
+      encoding:'utf8',env:{...process.env,PRINT_AGENT_STATE_FILE:stateFile,PRINT_AGENT_LOCK_DIR:path.join(root,'lock')}});
+    const beforeValidation=await fs.readFile(stateFile,'utf8');
+    const validation=validate();
+    assert.equal(validation.status,0,validation.stderr);
+    assert.equal(JSON.parse(validation.stdout).agentId,first.agentId);
+    assert.equal(await fs.readFile(stateFile,'utf8'),beforeValidation,'validation must not save or migrate state');
+    await assert.rejects(fs.stat(path.join(root,'lock')),'validation must not compete with an installed runtime');
     const mismatched = { ...first, publicKeyPem: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString() };
     for (const bad of ['{interrupted', JSON.stringify({ agentId: first.agentId }), JSON.stringify(mismatched)]) {
       await fs.writeFile(stateFile, bad);
@@ -26,6 +37,8 @@ const { generateKeyPairSync } = require('node:crypto');
       assert.equal(await fs.readFile(stateFile, 'utf8'), bad, 'unreadable identity must never be overwritten');
     }
     await fs.rm(stateFile);
+    assert.notEqual(validate().status,0,'missing state must fail read-only validation');
+    await assert.rejects(fs.stat(stateFile),'validation must not initialize a replacement identity');
     await fs.mkdir(stateFile);
     await assert.rejects(loadAgentState());
     assert((await fs.stat(stateFile)).isDirectory(), 'I/O errors must not replace state');

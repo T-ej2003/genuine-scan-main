@@ -208,6 +208,7 @@ import {
   testPrinter,
   testPrinterLabel,
   updateNetworkPrinter,
+  requestConnectorMaintenance,
 } from "../controllers/printerController";
 import { relinkLocalAgentPrinter } from "../controllers/printerRelinkController";
 import {
@@ -1842,6 +1843,19 @@ protectedMutationRouter.delete(
   printMutationActorLimiter,
   requireCsrf,
   deleteNetworkPrinter
+);
+protectedMutationRouter.post(
+  "/manufacturer/printers/:id/maintenance",
+  printMutationPreAuthRouteLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  requestConnectorMaintenance
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/relink-local-agent",

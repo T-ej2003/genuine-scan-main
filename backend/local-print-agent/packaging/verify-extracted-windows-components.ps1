@@ -18,7 +18,7 @@ if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::Reparse
 $files = @(foreach ($entry in $entries | Where-Object { -not $_.PSIsContainer }) {
   $stream = [IO.File]::Open($entry.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
   try { $first = $stream.ReadByte(); $second = $stream.ReadByte() } finally { $stream.Dispose() }
-  if (($first -eq 0x4d -and $second -eq 0x5a) -or $entry.Extension -in '.exe', '.dll', '.sys', '.msi') { $entry }
+  if (($first -eq 0x4d -and $second -eq 0x5a) -or $entry.Extension -in '.exe', '.dll', '.sys', '.msi', '.ps1') { $entry }
 })
 $files += Get-Item -LiteralPath $TemporarySetupFile, $UninstallerFile
 foreach ($file in $files) {

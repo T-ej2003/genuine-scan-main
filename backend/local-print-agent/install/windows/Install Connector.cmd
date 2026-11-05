@@ -36,7 +36,7 @@ set "MSCQR_PACKAGED_INSTALL=1"
 set "MSCQR_WEB_APP_BASE_URL=__MSCQR_WEB_APP_BASE_URL__"
 set "MSCQR_CONNECTOR_VERSION=__MSCQR_CONNECTOR_VERSION__"
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%INSTALL_SCRIPT%"
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "%INSTALL_SCRIPT%"
 set "EXITCODE=%ERRORLEVEL%"
 
 if "%EXITCODE%"=="10" (

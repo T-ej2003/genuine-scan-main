@@ -3,6 +3,7 @@ import express from "express";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { createHash } from "crypto";
 import { z } from "zod";
 
 import {
@@ -184,6 +185,14 @@ if (cliArgs.has("--version-json") || cliArgs.has("--status-json")) {
   process.exit(0);
 }
 
+if (cliArgs.has("--validate-state")) {
+  loadAgentState({ initialize: false }).then(state => {
+    console.log(JSON.stringify({ ok: true, agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+      publicKeySha256: createHash("sha256").update(state.publicKeyPem).digest("hex") }));
+    process.exit(0);
+  }).catch(() => { console.error("Existing connector identity validation failed."); process.exit(1); });
+}
+
 if (cliArgs.has("--self-test")) {
   runSelfTest()
     .then(() => process.exit(0))
@@ -205,7 +214,7 @@ if (cliArgs.has("--self-test")) {
 
 let singleInstanceLock: { lockPath: string; fd: number } | null = null;
 try {
-  singleInstanceLock = acquireSingleInstanceLock();
+  if (!cliArgs.has("--validate-state")) singleInstanceLock = acquireSingleInstanceLock();
 } catch (error: any) {
   console.error(
     JSON.stringify({
@@ -581,7 +590,7 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-if (!cliArgs.has("--self-test")) {
+if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state")) {
   app.listen(PORT, HOST, () => {
     console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
     startGatewayWorker();

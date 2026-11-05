@@ -2,6 +2,106 @@
 -- Caller GUCs are never authority. Every public application function verifies
 -- aq_db_session before reading a protected printing table.
 
+-- Private gate: only authenticated lifecycle functions may select its scope.
+-- A fence never asserts that previously accepted connector work has drained.
+CREATE OR REPLACE FUNCTION app_rls.printing_maintenance_gate(
+  p_scope text, p_operation text, p_actor text, p_details jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path=pg_catalog,public
+AS $fn$
+DECLARE checkpoint_key text; current_value jsonb;
+BEGIN
+  IF session_user NOT IN ({{APP_ROLE}},{{WORKER_ROLE}})
+     OR p_operation NOT IN ('CHECK','REQUEST','STATUS','LEASE','COMPLETE','AUTHORIZE','CONSUME','VERIFY','RELEASE') OR length(coalesce(p_scope,'')) NOT BETWEEN 1 AND 2048
+     OR (p_operation IN ('REQUEST','LEASE','COMPLETE','AUTHORIZE','CONSUME','VERIFY','RELEASE') AND nullif(p_actor,'') IS NULL)
+  THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
+  checkpoint_key:='connector-maintenance:'||encode(sha256(convert_to(p_scope,'UTF8')),'hex');
+  PERFORM set_config('app.printing_maintenance_key',checkpoint_key,true);
+  PERFORM pg_advisory_xact_lock(hashtextextended(checkpoint_key,0));
+  INSERT INTO public."SystemCheckpoint"(key,value,"createdAt","updatedAt")
+    VALUES(checkpoint_key,jsonb_build_object('state','ACTIVE','scope',p_scope),clock_timestamp(),clock_timestamp())
+    ON CONFLICT(key) DO NOTHING;
+  SELECT value INTO STRICT current_value FROM public."SystemCheckpoint" WHERE key=checkpoint_key FOR UPDATE;
+  IF current_value->>'scope' IS DISTINCT FROM p_scope OR
+     coalesce(current_value->>'state','') NOT IN ('ACTIVE','DISPATCH_FENCED')
+  THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_STATE_INVALID' USING ERRCODE='55000'; END IF;
+  IF p_operation='REQUEST' AND current_value->>'state'='ACTIVE' THEN
+    current_value:=current_value||jsonb_build_object('state','DISPATCH_FENCED','requestedBy',p_actor,
+      'requestId',p_details->>'requestId','requestedAt',clock_timestamp());
+    UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
+  END IF;
+  IF p_operation IN ('CHECK','LEASE') AND current_value->>'state'<>'ACTIVE'
+  THEN RAISE EXCEPTION 'CONNECTOR_MAINTENANCE_FENCED' USING ERRCODE='55000'; END IF;
+  IF p_operation IN ('LEASE','COMPLETE') THEN
+    IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
+    THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
+    IF p_operation='LEASE' THEN
+      IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId') OR
+        EXISTS (SELECT 1 FROM jsonb_each(coalesce(current_value->'diagnostics','{}'::jsonb)) lease
+        WHERE lease.value->>'state'='ACCEPTED')
+      THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+      current_value:=jsonb_set(current_value,'{diagnostics}',coalesce(current_value->'diagnostics','{}'::jsonb)||
+        jsonb_build_object(p_details->>'requestId',jsonb_build_object('state','ACCEPTED','actor',p_actor,'acceptedAt',clock_timestamp())),true);
+    ELSE
+      IF current_value->'diagnostics'->(p_details->>'requestId')->>'actor' IS DISTINCT FROM p_actor OR
+         p_details->>'outcome' IS DISTINCT FROM 'confirmed' OR nullif(p_details->>'deviceJobRef','') IS NULL
+      THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
+      current_value:=jsonb_set(current_value,ARRAY['diagnostics',p_details->>'requestId','state'],to_jsonb('CONFIRMED'::text),false);
+    END IF;
+    UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
+  END IF;
+  IF p_operation IN ('AUTHORIZE','CONSUME','VERIFY','RELEASE') THEN
+    IF current_value->>'state'<>'DISPATCH_FENCED' OR
+       p_details->'binding'->>'fenceRequestId' IS DISTINCT FROM current_value->>'requestId'
+    THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
+    IF p_operation='AUTHORIZE' THEN
+      IF coalesce(p_details->>'tokenHash','') !~ '^[a-f0-9]{64}$' OR
+         (current_value ? 'upgrade' AND (
+           current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
+           (current_value->'upgrade'->>'expiresAt')::timestamptz>clock_timestamp() OR
+           coalesce((p_details->'evidence'->>'verifiedAt')::timestamptz,'-infinity')<=(current_value->'upgrade'->>'expiresAt')::timestamptz))
+      THEN RAISE EXCEPTION 'MAINTENANCE_ATTEMPT_ALREADY_EXISTS' USING ERRCODE='55000'; END IF;
+      IF current_value ? 'upgrade' THEN
+        current_value:=jsonb_set(current_value,'{history}',coalesce(current_value->'history','[]'::jsonb)||jsonb_build_array(current_value->'upgrade'-'tokenHash'));
+      END IF;
+      current_value:=current_value||jsonb_build_object('upgrade',p_details||jsonb_build_object(
+        'state','AUTHORIZED','actor',p_actor,'authorizedAt',clock_timestamp()));
+    ELSIF p_operation='RELEASE' THEN
+      IF current_value->'upgrade'->>'state' IS DISTINCT FROM 'CONSUMED' OR
+         current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
+         coalesce(p_details->'evidence'->>'evidenceSha256','') !~ '^[a-f0-9]{64}$' OR
+         coalesce((p_details->'evidence'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
+         p_details->'evidence'->>'workDigest' IS DISTINCT FROM p_details->>'workDigest' OR
+         p_details->'evidence'->'runtime'->>'version' IS DISTINCT FROM p_details->'binding'->>'targetVersion' OR
+         p_details->'evidence'->'runtime'->>'sha256' IS DISTINCT FROM p_details->'binding'->>'targetSha256' OR
+         p_details->'evidence'->'runtime'->>'agentId' IS DISTINCT FROM p_details->'binding'->>'agentId' OR
+         p_details->'evidence'->'runtime'->>'deviceFingerprint' IS DISTINCT FROM p_details->'binding'->>'deviceFingerprint' OR
+         p_details->'evidence'->'runtime'->>'processCount' IS DISTINCT FROM '1' OR
+         coalesce(p_details->'evidence'->'runtime'->>'verificationSha256','') !~ '^[a-f0-9]{64}$'
+      THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
+      current_value:=jsonb_build_object('state','ACTIVE','scope',p_scope,'history',coalesce(current_value->'history','[]'::jsonb)||
+        jsonb_build_array(jsonb_build_object('maintenance',current_value-'history','releaseEvidence',p_details->'evidence','releasedBy',p_actor,'releasedAt',clock_timestamp())));
+    ELSE
+      IF current_value->'upgrade'->>'actor' IS DISTINCT FROM p_actor OR
+         current_value->'upgrade'->>'tokenHash' IS DISTINCT FROM p_details->>'tokenHash' OR
+         current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
+         current_value->'upgrade'->'evidence'->>'workDigest' IS DISTINCT FROM p_details->>'workDigest' OR
+         coalesce((current_value->'upgrade'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp() OR
+         current_value->'upgrade'->>'state' IS DISTINCT FROM (CASE WHEN p_operation='CONSUME' THEN 'AUTHORIZED' ELSE 'CONSUMED' END)
+      THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
+      IF p_operation='CONSUME' THEN
+        current_value:=jsonb_set(current_value,'{upgrade,state}',to_jsonb('CONSUMED'::text));
+      END IF;
+    END IF;
+    UPDATE public."SystemCheckpoint" SET value=current_value,"updatedAt"=clock_timestamp() WHERE key=checkpoint_key;
+    RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',current_value->>'state'<>'ACTIVE');
+  END IF;
+  RETURN (current_value-'upgrade')||jsonb_build_object('upgradeAllowed',false,'reconciliationRequired',current_value->>'state'<>'ACTIVE');
+END
+$fn$;
+REVOKE ALL ON FUNCTION app_rls.printing_maintenance_gate(text,text,text,jsonb) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app_rls.printing_bind_actor(
   p_capability text,
   p_purpose text,
@@ -747,10 +847,17 @@ DECLARE
   now_at timestamp without time zone:=transaction_timestamp();
   new_id text:=coalesce(nullif(p_printer_id,''),gen_random_uuid()::text);
   audit_action text;
+  maintenance_scope text;
+  maintenance_printers text[];
+  maintenance_sessions text[];
+  maintenance_inventory jsonb;
+  maintenance_snapshot jsonb;
+  maintenance_binding jsonb;
+  maintenance_registration record;
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
-       'CREATE','UPDATE','DELETE','RELINK',
+       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
        'AUDIT_TEST','AUDIT_TEST_LABEL_ATTENTION','AUDIT_TEST_LABEL_CONFIRMED',
        'AUDIT_TEST_LABEL_QUEUED','AUDIT_DISCOVERY'
      )
@@ -799,7 +906,7 @@ BEGIN
         ))
       )
       OR (
-        p_operation LIKE 'AUDIT_%' AND printer_row."assignedUserId"=actor."userId"
+        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
         AND EXISTS (
           SELECT 1 FROM public."ManufacturerLicenseeLink" ml
           WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer_row."licenseeId"
@@ -812,6 +919,93 @@ BEGIN
 
   PERFORM set_config('app.printing_licensee_id',coalesce(scope_licensee,''),true),
           set_config('app.printing_organization_id',coalesce(scope_org,''),true);
+  IF p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
+    IF printer_row."printerRegistrationId" IS NOT NULL AND NOT EXISTS (
+      SELECT 1 FROM public."PrinterRegistration" pr WHERE pr.id=printer_row."printerRegistrationId"
+        AND pr."userId" IS NOT DISTINCT FROM printer_row."assignedUserId"
+        AND pr."orgId" IS NOT DISTINCT FROM scope_org AND pr."licenseeId" IS NOT DISTINCT FROM scope_licensee
+    ) THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    maintenance_scope:=CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END;
+    maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
+    IF p_operation IN ('MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
+      SELECT array_agg(p.id ORDER BY p.id) INTO maintenance_printers FROM public."Printer" p
+        WHERE CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN p."printerRegistrationId"=printer_row."printerRegistrationId"
+          WHEN printer_row."gatewayId" IS NOT NULL THEN p."gatewayId"=printer_row."gatewayId"
+            AND p."orgId" IS NOT DISTINCT FROM scope_org AND p."licenseeId" IS NOT DISTINCT FROM scope_licensee
+            AND p."assignedUserId" IS NOT DISTINCT FROM printer_row."assignedUserId"
+          ELSE p.id=printer_row.id END;
+      PERFORM set_config('app.printing_maintenance_printers',to_json(maintenance_printers)::text,true);
+      SELECT coalesce(jsonb_agg(to_jsonb(j) ORDER BY j.id),'[]'::jsonb) INTO maintenance_inventory
+        FROM (SELECT id,status,"printerId","pipelineState" FROM public."PrintJob" WHERE "printerId"=ANY(maintenance_printers)) j;
+      SELECT array_agg(id ORDER BY id) INTO maintenance_sessions FROM public."PrintSession" WHERE "printerId"=ANY(maintenance_printers);
+      PERFORM set_config('app.printing_maintenance_sessions',coalesce(to_json(maintenance_sessions)::text,'[]'),true);
+      SELECT jsonb_build_object('jobs',maintenance_inventory,'items',coalesce(jsonb_agg(to_jsonb(i) ORDER BY i.id),'[]'::jsonb))
+        INTO maintenance_inventory FROM (SELECT id,state,"attemptCount","printSessionId","deviceJobRef","failureReason"
+          FROM public."PrintItem" WHERE "printSessionId"=ANY(maintenance_sessions)) i;
+      maintenance_inventory:=maintenance_inventory||jsonb_build_object('diagnostics',coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb),
+        'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
+          FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
+      IF p_operation='MAINTENANCE_INVENTORY' THEN
+        RETURN maintenance_snapshot||jsonb_build_object('inventory',maintenance_inventory,
+          'workDigest',encode(sha256(convert_to(maintenance_inventory::text,'UTF8')),'hex'));
+      END IF;
+      IF p_operation IN ('MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
+        IF p_operation='MAINTENANCE_RELEASE' THEN p_payload:=p_payload||jsonb_build_object('binding',p_payload->'evidence'->'binding'); END IF;
+        RETURN app_rls.printing_maintenance_gate(maintenance_scope,
+          CASE p_operation WHEN 'MAINTENANCE_CONSUME' THEN 'CONSUME' WHEN 'MAINTENANCE_RELEASE' THEN 'RELEASE' ELSE 'VERIFY' END,actor."userId",
+          p_payload||jsonb_build_object('workDigest',encode(sha256(convert_to(maintenance_inventory::text,'UTF8')),'hex')));
+      END IF;
+      maintenance_binding:=p_payload->'evidence'->'binding';
+      IF jsonb_typeof(maintenance_binding) IS DISTINCT FROM 'object' OR
+        jsonb_typeof(p_payload->'evidence'->'reconciliations') IS DISTINCT FROM 'array' OR
+        printer_row."printerRegistrationId" IS NULL OR maintenance_snapshot->>'state'<>'DISPATCH_FENCED'
+        OR p_payload->'evidence'->>'workDigest' IS DISTINCT FROM encode(sha256(convert_to(maintenance_inventory::text,'UTF8')),'hex')
+        OR coalesce(p_payload->'evidence'->>'evidenceSha256','') !~ '^[a-f0-9]{64}$'
+        OR coalesce((p_payload->'evidence'->>'expiresAt')::timestamptz,'-infinity')<=clock_timestamp()
+        OR coalesce((p_payload->'evidence'->>'verifiedAt')::timestamptz,'-infinity')<(maintenance_snapshot->>'requestedAt')::timestamptz
+        OR maintenance_binding->>'printerId' IS DISTINCT FROM printer_row.id
+        OR maintenance_binding->>'registrationId' IS DISTINCT FROM printer_row."printerRegistrationId"
+        OR maintenance_binding->>'tenantId' IS DISTINCT FROM scope_org
+        OR maintenance_binding->>'manufacturerId' IS DISTINCT FROM printer_row."assignedUserId"
+        OR maintenance_binding->>'fenceRequestId' IS DISTINCT FROM maintenance_snapshot->>'requestId'
+        OR coalesce(maintenance_binding->>'attemptId','') !~* '^[0-9a-f-]{36}$'
+        OR coalesce(maintenance_binding->>'sourceVersion','') !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
+        OR coalesce(maintenance_binding->>'targetVersion','') !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
+        OR maintenance_binding->>'sourceVersion'=maintenance_binding->>'targetVersion'
+        OR string_to_array(maintenance_binding->>'targetVersion','.')::integer[]<=string_to_array(maintenance_binding->>'sourceVersion','.')::integer[]
+        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256']) field
+          WHERE coalesce(maintenance_binding->>field,'') !~ '^[a-f0-9]{64}$')
+      THEN RAISE EXCEPTION 'MAINTENANCE_EVIDENCE_MISMATCH' USING ERRCODE='42501'; END IF;
+      SELECT pr."agentId",pr."deviceFingerprint",pr."publicKeyPem" INTO STRICT maintenance_registration FROM public."PrinterRegistration" pr
+        WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=printer_row."assignedUserId" AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL;
+      IF maintenance_binding->>'publicKeySha256' IS DISTINCT FROM encode(sha256(convert_to(maintenance_registration."publicKeyPem",'UTF8')),'hex') OR
+        maintenance_binding->>'agentId' IS DISTINCT FROM maintenance_registration."agentId" OR
+        maintenance_binding->>'deviceFingerprint' IS DISTINCT FROM maintenance_registration."deviceFingerprint"
+      THEN RAISE EXCEPTION 'MAINTENANCE_IDENTITY_MISMATCH' USING ERRCODE='42501'; END IF;
+      -- Reconciliation is an audit record, never a retry/reset instruction or
+      -- a claim that the legacy binary supports native drain acknowledgement.
+      IF EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'items') item
+        WHERE (item->>'state' NOT IN ('RESERVED','CONFIRMED') OR (item->>'attemptCount')::integer>0)
+        AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
+          WHERE r->>'itemId'=item->>'id' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+        OR EXISTS(SELECT 1 FROM jsonb_each(maintenance_inventory->'diagnostics') lease
+          WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
+            WHERE r->>'diagnosticId'=lease.key AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+      OR EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'localDiagnostics') diagnostic
+          WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
+            WHERE r->>'diagnosticId'=diagnostic->'job'->>'testJobId' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+      THEN RAISE EXCEPTION 'MAINTENANCE_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+      RETURN app_rls.printing_maintenance_gate(maintenance_scope,'AUTHORIZE',actor."userId",
+        jsonb_build_object('binding',maintenance_binding,'tokenHash',p_payload->>'tokenHash',
+          'expiresAt',p_payload->'evidence'->>'expiresAt','evidence',p_payload->'evidence'));
+    END IF;
+    RETURN app_rls.printing_maintenance_gate(maintenance_scope,
+      CASE p_operation WHEN 'MAINTENANCE_REQUEST' THEN 'REQUEST' WHEN 'DIAGNOSTIC_LEASE' THEN 'LEASE' WHEN 'DIAGNOSTIC_COMPLETE' THEN 'COMPLETE' ELSE 'STATUS' END,
+      actor."userId",p_payload||jsonb_build_object('requestId',p_request_id));
+  END IF;
+  IF p_operation IN ('UPDATE','DELETE','RELINK') THEN
+    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,'{}'::jsonb);
+  END IF;
 
   IF p_operation='CREATE' THEN
     IF p_payload->>'connectionType' NOT IN ('NETWORK_DIRECT','NETWORK_IPP')
@@ -904,6 +1098,7 @@ BEGIN
           WHERE coalesce(inventory->>'printerId',inventory->>'id')=nullif(p_payload->>'nativePrinterId','')
         )
     ) THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_payload->>'printerRegistrationId')::text,'CHECK',NULL,'{}'::jsonb);
     UPDATE public."Printer" SET "isDefault"=false,"updatedAt"=now_at
       WHERE "assignedUserId"=actor."userId" AND "connectionType"='LOCAL_AGENT'
         AND id<>p_printer_id;
@@ -1140,6 +1335,10 @@ BEGIN
      OR jsonb_array_length(coalesce(p_payload->'printers','[]'::jsonb))>50
   THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
 
+  -- A reconnect or new identity cannot replace a fenced registration.
+  PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',pr.id)::text,'CHECK',NULL,'{}'::jsonb)
+    FROM public."PrinterRegistration" pr WHERE pr."userId"=actor."userId";
+
   SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."deviceFingerprint",pr."agentId",
     pr."publicKeyPem",pr."trustStatus",pr."revokedAt",pr."approvedAt",pr."lastSeenAt",pr."updatedAt"
     INTO registration
@@ -1282,7 +1481,7 @@ BEGIN
     THEN RAISE EXCEPTION 'PRINTING_TEST_LABEL_DENIED' USING ERRCODE='42501'; END IF;
     PERFORM set_config('app.printing_operation','printing-test-label-queue',true),
             set_config('app.printing_printer_id',p_printer_id,true);
-    SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+    SELECT p.id,p.metadata,p."printerRegistrationId",p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
       p."nativePrinterId",p."ipAddress",p.host,p.port INTO STRICT printer_row FROM public."Printer" p
       WHERE p.id=p_printer_id AND p."connectionType"='LOCAL_AGENT' AND p."isActive"
         AND p."assignedUserId"=actor."userId"
@@ -1294,6 +1493,7 @@ BEGIN
             AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
         )
       FOR UPDATE;
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',printer_row."printerRegistrationId")::text,'CHECK',NULL,'{}'::jsonb);
     current_job:=printer_row.metadata->'pendingLocalAgentTestLabel';
     IF current_job IS NOT NULL
        AND coalesce(current_job->>'status','') NOT IN ('CONFIRMED','FAILED','EXPIRED')
@@ -1352,7 +1552,7 @@ BEGIN
       AND pa."signatureValid" AND pa."trustValid"
       AND pa."expiresAt">(clock_timestamp() AT TIME ZONE 'UTC')
   ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
-  SELECT p.id,p.metadata,p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
+  SELECT p.id,p.metadata,p."printerRegistrationId",p."orgId",p."licenseeId",p."connectionType",p."deliveryMode",
     p."nativePrinterId",p."ipAddress",p.host,p.port,p."printerUri",p."commandLanguage",p."assignedUserId"
     INTO STRICT printer_row FROM public."Printer" p
     WHERE p.id=p_printer_id AND p."printerRegistrationId"=registration.id
@@ -1390,6 +1590,9 @@ BEGIN
       AND pa.metadata->>'source'='PERSISTENT_SESSION' AND NOT (pa.metadata ? 'operation')
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
+  IF p_operation='CLAIM' THEN
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',registration.id)::text,'CHECK',NULL,'{}'::jsonb);
+  END IF;
   IF current_job IS NULL THEN RETURN jsonb_build_object('available',false); END IF;
   expires_at:=nullif(current_job->>'expiresAt','')::timestamp without time zone;
   IF expires_at IS NULL OR expires_at<=now_at THEN
@@ -1817,6 +2020,7 @@ BEGIN
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,'{}'::jsonb);
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
       INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
@@ -1843,6 +2047,7 @@ BEGIN
           set_config('app.printing_printer_id',printer_row.id,true);
 
   IF p_operation='CLAIM' THEN
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,'{}'::jsonb);
     SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence"
       INTO item_row FROM public."PrintItem" pi
      WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
@@ -2303,10 +2508,10 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS 
 DECLARE printer_row record; job_row record; session_row record; item_row record;
   now_at timestamp without time zone:=transaction_timestamp(); remaining integer;
 BEGIN
-  IF session_user<>{{APP_ROLE}} OR p_operation NOT IN ('CLAIM','ACK','CONFIRM','FAIL')
+  IF session_user<>{{APP_ROLE}} OR p_operation NOT IN ('CLAIM','ACK','CONFIRM','FAIL','CHECK_DISPATCH')
      OR p_mode NOT IN ('NETWORK_DIRECT','NETWORK_IPP')
      OR p_request_id !~* '^[0-9a-f-]{36}$' OR p_gateway_secret_hash !~ '^[0-9a-f]{64}$'
-     OR (p_operation<>'CLAIM' AND (p_job_id !~* '^[0-9a-f-]{36}$' OR p_item_id !~* '^[0-9a-f-]{36}$'))
+     OR (p_operation NOT IN ('CLAIM','CHECK_DISPATCH') AND (p_job_id !~* '^[0-9a-f-]{36}$' OR p_item_id !~* '^[0-9a-f-]{36}$'))
      OR jsonb_typeof(coalesce(p_details,'{}'::jsonb))<>'object'
   THEN RAISE EXCEPTION 'CONNECTOR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.printing_operation','printing-connector-gateway-'||lower(p_operation),true),
@@ -2329,6 +2534,10 @@ BEGIN
   PERFORM set_config('app.printing_printer_id',printer_row.id,true);
   UPDATE public."Printer" SET "gatewayLastSeenAt"=now_at,"gatewayStatus"='ONLINE',
     "gatewayLastError"=NULL,"updatedAt"=now_at WHERE id=printer_row.id;
+  IF p_operation IN ('CLAIM','CHECK_DISPATCH') THEN
+    PERFORM app_rls.printing_maintenance_gate(CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    IF p_operation='CHECK_DISPATCH' THEN RETURN jsonb_build_object('allowed',true); END IF;
+  END IF;
   IF p_operation='CLAIM' THEN
     SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
       j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
@@ -2851,7 +3060,7 @@ CREATE OR REPLACE FUNCTION app_rls.printing_worker_network_job(
   p_operation text,p_request_id text,p_job_id text,p_details jsonb
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE job_row record; session_row record; now_at timestamp without time zone:=transaction_timestamp();
+DECLARE maintenance_printer record; job_row record; session_row record; now_at timestamp without time zone:=transaction_timestamp();
   mode_value public."PrintDispatchMode"; item_ids text[]; remaining integer; page_limit integer;
 BEGIN
   IF session_user<>{{WORKER_ROLE}}
@@ -2880,6 +3089,12 @@ BEGIN
     PERFORM set_config('app.printing_job_id',job_row.id,true),
             set_config('app.printing_batch_id',job_row."batchId",true),
             set_config('app.printing_printer_id',job_row."printerId",true);
+    SELECT p.id,p."printerRegistrationId",p."gatewayId",p."orgId",p."licenseeId",p."assignedUserId"
+      INTO STRICT maintenance_printer FROM public."Printer" p WHERE p.id=job_row."printerId";
+    PERFORM app_rls.printing_maintenance_gate(
+      CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
+      WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
+      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
     SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
       ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
       ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
