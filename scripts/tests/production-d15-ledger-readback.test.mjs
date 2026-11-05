@@ -8,8 +8,8 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { LEDGER, assertLedgerAuthorization, assertLedgerEvidence, assertLedgerReceipt, assertFixedLedgerDefinition, authenticateLedgerLogPages,
-  assertProtectedToolingSource, createPinnedGitRunner, waitForLedgerLogPages } from "../aws/production-d15-ledger-readback.mjs";
-import { createPinnedAwsExecutor, d15MigrationChecksums, assertRootIdentity, assertLedgerIntent, assertLedgerTaskRecord, ledgerStartedBy } from "../aws/production-d15-ledger-readback.mjs";
+  assertProtectedToolingSource, createPinnedGitRunner, waitForLedgerLogPages } from "../aws/production-d15-ledger-runtime.mjs";
+import { createPinnedAwsExecutor, d15MigrationChecksums, assertRootIdentity, assertLedgerIntent, assertLedgerTaskRecord, ledgerStartedBy } from "../aws/production-d15-ledger-runtime.mjs";
 import { createPinnedRootAttestationVerifier, trustedRootAttestationOpenSsl, ROOT_ATTESTATION_KEY_ALIAS_ARN, ROOT_ATTESTATION_SIGNING_ALGORITHM } from "../aws/production-root-attestation-key.mjs";
 import { createProductionGithubCommandRunner, productionGithubExecutable, productionAwsExecutable } from "../aws/production-credential-source-contract.mjs";
 
@@ -129,8 +129,8 @@ test("ledger log pagination and native execution window fail closed", () => {
 test("protected-main gate pins GitHub host, repository, SHA, and executables", () => {
   const mainSha = "a".repeat(40);
   const gitRun = (args) => args[0] === "rev-parse" ? args[1] === "--show-toplevel" ? `${root}\n` : `${mainSha}\n`
-    : args[0] === "ls-files" ? "H scripts/aws/production-d15-ledger-readback.mjs\0"
-    : args[0] === "show" ? fs.readFileSync(new URL("../aws/production-d15-ledger-readback.mjs", import.meta.url)) : "";
+    : args[0] === "ls-files" ? "H scripts/aws/production-d15-ledger-runtime.mjs\0"
+    : args[0] === "show" ? fs.readFileSync(new URL("../aws/production-d15-ledger-runtime.mjs", import.meta.url)) : "";
   const branch = { name: "main", _links: { self: "https://api.github.com/repos/T-ej2003/genuine-scan-main/branches/main" },
     commit: { sha: mainSha, url: `https://api.github.com/repos/T-ej2003/genuine-scan-main/commits/${mainSha}` } };
   let observed;
@@ -148,7 +148,7 @@ test("protected-main gate pins GitHub host, repository, SHA, and executables", (
     _links: { self: "https://api.github.com/repos/attacker/repo/branches/main" } }) }));
   assert.throws(() => assertProtectedToolingSource({ gitRun, githubRun: () => { throw new Error("API unavailable"); } }));
   for (const flag of ["S", "h"]) assert.throws(() => assertProtectedToolingSource({
-    gitRun: (args, options) => args[0] === "ls-files" ? `${flag} scripts/aws/production-d15-ledger-readback.mjs\0` : gitRun(args, options), githubRun }));
+    gitRun: (args, options) => args[0] === "ls-files" ? `${flag} scripts/aws/production-d15-ledger-runtime.mjs\0` : gitRun(args, options), githubRun }));
   assert.throws(() => assertProtectedToolingSource({
     gitRun: (args, options) => args[0] === "show" ? Buffer.from("modified launcher") : gitRun(args, options), githubRun }));
   let gitCommand, gitEnvironment;
