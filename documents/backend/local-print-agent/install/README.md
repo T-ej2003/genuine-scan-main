@@ -122,7 +122,7 @@ The repository now includes installer-ready service scripts, and the release scr
 
 - macOS signed package path: wrap `macos/install-launch-agent.sh` with `pkgbuild` and sign with `productsign`.
 - macOS notarized package path: set `MACOS_CONNECTOR_APP_SIGN_IDENTITY`, `MACOS_CONNECTOR_SIGN_IDENTITY`, plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
-- Windows release prep path: run `npm run connector:windows:build-installer` to generate the staging folder and `MSCQR-Connector.iss` project. Publish the resulting unsigned `.exe` with `WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH` for internal testing, or publish the signed `.exe` / `.msi` with `WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH` and `WINDOWS_CONNECTOR_PUBLISHER_NAME` for customer rollout.
+- Windows development scaffold: `npm run connector:windows:build-installer` creates a non-installable `DEVELOPMENT-unsigned` fixture outside the publication tree, without production maintenance configuration. Never publish it. Signed candidates use the protected existing workflow and `connector:windows:prepare-signed-candidate`, with matching explicit `MSCQR_MAINTENANCE_API_ORIGIN` and governed `MSCQR_APPROVED_MAINTENANCE_API_ORIGIN`. See [Windows build modes](windows/WINDOWS_SIGNED_RELEASE.md).
 - MDM / IT rollout: Jamf, Kandji, Intune, or similar can run these same scripts directly.
 
 See the full Windows release guide in:

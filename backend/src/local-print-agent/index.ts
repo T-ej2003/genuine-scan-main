@@ -3,7 +3,6 @@ import express from "express";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { createHash } from "crypto";
 import { z } from "zod";
 
 import {
@@ -19,6 +18,7 @@ import {
 } from "./cups";
 import {
   loadAgentState,
+  inspectAgentState,
   mergeCalibrationProfile,
   saveAgentState,
   setAgentBackendUrl,
@@ -186,9 +186,8 @@ if (cliArgs.has("--version-json") || cliArgs.has("--status-json")) {
 }
 
 if (cliArgs.has("--validate-state")) {
-  loadAgentState({ initialize: false }).then(state => {
-    console.log(JSON.stringify({ ok: true, agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
-      publicKeySha256: createHash("sha256").update(state.publicKeyPem).digest("hex") }));
+  inspectAgentState().then(evidence => {
+    console.log(JSON.stringify(evidence));
     process.exit(0);
   }).catch(() => { console.error("Existing connector identity validation failed."); process.exit(1); });
 }

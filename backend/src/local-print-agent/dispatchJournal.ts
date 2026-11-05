@@ -3,6 +3,8 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 
+export const dispatchJournalRoot = () => process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR || path.join(os.homedir(), ".mscqr", "dispatch-journal");
+
 // A reservation is deliberately never automatically removed, including when
 // the process dies before it can establish whether the printer received bytes.
 // Reissue must use a new governed print item, not delete this evidence.
@@ -12,7 +14,7 @@ export const reserveAutomaticDispatch = async (input: {
   if (!input.printJobId || !input.printItemId || !input.printerId || !input.payloadHash) {
     throw new Error("Automatic dispatch identity is incomplete.");
   }
-  const root = process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR || path.join(os.homedir(), ".mscqr", "dispatch-journal");
+  const root = dispatchJournalRoot();
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
   const key = createHash("sha256").update(input.printItemId).digest("hex");
   let handle;

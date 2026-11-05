@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\connector-upgrade-staging.ps1"
 . "$PSScriptRoot\connector-upgrade-backup.ps1"
+. "$PSScriptRoot\connector-upgrade-state.ps1"
 
 function Assert-MscqrPlainPath([string]$Path) {
   $part = [IO.Path]::GetFullPath($Path)
@@ -213,6 +214,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   }
   if ($Journal.phase -eq 'COMMITTED') { return }
   if ($Journal.phase -eq 'RESTORATION_VERIFIED') {
+    Assert-MscqrStateDiscovery $Journal.stateDiscovery
     foreach($record in $Journal.records) {if((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256){throw 'Previously restored installation changed.'}}
     $Journal.expectedVersion=$Journal.binding.sourceVersion
     Wait-MscqrRuntime $Journal | Out-Null
@@ -249,6 +251,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
       if ((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Restored persistent state changed during verification.' }
     }
     Assert-MscqrSignedFile $Journal.runtime $Journal.binding.sourceSha256
+    Assert-MscqrStateDiscovery $Journal.stateDiscovery
   } catch {
     $failure=$_
     Stop-MscqrVerifiedRuntime $Journal.runtime $Journal.binding.sourceSha256
@@ -259,7 +262,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   # There is deliberately no unfence operation here, including on success.
 }
 function Invoke-MscqrUpgradeTransaction {
-  param([string]$Phase,[string]$LiveDirectory,[string]$Payload,[string]$Installer,[string]$AuthFile,[string]$Version,[string]$StateFile,[string]$StartupFile)
+  param([string]$Phase,[string]$LiveDirectory,[string]$Payload,[string]$Installer,[string]$AuthFile,[string]$Version,[string]$StateFile,[string]$StartupFile,$StateDiscovery)
   $live = [IO.Path]::GetFullPath($LiveDirectory).TrimEnd('\')
   foreach ($p in @($live,$StateFile,$StartupFile)) { Assert-MscqrPlainPath $p }
   $root = Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade'
@@ -272,6 +275,7 @@ function Invoke-MscqrUpgradeTransaction {
     Assert-MscqrPlainPath $journalPath
     if (Test-Path -LiteralPath $journalPath) {
       $journal = Read-MscqrJson $journalPath
+      if($journal.binding.statePath -ine $journal.stateFile -or $journal.stateDiscovery.sha256 -cne $journal.binding.stateDiscoverySha256) {throw 'Journal state discovery binding mismatch.'}
       if ($journal.runtime -ine (Join-Path $live 'bin\mscqr-local-print-agent.exe') -or $journal.stateFile -ine $StateFile -or $journal.startup -ine $StartupFile) { throw 'Upgrade journal ownership mismatch.' }
       if ($Phase -eq 'Recover') {
         if ($journal.phase -notin @('AUTHORIZED','STAGED','ABORTED','COMMITTED','RESTORATION_VERIFIED')) {
@@ -302,6 +306,9 @@ function Invoke-MscqrUpgradeTransaction {
       Assert-MscqrPrivatePath $AuthFile
       $auth = Read-MscqrAuthorization $AuthFile
       $binding = $auth.binding
+      if(-not $StateDiscovery) {$snapshot=Get-MscqrStateSnapshot @($StateFile);$StateDiscovery=[pscustomobject]@{selectedPath=[IO.Path]::GetFullPath($StateFile);candidates=$snapshot;sha256=(Get-MscqrStateDiscoveryDigest $snapshot)}}
+      if([IO.Path]::GetFullPath($StateFile) -ine $binding.statePath -or $StateDiscovery.selectedPath -ine $binding.statePath -or $StateDiscovery.sha256 -cne $binding.stateDiscoverySha256) {throw 'Selected identity location differs from authenticated upgrade authorization.'}
+      Assert-MscqrStateDiscovery $StateDiscovery
       $runtime = Join-Path $live 'bin\mscqr-local-print-agent.exe'
       $environmentFile = Join-Path $live 'agent.env'
       $wrapper = Join-Path $live 'bin\start-local-print-agent.cmd'
@@ -364,7 +371,7 @@ function Invoke-MscqrUpgradeTransaction {
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
-      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
+      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'
       $stage = Join-Path $root 'stage'
       Protect-MscqrDirectory $stage
@@ -377,6 +384,7 @@ function Invoke-MscqrUpgradeTransaction {
       foreach($name in (Get-MscqrSetupFiles).Keys) {$extras[$name]=Join-Path $live (Get-MscqrSetupFiles)[$name]}
       $journal.records = @(New-MscqrUpgradeBackup -BackupDirectory (Join-Path $root 'backup') -RuntimeFile $runtime -RuntimeSha256 $binding.sourceSha256 -RuntimeSignerSubject (Get-AuthenticodeSignature -LiteralPath $runtime).SignerCertificate.Subject -EnvironmentFile $environmentFile -StateFile $StateFile -StartupFile $StartupFile -AdditionalFiles $extras)
       Assert-MscqrBackupBindings $journal
+      Assert-MscqrStateDiscovery $journal.stateDiscovery
       Write-MscqrTransaction $journalPath $journal 'BACKED_UP'
       return
     }
@@ -385,6 +393,7 @@ function Invoke-MscqrUpgradeTransaction {
       $auth = Read-MscqrAuthorization $AuthFile
       Invoke-MscqrMaintenance $auth 'verify' $journal.binding
       Assert-MscqrBackupBindings $journal
+      Assert-MscqrStateDiscovery $journal.stateDiscovery
       foreach ($record in $journal.records) {
         if (($record.name -notin @('uninstaller','uninstallData') -and (Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) -or
             (Get-FileHash -LiteralPath $record.backup -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Live state or backup changed; refusing shutdown.' }
@@ -411,6 +420,7 @@ function Invoke-MscqrUpgradeTransaction {
           if ((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Persistent state changed during startup.' }
         }
         Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+        Assert-MscqrStateDiscovery $journal.stateDiscovery
         Write-MscqrTransaction $journalPath $journal 'VERIFIED'
       } catch {
         $failure = $_
@@ -431,6 +441,7 @@ function Invoke-MscqrUpgradeTransaction {
     } elseif ($Phase -eq 'Commit') {
       if ($journal.phase -cne 'VERIFIED') { throw 'Unverified upgrade cannot commit.' }
       Wait-MscqrRuntime $journal | Out-Null
+      Assert-MscqrStateDiscovery $journal.stateDiscovery
       $uninstall=Get-MscqrUninstallSnapshot $live
       if(($uninstall | Where-Object name -eq 'DisplayVersion').value -cne $journal.binding.targetVersion) {throw 'Replacement uninstall registration version mismatch.'}
       Assert-MscqrSignedFile (Join-Path $live 'unins000.exe') (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe') -Algorithm SHA256).Hash
@@ -441,7 +452,22 @@ function Invoke-MscqrUpgradeTransaction {
 
 if ($MyInvocation.InvocationName -ne '.') {
   try {
-    Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory (Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent') -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json') -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
+    $live=Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+    $discovery=$null
+    if($Operation -eq 'Prepare') {
+      $authorization=Read-MscqrAuthorization $AuthorizationFile
+      $candidate=Join-Path $PayloadDirectory 'bin\mscqr-local-print-agent.exe'
+      Assert-MscqrSignedFile $InstallerFile $authorization.binding.installerSha256
+      Assert-MscqrSignedFile $candidate $authorization.binding.targetSha256
+      $discovery=Resolve-MscqrUpgradeState $env:USERPROFILE $live $candidate
+      $selected=$discovery.selectedPath
+    } else {
+      $journalFile=Join-Path ([IO.Path]::GetDirectoryName($live)) 'connector-upgrade\transaction.json'
+      Assert-MscqrPrivatePath $journalFile
+      $existing=Read-MscqrJson $journalFile
+      $selected=[string]$existing.stateFile
+    }
+    Invoke-MscqrUpgradeTransaction -Phase $Operation -LiveDirectory $live -Payload $PayloadDirectory -Installer $InstallerFile -AuthFile $AuthorizationFile -Version $TargetVersion -StateFile $selected -StateDiscovery $discovery -StartupFile (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs')
     exit 0
   } catch { Write-Error $_; exit 1 }
 }

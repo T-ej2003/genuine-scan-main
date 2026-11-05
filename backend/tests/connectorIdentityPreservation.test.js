@@ -30,6 +30,16 @@ const { generateKeyPairSync } = require('node:crypto');
     assert.equal(JSON.parse(validation.stdout).agentId,first.agentId);
     assert.equal(await fs.readFile(stateFile,'utf8'),beforeValidation,'validation must not save or migrate state');
     await assert.rejects(fs.stat(path.join(root,'lock')),'validation must not compete with an installed runtime');
+    const legacyRoot=path.join(root,'legacy-profile');
+    const legacy=path.join(legacyRoot,'.authenticqr','local-print-agent-state.json');
+    await fs.mkdir(path.dirname(legacy),{recursive:true});
+    await fs.writeFile(legacy,beforeValidation);
+    const legacyRun=spawnSync(process.execPath,['-e',`(async()=>{const s=require('./dist/local-print-agent/state');const v=await s.loadAgentState({initialize:false});await s.saveAgentState({...v});console.log(JSON.stringify(await s.inspectAgentState()));})().catch(()=>process.exitCode=1)`],{
+      cwd:path.resolve(__dirname,'..'),encoding:'utf8',env:{...process.env,PRINT_AGENT_STATE_FILE:'',USERPROFILE:legacyRoot,HOME:legacyRoot}});
+    assert.equal(legacyRun.status,0,legacyRun.stderr);
+    assert.equal(JSON.parse(legacyRun.stdout).statePath,legacy);
+    assert.equal(JSON.parse(await fs.readFile(legacy,'utf8')).privateKeyPem,first.privateKeyPem);
+    await assert.rejects(fs.stat(path.join(legacyRoot,'.mscqr','local-print-agent-state.json')),'legacy persistence must not silently create a second identity location');
     const mismatched = { ...first, publicKeyPem: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'pem' }).toString() };
     for (const bad of ['{interrupted', JSON.stringify({ agentId: first.agentId }), JSON.stringify(mismatched)]) {
       await fs.writeFile(stateFile, bad);

@@ -1,9 +1,10 @@
 import os from "os";
+import { executeGatewayAttempt, flushGatewayPreDispatchFailures } from "./gatewayAttempt";
 import { reserveAutomaticDispatch } from "./dispatchJournal";
 import { createHash } from "crypto";
 
 import { renderPdfLabelBuffer } from "../printing/pdfLabel";
-import { inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
+import { buildIppConnectionInfo, inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
 import { sendRawPayloadToNetworkPrinter } from "../services/networkPrinterSocketService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "../services/zebraPrinterStatusService";
 import { loadAgentState } from "./state";
@@ -185,7 +186,8 @@ const reserveGatewayAttempt = async (claimed: any, payloadHash: string) => {
     throw Object.assign(new Error("Prior gateway dispatch requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
   }
 };
-const runIppJob = async (claimed: any) => {
+const runIppJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
+  buildIppConnectionInfo(claimed.printer || {});
   const pdf = await renderPdfLabelBuffer({
     code: String(claimed.code || "").trim(),
     scanUrl: String(claimed.scanUrl || "").trim(),
@@ -197,7 +199,7 @@ const runIppJob = async (claimed: any) => {
   });
   const payloadHash = sha256Hex(pdf);
 
-  await reserveGatewayAttempt(claimed, payloadHash);
+  await reserve(claimed, payloadHash);
   const result = await submitPdfToIppPrinter({
     profile: {
       host: claimed.printer?.host,
@@ -252,10 +254,10 @@ const runIppJob = async (claimed: any) => {
   });
 };
 
-const runDirectJob = async (claimed: any) => {
+const runDirectJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
   const printerIpAddress = String(claimed.printer?.ipAddress || "").trim();
   const printerPort = Number(claimed.printer?.port || 0) || 0;
-  if (!printerIpAddress || printerPort <= 0) {
+  if (!printerIpAddress || !Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535) {
     throw new Error("Gateway-backed direct printer is missing IP/port information.");
   }
 
@@ -272,7 +274,7 @@ const runDirectJob = async (claimed: any) => {
     ipAddress: printerIpAddress,
     port: printerPort,
   });
-  await reserveGatewayAttempt(claimed, payloadHash);
+  await reserve(claimed, payloadHash);
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: printerIpAddress,
     port: printerPort,
@@ -319,7 +321,8 @@ const runDirectJob = async (claimed: any) => {
   });
 };
 
-const runIppTestJob = async (claimed: any) => {
+const runIppTestJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
+  buildIppConnectionInfo(claimed.printer || {});
   const pdf = await renderPdfLabelBuffer({
     code: String(claimed.code || "").trim(),
     scanUrl: String(claimed.scanUrl || "").trim(),
@@ -331,7 +334,7 @@ const runIppTestJob = async (claimed: any) => {
   });
   const payloadHash = sha256Hex(pdf);
 
-  await reserveGatewayAttempt(claimed, payloadHash);
+  await reserve(claimed, payloadHash);
   const result = await submitPdfToIppPrinter({
     profile: {
       host: claimed.printer?.host,
@@ -384,10 +387,10 @@ const runIppTestJob = async (claimed: any) => {
   });
 };
 
-const runDirectTestJob = async (claimed: any) => {
+const runDirectTestJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
   const printerIpAddress = String(claimed.printer?.ipAddress || "").trim();
   const printerPort = Number(claimed.printer?.port || 0) || 0;
-  if (!printerIpAddress || printerPort <= 0) {
+  if (!printerIpAddress || !Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535) {
     throw new Error("Gateway-backed direct printer is missing IP/port information.");
   }
 
@@ -404,7 +407,7 @@ const runDirectTestJob = async (claimed: any) => {
     ipAddress: printerIpAddress,
     port: printerPort,
   });
-  await reserveGatewayAttempt(claimed, payloadHash);
+  await reserve(claimed, payloadHash);
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: printerIpAddress,
     port: printerPort,
@@ -449,19 +452,28 @@ const runDirectTestJob = async (claimed: any) => {
   });
 };
 
+const reportPreDispatchFailure = async (failure: any) => {
+  const gatewayMetadata = { failureClassification: "PRE_DISPATCH_FAILURE", reservation: "ABSENT_CONFIRMED" };
+  if (failure.testJobId) await failTestJob({ testJobId: failure.testJobId, reason: failure.reason, gatewayMetadata });
+  else await failJob(failure.connectionType, { printJobId: failure.printJobId, printItemId: failure.printItemId, reason: failure.reason, gatewayMetadata });
+};
+
 export const runGatewayCycle = async (connectionType: GatewayConnectionType) => {
+  const context = { gatewayId: GATEWAY_ID, backendUrl: BACKEND_URL, connectionType };
+  await flushGatewayPreDispatchFailures(context, reportPreDispatchFailure);
   const claimed = await claimNextJob(connectionType);
-  if (claimed) {
-    if (connectionType === "NETWORK_DIRECT") await runDirectJob(claimed);
-    else await runIppJob(claimed);
-    return;
-  }
-  const test = await claimTestJob();
-  if (!test) return;
-  // A transport exception may occur after physical submission. Retain the
-  // durable reservation and do not automatically send a failed/retryable result.
-  if (connectionType === "NETWORK_DIRECT") await runDirectTestJob(test);
-  else await runIppTestJob(test);
+  const job = claimed || await claimTestJob();
+  if (!job) return;
+  await executeGatewayAttempt(context, job, async reserve => {
+    const guardedReserve: typeof reserveGatewayAttempt = (claim, hash) => reserve(() => reserveGatewayAttempt(claim, hash));
+    if (job.testJobId) {
+      if (connectionType === "NETWORK_DIRECT") await runDirectTestJob(job, guardedReserve);
+      else await runIppTestJob(job, guardedReserve);
+    } else {
+      if (connectionType === "NETWORK_DIRECT") await runDirectJob(job, guardedReserve);
+      else await runIppJob(job, guardedReserve);
+    }
+  }, reportPreDispatchFailure);
 };
 export const startGatewayWorker = () => {
   if (!configured()) {

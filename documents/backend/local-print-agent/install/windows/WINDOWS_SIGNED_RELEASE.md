@@ -1,106 +1,25 @@
-# Windows signed release guide
+# Windows installer build modes
 
-This guide prepares the MSCQR Windows connector for a real trusted Windows release.
-
-## 1. Build the unsigned installer scaffold
-
-From the `backend` folder:
-
-```bash
-export WEB_APP_BASE_URL=https://mscqr.com
-npm run connector:windows:build-installer
-```
-
-What this does:
-
-1. builds the backend
-2. packages the Windows connector binary
-3. stages the install assets
-4. renders an Inno Setup project file
-5. optionally compiles an unsigned `.exe` installer on a Windows machine with Inno Setup installed
-
-If Inno Setup is not installed yet, the command still prints:
-
-- the staging folder
-- the generated `.iss` project file
-- the output folder where the installer should land
-
-## 2. Compile the unsigned Windows installer on a Windows machine
-
-Install:
-
-- Inno Setup 6
-- Windows SDK / SignTool for later signing
-
-Then run:
+The documented development command requires no maintenance credential or production origin:
 
 ```powershell
 cd backend
-$env:WEB_APP_BASE_URL="https://mscqr.com"
+$env:WEB_APP_BASE_URL='http://127.0.0.1:5173'
 npm run connector:windows:build-installer
 ```
 
-If `INNO_SETUP_COMPILER_PATH` is not detected automatically, set it before rerunning:
+This explicitly selects --mode=development. It builds the runtime and stages an unsigned fixture under .connector-build/windows-installer-development, outside the publication tree. Inno Setup is optional for scaffolding. The compiled filename includes DEVELOPMENT-unsigned. The generated installer refuses installation before copying files, contains no maintenance API origin, and cannot compile with MSCQR_SIGNED_RELEASE. It is a development fixture, not a customer installer or Windows policy certification artifact. Do not publish it or use it to replace an installed connector.
+
+## Governed signed candidate
+
+Use the existing windows-connector-signed-release.yml workflow, only with authorization for its protected Azure signing identity. Candidate-only mode cannot publish or tag. The publication blocker remains effective pending certification. The workflow calls:
 
 ```powershell
-$env:INNO_SETUP_COMPILER_PATH="C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+npm --prefix backend run connector:windows:prepare-signed-candidate
 ```
 
-## 3. Publish an unsigned internal test installer
+This selects --mode=signed-candidate. It requires MSCQR_MAINTENANCE_API_ORIGIN (requested HTTPS origin) and MSCQR_APPROVED_MAINTENANCE_API_ORIGIN (a separately governed variable in the protected signing environment). They must match. Missing, noncanonical, HTTP, credentials, paths, queries, fragments and host substitutions fail closed. The runtime maintenance client forbids redirects. There is no production default. WEB_APP_BASE_URL and the source-matching CONNECTOR_RELEASE_VERSION remain workflow settings.
 
-Only for internal validation:
+The approved workflow signs the runtime and PowerShell payload, then compiles with Inno Setup 6.7.1, the Azure SignTool hook and SignedUninstaller=yes. Do not externally sign only the final installer: that misses temporary Setup copies and the uninstaller. Do not substitute self-signed certificates. Verify the actual candidate and extracted executables, expected publisher, chain, timestamp, SHA256 and source provenance with the artifact verifier. Certify interactive/silent install, legacy upgrade and rollback under the applicable enforced Application Control policy. An unrestricted runner or mocked signature check does not satisfy that gate.
 
-```bash
-export WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH=/absolute/path/to/MSCQR-Connector-Windows-<version>-unsigned.exe
-npm run connector:release
-```
-
-MSCQR will publish that artifact as:
-
-- `Windows test installer`
-- trust level: `unsigned`
-- Windows trust mode: `unsigned-test`
-
-It will never be presented as a trusted Windows customer installer.
-
-## 4. Sign the Windows installer later
-
-When Azure Trusted Signing or another trusted signing path is ready:
-
-1. sign the Windows installer
-2. timestamp the signature
-3. verify the signature on Windows
-
-Then publish the signed installer:
-
-```bash
-export WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH=/absolute/path/to/MSCQR-Connector-Windows-<version>.exe
-export WINDOWS_CONNECTOR_PUBLISHER_NAME="Your Company Name"
-export WINDOWS_CONNECTOR_SIGNED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-npm run connector:release
-```
-
-MSCQR will then publish it as:
-
-- `Windows installer`
-- trust level: `trusted`
-- signature status: `signed`
-
-## 5. Verify before customer rollout
-
-On a Windows machine:
-
-```powershell
-cd backend
-npm run connector:windows:verify -- --file "C:\path\to\installer.exe" --expect-signed --publisher-name "Your Company Name"
-```
-
-Manual checks:
-
-1. Right-click the installer
-2. Open `Properties`
-3. Open `Digital Signatures`
-4. Confirm the publisher name is correct
-5. Confirm the signature is timestamped
-6. Download the installer on a clean Windows 11 machine with Smart App Control enabled
-7. Confirm the installer launches normally
+Release and production backend deployment require separate authorization. Do not raise minimum versions before a verified replacement is available. Physical Zebra certification additionally requires independently verified production isolation and reconciled connector-side work.

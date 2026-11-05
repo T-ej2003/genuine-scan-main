@@ -162,7 +162,8 @@ jobs:
           WEB_APP_BASE_URL: ${{ steps.release_settings.outputs.web_app_base_url }}
           INNO_SETUP_COMPILER_PATH: C:\__compile_after_payload_signing__\ISCC.exe
           WINDOWS_CONNECTOR_PKG_TARGET: node24-win-x64
-        run: npm --prefix backend run connector:windows:build-installer
+          MSCQR_APPROVED_MAINTENANCE_API_ORIGIN: ${{ vars.MSCQR_APPROVED_MAINTENANCE_API_ORIGIN }}
+        run: npm --prefix backend run connector:windows:prepare-signed-candidate
 
       - name: Verify staged Windows connector runtime
         shell: pwsh
@@ -173,6 +174,11 @@ jobs:
             "README.txt",
             "install-startup-task.ps1",
             "uninstall-startup-task.ps1",
+            "connector-upgrade-state.ps1",
+            "connector-upgrade-transaction.ps1",
+            "connector-upgrade-backup.ps1",
+            "connector-upgrade-staging.ps1",
+            "installer-build.json",
             "bin\mscqr-local-print-agent.exe"
           )
           foreach ($relativePath in $requiredFiles) {

@@ -2,6 +2,7 @@ import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, ran
 import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
+const STATE_SOURCE = Symbol("connector-state-source");
 
 export type CalibrationProfile = {
   dpi?: number;
@@ -15,6 +16,7 @@ export type CalibrationProfile = {
 };
 
 export type AgentState = {
+  [STATE_SOURCE]?: string;
   agentId: string;
   deviceFingerprint: string;
   selectedPrinterId: string | null;
@@ -83,6 +85,7 @@ const initializeAgentState = async (): Promise<AgentState> => {
 
 export const loadAgentState = async (options: { initialize?: boolean } = {}): Promise<AgentState> => {
   let raw: string;
+  let source = STATE_FILE;
   try {
     raw = await fs.readFile(STATE_FILE, "utf8");
   } catch (error: any) {
@@ -93,6 +96,7 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
     }
     try {
       raw = await fs.readFile(LEGACY_STATE_FILE, "utf8");
+      source = LEGACY_STATE_FILE;
     } catch (legacyError: any) {
       if (legacyError?.code !== "ENOENT") throw legacyError;
       if (options.initialize === false) throw new Error("Existing connector identity is missing.");
@@ -120,6 +124,7 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
   }
   return {
     ...parsed,
+    [STATE_SOURCE]: source,
     agentId: parsed.agentId,
     deviceFingerprint: parsed.deviceFingerprint,
     selectedPrinterId: parsed?.selectedPrinterId ? String(parsed.selectedPrinterId) : null,
@@ -139,8 +144,9 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
 };
 
 export const saveAgentState = async (state: AgentState) => {
-  await fs.mkdir(path.dirname(STATE_FILE), { recursive: true });
-  const temporaryFile = `${STATE_FILE}.${randomUUID()}.tmp`;
+  const destination = state[STATE_SOURCE] || STATE_FILE;
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  const temporaryFile = `${destination}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(
       temporaryFile,
@@ -160,10 +166,25 @@ export const saveAgentState = async (state: AgentState) => {
       ),
       { encoding: "utf8", mode: 0o600, flag: "wx" }
     );
-    await fs.rename(temporaryFile, STATE_FILE);
+    await fs.rename(temporaryFile, destination);
   } finally {
     await fs.rm(temporaryFile, { force: true });
   }
+};
+
+export const inspectAgentState = async () => {
+  const state = await loadAgentState({ initialize: false });
+  const source = path.resolve(state[STATE_SOURCE] || STATE_FILE);
+  const canonical = (value: any): any => {
+    if (typeof value === "number" && (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)))) throw new Error("Unsupported state number.");
+    if (Array.isArray(value)) return value.map(canonical);
+    if (value && typeof value === "object") return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+    return value;
+  };
+  const raw = await fs.readFile(source, "utf8");
+  return { ok: true, agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+    publicKeySha256: sha256Hex(state.publicKeyPem), statePath: source,
+    stateSha256: sha256Hex(raw), stateSemanticSha256: sha256Hex(JSON.stringify(canonical(JSON.parse(raw)))) };
 };
 
 export const mergeCalibrationProfile = (

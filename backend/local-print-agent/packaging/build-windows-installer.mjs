@@ -4,22 +4,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { readConnectorSourceVersion } from "./source-version.mjs";
+import { windowsBuildMode } from "./windows-build-mode.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const backendRoot = path.resolve(__dirname, "../..");
-const buildRoot = path.join(backendRoot, ".connector-build", "windows-installer");
+const buildMode = windowsBuildMode(process.argv.slice(2), process.env);
+const buildRoot = path.join(backendRoot, ".connector-build", buildMode.productionEligible ? "windows-installer" : "windows-installer-development");
 const windowsInstallRoot = path.join(backendRoot, "local-print-agent", "install", "windows");
 const legalRoot = path.resolve(backendRoot, "..", "documents", "legal", "connector");
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
-const maintenanceApiUrl = new URL(String(process.env.MSCQR_MAINTENANCE_API_ORIGIN || ""));
-if (maintenanceApiUrl.protocol !== "https:" || maintenanceApiUrl.username || maintenanceApiUrl.password ||
-    maintenanceApiUrl.search || maintenanceApiUrl.hash || maintenanceApiUrl.pathname !== "/") {
-  throw new Error("MSCQR_MAINTENANCE_API_ORIGIN must be the approved HTTPS backend origin, without a path.");
-}
 const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
 const minWindowsBinaryBytes = 1_000_000;
 const pkgBinary = process.platform === "win32"
@@ -176,7 +173,7 @@ const readWindowsAssetTemplate = (assetName) => {
   return fs
     .readFileSync(templatePath, "utf8")
     .replace(/__MSCQR_WEB_APP_BASE_URL__/g, webAppBaseUrl)
-    .replace(/__MSCQR_MAINTENANCE_API_ORIGIN__/g, maintenanceApiUrl.origin)
+    .replace(/__MSCQR_MAINTENANCE_API_ORIGIN__/g, buildMode.maintenanceOrigin)
     .replace(/__MSCQR_CONNECTOR_VERSION__/g, version);
 };
 
@@ -230,11 +227,12 @@ const buildWindowsBinary = (binariesDir) => {
 };
 
 const renderInstallerScript = (templatePath, stageDir, outputDir) =>
-  fs
+  (buildMode.productionEligible ? "" : "#define MSCQR_DEVELOPMENT_FIXTURE\n") + fs
     .readFileSync(templatePath, "utf8")
     .replace(/__MSCQR_CONNECTOR_VERSION__/g, version)
     .replace(/__WINDOWS_STAGE_DIR__/g, stageDir.replace(/\\/g, "\\\\"))
-    .replace(/__WINDOWS_OUTPUT_DIR__/g, outputDir.replace(/\\/g, "\\\\"));
+    .replace(/__WINDOWS_OUTPUT_DIR__/g, outputDir.replace(/\\/g, "\\\\"))
+    .replace(/__MSCQR_BUILD_SUFFIX__/g, buildMode.productionEligible ? "" : "-DEVELOPMENT");
 
 const main = () => {
   console.log(`Preparing MSCQR Windows installer scaffold ${version}`);
@@ -246,7 +244,7 @@ const main = () => {
   const binariesDir = path.join(buildRoot, "binaries");
   const stageDir = path.join(buildRoot, "staging");
   const stageBinDir = path.join(stageDir, "bin");
-  const outputDir = path.join(releaseRoot, version, "windows");
+  const outputDir = buildMode.productionEligible ? path.join(releaseRoot, version, "windows") : path.join(buildRoot, "output");
   const issTemplatePath = path.join(windowsInstallRoot, "MSCQR-Connector.iss.template");
   const issOutputPath = path.join(buildRoot, `MSCQR-Connector-${version}.iss`);
 
@@ -262,10 +260,11 @@ const main = () => {
   writeAsciiFile(path.join(stageDir, "Install Connector.cmd"), readWindowsAssetTemplate("Install Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "Uninstall Connector.cmd"), readWindowsAssetTemplate("Uninstall Connector.cmd"));
   writeAsciiFile(path.join(stageDir, "README.txt"), readWindowsAssetTemplate("README.txt"));
-  for (const name of ['connector-upgrade-staging.ps1', 'connector-upgrade-backup.ps1', 'connector-upgrade-transaction.ps1']) {
+  for (const name of ['connector-upgrade-staging.ps1', 'connector-upgrade-backup.ps1', 'connector-upgrade-state.ps1', 'connector-upgrade-transaction.ps1']) {
     writeAsciiFile(path.join(stageDir, name), readWindowsAssetTemplate(name));
   }
   copyLegalDocuments(stageDir);
+  writeAsciiFile(path.join(stageDir, 'installer-build.json'), JSON.stringify({ ...buildMode, version }, null, 2));
   writeAsciiFile(issOutputPath, renderInstallerScript(issTemplatePath, stageDir, outputDir));
 
   const compilerPath = resolveInnoSetupCompiler();
@@ -273,7 +272,7 @@ const main = () => {
     console.log(`Compiling Windows installer with ${compilerPath}`);
     run(compilerPath, [issOutputPath], { cwd: buildRoot });
     console.log("");
-    console.log(`Unsigned Windows installer written to: ${path.join(outputDir, `MSCQR-Connector-Windows-${version}-unsigned.exe`)}`);
+    console.log(`Unsigned ${buildMode.mode} Windows installer written to: ${outputDir}`);
   } else {
     console.log("");
     console.log("Inno Setup compiler was not found on this machine.");

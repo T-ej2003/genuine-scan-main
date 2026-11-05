@@ -21,6 +21,7 @@ function Get-AuthenticodeSignature {
 }
 function Get-MscqrRuntimeVersion { param($Runtime) return '2026.6.26' }
 function Assert-MscqrExistingIdentity {param($Candidate,$StateFile,$Binding)}
+function Get-MscqrIdentityEvidence {param($Candidate,$StateFile) return [pscustomobject]@{stateSemanticSha256=(Get-FileHash $StateFile).Hash.ToLowerInvariant()}}
 function Get-ScheduledTask { return @() }
 function Get-CimInstance { param($ClassName) return @() }
 function Get-MscqrUninstallSnapshot {
@@ -50,7 +51,7 @@ function Stop-MscqrVerifiedRuntime {
 function Start-MscqrVerifiedRuntime { param($Wrapper) $script:processes++; if ($script:processes -ne 1) { throw 'duplicate start' } }
 function Wait-MscqrRuntime {
   param($Journal)
-  if ($script:injection -in @('verify','restore-verify') -and $Journal.expectedVersion -ne '2026.6.26') { throw 'fixture replacement health failure' }
+  if ($script:injection -in @('verify','restore-verify','legacy-rollback') -and $Journal.expectedVersion -ne '2026.6.26') { throw 'fixture replacement health failure' }
   if ($script:injection -eq 'restore-verify') { throw 'fixture restoration health failure' }
   if ($script:processes -ne 1) { throw 'fixture cardinality failure' }
   return [pscustomobject]@{protocolVersion='1'}
@@ -59,12 +60,13 @@ function Wait-MscqrRuntime {
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ('mscqr-transaction-test-'+[guid]::NewGuid().ToString('N'))
 Protect-MscqrDirectory $fixture
 try {
-  foreach ($scenario in @('success','authorization','stage','extra-startup','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
+  foreach ($scenario in @('success','legacy-success','legacy-rollback','legacy-interrupted','authorization','stage','extra-startup','locked','locked-helper','journal-full','verify','restore-verify','interrupted','interrupted-activated','corrupt','tampered-manifest','duplicate-record','changed-identity','concurrent')) {
     $script:injection=$scenario; $script:consumed=$false; $script:processes=1
     $case=Join-Path $fixture $scenario
     $live=Join-Path $case 'live'; $payload=Join-Path $case 'payload'
     New-Item -ItemType Directory -Path "$live\bin","$payload\bin" -Force | Out-Null
     $runtime="$live\bin\mscqr-local-print-agent.exe"; $state="$case\state.json"; $startup="$case\startup.vbs"; $auth="$case\auth.json"; $installer="$case\setup.exe"
+    if($scenario -like 'legacy-*'){New-Item -ItemType Directory "$case\.authenticqr"|Out-Null;$state="$case\.authenticqr\local-print-agent-state.json"}
     [IO.File]::WriteAllText($runtime,'previous verified runtime fixture')
     [IO.File]::WriteAllText("$payload\bin\mscqr-local-print-agent.exe",'replacement verified runtime fixture')
     [IO.File]::WriteAllText($installer,'installer fixture')
@@ -81,6 +83,8 @@ try {
     [IO.File]::WriteAllText("$live\unknown-pending.json",'preserve uncertain evidence')
     $binding=[pscustomobject]@{ targetVersion='2026.10.29.1';sourceVersion='2026.6.26';attemptId=[guid]::NewGuid().ToString();agentId='synthetic';deviceFingerprint='synthetic-device';sourceSha256=(Get-FileHash $runtime).Hash;targetSha256=(Get-FileHash "$payload\bin\mscqr-local-print-agent.exe").Hash;installerSha256=(Get-FileHash $installer).Hash;stateSha256=(Get-FileHash $state).Hash;configurationSha256=(Get-FileHash "$live\agent.env").Hash;startupSha256=(Get-FileHash $startup).Hash;wrapperSha256=(Get-FileHash "$live\bin\start-local-print-agent.cmd").Hash }
     $binding | Add-Member payloadSha256 (Get-MscqrPayloadDigest $payload)
+    $binding | Add-Member statePath ([IO.Path]::GetFullPath($state))
+    $binding | Add-Member stateDiscoverySha256 (Get-MscqrStateDiscoveryDigest (Get-MscqrStateSnapshot @($state)))
     $binding | Add-Member sourcePayloadSha256 (Get-MscqrPayloadDigest $live)
     $binding | Add-Member protocolVersion '1'
     $binding | Add-Member uninstallerSha256 (Get-FileHash "$live\unins000.exe").Hash
@@ -88,6 +92,12 @@ try {
     $binding | Add-Member uninstallRegistrationSha256 (Get-MscqrUninstallDigest (Get-MscqrUninstallSnapshot $live))
     [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     $args=@{LiveDirectory=$live;Payload=$payload;Installer=$installer;AuthFile=$auth;Version=$binding.targetVersion;StateFile=$state;StartupFile=$startup}
+    if($scenario -like 'legacy-*') {
+      $discovery=Resolve-MscqrUpgradeState $case $live 'fixture'
+      $args.StateFile=$discovery.selectedPath;$args.StateDiscovery=$discovery
+      $binding.stateDiscoverySha256=$discovery.sha256
+      [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
+    }
     $failed=$false
     if($scenario -eq 'extra-startup'){[IO.File]::WriteAllText("$case\unknown-legacy.vbs","$runtime")}
     $operationLock=$null
@@ -105,7 +115,7 @@ try {
     $journal="$case\connector-upgrade\transaction.json"
     [IO.File]::WriteAllText("$journal.next",'unrelated recovery evidence')
     if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'BACKED_UP') {throw 'real orchestration did not stage and back up'}
-    if($scenario -in @('interrupted','interrupted-activated')) {
+    if($scenario -in @('interrupted','interrupted-activated','legacy-interrupted')) {
       # Persist the actual pre-replacement interruption state and execute the
       # same recovery entrypoint used by a subsequent installer process.
       $record=Get-Content $journal -Raw|ConvertFrom-Json
@@ -147,13 +157,14 @@ try {
         if(-not $failed -or $script:processes -ne 0 -or (Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_FAILED'){throw 'failed restoration was not left stopped'}
         Write-Host 'PASS transaction failed-restoration stayed stopped and fenced'
         continue
-      } elseif($scenario -eq 'success') {
+      } elseif($scenario -in @('success','legacy-success')) {
         if($failed){throw 'successful activation failed'}
         Invoke-MscqrUpgradeTransaction -Phase Commit @args
         if((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'COMMITTED' -or (Get-FileHash $runtime).Hash -ne $binding.targetSha256){throw 'commit invalid'}
       } elseif(-not $failed) {throw 'verification failure did not fail upgrade'}
     }
-    if($scenario -ne 'success' -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
+    if($scenario -notin @('success','legacy-success') -and ((Get-Content $journal -Raw|ConvertFrom-Json).phase -ne 'RESTORATION_VERIFIED' -or (Get-FileHash $runtime).Hash -ne $binding.sourceSha256)) {throw 'operational restoration was not verified'}
+    if($scenario -like 'legacy-*' -and (Test-Path -LiteralPath "$case\.mscqr\local-print-agent-state.json")){throw 'Legacy identity was silently migrated'}
     if($script:processes -ne 1 -or (Get-FileHash $state).Hash -ne $binding.stateSha256 -or [IO.File]::ReadAllText("$live\unknown-pending.json") -ne 'preserve uncertain evidence' -or [IO.File]::ReadAllText("$journal.next") -ne 'unrelated recovery evidence') {throw 'identity, pending evidence or cardinality lost'}
     Write-Host "PASS transaction $scenario (external boundaries simulated)"
   }

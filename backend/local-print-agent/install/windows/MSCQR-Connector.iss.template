@@ -1,6 +1,6 @@
 [Setup]
 AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}
-AppName=MSCQR Connector
+AppName=MSCQR Connector__MSCQR_BUILD_SUFFIX__
 AppVersion=__MSCQR_CONNECTOR_VERSION__
 AppPublisher=MSCQR
 DefaultDirName={localappdata}\MSCQR\local-print-agent
@@ -14,6 +14,9 @@ SolidCompression=yes
 PrivilegesRequired=lowest
 WizardStyle=modern
 #ifdef MSCQR_SIGNED_RELEASE
+#ifdef MSCQR_DEVELOPMENT_FIXTURE
+#error Development fixtures cannot enter signed release compilation.
+#endif
 #if Ver != 0x06070100
 #error Signed releases require Inno Setup 6.7.1.
 #endif
@@ -21,7 +24,7 @@ SignTool=mscqr
 SignedUninstaller=yes
 #endif
 OutputDir=__WINDOWS_OUTPUT_DIR__
-OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION__-unsigned
+OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION____MSCQR_BUILD_SUFFIX__-unsigned
 UninstallDisplayIcon={app}\bin\mscqr-local-print-agent.exe
 
 [Files]
@@ -60,6 +63,10 @@ end;
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 begin
   Result := '';
+#ifdef MSCQR_DEVELOPMENT_FIXTURE
+  Result := 'DEVELOPMENT FIXTURE: installation and production upgrades are disabled. Use the governed signed candidate workflow for certification.';
+  exit;
+#endif
   UpgradeMode := DirExists(ExpandConstant('{app}')) or
      FileExists(ExpandConstant('{userprofile}\.mscqr\local-print-agent-state.json')) or
      FileExists(ExpandConstant('{userprofile}\.authenticqr\local-print-agent-state.json'));

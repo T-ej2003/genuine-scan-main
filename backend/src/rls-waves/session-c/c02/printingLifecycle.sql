@@ -975,7 +975,8 @@ BEGIN
         OR coalesce(maintenance_binding->>'targetVersion','') !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
         OR maintenance_binding->>'sourceVersion'=maintenance_binding->>'targetVersion'
         OR string_to_array(maintenance_binding->>'targetVersion','.')::integer[]<=string_to_array(maintenance_binding->>'sourceVersion','.')::integer[]
-        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256']) field
+        OR coalesce(maintenance_binding->>'statePath','')=''
+        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','stateDiscoverySha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256']) field
           WHERE coalesce(maintenance_binding->>field,'') !~ '^[a-f0-9]{64}$')
       THEN RAISE EXCEPTION 'MAINTENANCE_EVIDENCE_MISMATCH' USING ERRCODE='42501'; END IF;
       SELECT pr."agentId",pr."deviceFingerprint",pr."publicKeyPem" INTO STRICT maintenance_registration FROM public."PrinterRegistration" pr
@@ -2617,6 +2618,9 @@ BEGIN
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
     END IF;
   ELSE
+    IF item_row.state='FAILED' THEN RETURN jsonb_build_object('idempotent',true,'printItemId',item_row.id); END IF;
+    IF item_row.state<>'ISSUED' OR p_details->'gatewayMetadata'->>'failureClassification' IS DISTINCT FROM 'PRE_DISPATCH_FAILURE'
+    THEN RAISE EXCEPTION 'GATEWAY_FAILURE_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
       "failureReason"=left(coalesce(p_details->>'reason','gateway_failure'),500),"updatedAt"=now_at WHERE id=item_row.id;
     UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','gateway_failure'),500),

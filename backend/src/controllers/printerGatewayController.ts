@@ -52,42 +52,46 @@ const claim = async (req: Request, res: Response, connectionType: PrinterConnect
   if (!auth || auth.printer.connectionType !== connectionType) {
     return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
   }
-  const result = await recordGatewayPrintingEvent({
-    ...auth,
-    requestId: randomUUID(),
-    operation: "CLAIM",
-    mode: modeFor(connectionType),
-  });
-  if (!result.available) return res.json({ success: true, data: null });
-  const item = result.item;
-  const qr = {
-    id: item.qrCodeId,
-    code: item.code,
-    displayCode: item.displayCode,
-    batchId: item.batchId,
-    licenseeId: item.licenseeId,
-    tokenNonce: item.tokenNonce,
-    tokenIssuedAt: item.tokenIssuedAt ? new Date(item.tokenIssuedAt) : null,
-    tokenExpiresAt: item.tokenExpiresAt ? new Date(item.tokenExpiresAt) : null,
-    tokenHash: item.tokenHash,
-    replayEpoch: item.replayEpoch,
-  };
-  const payload = connectionType === PrinterConnectionType.NETWORK_DIRECT
-    ? buildApprovedPrintPayload({
-        printer: result.printer,
-        qr,
-        manufacturerId: result.job.manufacturerId,
-        printJobId: result.job.id,
-        printItemId: item.id,
-        jobNumber: result.job.jobNumber,
-        reprintOfJobId: result.job.reprintOfJobId,
-      })
-    : buildApprovedPrintContext({
-        qr,
-        manufacturerId: result.job.manufacturerId,
-        reprintOfJobId: result.job.reprintOfJobId,
-      });
-  return res.json({ success: true, data: { ...result, payload } });
+  const data = await prisma.$transaction(async tx => {
+    const result = await recordGatewayPrintingEvent({
+      ...auth,
+      requestId: randomUUID(),
+      operation: "CLAIM",
+      mode: modeFor(connectionType),
+      client: tx,
+    });
+    if (!result.available) return null;
+    const item = result.item;
+    const qr = {
+      id: item.qrCodeId,
+      code: item.code,
+      displayCode: item.displayCode,
+      batchId: item.batchId,
+      licenseeId: item.licenseeId,
+      tokenNonce: item.tokenNonce,
+      tokenIssuedAt: item.tokenIssuedAt ? new Date(item.tokenIssuedAt) : null,
+      tokenExpiresAt: item.tokenExpiresAt ? new Date(item.tokenExpiresAt) : null,
+      tokenHash: item.tokenHash,
+      replayEpoch: item.replayEpoch,
+    };
+    const payload = connectionType === PrinterConnectionType.NETWORK_DIRECT
+      ? buildApprovedPrintPayload({
+          printer: result.printer,
+          qr,
+          manufacturerId: result.job.manufacturerId,
+          printJobId: result.job.id,
+          printItemId: item.id,
+          jobNumber: result.job.jobNumber,
+          reprintOfJobId: result.job.reprintOfJobId,
+        })
+      : buildApprovedPrintContext({
+          qr,
+          manufacturerId: result.job.manufacturerId,
+          reprintOfJobId: result.job.reprintOfJobId,
+        });
+    return { ...result, payload };
+    });
+  return res.json({ success: true, data });
 };
 
 const event = async (
