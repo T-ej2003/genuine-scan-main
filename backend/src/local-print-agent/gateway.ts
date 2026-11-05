@@ -461,8 +461,9 @@ const reportPreDispatchFailure = async (failure: any) => {
 export const runGatewayCycle = async (connectionType: GatewayConnectionType) => {
   const context = { gatewayId: GATEWAY_ID, backendUrl: BACKEND_URL, connectionType };
   await flushGatewayPreDispatchFailures(context, reportPreDispatchFailure);
-  const claimed = await claimNextJob(connectionType);
-  const job = claimed || await claimTestJob();
+  // A queued diagnostic owns this printer's physical evidence lease. Claim it
+  // before the normal route, which must reject automatic work during the lease.
+  const job = await claimTestJob() || await claimNextJob(connectionType);
   if (!job) return;
   await executeGatewayAttempt(context, job, async reserve => {
     const guardedReserve: typeof reserveGatewayAttempt = (claim, hash) => reserve(() => reserveGatewayAttempt(claim, hash));

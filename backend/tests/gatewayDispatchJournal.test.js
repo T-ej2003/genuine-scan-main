@@ -32,7 +32,8 @@ const { createHash } = require('node:crypto');
         global.fetch = async url => {
           events.push(String(url));
           const isTest = String(url).endsWith('/test/claim');
-          const data = diagnostic ? (isTest ? payload : null) : {
+          if (diagnostic && !isTest) throw new Error('automatic gateway claim is fenced by the diagnostic lease');
+          const data = diagnostic ? (isTest ? payload : null) : isTest ? null : {
             job: { id, jobNumber: 'synthetic' }, item: { id, code: 'synthetic' }, printer: payload.printer,
             payload: { payloadContent: content, payloadHash: payload.payloadHash, scanUrl: payload.scanUrl },
           };
@@ -41,6 +42,8 @@ const { createHash } = require('node:crypto');
         const before = submissions;
         await assert.rejects(runGatewayCycle(mode), /injected disconnect after submission/);
         await assert.rejects(runGatewayCycle(mode), { errorCode: 'dispatch_reconciliation_required' });
+        if (diagnostic) assert(!events.some(url => url.endsWith('/direct/claim') || url.endsWith('/ipp/claim')),
+          'diagnostic must claim before a fenced automatic route is attempted');
         assert.equal(submissions - before, 1, `${id}: redelivery must not resubmit`);
         assert(!events.some(url => url.endsWith('/fail')), 'uncertain physical outcome must not be classified as failed');
       }
