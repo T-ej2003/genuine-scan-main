@@ -81,6 +81,10 @@ function Get-MscqrPayloadDigest([string]$Payload) {
 }
 function Assert-MscqrBackupBindings($Journal) {
   $expected=@{runtime=@($Journal.runtime,$Journal.binding.sourceSha256);environment=@($Journal.environmentFile,$Journal.binding.configurationSha256);state=@($Journal.stateFile,$Journal.binding.stateSha256);startup=@($Journal.startup,$Journal.binding.startupSha256);wrapper=@($Journal.wrapper,$Journal.binding.wrapperSha256)}
+  $live=[IO.Path]::GetDirectoryName([IO.Path]::GetDirectoryName($Journal.runtime))
+  $expected.uninstaller=@((Join-Path $live 'unins000.exe'),$Journal.binding.uninstallerSha256)
+  $expected.uninstallData=@((Join-Path $live 'unins000.dat'),$Journal.binding.uninstallDataSha256)
+  if((Get-MscqrUninstallDigest $Journal.uninstall) -cne $Journal.binding.uninstallRegistrationSha256) {throw 'Uninstall backup differs from authenticated binding.'}
   foreach($name in $expected.Keys) {
     $records=@($Journal.records | Where-Object {$_.name -ceq $name})
     if($records.Count -ne 1 -or $records[0].original -ine $expected[$name][0] -or $records[0].sha256 -ine $expected[$name][1]) {throw 'Backup manifest differs from authenticated binding.'}
@@ -110,6 +114,11 @@ function Restore-MscqrUninstallSnapshot($Snapshot) {
   $key=Get-Item -LiteralPath $path
   foreach($name in $key.GetValueNames()) {if($name -notin @($Snapshot.name)){$key.DeleteValue($name)}}
   foreach($record in $Snapshot) {$key.SetValue([string]$record.name,$record.value,[Microsoft.Win32.RegistryValueKind]$record.kind)}
+}
+function Get-MscqrUninstallDigest($Snapshot) {
+  $json=ConvertTo-Json -InputObject @($Snapshot | Sort-Object name) -Depth 20 -Compress
+  $sha=[Security.Cryptography.SHA256]::Create()
+  try {return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($json)))).Replace('-','').ToLowerInvariant()} finally {$sha.Dispose()}
 }
 function Assert-MscqrRuntime([string]$Runtime, [string]$Version, [string]$StateFile, [string]$Startup, [string]$StartupHash) {
   $processes = @(Get-MscqrRuntimeProcesses)
@@ -315,6 +324,9 @@ function Invoke-MscqrUpgradeTransaction {
       $status = Assert-MscqrRuntime $runtime $oldVersion $StateFile $StartupFile $startupHash
       if($status.protocolVersion -cne $binding.protocolVersion) {throw 'Authorized connector protocol mismatch.'}
       $uninstall = Get-MscqrUninstallSnapshot $live
+      if((Get-MscqrUninstallDigest $uninstall) -cne $binding.uninstallRegistrationSha256 -or
+          (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
+          (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
       $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'

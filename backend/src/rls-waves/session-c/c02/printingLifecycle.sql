@@ -63,7 +63,7 @@ BEGIN
            coalesce((p_details->'evidence'->>'verifiedAt')::timestamptz,'-infinity')<=(current_value->'upgrade'->>'expiresAt')::timestamptz))
       THEN RAISE EXCEPTION 'MAINTENANCE_ATTEMPT_ALREADY_EXISTS' USING ERRCODE='55000'; END IF;
       IF current_value ? 'upgrade' THEN
-        current_value:=jsonb_set(current_value,'{history}',coalesce(current_value->'history','[]'::jsonb)||jsonb_build_array(current_value->'upgrade'-'tokenHash'));
+        current_value:=jsonb_set(current_value,'{history}',coalesce(current_value->'history','[]'::jsonb)||jsonb_build_array((current_value->'upgrade')-'tokenHash'));
       END IF;
       current_value:=current_value||jsonb_build_object('upgrade',p_details||jsonb_build_object(
         'state','AUTHORIZED','actor',p_actor,'authorizedAt',clock_timestamp()));
@@ -973,7 +973,7 @@ BEGIN
         OR coalesce(maintenance_binding->>'targetVersion','') !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
         OR maintenance_binding->>'sourceVersion'=maintenance_binding->>'targetVersion'
         OR string_to_array(maintenance_binding->>'targetVersion','.')::integer[]<=string_to_array(maintenance_binding->>'sourceVersion','.')::integer[]
-        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256']) field
+        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256']) field
           WHERE coalesce(maintenance_binding->>field,'') !~ '^[a-f0-9]{64}$')
       THEN RAISE EXCEPTION 'MAINTENANCE_EVIDENCE_MISMATCH' USING ERRCODE='42501'; END IF;
       SELECT pr."agentId",pr."deviceFingerprint",pr."publicKeyPem" INTO STRICT maintenance_registration FROM public."PrinterRegistration" pr

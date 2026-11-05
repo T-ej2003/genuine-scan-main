@@ -1042,7 +1042,7 @@ async function main() {
     assert(snapshot.inventory.items.length>0,'inventory must see real FORCE-RLS protected work');
     const binding={printerId:ids.printer,registrationId:ids.registration,tenantId:ids.orgA,manufacturerId:ids.maker,
       agentId:'printing-agent',deviceFingerprint:'printing-device',publicKeySha256:hash(signingPublicKey),fenceRequestId:snapshot.requestId,attemptId:randomUUID(),
-      sourceVersion:'2026.6.26',targetVersion:'2026.10.29.1',protocolVersion:'local-agent-direct-v2',...Object.fromEntries(['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256'].map(field=>[field,hash(field)]))};
+      sourceVersion:'2026.6.26',targetVersion:'2026.10.29.1',protocolVersion:'local-agent-direct-v2',...Object.fromEntries(['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256'].map(field=>[field,hash(field)]))};
     const reconciliations=[...snapshot.inventory.items.map(item=>({itemId:item.id,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-reconciliation'})),
       ...Object.keys(snapshot.inventory.diagnostics).map(diagnosticId=>({diagnosticId,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-diagnostic'})),
       ...snapshot.inventory.localDiagnostics.map(entry=>({diagnosticId:entry.job.testJobId,outcome:'VOID_NO_REPLAY',reference:'isolated-synthetic-local-diagnostic'}))];

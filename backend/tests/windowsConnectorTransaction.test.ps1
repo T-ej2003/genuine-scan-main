@@ -73,6 +73,9 @@ try {
     $binding | Add-Member payloadSha256 (Get-MscqrPayloadDigest $payload)
     $binding | Add-Member sourcePayloadSha256 (Get-MscqrPayloadDigest $live)
     $binding | Add-Member protocolVersion '1'
+    $binding | Add-Member uninstallerSha256 (Get-FileHash "$live\unins000.exe").Hash
+    $binding | Add-Member uninstallDataSha256 (Get-FileHash "$live\unins000.dat").Hash
+    $binding | Add-Member uninstallRegistrationSha256 (Get-MscqrUninstallDigest (Get-MscqrUninstallSnapshot $live))
     [IO.File]::WriteAllText($auth,(@{endpoint='https://isolated.example.invalid/api/manufacturer/printers/fixture/maintenance';binding=$binding;token='synthetic'}|ConvertTo-Json -Depth 10))
     $args=@{LiveDirectory=$live;Payload=$payload;Installer=$installer;AuthFile=$auth;Version=$binding.targetVersion;StateFile=$state;StartupFile=$startup}
     $failed=$false

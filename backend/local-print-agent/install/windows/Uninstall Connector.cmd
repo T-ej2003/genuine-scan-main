@@ -12,7 +12,7 @@ if not exist "%UNINSTALL_SCRIPT%" (
 )
 
 set "MSCQR_PACKAGED_INSTALL=1"
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%UNINSTALL_SCRIPT%"
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "%UNINSTALL_SCRIPT%"
 set "EXITCODE=%ERRORLEVEL%"
 
 if not "%EXITCODE%"=="0" (
