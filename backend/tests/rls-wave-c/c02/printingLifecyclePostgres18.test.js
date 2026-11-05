@@ -1025,7 +1025,7 @@ async function main() {
   psql(admin,`UPDATE public."PrintJob" SET "printerId"='${directPrinter}',"printMode"='NETWORK_DIRECT',status='PENDING',"pipelineState"='QUEUED' WHERE "batchId"='${ids.raceBatch}';
     UPDATE public."PrintSession" SET "printerId"='${directPrinter}',status='ACTIVE' WHERE "batchId"='${ids.raceBatch}';
     UPDATE public."PrintItem" pi SET state='RESERVED',"pipelineState"='QUEUED' FROM public."PrintSession" ps WHERE ps.id=pi."printSessionId" AND ps."batchId"='${ids.raceBatch}';`);
-  await require('./backendNetworkLifecycleFixture')({admin,worker,psql,printerId:directPrinter,gatewayPrinterId:gatewayPrinter,batchId:ids.raceBatch,foreignItemId:claim.printItemId});
+  await require('./backendNetworkLifecycleFixture')({admin,worker,app,capability:caps.maker,psql,printerId:directPrinter,gatewayPrinterId:gatewayPrinter,batchId:ids.raceBatch,foreignItemId:claim.printItemId});
   json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,gatewayPrinter));
   json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,directPrinter));
   const networkAttempts=psql(admin,`SELECT sum("attemptCount") FROM public."PrintItem"`);

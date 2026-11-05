@@ -31,6 +31,7 @@ const dispatchChunk = async (jobId?: string | null) => {
   });
   if (!claim?.available) return false;
   let physicalAttemptStarted=false;
+  let reservationStarted=false;
   try {
     const payload = claim.items.map((item: any) =>
       buildApprovedPrintPayload({
@@ -47,6 +48,9 @@ const dispatchChunk = async (jobId?: string | null) => {
     const port=Number(claim.printer.port || 9100);
     if(!ipAddress || !Number.isInteger(port) || port<1 || port>65535) throw new Error('Invalid direct printer configuration.');
     const startingLabelCount=await getZebraTotalLabelCount({ipAddress,port});
+    if(!Number.isSafeInteger(startingLabelCount) || startingLabelCount<0)throw new Error('Printer returned an invalid odometer baseline.');
+    reservationStarted=true;
+    await runNetworkPrintingWorker({operation:'RESERVE_DISPATCH',requestId:randomUUID(),jobId:claim.job.id,details:{itemIds:claim.items.map((item:any)=>item.id)}});
     physicalAttemptStarted=true;
     const sent = await sendRawPayloadToNetworkPrinter({
       ipAddress: String(claim.printer.ipAddress || claim.printer.host || ""),
@@ -64,7 +68,7 @@ const dispatchChunk = async (jobId?: string | null) => {
       details:{itemIds:claim.items.map((item:any)=>item.id),transportReference:`tcp:${sent.bytesWritten}`,
         confirmationEvidence:{kind:'ZEBRA_ODOMETER',printerId:claim.printer.id,startingLabelCount,confirmedLabelCount:completion.lastCount}}});
   } catch (error: any) {
-    if(physicalAttemptStarted) {
+    if(physicalAttemptStarted || reservationStarted) {
       logger.error('Network-direct physical outcome requires reconciliation',{jobId:claim.job.id});
       throw error;
     }

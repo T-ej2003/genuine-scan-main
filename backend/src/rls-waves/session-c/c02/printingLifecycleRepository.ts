@@ -340,7 +340,7 @@ export const reconcilePrintingLifecycle = async (input: {
 };
 
 export const runNetworkPrintingWorker = (input: {
-  operation: "CLAIM_DIRECT" | "CLAIM_IPP" | "ACK" | "CONFIRM" | "FAIL";
+  operation: "CLAIM_DIRECT" | "CLAIM_IPP" | "RESERVE_DISPATCH" | "ACK" | "CONFIRM" | "FAIL";
   requestId: string;
   jobId?: string | null;
   details?: Record<string, unknown>;

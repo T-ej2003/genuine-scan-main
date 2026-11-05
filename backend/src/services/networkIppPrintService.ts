@@ -20,9 +20,10 @@ const dispatchChunk = async (jobId?: string | null) => {
   });
   if (!claim?.available) return false;
   let physicalAttemptStarted=false;
+  let reservationStarted=false;
   try {
     const connection=buildIppConnectionInfo(claim.printer);
-    if(!Number.isInteger(connection.port) || connection.port<1 || connection.port>65535)throw new Error('Invalid IPP printer configuration.');
+    if(!connection.host || !Number.isInteger(connection.port) || connection.port<1 || connection.port>65535)throw new Error('Invalid IPP printer configuration.');
     for (const item of claim.items) {
       const context = buildApprovedPrintContext({
         qr: {
@@ -46,6 +47,8 @@ const dispatchChunk = async (jobId?: string | null) => {
         previewLabel: context.previewLabel,
         calibrationProfile: claim.printer.calibrationProfile,
       });
+      reservationStarted=true;
+      await runNetworkPrintingWorker({operation:'RESERVE_DISPATCH',requestId:randomUUID(),jobId:claim.job.id,details:{itemIds:[item.id]}});
       physicalAttemptStarted=true;
       const submitted = await submitPdfToIppPrinter({
         profile: claim.printer,
@@ -75,7 +78,7 @@ const dispatchChunk = async (jobId?: string | null) => {
       if(!completed)throw new Error('IPP device completion is uncertain; automatic replay refused.');
     }
   } catch (error: any) {
-    if(!physicalAttemptStarted) {
+    if(!physicalAttemptStarted && !reservationStarted) {
       await runNetworkPrintingWorker({
         operation: "FAIL",
         requestId: randomUUID(),

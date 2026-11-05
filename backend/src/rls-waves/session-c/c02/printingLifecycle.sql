@@ -3070,7 +3070,7 @@ DECLARE maintenance_printer record; job_row record; session_row record; now_at t
   mode_value public."PrintDispatchMode"; item_ids text[]; remaining integer; page_limit integer;
 BEGIN
   IF session_user<>{{WORKER_ROLE}}
-     OR p_operation NOT IN ('CLAIM_DIRECT','CLAIM_IPP','ACK','CONFIRM','FAIL')
+     OR p_operation NOT IN ('CLAIM_DIRECT','CLAIM_IPP','RESERVE_DISPATCH','ACK','CONFIRM','FAIL')
      OR p_request_id !~* '^[0-9a-f-]{36}$'
      OR (p_job_id IS NOT NULL AND p_job_id !~* '^[0-9a-f-]{36}$')
      OR jsonb_typeof(coalesce(p_details,'{}'::jsonb))<>'object'
@@ -3119,10 +3119,10 @@ BEGIN
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
       ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT page_limit
     ), issued AS (
-      UPDATE public."PrintItem" pi SET state='AGENT_ACKED',"pipelineState"='SENT_TO_PRINTER',
+      UPDATE public."PrintItem" pi SET state='ISSUED',"pipelineState"='SENT_TO_PRINTER',
         "attemptCount"=pi."attemptCount"+1,"issuedAt"=coalesce(pi."issuedAt",now_at),
-        "dispatchedAt"=now_at,"agentAckedAt"=now_at,
-        "confirmationDeadlineAt"=now_at+interval '10 minutes',"updatedAt"=now_at
+        "dispatchedAt"=NULL,"agentAckedAt"=NULL,
+        "confirmationDeadlineAt"=NULL,"updatedAt"=now_at
       FROM selected s WHERE pi.id=s.id RETURNING pi.id
     )
     SELECT array_agg(id ORDER BY id) INTO item_ids FROM issued;
@@ -3172,8 +3172,20 @@ BEGIN
   IF cardinality(item_ids)=0 THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
   IF cardinality(item_ids)<>(SELECT count(*) FROM public."PrintItem" WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id)
   THEN RAISE EXCEPTION 'PRINTING_WORKER_ITEM_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
-  IF p_operation='ACK' THEN
-    IF nullif(p_details->>'transportReference','') IS NULL OR EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND
+  IF p_operation='RESERVE_DISPATCH' THEN
+    SELECT p.id,p."printerRegistrationId",p."gatewayId",p."orgId",p."licenseeId",p."assignedUserId"
+      INTO STRICT maintenance_printer FROM public."Printer" p WHERE p.id=job_row."printerId" AND p."deliveryMode"='DIRECT' AND p."isActive";
+    PERFORM app_rls.printing_maintenance_gate(
+      CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
+      WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
+      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    IF EXISTS(SELECT 1 FROM public."PrintItem" WHERE id=ANY(item_ids) AND state<>'ISSUED')
+    THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    UPDATE public."PrintItem" SET state='AGENT_ACKED',"dispatchedAt"=now_at,"agentAckedAt"=now_at,"confirmationDeadlineAt"=now_at+interval '10 minutes',"updatedAt"=now_at
+      WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id;
+  ELSIF p_operation='ACK' THEN
+    IF EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state NOT IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED')) OR
+      nullif(p_details->>'transportReference','') IS NULL OR EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND
       nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL AND pi."dispatchMetadata" IS DISTINCT FROM p_details)
     THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET "dispatchMetadata"=p_details,"pipelineState"='PRINTER_ACKNOWLEDGED',"updatedAt"=now_at
@@ -3218,7 +3230,7 @@ BEGIN
     END IF;
   ELSE
     IF p_details->>'failureClassification' IS DISTINCT FROM 'PRE_DISPATCH_FAILURE' OR EXISTS(
-      SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND (pi.state<>'AGENT_ACKED' OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))
+      SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND (pi.state<>'ISSUED' OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))
     THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
       "failureReason"=left(coalesce(p_details->>'reason','network_transport_failed'),500),"updatedAt"=now_at
