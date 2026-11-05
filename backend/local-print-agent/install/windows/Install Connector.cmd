@@ -17,7 +17,7 @@ if not exist "%INSTALL_SCRIPT%" (
   set "DIALOG_MESSAGE=MSCQR Connector setup could not start. Extract the ZIP to a normal folder first, then run Install Connector.cmd again."
   set "DIALOG_ICON=Error"
   call :show_dialog
-  pause
+  if not "%MSCQR_SETUP_SILENT%"=="1" pause
   exit /b 1
 )
 
@@ -28,7 +28,7 @@ if not exist "%CONNECTOR_EXE%" (
   set "DIALOG_MESSAGE=MSCQR Connector setup could not start because the package is incomplete. Extract the ZIP to a normal folder first, then run Install Connector.cmd again."
   set "DIALOG_ICON=Error"
   call :show_dialog
-  pause
+  if not "%MSCQR_SETUP_SILENT%"=="1" pause
   exit /b 1
 )
 

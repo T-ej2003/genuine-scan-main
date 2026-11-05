@@ -1043,7 +1043,9 @@ async function main() {
     const role=name==='maker'?'MANUFACTURER_ADMIN':'LICENSEE_ADMIN';
     const scopeVersion=name==='maker'?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
     const headers=name?{authorization:`Bearer ${signAccessToken({userId:ids[name],email:'printing-http@example.invalid',role,sessionId:ids[`${name}Refresh`],orgId:name==='outsider'?ids.orgB:ids.orgA,licenseeId:name==='outsider'?ids.licenseeB:ids.licenseeA,scopeVersion,authenticatedAt:new Date().toISOString()})}`,
-      'x-database-session-capability':sealCookieToken(caps[name],'auth.database-session'),'content-type':'application/json'}:{'content-type':'application/json'};
+      // Synchronous bulk fixture setup can outlive HTTP keep-alive timers.
+      // Use a fresh connection; never retry a one-use authorization request.
+      'x-database-session-capability':sealCookieToken(caps[name],'auth.database-session'),'content-type':'application/json',connection:'close'}:{'content-type':'application/json',connection:'close'};
     const response=await fetch(`http://127.0.0.1:${maintenanceServer.address().port}/api/manufacturer/printers/${printerId}/maintenance`,{method:'POST',headers,body:JSON.stringify(body)});
     const result=await response.json();
     if(expected!==undefined)assert.equal(response.status,expected,JSON.stringify(result));

@@ -204,7 +204,7 @@ function Open-PrinterSetup {
     [string]$TargetUrl
   )
 
-  if ([string]::IsNullOrWhiteSpace($TargetUrl)) {
+  if ($env:MSCQR_SETUP_SILENT -eq "1" -or [string]::IsNullOrWhiteSpace($TargetUrl)) {
     return $false
   }
 

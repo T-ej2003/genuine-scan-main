@@ -5,13 +5,14 @@ if($ChildCase) {
   # Execute the real fresh-install try/catch and result writer. Only OS startup,
   # local status and UI boundaries are simulated; no installed runtime is used.
   $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$null,[ref]$null)
-  foreach($name in @('Complete-Install','Write-InstallResult')) {
+  foreach($name in @('Complete-Install','Write-InstallResult','Open-PrinterSetup')) {
     $fn=$ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)|Where-Object Name -eq $name
     Invoke-Expression $fn.Extent.Text
   }
   $AgentHome=$CaseDirectory;$BinDir="$CaseDirectory\bin";$LogDir="$CaseDirectory\logs";$StartupDir="$CaseDirectory\startup"
   $InstallResultPath="$CaseDirectory\install-result.json";$SetupLog="$LogDir\setup.log";$StatusUrl='http://127.0.0.1:1/status'
   $StartupLauncher="$StartupDir\fixture.vbs";$ResolvedVersion='2026.10.29.1';$PackagedInstall=$true
+  $env:MSCQR_SETUP_SILENT=if($SilentFixture){'1'}else{'0'}
   function Write-UpgradeLog {param($Message)}
   function Read-PreviousVersion {return $null}
   foreach($name in @('Stop-RunningAgent','Cleanup-LegacyTask','Cleanup-LegacyServices','Remove-LegacyRunRegistryEntries','Remove-LegacyStartupEntries','Remove-LegacyRuntimeFiles','Ensure-AgentEnvFile')) {
@@ -28,7 +29,7 @@ if($ChildCase) {
   }
   function Assert-PostInstallProcessState {if($ChildCase -eq 'process-failure'){throw 'fixture duplicate process'}}
   function Get-PrinterSetupUrl {return 'https://isolated.example.invalid/printer-diagnostics'}
-  function Open-PrinterSetup {param($TargetUrl) return $false}
+  function Start-Process {param($FilePath) [IO.File]::WriteAllText("$CaseDirectory\browser",$FilePath)}
   function Show-SetupDialog {param($Message,$Icon) if(-not $SilentFixture){[IO.File]::WriteAllText("$CaseDirectory\dialog",$Icon)}}
   # Write-Error normally terminates in the production catch before Complete-
   # Install; preserve nonzero exit while allowing this fixture to inspect JSON.
@@ -54,9 +55,20 @@ try {
       if($result.outcome -ne $(if($expected -eq 10){'partial'}else{'success'})){throw 'Incorrect install outcome'}
     } elseif($result.outcome -ne 'failure' -or $result.localhostStatusOk){throw 'False installation success'}
     if($mode -eq 'silent' -and (Test-Path "$dir\dialog")){throw 'Silent setup requires UI'}
+    if($mode -eq 'silent' -and (Test-Path "$dir\browser")){throw 'Silent setup opened a browser'}
+    if($mode -eq 'interactive' -and $expected -in @(0,10) -and -not (Test-Path "$dir\browser")){throw 'Interactive Printer Setup was not offered'}
     if($case -eq 'startup-failure' -and (Test-Path "$dir\started")){throw 'Registration failure started runtime'}
     Write-Host "PASS fresh initialization $mode/$case exit=$expected (external boundaries simulated)"
   }}
+  foreach($case in @('missing-script','missing-runtime')) {
+    $dir=Join-Path $fixture $case;New-Item -ItemType Directory $dir|Out-Null
+    $command=Join-Path $dir 'setup.cmd'
+    Copy-Item -LiteralPath "$PSScriptRoot\..\local-print-agent\install\windows\Install Connector.cmd" -Destination $command
+    if($case -eq 'missing-runtime'){Copy-Item -LiteralPath $source -Destination "$dir\install-startup-task.ps1"}
+    & $env:ComSpec /d /c ('""{0}" /MSCQRSILENT"' -f $command) *> "$dir\output.log"
+    if($LASTEXITCODE -ne 1 -or (Get-Content "$dir\output.log" -Raw) -match 'Press any key'){throw "Silent $case did not fail without pause"}
+    Write-Host "PASS silent CMD $case rejected without UI or pause"
+  }
   # Expected failing child processes were asserted above. Do not leak their
   # final native exit code into the CI PowerShell runner's success footer.
   $global:LASTEXITCODE=0
