@@ -16,7 +16,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
   const zebra=require('../../../dist/services/zebraPrinterStatusService');
   const renderer=require('../../../dist/printing/pdfLabel');
   const saved={send:socket.sendRawPayloadToNetworkPrinter,status:zebra.getZebraTotalLabelCount,render:renderer.renderPdfLabelBuffer};
-  let submitted=0,scenario;
+  let submitted=0,scenario,mustClaim;
   socket.sendRawPayloadToNetworkPrinter=async()=>{submitted++;throw new Error('fixture disconnect after physical boundary');};
   zebra.getZebraTotalLabelCount=async()=>{if(scenario==='status')throw new Error('fixture status unavailable');return 0;};
   renderer.renderPdfLabelBuffer=async()=>{throw new Error('fixture rendering failed');};
@@ -29,9 +29,17 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
     const job=psql(admin,`SELECT id FROM public."PrintJob" WHERE "batchId"='${batchId}' ORDER BY "createdAt" LIMIT 1`);
     const item=psql(admin,`SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId"='${job}' LIMIT 1`);
     assert(job&&item,'fixture must use actual allocated QR, job and session');
+    const qr=JSON.parse(psql(admin,`SELECT to_jsonb(q) FROM public."QRCode" q JOIN public."PrintItem" pi ON pi."qrCodeId"=q.id WHERE pi.id='${item}'`));
+    const manufacturer=psql(admin,`SELECT "manufacturerId" FROM public."PrintJob" WHERE id='${job}'`);
+    const token=require('../../../dist/services/qrTokenService');
+    const utc=value=>new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value)?value:`${value}Z`);
+    const tokenHash=token.hashToken(token.signQrPayload({qr_id:qr.id,batch_id:qr.batchId,licensee_id:qr.licenseeId,manufacturer_id:manufacturer,
+      nonce:qr.tokenNonce,iat:Math.floor(utc(qr.tokenIssuedAt).getTime()/1000),exp:Math.floor(utc(qr.tokenExpiresAt).getTime()/1000),epoch:Number(qr.replayEpoch||1)}));
+    psql(admin,`UPDATE public."QRCode" SET "tokenHash"='${tokenHash}' WHERE id='${qr.id}'`);
     const state=()=>psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${item}'`);
     const events=()=>psql(admin,`SELECT count(*) FROM public."PrintItemEvent" WHERE "printItemId"='${item}' AND "eventType"='FAILED'`);
     for(scenario of ['payload','configuration','status','render','reserved','lost-failure-response']) {
+      mustClaim=true;
       process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR=path.join(root,scenario);
       const mode=scenario==='render'?'NETWORK_IPP':'NETWORK_DIRECT';
       psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}',"printerUri"='ipp://127.0.0.1:1/fixture' WHERE id='${printerId}';
@@ -43,6 +51,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
         const response=await originalFetch(url,options);
         if(String(url).endsWith('/claim')&&response.ok) {
           const body=await response.json();
+          if(mustClaim&&!String(url).endsWith('/test/claim'))assert(body.data?.available,`${scenario}: eligible gateway claim must be visible through FORCE-RLS`);
           if(body.data?.available) {
             if(scenario==='payload')body.data.payload.payloadHash='invalid';
             if(scenario==='configuration')body.data.printer.port=70000;
@@ -54,6 +63,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
       };
       const before=Number(events()),beforeSubmits=submitted;
       await assert.rejects(runGatewayCycle(mode));
+      mustClaim=false;
       if(scenario==='reserved') {
         assert.equal(state(),'ISSUED','post-reservation uncertainty remains explicitly unreconciled');
         assert.equal(Number(events()),before,'uncertain dispatch must never produce definite FAIL');

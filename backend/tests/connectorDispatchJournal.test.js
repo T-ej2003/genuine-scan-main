@@ -24,6 +24,22 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     await fs.writeFile(path.join(root, files[0]), '{interrupted journal');
     assert.equal(await worker(), 2, 'incomplete evidence must also block replay');
     process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR = root;
+    const {reserveAutomaticDispatch}=require(modulePath);
+    const {shouldReportLocalPrintFailureToBackend}=require('../dist/local-print-agent/directPrintWorker');
+    const realOpen=fs.open;
+    fs.open=async(...args)=>{
+      const handle=await realOpen(...args);
+      handle.sync=async()=>{throw new Error('injected fsync ambiguity after reservation creation');};
+      return handle;
+    };
+    try {
+      await assert.rejects(reserveAutomaticDispatch({...input,printItemId:'fsync-uncertain'}),error=>{
+        assert.equal(error.errorCode,'dispatch_reconciliation_required');
+        assert.equal(shouldReportLocalPrintFailureToBackend(error,false),false,'REST must preserve reservation-write uncertainty');
+        return true;
+      });
+    } finally {fs.open=realOpen;}
+    assert.equal(await reserveAutomaticDispatch({...input,printItemId:'fsync-uncertain'}),false,'partial write must remain non-replayable');
     const { createHash } = require('node:crypto');
     const { runPersistentPrintChunk, runPersistentDiagnosticTestJob } = require('../dist/local-print-agent/directPrintWorker');
     const zpl = '^XA^FDLOCAL-SYNTHETIC^FS^XZ';

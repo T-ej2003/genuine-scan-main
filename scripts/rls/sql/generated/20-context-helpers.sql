@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37'
+    AND source_contract_sha256='1e0f1d562147631cbd78f7c11447371218b2078efed7e3ce8aa7e4c9800573f7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:1e0f1d562147631cbd78f7c11447371218b2078efed7e3ce8aa7e4c9800573f7'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:50e5ccf00f0eae40dad125b80a394882ccba5db1770aae5d155e51401e966a37')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:1e0f1d562147631cbd78f7c11447371218b2078efed7e3ce8aa7e4c9800573f7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -9034,7 +9034,8 @@ BEGIN
         OR coalesce(maintenance_binding->>'targetVersion','') !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
         OR maintenance_binding->>'sourceVersion'=maintenance_binding->>'targetVersion'
         OR string_to_array(maintenance_binding->>'targetVersion','.')::integer[]<=string_to_array(maintenance_binding->>'sourceVersion','.')::integer[]
-        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256']) field
+        OR coalesce(maintenance_binding->>'statePath','')=''
+        OR EXISTS(SELECT 1 FROM unnest(ARRAY['sourceSha256','targetSha256','installerSha256','stateSha256','stateDiscoverySha256','configurationSha256','startupSha256','wrapperSha256','payloadSha256','sourcePayloadSha256','uninstallerSha256','uninstallDataSha256','uninstallRegistrationSha256']) field
           WHERE coalesce(maintenance_binding->>field,'') !~ '^[a-f0-9]{64}$')
       THEN RAISE EXCEPTION 'MAINTENANCE_EVIDENCE_MISMATCH' USING ERRCODE='42501'; END IF;
       SELECT pr."agentId",pr."deviceFingerprint",pr."publicKeyPem" INTO STRICT maintenance_registration FROM public."PrinterRegistration" pr
@@ -10676,6 +10677,9 @@ BEGIN
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
     END IF;
   ELSE
+    IF item_row.state='FAILED' THEN RETURN jsonb_build_object('idempotent',true,'printItemId',item_row.id); END IF;
+    IF item_row.state<>'ISSUED' OR p_details->'gatewayMetadata'->>'failureClassification' IS DISTINCT FROM 'PRE_DISPATCH_FAILURE'
+    THEN RAISE EXCEPTION 'GATEWAY_FAILURE_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
       "failureReason"=left(coalesce(p_details->>'reason','gateway_failure'),500),"updatedAt"=now_at WHERE id=item_row.id;
     UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','gateway_failure'),500),

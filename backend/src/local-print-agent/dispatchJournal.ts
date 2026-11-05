@@ -27,6 +27,18 @@ export const reserveAutomaticDispatch = async (input: {
   try {
     await handle.writeFile(JSON.stringify({ ...input, state: "ATTEMPT_RESERVED", reservedAt: new Date().toISOString() }));
     await handle.sync();
-  } finally { await handle.close(); }
+  } catch (error) {
+    // Creation already succeeded. A failed write/fsync may leave a durable or
+    // partial reservation; callers must not convert it into a retryable FAIL.
+    throw Object.assign(new Error("Dispatch reservation could not be verified; reconciliation required."), {
+      errorCode: "dispatch_reconciliation_required", cause: error,
+    });
+  } finally {
+    try { await handle.close(); } catch (cause) {
+      throw Object.assign(new Error("Dispatch reservation close failed; reconciliation required."), {
+        errorCode: "dispatch_reconciliation_required", cause,
+      });
+    }
+  }
   return true;
 };

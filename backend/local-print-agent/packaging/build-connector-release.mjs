@@ -54,6 +54,9 @@ const normalizeOptionalIsoTimestamp = (value, envName) => {
 const webAppBaseUrl = normalizeEnv(process.env.WEB_APP_BASE_URL).replace(/\/+$/g, "");
 const windowsUnsignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH);
 const windowsSignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
+if ([windowsUnsignedInstallerSource, windowsSignedInstallerSource].some(source => /development/i.test(source))) {
+  throw new Error('Development installer fixtures cannot enter connector publication.');
+}
 const windowsPublisherName = normalizeEnv(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME);
 const windowsSignedAt = normalizeOptionalIsoTimestamp(process.env.WINDOWS_CONNECTOR_SIGNED_AT, "WINDOWS_CONNECTOR_SIGNED_AT");
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);

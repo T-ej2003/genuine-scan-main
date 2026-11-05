@@ -35,8 +35,8 @@ assertConnectorVersionMatchesSource(version, backendRoot);
 if (!signedInstallerSource) {
   throw new Error("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH is required.");
 }
-if (/development/i.test(signedInstallerSource) || path.basename(signedInstallerSource) !== `MSCQR-Connector-Windows-${version}.exe`) {
-  throw new Error('Only the canonical governed signed candidate filename can be published; development artifacts are forbidden.');
+if (/development/i.test(signedInstallerSource)) {
+  throw new Error('Governed signed candidates are required; development artifacts are forbidden.');
 }
 
 if (!fs.existsSync(signedInstallerSource)) {

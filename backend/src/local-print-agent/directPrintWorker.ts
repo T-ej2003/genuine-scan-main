@@ -840,6 +840,7 @@ export const isPreSpoolAckRejection = (error: unknown) =>
     String(errorInfo(error).errorCode || "") === "connector_update_required");
 
 export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean) => {
+  if (errorInfo(error).errorCode === "dispatch_reconciliation_required") return false;
   if (spoolerAttempted) return false;
   if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
   return true;

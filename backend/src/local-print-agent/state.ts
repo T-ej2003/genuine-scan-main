@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 const STATE_SOURCE = Symbol("connector-state-source");
+const STATE_CONTENT_HASH = Symbol("connector-state-content-hash");
 
 export type CalibrationProfile = {
   dpi?: number;
@@ -17,6 +18,7 @@ export type CalibrationProfile = {
 
 export type AgentState = {
   [STATE_SOURCE]?: string;
+  [STATE_CONTENT_HASH]?: string;
   agentId: string;
   deviceFingerprint: string;
   selectedPrinterId: string | null;
@@ -125,6 +127,7 @@ export const loadAgentState = async (options: { initialize?: boolean } = {}): Pr
   return {
     ...parsed,
     [STATE_SOURCE]: source,
+    [STATE_CONTENT_HASH]: sha256Hex(raw),
     agentId: parsed.agentId,
     deviceFingerprint: parsed.deviceFingerprint,
     selectedPrinterId: parsed?.selectedPrinterId ? String(parsed.selectedPrinterId) : null,
@@ -182,6 +185,7 @@ export const inspectAgentState = async () => {
     return value;
   };
   const raw = await fs.readFile(source, "utf8");
+  if (sha256Hex(raw) !== state[STATE_CONTENT_HASH]) throw new Error("Connector identity changed during validation; preserve and reconcile the state.");
   return { ok: true, agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
     publicKeySha256: sha256Hex(state.publicKeyPem), statePath: source,
     stateSha256: sha256Hex(raw), stateSemanticSha256: sha256Hex(JSON.stringify(canonical(JSON.parse(raw)))) };
