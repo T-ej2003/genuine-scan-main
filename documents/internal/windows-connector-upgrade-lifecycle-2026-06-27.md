@@ -69,6 +69,13 @@ WEB_APP_BASE_URL=https://mscqr.com \
 npm --prefix backend run connector:windows:build-installer
 ```
 
+Current contract: the command above creates a non-installable development
+fixture outside the publication tree. Do not publish that fixture. Signed
+candidates use the existing protected Azure workflow and
+`connector:windows:prepare-signed-candidate`, with the requested HTTPS maintenance
+origin matching the independently governed approved origin. Historical examples
+below are not authorization to publish; current release gates apply.
+
 Publish a signed Windows connector after signing:
 
 ```sh

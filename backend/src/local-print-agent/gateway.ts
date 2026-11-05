@@ -1,8 +1,10 @@
 import os from "os";
+import { executeGatewayAttempt, flushGatewayPreDispatchFailures } from "./gatewayAttempt";
+import { reserveAutomaticDispatch } from "./dispatchJournal";
 import { createHash } from "crypto";
 
 import { renderPdfLabelBuffer } from "../printing/pdfLabel";
-import { inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
+import { buildIppConnectionInfo, inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
 import { sendRawPayloadToNetworkPrinter } from "../services/networkPrinterSocketService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "../services/zebraPrinterStatusService";
 import { loadAgentState } from "./state";
@@ -63,13 +65,33 @@ const heartbeat = async (error?: string | null) => {
   return response?.data || null;
 };
 
+export const normalizeGatewayClaim = (data: any) => {
+  if (!data) return null;
+  const jobId = String(data.job?.id || data.printJobId || "").trim();
+  const itemId = String(data.item?.id || data.printItemId || "").trim();
+  if (!jobId || !itemId ||
+      (data.job?.id && data.printJobId && data.job.id !== data.printJobId) ||
+      (data.item?.id && data.printItemId && data.item.id !== data.printItemId)) {
+    throw new Error("Gateway claim identity is missing or inconsistent.");
+  }
+  return {
+    ...data,
+    ...(data.payload || {}),
+    printJobId: jobId,
+    printItemId: itemId,
+    code: data.item?.code || data.code,
+    jobNumber: data.job?.jobNumber || data.jobNumber,
+    printer: data.printer,
+  };
+};
+
 const claimNextJob = async (connectionType: GatewayConnectionType) => {
   const path = connectionType === "NETWORK_DIRECT" ? "/print-gateway/direct/claim" : "/print-gateway/ipp/claim";
   const response = await postGateway<{ success: boolean; data?: any }>(path, {
     deviceName: os.hostname(),
     agentVersion: AGENT_VERSION,
   });
-  return response?.data || null;
+  return normalizeGatewayClaim(response?.data);
 };
 
 const claimTestJob = async () => {
@@ -156,7 +178,16 @@ const waitForIppCompletion = async (claimed: any, ippJobId: number) => {
   throw new Error(`IPP job ${ippJobId} did not reach terminal completion before the gateway confirmation timeout.`);
 };
 
-const runIppJob = async (claimed: any) => {
+const reserveGatewayAttempt = async (claimed: any, payloadHash: string) => {
+  const testId = String(claimed.testJobId || "").trim();
+  const printItemId = testId ? `diagnostic:${testId}` : String(claimed.printItemId || "").trim();
+  const printJobId = testId ? `diagnostic:${testId}` : String(claimed.printJobId || "").trim();
+  if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: GATEWAY_ID, payloadHash })) {
+    throw Object.assign(new Error("Prior gateway dispatch requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
+  }
+};
+const runIppJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
+  buildIppConnectionInfo(claimed.printer || {});
   const pdf = await renderPdfLabelBuffer({
     code: String(claimed.code || "").trim(),
     scanUrl: String(claimed.scanUrl || "").trim(),
@@ -168,6 +199,7 @@ const runIppJob = async (claimed: any) => {
   });
   const payloadHash = sha256Hex(pdf);
 
+  await reserve(claimed, payloadHash);
   const result = await submitPdfToIppPrinter({
     profile: {
       host: claimed.printer?.host,
@@ -222,10 +254,10 @@ const runIppJob = async (claimed: any) => {
   });
 };
 
-const runDirectJob = async (claimed: any) => {
+const runDirectJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
   const printerIpAddress = String(claimed.printer?.ipAddress || "").trim();
   const printerPort = Number(claimed.printer?.port || 0) || 0;
-  if (!printerIpAddress || printerPort <= 0) {
+  if (!printerIpAddress || !Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535) {
     throw new Error("Gateway-backed direct printer is missing IP/port information.");
   }
 
@@ -242,6 +274,7 @@ const runDirectJob = async (claimed: any) => {
     ipAddress: printerIpAddress,
     port: printerPort,
   });
+  await reserve(claimed, payloadHash);
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: printerIpAddress,
     port: printerPort,
@@ -288,7 +321,8 @@ const runDirectJob = async (claimed: any) => {
   });
 };
 
-const runIppTestJob = async (claimed: any) => {
+const runIppTestJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
+  buildIppConnectionInfo(claimed.printer || {});
   const pdf = await renderPdfLabelBuffer({
     code: String(claimed.code || "").trim(),
     scanUrl: String(claimed.scanUrl || "").trim(),
@@ -300,6 +334,7 @@ const runIppTestJob = async (claimed: any) => {
   });
   const payloadHash = sha256Hex(pdf);
 
+  await reserve(claimed, payloadHash);
   const result = await submitPdfToIppPrinter({
     profile: {
       host: claimed.printer?.host,
@@ -352,10 +387,10 @@ const runIppTestJob = async (claimed: any) => {
   });
 };
 
-const runDirectTestJob = async (claimed: any) => {
+const runDirectTestJob = async (claimed: any, reserve: typeof reserveGatewayAttempt) => {
   const printerIpAddress = String(claimed.printer?.ipAddress || "").trim();
   const printerPort = Number(claimed.printer?.port || 0) || 0;
-  if (!printerIpAddress || printerPort <= 0) {
+  if (!printerIpAddress || !Number.isInteger(printerPort) || printerPort <= 0 || printerPort > 65535) {
     throw new Error("Gateway-backed direct printer is missing IP/port information.");
   }
 
@@ -372,6 +407,7 @@ const runDirectTestJob = async (claimed: any) => {
     ipAddress: printerIpAddress,
     port: printerPort,
   });
+  await reserve(claimed, payloadHash);
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: printerIpAddress,
     port: printerPort,
@@ -416,52 +452,30 @@ const runDirectTestJob = async (claimed: any) => {
   });
 };
 
-const runOnce = async (connectionType: GatewayConnectionType) => {
-  const claimed = await claimNextJob(connectionType);
-  if (!claimed) {
-    const claimedTest = await claimTestJob();
-    if (!claimedTest) return;
-
-    try {
-      if (connectionType === "NETWORK_DIRECT") {
-        await runDirectTestJob(claimedTest);
-        return;
-      }
-
-      await runIppTestJob(claimedTest);
-    } catch (error: any) {
-      await failTestJob({
-        testJobId: String(claimedTest.testJobId || "").trim(),
-        reason: error?.message || "Gateway setup test failed.",
-        gatewayMetadata: {
-          connectionType,
-        },
-      }).catch(() => undefined);
-      throw error;
-    }
-    return;
-  }
-
-  try {
-    if (connectionType === "NETWORK_DIRECT") {
-      await runDirectJob(claimed);
-      return;
-    }
-
-    await runIppJob(claimed);
-  } catch (error: any) {
-    await failJob(connectionType, {
-      printJobId: String(claimed.printJobId || "").trim(),
-      printItemId: String(claimed.printItemId || "").trim(),
-      reason: error?.message || "Gateway dispatch failed.",
-      gatewayMetadata: {
-        connectionType,
-      },
-    }).catch(() => undefined);
-    throw error;
-  }
+const reportPreDispatchFailure = async (failure: any) => {
+  const gatewayMetadata = { failureClassification: "PRE_DISPATCH_FAILURE", reservation: "ABSENT_CONFIRMED" };
+  if (failure.testJobId) await failTestJob({ testJobId: failure.testJobId, reason: failure.reason, gatewayMetadata });
+  else await failJob(failure.connectionType, { printJobId: failure.printJobId, printItemId: failure.printItemId, reason: failure.reason, gatewayMetadata });
 };
 
+export const runGatewayCycle = async (connectionType: GatewayConnectionType) => {
+  const context = { gatewayId: GATEWAY_ID, backendUrl: BACKEND_URL, connectionType };
+  await flushGatewayPreDispatchFailures(context, reportPreDispatchFailure);
+  // A queued diagnostic owns this printer's physical evidence lease. Claim it
+  // before the normal route, which must reject automatic work during the lease.
+  const job = await claimTestJob() || await claimNextJob(connectionType);
+  if (!job) return;
+  await executeGatewayAttempt(context, job, async reserve => {
+    const guardedReserve: typeof reserveGatewayAttempt = (claim, hash) => reserve(() => reserveGatewayAttempt(claim, hash));
+    if (job.testJobId) {
+      if (connectionType === "NETWORK_DIRECT") await runDirectTestJob(job, guardedReserve);
+      else await runIppTestJob(job, guardedReserve);
+    } else {
+      if (connectionType === "NETWORK_DIRECT") await runDirectJob(job, guardedReserve);
+      else await runIppJob(job, guardedReserve);
+    }
+  }, reportPreDispatchFailure);
+};
 export const startGatewayWorker = () => {
   if (!configured()) {
     return () => undefined;
@@ -475,7 +489,7 @@ export const startGatewayWorker = () => {
         const heartbeatData = await heartbeat(null);
         connectionType = (heartbeatData?.connectionType as GatewayConnectionType | undefined) || connectionType;
         if (connectionType) {
-          await runOnce(connectionType);
+          await runGatewayCycle(connectionType);
         }
       } catch (error: any) {
         console.error("gateway worker cycle failed:", error);

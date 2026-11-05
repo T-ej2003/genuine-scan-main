@@ -63,6 +63,7 @@ function Show-SetupDialog {
     [string]$Icon = "Information"
   )
 
+  if ($env:MSCQR_SETUP_SILENT -eq "1") { Write-Host $Message; return }
   $messageBoxIcon = [System.Windows.Forms.MessageBoxIcon]::$Icon
   [System.Windows.Forms.MessageBox]::Show(
     $Message,
@@ -203,7 +204,7 @@ function Open-PrinterSetup {
     [string]$TargetUrl
   )
 
-  if ([string]::IsNullOrWhiteSpace($TargetUrl)) {
+  if ($env:MSCQR_SETUP_SILENT -eq "1" -or [string]::IsNullOrWhiteSpace($TargetUrl)) {
     return $false
   }
 
@@ -457,6 +458,26 @@ function Ensure-AgentEnvFile {
   }
 }
 
+function Initialize-AgentIdentity {
+  if ($PackagedInstall) {
+    $output = & $CanonicalAgentExe --initialize-state 2>&1
+  } else {
+    $backendDir = (Resolve-Path (Join-Path $ScriptRoot "..\..\..")).Path
+    $nodeCommand = Get-Command node -ErrorAction Stop
+    Push-Location $backendDir
+    try { $output = & $nodeCommand.Source (Join-Path $backendDir 'dist\local-print-agent\index.js') --initialize-state 2>&1 }
+    finally { Pop-Location }
+  }
+  if ($LASTEXITCODE -ne 0) { throw 'Connector first-install identity initialization failed; inspect the configured state path before retrying.' }
+  $evidence = ($output | Out-String) | ConvertFrom-Json -ErrorAction Stop
+  $expectedStateFile = Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'
+  if (-not $evidence.ok -or -not (Test-SamePath -Left ([string]$evidence.statePath) -Right $expectedStateFile) -or
+      [string]$evidence.stateSha256 -notmatch '^[a-fA-F0-9]{64}$') {
+    throw 'Connector first-install identity evidence does not match the expected state location.'
+  }
+  Write-UpgradeLog 'Connector first-install identity initialized and validated at the canonical state location.'
+}
+
 function Register-StartupLauncher {
   Write-UpgradeLog "Registering startup launcher: $StartupLauncher"
   $LauncherBody = @"
@@ -467,80 +488,32 @@ WshShell.Run chr(34) & "$Wrapper" & chr(34), 0, False
 }
 
 function Cleanup-LegacyTask {
-  foreach ($legacyTaskName in $LegacyTaskNames) {
-    $ExistingTask = Get-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
-    if (-not $ExistingTask) {
-      continue
-    }
-
-    Write-UpgradeLog "Found legacy scheduled task: $legacyTaskName"
-    try {
-      Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue | Out-Null
-      Write-UpgradeLog "Stopped legacy scheduled task: $legacyTaskName"
-    } catch {
-    }
-
-    try {
-      Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction Stop
-      Write-UpgradeLog "Removed legacy scheduled-task startup entry: $legacyTaskName"
-      $script:OldStartupEntriesRemoved += 1
-    } catch {
-      throw "Existing scheduled task '$legacyTaskName' could not be removed. Run the installer as Administrator so the old connector startup path can be replaced."
+  $tasks = @(Get-ScheduledTask -ErrorAction Stop)
+  foreach ($name in $LegacyTaskNames) {
+    if (@($tasks | Where-Object { $_.TaskName -eq $name }).Count) {
+      throw "Legacy task '$name' requires verified migration; it has been preserved."
     }
   }
 }
 
 function Cleanup-LegacyServices {
-  foreach ($serviceName in $LegacyServiceNames) {
-    $existingService = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-    if (-not $existingService) {
-      $existingService = Get-Service -DisplayName $serviceName -ErrorAction SilentlyContinue
+  $services = @(Get-Service -ErrorAction Stop)
+  foreach ($name in $LegacyServiceNames) {
+    if (@($services | Where-Object { $_.Name -eq $name -or $_.DisplayName -eq $name }).Count) {
+      throw "Legacy service '$name' requires verified migration; it has been preserved."
     }
-    if (-not $existingService) {
-      continue
-    }
-
-    Write-UpgradeLog "Found legacy connector service: $($existingService.Name)"
-    try {
-      Stop-Service -Name $existingService.Name -Force -ErrorAction SilentlyContinue
-    } catch {
-    }
-
-    $deleteResult = & sc.exe delete $existingService.Name 2>&1
-    if ($LASTEXITCODE -ne 0) {
-      throw "Existing connector service '$($existingService.Name)' could not be removed. Run the installer as Administrator. $deleteResult"
-    }
-    $script:OldStartupEntriesRemoved += 1
-    Write-UpgradeLog "Removed legacy connector service: $($existingService.Name)"
   }
 }
 
 function Remove-LegacyRunRegistryEntries {
-  $runKeys = @(
-    "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
-    "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run"
-  )
-  foreach ($runKey in $runKeys) {
-    if (-not (Test-Path $runKey)) {
-      continue
-    }
-    foreach ($valueName in $LegacyRunValueNames) {
-      $property = Get-ItemProperty -Path $runKey -Name $valueName -ErrorAction SilentlyContinue
-      if ($null -eq $property) {
-        continue
-      }
-      try {
-        Remove-ItemProperty -Path $runKey -Name $valueName -Force -ErrorAction Stop
-        $script:OldStartupEntriesRemoved += 1
-        Write-UpgradeLog "Removed legacy Run registry entry: $runKey\$valueName"
-      } catch {
-        throw "Could not remove legacy Run registry entry '$runKey\$valueName'. $($_.Exception.Message)"
+  foreach ($key in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run')) {
+    foreach ($name in $LegacyRunValueNames) {
+      if (Get-ItemProperty -LiteralPath $key -Name $name -ErrorAction SilentlyContinue) {
+        throw "Legacy startup registration '$name' requires verified migration; it has been preserved."
       }
     }
   }
 }
-
 function Get-AgentProcessCandidates {
   $agentProcesses = @()
   try {
@@ -552,7 +525,7 @@ function Get-AgentProcessCandidates {
         ($commandLine -match "mscqr-local-print-agent")
     }
   } catch {
-    Write-UpgradeLog "Could not inspect running connector processes: $($_.Exception.Message)"
+    throw "Cannot prove connector process state: $($_.Exception.Message)"
   }
 
   return ,@($agentProcesses | Sort-Object ProcessId -Unique)
@@ -560,88 +533,24 @@ function Get-AgentProcessCandidates {
 
 function Stop-RunningAgent {
   $runningAgents = Get-AgentProcessCandidates
-  if ($runningAgents.Count -eq 0) {
-    Write-UpgradeLog "No running MSCQR connector process found before install."
-    return
-  }
-
-  foreach ($process in $runningAgents) {
-    Write-UpgradeLog "Stopping old connector process: pid=$($process.ProcessId) path=$($process.ExecutablePath)"
-    try {
-      Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
-      $script:ProcessStopped = $true
-    } catch {
-      throw "Could not stop old MSCQR connector process pid=$($process.ProcessId). $($_.Exception.Message)"
-    }
-  }
-
-  Start-Sleep -Milliseconds 500
-  $remainingAgents = Get-AgentProcessCandidates
-  if ($remainingAgents.Count -gt 0) {
-    $remainingSummary = ($remainingAgents | ForEach-Object { "pid=$($_.ProcessId) path=$($_.ExecutablePath)" }) -join "; "
-    throw "Old MSCQR connector process is still running after stop attempt: $remainingSummary"
+  if ($runningAgents.Count -ne 0) {
+    throw 'Connector process is present. Maintenance authorization and reconciliation are required; no process was stopped.'
   }
 }
 
 function Remove-LegacyStartupEntries {
-  if (-not (Test-Path $StartupDir)) {
-    return
-  }
-
-  $startupEntries = @()
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.vbs" -ErrorAction SilentlyContinue
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.lnk" -ErrorAction SilentlyContinue
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "MSCQR*.cmd" -ErrorAction SilentlyContinue
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.vbs" -ErrorAction SilentlyContinue
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.lnk" -ErrorAction SilentlyContinue
-  $startupEntries += Get-ChildItem -Path $StartupDir -Filter "Genuine*.cmd" -ErrorAction SilentlyContinue
-
-  foreach ($entry in ($startupEntries | Sort-Object FullName -Unique)) {
-    try {
-      Write-UpgradeLog "Removing stale startup entry: $($entry.FullName)"
-      Remove-Item -Path $entry.FullName -Force -ErrorAction Stop
-      $script:OldStartupEntriesRemoved += 1
-    } catch {
-      throw "Could not remove stale startup entry $($entry.FullName). $($_.Exception.Message)"
-    }
+  if (Test-Path -LiteralPath $StartupLauncher) {
+    throw 'Existing connector startup registration has been preserved; verified migration is required.'
   }
 }
 
 function Remove-LegacyRuntimeFiles {
   foreach ($root in $LegacyInstallRoots) {
-    if (-not (Test-Path $root)) {
-      continue
-    }
-
-    Write-UpgradeLog "Found install path during upgrade cleanup: $root"
-    if (Test-SamePath -Left $root -Right $AgentHome) {
-      $oldBin = Join-Path $root "bin"
-      if (Test-Path $oldBin) {
-        if (Test-IsProtectedInstallerPath -PathValue $root) {
-          Write-UpgradeLog "Preserving current installer payload bin during cleanup: $oldBin"
-        } else {
-          Write-UpgradeLog "Removing old connector runtime files from: $oldBin"
-          Remove-Item -Path $oldBin -Recurse -Force -ErrorAction Stop
-        }
-      }
-      foreach ($runtimeName in @("queue", "work", "tmp", "cache", "runtime", "active-job.json", "heartbeat-cache.json", "release-metadata.json", "mscqr-local-print-agent.lock")) {
-        $runtimePath = Join-Path $root $runtimeName
-        if (Test-Path $runtimePath) {
-          Write-UpgradeLog "Removing stale connector runtime state: $runtimePath"
-          Remove-Item -Path $runtimePath -Recurse -Force -ErrorAction Stop
-        }
-      }
-    } else {
-      if (Test-IsProtectedInstallerPath -PathValue $root) {
-        Write-UpgradeLog "Skipping current installer payload path during legacy cleanup: $root"
-        continue
-      }
-      Write-UpgradeLog "Removing legacy connector install path: $root"
-      Remove-Item -Path $root -Recurse -Force -ErrorAction Stop
+    if (Test-Path -LiteralPath $root) {
+      Write-UpgradeLog "Preserving install path and all unknown, pending and recovery data: $root"
     }
   }
 }
-
 function Start-AgentProcess {
   Write-UpgradeLog "Starting newly installed connector via wrapper: $Wrapper"
   Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "`"$Wrapper`"" -WindowStyle Hidden
@@ -685,6 +594,22 @@ function Complete-Install {
   exit $ExitCode
 }
 
+# Refuse an uncoordinated legacy upgrade before writing installation state.
+# This is not an idle snapshot or a substitute for a server maintenance fence.
+if (-not [string]::IsNullOrWhiteSpace([string]$env:PRINT_AGENT_STATE_FILE)) {
+  throw 'An ambient connector state override requires verified persistent startup configuration; fresh initialization is refused.'
+}
+if ((Test-Path -LiteralPath $EnvFile) -or
+    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or
+    (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) {
+  throw 'Existing connector identity or configuration requires authenticated maintenance and reconciliation before initialization.'
+}
+Stop-RunningAgent
+Cleanup-LegacyTask
+Cleanup-LegacyServices
+Remove-LegacyRunRegistryEntries
+Remove-LegacyStartupEntries
+
 try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
@@ -713,6 +638,7 @@ try {
     Install-StandaloneAgentFiles
   }
 
+  Initialize-AgentIdentity
   Register-StartupLauncher
   Start-AgentProcess
 

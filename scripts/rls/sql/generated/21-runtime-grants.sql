@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='52300f6e6b2eeceb4989ae3f6149b19304defe4771d94009cd5d2f612e57b08b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:52300f6e6b2eeceb4989ae3f6149b19304defe4771d94009cd5d2f612e57b08b'
+    AND source_contract_sha256='53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:52300f6e6b2eeceb4989ae3f6149b19304defe4771d94009cd5d2f612e57b08b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -242,6 +242,9 @@ GRANT SELECT ("id", "qrCodeId", "reviewState", "updatedAt") ON TABLE public."Cus
 GRANT INSERT ("id", "bucketKey", "hourBucket", "licenseeId", "batchId", "manufacturerId", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "createdAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("bucketKey", "totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("totalScanEvents", "firstScanEvents", "repeatScanEvents", "blockedEvents", "trustedOwnerEvents", "externalEvents", "namedLocationEvents", "knownDeviceEvents", "uniqueQrCodes", "firstScannedAt", "lastScannedAt", "updatedAt") ON TABLE public."ScanMetricsHourlyRollup" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("key", "value") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
+GRANT INSERT ("key", "value", "createdAt", "updatedAt") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("value", "updatedAt") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("key", "value") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("key", "value", "createdAt", "updatedAt") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("value", "updatedAt") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";

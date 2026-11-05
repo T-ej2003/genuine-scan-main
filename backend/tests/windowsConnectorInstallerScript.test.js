@@ -121,31 +121,30 @@ const run = async () => {
   );
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH"),
-    "Release packaging should support publishing a separately signed Windows installer"
+    "Generic packaging should reject path overrides and require the governed signed Windows workflow"
   );
   assert(
     packagingScript.includes("readConnectorSourceVersion") &&
       packagingScript.includes("minimumBuildVersion = version") &&
-      packagingScript.includes("buildVersion: version"),
+      packagingScript.includes("requiredProtocolVersion,"),
     "Release packaging should default to the source connector version and stamp build metadata"
   );
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH"),
-    "Release packaging should support publishing an unsigned Windows test installer"
+    "Generic packaging should reject the former unsigned installer override"
   );
   assert(
-    packagingScript.includes('windowsTrustMode: "unsigned-test"') && packagingScript.includes('windowsTrustMode: "trusted"'),
-    "Release packaging should publish explicit Windows trust modes"
+    packagingScript.includes('NON-INSTALLABLE INSPECTION FIXTURE') && !packagingScript.includes('windowsTrustMode: "unsigned-test"'),
+    "Unsigned Windows inspection output must not be advertised as a runnable download"
   );
   assert(
-    packagingScript.includes("WINDOWS_CONNECTOR_PUBLISHER_NAME"),
-    "Release packaging should capture the Windows publisher name for signed installers"
+    packagingScript.includes("governed signed Windows workflow"),
+    "Windows publishing must use the existing governed signing workflow"
   );
   assert(
-    packagingScript.includes('label: "Windows test package"') &&
-      packagingScript.includes('label: "Windows test installer"') &&
-      packagingScript.includes('label: "Windows installer"'),
-    "Release packaging should distinguish unsigned packages, unsigned installers, and signed installers"
+    packagingScript.includes('INSPECTION-ONLY.zip') &&
+      signedReleasePublisher.includes('label: "Windows installer"'),
+    "Local inspection output and the governed signed Windows installer must remain distinct"
   );
   assert(
     installerBuilder.includes("MSCQR-Connector.iss.template") &&
@@ -225,10 +224,9 @@ const run = async () => {
     "Windows installer should implement a PRINTER_UNAVAILABLE partial-success path"
   );
   assert(
-    installScript.includes("Run the installer as Administrator") &&
-      installScript.includes("could not be removed") &&
-      installScript.includes("old connector startup path can be replaced"),
-    "Windows installer should fail visibly when legacy startup cleanup needs elevation"
+    installScript.includes("requires verified migration; it has been preserved") &&
+      !installScript.includes("Unregister-ScheduledTask") && !installScript.includes("sc.exe delete"),
+    "Windows installer must preserve unverified legacy registrations"
   );
   assert(
     installScript.includes("Stop-RunningAgent") &&
@@ -236,13 +234,13 @@ const run = async () => {
       installScript.includes("Remove-LegacyStartupEntries") &&
       installScript.includes("Cleanup-LegacyServices") &&
       installScript.includes("Remove-LegacyRunRegistryEntries"),
-    "Windows installer should stop old connectors and remove stale runtime/startup paths before installing"
+    "Windows installer must check legacy paths before initialization"
   );
   assert(
     installScript.includes('Join-Path $env:LOCALAPPDATA "MSCQR\\local-print-agent"') &&
       installScript.includes('Join-Path $env:LOCALAPPDATA "Programs\\MSCQR Connector"') &&
       installScript.includes('Join-Path $env:PROGRAMDATA "Genuine Scan"'),
-    "Windows installer should use one canonical path and clean legacy MSCQR/Genuine Scan install roots"
+    "Windows installer must identify canonical and legacy roots"
   );
   assert(
     installScript.includes("agentId") === false &&
@@ -251,12 +249,16 @@ const run = async () => {
     "Windows installer script should not read or log connector private identity material"
   );
   assert(
-    installScript.includes("heartbeat-cache.json") &&
-      installScript.includes("active-job.json") &&
-      installScript.includes("release-metadata.json") &&
-      installScript.includes("mscqr-local-print-agent.lock"),
-    "Windows installer should clear stale runtime state that can confuse readiness"
+    !installScript.includes("Remove-Item -Path $root") &&
+      !installScript.includes("Stop-Process") &&
+      installScript.includes("Preserving install path and all unknown, pending and recovery data"),
+    "Windows installer must preserve uncertain state and never force-stop a connector"
   );
+  assert(!installerTemplate.includes('postinstall skipifsilent') && installerTemplate.includes('ResultCode <> 0') &&
+    installerTemplate.includes('PrepareToInstall') && installerTemplate.includes('WizardSilent') &&
+    installerTemplate.includes('if ResultCode = 10 then begin') && installerTemplate.includes('end else if ResultCode <> 0 then') &&
+    installerTemplate.includes('Result := Result and (Code = 0)') && installerTemplate.indexOf("RunUpgrade('Activate')") < installerTemplate.indexOf('if ResultCode = 10 then begin'),
+    'Mandatory initialization must run in both modes and propagate failure, with pre-copy upgrade refusal');
   assert(
     installScript.includes("supportsPersistentPrintSession") &&
       installScript.includes("websocket.supported") &&
@@ -307,8 +309,8 @@ const run = async () => {
     "Windows README should explain the Smart App Control block path"
   );
   assert(
-    readme.includes("unsigned Windows test package for internal validation only"),
-    "Windows README should call the ZIP release an internal test package"
+    readme.includes("Unsigned inspection ZIPs are not installable"),
+    "Windows README must distinguish non-installable inspection output from signed setup"
   );
 
   const releaseZip = await JSZip.loadAsync(fs.readFileSync(releaseZipPath));

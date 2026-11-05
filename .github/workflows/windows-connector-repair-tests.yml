@@ -1,0 +1,43 @@
+name: Windows connector repair fixtures
+
+on:
+  pull_request:
+    paths:
+      - 'backend/local-print-agent/install/windows/**'
+      - 'backend/local-print-agent/packaging/sign-inno-file.ps1'
+      - 'backend/local-print-agent/packaging/verify-extracted-windows-components.ps1'
+      - 'backend/tests/windowsConnector*test.ps1'
+      - '.github/workflows/windows-connector-repair-tests.yml'
+      - '.github/workflows/windows-connector-signed-release.yml'
+      - 'scripts/tests/windows-candidate-workflow.test.cjs'
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-workflow-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - run: npm ci --ignore-scripts
+      - run: node --test scripts/tests/windows-candidate-workflow.test.cjs
+  windows-fixtures:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6
+      - name: Test isolated staging, backup and signing-hook checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./backend/tests/windowsConnectorStaging.test.ps1
+          & ./backend/tests/windowsConnectorBackup.test.ps1
+          & ./backend/tests/windowsConnectorCleanup.test.ps1
+          & ./backend/tests/windowsConnectorInitializationSafety.test.ps1
+          & ./backend/tests/windowsConnectorInitializationResults.test.ps1
+          & ./backend/tests/windowsConnectorTransaction.test.ps1
+          & ./backend/tests/windowsConnectorStateDiscovery.test.ps1
+          & ./backend/tests/windowsConnectorSigningHook.test.ps1
+          & ./backend/tests/windowsConnectorComponentVerification.test.ps1

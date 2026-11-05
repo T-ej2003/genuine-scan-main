@@ -3,9 +3,21 @@ name: Windows Connector Signed Release
 on:
   workflow_dispatch:
     inputs:
+      execution_mode:
+        description: "Candidate build requires production-signing approval; publishing remains blocked."
+        type: choice
+        required: true
+        default: build_verify_only
+        options:
+          - build_verify_only
+          - publish
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
+        type: string
+      maintenance_api_origin:
+        description: "Approved HTTPS backend origin embedded in the signed maintenance client (no path)."
+        required: true
         type: string
       web_app_base_url:
         description: "Public MSCQR web app URL embedded into the connector installer."
@@ -35,6 +47,11 @@ env:
 jobs:
   build-sign-windows:
     name: Build and sign Windows connector
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     runs-on: windows-2022
     # Configure this GitHub Environment with required reviewers before production use.
     # The job will pause here before Azure OIDC login and signing can access the certificate profile.
@@ -44,6 +61,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      # Remove only after the maintenance fence, transactional installer and
+      # signed-artifact Windows certification have been reviewed and passed.
+      - name: Block release while upgrade safety is incomplete
+        if: github.event_name != 'workflow_dispatch' || inputs.execution_mode != 'build_verify_only'
+        shell: pwsh
+        run: |
+          throw "Windows connector release is blocked: upgrade safety and embedded-signature certification are incomplete."
 
       - name: Validate Azure signing configuration
         shell: pwsh
@@ -83,6 +108,7 @@ jobs:
           INPUT_CONNECTOR_RELEASE_VERSION: ${{ inputs.connector_release_version }}
           INPUT_WEB_APP_BASE_URL: ${{ inputs.web_app_base_url }}
           VAR_WEB_APP_BASE_URL: ${{ vars.WEB_APP_BASE_URL }}
+          INPUT_MAINTENANCE_API_ORIGIN: ${{ inputs.maintenance_api_origin }}
         run: |
           $version = "$env:INPUT_CONNECTOR_RELEASE_VERSION".Trim()
           $versionSourcePath = Join-Path $env:GITHUB_WORKSPACE "backend\src\local-print-agent\version.ts"
@@ -113,6 +139,14 @@ jobs:
           # Adjust these paths if the Windows packaging script starts writing artifacts somewhere else.
           "CONNECTOR_RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WEB_APP_BASE_URL=$webAppBaseUrl" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $maintenanceOrigin = [Uri]$env:INPUT_MAINTENANCE_API_ORIGIN
+          if ($maintenanceOrigin.Scheme -ne 'https' -or $maintenanceOrigin.UserInfo -or $maintenanceOrigin.Query -or $maintenanceOrigin.Fragment -or $maintenanceOrigin.AbsolutePath -ne '/') {
+            throw 'Approved HTTPS maintenance origin is required, without a path.'
+          }
+          if ($env:INPUT_MAINTENANCE_API_ORIGIN -cnotin @($maintenanceOrigin.GetLeftPart([UriPartial]::Authority), ($maintenanceOrigin.GetLeftPart([UriPartial]::Authority)+'/'))) {
+            throw 'Maintenance origin must be canonical; normalized paths or host substitutions are forbidden.'
+          }
+          "MSCQR_MAINTENANCE_API_ORIGIN=$($maintenanceOrigin.GetLeftPart([UriPartial]::Authority))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_INSTALLER_STAGE_DIR=$stageDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_INSTALLER_PROJECT=$installerProject" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_RELEASE_OUTPUT_DIR=$releaseOutputDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -131,7 +165,8 @@ jobs:
           WEB_APP_BASE_URL: ${{ steps.release_settings.outputs.web_app_base_url }}
           INNO_SETUP_COMPILER_PATH: C:\__compile_after_payload_signing__\ISCC.exe
           WINDOWS_CONNECTOR_PKG_TARGET: node24-win-x64
-        run: npm --prefix backend run connector:windows:build-installer
+          MSCQR_APPROVED_MAINTENANCE_API_ORIGIN: ${{ vars.MSCQR_APPROVED_MAINTENANCE_API_ORIGIN }}
+        run: npm --prefix backend run connector:windows:prepare-signed-candidate
 
       - name: Verify staged Windows connector runtime
         shell: pwsh
@@ -142,6 +177,11 @@ jobs:
             "README.txt",
             "install-startup-task.ps1",
             "uninstall-startup-task.ps1",
+            "connector-upgrade-state.ps1",
+            "connector-upgrade-transaction.ps1",
+            "connector-upgrade-backup.ps1",
+            "connector-upgrade-staging.ps1",
+            "installer-build.json",
             "bin\mscqr-local-print-agent.exe"
           )
           foreach ($relativePath in $requiredFiles) {
@@ -173,18 +213,43 @@ jobs:
           # This is where build-windows-installer.mjs stages files before Inno Setup packages them.
           # If the app's output directory changes, adjust WINDOWS_INSTALLER_STAGE_DIR above.
           files-folder: ${{ steps.release_settings.outputs.windows_installer_stage_dir }}
-          files-folder-filter: exe,dll,msi
+          files-folder-filter: exe,dll,msi,sys,ps1
           files-folder-recurse: true
           file-digest: SHA256
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
+      - name: Verify signed staged executables
+        shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
+        run: |
+          $publisher = $env:WINDOWS_CONNECTOR_PUBLISHER_NAME
+          if (-not $publisher) { $publisher = 'L&D Health Ltd' }
+          $entries = @(Get-ChildItem -LiteralPath $env:WINDOWS_INSTALLER_STAGE_DIR -Force -Recurse)
+          if (@($entries | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count) { throw 'Staged payload contains a reparse point.' }
+          $files = @(foreach ($entry in $entries | Where-Object { -not $_.PSIsContainer }) {
+            $stream = [IO.File]::Open($entry.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try { $first = $stream.ReadByte(); $second = $stream.ReadByte() } finally { $stream.Dispose() }
+            if (($first -eq 0x4d -and $second -eq 0x5a) -or $entry.Extension -in '.exe', '.dll', '.sys', '.msi', '.ps1') { $entry }
+          })
+          if ($files.Count -eq 0) { throw 'No staged executable payloads found.' }
+          foreach ($file in $files) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate -or -not $sig.TimeStamperCertificate -or
+                $sig.SignerCertificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -ne $publisher) {
+              throw "Invalid or untimestamped staged payload: $($file.FullName)"
+            }
+          }
+
       - name: Install Inno Setup
         shell: pwsh
-        run: choco install innosetup --yes --no-progress
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
 
       - name: Compile Windows installer
         shell: pwsh
+        env:
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
         run: |
           if (-not (Test-Path $env:WINDOWS_INSTALLER_PROJECT)) {
             throw "Inno Setup project was not generated: $env:WINDOWS_INSTALLER_PROJECT"
@@ -199,7 +264,12 @@ jobs:
             throw "ISCC.exe was not found after installing Inno Setup."
           }
 
-          & $iscc $env:WINDOWS_INSTALLER_PROJECT
+          $signScript = Join-Path $env:GITHUB_WORKSPACE 'backend\local-print-agent\packaging\sign-inno-file.ps1'
+          if (-not (Test-Path -LiteralPath $signScript -PathType Leaf)) {
+            throw "Inno signing hook not found: $signScript"
+          }
+          $signTool = 'mscqr=pwsh.exe -NoProfile -NonInteractive -File $q' + $signScript + '$q $f'
+          & $iscc '/DMSCQR_SIGNED_RELEASE' "/S$signTool" $env:WINDOWS_INSTALLER_PROJECT
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
@@ -217,21 +287,6 @@ jobs:
               throw "Windows release artifact is too small: $($artifact.FullName) $($artifact.Length) bytes"
             }
           }
-
-      - name: Sign final Windows release artifacts
-        uses: azure/artifact-signing-action@v2
-        with:
-          endpoint: ${{ env.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ env.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ env.AZURE_ARTIFACT_SIGNING_PROFILE }}
-          # Final installer output is generated here by the existing packaging script.
-          # If the artifact path changes, adjust WINDOWS_RELEASE_OUTPUT_DIR in Resolve connector release settings.
-          files-folder: ${{ steps.release_settings.outputs.windows_release_output_dir }}
-          files-folder-filter: exe,dll,msi
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: Normalize signed installer name and verify signatures
         shell: pwsh
@@ -267,8 +322,8 @@ jobs:
             throw "Normalized signed Windows installer was not found: $mainInstaller"
           }
           $mainSignature = Get-AuthenticodeSignature -FilePath $mainInstaller
-          if ($mainSignature.Status -ne "Valid" -or -not $mainSignature.SignerCertificate) {
-            throw "Signed Windows installer does not have a valid signer certificate."
+          if ($mainSignature.Status -ne "Valid" -or -not $mainSignature.SignerCertificate -or -not $mainSignature.TimeStamperCertificate) {
+            throw "Signed Windows installer does not have a valid signer and timestamp certificate."
           }
           $reportPath = Join-Path $env:WINDOWS_RELEASE_OUTPUT_DIR "signature-report.json"
           [ordered]@{
@@ -292,6 +347,7 @@ jobs:
           "WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH=$reportPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Publish signed Windows connector manifest
+        if: inputs.execution_mode == 'publish'
         shell: pwsh
         env:
           WINDOWS_CONNECTOR_PUBLISHER_NAME: ${{ vars.WINDOWS_CONNECTOR_PUBLISHER_NAME }}
@@ -313,11 +369,12 @@ jobs:
           npm --prefix backend run connector:windows:publish-signed
 
       - name: Smoke-check published connector metadata
+        if: inputs.execution_mode == 'publish'
         shell: pwsh
         run: npm --prefix backend run connector:smoke
 
       - name: Commit signed connector release files
-        if: github.ref_type == 'branch'
+        if: inputs.execution_mode == 'publish' && github.ref_type == 'branch'
         shell: pwsh
         run: |
           git config user.name "github-actions[bot]"
@@ -391,8 +448,7 @@ jobs:
       - name: Upload signed Windows connector artifact
         uses: actions/upload-artifact@v7
         with:
-          name: mscqr-windows-connector-signed-${{ steps.release_settings.outputs.connector_release_version }}
+          name: mscqr-windows-candidate-${{ steps.release_settings.outputs.connector_release_version }}-${{ github.sha }}
           path: |
             ${{ steps.release_settings.outputs.windows_release_output_dir }}
-            backend/local-print-agent/releases/manifest.json
           if-no-files-found: error

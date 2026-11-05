@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import prisma from "../config/database";
 
 import { PrintDispatchMode, PrinterConnectionType } from "@prisma/client";
 import { Request, Response } from "express";
@@ -14,6 +15,7 @@ import {
   claimGatewayPrinterTestJob,
   confirmGatewayPrinterTestJob,
   failGatewayPrinterTestJob,
+  pendingGatewayPrinterTestLease,
 } from "../services/printerTestLabelService";
 
 const credentials = (req: Request) => ({
@@ -51,42 +53,46 @@ const claim = async (req: Request, res: Response, connectionType: PrinterConnect
   if (!auth || auth.printer.connectionType !== connectionType) {
     return res.status(401).json({ success: false, error: "Invalid gateway credentials" });
   }
-  const result = await recordGatewayPrintingEvent({
-    ...auth,
-    requestId: randomUUID(),
-    operation: "CLAIM",
-    mode: modeFor(connectionType),
-  });
-  if (!result.available) return res.json({ success: true, data: null });
-  const item = result.item;
-  const qr = {
-    id: item.qrCodeId,
-    code: item.code,
-    displayCode: item.displayCode,
-    batchId: item.batchId,
-    licenseeId: item.licenseeId,
-    tokenNonce: item.tokenNonce,
-    tokenIssuedAt: item.tokenIssuedAt ? new Date(item.tokenIssuedAt) : null,
-    tokenExpiresAt: item.tokenExpiresAt ? new Date(item.tokenExpiresAt) : null,
-    tokenHash: item.tokenHash,
-    replayEpoch: item.replayEpoch,
-  };
-  const payload = connectionType === PrinterConnectionType.NETWORK_DIRECT
-    ? buildApprovedPrintPayload({
-        printer: result.printer,
-        qr,
-        manufacturerId: result.job.manufacturerId,
-        printJobId: result.job.id,
-        printItemId: item.id,
-        jobNumber: result.job.jobNumber,
-        reprintOfJobId: result.job.reprintOfJobId,
-      })
-    : buildApprovedPrintContext({
-        qr,
-        manufacturerId: result.job.manufacturerId,
-        reprintOfJobId: result.job.reprintOfJobId,
-      });
-  return res.json({ success: true, data: { ...result, payload } });
+  const data = await prisma.$transaction(async tx => {
+    const result = await recordGatewayPrintingEvent({
+      ...auth,
+      requestId: randomUUID(),
+      operation: "CLAIM",
+      mode: modeFor(connectionType),
+      client: tx,
+    });
+    if (!result.available) return null;
+    const item = result.item;
+    const qr = {
+      id: item.qrCodeId,
+      code: item.code,
+      displayCode: item.displayCode,
+      batchId: item.batchId,
+      licenseeId: item.licenseeId,
+      tokenNonce: item.tokenNonce,
+      tokenIssuedAt: item.tokenIssuedAt ? new Date(item.tokenIssuedAt) : null,
+      tokenExpiresAt: item.tokenExpiresAt ? new Date(item.tokenExpiresAt) : null,
+      tokenHash: item.tokenHash,
+      replayEpoch: item.replayEpoch,
+    };
+    const payload = connectionType === PrinterConnectionType.NETWORK_DIRECT
+      ? buildApprovedPrintPayload({
+          printer: result.printer,
+          qr,
+          manufacturerId: result.job.manufacturerId,
+          printJobId: result.job.id,
+          printItemId: item.id,
+          jobNumber: result.job.jobNumber,
+          reprintOfJobId: result.job.reprintOfJobId,
+        })
+      : buildApprovedPrintContext({
+          qr,
+          manufacturerId: result.job.manufacturerId,
+          reprintOfJobId: result.job.reprintOfJobId,
+        });
+    return { ...result, payload };
+    });
+  return res.json({ success: true, data });
 };
 
 const event = async (
@@ -123,14 +129,25 @@ export const gatewayHeartbeat = async (req: Request, res: Response) => {
   } });
 };
 
-export const claimGatewayIppJob = (req: Request, res: Response) => claim(req, res, PrinterConnectionType.NETWORK_IPP);
-export const claimGatewayDirectJob = (req: Request, res: Response) => claim(req, res, PrinterConnectionType.NETWORK_DIRECT);
-export const ackGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "ACK");
-export const confirmGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "CONFIRM");
-export const failGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "FAIL");
-export const ackGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "ACK");
-export const confirmGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "CONFIRM");
-export const failGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "FAIL");
+// Express 4 does not forward rejected handler promises. In particular, a
+// fenced claim or payload-generation failure must return an error, not crash
+// the backend and lose the caller's acknowledgement channel.
+const gatewayRequest = async (res: Response, action: () => Promise<unknown>) => {
+  try { return await action(); } catch (error: any) {
+    const code=String(error?.meta?.code || error?.code || '');
+    const status=code==='42501'?403:code==='55000'?409:500;
+    console.error('Gateway lifecycle operation rejected', { databaseCode: code });
+    return res.status(status).json({ success:false, error:status===409?'Gateway work is fenced or requires reconciliation.':status===403?'Gateway operation is not authorized.':'Gateway operation failed; no automatic replay is authorized.' });
+  }
+};
+export const claimGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>claim(req, res, PrinterConnectionType.NETWORK_IPP));
+export const claimGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>claim(req, res, PrinterConnectionType.NETWORK_DIRECT));
+export const ackGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "ACK"));
+export const confirmGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "CONFIRM"));
+export const failGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "FAIL"));
+export const ackGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "ACK"));
+export const confirmGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "CONFIRM"));
+export const failGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "FAIL"));
 
 const testGateway = async (req: Request) => {
   const auth = await gateway(req);
@@ -140,10 +157,14 @@ const testGateway = async (req: Request) => {
 export const claimGatewayTestJob = async (req: Request, res: Response) => {
   try {
     const auth = await testGateway(req);
-    return res.json({ success: true, data: claimGatewayPrinterTestJob({
-      printerId: auth.printer.id,
-      connectionType: auth.printer.connectionType,
-    }) });
+    const diagnosticRequestId = pendingGatewayPrinterTestLease(auth.printer.id);
+    if (!diagnosticRequestId) return res.json({ success: true, data: null });
+    const data = await prisma.$transaction(async tx => {
+      await recordGatewayPrintingEvent({ ...auth, requestId: randomUUID(), operation: "CHECK_DISPATCH",
+        mode: modeFor(auth.printer.connectionType), details: { diagnosticRequestId }, client: tx });
+      return claimGatewayPrinterTestJob({ printerId: auth.printer.id, connectionType: auth.printer.connectionType });
+    });
+    return res.json({ success: true, data });
   } catch (error: any) {
     return res.status(error.statusCode || 400).json({ success: false, error: error.message });
   }

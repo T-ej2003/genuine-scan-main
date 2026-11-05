@@ -1,5 +1,8 @@
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
+// These existing tests isolate the chunk protocol; durable reservation has
+// separate real-filesystem, multi-process coverage in connectorDispatchJournal.
+require("../dist/local-print-agent/dispatchJournal").reserveAutomaticDispatch = async () => true;
 const { runPersistentPrintChunk } = require("../dist/local-print-agent/directPrintWorker");
 
 const zpl = "^XA^FO20,20^FDTEST^FS^XZ";
@@ -70,7 +73,7 @@ const run = async ({ print, wait } = {}) => {
     print: async () => { throw new Error("mock spooler unavailable"); },
     wait: async () => { throw new Error("must not wait after rejected submission"); },
   }), /mock spooler unavailable/);
-  assert.deepEqual(unavailable, ["chunk_ack", "label_failed", "chunk_failed"]);
+  assert.deepEqual(unavailable, ["chunk_ack"]);
 
   const uncertain = [];
   await assert.rejects(runPersistentPrintChunk({}, { ...session }, payload, session.selectedPrinterId, {
@@ -78,7 +81,7 @@ const run = async ({ print, wait } = {}) => {
     print: async () => ({ printPath: "USB_RAW", labelLanguage: "ZPL", jobRef: "uncertain-job", bytesWritten: Buffer.byteLength(zpl) }),
     wait: async () => ({ confirmed: false, confirmationUnavailable: true }),
   }), { errorCode: "queue_confirmation_unavailable" });
-  assert.deepEqual(uncertain, ["chunk_ack", "label_spooled", "label_failed", "chunk_failed"]);
+  assert.deepEqual(uncertain, ["chunk_ack", "label_spooled"]);
 
   let acceptedWrites = 0;
   const lostReceipt = [];
@@ -98,7 +101,7 @@ const run = async ({ print, wait } = {}) => {
     /signed receipt transport lost/);
   await runPersistentPrintChunk({}, lostReceiptSession, payload, session.selectedPrinterId, lostReceiptAdapters);
   assert.equal(acceptedWrites, 1, "An accepted spool submission must not be retried after a lost receipt");
-  assert.deepEqual(lostReceipt, ["chunk_ack", "label_spooled", "label_failed", "chunk_failed"]);
+  assert.deepEqual(lostReceipt, ["chunk_ack", "label_spooled"]);
 
   let attempted = false;
   await assert.rejects(runPersistentPrintChunk({}, { ...session }, {

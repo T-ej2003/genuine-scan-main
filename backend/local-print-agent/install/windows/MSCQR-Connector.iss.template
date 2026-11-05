@@ -1,28 +1,142 @@
 [Setup]
 AppId={{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}
-AppName=MSCQR Connector
+AppName=MSCQR Connector__MSCQR_BUILD_SUFFIX__
 AppVersion=__MSCQR_CONNECTOR_VERSION__
 AppPublisher=MSCQR
 DefaultDirName={localappdata}\MSCQR\local-print-agent
 DefaultGroupName=MSCQR Connector
 DisableProgramGroupPage=yes
+DisableDirPage=yes
+UsePreviousAppDir=no
+SetupMutex=MSCQRConnectorSetup
 Compression=lzma
 SolidCompression=yes
 PrivilegesRequired=lowest
 WizardStyle=modern
+#ifdef MSCQR_SIGNED_RELEASE
+#ifdef MSCQR_DEVELOPMENT_FIXTURE
+#error Development fixtures cannot enter signed release compilation.
+#endif
+#if Ver != 0x06070100
+#error Signed releases require Inno Setup 6.7.1.
+#endif
+SignTool=mscqr
+SignedUninstaller=yes
+#endif
 OutputDir=__WINDOWS_OUTPUT_DIR__
-OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION__-unsigned
+OutputBaseFilename=MSCQR-Connector-Windows-__MSCQR_CONNECTOR_VERSION____MSCQR_BUILD_SUFFIX__-unsigned
 UninstallDisplayIcon={app}\bin\mscqr-local-print-agent.exe
 
 [Files]
-Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
+Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "mscqr-payload"; Flags: dontcopy recursesubdirs
+Source: "__WINDOWS_STAGE_DIR__\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion; Check: IsFreshInstallation
 
 [Icons]
 Name: "{group}\MSCQR Connector"; Filename: "{app}\Install Connector.cmd"
 Name: "{group}\Uninstall MSCQR Connector"; Filename: "{app}\Uninstall Connector.cmd"
 
-[Run]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Install Connector.cmd"""; Flags: runhidden waituntilterminated postinstall skipifsilent
-
 [UninstallRun]
-Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: runhidden waituntilterminated; RunOnceId: MSCQRConnectorUninstall
+
+[Code]
+var
+  UpgradeMode, UpgradePrepared, SetupCommitted: Boolean;
+
+function InitializeUninstall(): Boolean;
+begin
+  { UninstallRun exit codes cannot prevent Inno's later file removal. Refuse
+    before any uninstallation work until governed removal is implemented. }
+  Result := False;
+  if not UninstallSilent then
+    MsgBox('Automatic connector removal is blocked pending governed dispatch isolation and work reconciliation. The installation and identity are preserved. Contact MSCQR support.', mbError, MB_OK);
+end;
+
+function IsFreshInstallation: Boolean;
+begin
+  Result := not UpgradeMode;
+end;
+
+function RunUpgrade(const Operation: String): Boolean;
+var Code: Integer; Params: String;
+begin
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' + ExpandConstant('{tmp}\mscqr-payload\connector-upgrade-transaction.ps1') +
+    '" -Operation ' + Operation + ' -PayloadDirectory "' + ExpandConstant('{tmp}\mscqr-payload') +
+    '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -AuthorizationFile "' +
+    ExpandConstant('{param:MSCQRAUTH|}') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
+  Code := -1;
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := Result and (Code = 0);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+#ifdef MSCQR_DEVELOPMENT_FIXTURE
+  Result := 'DEVELOPMENT FIXTURE: installation and production upgrades are disabled. Use the governed signed candidate workflow for certification.';
+  exit;
+#endif
+  UpgradeMode := DirExists(ExpandConstant('{app}')) or
+     FileExists(ExpandConstant('{userprofile}\.mscqr\local-print-agent-state.json')) or
+     FileExists(ExpandConstant('{userprofile}\.authenticqr\local-print-agent-state.json'));
+  if UpgradeMode then begin
+    if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin
+      Result := 'Existing connector requires authenticated maintenance and independently verified reconciliation. Supply MSCQRAUTH. No upgrade was performed.';
+      exit;
+    end;
+    ExtractTemporaryFiles('mscqr-payload\*');
+    if ExpandConstant('{param:MSCQRRECOVER|}') = '1' then begin
+      if RunUpgrade('Recover') then
+        Result := 'Previous installation restoration was verified. This upgrade remains cancelled and dispatch remains fenced. Review the journal before another attempt.'
+      else
+        Result := 'Interrupted upgrade restoration could not be verified. Keep dispatch fenced and inspect the durable journal.';
+      exit;
+    end;
+    if not RunUpgrade('Prepare') then
+      Result := 'Upgrade preflight, backend authorization, staging or backup failed. The existing runtime has not been replaced.'
+    else UpgradePrepared := True;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  Parameters: String;
+begin
+  if CurStep = ssPostInstall then begin
+    if UpgradeMode then begin
+      if not RunUpgrade('Activate') then
+        RaiseException('Connector upgrade failed. Review the durable upgrade journal; dispatch remains fenced.');
+      exit;
+    end;
+    Parameters := '/c ""' + ExpandConstant('{app}\Install Connector.cmd') + '"';
+    if WizardSilent then Parameters := Parameters + ' /MSCQRSILENT';
+    Parameters := Parameters + '"';
+    if not Exec(ExpandConstant('{cmd}'), Parameters, ExpandConstant('{app}'), SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) then
+      RaiseException('Connector initialization could not be started.');
+    { Exit 10 is emitted only after startup registration, version/protocol and
+      exactly-one-process verification. It does not certify printer readiness.
+      This fresh-install contract never applies to RunUpgrade: every upgrade
+      phase still requires exit 0 and independent transaction verification. }
+    if ResultCode = 10 then begin
+      Log('Connector installed and runtime verified; printer setup needs attention. Open MSCQR Printer Setup and check the selected printer.');
+      if not WizardSilent then
+        MsgBox('MSCQR Connector is installed and running. Printer setup needs attention: open MSCQR Printer Setup, select a printer and check that Windows reports it online. Printing readiness has not been verified. See the connector setup log and install-result.json.', mbInformation, MB_OK);
+    end else if ResultCode <> 0 then
+      RaiseException('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + '). Review the connector setup log.');
+  end;
+  if CurStep = ssDone then begin
+    if UpgradeMode then
+      if not RunUpgrade('Commit') then
+        RaiseException('Connector upgrade commit verification failed; dispatch remains fenced.');
+    SetupCommitted := True;
+  end;
+end;
+
+procedure DeinitializeSetup;
+begin
+  if UpgradePrepared and not SetupCommitted then
+    if not RunUpgrade('Recover') then
+      Log('Upgrade recovery is NOT verified. Keep dispatch fenced and inspect the transaction journal.');
+end;

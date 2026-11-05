@@ -21,7 +21,7 @@ import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
 import { resolvePrinterConfirmationMode, type PrintConfirmationMode } from "./printConfirmationService";
 import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload, type PrinterPayloadProfile } from "./printPayloadService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
-import { mutatePrintingTestLabelJob } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { administerPrintingPrinter, mutatePrintingTestLabelJob } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
 const PRINTER_TEST_LABEL_TIMEOUT_MS = Math.max(
   15_000,
@@ -85,6 +85,7 @@ type GatewayPrinterTestClaim = {
 
 type GatewayPrinterTestJob = {
   id: string;
+  leaseRequestId: string;
   printerId: string;
   connectionType: "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT";
   createdAt: number;
@@ -268,6 +269,7 @@ const getGatewayPrinterTestJob = (printerId: string) => {
 const enqueueGatewayPrinterTestJob = (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
+  boundary: { capability: string; requestId: string };
 }) => {
   const existing = getGatewayPrinterTestJob(params.printer.id);
   if (existing) {
@@ -362,6 +364,7 @@ const enqueueGatewayPrinterTestJob = (params: {
 
   const job: GatewayPrinterTestJob = {
     id: jobId,
+    leaseRequestId: params.boundary.requestId,
     printerId: params.printer.id,
     connectionType: params.printer.connectionType as "NETWORK_DIRECT" | "NETWORK_IPP" | "LOCAL_AGENT",
     createdAt: Date.now(),
@@ -442,6 +445,11 @@ export const claimGatewayPrinterTestJob = (params: {
   }
   job.status = "CLAIMED";
   return job.claim;
+};
+
+export const pendingGatewayPrinterTestLease = (printerId: string) => {
+  const job = getGatewayPrinterTestJob(printerId);
+  return job?.status === "PENDING" ? job.leaseRequestId : null;
 };
 
 export const claimLocalAgentPrinterTestJob = async (params: {
@@ -600,15 +608,17 @@ export const failLocalAgentPrinterTestJob = async (params: {
 const dispatchGatewayPrinterTestLabel = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
-}) => {
+  boundary: { capability: string; requestId: string };
+}, onQueued: () => void) => {
   const job = enqueueGatewayPrinterTestJob(params);
+  onQueued();
   return job.promise;
 };
 
 const dispatchDirectIppTestLabel = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
-}): Promise<PrinterTestLabelResult> => {
+}, onTransportStart: () => void): Promise<PrinterTestLabelResult> => {
   const confirmationMode = resolvePrinterConfirmationMode(params.printer);
   if (confirmationMode !== "IPP_JOB_STATE") {
     throw new Error("This IPP printer route does not expose strict terminal completion confirmation.");
@@ -622,6 +632,7 @@ const dispatchDirectIppTestLabel = async (params: {
     calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
   });
   const dispatchedAt = new Date();
+  onTransportStart();
   const result = await submitPdfToIppPrinter({
     profile: {
       host: params.printer.host,
@@ -660,7 +671,7 @@ const dispatchDirectIppTestLabel = async (params: {
 const dispatchDirectRawTestLabel = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
-}): Promise<PrinterTestLabelResult> => {
+}, onTransportStart: () => void): Promise<PrinterTestLabelResult> => {
   const confirmationMode = resolvePrinterConfirmationMode(params.printer);
   if (confirmationMode !== "ZEBRA_ODOMETER") {
     throw new Error("This raw printer route is not yet certified for strict terminal completion confirmation.");
@@ -678,6 +689,7 @@ const dispatchDirectRawTestLabel = async (params: {
     ipAddress: params.printer.ipAddress,
     port: params.printer.port,
   });
+  onTransportStart();
   const socketResult = await sendRawPayloadToNetworkPrinter({
     ipAddress: params.printer.ipAddress,
     port: params.printer.port,
@@ -714,18 +726,38 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     return enqueuePersistentLocalAgentPrinterTestJob(params);
   }
-
-  if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
-    return dispatchGatewayPrinterTestLabel(params);
+  if (params.printer.connectionType !== PrinterConnectionType.NETWORK_IPP &&
+      params.printer.connectionType !== PrinterConnectionType.NETWORK_DIRECT) {
+    throw new Error("Unsupported printer route for live test labels.");
   }
-
-  if (params.printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
-    return dispatchDirectIppTestLabel(params);
+  await administerPrintingPrinter({ ...params.boundary, operation: "DIAGNOSTIC_LEASE", printerId: params.printer.id, payload: {} });
+  let result: PrinterTestLabelResult;
+  let transportStarted = false;
+  let gatewayQueued = false;
+  try {
+    if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
+      result = await dispatchGatewayPrinterTestLabel(params, () => { gatewayQueued = true; });
+    } else if (params.printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
+      result = await dispatchDirectIppTestLabel(params, () => { transportStarted = true; });
+    } else {
+      result = await dispatchDirectRawTestLabel(params, () => { transportStarted = true; });
+    }
+  } catch (error) {
+    if (!gatewayQueued && !transportStarted) {
+      try {
+        await administerPrintingPrinter({ ...params.boundary, operation: "DIAGNOSTIC_ABORT", printerId: params.printer.id,
+          payload: { outcome: "pre_dispatch_rejected", reason: (String(error instanceof Error ? error.message : error || "Diagnostic preparation failed").trim() || "Diagnostic preparation failed").slice(0, 500) } });
+      } catch (closureError) {
+        throw new AggregateError([error, closureError], "Pre-dispatch diagnostic failed and lease closure is unverified; reconciliation remains required.");
+      }
+    }
+    throw error;
   }
-
-  if (params.printer.connectionType === PrinterConnectionType.NETWORK_DIRECT) {
-    return dispatchDirectRawTestLabel(params);
+  // A timeout or lost response retains the accepted lease. Only the actual
+  // transport completion path may record completion; no expiry implies retry.
+  if (result.outcome === "confirmed") {
+    await administerPrintingPrinter({ ...params.boundary, operation: "DIAGNOSTIC_COMPLETE", printerId: params.printer.id,
+      payload: { outcome: result.outcome, deviceJobRef: result.deviceJobRef } });
   }
-
-  throw new Error("Unsupported printer route for live test labels.");
+  return result;
 };

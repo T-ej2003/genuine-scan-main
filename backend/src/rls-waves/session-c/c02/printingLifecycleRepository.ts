@@ -43,7 +43,7 @@ export const readPrintingProjection = (input: {
 export const administerPrintingPrinter = (input: {
   capability: string;
   requestId: string;
-  operation: "CREATE" | "UPDATE" | "DELETE" | "RELINK" | "AUDIT_TEST" | "AUDIT_TEST_LABEL_ATTENTION" | "AUDIT_TEST_LABEL_CONFIRMED" | "AUDIT_TEST_LABEL_QUEUED" | "AUDIT_DISCOVERY";
+  operation: "CREATE" | "UPDATE" | "DELETE" | "RELINK" | "MAINTENANCE_REQUEST" | "MAINTENANCE_STATUS" | "MAINTENANCE_INVENTORY" | "MAINTENANCE_AUTHORIZE" | "MAINTENANCE_CONSUME" | "MAINTENANCE_VERIFY" | "MAINTENANCE_RELEASE" | "DIAGNOSTIC_LEASE" | "DIAGNOSTIC_COMPLETE" | "DIAGNOSTIC_ABORT" | "AUDIT_TEST" | "AUDIT_TEST_LABEL_ATTENTION" | "AUDIT_TEST_LABEL_CONFIRMED" | "AUDIT_TEST_LABEL_QUEUED" | "AUDIT_DISCOVERY";
   printerId?: string | null;
   payload?: Record<string, unknown>;
   client?: SqlClient;
@@ -257,7 +257,7 @@ export const recordGatewayPrintingEvent = (input: {
   gatewayId: string;
   gatewaySecretHash: string;
   requestId: string;
-  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL";
+  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL" | "CHECK_DISPATCH";
   mode: "NETWORK_DIRECT" | "NETWORK_IPP";
   jobId?: string | null;
   itemId?: string | null;
@@ -340,7 +340,7 @@ export const reconcilePrintingLifecycle = async (input: {
 };
 
 export const runNetworkPrintingWorker = (input: {
-  operation: "CLAIM_DIRECT" | "CLAIM_IPP" | "CONFIRM" | "FAIL";
+  operation: "CLAIM_DIRECT" | "CLAIM_IPP" | "RESERVE_DISPATCH" | "ACK" | "CONFIRM" | "FAIL";
   requestId: string;
   jobId?: string | null;
   details?: Record<string, unknown>;

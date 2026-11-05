@@ -18,6 +18,7 @@ import {
 } from "./cups";
 import {
   loadAgentState,
+  inspectAgentState,
   mergeCalibrationProfile,
   saveAgentState,
   setAgentBackendUrl,
@@ -184,6 +185,13 @@ if (cliArgs.has("--version-json") || cliArgs.has("--status-json")) {
   process.exit(0);
 }
 
+if (cliArgs.has("--validate-state")) {
+  inspectAgentState().then(evidence => {
+    console.log(JSON.stringify(evidence));
+    process.exit(0);
+  }).catch(() => { console.error("Existing connector identity validation failed."); process.exit(1); });
+}
+
 if (cliArgs.has("--self-test")) {
   runSelfTest()
     .then(() => process.exit(0))
@@ -205,7 +213,7 @@ if (cliArgs.has("--self-test")) {
 
 let singleInstanceLock: { lockPath: string; fd: number } | null = null;
 try {
-  singleInstanceLock = acquireSingleInstanceLock();
+  if (!cliArgs.has("--validate-state")) singleInstanceLock = acquireSingleInstanceLock();
 } catch (error: any) {
   console.error(
     JSON.stringify({
@@ -242,6 +250,17 @@ process.once("SIGTERM", () => {
   releaseSingleInstanceLock();
   process.exit(0);
 });
+
+if (cliArgs.has("--initialize-state")) {
+  if (cliArgs.size !== 1) {
+    console.error("Connector identity initialization cannot be combined with another operation.");
+    process.exit(2);
+  }
+  loadAgentState({ initialize: true }).then(() => inspectAgentState()).then(evidence => {
+    console.log(JSON.stringify(evidence));
+    process.exit(0);
+  }).catch(() => { console.error("Connector identity initialization failed; preserve existing state and inspect the configured path."); process.exit(1); });
+}
 
 app.use((_req, res, next) => {
   res.setHeader("Access-Control-Allow-Private-Network", "true");
@@ -581,10 +600,12 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-if (!cliArgs.has("--self-test")) {
-  app.listen(PORT, HOST, () => {
-    console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
-    startGatewayWorker();
-    startDirectPrintWorker();
-  });
+if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state")) {
+  loadAgentState({ initialize: false }).then(() => {
+    app.listen(PORT, HOST, () => {
+      console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);
+      startGatewayWorker();
+      startDirectPrintWorker();
+    });
+  }).catch(() => { console.error("Existing connector identity is unavailable; startup refused."); process.exit(1); });
 }

@@ -4,6 +4,7 @@ import WebSocket from "ws";
 import type { IncomingMessage } from "http";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
+import { reserveAutomaticDispatch } from "./dispatchJournal";
 import { printLabel } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, buildPrinterAgentSessionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
@@ -839,6 +840,8 @@ export const isPreSpoolAckRejection = (error: unknown) =>
     String(errorInfo(error).errorCode || "") === "connector_update_required");
 
 export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean) => {
+  if (errorInfo(error).errorCode === "dispatch_reconciliation_required") return false;
+  if (spoolerAttempted) return false;
   if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
   return true;
 };
@@ -886,6 +889,9 @@ const runLocalDiagnosticTestJob = async (payload: ConnectorWorkPayload, printerI
     printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
     payloadDiagnostics,
   });
+  if (!await reserveAutomaticDispatch({ printJobId: `diagnostic:${testJobId}`, printItemId: `diagnostic:${testJobId}`, printerId: printerId, payloadHash })) {
+    throw Object.assign(new Error("Diagnostic attempt requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
+  }
   try {
     const result = await printLabel({
       printerId,
@@ -915,6 +921,10 @@ const runLocalDiagnosticTestJob = async (payload: ConnectorWorkPayload, printerI
       jobRef: result.jobRef,
       bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
     });
+    const completion = await waitForLocalPrintJobCompletion({ printerId, jobRef: result.jobRef });
+    if (!completion.confirmed || ("confirmationUnavailable" in completion && completion.confirmationUnavailable)) {
+      throw Object.assign(new Error("Diagnostic physical outcome requires reconciliation."), { errorCode: "queue_confirmation_unavailable" });
+    }
     await confirmLocalTestJob({
       printerId: backendPrinterId,
       testJobId,
@@ -931,22 +941,19 @@ const runLocalDiagnosticTestJob = async (payload: ConnectorWorkPayload, printerI
       printPath: result.printPath,
       bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
     });
-  } catch (error: unknown) {
-    await failLocalTestJob({
-      printerId: backendPrinterId,
-      testJobId,
-      reason: errorInfo(error).message || "Diagnostic test label failed.",
-    }).catch(() => undefined);
-    throw error;
-  }
+  } catch (error: unknown) { throw error; }
 };
 
-const runPersistentDiagnosticTestJob = async (
+export const runPersistentDiagnosticTestJob = async (
   ws: WebSocket,
   session: SessionContext,
   payload: ConnectorWorkPayload,
-  selectedPrinterId: string
+  selectedPrinterId: string,
+  adapters: { print?: typeof printLabel; wait?: typeof waitForLocalPrintJobCompletion; send?: typeof sendSessionMessage } = {}
 ) => {
+  const print = adapters.print || printLabel;
+  const wait = adapters.wait || waitForLocalPrintJobCompletion;
+  const send = adapters.send || sendSessionMessage;
   const testJobId = String(payload?.testJobId || "").trim();
   const payloadContent = typeof payload?.payloadContent === "string" ? payload.payloadContent : "";
   const payloadHash = String(payload?.payloadHash || "").trim();
@@ -965,8 +972,11 @@ const runPersistentDiagnosticTestJob = async (
     labelLanguage: payload.commandLanguage || "ZPL",
     payloadContent,
   });
+  if (!await reserveAutomaticDispatch({ printJobId: `diagnostic:${testJobId}`, printItemId: `diagnostic:${testJobId}`, printerId: selectedPrinterId, payloadHash })) {
+    throw Object.assign(new Error("Diagnostic attempt requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
+  }
   try {
-    const result = await printLabel({
+    const result = await print({
       printerId: selectedPrinterId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || selectedPrinterId).trim(),
       printerLanguages: ["ZPL"],
@@ -984,7 +994,7 @@ const runPersistentDiagnosticTestJob = async (
         labelLanguage: payload.commandLanguage || "ZPL",
       },
     });
-    await sendSessionMessage(ws, session, selectedPrinterId, {
+    await send(ws, session, selectedPrinterId, {
       type: "test_ack",
       testJobId,
       payloadHash,
@@ -994,7 +1004,11 @@ const runPersistentDiagnosticTestJob = async (
       deviceJobRef: result.jobRef,
       bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
     });
-    await sendSessionMessage(ws, session, selectedPrinterId, {
+    const completion = await wait({ printerId: selectedPrinterId, jobRef: result.jobRef });
+    if (!completion.confirmed || ("confirmationUnavailable" in completion && completion.confirmationUnavailable)) {
+      throw Object.assign(new Error("Diagnostic physical outcome requires reconciliation."), { errorCode: "queue_confirmation_unavailable" });
+    }
+    await send(ws, session, selectedPrinterId, {
       type: "test_confirmed",
       testJobId,
       payloadHash,
@@ -1010,14 +1024,7 @@ const runPersistentDiagnosticTestJob = async (
       selectedPrinterId,
       printPath: result.printPath,
     });
-  } catch (error: unknown) {
-    await sendSessionMessage(ws, session, selectedPrinterId, {
-      type: "test_failed",
-      testJobId,
-      error: errorInfo(error).message || "Persistent diagnostic test label failed.",
-    }).catch(() => undefined);
-    throw error;
-  }
+  } catch (error: unknown) { throw error; }
 };
 
 export const runPersistentPrintChunk = async (
@@ -1086,6 +1093,11 @@ export const runPersistentPrintChunk = async (
       printItemId,
       payloadDiagnostics,
     });
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: selectedPrinterId, payloadHash })) {
+      throw Object.assign(new Error("Previously reserved dispatch requires reconciliation; automatic spool was refused."), {
+        errorCode: "dispatch_reconciliation_required",
+      });
+    }
     try {
       const result = await print({
         printerId: selectedPrinterId,
@@ -1139,20 +1151,9 @@ export const runPersistentPrintChunk = async (
         bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
       });
     } catch (error: unknown) {
-      await send(ws, session, selectedPrinterId, {
-        type: "label_failed",
-        chunkId,
-        printJobId,
-        printItemId,
-        payloadHash,
-        error: errorInfo(error).message || "Persistent print label failed.",
-      }).catch(() => undefined);
-      await send(ws, session, selectedPrinterId, {
-        type: "chunk_failed",
-        chunkId,
-        printJobId,
-        error: errorInfo(error).message || "Persistent print chunk failed.",
-      }).catch(() => undefined);
+      // A print call can throw after submitting bytes. Do not turn an
+      // ambiguous physical attempt into a failed/retryable backend item.
+      console.error("persistent dispatch requires reconciliation", { chunkId, printJobId, printItemId });
       throw error;
     }
   }
@@ -1300,6 +1301,10 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       payloadType: payload.payloadType || null,
       payloadDiagnostics,
     });
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId, payloadHash: validated.payloadHash })) {
+      console.error("automatic dispatch refused: prior attempt requires reconciliation", { printJobId, printItemId });
+      return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
+    }
     spoolerAttempted = true;
     const result = await printLabel({
       printerId,

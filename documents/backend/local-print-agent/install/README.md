@@ -16,13 +16,24 @@ Build the latest packaged connector artifacts from the `backend` folder with:
 npm run connector:release
 ```
 
+Its Windows ZIP is a **non-installable inspection fixture** kept under
+`.connector-build`, outside release/download directories. It is omitted from
+the download manifest. Do not run its unsigned runtime or scripts. Executable
+Windows testing and publication require the existing governed signed Windows
+workflow. `connector:windows:publish-zip` is retired and fails before mutation;
+the generic builder also rejects signed/unsigned Windows artifact-path overrides.
+The approved signed publisher remains separate. A macOS manifest refresh
+preserves an existing trusted Windows record for the same version.
+
 Prepare the Windows installer scaffold from the `backend` folder with:
 
 ```bash
 npm run connector:windows:build-installer
 ```
 
-That command stages a real Windows installer project and, on a Windows machine with Inno Setup installed, can produce an unsigned `.exe` installer for internal testing before signing is added.
+That command stages a non-installable development fixture and can compile it
+with Inno Setup. Installation is deliberately disabled; it is not a substitute
+for the protected signed candidate workflow.
 
 When the Apple release credentials are configured, that single command now:
 
@@ -61,6 +72,8 @@ Supported rollout paths:
 - Windows per-user Startup entry at logon
 
 For engineering and release packaging from the `backend` folder:
+
+The installers initialize identity explicitly on a first installation and validate the existing identity before starting an installed service. Ordinary connector startup refuses a missing state file. For a standalone development run, build first, run `npm run print:agent:init` once for a new isolated profile, then run `npm run print:agent`. Never use initialization to replace a missing identity from an existing installation.
 
 ```bash
 npm run print:agent:install:macos
@@ -122,7 +135,7 @@ The repository now includes installer-ready service scripts, and the release scr
 
 - macOS signed package path: wrap `macos/install-launch-agent.sh` with `pkgbuild` and sign with `productsign`.
 - macOS notarized package path: set `MACOS_CONNECTOR_APP_SIGN_IDENTITY`, `MACOS_CONNECTOR_SIGN_IDENTITY`, plus either `MACOS_CONNECTOR_NOTARY_PROFILE` or the Apple ID / team ID / password variables, then run `npm run connector:release`.
-- Windows release prep path: run `npm run connector:windows:build-installer` to generate the staging folder and `MSCQR-Connector.iss` project. Publish the resulting unsigned `.exe` with `WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH` for internal testing, or publish the signed `.exe` / `.msi` with `WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH` and `WINDOWS_CONNECTOR_PUBLISHER_NAME` for customer rollout.
+- Windows development scaffold: `npm run connector:windows:build-installer` creates a non-installable `DEVELOPMENT-unsigned` fixture outside the publication tree, without production maintenance configuration. Never publish it. Signed candidates use the protected existing workflow and `connector:windows:prepare-signed-candidate`, with matching explicit `MSCQR_MAINTENANCE_API_ORIGIN` and governed `MSCQR_APPROVED_MAINTENANCE_API_ORIGIN`. See [Windows build modes](windows/WINDOWS_SIGNED_RELEASE.md).
 - MDM / IT rollout: Jamf, Kandji, Intune, or similar can run these same scripts directly.
 
 See the full Windows release guide in:

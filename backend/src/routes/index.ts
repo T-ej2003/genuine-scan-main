@@ -1,3 +1,4 @@
+import { requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
 import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
@@ -1842,6 +1843,19 @@ protectedMutationRouter.delete(
   printMutationActorLimiter,
   requireCsrf,
   deleteNetworkPrinter
+);
+protectedMutationRouter.post(
+  "/manufacturer/printers/:id/maintenance",
+  printMutationPreAuthRouteLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  requestConnectorMaintenance
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/relink-local-agent",
