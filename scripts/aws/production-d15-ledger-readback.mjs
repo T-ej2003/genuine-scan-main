@@ -210,6 +210,11 @@ export function assertProtectedToolingSource({ requireCurrentMain = true, gitRun
   assert.equal(fs.realpathSync(gitRun(["rev-parse", "--show-toplevel"]).trim()), fs.realpathSync(root));
   const sha = gitRun(["rev-parse", "HEAD"]).trim();
   assert.match(sha, /^[a-f0-9]{40}$/);
+  const tracked = gitRun(["ls-files", "-v", "-z"]).split("\0").filter(Boolean);
+  assert.ok(tracked.length > 0 && tracked.every((entry) => entry.startsWith("H ")), "Hidden or assumed-unchanged Git index entry");
+  const launcher = "scripts/aws/production-d15-ledger-readback.mjs";
+  assert.ok(fs.readFileSync(fileURLToPath(import.meta.url)).equals(gitRun(["show", `${sha}:${launcher}`], { encoding: null })),
+    "Executed ledger launcher differs from the pinned Git tree");
   assert.equal(gitRun(["status", "--porcelain=v1", "--untracked-files=all"]).trim(), "");
   gitRun(["merge-base", "--is-ancestor", LEDGER.sourceSha, sha]);
   if (requireCurrentMain) {
