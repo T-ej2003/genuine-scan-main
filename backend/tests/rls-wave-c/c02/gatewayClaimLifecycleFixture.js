@@ -62,7 +62,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
       }
       const realOpen=fs.open;
       fs.open=async(file,...args)=>{
-        const physical=String(file).endsWith(`${hash(item)}.json`);
+        const physical=String(file).endsWith(`${require('../../../dist/local-print-agent/dispatchJournal').dispatchReservationKey(job,item)}.json`);
         if(physical&&scenario==='rejected-write')throw Object.assign(new Error('fixture rejected reservation'),{code:'EACCES'});
         const handle=await realOpen(file,...args);
         if(physical&&scenario==='ambiguous-write')handle.sync=async()=>{throw new Error('fixture fsync failed after creation');};

@@ -40,6 +40,13 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       });
     } finally {fs.open=realOpen;}
     assert.equal(await reserveAutomaticDispatch({...input,printItemId:'fsync-uncertain'}),false,'partial write must remain non-replayable');
+    assert.equal(await reserveAutomaticDispatch({...input,printJobId:'new-governed-reissue'}),true,'governed replacement job may retain the existing item identity');
+    assert.equal(await reserveAutomaticDispatch({...input,printJobId:'new-governed-reissue'}),false,'replacement job is itself at most once');
+    const {legacyDispatchKey}=require(modulePath);
+    const legacy={...input,printItemId:'legacy-item',state:'ATTEMPT_RESERVED'};
+    await fs.writeFile(path.join(root,`${legacyDispatchKey(legacy.printItemId)}.json`),JSON.stringify(legacy));
+    assert.equal(await reserveAutomaticDispatch(legacy),false,'v1 original reservation blocks original job redelivery');
+    assert.equal(await reserveAutomaticDispatch({...legacy,printJobId:'approved-reissue-of-legacy'}),false,'ambiguous item-only markers must not be inferred to authorize another physical attempt');
     const { createHash } = require('node:crypto');
     const { runPersistentPrintChunk, runPersistentDiagnosticTestJob } = require('../dist/local-print-agent/directPrintWorker');
     const zpl = '^XA^FDLOCAL-SYNTHETIC^FS^XZ';

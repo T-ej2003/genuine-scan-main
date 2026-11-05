@@ -1,17 +1,17 @@
 import { createHash, randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import path from "path";
-import { dispatchJournalRoot } from "./dispatchJournal";
+import { dispatchJournalRoot, dispatchReservationKey, legacyDispatchKey, priorDispatchExists } from "./dispatchJournal";
 
 type Claim = { printJobId: string; printItemId: string; testJobId?: string };
 type Context = { gatewayId: string; backendUrl: string; connectionType: "NETWORK_DIRECT" | "NETWORK_IPP" };
-type Failure = Claim & Context & { state: "PRE_DISPATCH_FAILURE"; reason: string };
+type Failure = Claim & Context & { journalVersion?: number; state: "PRE_DISPATCH_FAILURE"; reason: string };
 const key = (item: string) => createHash("sha256").update(item).digest("hex");
 const itemKey = (claim: Claim) => claim.testJobId ? `diagnostic:${claim.testJobId}` : claim.printItemId;
+const jobKey = (claim: Claim) => claim.testJobId ? `diagnostic:${claim.testJobId}` : claim.printJobId;
 const uncertain = () => Object.assign(new Error("Gateway dispatch evidence requires reconciliation; automatic replay refused."), { errorCode: "dispatch_reconciliation_required" });
 const reservationAbsent = async (claim: Claim) => {
-  try { await fs.lstat(path.join(dispatchJournalRoot(), `${key(itemKey(claim))}.json`)); return false; }
-  catch (error: any) { if (error.code === "ENOENT") return true; throw uncertain(); }
+  return !await priorDispatchExists({printJobId:jobKey(claim),printItemId:itemKey(claim)});
 };
 
 // The preparation guard is distinct from a physical-dispatch reservation. Its
@@ -23,7 +23,11 @@ export const executeGatewayAttempt = async (context: Context, claim: Claim,
   if (!itemKey(claim) || (!claim.testJobId && !claim.printJobId)) throw uncertain();
   const root = dispatchJournalRoot();
   await fs.mkdir(root, { recursive: true, mode: 0o700 });
-  const file = path.join(root, `${key(itemKey(claim))}.gateway-attempt.json`);
+  const file = path.join(root, `${dispatchReservationKey(jobKey(claim),itemKey(claim))}.gateway-attempt.json`);
+  try {
+    await fs.lstat(path.join(root,`${legacyDispatchKey(itemKey(claim))}.gateway-attempt.json`));
+    throw uncertain();
+  } catch(error:any){if(error.code!=='ENOENT')throw uncertain();}
   let handle;
   try { handle = await fs.open(file, "wx", 0o600); } catch { throw uncertain(); }
   let reservationStarted = false;
@@ -34,7 +38,7 @@ export const executeGatewayAttempt = async (context: Context, claim: Claim,
     await handle.sync();
   };
   try {
-    await write({ ...context, ...claim, state: "PREPARING" });
+    await write({ ...context, ...claim, journalVersion:2, state: "PREPARING" });
     if (!await reservationAbsent(claim)) throw uncertain();
     try {
       await execute(async action => {
@@ -46,7 +50,7 @@ export const executeGatewayAttempt = async (context: Context, claim: Claim,
       // A thrown filesystem error is not proof of absence. Under our exclusive
       // preparation guard, only an accessible, absent reservation permits FAIL.
       if (reserved || error?.errorCode === "dispatch_reconciliation_required" || !await reservationAbsent(claim)) throw error;
-      const failure: Failure = { ...context, ...claim, state: "PRE_DISPATCH_FAILURE",
+      const failure: Failure = { ...context, ...claim, journalVersion:2, state: "PRE_DISPATCH_FAILURE",
         reason: String(error?.message || "Gateway preparation failed").slice(0, 500) };
       await write(failure); // durable failure outbox before an unreliable HTTP call
       try { await report(failure); await write({ ...failure, state: "PRE_DISPATCH_REPORTED" }); }
@@ -67,7 +71,8 @@ export const flushGatewayPreDispatchFailures = async (context: Context, report: 
     let failure: Failure;
     try { failure = JSON.parse(await fs.readFile(file, "utf8")); } catch { continue; }
     if (failure.state !== "PRE_DISPATCH_FAILURE" || failure.gatewayId !== context.gatewayId || failure.backendUrl !== context.backendUrl) continue;
-    if (name !== `${key(itemKey(failure))}.gateway-attempt.json` || !await reservationAbsent(failure)) throw uncertain();
+    const expected=(failure as any).journalVersion===2?dispatchReservationKey(jobKey(failure),itemKey(failure)):key(itemKey(failure));
+    if (name !== `${expected}.gateway-attempt.json` || !await reservationAbsent(failure)) throw uncertain();
     try {
       await report(failure);
       const temp = `${file}.${randomUUID()}.tmp`;

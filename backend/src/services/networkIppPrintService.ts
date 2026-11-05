@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { renderPdfLabelBuffer } from "../printing/pdfLabel";
-import { submitPdfToIppPrinter } from "../printing/ippClient";
+import { buildIppConnectionInfo, inspectIppJob, submitPdfToIppPrinter } from "../printing/ippClient";
 import { runNetworkPrintingWorker } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { logger } from "../utils/logger";
 import { buildApprovedPrintContext } from "./printPayloadService";
@@ -19,8 +19,10 @@ const dispatchChunk = async (jobId?: string | null) => {
     details: { limit: 25 },
   });
   if (!claim?.available) return false;
-  const confirmed: string[] = [];
+  let physicalAttemptStarted=false;
   try {
+    const connection=buildIppConnectionInfo(claim.printer);
+    if(!Number.isInteger(connection.port) || connection.port<1 || connection.port>65535)throw new Error('Invalid IPP printer configuration.');
     for (const item of claim.items) {
       const context = buildApprovedPrintContext({
         qr: {
@@ -44,6 +46,7 @@ const dispatchChunk = async (jobId?: string | null) => {
         previewLabel: context.previewLabel,
         calibrationProfile: claim.printer.calibrationProfile,
       });
+      physicalAttemptStarted=true;
       const submitted = await submitPdfToIppPrinter({
         profile: claim.printer,
         pdf,
@@ -51,22 +54,36 @@ const dispatchChunk = async (jobId?: string | null) => {
         requestingUserName: "mscqr-print-worker",
       });
       await runNetworkPrintingWorker({
-        operation: "CONFIRM",
+        operation: "ACK",
         requestId: randomUUID(),
         jobId: claim.job.id,
-        details: { itemIds: [item.id], transportReference: submitted.jobId ? `ipp:${submitted.jobId}` : submitted.jobUri || "ipp:accepted" },
+        details: { itemIds: [item.id], transportReference: submitted.jobId ? `ipp:${submitted.jobId}` : submitted.jobUri || "ipp:accepted",ippJobId:submitted.jobId },
       });
-      confirmed.push(item.id);
+      if(!submitted.jobId)throw new Error('IPP accepted transport without a verifiable job identity. Reconciliation required.');
+      const deadline=Date.now()+120000;
+      let completed=false;
+      while(Date.now()<deadline) {
+        const status=await inspectIppJob({profile:claim.printer,jobId:submitted.jobId});
+        if(status.jobStateReasons.some(reason=>/completed-with-errors/i.test(reason)) || [7,8].includes(Number(status.jobState)))throw new Error('IPP device reported an unsuccessful or uncertain physical outcome.');
+        if(status.jobState===9) {
+          await runNetworkPrintingWorker({operation:'CONFIRM',requestId:randomUUID(),jobId:claim.job.id,
+            details:{itemIds:[item.id],transportReference:`ipp:${submitted.jobId}`,confirmationEvidence:{kind:'IPP_COMPLETED',printerId:claim.printer.id,ippJobId:submitted.jobId,jobState:9,jobStateReasons:status.jobStateReasons}}});
+          completed=true;break;
+        }
+        await new Promise(resolve=>setTimeout(resolve,1500));
+      }
+      if(!completed)throw new Error('IPP device completion is uncertain; automatic replay refused.');
     }
   } catch (error: any) {
-    const remaining = claim.items.map((item: any) => item.id).filter((id: string) => !confirmed.includes(id));
-    if (remaining.length) {
+    if(!physicalAttemptStarted) {
       await runNetworkPrintingWorker({
         operation: "FAIL",
         requestId: randomUUID(),
         jobId: claim.job.id,
-        details: { itemIds: remaining, reason: String(error?.message || "ipp_transport_failed").slice(0, 500) },
+        details: { itemIds: claim.items.map((item:any)=>item.id),failureClassification:'PRE_DISPATCH_FAILURE', reason: String(error?.message || "ipp_preparation_failed").slice(0, 500) },
       });
+    } else {
+      logger.error('IPP physical outcome requires reconciliation',{jobId:claim.job.id});
     }
     throw error;
   }
