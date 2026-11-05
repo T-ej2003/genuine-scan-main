@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff",
+  "sourceContractSha256": "c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "3e17d74920e819dc86363d4dfbbd35ffa224783bb50209bffdcfab6d1fcc1f95"
+      "sha256": "aaff7974d0ddd381c6981783ac0f06b8027266e42ecfc6a8c8e3c60b6ed5be97"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "84694dd161b4772e40583eb4c5f39dd54367e0d850dca9ba71a3ae83cce51070"
+      "sha256": "276d8eed922f39929c2e4394e54944511183f318fbeaeb442416bc982b24570f"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -8361,7 +8361,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND \"printSessionId\" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_sessions',true),'')::jsonb))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR \"printSessionId\"=current_setting('app.printing_session_row_id',true) OR (current_setting('app.printing_operation',true)='printing-reissue' AND \"printSessionId\"=current_setting('app.printing_original_session_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
+      "scopePredicate": "(current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true) IN ('printing-printer-admin-maintenance_inventory','printing-printer-admin-maintenance_authorize','printing-printer-admin-maintenance_consume','printing-printer-admin-maintenance_verify','printing-printer-admin-maintenance_release') AND \"printSessionId\" IN (SELECT ps.id FROM public.\"PrintSession\" ps WHERE ps.\"printerId\" IN (SELECT jsonb_array_elements_text(nullif(current_setting('app.printing_maintenance_printers',true),'')::jsonb)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND (current_setting('app.printing_operation',true)='printing-readiness' OR \"printSessionId\"=current_setting('app.printing_session_row_id',true) OR (current_setting('app.printing_operation',true)='printing-reissue' AND \"printSessionId\"=current_setting('app.printing_original_session_id',true)))) OR (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_operation',true) LIKE 'printing-connector-%' AND \"printSessionId\"=current_setting('app.printing_session_row_id',true)) OR current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_worker' AND current_setting('app.printing_operation',true) LIKE 'printing-worker-%'",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-event:PrintItem:SELECT",
@@ -12812,55 +12812,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:0340695e3b7808765fbc066ce6e7c3d1c0ce0f41a8056fbf536ec3397e38a1ff"
+      "marker": "mscqr-full-rls-clean-room:certification:c949b46149a20090af05516ea3ce9873611b1d25b903753c4bc6d84a58305f37"
     }
   ]
 }

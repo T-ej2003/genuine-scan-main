@@ -57,6 +57,9 @@ try {
     if($case -eq 'startup-failure' -and (Test-Path "$dir\started")){throw 'Registration failure started runtime'}
     Write-Host "PASS fresh initialization $mode/$case exit=$expected (external boundaries simulated)"
   }}
+  # Expected failing child processes were asserted above. Do not leak their
+  # final native exit code into the CI PowerShell runner's success footer.
+  $global:LASTEXITCODE=0
 } finally {
   $resolved=[IO.Path]::GetFullPath($fixture)
   if(-not $resolved.StartsWith([IO.Path]::GetTempPath(),[StringComparison]::OrdinalIgnoreCase)){throw 'Unsafe fixture cleanup'}
