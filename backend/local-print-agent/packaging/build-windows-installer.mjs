@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { readConnectorSourceVersion } from "./source-version.mjs";
+import { readConnectorSourceVersion, assertConnectorVersionMatchesSource } from "./source-version.mjs";
 import { windowsBuildMode } from "./windows-build-mode.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -16,6 +16,7 @@ const legalRoot = path.resolve(backendRoot, "..", "documents", "legal", "connect
 const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
+if (buildMode.productionEligible) assertConnectorVersionMatchesSource(version, backendRoot);
 const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
 const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
 const minWindowsBinaryBytes = 1_000_000;

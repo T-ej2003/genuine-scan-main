@@ -1022,8 +1022,9 @@ async function main() {
     UPDATE public."PrintSession" SET "printerId"='${directPrinter}' WHERE "batchId"='${ids.raceBatch}';`);
   await require('./gatewayClaimLifecycleFixture')({admin,psql,appFactory:createBackendApp,printerId:gatewayPrinter,batchId:ids.raceBatch,secret:'disposable-maintenance-gateway',hash});
   // Restore the worker-race fixture's transport after gateway failure injection.
-  psql(admin,`UPDATE public."PrintJob" SET "printerId"='${directPrinter}',"printMode"='NETWORK_DIRECT' WHERE "batchId"='${ids.raceBatch}';
-    UPDATE public."PrintSession" SET "printerId"='${directPrinter}' WHERE "batchId"='${ids.raceBatch}';`);
+  psql(admin,`UPDATE public."PrintJob" SET "printerId"='${directPrinter}',"printMode"='NETWORK_DIRECT',status='PENDING',"pipelineState"='QUEUED' WHERE "batchId"='${ids.raceBatch}';
+    UPDATE public."PrintSession" SET "printerId"='${directPrinter}',status='ACTIVE' WHERE "batchId"='${ids.raceBatch}';
+    UPDATE public."PrintItem" pi SET state='RESERVED',"pipelineState"='QUEUED' FROM public."PrintSession" ps WHERE ps.id=pi."printSessionId" AND ps."batchId"='${ids.raceBatch}';`);
   json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,gatewayPrinter));
   json(app,maintenanceSql(caps.maker,'MAINTENANCE_REQUEST').replace(ids.printer,directPrinter));
   const networkAttempts=psql(admin,`SELECT sum("attemptCount") FROM public."PrintItem"`);

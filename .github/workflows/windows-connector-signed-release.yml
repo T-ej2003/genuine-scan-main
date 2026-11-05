@@ -143,6 +143,9 @@ jobs:
           if ($maintenanceOrigin.Scheme -ne 'https' -or $maintenanceOrigin.UserInfo -or $maintenanceOrigin.Query -or $maintenanceOrigin.Fragment -or $maintenanceOrigin.AbsolutePath -ne '/') {
             throw 'Approved HTTPS maintenance origin is required, without a path.'
           }
+          if ($env:INPUT_MAINTENANCE_API_ORIGIN -cnotin @($maintenanceOrigin.GetLeftPart([UriPartial]::Authority), ($maintenanceOrigin.GetLeftPart([UriPartial]::Authority)+'/'))) {
+            throw 'Maintenance origin must be canonical; normalized paths or host substitutions are forbidden.'
+          }
           "MSCQR_MAINTENANCE_API_ORIGIN=$($maintenanceOrigin.GetLeftPart([UriPartial]::Authority))" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_INSTALLER_STAGE_DIR=$stageDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "WINDOWS_INSTALLER_PROJECT=$installerProject" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append

@@ -42,6 +42,15 @@ Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: ru
 var
   UpgradeMode, UpgradePrepared, SetupCommitted: Boolean;
 
+function InitializeUninstall(): Boolean;
+begin
+  { UninstallRun exit codes cannot prevent Inno's later file removal. Refuse
+    before any uninstallation work until governed removal is implemented. }
+  Result := False;
+  if not UninstallSilent then
+    MsgBox('Automatic connector removal is blocked pending governed dispatch isolation and work reconciliation. The installation and identity are preserved. Contact MSCQR support.', mbError, MB_OK);
+end;
+
 function IsFreshInstallation: Boolean;
 begin
   Result := not UpgradeMode;

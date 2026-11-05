@@ -43,3 +43,17 @@ try {
     Write-Host "PASS state discovery $scenario"
   }
 } finally {$env:PRINT_AGENT_STATE_FILE=$previous;Remove-Item -LiteralPath $root -Recurse -Force}
+
+# Invoke the actual removal script with forbidden mutation commands trapped.
+# It must refuse even if a caller bypasses Inno and runs the CMD entrypoint.
+function Stop-Process {throw 'UNSAFE mutation reached'}
+function Stop-ScheduledTask {throw 'UNSAFE mutation reached'}
+function Unregister-ScheduledTask {throw 'UNSAFE mutation reached'}
+function Remove-Item {throw 'UNSAFE mutation reached'}
+$refused=$false
+try {& "$PSScriptRoot\..\local-print-agent\install\windows\uninstall-startup-task.ps1"}catch{
+  if($_.Exception.Message -notlike 'Automatic connector removal is blocked:*'){throw}
+  $refused=$true
+}
+if(-not $refused){throw 'Ungoverned automatic uninstall was accepted'}
+Write-Host 'PASS uninstall refused before process, startup or file mutation'

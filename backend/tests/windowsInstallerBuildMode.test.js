@@ -41,6 +41,8 @@ const {spawnSync}=require('node:child_process');
     assert(iss.includes('-DEVELOPMENT-unsigned'));
     assert(iss.includes('#error Development fixtures cannot enter signed release compilation.'));
     assert(!fs.existsSync(path.join(backend,'local-print-agent/releases')),'development scaffold must not write publication tree');
+    const incompatible=spawnSync(process.execPath,['--require',preload,'local-print-agent/packaging/build-windows-installer.mjs','--mode=signed-candidate'],{cwd:backend,encoding:'utf8',env:{...process.env,CONNECTOR_RELEASE_VERSION:'0.0.1',WEB_APP_BASE_URL:'http://127.0.0.1:1',MSCQR_MAINTENANCE_API_ORIGIN:approved,MSCQR_APPROVED_MAINTENANCE_API_ORIGIN:approved}});
+    assert.notEqual(incompatible.status,0);assert.match(incompatible.stderr,/source connector buildVersion/,'candidate metadata must match the compiled source version');
     const publish=spawnSync(process.execPath,[path.join(packaging,'publish-windows-connector-release.mjs')],{encoding:'utf8',env:{...process.env,WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH:path.join(stage,'output','DEVELOPMENT.exe')}});
     assert.notEqual(publish.status,0);assert.match(publish.stderr,/development artifacts are forbidden/);
     console.log('PASS Windows build modes: documented development scaffold, candidate origin validation, publication rejection');

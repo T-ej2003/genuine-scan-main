@@ -20,4 +20,7 @@ test('candidate signing requires protected environment and cannot publish releas
   const upload = job.steps.find(s => s.uses?.startsWith('actions/upload-artifact@'));
   assert.match(upload.with.name, /candidate/);
   assert(!upload.with.path.includes('manifest.json'));
+  const prepare=job.steps.find(step=>step.name==='Prepare unsigned Windows installer scaffold');
+  assert.equal(prepare.run,'npm --prefix backend run connector:windows:prepare-signed-candidate');
+  assert.equal(prepare.env.MSCQR_APPROVED_MAINTENANCE_API_ORIGIN,'${{ vars.MSCQR_APPROVED_MAINTENANCE_API_ORIGIN }}','origin allowlist must come from protected configuration, not a dispatch input');
 });
