@@ -3160,10 +3160,12 @@ BEGIN
   END IF;
 
   SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode"
-    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id AND j."printMode" IN ('NETWORK_DIRECT','NETWORK_IPP') FOR UPDATE;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true),
           set_config('app.printing_printer_id',job_row."printerId",true);
+  PERFORM 1 FROM public."Printer" p WHERE p.id=job_row."printerId" AND p."deliveryMode"='DIRECT' AND p."connectionType"::text=job_row."printMode"::text;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_WORKER_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
   SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
     WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);

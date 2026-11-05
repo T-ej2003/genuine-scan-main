@@ -33,6 +33,8 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
       const cycle=mode==='NETWORK_DIRECT'?direct.resumePendingNetworkDirectJobs:serviceIpp.resumePendingNetworkIppJobs;
       if(scenario==='success')await cycle();else await assert.rejects(cycle(),scenario==='preflight'?/fixture printer unavailable|fixture rendering failed/:undefined);
       assert.equal(state(),scenario==='success'?'PRINT_CONFIRMED':scenario==='preflight'?'FAILED':'AGENT_ACKED',`${mode}/${scenario}: actual database outcome`);
+      assert.equal(psql(admin,`SELECT status FROM public."PrintJob" WHERE id='${job}'`),scenario==='success'?'CONFIRMED':scenario==='preflight'?'FAILED':'SENT');
+      assert.equal(psql(admin,`SELECT status FROM public."PrintSession" WHERE "printJobId"='${job}'`),scenario==='success'?'COMPLETED':scenario==='preflight'?'FAILED':'ACTIVE');
       assert.equal(qrState(),scenario==='success'?'PRINTED':'ALLOCATED','transport acceptance must not mark a QR physically printed');
       assert.equal(submits,before+(['preflight','lost-reservation'].includes(scenario)?0:1));
       await cycle();assert.equal(submits,before+(['preflight','lost-reservation'].includes(scenario)?0:1),'redelivery cannot resubmit an uncertain item');
@@ -51,6 +53,7 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
     assert.equal(state(),'AGENT_ACKED');assert.equal(qrState(),'ALLOCATED');
     reset('NETWORK_DIRECT');psql(admin,`UPDATE public."PrintJob" SET "printerId"='${gatewayPrinterId}' WHERE id='${job}';UPDATE public."PrintSession" SET "printerId"='${gatewayPrinterId}' WHERE "printJobId"='${job}'`);
     assert.equal((await saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client})).available,false,'backend worker must never consume site-gateway work');
+    await assert.rejects(saved.run({operation:'ACK',jobId:job,requestId:randomUUID(),details:{itemIds:[item],transportReference:'forged-worker-reference'},client}),/PRINTING_WORKER_SCOPE_DENIED/);
     assert.equal(state(),'RESERVED');
     reset('NETWORK_DIRECT');
     await saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client});
