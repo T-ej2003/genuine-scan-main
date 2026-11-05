@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='6b1d996ee6eba237bc837a9b71ddedaec3f8ce3f3ec838d02b59a993dce4743a'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:6b1d996ee6eba237bc837a9b71ddedaec3f8ce3f3ec838d02b59a993dce4743a'
+    AND source_contract_sha256='2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:6b1d996ee6eba237bc837a9b71ddedaec3f8ce3f3ec838d02b59a993dce4743a')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:2815e1f22a76ddfd9b0ca0fd370af6fe8ceef39fb258bcf0949148d6b3dc9217')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11129,7 +11129,7 @@ DECLARE maintenance_printer record; job_row record; session_row record; now_at t
   mode_value public."PrintDispatchMode"; item_ids text[]; remaining integer; page_limit integer;
 BEGIN
   IF session_user<>'mscqr_rls_cert_worker'
-     OR p_operation NOT IN ('CLAIM_DIRECT','CLAIM_IPP','CONFIRM','FAIL')
+     OR p_operation NOT IN ('CLAIM_DIRECT','CLAIM_IPP','RESERVE_DISPATCH','ACK','CONFIRM','FAIL')
      OR p_request_id !~* '^[0-9a-f-]{36}$'
      OR (p_job_id IS NOT NULL AND p_job_id !~* '^[0-9a-f-]{36}$')
      OR jsonb_typeof(coalesce(p_details,'{}'::jsonb))<>'object'
@@ -11138,14 +11138,18 @@ BEGIN
           set_config('app.printing_request_id',p_request_id,true);
   IF p_operation IN ('CLAIM_DIRECT','CLAIM_IPP') THEN
     mode_value:=CASE p_operation WHEN 'CLAIM_DIRECT' THEN 'NETWORK_DIRECT' ELSE 'NETWORK_IPP' END;
-    page_limit:=LEAST(GREATEST(coalesce(NULLIF(p_details->>'limit','')::integer,25),1),250);
+    -- One durable physical reservation per printer. A crash/unknown outcome
+    -- must block further automatic work until it is explicitly reconciled.
+    page_limit:=1;
     SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
       j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
       j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
       j."approvedByUserId",j."reprintReason",j."confirmedAt",j."createdAt",j."updatedAt"
       INTO job_row FROM public."PrintJob" j
       WHERE (p_job_id IS NULL OR j.id=p_job_id) AND j."printMode"=mode_value
-        AND j.status IN ('PENDING','SENT') AND EXISTS (
+        AND j.status IN ('PENDING','SENT')
+        AND j."printerId" IN (SELECT p.id FROM public."Printer" p WHERE p."deliveryMode"='DIRECT' AND p."isActive" AND p."connectionType"=mode_value::text::public."PrinterConnectionType")
+        AND EXISTS (
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
           WHERE ps."printJobId"=j.id AND pi.state='RESERVED'
         )
@@ -11160,6 +11164,9 @@ BEGIN
       CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
       WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
       ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    IF EXISTS(SELECT 1 FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
+      WHERE j."printerId"=job_row."printerId" AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     SELECT ps.id,ps."printJobId",ps."batchId",ps."manufacturerId",ps."printerRegistrationId",
       ps."printerId",ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",ps."frozenItems",
       ps."failedReason",ps."startedAt",ps."completedAt",ps."createdAt",ps."updatedAt"
@@ -11171,10 +11178,10 @@ BEGIN
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
       ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT page_limit
     ), issued AS (
-      UPDATE public."PrintItem" pi SET state='AGENT_ACKED',"pipelineState"='SENT_TO_PRINTER',
+      UPDATE public."PrintItem" pi SET state='ISSUED',"pipelineState"='SENT_TO_PRINTER',
         "attemptCount"=pi."attemptCount"+1,"issuedAt"=coalesce(pi."issuedAt",now_at),
-        "dispatchedAt"=now_at,"agentAckedAt"=now_at,
-        "confirmationDeadlineAt"=now_at+interval '10 minutes',"updatedAt"=now_at
+        "dispatchedAt"=NULL,"agentAckedAt"=NULL,
+        "confirmationDeadlineAt"=NULL,"updatedAt"=now_at
       FROM selected s WHERE pi.id=s.id RETURNING pi.id
     )
     SELECT array_agg(id ORDER BY id) INTO item_ids FROM issued;
@@ -11212,19 +11219,55 @@ BEGIN
   END IF;
 
   SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode"
-    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id AND j."printMode" IN ('NETWORK_DIRECT','NETWORK_IPP') FOR UPDATE;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true),
           set_config('app.printing_printer_id',job_row."printerId",true);
+  PERFORM 1 FROM public."Printer" p WHERE p.id=job_row."printerId" AND p."deliveryMode"='DIRECT' AND p."connectionType"::text=job_row."printMode"::text;
+  IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_WORKER_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
   SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
     WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT coalesce(array_agg(value #>> '{}'),'{}'::text[]) INTO item_ids
     FROM jsonb_array_elements(coalesce(p_details->'itemIds','[]'::jsonb));
   IF cardinality(item_ids)=0 THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
-  IF p_operation='CONFIRM' THEN
+  IF cardinality(item_ids)<>(SELECT count(*) FROM public."PrintItem" WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id)
+  THEN RAISE EXCEPTION 'PRINTING_WORKER_ITEM_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
+  IF p_operation='RESERVE_DISPATCH' THEN
+    SELECT p.id,p."printerRegistrationId",p."gatewayId",p."orgId",p."licenseeId",p."assignedUserId"
+      INTO STRICT maintenance_printer FROM public."Printer" p WHERE p.id=job_row."printerId" AND p."deliveryMode"='DIRECT' AND p."isActive";
+    PERFORM app_rls.printing_maintenance_gate(
+      CASE WHEN maintenance_printer."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',maintenance_printer."printerRegistrationId")::text
+      WHEN maintenance_printer."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',maintenance_printer."gatewayId",maintenance_printer."orgId",maintenance_printer."licenseeId",maintenance_printer."assignedUserId")::text
+      ELSE jsonb_build_array('printer',maintenance_printer.id)::text END,'CHECK',NULL,'{}'::jsonb);
+    IF EXISTS(SELECT 1 FROM public."PrintItem" WHERE id=ANY(item_ids) AND state<>'ISSUED')
+    THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    UPDATE public."PrintItem" SET state='AGENT_ACKED',"dispatchedAt"=now_at,"agentAckedAt"=now_at,"confirmationDeadlineAt"=now_at+interval '10 minutes',"updatedAt"=now_at
+      WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id;
+  ELSIF p_operation='ACK' THEN
+    IF EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state NOT IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED')) OR
+      nullif(p_details->>'transportReference','') IS NULL OR EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND
+      nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL AND pi."dispatchMetadata" IS DISTINCT FROM p_details)
+    THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    UPDATE public."PrintItem" SET "dispatchMetadata"=p_details,"pipelineState"='PRINTER_ACKNOWLEDGED',"updatedAt"=now_at
+      WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id AND state='AGENT_ACKED';
+  ELSIF p_operation='CONFIRM' THEN
+    IF p_details->'confirmationEvidence'->>'printerId' IS DISTINCT FROM job_row."printerId" OR
+       EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND (
+         nullif(pi."dispatchMetadata"->>'transportReference','') IS NULL OR pi."dispatchMetadata"->>'transportReference' IS DISTINCT FROM p_details->>'transportReference')) OR
+       NOT coalesce(CASE WHEN job_row."printMode"='NETWORK_DIRECT' THEN
+         p_details->'confirmationEvidence'->>'kind'='ZEBRA_ODOMETER' AND
+         (p_details->'confirmationEvidence'->>'startingLabelCount')::bigint>=0 AND
+         (p_details->'confirmationEvidence'->>'confirmedLabelCount')::bigint >= (p_details->'confirmationEvidence'->>'startingLabelCount')::bigint+cardinality(item_ids) AND
+         NOT EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND pi."dispatchMetadata"->>'startingLabelCount' IS DISTINCT FROM p_details->'confirmationEvidence'->>'startingLabelCount')
+       ELSE p_details->'confirmationEvidence'->>'kind'='IPP_COMPLETED' AND
+         p_details->'confirmationEvidence'->>'jobState'='9' AND (p_details->'confirmationEvidence'->>'ippJobId')::bigint>0 AND
+         jsonb_typeof(p_details->'confirmationEvidence'->'jobStateReasons')='array' AND
+         NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(p_details->'confirmationEvidence'->'jobStateReasons') reason WHERE lower(reason) LIKE '%completed-with-errors%') AND
+         NOT EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND pi."dispatchMetadata"->>'ippJobId' IS DISTINCT FROM p_details->'confirmationEvidence'->>'ippJobId') END,false)
+    THEN RAISE EXCEPTION 'PHYSICAL_PRINT_CONFIRMATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
-      "printConfirmedAt"=now_at,"confirmationEvidence"=jsonb_build_object(
+      "printConfirmedAt"=now_at,"confirmationEvidence"=p_details->'confirmationEvidence'||jsonb_build_object(
         'runtimeIdentity','identity-background-worker','transport',job_row."printMode",
         'transportReference',p_details->>'transportReference'
       ),"updatedAt"=now_at
@@ -11247,6 +11290,9 @@ BEGIN
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
     END IF;
   ELSE
+    IF p_details->>'failureClassification' IS DISTINCT FROM 'PRE_DISPATCH_FAILURE' OR EXISTS(
+      SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND (pi.state<>'ISSUED' OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))
+    THEN RAISE EXCEPTION 'NETWORK_PRINT_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
       "failureReason"=left(coalesce(p_details->>'reason','network_transport_failed'),500),"updatedAt"=now_at
       WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id
@@ -11258,7 +11304,7 @@ BEGIN
       "failureReason"=left(coalesce(p_details->>'reason','network_transport_failed'),500),"updatedAt"=now_at
       WHERE id=job_row.id;
   END IF;
-  INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","eventType",actorId,metadata,"createdAt")
+  INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,'WORKER_NETWORK_'||p_operation,
     job_row."manufacturerId",jsonb_build_object('runtimeIdentity','identity-background-worker',
       'itemCount',cardinality(item_ids),'transportReference',p_details->>'transportReference'),now_at);
