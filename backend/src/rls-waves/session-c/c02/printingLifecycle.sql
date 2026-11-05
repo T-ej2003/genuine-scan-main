@@ -3243,7 +3243,7 @@ BEGIN
       "failureReason"=left(coalesce(p_details->>'reason','network_transport_failed'),500),"updatedAt"=now_at
       WHERE id=job_row.id;
   END IF;
-  INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","eventType",actorId,metadata,"createdAt")
+  INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,'WORKER_NETWORK_'||p_operation,
     job_row."manufacturerId",jsonb_build_object('runtimeIdentity','identity-background-worker',
       'itemCount',cardinality(item_ids),'transportReference',p_details->>'transportReference'),now_at);

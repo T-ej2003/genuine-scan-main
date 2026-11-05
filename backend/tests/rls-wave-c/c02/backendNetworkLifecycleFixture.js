@@ -31,7 +31,7 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
     for(const mode of ['NETWORK_DIRECT','NETWORK_IPP'])for(scenario of ['preflight','lost-reservation','transport','lost-ack','uncertain','success',...(mode==='NETWORK_IPP'?['device-errors']:[])]) {
       reset(mode);const before=submits;
       const cycle=mode==='NETWORK_DIRECT'?direct.resumePendingNetworkDirectJobs:serviceIpp.resumePendingNetworkIppJobs;
-      if(scenario==='success')await cycle();else await assert.rejects(cycle());
+      if(scenario==='success')await cycle();else await assert.rejects(cycle(),scenario==='preflight'?/fixture printer unavailable|fixture rendering failed/:undefined);
       assert.equal(state(),scenario==='success'?'PRINT_CONFIRMED':scenario==='preflight'?'FAILED':'AGENT_ACKED',`${mode}/${scenario}: actual database outcome`);
       assert.equal(qrState(),scenario==='success'?'PRINTED':'ALLOCATED','transport acceptance must not mark a QR physically printed');
       assert.equal(submits,before+(['preflight','lost-reservation'].includes(scenario)?0:1));
