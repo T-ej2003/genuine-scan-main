@@ -10,6 +10,8 @@ Deployment still requires a reviewed dedicated `mscqr_prod_d15_catalog_read` log
 
 The fixed SQL proves catalog and migration-ledger visibility only. The comparator also needs an independently authenticated migration/rollback receipt containing the 57 applied Prisma migration records. Do not infer this receipt from the executor output. No image was published, task registered or run, or production SQL executed.
 
+The proposed non-Terraform ownership and private launcher route is in [D15 fixed readback ownership proposal](iam/D15_FIXED_READBACK_OWNERSHIP_PROPOSAL.md). It is a review proposal and grants no production execution authority.
+
 ## Database evidence
 
 Expected source contract: `53fe3f041a8d20760caa68898a5de03fffe95eb7d51d72449ac93b96824622ef`.
