@@ -10,6 +10,7 @@ export function validateVictoriaDiagnosticResult(row) {
   } else {
     if (typeof row.account_active !== 'boolean' || !roles.has(row.account_role)) throw new Error('Invalid diagnostic result');
     if (!['mfa_enabled', 'totp_enabled', 'webauthn_present', 'backup_codes_present'].every((key) => row[key] === null || row[key] === true)) throw new Error('Invalid diagnostic result');
+    if ((row.totp_enabled === true || row.webauthn_present === true) !== (row.mfa_enabled === true)) throw new Error('Invalid diagnostic result');
     if (row.c04_procedure_present !== true && row.c04_procedure_present !== false) throw new Error('Invalid diagnostic result');
     if (row.c04_procedure_present === false ? row.c04_execution_grants !== null : !Array.isArray(row.c04_execution_grants) || row.c04_execution_grants.length > 100 || row.c04_execution_grants.some((role) => typeof role !== 'string' || !/^[a-zA-Z0-9_-]{1,63}$/.test(role))) throw new Error('Invalid diagnostic result');
   }

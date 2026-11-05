@@ -55,6 +55,9 @@ try {
   assert.equal(row.status, 'ACCOUNT_PRESENT'); assert.equal(row.account_role, 'SUPER_ADMIN');
   assert.equal(row.totp_enabled, true); assert.equal(row.backup_codes_present, true);
   assert.equal(row.webauthn_present, null); assert(!JSON.stringify(row).includes('never-output-this-hash'));
+  psql('ALTER TABLE public."User" NO FORCE ROW LEVEL SECURITY');
+  assert.equal(JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{'))).status, 'VISIBILITY_UNVERIFIED');
+  psql('ALTER TABLE public."User" FORCE ROW LEVEL SECURITY');
   psql(`CREATE FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) RETURNS void LANGUAGE sql AS 'SELECT';
     REVOKE ALL ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) TO diag;`);

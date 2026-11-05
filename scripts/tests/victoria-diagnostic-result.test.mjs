@@ -10,7 +10,7 @@ test('fixed projection accepts and freezes only the reviewed fields', () => {
   input.c04_execution_grants.push('later');
   assert.deepEqual(output.c04_execution_grants, ['mscqr_prod_breakglass_test']);
   assert(Object.isFrozen(output));
-  for (const mutation of [{ secret: 'never-return' }, { account_role: 'secret-value' }, { totp_enabled: false }, { c04_execution_grants: ['bad role'] }]) {
+  for (const mutation of [{ secret: 'never-return' }, { account_role: 'secret-value' }, { totp_enabled: false }, { mfa_enabled: null }, { c04_execution_grants: ['bad role'] }]) {
     assert.throws(() => validateVictoriaDiagnosticResult({ ...row(), ...mutation }), /Invalid diagnostic result/);
   }
 });

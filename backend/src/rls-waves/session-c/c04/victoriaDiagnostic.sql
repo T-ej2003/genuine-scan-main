@@ -42,6 +42,10 @@ BEGIN
     RAISE EXCEPTION 'VICTORIA_DIAGNOSTIC_READ_ONLY_REQUIRED';
   END IF;
   IF NOT (SELECT NOT rolsuper AND NOT rolbypassrls FROM pg_roles WHERE rolname = current_user)
+     OR EXISTS (SELECT 1 FROM pg_class c WHERE c.oid IN (
+          'public."User"'::regclass, 'public."AdminMfaCredential"'::regclass,
+          'public."AdminWebAuthnCredential"'::regclass, 'public."UserMfaFactor"'::regclass,
+          'public."UserBackupCode"'::regclass) AND (NOT c.relrowsecurity OR NOT c.relforcerowsecurity))
      OR NOT row_security_active('public."User"'::regclass)
      OR NOT row_security_active('public."AdminMfaCredential"'::regclass)
      OR NOT row_security_active('public."AdminWebAuthnCredential"'::regclass)
