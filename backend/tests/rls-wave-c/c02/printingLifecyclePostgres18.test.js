@@ -964,6 +964,14 @@ async function main() {
     '${capability}','printing-printer-admin','${requestId()}','${operation}','${ids.printer}','{}'::jsonb)`;
   denied(app, maintenanceSql(caps.outsider, 'MAINTENANCE_REQUEST'), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   denied(app, `SELECT app_rls.printing_maintenance_gate('forged','REQUEST','forged','{}'::jsonb)`, /permission denied/);
+  const diagnosticReservation=requestId();
+  const reserveDiagnostic=id=>`SELECT app_rls.printing_printer_administration('${caps.maker}','printing-printer-admin','${id}','DIAGNOSTIC_LEASE','${ids.printer}','{}'::jsonb)`;
+  json(app,reserveDiagnostic(diagnosticReservation));
+  denied(app,reserveDiagnostic(diagnosticReservation),/DIAGNOSTIC_RECONCILIATION_REQUIRED/);
+  const nextDiagnostic=requestId();
+  const diagnosticInventory=json(app,reserveDiagnostic(nextDiagnostic));
+  assert.equal(diagnosticInventory.diagnostics[diagnosticReservation].state,'ACCEPTED','a new diagnostic must preserve the previous unresolved intent');
+  assert.equal(diagnosticInventory.diagnostics[nextDiagnostic].state,'ACCEPTED');
   psql(admin, `UPDATE public."PrintJob" SET status='SENT' WHERE id='${created.job.id}';
     UPDATE public."PrintSession" SET status='ACTIVE' WHERE "printJobId"='${created.job.id}';
     UPDATE public."PrintItem" SET state='ISSUED' WHERE id='${claim.printItemId}';`);

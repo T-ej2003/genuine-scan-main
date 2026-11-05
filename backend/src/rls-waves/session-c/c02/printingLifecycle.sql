@@ -37,9 +37,10 @@ BEGIN
     IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
     THEN RAISE EXCEPTION 'PRINTING_MAINTENANCE_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='LEASE' THEN
-      IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId') OR
-        EXISTS (SELECT 1 FROM jsonb_each(coalesce(current_value->'diagnostics','{}'::jsonb)) lease
-        WHERE lease.value->>'state'='ACCEPTED')
+      -- A reservation permanently blocks replay of that request, not a fresh,
+      -- separately authorized diagnostic intent. All unresolved reservations
+      -- remain in the maintenance inventory and require signed reconciliation.
+      IF coalesce(current_value->'diagnostics','{}'::jsonb) ? (p_details->>'requestId')
       THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
       current_value:=jsonb_set(current_value,'{diagnostics}',coalesce(current_value->'diagnostics','{}'::jsonb)||
         jsonb_build_object(p_details->>'requestId',jsonb_build_object('state','ACCEPTED','actor',p_actor,'acceptedAt',clock_timestamp())),true);
