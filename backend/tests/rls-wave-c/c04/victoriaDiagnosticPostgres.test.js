@@ -1,0 +1,102 @@
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const image = JSON.parse(fs.readFileSync(path.join(__dirname, '../../../../docker/base-image-identities.json'), 'utf8')).images.postgres.reference;
+
+const container = `mscqr-victoria-test-${crypto.randomBytes(6).toString('hex')}`;
+const run = (args, input) => {
+  const result = spawnSync('docker', args, { encoding: 'utf8', input });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  return result.stdout.trim();
+};
+const psql = (sql, user = 'postgres') => run(['exec', '-i', container, 'psql', '-U', user, '-d', 'postgres', '-X', '-v', 'ON_ERROR_STOP=1', '-At'], sql);
+try {
+  run(['run', '-d', '--rm', '--network', 'none', '--name', container, '-e', 'POSTGRES_HOST_AUTH_METHOD=trust', image]);
+  for (let i = 0; ; i++) {
+    const ready = spawnSync('docker', ['exec', container, 'pg_isready', '-U', 'postgres'], { encoding: 'utf8' });
+    const logs = spawnSync('docker', ['logs', container], { encoding: 'utf8' });
+    if (ready.status === 0 && logs.stdout.includes('PostgreSQL init process complete')) break;
+    if (i === 60) throw new Error('PostgreSQL did not become ready');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
+  }
+  psql(`CREATE SCHEMA app_ops; CREATE ROLE diag LOGIN; CREATE ROLE denied LOGIN;
+    CREATE TABLE public."User" (id text, email text, "isActive" boolean, status text, "deletedAt" timestamp, "disabledAt" timestamp, role text);
+    CREATE TABLE public."AdminMfaCredential" ("userId" text, "isEnabled" boolean, "backupCodesHash" text[]);
+    CREATE TABLE public."AdminWebAuthnCredential" ("userId" text);
+    CREATE TABLE public."UserMfaFactor" ("userId" text, type text, "disabledAt" timestamp, "legacySource" text, "lastUsedAt" timestamp);
+    CREATE TABLE public."UserBackupCode" ("userId" text, "usedAt" timestamp);
+    INSERT INTO public."User" VALUES ('v','victoria@mscqr.com',true,'ACTIVE',NULL,NULL,'SUPER_ADMIN'), ('x','other@example.invalid',true,'ACTIVE',NULL,NULL,'SUPER_ADMIN');
+    INSERT INTO public."AdminMfaCredential" VALUES ('v',true,ARRAY['never-output-this-hash']);
+    GRANT USAGE ON SCHEMA app_ops TO diag, denied;
+    ALTER TABLE public."User" ENABLE ROW LEVEL SECURITY; ALTER TABLE public."User" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public."AdminMfaCredential" ENABLE ROW LEVEL SECURITY; ALTER TABLE public."AdminMfaCredential" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public."AdminWebAuthnCredential" ENABLE ROW LEVEL SECURITY; ALTER TABLE public."AdminWebAuthnCredential" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public."UserMfaFactor" ENABLE ROW LEVEL SECURITY; ALTER TABLE public."UserMfaFactor" FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public."UserBackupCode" ENABLE ROW LEVEL SECURITY; ALTER TABLE public."UserBackupCode" FORCE ROW LEVEL SECURITY;
+    SELECT 1;`);
+  const sql = fs.readFileSync(path.join(__dirname, '../../../src/rls-waves/session-c/c04/victoriaDiagnostic.sql'), 'utf8');
+  psql('CREATE ROLE leaky; ALTER DEFAULT PRIVILEGES IN SCHEMA app_ops GRANT EXECUTE ON FUNCTIONS TO leaky');
+  assert.throws(() => psql(sql), /VICTORIA_DIAGNOSTIC_UNEXPECTED_DEFAULT_GRANTS/);
+  assert.equal(psql("SELECT count(*) FROM pg_roles WHERE rolname='mscqr_victoria_diag_owner'"), '0');
+  psql('ALTER DEFAULT PRIVILEGES IN SCHEMA app_ops REVOKE EXECUTE ON FUNCTIONS FROM leaky');
+  psql(sql);
+  assert.equal(psql("SELECT concat_ws('|',rolcanlogin,rolsuper,rolbypassrls,rolcreaterole,rolcreatedb) FROM pg_roles WHERE rolname='mscqr_victoria_diag_owner'"), 'f|f|f|f|f');
+  assert.equal(psql("SELECT count(*) FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner WHERE r.rolname='mscqr_victoria_diag_owner' AND c.relname IN ('User','AdminMfaCredential','AdminWebAuthnCredential','UserMfaFactor','UserBackupCode')"), '0');
+  assert.equal(psql("SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid WHERE r.rolname='mscqr_victoria_diag_owner'"), '0');
+  assert.throws(() => psql(sql), /VICTORIA_DIAGNOSTIC_ALREADY_EXISTS/);
+  assert.throws(() => psql('BEGIN READ ONLY; SELECT * FROM app_ops.victoria_mfa_diagnostic();', 'diag'), /permission denied/);
+  assert.throws(() => psql('SELECT "backupCodesHash" FROM public."AdminMfaCredential"', 'diag'), /permission denied/);
+  assert.equal(psql('SET ROLE mscqr_victoria_diag_owner; SELECT count(*) FROM public."User" WHERE email=\'other@example.invalid\'').split('\n').at(-1), '0');
+  psql('GRANT EXECUTE ON FUNCTION app_ops.victoria_mfa_diagnostic() TO diag');
+  const query = 'BEGIN READ ONLY; SELECT row_to_json(d) FROM app_ops.victoria_mfa_diagnostic() d; ROLLBACK;';
+  const row = JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{')));
+  assert.equal(row.status, 'ACCOUNT_PRESENT'); assert.equal(row.account_role, 'SUPER_ADMIN');
+  assert.equal(row.totp_enabled, true); assert.equal(row.backup_codes_present, true);
+  assert.equal(row.webauthn_present, null); assert(!JSON.stringify(row).includes('never-output-this-hash'));
+  psql(`CREATE FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) RETURNS void LANGUAGE sql AS 'SELECT';
+    REVOKE ALL ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION app_ops.reset_account_mfa(uuid,uuid,text,uuid) TO diag;`);
+  const catalog = JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{')));
+  assert.equal(catalog.c04_procedure_present, true); assert(catalog.c04_execution_grants.includes('diag'));
+  psql('DROP POLICY victoria_diag_totp ON public."AdminMfaCredential"');
+  const hiddenFactors = JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{')));
+  assert.equal(hiddenFactors.totp_enabled, null); assert.equal(hiddenFactors.backup_codes_present, null);
+  assert.throws(() => psql(query, 'denied'), /permission denied/);
+  assert.throws(() => psql('SELECT email FROM public."User"', 'diag'), /permission denied/);
+  psql('DROP POLICY victoria_diag_user ON public."User"');
+  assert.equal(JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{'))).status, 'VISIBILITY_UNVERIFIED');
+  psql('CREATE POLICY victoria_diag_user ON public."User" FOR SELECT TO mscqr_victoria_diag_owner USING (email=\'victoria@mscqr.com\'); DELETE FROM public."User" WHERE email=\'victoria@mscqr.com\'');
+  assert.equal(JSON.parse(psql(query, 'diag').split('\n').find((s) => s.startsWith('{'))).status, 'VISIBILITY_UNVERIFIED');
+  assert.equal(JSON.parse(psql('SELECT row_to_json(d) FROM app_ops.victoria_mfa_diagnostic() d', 'diag')).status, 'DIAGNOSTIC_ERROR');
+  psql('REVOKE EXECUTE ON FUNCTION app_ops.victoria_mfa_diagnostic() FROM denied');
+  assert.throws(() => psql(query, 'denied'), /permission denied/);
+  // A disposable proof only: this role/function is not an installation package.
+  psql(`CREATE ROLE lab_owner NOLOGIN NOSUPERUSER NOBYPASSRLS;
+    CREATE ROLE lab_operator LOGIN NOSUPERUSER NOBYPASSRLS;
+    GRANT USAGE ON SCHEMA public,app_ops TO lab_owner,lab_operator;
+    GRANT SELECT(email) ON public."User" TO lab_owner;
+    CREATE POLICY lab_target ON public."User" FOR SELECT TO lab_owner USING (email='victoria@mscqr.com');
+    CREATE FUNCTION app_ops.lab_fixed_target() RETURNS text LANGUAGE sql SECURITY DEFINER SET search_path=pg_catalog AS
+      'SELECT CASE WHEN EXISTS(SELECT 1 FROM public."User" WHERE email=''victoria@mscqr.com'') THEN ''ACCOUNT_PRESENT'' ELSE ''VISIBILITY_UNVERIFIED'' END';
+    ALTER FUNCTION app_ops.lab_fixed_target() OWNER TO lab_owner;
+    REVOKE ALL ON FUNCTION app_ops.lab_fixed_target() FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION app_ops.lab_fixed_target() TO lab_operator;
+    INSERT INTO public."User" VALUES ('v','victoria@mscqr.com',true,'ACTIVE',NULL,NULL,'SUPER_ADMIN');`);
+  assert.throws(() => psql('SELECT email FROM public."User"', 'lab_operator'), /permission denied/);
+  assert.throws(() => psql('SELECT app_ops.lab_fixed_target()', 'denied'), /permission denied/);
+  assert.equal(psql('BEGIN READ ONLY; SELECT app_ops.lab_fixed_target(); ROLLBACK;', 'lab_operator').split('\n')[1], 'ACCOUNT_PRESENT');
+  psql('DROP POLICY lab_target ON public."User"');
+  assert.equal(psql('BEGIN READ ONLY; SELECT app_ops.lab_fixed_target(); ROLLBACK;', 'lab_operator').split('\n')[1], 'VISIBILITY_UNVERIFIED');
+  psql("CREATE POLICY lab_target ON public.\"User\" FOR SELECT TO lab_owner USING (email='victoria@mscqr.com')");
+  const shadow = psql('CREATE TEMP TABLE "User" (email text); BEGIN READ ONLY; SELECT app_ops.lab_fixed_target(); ROLLBACK;', 'lab_operator');
+  assert(shadow.split('\n').includes('ACCOUNT_PRESENT'));
+  const concurrent = run(['exec', container, 'sh', '-c', "psql -U lab_operator -d postgres -At -c 'BEGIN READ ONLY; SELECT app_ops.lab_fixed_target(); ROLLBACK;' & psql -U lab_operator -d postgres -At -c 'BEGIN READ ONLY; SELECT app_ops.lab_fixed_target(); ROLLBACK;' & wait"]);
+  assert.equal((concurrent.match(/ACCOUNT_PRESENT/g) || []).length, 2);
+  psql('CREATE TABLE public.lab_audit (event text); GRANT INSERT ON public.lab_audit TO lab_operator');
+  assert.throws(() => psql("BEGIN READ ONLY; INSERT INTO public.lab_audit VALUES ('event');", 'lab_operator'), /read-only transaction/);
+  console.log('Victoria diagnostic PostgreSQL isolation tests passed');
+} finally {
+  spawnSync('docker', ['rm', '-f', container], { encoding: 'utf8' });
+}
