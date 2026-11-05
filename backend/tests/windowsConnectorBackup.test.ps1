@@ -14,6 +14,9 @@ try {
   $runtimeSigner = (Get-AuthenticodeSignature -FilePath $runtime).SignerCertificate.Subject
   [IO.File]::WriteAllText($envFile, 'synthetic credential')
   [IO.File]::WriteAllText($state, 'synthetic identity and calibration')
+  $stateAcl=Get-Acl -LiteralPath $state
+  $stateAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
+  Set-Acl -LiteralPath $state -AclObject $stateAcl
   [IO.File]::WriteAllText($startup, 'synthetic launcher')
   $argsForBackup = @{ BackupDirectory = $backup; RuntimeFile = $runtime; RuntimeSha256 = $runtimeHash; RuntimeSignerSubject = $runtimeSigner; EnvironmentFile = $envFile; StateFile = $state; StartupFile = $startup }
   $records = @(New-MscqrUpgradeBackup @argsForBackup)
@@ -39,6 +42,7 @@ try {
   } finally { $lock.Dispose() }
   if ([IO.File]::ReadAllText($runtime) -ne 'replacement' -or -not (Test-Path -LiteralPath $stateBackup)) { throw 'Failed restore must preserve the snapshot.' }
   Restore-MscqrUpgradeBackup -Records $records
+  if((Get-Acl -LiteralPath $state).GetOwner([Security.Principal.SecurityIdentifier]).Value -cne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {throw 'Restore changed the authenticated state owner.'}
   if ((Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash -ne $runtimeHash -or
       [IO.File]::ReadAllText($envFile) -ne 'synthetic credential' -or
       [IO.File]::ReadAllText($state) -ne 'synthetic identity and calibration' -or
