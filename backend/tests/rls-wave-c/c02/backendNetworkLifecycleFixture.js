@@ -10,7 +10,7 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
   const renderer=require('../../../dist/printing/pdfLabel');
   const saved={run:repo.runNetworkPrintingWorker,send:socket.sendRawPayloadToNetworkPrinter,count:zebra.getZebraTotalLabelCount,wait:zebra.waitForZebraLabelConfirmation,submit:ipp.submitPdfToIppPrinter,inspect:ipp.inspectIppJob,render:renderer.renderPdfLabelBuffer};
   let scenario,submits=0;
-  repo.runNetworkPrintingWorker=async input=>{const result=await saved.run({...input,client});if((scenario==='lost-ack'&&input.operation==='ACK')||(scenario==='lost-reservation'&&input.operation==='RESERVE_DISPATCH'))throw new Error('fixture lost durable reservation/ACK response');return result;};
+  repo.runNetworkPrintingWorker=async input=>{if(input.jobId&&input.jobId!==job)return saved.run(input);const result=await saved.run({...input,jobId:input.jobId||job,client});if((scenario==='lost-ack'&&input.operation==='ACK')||(scenario==='lost-reservation'&&input.operation==='RESERVE_DISPATCH'))throw new Error('fixture lost durable reservation/ACK response');return result;};
   socket.sendRawPayloadToNetworkPrinter=async()=>{submits++;if(scenario==='transport')throw new Error('fixture TCP disconnect after possible submission');return {bytesWritten:100};};
   zebra.getZebraTotalLabelCount=async()=>{if(scenario==='preflight')throw new Error('fixture printer unavailable before submission');return 100;};
   zebra.waitForZebraLabelConfirmation=async()=>{if(scenario==='uncertain')throw new Error('fixture device outcome unavailable');return {confirmed:true,lastCount:101};};
@@ -20,7 +20,7 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
   const direct=require('../../../dist/services/networkDirectPrintService');const serviceIpp=require('../../../dist/services/networkIppPrintService');
   const job=psql(admin,`SELECT id FROM public."PrintJob" WHERE "batchId"='${batchId}' LIMIT 1`);
   const item=psql(admin,`SELECT pi.id FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" WHERE ps."printJobId"='${job}' LIMIT 1`);
-  const reset=mode=>psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}',"ipAddress"='127.0.0.1',host='127.0.0.1',port=1,"printerUri"='ipp://127.0.0.1:1/fixture' WHERE id='${printerId}';
+  const reset=mode=>psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}',"ipAddress"='127.0.0.2',host='127.0.0.2',port=1,"printerUri"='ipp://127.0.0.2:1/fixture' WHERE id='${printerId}';
     UPDATE public."PrintJob" SET "printerId"='${printerId}',"printMode"='${mode}',status='PENDING',"pipelineState"='QUEUED' WHERE id='${job}';
     UPDATE public."PrintSession" SET "printerId"='${printerId}',status='ACTIVE' WHERE "printJobId"='${job}';
     UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"dispatchMetadata"=NULL,"confirmationEvidence"=NULL WHERE id='${item}';
@@ -39,7 +39,7 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
       console.log(`PASS PostgreSQL backend network ${mode}/${scenario}`);
     }
     reset('NETWORK_DIRECT');
-    const claims=await Promise.all(Array.from({length:4},()=>saved.run({operation:'CLAIM_DIRECT',requestId:randomUUID(),client})));
+    const claims=await Promise.all(Array.from({length:4},()=>saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client})));
     assert.equal(claims.filter(result=>result.available).length,1,'one durable reservation across concurrent worker connections');
     assert.equal(state(),'ISSUED','claim is a lease, not transport acceptance');
     await saved.run({operation:'RESERVE_DISPATCH',requestId:randomUUID(),jobId:job,details:{itemIds:[item]},client});
@@ -50,10 +50,10 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
     await assert.rejects(saved.run({operation:'ACK',requestId:randomUUID(),jobId:job,details:{itemIds:[foreignItemId],transportReference:'tcp:100'},client}),/PRINTING_WORKER_ITEM_SCOPE_DENIED/);
     assert.equal(state(),'AGENT_ACKED');assert.equal(qrState(),'ALLOCATED');
     reset('NETWORK_DIRECT');psql(admin,`UPDATE public."PrintJob" SET "printerId"='${gatewayPrinterId}' WHERE id='${job}';UPDATE public."PrintSession" SET "printerId"='${gatewayPrinterId}' WHERE "printJobId"='${job}'`);
-    assert.equal((await saved.run({operation:'CLAIM_DIRECT',requestId:randomUUID(),client})).available,false,'backend worker must never consume site-gateway work');
+    assert.equal((await saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client})).available,false,'backend worker must never consume site-gateway work');
     assert.equal(state(),'RESERVED');
     reset('NETWORK_DIRECT');
-    await saved.run({operation:'CLAIM_DIRECT',requestId:randomUUID(),client});
+    await saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client});
     psql(app,`SELECT app_rls.printing_printer_administration('${capability}','printing-printer-admin','${randomUUID()}','MAINTENANCE_REQUEST','${printerId}','{}'::jsonb)`);
     await assert.rejects(saved.run({operation:'RESERVE_DISPATCH',requestId:randomUUID(),jobId:job,details:{itemIds:[item]},client}),/CONNECTOR_MAINTENANCE_FENCED/);
     assert.equal(state(),'ISSUED','a pre-fence lease cannot become a physical reservation after fencing');
