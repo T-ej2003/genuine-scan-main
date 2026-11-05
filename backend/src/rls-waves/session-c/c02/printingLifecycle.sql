@@ -43,6 +43,17 @@ BEGIN
         AND NOT coalesce(lease.key=p_details->>'diagnosticRequestId' AND
           lease.value->>'printerId'=p_details->>'printerId' AND lease.value->>'state'='ACCEPTED',false))
     THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    -- Local diagnostics have a separate durable record on Printer. A connector
+    -- ACK is transport evidence, not physical confirmation, and must not let
+    -- the next automatic chunk use the same printer before reconciliation.
+    IF p_operation='CHECK' AND EXISTS (
+      SELECT 1 FROM public."Printer" p
+      WHERE p.id=p_details->>'printerId'
+        AND p.metadata->'pendingLocalAgentTestLabel' IS NOT NULL
+        AND p.metadata->'pendingLocalAgentTestLabel'->>'status' IS DISTINCT FROM 'CONFIRMED'
+        AND (p.metadata->'pendingLocalAgentTestLabel' ? 'claimedAt' OR
+          p.metadata->'pendingLocalAgentTestLabel'->>'status' IN ('CLAIMED','ACKED'))
+    ) THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
   END IF;
   IF p_operation IN ('LEASE','COMPLETE') THEN
     IF coalesce(p_details->>'requestId','') !~* '^[0-9a-f-]{36}$'
@@ -990,7 +1001,8 @@ BEGIN
         'settledDiagnostics',(SELECT count(*) FROM jsonb_each(coalesce(maintenance_snapshot->'diagnostics','{}'::jsonb)) lease
           WHERE lease.value->>'state'='CONFIRMED'),
         'localDiagnostics',coalesce((SELECT jsonb_agg(jsonb_build_object('printerId',p.id,'job',p.metadata->'pendingLocalAgentTestLabel') ORDER BY p.id)
-          FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'),'[]'::jsonb));
+          FROM public."Printer" p WHERE p.id=ANY(maintenance_printers) AND p.metadata ? 'pendingLocalAgentTestLabel'
+            AND p.metadata->'pendingLocalAgentTestLabel'->>'status' IS DISTINCT FROM 'CONFIRMED'),'[]'::jsonb));
       -- LIMIT is a detection bound, never a truncated authorizable inventory.
       IF jsonb_array_length(maintenance_inventory->'items')>512 OR octet_length(maintenance_inventory::text)>1000000
       THEN RAISE EXCEPTION 'MAINTENANCE_WORKSET_TOO_LARGE' USING ERRCODE='54000',
@@ -1546,6 +1558,9 @@ BEGIN
       FOR UPDATE;
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',printer_row."printerRegistrationId")::text,'CHECK',NULL,'{}'::jsonb);
     current_job:=printer_row.metadata->'pendingLocalAgentTestLabel';
+    IF current_job->>'status' IS DISTINCT FROM 'CONFIRMED' AND
+       (current_job ? 'claimedAt' OR current_job->>'status' IN ('CLAIMED','ACKED'))
+    THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
     IF current_job IS NOT NULL
        AND coalesce(current_job->>'status','') NOT IN ('CONFIRMED','FAILED','EXPIRED')
        AND nullif(current_job->>'expiresAt','')::timestamp without time zone>now_at
@@ -1643,10 +1658,16 @@ BEGIN
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',registration.id)::text,'CHECK',NULL,'{}'::jsonb);
+    IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+      WHERE ps."printerId"=printer_row.id AND (pi.state IN ('ISSUED','AGENT_ACKED','FROZEN') OR
+        (pi."printConfirmedAt" IS NULL AND (pi."dispatchedAt" IS NOT NULL OR
+          pi."agentAckedAt" IS NOT NULL OR nullif(pi."dispatchMetadata"->>'transportReference','') IS NOT NULL))))
+    THEN RAISE EXCEPTION 'DIAGNOSTIC_RECONCILIATION_REQUIRED' USING ERRCODE='55000'; END IF;
   END IF;
   IF current_job IS NULL THEN RETURN jsonb_build_object('available',false); END IF;
   expires_at:=nullif(current_job->>'expiresAt','')::timestamp without time zone;
-  IF expires_at IS NULL OR expires_at<=now_at THEN
+  IF p_operation='CLAIM' AND (expires_at IS NULL OR expires_at<=now_at) THEN
+    IF current_job->>'status' IS DISTINCT FROM 'PENDING' THEN RETURN jsonb_build_object('available',false); END IF;
     next_job:=current_job||jsonb_build_object(
       'status','EXPIRED','failedAt',now_at,
       'failedReason','The connector did not complete the printer test before expiry'
@@ -2071,7 +2092,7 @@ BEGIN
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
-    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,'{}'::jsonb);
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
       INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
@@ -2098,7 +2119,7 @@ BEGIN
           set_config('app.printing_printer_id',printer_row.id,true);
 
   IF p_operation='CLAIM' THEN
-    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,'{}'::jsonb);
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence"
       INTO item_row FROM public."PrintItem" pi
      WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'

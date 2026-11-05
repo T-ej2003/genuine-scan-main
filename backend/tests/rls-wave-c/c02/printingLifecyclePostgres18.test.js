@@ -738,18 +738,32 @@ async function main() {
   )`);
   assert.equal(testClaim.available, true);
   assert.equal(testClaim.testJobId, testJobId);
+  psql(admin, `UPDATE public."Printer" SET metadata=jsonb_set(metadata,
+    '{pendingLocalAgentTestLabel,expiresAt}',to_jsonb(now()-interval '1 minute'),false)
+    WHERE id='${ids.printer}'`);
+  denied(app, `SELECT app_rls.printing_test_label_job(
+    '${caps.maker}','${requestId()}','QUEUE','${ids.printer}','{}'::jsonb,'{}'::jsonb
+  )`, /DIAGNOSTIC_RECONCILIATION_REQUIRED/);
+  const automaticDuringLocalDiagnostic = () => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','local_diag_claim_${requestId()}',now()::timestamp,
+    '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.printer}',NULL,NULL,'{}'::jsonb)`;
+  denied(app, automaticDuringLocalDiagnostic(), /DIAGNOSTIC_RECONCILIATION_REQUIRED/);
   assert.equal(json(app, `SELECT app_rls.printing_test_label_job(
     NULL,'${requestId()}','ACK','${ids.printer}',
     jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent',
       'deviceFingerprint','printing-device','nonce','test_ack_nonce_00001','issuedAt',now()),
     '{"testJobId":"${testJobId}","metadata":{"deviceJobRef":"spool-test"}}'::jsonb
   )`).matched, true);
+  denied(app, automaticDuringLocalDiagnostic(), /DIAGNOSTIC_RECONCILIATION_REQUIRED/,
+    "a test ACK must not release production work before physical confirmation");
   assert.equal(json(app, `SELECT app_rls.printing_test_label_job(
     NULL,'${requestId()}','CONFIRM','${ids.printer}',
     jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent',
       'deviceFingerprint','printing-device','nonce','test_confirm_nonce1','issuedAt',now()),
     '{"testJobId":"${testJobId}","payloadType":"ZPL","deviceJobRef":"spool-test","confirmationMode":"LOCAL_QUEUE"}'::jsonb
   )`).matched, true);
+  assert.equal(json(app, automaticDuringLocalDiagnostic()).available, false,
+    "confirmed local diagnostic must release the automatic dispatch gate");
   assert.equal(psql(admin, `SELECT metadata->'pendingLocalAgentTestLabel'->>'status' FROM public."Printer" WHERE id='${ids.printer}'`), "CONFIRMED");
   assert(psql(admin, `SELECT metadata->>'lastTestLabelConfirmedAt' FROM public."Printer" WHERE id='${ids.printer}'`));
   assert.equal(Number(psql(admin, `SELECT count(*) FROM public."AuditLog"
@@ -782,6 +796,16 @@ async function main() {
   assert.equal(created.preparedCount, 1);
   assert.equal(new Date(`${psql(admin, `SELECT to_char("tokenIssuedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS') FROM public."QRCode" WHERE id='${ids.qr}'`)}Z`).toISOString(), signedAt);
   const immutableCode = psql(admin, `SELECT code FROM public."QRCode" WHERE id='${ids.qr}'`);
+  psql(admin, `UPDATE public."Printer" SET metadata=jsonb_set(
+    jsonb_set(metadata,'{pendingLocalAgentTestLabel,status}','"ACKED"'::jsonb,false),
+    '{pendingLocalAgentTestLabel,claimedAt}',to_jsonb(now()-interval '2 minutes'),true)
+    WHERE id='${ids.printer}'`);
+  denied(app, automaticDuringLocalDiagnostic(), /DIAGNOSTIC_RECONCILIATION_REQUIRED/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" pi JOIN public."PrintSession" ps
+    ON ps.id=pi."printSessionId" WHERE ps."printJobId"='${created.job.id}' AND pi.state='RESERVED'`), "1",
+    "diagnostic gate must reject the actual claim before RESERVED advances to ISSUED");
+  psql(admin, `UPDATE public."Printer" SET metadata=jsonb_set(metadata,
+    '{pendingLocalAgentTestLabel,status}','"CONFIRMED"'::jsonb,false) WHERE id='${ids.printer}'`);
 
   const claim = json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','claim_nonce_00001',now()::timestamp,
@@ -1004,6 +1028,9 @@ async function main() {
   const fenceStatus = json(app, maintenanceSql(caps.maker,'MAINTENANCE_STATUS'));
   assert.equal(fenceStatus.state,'DISPATCH_FENCED');
   assert.equal(fenceStatus.upgradeAllowed,false,'backend fencing alone must never authorize legacy replacement');
+  const settledLocalDiagnostics=json(app,maintenanceSql(caps.maker,'MAINTENANCE_INVENTORY'));
+  assert.equal(settledLocalDiagnostics.inventory.localDiagnostics.length,0,
+    'physically confirmed local diagnostic history does not require reconciliation');
   const fencedAck = json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','maintenance_ack_1',now()::timestamp,
     '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash('maint-ack')}','synthetic-spool','{}'::jsonb)`);
