@@ -16,13 +16,24 @@ Build the latest packaged connector artifacts from the `backend` folder with:
 npm run connector:release
 ```
 
+Its Windows ZIP is a **non-installable inspection fixture** kept under
+`.connector-build`, outside release/download directories. It is omitted from
+the download manifest. Do not run its unsigned runtime or scripts. Executable
+Windows testing and publication require the existing governed signed Windows
+workflow. `connector:windows:publish-zip` is retired and fails before mutation;
+the generic builder also rejects signed/unsigned Windows artifact-path overrides.
+The approved signed publisher remains separate. A macOS manifest refresh
+preserves an existing trusted Windows record for the same version.
+
 Prepare the Windows installer scaffold from the `backend` folder with:
 
 ```bash
 npm run connector:windows:build-installer
 ```
 
-That command stages a real Windows installer project and, on a Windows machine with Inno Setup installed, can produce an unsigned `.exe` installer for internal testing before signing is added.
+That command stages a non-installable development fixture and can compile it
+with Inno Setup. Installation is deliberately disabled; it is not a substitute
+for the protected signed candidate workflow.
 
 When the Apple release credentials are configured, that single command now:
 

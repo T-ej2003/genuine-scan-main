@@ -121,31 +121,30 @@ const run = async () => {
   );
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH"),
-    "Release packaging should support publishing a separately signed Windows installer"
+    "Generic packaging should reject path overrides and require the governed signed Windows workflow"
   );
   assert(
     packagingScript.includes("readConnectorSourceVersion") &&
       packagingScript.includes("minimumBuildVersion = version") &&
-      packagingScript.includes("buildVersion: version"),
+      packagingScript.includes("requiredProtocolVersion,"),
     "Release packaging should default to the source connector version and stamp build metadata"
   );
   assert(
     packagingScript.includes("WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH"),
-    "Release packaging should support publishing an unsigned Windows test installer"
+    "Generic packaging should reject the former unsigned installer override"
   );
   assert(
-    packagingScript.includes('windowsTrustMode: "unsigned-test"') && packagingScript.includes('windowsTrustMode: "trusted"'),
-    "Release packaging should publish explicit Windows trust modes"
+    packagingScript.includes('NON-INSTALLABLE INSPECTION FIXTURE') && !packagingScript.includes('windowsTrustMode: "unsigned-test"'),
+    "Unsigned Windows inspection output must not be advertised as a runnable download"
   );
   assert(
-    packagingScript.includes("WINDOWS_CONNECTOR_PUBLISHER_NAME"),
-    "Release packaging should capture the Windows publisher name for signed installers"
+    packagingScript.includes("governed signed Windows workflow"),
+    "Windows publishing must use the existing governed signing workflow"
   );
   assert(
-    packagingScript.includes('label: "Windows test package"') &&
-      packagingScript.includes('label: "Windows test installer"') &&
-      packagingScript.includes('label: "Windows installer"'),
-    "Release packaging should distinguish unsigned packages, unsigned installers, and signed installers"
+    packagingScript.includes('INSPECTION-ONLY.zip') &&
+      signedReleasePublisher.includes('label: "Windows installer"'),
+    "Local inspection output and the governed signed Windows installer must remain distinct"
   );
   assert(
     installerBuilder.includes("MSCQR-Connector.iss.template") &&
@@ -310,8 +309,8 @@ const run = async () => {
     "Windows README should explain the Smart App Control block path"
   );
   assert(
-    readme.includes("unsigned Windows test package for internal validation only"),
-    "Windows README should call the ZIP release an internal test package"
+    readme.includes("Unsigned inspection ZIPs are not installable"),
+    "Windows README must distinguish non-installable inspection output from signed setup"
   );
 
   const releaseZip = await JSZip.loadAsync(fs.readFileSync(releaseZipPath));
