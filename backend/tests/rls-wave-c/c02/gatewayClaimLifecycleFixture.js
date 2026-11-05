@@ -17,7 +17,7 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
   const renderer=require('../../../dist/printing/pdfLabel');
   const saved={send:socket.sendRawPayloadToNetworkPrinter,status:zebra.getZebraTotalLabelCount,render:renderer.renderPdfLabelBuffer};
   let submitted=0,scenario,mustClaim;
-  socket.sendRawPayloadToNetworkPrinter=async()=>{submitted++;throw new Error('fixture disconnect after physical boundary');};
+  socket.sendRawPayloadToNetworkPrinter=async()=>{submitted++;if(scenario==='lost-ack')return {bytesWritten:1};throw new Error('fixture disconnect after physical boundary');};
   zebra.getZebraTotalLabelCount=async()=>{if(scenario==='status')throw new Error('fixture status unavailable');return 0;};
   renderer.renderPdfLabelBuffer=async()=>{throw new Error('fixture rendering failed');};
   const gatewayPath=require.resolve('../../../dist/local-print-agent/gateway');delete require.cache[gatewayPath];
@@ -38,7 +38,16 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
     psql(admin,`UPDATE public."QRCode" SET "tokenHash"='${tokenHash}' WHERE id='${qr.id}'`);
     const state=()=>psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${item}'`);
     const events=()=>psql(admin,`SELECT count(*) FROM public."PrintItemEvent" WHERE "printItemId"='${item}' AND "eventType"='FAILED'`);
-    for(scenario of ['payload','configuration','status','render','reserved','lost-failure-response']) {
+    psql(admin,`UPDATE public."PrintJob" SET status='PENDING' WHERE id='${job}';UPDATE public."PrintItem" SET state='RESERVED' WHERE id='${item}';
+      UPDATE public."QRCode" SET "tokenHash"='${hash('invalid-token-integrity')}' WHERE id='${qr.id}'`);
+    const attempts=psql(admin,`SELECT "attemptCount" FROM public."PrintItem" WHERE id='${item}'`);
+    const badPayload=await originalFetch(`${base}/api/print-gateway/direct/claim`,{method:'POST',headers:{'content-type':'application/json','x-printer-gateway-id':'isolated-maintenance-gateway','x-printer-gateway-secret':secret},body:'{}'});
+    assert.equal(badPayload.status,500,'backend payload integrity error must abort the claim transaction');
+    assert.equal(state(),'RESERVED','backend rendering exception must roll back ISSUED');
+    assert.equal(psql(admin,`SELECT "attemptCount" FROM public."PrintItem" WHERE id='${item}'`),attempts,'failed payload preparation must not consume a claim attempt');
+    psql(admin,`UPDATE public."QRCode" SET "tokenHash"='${tokenHash}' WHERE id='${qr.id}'`);
+    console.log('PASS PostgreSQL gateway backend payload error rolls back claim');
+    for(scenario of ['payload','configuration','status','render','rejected-write','ambiguous-write','existing-reservation','reserved','lost-ack','lost-failure-response']) {
       mustClaim=true;
       process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR=path.join(root,scenario);
       const mode=scenario==='render'?'NETWORK_IPP':'NETWORK_DIRECT';
@@ -47,6 +56,18 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
         UPDATE public."PrintSession" SET status='ACTIVE' WHERE "printJobId"='${job}';
         UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED' WHERE id='${item}';`);
       let lost=false;
+      if(scenario==='existing-reservation') {
+        await fs.mkdir(process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR,{recursive:true});
+        await fs.writeFile(path.join(process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR,`${hash(item)}.json`),'{interrupted reservation');
+      }
+      const realOpen=fs.open;
+      fs.open=async(file,...args)=>{
+        const physical=String(file).endsWith(`${hash(item)}.json`);
+        if(physical&&scenario==='rejected-write')throw Object.assign(new Error('fixture rejected reservation'),{code:'EACCES'});
+        const handle=await realOpen(file,...args);
+        if(physical&&scenario==='ambiguous-write')handle.sync=async()=>{throw new Error('fixture fsync failed after creation');};
+        return handle;
+      };
       global.fetch=async(url,options)=>{
         const response=await originalFetch(url,options);
         if(String(url).endsWith('/claim')&&response.ok) {
@@ -59,16 +80,17 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
           return new Response(JSON.stringify(body),{status:response.status,headers:{'content-type':'application/json'}});
         }
         if(scenario==='lost-failure-response'&&String(url).endsWith('/fail')&&!lost){lost=true;throw new Error('lost FAIL response after database commit');}
+        if(scenario==='lost-ack'&&String(url).endsWith('/ack'))throw new Error('lost transport acknowledgement after database commit');
         return response;
       };
       const before=Number(events()),beforeSubmits=submitted;
-      await assert.rejects(runGatewayCycle(mode));
+      try {await assert.rejects(runGatewayCycle(mode));} finally {fs.open=realOpen;}
       mustClaim=false;
-      if(scenario==='reserved') {
-        assert.equal(state(),'ISSUED','post-reservation uncertainty remains explicitly unreconciled');
+      if(['reserved','ambiguous-write','existing-reservation','lost-ack'].includes(scenario)) {
+        assert.equal(state(),scenario==='lost-ack'?'AGENT_ACKED':'ISSUED','post-reservation uncertainty remains explicitly unreconciled');
         assert.equal(Number(events()),before,'uncertain dispatch must never produce definite FAIL');
         // DB never reclaims ISSUED on subsequent polls.
-        await runGatewayCycle(mode);assert.equal(submitted,beforeSubmits+1);
+        await runGatewayCycle(mode);assert.equal(submitted,beforeSubmits+(['reserved','lost-ack'].includes(scenario)?1:0));
       } else {
         assert.equal(state(),'FAILED',`${scenario}: authoritative pre-dispatch failure cannot strand ISSUED`);
         assert.equal(psql(admin,`SELECT status FROM public."PrintJob" WHERE id='${job}'`),'FAILED');

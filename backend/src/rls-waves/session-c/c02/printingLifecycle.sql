@@ -2632,8 +2632,8 @@ BEGIN
   END IF;
   INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
   VALUES(gen_random_uuid()::text,item_row.id,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END,
-    item_row.state,CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END,
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemEventType",
+    item_row.state,CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemState",
     p_details,job_row."manufacturerId",now_at);
   INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",

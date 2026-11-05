@@ -128,14 +128,25 @@ export const gatewayHeartbeat = async (req: Request, res: Response) => {
   } });
 };
 
-export const claimGatewayIppJob = (req: Request, res: Response) => claim(req, res, PrinterConnectionType.NETWORK_IPP);
-export const claimGatewayDirectJob = (req: Request, res: Response) => claim(req, res, PrinterConnectionType.NETWORK_DIRECT);
-export const ackGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "ACK");
-export const confirmGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "CONFIRM");
-export const failGatewayIppJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_IPP, "FAIL");
-export const ackGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "ACK");
-export const confirmGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "CONFIRM");
-export const failGatewayDirectJob = (req: Request, res: Response) => event(req, res, PrinterConnectionType.NETWORK_DIRECT, "FAIL");
+// Express 4 does not forward rejected handler promises. In particular, a
+// fenced claim or payload-generation failure must return an error, not crash
+// the backend and lose the caller's acknowledgement channel.
+const gatewayRequest = async (res: Response, action: () => Promise<unknown>) => {
+  try { return await action(); } catch (error: any) {
+    const code=String(error?.meta?.code || error?.code || '');
+    const status=code==='42501'?403:code==='55000'?409:500;
+    console.error('Gateway lifecycle operation rejected', { databaseCode: code });
+    return res.status(status).json({ success:false, error:status===409?'Gateway work is fenced or requires reconciliation.':status===403?'Gateway operation is not authorized.':'Gateway operation failed; no automatic replay is authorized.' });
+  }
+};
+export const claimGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>claim(req, res, PrinterConnectionType.NETWORK_IPP));
+export const claimGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>claim(req, res, PrinterConnectionType.NETWORK_DIRECT));
+export const ackGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "ACK"));
+export const confirmGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "CONFIRM"));
+export const failGatewayIppJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_IPP, "FAIL"));
+export const ackGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "ACK"));
+export const confirmGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "CONFIRM"));
+export const failGatewayDirectJob = (req: Request, res: Response) => gatewayRequest(res,()=>event(req, res, PrinterConnectionType.NETWORK_DIRECT, "FAIL"));
 
 const testGateway = async (req: Request) => {
   const auth = await gateway(req);
