@@ -4,6 +4,7 @@ const crypto = require("node:crypto");
 const { execFileSync } = require("node:child_process");
 const JSZip = require("jszip");
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
+const { LOCAL_AGENT_MIN_VERSION_HINT } = require("../dist/services/localAgentProtocol");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -95,8 +96,9 @@ const run = async () => {
 
   assert(compareConnectorVersions(sourceVersion, "2026.5.19") > 0, "Connector source version must be newer than 2026.5.19");
   assert(manifest.latestVersion === sourceVersion, "Connector manifest latestVersion must match source buildVersion");
-  assert(manifest.minimumBuildVersion === (signedWindows?.installationScope === "fresh-install-only" ? "2026.11.6.1" : sourceVersion),
-    "Fresh-only publication must preserve the existing-session minimum build");
+  const expectedMinimum = signedWindows && signedWindows.installationScope !== "fresh-install-only" ? sourceVersion : LOCAL_AGENT_MIN_VERSION_HINT;
+  assert(manifest.minimumBuildVersion === expectedMinimum, "Pending or fresh-only release must preserve the existing-session minimum build");
+  assert(latest.release.minimumBuildVersion === expectedMinimum, "Public release must advertise the effective existing-session minimum build");
   assert(latestRelease, "Connector manifest latestVersion must reference a release");
   if (!windows) {
     assert(latest.release.productionSignedAvailable === false, "Pending latest release should report no signed Windows connector yet");
