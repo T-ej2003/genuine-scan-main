@@ -47,6 +47,12 @@ const latestRelease = manifest.releases?.find((release) => release.version === m
 if (!latestRelease) {
   throw new Error("Connector release manifest latestVersion does not match any release.");
 }
+const validVersion = (value) => /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(value);
+const compareVersion = (left, right) => left.localeCompare(right, "en", { numeric: true });
+if (!validVersion(manifest.latestVersion) || manifest.releases.some((release) =>
+  !validVersion(release.version) || (release.publishedAt && compareVersion(release.version, manifest.latestVersion) > 0))) {
+  throw new Error("Connector release manifest has an invalid or stale latestVersion.");
+}
 
 fs.rmSync(outputRoot, { recursive: true, force: true });
 fs.mkdirSync(outputReleaseRoot, { recursive: true });
@@ -58,22 +64,29 @@ const latestRuntimeRelease = {
 
 let referencedArtifactsCopied = 0;
 for (const [platformKey, platform] of Object.entries(latestRelease.platforms || {})) {
-  if (!platform?.relativePath) continue;
-  if (copyFilePreservingPath(platform.relativePath)) {
-    latestRuntimeRelease.platforms[platformKey] = platform;
-    referencedArtifactsCopied += 1;
+  if (!latestRelease.publishedAt) continue;
+  if (platformKey === "windows" && (platform?.signatureStatus !== "signed" || !["production", "trusted"].includes(platform.trustLevel))) {
+    throw new Error("Published Windows connector is not signed and production-trusted.");
   }
+  if (!platform?.relativePath || !copyFilePreservingPath(platform.relativePath)) {
+    throw new Error(`Published connector artifact is missing: ${platformKey}`);
+  }
+  latestRuntimeRelease.platforms[platformKey] = platform;
+  referencedArtifactsCopied += 1;
 }
 
 const latestDir = path.join(sourceReleaseRoot, manifest.latestVersion);
-const latestDirFilesCopied = copyDirectory(latestDir, path.join(outputReleaseRoot, manifest.latestVersion));
+const latestDirFilesCopied = latestRelease.publishedAt ? copyDirectory(latestDir, path.join(outputReleaseRoot, manifest.latestVersion)) : 0;
 
 // Keep the previous published signed installer available while the latest
 // connector is limited to fresh installations.
-const previous = manifest.releases?.find((release) =>
-  release.version !== manifest.latestVersion && release.publishedAt &&
-  release.platforms?.windows?.signatureStatus === "signed" &&
-  release.platforms.windows.trustLevel === "production");
+const previous = latestRelease.publishedAt && latestRelease.platforms?.windows?.installationScope === "fresh-install-only" &&
+  latestRelease.platforms.windows.signatureStatus === "signed" && latestRelease.platforms.windows.trustLevel === "production" &&
+  manifest.releases.filter((release) =>
+    compareVersion(release.version, manifest.latestVersion) < 0 && release.publishedAt &&
+    release.platforms?.windows?.signatureStatus === "signed" &&
+    release.platforms.windows.trustLevel === "production")
+    .sort((left, right) => compareVersion(right.version, left.version))[0];
 let previousRuntimeRelease;
 if (previous) {
   const platform = previous.platforms.windows;
