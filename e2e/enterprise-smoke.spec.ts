@@ -94,7 +94,7 @@ const latestConnectorRelease = connectorManifest.releases?.find(
   (release) => release.version === connectorManifest.latestVersion
 );
 const E2E_LOCAL_AGENT_PROTOCOL_VERSION = String(latestConnectorRelease?.requiredProtocolVersion || "local-agent-direct-v2");
-const E2E_LOCAL_AGENT_BUILD_VERSION = `${localAgentProtocol.LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION}-e2e`;
+const E2E_LOCAL_AGENT_BUILD_VERSION = localAgentProtocol.LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION;
 const E2E_TRANSPORT_DIAGNOSTICS_VERSION = String(
   latestConnectorRelease?.transportDiagnosticsVersion || "transport-diagnostics-v1"
 );
