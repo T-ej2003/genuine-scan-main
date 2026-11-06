@@ -6,8 +6,6 @@ cd /d "%~dp0"
 set "INSTALL_SCRIPT=%~dp0install-startup-task.ps1"
 set "CONNECTOR_EXE=%~dp0bin\mscqr-local-print-agent.exe"
 set "DIALOG_TITLE=MSCQR Connector Setup"
-set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-if exist "%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe" set "POWERSHELL_EXE=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
 
 if not exist "%INSTALL_SCRIPT%" (
   echo.
@@ -38,13 +36,13 @@ set "MSCQR_PACKAGED_INSTALL=1"
 set "MSCQR_WEB_APP_BASE_URL=__MSCQR_WEB_APP_BASE_URL__"
 set "MSCQR_CONNECTOR_VERSION=__MSCQR_CONNECTOR_VERSION__"
 
-"%POWERSHELL_EXE%" -NoProfile -NonInteractive -Command "$signature = Get-AuthenticodeSignature -LiteralPath $env:INSTALL_SCRIPT; $runtime = Get-AuthenticodeSignature -LiteralPath $env:CONNECTOR_EXE; if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or $runtime.Status -ne 'Valid' -or -not $runtime.TimeStamperCertificate -or $signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint -or $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'L&D Health Ltd') { exit 1 }"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "$signature = Get-AuthenticodeSignature -LiteralPath $env:INSTALL_SCRIPT; $runtime = Get-AuthenticodeSignature -LiteralPath $env:CONNECTOR_EXE; if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate -or $runtime.Status -ne 'Valid' -or -not $runtime.TimeStamperCertificate -or $signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint -or $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne 'L&D Health Ltd') { exit 1 }"
 if errorlevel 1 (
   echo MSCQR Connector setup script signature verification failed.
   exit /b 1
 )
 
-"%POWERSHELL_EXE%" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "%INSTALL_SCRIPT%"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "%INSTALL_SCRIPT%"
 set "EXITCODE=%ERRORLEVEL%"
 
 if "%EXITCODE%"=="10" (

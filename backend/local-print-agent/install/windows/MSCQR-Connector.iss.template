@@ -69,12 +69,6 @@ begin
   Result := Chr(39) + Result + Chr(39);
 end;
 
-function NativePowerShell: String;
-begin
-  if IsWin64 then Result := ExpandConstant('{sysnative}\WindowsPowerShell\v1.0\powershell.exe')
-  else Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-end;
-
 function VerifyUpgradePayloadSignatures: Boolean;
 var Code: Integer; Params, Command, Payload: String;
 begin
@@ -92,7 +86,7 @@ begin
     '$signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint) { exit 1 } }';
   Params := '-NoProfile -NonInteractive -Command "' + Command + '"';
   Code := -1;
-  Result := Exec(NativePowerShell, Params,
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
   Result := Result and (Code = 0);
 end;
@@ -107,7 +101,7 @@ begin
     '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -AuthorizationFile "' +
     ExpandConstant('{param:MSCQRAUTH|}') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
   Code := -1;
-  Result := Exec(NativePowerShell, Params,
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
     ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
   Result := Result and (Code = 0);
 end;

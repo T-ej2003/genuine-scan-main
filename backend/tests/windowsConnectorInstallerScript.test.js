@@ -207,7 +207,7 @@ const run = async () => {
     "Windows installer must expand the supported per-user profile environment constant before signing"
   );
   const supportedInnoConstants = new Set([
-    "app", "cmd", "tmp", "srcexe", "sys", "sysnative", "%USERPROFILE",
+    "app", "cmd", "tmp", "srcexe", "sys", "%USERPROFILE",
     "param:MSCQRAUTH|", "param:MSCQRRECOVER|",
   ]);
   for (const [, pathExpression] of installerTemplate.matchAll(/ExpandConstant\('([^']+)'\)/g)) {
@@ -321,8 +321,6 @@ const run = async () => {
   const scriptLaunch = installCmd.indexOf('-ExecutionPolicy RemoteSigned -File "%INSTALL_SCRIPT%"');
   assert(
     scriptSignatureGate >= 0 && scriptLaunch > scriptSignatureGate &&
-      installCmd.includes('if exist "%SystemRoot%\\Sysnative\\WindowsPowerShell\\v1.0\\powershell.exe" set "POWERSHELL_EXE=') &&
-      (installCmd.match(/"%POWERSHELL_EXE%" -NoProfile -NonInteractive/g) || []).length === 2 &&
       installCmd.includes("$signature.Status -ne 'Valid'") &&
       installCmd.includes("$signature.TimeStamperCertificate") &&
       installCmd.includes("$runtime.Status -ne 'Valid'") &&
@@ -354,9 +352,6 @@ const run = async () => {
   );
   assert(
     installerTemplate.includes('function VerifyUpgradePayloadSignatures: Boolean;') &&
-      installerTemplate.includes('function NativePowerShell: String;') &&
-      installerTemplate.includes("if IsWin64 then Result := ExpandConstant('{sysnative}\\WindowsPowerShell\\v1.0\\powershell.exe')") &&
-      (installerTemplate.match(/Exec\(NativePowerShell, Params,/g) || []).length === 2 &&
       installerTemplate.includes('Result := VerifyUpgradePayloadSignatures;') &&
       installerTemplate.includes("$runtime.Status -ne ''Valid''") &&
       installerTemplate.includes('$signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint') &&

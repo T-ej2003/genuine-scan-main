@@ -99,16 +99,14 @@ jobs:
             $wrapperOutput | Select-Object -Last 20 | Write-Host
             & "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host ('32-bit PowerShell: ' + (-not [Environment]::Is64BitProcess)); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host '32-bit security module: PASS' } catch { Write-Host ('32-bit security module: FAIL ' + `$_.Exception.Message) }"
             & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host ('64-bit PowerShell: ' + [Environment]::Is64BitProcess); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host '64-bit security module: PASS' } catch { Write-Host ('64-bit security module: FAIL ' + `$_.Exception.Message) }"
-            $patchedCmd = (Get-Content 'backend/local-print-agent/install/windows/Install Connector.cmd' -Raw).Replace('__MSCQR_WEB_APP_BASE_URL__', 'https://mscqr.com').Replace('__MSCQR_CONNECTOR_VERSION__', '2026.11.6.2')
-            Set-Content -LiteralPath (Join-Path $installRoot 'Install Connector.cmd') -Value $patchedCmd -Encoding ascii
-            $patchedOutput = & (Join-Path $installRoot 'Install Connector.cmd') /MSCQRSILENT 2>&1
-            $patchedExit = $LASTEXITCODE
-            Write-Host "Source-patched wrapper diagnostic exit: $patchedExit"
-            $patchedOutput | Select-Object -Last 20 | Write-Host
-            if (Test-Path $receipt) {
-              $patchedReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
-              Write-Host "Source-patched receipt outcome=$($patchedReceipt.outcome); state=$($patchedReceipt.state); version=$($patchedReceipt.installedVersion)"
-            }
-            if ($patchedExit -notin @(0,10)) { throw 'Source-patched wrapper did not initialize on clean runner.' }
+            $cmdProbe = Join-Path $installRoot 'probe-module.cmd'
+            @(
+              '@echo off',
+              'setlocal EnableExtensions',
+              'cd /d "%~dp0"',
+              '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host (''CMD child bitness: '' + [Environment]::Is64BitProcess); Write-Host (''CMD child language mode: '' + $ExecutionContext.SessionState.LanguageMode); Write-Host (''CMD child module path: '' + $env:PSModulePath); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host ''CMD child import: PASS'' } catch { Write-Host (''CMD child import: FAIL '' + $_.Exception.ToString()) }"'
+            ) | Set-Content -LiteralPath $cmdProbe -Encoding ascii
+            & $cmdProbe 2>&1 | Select-Object -Last 25 | Write-Host
+            Write-Host 'Diagnostic only: the pinned candidate remains uncertified after installer exit 20.'
           }
           if (Test-Path $setupLog) { Get-Content $setupLog -Tail 12 | Write-Host }
