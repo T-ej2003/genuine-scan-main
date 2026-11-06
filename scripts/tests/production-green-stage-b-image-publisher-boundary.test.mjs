@@ -348,10 +348,12 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
 });
 
 test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first, and deployment-free", () => {
-  assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), ["release_sha"]);
+  assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), ["release_sha", "connector_fresh_install_distribution"]);
+  assert.deepEqual(Object.keys(backendPublisher.on.workflow_call.inputs), ["release_sha", "connector_fresh_install_distribution"]);
+  assert.deepEqual(backendPublisher.on.workflow_dispatch.inputs.connector_fresh_install_distribution, { description: "Include the certified 2026.11.6.2 fresh-install distribution artifact", required: false, type: "boolean", default: false });
   assert.deepEqual(backendPublisher.permissions, { contents: "read" });
   const job = backendPublisher.jobs["publish-and-verify"];
-  assert.deepEqual(job.permissions, { contents: "read", "id-token": "write" });
+  assert.deepEqual(job.permissions, { contents: "read", actions: "read", "id-token": "write" });
   assert.equal(job.environment, publisherEnvironment);
   assert.equal(job.env.AWS_REGION, "eu-west-2");
   assert.equal(job.env.BACKEND_ECR_REPO, "mscqr-backend");
@@ -362,6 +364,9 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /apply-ecr-repository-controls\.sh backend/);
   assert.match(text, /publish-ecs-images\.sh backend/);
   assert.match(text, /BACKEND_IMAGE_TAG/);
+  assert.match(text, /\$\{RELEASE_SHA\}-connector-2026\.11\.6\.2/);
+  assert.match(text, /13518653511/);
+  assert.match(text, /f048514be6ca5c0c09eac5f24b1a39487b6b3890f6b7ca7a5274c9661b6d4e25/);
   assert.match(text, /backend-only/);
   assert.match(text, /SOURCE_RELEASE_SHA/);
   assert.doesNotMatch(text, /IMAGE_TAG=\"\$RELEASE_SHA\"/);
