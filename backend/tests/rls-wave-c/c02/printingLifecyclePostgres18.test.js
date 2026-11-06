@@ -973,7 +973,8 @@ async function main() {
   try {
     assert((await httpList("checker",200)).data.some(row=>row.id===reissueId));
     assert((await httpList("maker",200)).data.some(row=>row.id===reissueId));
-    await httpList("checker",403,{"x-request-id":"not-a-uuid"});
+    assert((await httpList("checker",200,{"x-request-id":"not-a-uuid"})).data.some(row=>row.id===reissueId),
+      "server request-ID normalization preserves authorized database-backed printing reads");
     assert.deepEqual((await httpList("outsider",200)).data,[]);
     await httpList(null,401);
     await httpList("checker",401,{"x-database-session-capability":"invalid"});
