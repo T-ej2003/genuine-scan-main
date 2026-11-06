@@ -47,10 +47,15 @@ test('fresh-install publication reuses only the attested signed candidate after 
   assert.match(source, /\.digest\.sha256 -ceq \$expected/);
   const install = job.steps.find(step => step.name === 'Certify first installation without maintenance authorization').run;
   assert(!/\$home\b/i.test(install), 'PowerShell HOME is a read-only automatic variable');
-  assert.match(install, /Start-Process.*-Wait -PassThru/);
+  assert.match(install, /Start-Process.*-PassThru/);
+  assert(!/Start-Process.*-Wait/.test(install), 'installer wait must not include persistent descendants');
+  assert.match(install, /\$setup\.WaitForExit\(120000\)/);
+  assert.match(install, /Fresh installer process timed out after 120 seconds/);
   assert.match(install, /\/VERYSILENT/);
   assert.match(install, /\$setup[.]ExitCode/);
   assert.match(install, /install-result[.]json/);
+  assert.match(install, /MSCQR Connector[.]vbs/);
+  assert.match(install, /start-local-print-agent[.]cmd/);
   assert.match(install, /status[.]buildVersion/);
   assert(!install.includes('/MSCQRAUTH='));
   const publish = job.steps.find(step => step.name === 'Stage fresh-install-only release files for review');
