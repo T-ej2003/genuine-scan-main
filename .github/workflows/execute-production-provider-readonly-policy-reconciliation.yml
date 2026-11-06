@@ -3,7 +3,7 @@ name: Execute production ProviderReadOnly policy reconciliation
 on:
   workflow_dispatch:
     inputs:
-      operation: { description: Isolated operation, type: choice, options: [reconcile, export-journals], default: reconcile, required: true }
+      operation: { description: Isolated operation, type: choice, options: [reconcile, export-journals, retire-v1], default: reconcile, required: true }
       recipient_public_key_base64: { description: Export recipient RSA public key only, type: string, required: false }
       recipient_public_key_sha256: { description: Export recipient SPKI DER SHA256, type: string, required: false }
       source_sha: { description: Protected main source SHA, required: true, type: string }
@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   execute:
-    if: ${{ inputs.operation == 'reconcile' || inputs.operation == '' }}
+    if: ${{ inputs.operation == 'reconcile' || inputs.operation == '' || inputs.operation == 'retire-v1' }}
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -79,9 +79,15 @@ jobs:
           PREPARATION_FILE_SHA256: ${{ inputs.preparation_file_sha256 }}
           AUTHORIZATION_WORKFLOW_RUN_ID: ${{ inputs.authorization_workflow_run_id }}
           AUTHORIZATION_WORKFLOW_RUN_ATTEMPT: ${{ inputs.authorization_workflow_run_attempt }}
+          OPERATION: ${{ inputs.operation }}
         run: |
           set -euo pipefail
-          node scripts/aws/reconcile-production-provider-readonly-policy.mjs --mode execute \
+          case "$OPERATION" in
+            retire-v1) mode=execute-retirement ;;
+            reconcile|'') mode=execute ;;
+            *) exit 1 ;;
+          esac
+          node scripts/aws/reconcile-production-provider-readonly-policy.mjs --mode "$mode" \
             --source-sha "$SOURCE_SHA" \
             --preparation "$RUNNER_TEMP/provider-readonly/preparation.json" \
             --preparation-file-sha256 "$PREPARATION_FILE_SHA256" \
