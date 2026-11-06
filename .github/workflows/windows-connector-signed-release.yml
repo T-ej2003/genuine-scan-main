@@ -12,6 +12,7 @@ on:
           - build_verify_only
           - publish
           - certify_fresh_install
+          - diagnose_fresh_install
           - publish_fresh_install
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
@@ -466,7 +467,7 @@ jobs:
 
   fresh-install:
     name: Certify pinned signed installer for fresh installation
-    if: github.event_name == 'workflow_dispatch' && (inputs.execution_mode == 'certify_fresh_install' || inputs.execution_mode == 'publish_fresh_install')
+    if: github.event_name == 'workflow_dispatch' && (inputs.execution_mode == 'certify_fresh_install' || inputs.execution_mode == 'diagnose_fresh_install' || inputs.execution_mode == 'publish_fresh_install')
     runs-on: windows-2022
     environment: production-signing
     permissions:
@@ -483,13 +484,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           INPUT_SIGNED_CANDIDATE_RUN_ID: ${{ inputs.signed_candidate_run_id }}
           INPUT_SIGNED_INSTALLER_SHA256: ${{ inputs.signed_installer_sha256 }}
+          INPUT_EXECUTION_MODE: ${{ inputs.execution_mode }}
         run: |
-          if ($env:GITHUB_REF -cne 'refs/heads/main') { throw 'Fresh-install certification requires protected main.' }
-          $source = $env:GITHUB_SHA
+          if ($env:GITHUB_REF -cne 'refs/heads/main' -and
+              ($env:INPUT_EXECUTION_MODE -cne 'diagnose_fresh_install' -or
+               $env:GITHUB_REF -cne 'refs/heads/fix/windows-fresh-install-receipt')) {
+            throw 'Fresh-install certification requires protected main.'
+          }
+          $source = 'e3b2686cab560a613aedae7e99422e22a27cb646'
           $expected = "$env:INPUT_SIGNED_INSTALLER_SHA256".Trim().ToLowerInvariant()
           if ($env:INPUT_SIGNED_CANDIDATE_RUN_ID -cnotmatch '^[1-9][0-9]{0,17}$' -or
               $expected -cnotmatch '^[0-9a-f]{64}$') { throw 'Exact signed run ID and installer SHA-256 are required.' }
           $runId = [long]$env:INPUT_SIGNED_CANDIDATE_RUN_ID
+          if ($runId -ne 42199211978 -or $expected -cne '91b3f52eafd625243880f160fc639916f8de9df17261bcdcccb69018ea71faa9') {
+            throw 'This certification is bound to the verified signed candidate.'
+          }
           $name = "mscqr-windows-candidate-2026.11.6.2-$source"
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0) { throw 'Signed candidate run lookup failed.' }
@@ -503,7 +512,10 @@ jobs:
               $run.event -cne 'workflow_dispatch' -or $run.conclusion -cne 'success' -or
               $run.head_branch -cne 'main' -or $run.head_sha -cne $source -or
               $matching.Count -ne 1) { throw 'Signed candidate provenance mismatch.' }
-          if ((git rev-parse HEAD) -cne $source -or $LASTEXITCODE -ne 0) { throw 'Checked-out source mismatch.' }
+          git merge-base --is-ancestor $source HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Signed source is not an ancestor of certification tooling.' }
+          git diff --exit-code $source HEAD -- backend/src/local-print-agent backend/local-print-agent/install/windows backend/local-print-agent/packaging/build-windows-installer.mjs backend/local-print-agent/packaging/sign-inno-file.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Signed installer source changed after attestation.' }
           $version = Get-Content backend/src/local-print-agent/version.ts -Raw
           if ($version -notmatch 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"2026[.]11[.]6[.]2"') { throw 'Release source version mismatch.' }
           New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\candidate" | Out-Null
@@ -548,7 +560,12 @@ jobs:
             if (Test-Path $setupLog) { Get-Content $setupLog -Tail 20 | Write-Host }
             throw "Fresh installer failed with exit $($setup.ExitCode)."
           }
-          $result = Get-Content (Join-Path $installRoot 'install-result.json') -Raw | ConvertFrom-Json
+          $resultPath = Join-Path $installRoot 'install-result.json'
+          for ($attempt = 0; $attempt -lt 30 -and -not (Test-Path -LiteralPath $resultPath); $attempt++) {
+            Start-Sleep -Seconds 2
+          }
+          if (-not (Test-Path -LiteralPath $resultPath)) { throw 'Installer exited zero but the installation receipt is absent.' }
+          $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
           $status = Invoke-RestMethod 'http://127.0.0.1:17866/status' -TimeoutSec 10
           if ($result.outcome -notin @('success','partial') -or -not $result.localhostStatusOk -or
               $result.installedVersion -cne '2026.11.6.2' -or $status.buildVersion -cne '2026.11.6.2' -or
@@ -556,6 +573,39 @@ jobs:
             throw 'Fresh installer did not establish a verified 2026.11.6.2 runtime.'
           }
           Write-Host 'PASS: signed fresh installation without MSCQRAUTH; printer readiness remains a separate check.'
+
+      - name: Retain sanitized failed-install diagnostics
+        if: failure()
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+          $setupLog = Join-Path $env:RUNNER_TEMP 'mscqr-fresh-install.log'
+          $receipt = Join-Path $installRoot 'install-result.json'
+          $otherReceipts = @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'MSCQR'), (Join-Path $env:APPDATA 'MSCQR') -Filter install-result.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          [ordered]@{
+            installRootExists = Test-Path -LiteralPath $installRoot
+            receiptExists = Test-Path -LiteralPath $receipt
+            receiptLocations = $otherReceipts
+            runtimeExists = Test-Path -LiteralPath (Join-Path $installRoot 'bin\mscqr-local-print-agent.exe')
+            setupLogExists = Test-Path -LiteralPath $setupLog
+            profileMatchesLocalAppData = -not [string]::IsNullOrWhiteSpace($env:USERPROFILE) -and
+              ([string]$env:LOCALAPPDATA).StartsWith($env:USERPROFILE, [StringComparison]::OrdinalIgnoreCase)
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mscqr-install-diagnostics.json')
+          if (Test-Path -LiteralPath $setupLog) {
+            Get-Content -LiteralPath $setupLog |
+              Where-Object { $_ -notmatch '(?i)MSCQRAUTH|password|token|secret|private.?key|agent.?id|device.?fingerprint' } |
+              Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mscqr-sanitized-setup.log')
+          }
+      - name: Upload failed-install diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-fresh-install-diagnostics
+          path: |
+            ${{ runner.temp }}/mscqr-install-diagnostics.json
+            ${{ runner.temp }}/mscqr-sanitized-setup.log
+          retention-days: 3
+          if-no-files-found: error
 
       - uses: actions/setup-node@v6
         if: inputs.execution_mode == 'publish_fresh_install'

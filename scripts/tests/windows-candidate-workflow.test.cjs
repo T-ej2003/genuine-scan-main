@@ -35,11 +35,13 @@ test('fresh-install publication reuses only the attested signed candidate after 
   assert(!signer.if.includes('publish_fresh_install'));
   assert.equal(job.environment, 'production-signing');
   assert.match(job.if, /certify_fresh_install/);
+  assert.match(job.if, /diagnose_fresh_install/);
   assert.match(job.if, /publish_fresh_install/);
   const source = job.steps.find(step => step.name === 'Authenticate and download the existing signed candidate').run;
-  for (const required of ['refs/heads/main', '$env:GITHUB_SHA', 'INPUT_SIGNED_CANDIDATE_RUN_ID',
+  for (const required of ['refs/heads/main', 'e3b2686cab560a613aedae7e99422e22a27cb646', 'INPUT_SIGNED_CANDIDATE_RUN_ID',
     'INPUT_SIGNED_INSTALLER_SHA256', 'gh attestation verify', 'Get-AuthenticodeSignature',
-    'gh run download', 'git rev-parse HEAD']) assert(source.includes(required));
+    'gh run download', 'git merge-base --is-ancestor $source HEAD',
+    'git diff --exit-code $source HEAD']) assert(source.includes(required));
   assert.match(source, /\$run\.head_branch -cne 'main'/);
   assert.match(source, /\$run\.head_sha -cne \$source/);
   assert.match(source, /\$matching.Count -ne 1/);
@@ -51,8 +53,17 @@ test('fresh-install publication reuses only the attested signed candidate after 
   assert.match(install, /\/VERYSILENT/);
   assert.match(install, /\$setup[.]ExitCode/);
   assert.match(install, /install-result[.]json/);
+  assert.match(install, /Installer exited zero but the installation receipt is absent/);
+  assert.match(install, /Start-Sleep -Seconds 2/);
   assert.match(install, /status[.]buildVersion/);
   assert(!install.includes('/MSCQRAUTH='));
+  const diagnostics = job.steps.find(step => step.name === 'Retain sanitized failed-install diagnostics');
+  const uploadDiagnostics = job.steps.find(step => step.name === 'Upload failed-install diagnostics');
+  assert.equal(diagnostics.if, 'failure()');
+  assert.equal(uploadDiagnostics.if, 'failure()');
+  assert.match(diagnostics.run, /receiptExists/);
+  assert.match(diagnostics.run, /MSCQRAUTH\|password\|token\|secret/);
+  assert.match(uploadDiagnostics.with.path, /mscqr-install-diagnostics[.]json/);
   const publish = job.steps.find(step => step.name === 'Stage fresh-install-only release files for review');
   assert.equal(publish.if, "inputs.execution_mode == 'publish_fresh_install'");
   assert.equal(publish.env.WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY, 'true');
