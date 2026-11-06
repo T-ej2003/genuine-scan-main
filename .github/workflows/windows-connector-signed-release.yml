@@ -545,6 +545,19 @@ jobs:
               Write-Host "Installer state: $($failed.state)"
               Write-Host "Installer message: $($failed.message)"
             }
+            $connectorLog = Join-Path $installRoot 'logs\setup.log'
+            Write-Host "Connector setup log present: $(Test-Path $connectorLog)"
+            if (Test-Path $connectorLog) { Get-Content $connectorLog -Tail 30 | Write-Host }
+            Write-Host "Ambient state override present: $(-not [string]::IsNullOrWhiteSpace($env:PRINT_AGENT_STATE_FILE))"
+            $installerSig = Get-AuthenticodeSignature -LiteralPath $env:MSCQR_SIGNED_INSTALLER
+            foreach ($file in @('install-startup-task.ps1', 'bin\mscqr-local-print-agent.exe')) {
+              $path = Join-Path $installRoot $file
+              if (-not (Test-Path $path)) { Write-Host "Payload missing: $file"; continue }
+              $sig = Get-AuthenticodeSignature -LiteralPath $path
+              $zone = Get-Item -LiteralPath $path -Stream Zone.Identifier -ErrorAction SilentlyContinue
+              Write-Host "Payload $file`: signature=$($sig.Status); timestamped=$([bool]$sig.TimeStamperCertificate); signerMatchesInstaller=$($sig.SignerCertificate.Thumbprint -ceq $installerSig.SignerCertificate.Thumbprint); zoneMarker=$([bool]$zone)"
+            }
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-ExecutionPolicy -List | Format-Table -HideTableHeaders; try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; Write-Host 'Windows Forms load: PASS' } catch { Write-Host 'Windows Forms load: FAIL' }"
             if (Test-Path $setupLog) { Get-Content $setupLog -Tail 20 | Write-Host }
             throw "Fresh installer failed with exit $($setup.ExitCode)."
           }
