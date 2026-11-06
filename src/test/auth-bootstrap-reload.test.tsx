@@ -179,4 +179,20 @@ describe("auth bootstrap after reload", () => {
     expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
     expect(screen.queryByText(/no token provided/i)).not.toBeInTheDocument();
   });
+
+  it("restores a valid access-cookie session after refresh is throttled", async () => {
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({
+      success: false, status: 429, retryAfterSec: 45, error: "Rate limited",
+    } as Awaited<ReturnType<typeof apiClient.refreshSession>>);
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValue({
+      success: true, data: { user: manufacturerUser, auth: { sessionStage: "ACTIVE" } },
+    } as Awaited<ReturnType<typeof apiClient.getCurrentUser>>);
+
+    renderAt("/batches");
+
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledOnce());
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
+    expect(await screen.findByTestId("protected-batches-probe")).toBeInTheDocument();
+    expect(apiClient.getBatches).toHaveBeenCalledTimes(1);
+  });
 });

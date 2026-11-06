@@ -166,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const restoreAttempts: Array<() => Promise<any>> = apiClient.getToken?.()
         ? [getCurrentUser, refreshSession]
         : [refreshSession, getCurrentUser];
+      let transientFailure = false;
 
       for (const attempt of restoreAttempts) {
         const res = await attempt().catch((error: unknown) => ({
@@ -179,12 +180,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
         }
         if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
+          transientFailure = true;
           refreshCooldownUntilRef.current = Date.now() + Math.max(10, Number(res?.retryAfterSec) || 10) * 1000;
-          return;
+          continue;
         }
       }
 
-      if (generation === sessionGenerationRef.current) clearSession();
+      if (generation === sessionGenerationRef.current && !transientFailure) clearSession();
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
