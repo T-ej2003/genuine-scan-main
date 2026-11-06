@@ -537,7 +537,8 @@ jobs:
             throw 'Runner is not a clean first-install host.'
           }
           $setupLog = Join-Path $env:RUNNER_TEMP 'mscqr-fresh-install.log'
-          $setup = Start-Process -FilePath $env:MSCQR_SIGNED_INSTALLER -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$setupLog") -Wait -PassThru
+          $setup = Start-Process -FilePath $env:MSCQR_SIGNED_INSTALLER -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$setupLog") -PassThru
+          if (-not $setup.WaitForExit(120000)) { throw 'Fresh installer process timed out after 120 seconds.' }
           if ($setup.ExitCode -ne 0) {
             $resultPath = Join-Path $installRoot 'install-result.json'
             if (Test-Path $resultPath) {
@@ -549,6 +550,12 @@ jobs:
             throw "Fresh installer failed with exit $($setup.ExitCode)."
           }
           $result = Get-Content (Join-Path $installRoot 'install-result.json') -Raw | ConvertFrom-Json
+          $startup = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\MSCQR Connector.vbs'
+          $wrapper = Join-Path $installRoot 'bin\start-local-print-agent.cmd'
+          if (-not (Test-Path -LiteralPath $startup) -or -not (Test-Path -LiteralPath $wrapper) -or
+              -not (Get-Content -LiteralPath $startup -Raw).Contains($wrapper)) {
+            throw 'Fresh installer did not register the canonical connector startup launcher.'
+          }
           $status = Invoke-RestMethod 'http://127.0.0.1:17866/status' -TimeoutSec 10
           if ($result.outcome -notin @('success','partial') -or -not $result.localhostStatusOk -or
               $result.installedVersion -cne '2026.11.6.2' -or $status.buildVersion -cne '2026.11.6.2' -or
