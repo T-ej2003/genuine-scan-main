@@ -85,4 +85,17 @@ jobs:
             $r = Get-Content $receipt -Raw | ConvertFrom-Json
             Write-Host "Receipt outcome=$($r.outcome); state=$($r.state); version=$($r.installedVersion)"
           }
+          if ($setup.ExitCode -ne 0 -and -not (Test-Path $receipt) -and -not (Test-Path $connectorLog) -and
+              -not (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'))) {
+            $env:INSTALL_SCRIPT = Join-Path $installRoot 'install-startup-task.ps1'
+            $env:CONNECTOR_EXE = Join-Path $installRoot 'bin\mscqr-local-print-agent.exe'
+            $gateLine = Get-Content (Join-Path $installRoot 'Install Connector.cmd') | Where-Object { $_ -like '*-Command*Get-AuthenticodeSignature*' } | Select-Object -First 1
+            if ($gateLine -match '-Command "(.*)"$') {
+              & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command $Matches[1]
+              Write-Host "Installed wrapper signature gate exit: $LASTEXITCODE"
+            }
+            $wrapperOutput = & (Join-Path $installRoot 'Install Connector.cmd') /MSCQRSILENT 2>&1
+            Write-Host "Installed wrapper diagnostic exit: $LASTEXITCODE"
+            $wrapperOutput | Select-Object -Last 20 | Write-Host
+          }
           if (Test-Path $setupLog) { Get-Content $setupLog -Tail 12 | Write-Host }
