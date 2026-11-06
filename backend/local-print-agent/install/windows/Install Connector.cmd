@@ -1,5 +1,7 @@
 @echo off
 setlocal EnableExtensions
+rem Let Windows PowerShell rebuild its native module path after Inno/cmd launches it.
+set "PSModulePath="
 if /I "%~1"=="/MSCQRSILENT" set "MSCQR_SETUP_SILENT=1"
 cd /d "%~dp0"
 

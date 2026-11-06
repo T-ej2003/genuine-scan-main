@@ -321,6 +321,8 @@ const run = async () => {
   const scriptLaunch = installCmd.indexOf('-ExecutionPolicy RemoteSigned -File "%INSTALL_SCRIPT%"');
   assert(
     scriptSignatureGate >= 0 && scriptLaunch > scriptSignatureGate &&
+      installCmd.indexOf('set "PSModulePath="') > installCmd.indexOf('setlocal EnableExtensions') &&
+      installCmd.indexOf('set "PSModulePath="') < scriptSignatureGate &&
       installCmd.includes("$signature.Status -ne 'Valid'") &&
       installCmd.includes("$signature.TimeStamperCertificate") &&
       installCmd.includes("$runtime.Status -ne 'Valid'") &&
