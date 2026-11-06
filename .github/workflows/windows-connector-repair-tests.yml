@@ -15,6 +15,7 @@ on:
       - 'scripts/tests/windows-candidate-workflow.test.cjs'
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -45,3 +46,43 @@ jobs:
           & ./backend/tests/windowsConnectorStateDiscovery.test.ps1
           & ./backend/tests/windowsConnectorSigningHook.test.ps1
           & ./backend/tests/windowsConnectorComponentVerification.test.ps1
+      - name: Diagnose pinned signed installer on clean GitHub Windows runner
+        if: github.event.pull_request.number == 803
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'mscqr-pinned-diagnostic'
+          New-Item -ItemType Directory -Path $root | Out-Null
+          gh run download 42232461905 --repo $env:GITHUB_REPOSITORY --name 'mscqr-windows-candidate-2026.11.6.2-29ce21eb66bf193d38b95407568de6d8412a854d' --dir $root
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned signed installer download failed.' }
+          $installer = Join-Path $root 'MSCQR-Connector-Windows-2026.11.6.2.exe'
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'fd2bb5415415fee272af55a8d1fbff855c71944185e60ec4ad81bd685b0a34ee') { throw 'Pinned installer hash mismatch.' }
+          $installerSig = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($installerSig.Status -ne 'Valid' -or -not $installerSig.TimeStamperCertificate) { throw 'Pinned installer signature invalid.' }
+          $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+          Write-Host "Runner user: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
+          Write-Host "Install path: $installRoot"
+          Write-Host "Preexisting install: $(Test-Path $installRoot); state: $(Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')); ambient override: $(-not [string]::IsNullOrWhiteSpace($env:PRINT_AGENT_STATE_FILE))"
+          if ((Test-Path $installRoot) -or (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or (Test-Path (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) { throw 'Diagnostic runner is not a clean fresh-install host.' }
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-ExecutionPolicy -List | Format-Table -HideTableHeaders; try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; Write-Host 'Windows Forms load: PASS' } catch { Write-Host 'Windows Forms load: FAIL' }"
+          $setupLog = Join-Path $root 'inno-setup.log'
+          $setup = Start-Process -FilePath $installer -WindowStyle Hidden -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$setupLog") -Wait -PassThru
+          Write-Host "Pinned diagnostic installer exit: $($setup.ExitCode)"
+          foreach ($file in @('install-startup-task.ps1', 'bin\mscqr-local-print-agent.exe')) {
+            $path = Join-Path $installRoot $file
+            if (-not (Test-Path $path)) { Write-Host "Missing payload: $file"; continue }
+            $sig = Get-AuthenticodeSignature -LiteralPath $path
+            $zone = Get-Item -LiteralPath $path -Stream Zone.Identifier -ErrorAction SilentlyContinue
+            Write-Host "Payload $file`: signature=$($sig.Status); timestamped=$([bool]$sig.TimeStamperCertificate); signerMatchesInstaller=$($sig.SignerCertificate.Thumbprint -ceq $installerSig.SignerCertificate.Thumbprint); zoneMarker=$([bool]$zone)"
+          }
+          $connectorLog = Join-Path $installRoot 'logs\setup.log'
+          Write-Host "Connector setup log present: $(Test-Path $connectorLog)"
+          if (Test-Path $connectorLog) { Get-Content $connectorLog -Tail 25 | Write-Host }
+          $receipt = Join-Path $installRoot 'install-result.json'
+          Write-Host "Receipt present: $(Test-Path $receipt)"
+          if (Test-Path $receipt) {
+            $r = Get-Content $receipt -Raw | ConvertFrom-Json
+            Write-Host "Receipt outcome=$($r.outcome); state=$($r.state); version=$($r.installedVersion)"
+          }
+          if (Test-Path $setupLog) { Get-Content $setupLog -Tail 12 | Write-Host }
