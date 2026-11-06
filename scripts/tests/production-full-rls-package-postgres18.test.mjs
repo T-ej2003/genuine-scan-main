@@ -1407,8 +1407,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         candidateSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", objects: beforeB03 };
       delete oldRequirementBody.requirementsSha256;
       const oldRequirements = { ...oldRequirementBody, requirementsSha256: canonicalSha256(oldRequirementBody) };
+      const c02SuccessorBody = { ...requirements, candidateSourceSha: requirements.sourceSha };
+      delete c02SuccessorBody.requirementsSha256;
+      const c02Successor = { ...c02SuccessorBody, requirementsSha256: canonicalSha256(c02SuccessorBody) };
       const combinedPackage = buildC02CombinedPackage({ sourceSha: requirements.sourceSha,
-        predecessor: oldRequirements, successor: requirements });
+        predecessor: oldRequirements, successor: c02Successor });
       const preservedTables = ["PrinterAgentSession", "User", "QRCode", "SupportIssueReport", "Notification"];
       const dataFingerprint = table => scalar(privilegedGreenUrl,
         `SELECT md5(coalesce(string_agg((to_jsonb(t)-'lastMessageSeq')::text, E'\\n' ORDER BY (to_jsonb(t)-'lastMessageSeq')::text),'')) FROM public."${table}" t`, "preserved row values");
@@ -1433,7 +1436,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         pkg: combinedPackage, cli: path.join(root, "backend/node_modules/prisma/build/index.js") });
       assert.equal(await administratorClient.$transaction(tx => combinedC02Runtime.migrationState(tx, combinedPackage)), true);
       assert.deepEqual(await combinedC02Runtime.verifyCommittedCatalogue({ client: administratorClient, pkg: combinedPackage }), combinedPackage.successorCatalogue);
-      const packageB03 = buildB03DeltaPackage({ predecessor: oldRequirements, successor: requirements });
+      const packageB03 = buildB03DeltaPackage({ predecessor: oldRequirements, successor: c02Successor });
       assert.equal(packageB03.mutations.length, 44);
       for (const stage of ["after-temporary-grant", "after-1", "after-22", "after-44"]) {
         await assert.rejects(administratorClient.$transaction((tx) => b03DeltaRuntime.executeB03DeltaTransaction({ tx, package: packageB03,
