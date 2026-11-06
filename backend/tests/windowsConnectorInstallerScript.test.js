@@ -202,7 +202,8 @@ const run = async () => {
   assert(
     !/\{userprofile\}/i.test(installerTemplate) &&
       installerTemplate.includes("{%USERPROFILE}\\.mscqr\\local-print-agent-state.json") &&
-      installerTemplate.includes("{%USERPROFILE}\\.authenticqr\\local-print-agent-state.json"),
+      installerTemplate.includes("{%USERPROFILE}\\.authenticqr\\local-print-agent-state.json") &&
+      installerTemplate.includes("if ExpandConstant('{%USERPROFILE}') = '' then begin"),
     "Windows installer must expand the supported per-user profile environment constant before signing"
   );
   const supportedInnoConstants = new Set([

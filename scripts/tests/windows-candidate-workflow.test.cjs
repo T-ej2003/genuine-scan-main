@@ -37,14 +37,13 @@ test('fresh-install publication reuses only the attested signed candidate after 
   assert.match(job.if, /certify_fresh_install/);
   assert.match(job.if, /publish_fresh_install/);
   const source = job.steps.find(step => step.name === 'Authenticate and download the existing signed candidate').run;
-  for (const required of ['42168502112', '13479883655', '230eaf8d1fa6b2c5e3a82190a6c18a16e9af39d7',
-    '47cf05c6bd44437f34693c8636eb460386f5debcdd54af9f1d3365ad680d51e6',
-    'gh attestation verify', 'Get-AuthenticodeSignature',
-    'git merge-base $source HEAD', 'git diff --exit-code $source HEAD']) assert(source.includes(required));
-  assert.match(source, /\$actualParent -cne \$signedParent/);
-  assert.match(source, /\$signedParent = '[0-9a-f]{40}'/);
-  assert.match(source, /\$common -cnotin @\(\$source, \$signedParent\)/);
+  for (const required of ['refs/heads/main', '$env:GITHUB_SHA', 'INPUT_SIGNED_CANDIDATE_RUN_ID',
+    'INPUT_SIGNED_INSTALLER_SHA256', 'gh attestation verify', 'Get-AuthenticodeSignature',
+    'gh run download', 'git rev-parse HEAD']) assert(source.includes(required));
+  assert.match(source, /\$run\.head_branch -cne 'main'/);
   assert.match(source, /\$run\.head_sha -cne \$source/);
+  assert.match(source, /\$matching.Count -ne 1/);
+  assert.match(source, /\$run\.workflow_id -ne 273963817/);
   assert.match(source, /\.digest\.sha256 -ceq \$expected/);
   const install = job.steps.find(step => step.name === 'Certify first installation without maintenance authorization').run;
   assert(!/\$home\b/i.test(install), 'PowerShell HOME is a read-only automatic variable');
@@ -57,7 +56,7 @@ test('fresh-install publication reuses only the attested signed candidate after 
   const publish = job.steps.find(step => step.name === 'Stage fresh-install-only release files for review');
   assert.equal(publish.if, "inputs.execution_mode == 'publish_fresh_install'");
   assert.equal(publish.env.WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY, 'true');
-  assert.match(publish.run, /refs\/heads\/fix\/connector-fresh-install-publication/);
+  assert.match(publish.run, /refs\/heads\/main/);
   assert(!publish.run.includes('git push'));
   assert(job.steps.some(step => step.uses?.startsWith('actions/upload-artifact@') && step.if === "inputs.execution_mode == 'publish_fresh_install'"));
   assert(!job.steps.some(step => /azure login|sign staged|compile windows installer/i.test(step.name || '')));
