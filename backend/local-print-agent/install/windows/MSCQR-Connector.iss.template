@@ -196,6 +196,17 @@ begin
   end;
 end;
 
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and InitializationFailed then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector setup failed';
+    if UpgradeMode then
+      WizardForm.FinishedLabel.Caption := 'The connector upgrade did not complete. Close Setup to run recovery. Keep dispatch fenced and inspect the durable upgrade journal before retrying.'
+    else
+      WizardForm.FinishedLabel.Caption := 'The connector installation did not initialize successfully. Review the setup log before retrying.';
+  end;
+end;
+
 procedure DeinitializeSetup;
 begin
   if UpgradePrepared and not SetupCommitted then

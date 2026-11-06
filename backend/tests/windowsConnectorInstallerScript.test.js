@@ -339,6 +339,18 @@ const run = async () => {
     "A failed initialization must produce a nonzero Inno exit even when message boxes are suppressed"
   );
   assert(
+    installerTemplate.includes('procedure CurPageChanged(CurPageID: Integer);') &&
+      installerTemplate.includes('if (CurPageID = wpFinished) and InitializationFailed then begin') &&
+      installerTemplate.includes("WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector setup failed'") &&
+      installerTemplate.includes("WizardForm.FinishedLabel.Caption := 'The connector upgrade did not complete.") &&
+      installerTemplate.includes("WizardForm.FinishedLabel.Caption := 'The connector installation did not initialize successfully.") &&
+      installerTemplate.includes('if UpgradePrepared and not SetupCommitted then') &&
+      installerTemplate.includes("RunUpgrade('Recover')") &&
+      !installerTemplate.includes('WizardForm.Close') &&
+      !installerTemplate.includes('Abort;'),
+    "Interactive failures must show a failed Finished page while upgrade recovery still runs at setup exit"
+  );
+  assert(
     installerTemplate.includes('function VerifyUpgradePayloadSignatures: Boolean;') &&
       installerTemplate.includes('Result := VerifyUpgradePayloadSignatures;') &&
       installerTemplate.includes("$runtime.Status -ne ''Valid''") &&
