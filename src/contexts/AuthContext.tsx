@@ -88,10 +88,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshCooldownUntilRef = useRef(0);
   const sessionGenerationRef = useRef(0);
   const scopeRetryRef = useRef<number | null>(null);
+  const bootstrapRetryRef = useRef<number | null>(null);
+  const bootstrapRetryCountRef = useRef(0);
+  const transientRestoreRef = useRef(false);
 
   const clearSession = () => {
     if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
     scopeRetryRef.current = null;
+    if (bootstrapRetryRef.current !== null) window.clearTimeout(bootstrapRetryRef.current);
+    bootstrapRetryRef.current = null;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    setIsLoading(false);
     sessionGenerationRef.current += 1;
     setRequestCoordinatorScope(null);
     setUser(null);
@@ -108,6 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     sessionGenerationRef.current += 1;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    refreshCooldownUntilRef.current = 0;
     setPendingAuth(null);
     const normalized = normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null });
     setRequestCoordinatorScope(normalized);
@@ -122,6 +133,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     sessionGenerationRef.current += 1;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    refreshCooldownUntilRef.current = 0;
     const auth = payload.auth || payload.user?.auth || null;
     const normalized = normalizeUser({ ...payload.user, auth });
 
@@ -175,21 +189,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error: error instanceof Error ? error.message : "Session restore failed",
         }));
         if (generation !== sessionGenerationRef.current) return;
+        if (attempt === refreshSession && res?.status === 401) {
+          clearSession();
+          return;
+        }
         if (res?.success && res.data) {
           lastRefreshSuccessAtRef.current = Date.now();
           if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) {
-            refreshCooldownUntilRef.current = 0;
             return;
           }
         }
         if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
           transientFailure = true;
-          refreshCooldownUntilRef.current = Date.now() + Math.max(10, Number(res?.retryAfterSec) || 10) * 1000;
+          const fallbackSec = Math.min(120, 10 * 2 ** Math.min(bootstrapRetryCountRef.current++, 4));
+          refreshCooldownUntilRef.current = Math.max(
+            refreshCooldownUntilRef.current,
+            Date.now() + Math.max(fallbackSec, Number(res?.retryAfterSec) || 0) * 1000,
+          );
           continue;
         }
       }
 
-      if (generation === sessionGenerationRef.current && !transientFailure) clearSession();
+      if (generation === sessionGenerationRef.current) {
+        transientRestoreRef.current = transientFailure;
+        if (!transientFailure) clearSession();
+      }
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
@@ -264,17 +288,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false;
+    const retryBootstrap = () => {
+      if (cancelled || !transientRestoreRef.current) return;
+      bootstrapRetryRef.current = window.setTimeout(async () => {
+        bootstrapRetryRef.current = null;
+        await refresh();
+        if (cancelled) return;
+        if (transientRestoreRef.current) retryBootstrap();
+        else setIsLoading(false);
+      }, Math.max(1, refreshCooldownUntilRef.current - Date.now()));
+    };
     (async () => {
       setIsLoading(true);
       try {
         await refresh();
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          if (transientRestoreRef.current && !user) retryBootstrap();
+          else setIsLoading(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
+      if (bootstrapRetryRef.current !== null) window.clearTimeout(bootstrapRetryRef.current);
+      bootstrapRetryRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, user]);

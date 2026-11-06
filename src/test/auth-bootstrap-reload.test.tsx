@@ -195,4 +195,36 @@ describe("auth bootstrap after reload", () => {
     expect(await screen.findByTestId("protected-batches-probe")).toBeInTheDocument();
     expect(apiClient.getBatches).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps protected queries pending and retries after both restore paths fail transiently", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.refreshSession)
+      .mockResolvedValueOnce({ success: false, status: 429, retryAfterSec: 45 } as any)
+      .mockResolvedValueOnce({ success: true, data: { user: manufacturerUser, auth: { sessionStage: "ACTIVE" } } } as any);
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValueOnce({ success: false, status: 503 } as any);
+    try {
+      await act(async () => { renderAt("/batches"); await Promise.resolve(); });
+      expect(apiClient.refreshSession).toHaveBeenCalledOnce();
+      expect(apiClient.getCurrentUser).toHaveBeenCalledOnce();
+      expect(apiClient.getBatches).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(44_000); });
+      expect(apiClient.refreshSession).toHaveBeenCalledOnce();
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+      expect(apiClient.refreshSession).toHaveBeenCalledTimes(2);
+      expect(screen.getByTestId("protected-batches-probe")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("treats refresh-token revocation as terminal even if current-user lookup would be transient", async () => {
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: false, status: 401 } as any);
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValue({ success: false, status: 503 } as any);
+    renderAt("/batches");
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledOnce());
+    expect(apiClient.getCurrentUser).not.toHaveBeenCalled();
+    expect(apiClient.getBatches).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
+  });
 });
