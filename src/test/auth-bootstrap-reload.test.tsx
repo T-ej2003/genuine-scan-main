@@ -227,4 +227,13 @@ describe("auth bootstrap after reload", () => {
     expect(apiClient.getBatches).not.toHaveBeenCalled();
     expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
   });
+
+  it("ends bootstrap on an explicit manufacturer scope denial", async () => {
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: false, status: 403, code: "AUTH_SCOPE_UNAVAILABLE" } as any);
+    renderAt("/batches");
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledOnce());
+    expect(apiClient.getCurrentUser).not.toHaveBeenCalled();
+    expect(apiClient.getBatches).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
+  });
 });

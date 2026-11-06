@@ -189,7 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           error: error instanceof Error ? error.message : "Session restore failed",
         }));
         if (generation !== sessionGenerationRef.current) return;
-        if (attempt === refreshSession && res?.status === 401) {
+        if ((attempt === refreshSession && res?.status === 401) || res?.code === "AUTH_SCOPE_UNAVAILABLE") {
           clearSession();
           return;
         }
@@ -247,6 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
         if (scope !== getRequestCoordinatorScope()) return;
+        if (response.code === "AUTH_SCOPE_UNAVAILABLE") { clearSession(); return; }
         if (response.status === 403 || response.status === 429 || response.status === 0 || (response.status && response.status >= 500)) { retry(response.retryAfterSec); return; }
         if (!response.success || !setAuthStateFromPayload(authPayloadFromResponseData(response.data))) clearSession();
       }).catch(() => { if (generation === sessionGenerationRef.current && scope === getRequestCoordinatorScope()) retry(); });

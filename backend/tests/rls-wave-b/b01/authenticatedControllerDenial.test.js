@@ -38,6 +38,8 @@ try {
 assert.equal(canonical.isCanonicalAuthDenial(caught), true, "an empty actor revalidation must be a typed denial");
 
 let boundaryError = new canonical.CanonicalAuthDenial();
+let refreshError = null;
+let rawRefresh = null;
 let activationSessionError = null;
 let activationVerificationCount = 0;
 mockModule("rls-waves/session-b/b01/canonicalAuthContext.js", {
@@ -56,7 +58,7 @@ mockModule("controllers/authControllerShared.js", {
   forgotPasswordSchema: validSchema,
   getAuthClaims: (req) => req.user,
   getCurrentRefreshSession: async () => null,
-  getRefreshTokenFromRequest: () => null,
+  getRefreshTokenFromRequest: () => rawRefresh,
   getRequestId: () => "request-1",
   hashIp: () => "ip-hash",
   invitePreviewQuerySchema: validSchema,
@@ -86,7 +88,7 @@ mockModule("services/auth/authService.js", {
   },
   loginWithPassword: async () => ({}),
   logoutSession: async () => null,
-  refreshSession: async () => ({ ok: false }),
+  refreshSession: async () => { if (refreshError) throw refreshError; return { ok: false }; },
 });
 mockModule("services/auth/passwordService.js", { verifyPassword: async () => true });
 mockModule("services/auth/refreshTokenService.js", {
@@ -178,8 +180,19 @@ for (const category of ["MANUFACTURER_SCOPE_DENIED", "MANUFACTURER_SCOPE_STALE"]
   await authControllers.me(request(), res);
   assert.equal(res.statusCode, 403, `${category} must map to a scope denial`);
   assert.equal(res.cleared, 0, `${category} must preserve the session for a valid scope switch`);
-  assert.doesNotMatch(JSON.stringify(res.body), new RegExp(category));
+  assert.equal(res.body.code, "AUTH_SCOPE_UNAVAILABLE");
+  assert.doesNotMatch(res.body.error, new RegExp(category));
 }
+
+rawRefresh = "refresh-fixture";
+refreshError = new Error("MANUFACTURER_SCOPE_DENIED");
+const deniedRefresh = response();
+await authControllers.refresh(request(), deniedRefresh);
+assert.equal(deniedRefresh.statusCode, 403);
+assert.equal(deniedRefresh.body.code, "AUTH_SCOPE_UNAVAILABLE");
+assert.doesNotMatch(deniedRefresh.body.error, /MANUFACTURER_SCOPE_DENIED/);
+rawRefresh = null;
+refreshError = null;
 
 activationSessionError = new Error("Activation completed. Please sign in from a trusted network.");
 const activatedWithoutSession = response();

@@ -544,7 +544,7 @@ export function createApiClientCore(): ApiClientCore {
           return request<T>(endpoint, { ...options, skipAuthRefresh: true });
         }
 
-        if (refreshed.status === 401) {
+        if (refreshed.status === 401 || refreshed.code === "AUTH_SCOPE_UNAVAILABLE") {
           logout();
           emitLogout();
         } else {

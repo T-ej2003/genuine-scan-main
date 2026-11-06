@@ -44,6 +44,26 @@ describe("internal client core HTML error handling", () => {
     window.removeEventListener("auth:logout", logout);
   });
 
+  it("treats explicit scope denial as terminal but keeps CSRF 403 nonterminal", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    try {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ code: "CSRF_DENIED" }), { status: 403, headers: { "content-type": "application/json" } }));
+      expect((await createApiClientCore().request("/dashboard/stats")).status).toBe(403);
+      expect(logout).not.toHaveBeenCalled();
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ code: "AUTH_SCOPE_UNAVAILABLE" }), { status: 403, headers: { "content-type": "application/json" } }));
+      expect((await createApiClientCore().request("/dashboard/stats")).code).toBe("UNAUTHENTICATED");
+      expect(logout).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener("auth:logout", logout);
+    }
+  });
+
   it("does not log out or replay a protected operation after a refresh timeout", async () => {
     setRequestCoordinatorScope({ id: "actor" });
     const logout = vi.fn();

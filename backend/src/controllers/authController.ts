@@ -173,7 +173,7 @@ export const me = async (req: Request, res: Response) => {
   } catch (error) {
     if (denyInactiveSession(error, res)) return;
     if (error instanceof Error && ["MANUFACTURER_SCOPE_DENIED", "MANUFACTURER_SCOPE_STALE"].includes(error.message)) {
-      return res.status(403).json({ success: false, error: "The current manufacturer workspace is unavailable." });
+      return res.status(403).json({ success: false, error: "The current manufacturer workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
     }
     console.error("Me error:", error);
     return res.status(500).json({ success: false, error: "Internal server error" });
@@ -211,7 +211,7 @@ export const refresh = async (req: Request, res: Response) => {
       return res.status(409).json({ success: false, error: "Select a current manufacturer workspace and try again.", code: category });
     }
     if (category === "MANUFACTURER_SCOPE_DENIED") {
-      return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable." });
+      return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
     }
     console.error("Refresh error:", error);
     return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
