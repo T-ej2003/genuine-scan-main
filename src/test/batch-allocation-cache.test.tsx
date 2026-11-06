@@ -41,7 +41,7 @@ it("refreshes both dashboard cache layers and batch caches only after committed 
     searchParams: new URLSearchParams(), canAssignManufacturer: true, canDelete: false, toast: vi.fn(),
     progress: { start: vi.fn(), close: vi.fn(), complete: vi.fn().mockResolvedValue(undefined) },
   }), { wrapper });
-  await waitFor(() => expect(dashboard.result.current.data?.qrStats.dormant).toBe(150));
+  await waitFor(() => expect(dashboard.result.current.data?.qrStats?.dormant).toBe(150));
   await waitFor(() => expect(operations.result.current.rows).toHaveLength(1));
   client.setQueryData([...queryKeys.batches.allocationMap("source"), "tenant-one"], { stale: true });
   await act(async () => {
@@ -50,7 +50,7 @@ it("refreshes both dashboard cache layers and batch caches only after committed 
     operations.result.current.setAssignQuantity("10");
   });
   await act(async () => { await operations.result.current.submitAssign(); });
-  await waitFor(() => expect(dashboard.result.current.data?.qrStats.dormant).toBe(140));
+  await waitFor(() => expect(dashboard.result.current.data?.qrStats?.dormant).toBe(140));
   expect(dashboardRead).toHaveBeenCalledTimes(2);
   expect(qrRead).toHaveBeenCalledTimes(2);
   expect(operations.result.current.rows[0]?.unassignedRemainingCodes).toBe(140);

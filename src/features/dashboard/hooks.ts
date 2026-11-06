@@ -18,8 +18,10 @@ import {
 } from "../../../shared/contracts/runtime/dashboard.ts";
 
 type DashboardStatsResult = {
-  summary: DashboardStatsDTO;
-  qrStats: QrStatsDTO;
+  summary: DashboardStatsDTO | null;
+  qrStats: QrStatsDTO | null;
+  summaryError?: string;
+  qrStatsError?: string;
   refreshPaused?: boolean;
 };
 
@@ -39,15 +41,24 @@ export function useDashboardStats(licenseeId?: string) {
     staleTime: pollingPolicy.dashboardFallbackMs,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<DashboardStatsResult> => {
-      const [summaryResponse, qrStatsResponse] = await Promise.all([
-        apiClient.getDashboardStats(licenseeId),
-        apiClient.getQRStats(licenseeId),
+      const [summary, qrStats] = await Promise.allSettled([
+        apiClient.getDashboardStats(licenseeId).then((response) => ({
+          data: unwrapParsedApiResponse(response, dashboardStatsSchema, "Failed to load dashboard stats"),
+          refreshPaused: isPausedResponse(response),
+        })),
+        apiClient.getQRStats(licenseeId).then((response) => ({
+          data: unwrapParsedApiResponse(response, qrStatsSchema, "Failed to load QR stats"),
+          refreshPaused: isPausedResponse(response),
+        })),
       ]);
 
       return {
-        summary: unwrapParsedApiResponse(summaryResponse, dashboardStatsSchema, "Failed to load dashboard stats"),
-        qrStats: unwrapParsedApiResponse(qrStatsResponse, qrStatsSchema, "Failed to load QR stats"),
-        refreshPaused: isPausedResponse(summaryResponse) || isPausedResponse(qrStatsResponse),
+        summary: summary.status === "fulfilled" ? summary.value.data : null,
+        qrStats: qrStats.status === "fulfilled" ? qrStats.value.data : null,
+        summaryError: summary.status === "rejected" ? "Operations overview is temporarily unavailable." : undefined,
+        qrStatsError: qrStats.status === "rejected" ? "QR statistics are temporarily unavailable." : undefined,
+        refreshPaused: (summary.status === "fulfilled" && summary.value.refreshPaused) ||
+          (qrStats.status === "fulfilled" && qrStats.value.refreshPaused),
       };
     },
   });

@@ -175,12 +175,13 @@ export default function Dashboard() {
   const summary = liveSummary ?? dashboardQuery.data?.summary ?? null;
   const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
   const logs = liveLogs ?? auditLogsQuery.data?.logs ?? [];
-  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary;
+  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary && !liveQrStats;
   const rawError = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
-  const error =
+  const error = dashboardQuery.data?.summaryError || (
     rawError && /no token provided/i.test(rawError)
       ? "Your secure session could not be refreshed. Please sign in again."
-      : rawError;
+      : rawError);
+  const qrStatsError = dashboardQuery.data?.qrStatsError;
   const activityRateLimited =
     auditLogsQuery.error instanceof ApiResponseError &&
     String(auditLogsQuery.error.code || "").toUpperCase() === "RATE_LIMITED";
@@ -346,7 +347,11 @@ export default function Dashboard() {
         ctaLabel: "View scans",
       },
     ];
-    return items;
+    return items.filter((item) => {
+      if (item.title === "Brands") return Boolean(summary);
+      if (item.title === "Linked brands") return true;
+      return Boolean(qrStats);
+    });
   }, [
     activeLicenseesCount,
     qrStatusData.dormant,
@@ -355,6 +360,8 @@ export default function Dashboard() {
     qrStatusData.scanned,
     qrLabelsAvailable,
     scansToday,
+    summary,
+    qrStats,
     user?.licenseeId,
     user?.linkedLicensees,
     user?.role,
@@ -411,6 +418,13 @@ export default function Dashboard() {
             action={{ label: "Retry overview", onClick: () => void refreshDashboard({ bypassCache: true }) }}
           />
         )}
+        {qrStatsError && (
+          <ErrorState
+            title="QR statistics unavailable"
+            description={qrStatsError}
+            action={{ label: "Retry QR statistics", onClick: () => void refreshDashboard({ bypassCache: true }) }}
+          />
+        )}
 
         <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="dashboard-kpi-grid">
           {cards.map((item) => (
@@ -443,7 +457,7 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <MotionPanel className="rounded-[1.75rem] border border-mscqr-border bg-mscqr-surface/92 p-5">
+        {qrStats && <MotionPanel className="rounded-[1.75rem] border border-mscqr-border bg-mscqr-surface/92 p-5">
           <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <p className="text-sm font-medium text-mscqr-accent">QR label progress</p>
@@ -467,7 +481,7 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-        </MotionPanel>
+        </MotionPanel>}
 
         <div className="grid items-start gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <Card className="self-start border-mscqr-border bg-mscqr-surface/92">
@@ -492,7 +506,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          <Card className="border-mscqr-border bg-mscqr-surface/92">
+          {qrStats && <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
               <CardTitle className="text-lg font-semibold text-mscqr-primary">Workspace snapshot</CardTitle>
             </CardHeader>
@@ -549,11 +563,11 @@ export default function Dashboard() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
         </div>
 
         <div className="grid gap-6 md:grid-cols-2 mt-6">
-          <Card className="border-mscqr-border bg-mscqr-surface/92">
+          {qrStats && <Card className="border-mscqr-border bg-mscqr-surface/92">
             <CardHeader>
               <CardTitle className="text-lg font-semibold text-mscqr-primary">Label status distribution</CardTitle>
             </CardHeader>
@@ -563,7 +577,7 @@ export default function Dashboard() {
               </p>
               <QRStatusChart data={qrStatusData} selectedStatus={statusFocus} onStatusSelect={setStatusFocus} />
             </CardContent>
-          </Card>
+          </Card>}
           <RecentActivityCard
             logs={logs.map((log) => ({
               ...log,
