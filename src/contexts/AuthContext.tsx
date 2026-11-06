@@ -177,7 +177,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (generation !== sessionGenerationRef.current) return;
         if (res?.success && res.data) {
           lastRefreshSuccessAtRef.current = Date.now();
-          if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
+          if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) {
+            refreshCooldownUntilRef.current = 0;
+            return;
+          }
         }
         if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
           transientFailure = true;

@@ -1,5 +1,5 @@
 import React from "react";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 
@@ -23,7 +23,7 @@ vi.mock("@/lib/api-client", () => ({ default: {
 const user = { id: "actor", email: "actor@example.com", role: "MANUFACTURER", auth: { sessionStage: "ACTIVE" } };
 function Probe() {
   const auth = useAuth();
-  return <div>{auth.user?.id || "signed-out"}</div>;
+  return <div>{auth.user?.id || "signed-out"}<button onClick={() => void auth.refresh()}>Refresh session</button></div>;
 }
 const mount = () => render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><Probe /></AuthProvider></MemoryRouter>);
 
@@ -43,6 +43,18 @@ describe("auth scope refresh", () => {
     await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
     expect(screen.getByText("actor")).toBeInTheDocument();
     expect(ready).toBe(true);
+  });
+
+  it("clears refresh cooldown after a successful access-cookie fallback", async () => {
+    vi.mocked(apiClient.refreshSession)
+      .mockResolvedValueOnce({ success: false, status: 429, retryAfterSec: 267 } as any)
+      .mockResolvedValueOnce({ success: true, data: { user } } as any);
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValue({ success: true, data: { user } } as any);
+    mount();
+    await screen.findByText("actor");
+    expect(apiClient.refreshSession).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh session" }));
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledTimes(2));
   });
 
   it("retries a transient scope refresh after Retry-After", async () => {
