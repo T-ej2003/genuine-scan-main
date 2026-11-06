@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router";
 import { APP_PATHS, getRoleDisplayLabel } from "@/app/route-metadata";
@@ -26,7 +26,7 @@ import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
-import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { getRequestCoordinatorScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
@@ -44,6 +44,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const activePrintSuppressed = useActivePrintSessionSuppression();
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getRequestCoordinatorScope, getRequestCoordinatorScope);
   const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
   const canReadAuditFeed = Boolean(scopedLicenseeId) && (user?.role === "super_admin" || user?.role === "licensee_admin");
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
@@ -132,7 +133,7 @@ export default function Dashboard() {
       }, 30_000);
     };
 
-    const streamScope = getRequestCoordinatorScope();
+    const streamScope = securityScope;
     stopSseRef.current = apiClient.streamDashboardEvents(
       (envelope) => {
         if (streamScope !== getRequestCoordinatorScope()) return;
@@ -171,7 +172,7 @@ export default function Dashboard() {
     return () => {
       closeRealtime();
     };
-  }, [activePrintSuppressed, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, user?.role]);
+  }, [activePrintSuppressed, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, securityScope, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {

@@ -4,7 +4,7 @@ import { useLocation } from "react-router";
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
-import { clearRequestCoordinator, getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { clearRequestCoordinator, getRequestCoordinatorScope, isRequestCoordinatorScopeReady, isRequestCoordinatorUserCurrent, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
@@ -87,8 +87,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const lastRefreshSuccessAtRef = useRef(0);
   const refreshCooldownUntilRef = useRef(0);
   const sessionGenerationRef = useRef(0);
+  const scopeRetryRef = useRef<number | null>(null);
 
   const clearSession = () => {
+    if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
+    scopeRetryRef.current = null;
     sessionGenerationRef.current += 1;
     setRequestCoordinatorScope(null);
     setUser(null);
@@ -190,20 +193,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onAuthLogout = () => clearSession();
+    let retryCount = 0;
     const onScopeRefresh = () => {
+      if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
+      scopeRetryRef.current = null;
+      if (isRequestCoordinatorScopeReady()) return;
       apiClient.setToken(null);
       const scope = getRequestCoordinatorScope();
       const generation = sessionGenerationRef.current;
+      const retry = (retryAfterSec?: number) => {
+        const delay = Number.isFinite(retryAfterSec) && Number(retryAfterSec) > 0
+          ? Number(retryAfterSec)
+          : Math.min(60, 10 * 2 ** Math.min(retryCount++, 3));
+        scopeRetryRef.current = window.setTimeout(onScopeRefresh, delay * 1000);
+      };
       void apiClient.getCurrentUser().then(response => {
-        if (generation !== sessionGenerationRef.current || scope !== getRequestCoordinatorScope() || response.code === "REQUEST_SCOPE_CHANGED") return;
-        if (response.status === 403 || response.status === 429 || response.status === 0 || (response.status && response.status >= 500)) return;
+        if (generation !== sessionGenerationRef.current || response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (response.success && response.data) {
+          const payload = authPayloadFromResponseData(response.data);
+          if (payload?.user && isRequestCoordinatorUserCurrent(normalizeUser({ ...payload.user, auth: payload.auth || null }))) {
+            retryCount = 0;
+            setAuthStateFromPayload(payload);
+            return;
+          }
+        }
+        if (scope !== getRequestCoordinatorScope()) return;
+        if (response.status === 403 || response.status === 429 || response.status === 0 || (response.status && response.status >= 500)) { retry(response.retryAfterSec); return; }
         if (!response.success || !setAuthStateFromPayload(authPayloadFromResponseData(response.data))) clearSession();
-      }).catch(() => undefined);
+      }).catch(() => { if (generation === sessionGenerationRef.current && scope === getRequestCoordinatorScope()) retry(); });
     };
     window.addEventListener("auth:logout", onAuthLogout);
     window.addEventListener("auth:scope-refresh", onScopeRefresh);
 
     return () => {
+      if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
       window.removeEventListener("auth:logout", onAuthLogout);
       window.removeEventListener("auth:scope-refresh", onScopeRefresh);
     };
