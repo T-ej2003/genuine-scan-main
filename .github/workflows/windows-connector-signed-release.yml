@@ -580,14 +580,20 @@ jobs:
         run: |
           $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
           $setupLog = Join-Path $env:RUNNER_TEMP 'mscqr-fresh-install.log'
+          $connectorSetupLog = Join-Path $installRoot 'logs\setup.log'
+          $installedScript = Join-Path $installRoot 'install-startup-task.ps1'
           $receipt = Join-Path $installRoot 'install-result.json'
           $otherReceipts = @(Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA 'MSCQR'), (Join-Path $env:APPDATA 'MSCQR') -Filter install-result.json -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+          $scriptSignatureStatus = if (Test-Path -LiteralPath $installedScript) { [string](Get-AuthenticodeSignature -LiteralPath $installedScript).Status } else { 'Missing' }
           [ordered]@{
             installRootExists = Test-Path -LiteralPath $installRoot
             receiptExists = Test-Path -LiteralPath $receipt
             receiptLocations = $otherReceipts
             runtimeExists = Test-Path -LiteralPath (Join-Path $installRoot 'bin\mscqr-local-print-agent.exe')
+            installedScriptExists = Test-Path -LiteralPath $installedScript
+            installedScriptSignatureStatus = $scriptSignatureStatus
             setupLogExists = Test-Path -LiteralPath $setupLog
+            connectorSetupLogExists = Test-Path -LiteralPath $connectorSetupLog
             profileMatchesLocalAppData = -not [string]::IsNullOrWhiteSpace($env:USERPROFILE) -and
               ([string]$env:LOCALAPPDATA).StartsWith($env:USERPROFILE, [StringComparison]::OrdinalIgnoreCase)
           } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mscqr-install-diagnostics.json')
@@ -595,6 +601,11 @@ jobs:
             Get-Content -LiteralPath $setupLog |
               Where-Object { $_ -notmatch '(?i)MSCQRAUTH|password|token|secret|private.?key|agent.?id|device.?fingerprint' } |
               Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mscqr-sanitized-setup.log')
+          }
+          if (Test-Path -LiteralPath $connectorSetupLog) {
+            Get-Content -LiteralPath $connectorSetupLog |
+              Where-Object { $_ -notmatch '(?i)MSCQRAUTH|password|token|secret|private.?key|agent.?id|device.?fingerprint' } |
+              Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'mscqr-sanitized-connector-setup.log')
           }
       - name: Upload failed-install diagnostics
         if: failure()
@@ -604,6 +615,7 @@ jobs:
           path: |
             ${{ runner.temp }}/mscqr-install-diagnostics.json
             ${{ runner.temp }}/mscqr-sanitized-setup.log
+            ${{ runner.temp }}/mscqr-sanitized-connector-setup.log
           retention-days: 3
           if-no-files-found: error
 
