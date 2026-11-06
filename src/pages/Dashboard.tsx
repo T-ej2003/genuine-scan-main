@@ -67,12 +67,14 @@ export default function Dashboard() {
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
+  const latestAuditLogsScopeRef = useRef<string | null>(null);
   const liveSummaryScopeRef = useRef<string | null>(null);
   const liveLogsScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
     latestAuditLogsRef.current = (auditLogsQuery.data?.logs || []) as AuditLogDTO[];
-  }, [auditLogsQuery.data]);
+    latestAuditLogsScopeRef.current = securityScope;
+  }, [auditLogsQuery.data, securityScope]);
 
   const refreshDashboard = useCallback(async (options?: { bypassCache?: boolean }) => {
     if (activePrintSuppressed && !options?.bypassCache) return;
@@ -153,7 +155,11 @@ export default function Dashboard() {
             const previousScope = liveLogsScopeRef.current;
             liveLogsScopeRef.current = streamScope;
             setLiveLogs((prev) => applyAuditDeltaToCache(
-              queryClient, log, previousScope === streamScope ? prev || latestAuditLogsRef.current : [], scopedLicenseeId
+              queryClient, log,
+              previousScope === streamScope && prev
+                ? prev
+                : latestAuditLogsScopeRef.current === streamScope ? latestAuditLogsRef.current : [],
+              scopedLicenseeId
             ));
           }
           return;
