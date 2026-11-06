@@ -132,9 +132,11 @@ export const createBackendApp = () => {
   });
 
   const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency"]);
+  const validRequestId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   app.use((req, res, next) => {
-    const requestId = String(req.get("x-request-id") || randomUUID());
+    const clientRequestId = req.get("x-request-id") || "";
+    const requestId = validRequestId.test(clientRequestId) ? clientRequestId : randomUUID();
     const startedAt = process.hrtime.bigint();
 
     (req as express.Request & { requestId?: string }).requestId = requestId;
