@@ -26,6 +26,14 @@ on:
         required: true
         default: "https://mscqr.com"
         type: string
+      signed_candidate_run_id:
+        description: "Successful signed-candidate run on this exact protected-main commit (certification modes only)."
+        required: false
+        type: string
+      signed_installer_sha256:
+        description: "SHA-256 of that run's signed Windows installer (certification modes only)."
+        required: false
+        type: string
   push:
     tags:
       - "connector-v*"
@@ -473,26 +481,29 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          INPUT_SIGNED_CANDIDATE_RUN_ID: ${{ inputs.signed_candidate_run_id }}
+          INPUT_SIGNED_INSTALLER_SHA256: ${{ inputs.signed_installer_sha256 }}
         run: |
-          $source = '230eaf8d1fa6b2c5e3a82190a6c18a16e9af39d7'
-          $expected = '47cf05c6bd44437f34693c8636eb460386f5debcdd54af9f1d3365ad680d51e6'
-          $runId = '42168502112'
-          $artifactId = '13479883655'
+          if ($env:GITHUB_REF -cne 'refs/heads/main') { throw 'Fresh-install certification requires protected main.' }
+          $source = $env:GITHUB_SHA
+          $expected = "$env:INPUT_SIGNED_INSTALLER_SHA256".Trim().ToLowerInvariant()
+          if ($env:INPUT_SIGNED_CANDIDATE_RUN_ID -cnotmatch '^[1-9][0-9]{0,17}$' -or
+              $expected -cnotmatch '^[0-9a-f]{64}$') { throw 'Exact signed run ID and installer SHA-256 are required.' }
+          $runId = [long]$env:INPUT_SIGNED_CANDIDATE_RUN_ID
           $name = "mscqr-windows-candidate-2026.11.6.2-$source"
           $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
-          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$artifactId" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Signed candidate run lookup failed.' }
+          $artifacts = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId/artifacts" | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Signed candidate artifact lookup failed.' }
+          $matching = @($artifacts.artifacts | Where-Object {
+            $_.name -ceq $name -and $_.workflow_run.id -eq $runId -and -not $_.expired
+          })
           if ($run.repository.full_name -cne $env:GITHUB_REPOSITORY -or $run.workflow_id -ne 273963817 -or
               $run.path -cne '.github/workflows/windows-connector-signed-release.yml' -or
               $run.event -cne 'workflow_dispatch' -or $run.conclusion -cne 'success' -or
-              $run.head_sha -cne $source -or $artifact.workflow_run.id -ne [long]$runId -or
-              $artifact.name -cne $name -or $artifact.expired) { throw 'Signed candidate provenance mismatch.' }
-          $signedParent = '0702577ea3c483963f17c2d19781fc7c8fee5e06'
-          $actualParent = git rev-parse "$source^"
-          $common = git merge-base $source HEAD
-          if ($LASTEXITCODE -ne 0 -or $actualParent -cne $signedParent -or
-              $common -cnotin @($source, $signedParent)) { throw 'Release policy does not share the approved signed-source lineage.' }
-          git diff --exit-code $source HEAD -- backend/src/local-print-agent backend/local-print-agent/install/windows backend/local-print-agent/packaging/build-windows-installer.mjs backend/local-print-agent/packaging/sign-inno-file.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Signed installer source changed after candidate attestation.' }
+              $run.head_branch -cne 'main' -or $run.head_sha -cne $source -or
+              $matching.Count -ne 1) { throw 'Signed candidate provenance mismatch.' }
+          if ((git rev-parse HEAD) -cne $source -or $LASTEXITCODE -ne 0) { throw 'Checked-out source mismatch.' }
           $version = Get-Content backend/src/local-print-agent/version.ts -Raw
           if ($version -notmatch 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"2026[.]11[.]6[.]2"') { throw 'Release source version mismatch.' }
           New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\candidate" | Out-Null
@@ -558,7 +569,7 @@ jobs:
           WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY: 'true'
           WINDOWS_CONNECTOR_PUBLISHER_NAME: L&D Health Ltd
         run: |
-          if ($env:GITHUB_REF -cne 'refs/heads/fix/connector-fresh-install-publication') { throw 'Publication staging is restricted to the review branch.' }
+          if ($env:GITHUB_REF -cne 'refs/heads/main') { throw 'Publication staging requires protected main.' }
           $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $env:MSCQR_SIGNED_INSTALLER
           $env:WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH = "$env:RUNNER_TEMP\candidate\signature-report.json"
           node backend/local-print-agent/packaging/publish-windows-connector-release.mjs

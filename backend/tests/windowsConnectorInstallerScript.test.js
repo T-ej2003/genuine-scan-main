@@ -199,6 +199,22 @@ const run = async () => {
       installerTemplate.includes("Uninstall Connector.cmd"),
     "Windows installer template should run the packaged install and uninstall entry points without elevation"
   );
+  assert(
+    !/\{userprofile\}/i.test(installerTemplate) &&
+      installerTemplate.includes("{%USERPROFILE}\\.mscqr\\local-print-agent-state.json") &&
+      installerTemplate.includes("{%USERPROFILE}\\.authenticqr\\local-print-agent-state.json") &&
+      installerTemplate.includes("if ExpandConstant('{%USERPROFILE}') = '' then begin"),
+    "Windows installer must expand the supported per-user profile environment constant before signing"
+  );
+  const supportedInnoConstants = new Set([
+    "app", "cmd", "tmp", "srcexe", "sys", "%USERPROFILE",
+    "param:MSCQRAUTH|", "param:MSCQRRECOVER|",
+  ]);
+  for (const [, pathExpression] of installerTemplate.matchAll(/ExpandConstant\('([^']+)'\)/g)) {
+    for (const [, constant] of pathExpression.matchAll(/\{([^{}]+)\}/g)) {
+      assert(supportedInnoConstants.has(constant), "Unsupported Inno runtime constant: " + constant);
+    }
+  }
   const uninstallRunLine = installerTemplate
     .split(/\r?\n/)
     .find((line) => line.includes('"{app}\\Uninstall Connector.cmd"') && line.includes("Flags:"));

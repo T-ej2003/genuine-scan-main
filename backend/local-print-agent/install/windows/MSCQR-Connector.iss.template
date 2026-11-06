@@ -76,9 +76,13 @@ begin
   Result := 'DEVELOPMENT FIXTURE: installation and production upgrades are disabled. Use the governed signed candidate workflow for certification.';
   exit;
 #endif
+  if ExpandConstant('{%USERPROFILE}') = '' then begin
+    Result := 'Windows user profile could not be resolved. Installation was cancelled.';
+    exit;
+  end;
   UpgradeMode := DirExists(ExpandConstant('{app}')) or
-     FileExists(ExpandConstant('{userprofile}\.mscqr\local-print-agent-state.json')) or
-     FileExists(ExpandConstant('{userprofile}\.authenticqr\local-print-agent-state.json'));
+     FileExists(ExpandConstant('{%USERPROFILE}\.mscqr\local-print-agent-state.json')) or
+     FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json'));
   if UpgradeMode then begin
     if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin
       Result := 'Existing connector requires authenticated maintenance and independently verified reconciliation. Supply MSCQRAUTH. No upgrade was performed.';
