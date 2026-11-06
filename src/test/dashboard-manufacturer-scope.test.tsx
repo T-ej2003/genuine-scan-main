@@ -38,6 +38,10 @@ vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+vi.mock("@/components/dashboard/RecentActivityCard", () => ({
+  RecentActivityCard: ({ logs }: { logs: Array<{ id: string }> }) => <div data-testid="recent-log-ids">{logs.map(log => log.id).join(",")}</div>,
+}));
+
 vi.mock("@/lib/mutation-events", () => ({
   onMutationEvent: () => () => undefined,
 }));
@@ -141,6 +145,26 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     act(() => setRequestCoordinatorScope({ id: "another-manufacturer" }));
     await waitFor(() => expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(2));
     expect(stop).toHaveBeenCalled();
+    act(() => setRequestCoordinatorScope(null));
+  });
+
+  it("does not merge previous-scope audit rows into the first new-scope delta", async () => {
+    const callbacks: Array<(envelope: unknown) => void> = [];
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((onEvent) => {
+      callbacks.push(onEvent as (envelope: unknown) => void);
+      return () => undefined;
+    });
+    setRequestCoordinatorScope({ id: "manufacturer-a" });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(callbacks).toHaveLength(1));
+    act(() => callbacks[0]({ type: "audit.delta", payload: { log: { id: "old-tenant-row" } } }));
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("old-tenant-row");
+
+    act(() => setRequestCoordinatorScope({ id: "manufacturer-b" }));
+    await waitFor(() => expect(callbacks).toHaveLength(2));
+    act(() => callbacks[1]({ type: "audit.delta", payload: { log: { id: "new-tenant-row" } } }));
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("new-tenant-row");
+    expect(screen.getByTestId("recent-log-ids")).not.toHaveTextContent("old-tenant-row");
     act(() => setRequestCoordinatorScope(null));
   });
 });

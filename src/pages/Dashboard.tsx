@@ -150,8 +150,11 @@ export default function Dashboard() {
           const payload = envelope?.payload || {};
           const log = payload.log as AuditLogDTO | undefined;
           if (log) {
-            liveLogsScopeRef.current = getRequestCoordinatorScope();
-            setLiveLogs((prev) => applyAuditDeltaToCache(queryClient, log, prev || latestAuditLogsRef.current, scopedLicenseeId));
+            const previousScope = liveLogsScopeRef.current;
+            liveLogsScopeRef.current = streamScope;
+            setLiveLogs((prev) => applyAuditDeltaToCache(
+              queryClient, log, previousScope === streamScope ? prev || latestAuditLogsRef.current : [], scopedLicenseeId
+            ));
           }
           return;
         }
