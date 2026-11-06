@@ -181,6 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ? [getCurrentUser, refreshSession]
         : [refreshSession, getCurrentUser];
       let transientFailure = false;
+      let retryableFailure = false;
 
       for (const attempt of restoreAttempts) {
         const res = await attempt().catch((error: unknown) => ({
@@ -201,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
           transientFailure = true;
+          if (res.status !== 403) retryableFailure = true;
           const fallbackSec = Math.min(120, 10 * 2 ** Math.min(bootstrapRetryCountRef.current++, 4));
           refreshCooldownUntilRef.current = Math.max(
             refreshCooldownUntilRef.current,
@@ -211,8 +213,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (generation === sessionGenerationRef.current) {
-        transientRestoreRef.current = transientFailure;
-        if (!transientFailure) clearSession();
+        transientRestoreRef.current = transientFailure && (Boolean(user) || retryableFailure);
+        if (!transientRestoreRef.current) clearSession();
       }
     })().finally(() => {
       refreshInFlightRef.current = null;

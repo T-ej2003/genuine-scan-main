@@ -236,4 +236,19 @@ describe("auth bootstrap after reload", () => {
     expect(apiClient.getBatches).not.toHaveBeenCalled();
     expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
   });
+
+  it("redirects an anonymous CSRF 403 plus current-user 401 to login", async () => {
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: false, status: 403, code: "CSRF_DENIED" } as any);
+    renderAt("/dashboard");
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+  });
+
+  it("keeps a throttled refresh plus expired access cookie pending", async () => {
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: false, status: 429, retryAfterSec: 45 } as any);
+    renderAt("/dashboard");
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
+    expect(window.location.pathname).toBe("/dashboard");
+    expect(screen.queryByTestId("protected-batches-probe")).not.toBeInTheDocument();
+  });
 });
