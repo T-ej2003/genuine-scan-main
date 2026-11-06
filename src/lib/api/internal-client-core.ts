@@ -277,6 +277,11 @@ export function createApiClientCore(): ApiClientCore {
   const getCache = new Map<string, unknown>();
   const endpointCooldowns = new Map<string, { until: number; hits: number }>();
   let refreshInFlight: Promise<ApiResponse<{ user: any; auth?: any; accessToken?: string }>> | null = null;
+  let sessionEpoch = 0;
+  const refreshVersionKey = "mscqr:auth-refresh-version";
+  const readRefreshVersion = () => {
+    try { return window.localStorage.getItem(refreshVersionKey) || ""; } catch { return null; }
+  };
 
   const normalizeCooldownEndpoint = (endpoint: string) => {
     const [path, rawQuery = ""] = String(endpoint || "").split("?");
@@ -317,6 +322,7 @@ export function createApiClientCore(): ApiClientCore {
   const getToken = () => token;
 
   const logout = () => {
+    sessionEpoch += 1;
     setRequestCoordinatorScope(null);
     clearRequestCoordinator();
     setToken(null);
@@ -371,6 +377,7 @@ export function createApiClientCore(): ApiClientCore {
 
   const request = async <T>(endpoint: string, options: RequestOptions = {}): Promise<ApiResponse<T>> => {
     if (endpoint === "/auth/login") {
+      sessionEpoch += 1;
       setRequestCoordinatorScope(null);
       clearRequestCoordinator();
     }
@@ -379,10 +386,27 @@ export function createApiClientCore(): ApiClientCore {
     }
     if (endpoint === "/auth/refresh" && !options.skipRefreshDedup) {
       if (!refreshInFlight) {
-        refreshInFlight = request<{ user: any; auth?: any; accessToken?: string }>(
-          endpoint,
-          { ...options, skipRefreshDedup: true },
-        ).finally(() => {
+        const epoch = sessionEpoch;
+        const scope = getRequestCoordinatorScope();
+        const queuedVersion = readRefreshVersion();
+        const runRefresh = (): Promise<ApiResponse<{ user: any; auth?: any; accessToken?: string }>> => {
+          if (epoch !== sessionEpoch || scope !== getRequestCoordinatorScope()) {
+            return Promise.resolve({ success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed" });
+          }
+          if (queuedVersion !== null && readRefreshVersion() !== queuedVersion) {
+            return Promise.resolve({ success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Session changed during refresh" });
+          }
+          return request<{ user: any; auth?: any; accessToken?: string }>(endpoint, { ...options, skipRefreshDedup: true }).then((response) => {
+            if (epoch !== sessionEpoch) return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed" };
+            if (response.success) {
+              try { window.localStorage.setItem(refreshVersionKey, crypto.randomUUID()); } catch { /* Refresh still succeeded. */ }
+            }
+            return response;
+          });
+        };
+        refreshInFlight = (async () => typeof navigator !== "undefined" && navigator.locks
+          ? await navigator.locks.request("mscqr-auth-refresh", runRefresh)
+          : await runRefresh())().finally(() => {
           refreshInFlight = null;
         });
       }
@@ -394,6 +418,7 @@ export function createApiClientCore(): ApiClientCore {
     };
 
     const method = String(options.method || "GET").toUpperCase();
+    const requestEpoch = sessionEpoch;
     const requestScope = getRequestCoordinatorScope();
     const cacheKey = `${getRequestCoordinatorScope()}:${getToken() || "cookie"}:${endpoint}`;
     const cooldownKey = `${requestScope}:${method}:${normalizeCooldownEndpoint(endpoint)}`;
@@ -476,7 +501,7 @@ export function createApiClientCore(): ApiClientCore {
         signal: controller.signal,
       });
       const requestId = response.headers.get("x-request-id") || response.headers.get("x-correlation-id") || undefined;
-      if (requestScope !== getRequestCoordinatorScope()) {
+      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope()) {
         pushNetworkLog({ status: response.status, ok: false, error: "Request scope changed" });
         return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed; refresh before retrying", unknownOutcome: method !== "GET" && method !== "HEAD", requestId };
       }
@@ -497,7 +522,7 @@ export function createApiClientCore(): ApiClientCore {
         : await response.text().catch((): string => "");
 
       // Parsing is asynchronous too: scope may change after headers arrive.
-      if (requestScope !== getRequestCoordinatorScope()) {
+      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope()) {
         return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed", unknownOutcome: isStateChanging, requestId };
       }
 
@@ -519,8 +544,13 @@ export function createApiClientCore(): ApiClientCore {
           return request<T>(endpoint, { ...options, skipAuthRefresh: true });
         }
 
-        logout();
-        emitLogout();
+        if (refreshed.status === 401) {
+          logout();
+          emitLogout();
+        } else {
+          pushNetworkLog({ status: response.status, ok: false, error: refreshed.error || message });
+          return { ...refreshed, success: false, error: refreshed.error || message, requestId } as ApiResponse<T>;
+        }
         pushNetworkLog({ status: response.status, ok: false, error: message });
         return { success: false, error: message, status: response.status, code: "UNAUTHENTICATED", requestId };
       }

@@ -26,6 +26,7 @@ import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
@@ -65,6 +66,8 @@ export default function Dashboard() {
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
+  const liveSummaryScopeRef = useRef<string | null>(null);
+  const liveLogsScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
     latestAuditLogsRef.current = (auditLogsQuery.data?.logs || []) as AuditLogDTO[];
@@ -129,9 +132,12 @@ export default function Dashboard() {
       }, 30_000);
     };
 
+    const streamScope = getRequestCoordinatorScope();
     stopSseRef.current = apiClient.streamDashboardEvents(
       (envelope) => {
+        if (streamScope !== getRequestCoordinatorScope()) return;
         if (envelope?.type === "snapshot") {
+          liveSummaryScopeRef.current = getRequestCoordinatorScope();
           const payload = envelope?.payload || {};
           const { summary, qrStats } = applyDashboardSnapshotToCache(queryClient, scopedLicenseeId, payload);
           setLiveSummary(summary);
@@ -143,7 +149,8 @@ export default function Dashboard() {
           const payload = envelope?.payload || {};
           const log = payload.log as AuditLogDTO | undefined;
           if (log) {
-            setLiveLogs((prev) => applyAuditDeltaToCache(queryClient, log, prev || latestAuditLogsRef.current));
+            liveLogsScopeRef.current = getRequestCoordinatorScope();
+            setLiveLogs((prev) => applyAuditDeltaToCache(queryClient, log, prev || latestAuditLogsRef.current, scopedLicenseeId));
           }
           return;
         }
@@ -172,16 +179,19 @@ export default function Dashboard() {
     }
   }, [dashboardQuery.dataUpdatedAt]);
 
-  const summary = liveSummary ?? dashboardQuery.data?.summary ?? null;
-  const qrStats = liveQrStats ?? dashboardQuery.data?.qrStats ?? null;
-  const logs = liveLogs ?? auditLogsQuery.data?.logs ?? [];
-  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !liveSummary && !liveQrStats;
+  const currentScope = getRequestCoordinatorScope();
+  const currentLiveSummary = liveSummaryScopeRef.current === currentScope ? liveSummary : null;
+  const currentLiveQrStats = liveSummaryScopeRef.current === currentScope ? liveQrStats : null;
+  const summary = currentLiveSummary ?? dashboardQuery.data?.summary ?? null;
+  const qrStats = currentLiveQrStats ?? dashboardQuery.data?.qrStats ?? null;
+  const logs = (liveLogsScopeRef.current === currentScope ? liveLogs : null) ?? auditLogsQuery.data?.logs ?? [];
+  const loading = dashboardQuery.isLoading && !dashboardQuery.data && !currentLiveSummary && !currentLiveQrStats;
   const rawError = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null;
-  const error = dashboardQuery.data?.summaryError || (
+  const error = summary ? null : dashboardQuery.data?.summaryError || (
     rawError && /no token provided/i.test(rawError)
       ? "Your secure session could not be refreshed. Please sign in again."
       : rawError);
-  const qrStatsError = dashboardQuery.data?.qrStatsError;
+  const qrStatsError = qrStats ? null : dashboardQuery.data?.qrStatsError;
   const activityRateLimited =
     auditLogsQuery.error instanceof ApiResponseError &&
     String(auditLogsQuery.error.code || "").toUpperCase() === "RATE_LIMITED";

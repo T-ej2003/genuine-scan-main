@@ -85,8 +85,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAttemptAtRef = useRef(0);
   const lastRefreshSuccessAtRef = useRef(0);
+  const refreshCooldownUntilRef = useRef(0);
+  const sessionGenerationRef = useRef(0);
 
   const clearSession = () => {
+    sessionGenerationRef.current += 1;
     setRequestCoordinatorScope(null);
     setUser(null);
     setPendingAuth(null);
@@ -101,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    sessionGenerationRef.current += 1;
     setPendingAuth(null);
     const normalized = normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null });
     setRequestCoordinatorScope(normalized);
@@ -114,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
+    sessionGenerationRef.current += 1;
     const auth = payload.auth || payload.user?.auth || null;
     const normalized = normalizeUser({ ...payload.user, auth });
 
@@ -140,7 +145,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = async () => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    if (Date.now() < refreshCooldownUntilRef.current) return;
     refreshInFlightRef.current = (async () => {
+      const generation = sessionGenerationRef.current;
       lastRefreshAttemptAtRef.current = Date.now();
 
       const canRefreshSession = typeof apiClient.refreshSession === "function";
@@ -160,15 +167,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       for (const attempt of restoreAttempts) {
         const res = await attempt().catch((error: unknown) => ({
           success: false,
+          status: 0,
           error: error instanceof Error ? error.message : "Session restore failed",
         }));
-        if (!res?.success || !res.data) continue;
-
-        lastRefreshSuccessAtRef.current = Date.now();
-        if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
+        if (generation !== sessionGenerationRef.current) return;
+        if (res?.success && res.data) {
+          lastRefreshSuccessAtRef.current = Date.now();
+          if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
+        }
+        if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
+          refreshCooldownUntilRef.current = Date.now() + Math.max(10, Number(res?.retryAfterSec) || 10) * 1000;
+          return;
+        }
       }
 
-      clearSession();
+      if (generation === sessionGenerationRef.current) clearSession();
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
@@ -180,10 +193,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const onScopeRefresh = () => {
       apiClient.setToken(null);
       const scope = getRequestCoordinatorScope();
+      const generation = sessionGenerationRef.current;
       void apiClient.getCurrentUser().then(response => {
-        if (response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (generation !== sessionGenerationRef.current || scope !== getRequestCoordinatorScope() || response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (response.status === 403 || response.status === 429 || response.status === 0 || (response.status && response.status >= 500)) return;
         if (!response.success || !setAuthStateFromPayload(authPayloadFromResponseData(response.data))) clearSession();
-      }).catch(() => { if (scope === getRequestCoordinatorScope()) clearSession(); });
+      }).catch(() => undefined);
     };
     window.addEventListener("auth:logout", onAuthLogout);
     window.addEventListener("auth:scope-refresh", onScopeRefresh);
@@ -237,8 +252,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [location.pathname, user]);
 
   const login = async (email: string, password: string) => {
+    const generation = sessionGenerationRef.current;
     try {
       const result = await apiClient.login(email, password);
+      if (generation !== sessionGenerationRef.current) return { success: false, error: "Session changed" };
       if (result.success && result.data?.user) {
         const auth = result.data.auth || null;
         setAuthStateFromPayload({ user: result.data.user, auth });

@@ -7,6 +7,7 @@ import type { ApiResponse } from "@/lib/api-client";
 import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { pollingPolicy } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 import {
   auditLogArraySchema,
@@ -36,7 +37,7 @@ const isPausedResponse = (response: ApiResponse<unknown>) =>
 export function useDashboardStats(licenseeId?: string) {
   const activePrintSuppressed = useActivePrintSessionSuppression();
   return useQuery({
-    queryKey: queryKeys.dashboard.stats(licenseeId),
+    queryKey: [...queryKeys.dashboard.stats(licenseeId), getRequestCoordinatorScope()],
     enabled: !activePrintSuppressed,
     staleTime: pollingPolicy.dashboardFallbackMs,
     refetchOnWindowFocus: false,
@@ -67,7 +68,7 @@ export function useDashboardStats(licenseeId?: string) {
 export function useDashboardAuditLogs(enabled: boolean, limit = 5, licenseeId?: string) {
   const activePrintSuppressed = useActivePrintSessionSuppression();
   return useQuery({
-    queryKey: [...queryKeys.dashboard.audit(limit), licenseeId || null],
+    queryKey: [...queryKeys.dashboard.audit(limit), licenseeId || null, getRequestCoordinatorScope()],
     enabled: enabled && Boolean(licenseeId) && !activePrintSuppressed,
     staleTime: pollingPolicy.dashboardFallbackMs,
     refetchOnWindowFocus: false,
