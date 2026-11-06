@@ -47,16 +47,17 @@ const REST_FALLBACK_CAPABILITY_FLAGS = REQUIRED_LOCAL_AGENT_CAPABILITY_FLAGS.fil
 export const isLocalAgentProtocolCompatible = (protocolVersion?: string | null) =>
   String(protocolVersion || "").trim() === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION;
 
-const parseVersionParts = (value?: string | null) =>
-  String(value || "")
-    .trim()
-    .split(/[.-]/)
-    .map((part) => Number.parseInt(part, 10))
-    .filter((part) => Number.isFinite(part));
+const parseVersionParts = (value?: string | null) => {
+  const text = String(value || "").trim();
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(text)) return null;
+  const parts = text.split(".").map(Number);
+  return parts.every(Number.isSafeInteger) ? parts : null;
+};
 
 export const compareLocalAgentVersions = (left?: string | null, right?: string | null) => {
   const a = parseVersionParts(left);
   const b = parseVersionParts(right);
+  if (!a || !b) return Number.NaN;
   const length = Math.max(a.length, b.length, 3);
   for (let index = 0; index < length; index += 1) {
     const delta = (a[index] || 0) - (b[index] || 0);

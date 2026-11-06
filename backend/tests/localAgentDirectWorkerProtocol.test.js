@@ -138,6 +138,9 @@ const run = async () => {
     isLocalAgentPersistentSessionCapable(LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION),
     "New connector build must be eligible for persistent WebSocket sessions"
   );
+  for (const malformed of ["", "2026.11.6.1-rc1", "2026.11.bad", "999999999999999999999.11.6.1"]) {
+    assert(!isLocalAgentPersistentSessionCapable(malformed), `Malformed connector build must fail closed: ${malformed}`);
+  }
   assert(
     !isLocalAgentTransportDiagnosticsCurrent({
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,

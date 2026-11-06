@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { LegalFooter } from "@/components/trust/LegalFooter";
 import { ConnectorReleaseDiagnostics } from "@/features/connector/ConnectorReleaseDiagnostics";
+import { evaluateConnectorCompatibility } from "@/features/connector/connectorCompatibility";
 import { cn } from "@/lib/utils";
 import apiClient from "@/lib/api-client";
 type ConnectorPlatformRelease = {
@@ -387,10 +388,9 @@ export default function ConnectorDownload() {
   const freshInstallOnlyWindows = release?.release.platforms.windows?.installationScope === "fresh-install-only";
   const existingWindowsConnector = detectedPlatform === "windows" && Boolean(localConnector?.reachable);
   const installedConnectorVersion = localConnector?.buildVersion || localConnector?.agentVersion || (localConnector?.reachable ? "Installed version not reported" : "Not detected");
-  const connectorUpdateRequired = Boolean(localConnector?.reachable && (
-    (localConnector.protocolVersion && requiredProtocol && localConnector.protocolVersion !== requiredProtocol) ||
-    (!(freshInstallOnlyWindows && detectedPlatform === "windows") && localConnector.buildVersion && availableConnectorVersion && localConnector.buildVersion !== availableConnectorVersion)
-  ));
+  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(localConnector?.reachable), buildVersion: localConnector?.buildVersion,
+    protocolVersion: localConnector?.protocolVersion, requiredProtocol, minimumBuildVersion: release?.minimumBuildVersion || release?.release.minimumBuildVersion,
+    latestVersion: availableConnectorVersion, installationScope: detectedPlatform === "windows" ? release?.release.platforms.windows?.installationScope : null });
   const detectedPlatformLabel =
     detectedPlatform === "macos"
       ? "This computer looks like a Mac."
@@ -606,7 +606,7 @@ export default function ConnectorDownload() {
                   </div>
                 </div>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  {recommendedCard && !(existingWindowsConnector && recommendedCard.platform === "windows" && freshInstallOnlyWindows) ? (
+                  {recommendedCard && !(detectedPlatform === "windows" && recommendedCard.platform === "windows" && !compatibility.offerInstaller) ? (
                     <Button asChild size="lg" className="sm:min-w-[240px]">
                       <a href={recommendedCard.href} data-testid={`download-printer-helper-${recommendedCard.platform}`}>
                         <Download className="h-4 w-4" />
@@ -654,9 +654,12 @@ export default function ConnectorDownload() {
                   requiredProtocol={requiredProtocol}
                   installedVersion={installedConnectorVersion}
                   reachable={Boolean(localConnector?.reachable)}
-                  updateRequired={connectorUpdateRequired}
+                  updateRequired={compatibility.updateRequired}
+                  updateAvailable={compatibility.updateAvailable}
+                  compatibility={compatibility.status}
                 />
                 {freshInstallOnlyWindows ? <p className="mt-5 text-sm text-amber-800">Windows release for new installations only. Existing connector upgrades require the authorized maintenance workflow.</p> : null}
+                {existingWindowsConnector && !compatibility.offerInstaller && !freshInstallOnlyWindows ? <p className="mt-5 text-sm text-amber-800">The published installer is not authorized for this existing installation. Contact support for a compatible installer.</p> : null}
                 <div className="mt-8 grid gap-5 xl:grid-cols-2">
                   {downloadCards.map((item) => {
                     const Icon = item.icon;
@@ -785,7 +788,7 @@ export default function ConnectorDownload() {
                             </div>
                           </div>
                           <div className="flex flex-col gap-3 sm:flex-row">
-                            {!(existingWindowsConnector && item.platform === "windows" && item.installationScope === "fresh-install-only") ? (
+                            {!(detectedPlatform === "windows" && item.platform === "windows" && !compatibility.offerInstaller) ? (
                               <Button asChild size="lg" className="sm:min-w-[230px]">
                                 <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
                                   <Download className="h-4 w-4" />{item.action}
