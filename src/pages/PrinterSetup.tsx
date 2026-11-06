@@ -388,7 +388,7 @@ export default function PrinterSetupPage() {
     !detectedPlatformRelease;
   const freshInstallOnly = detectedPlatformRelease?.installationScope === "fresh-install-only";
   const minimumHelperVersion = remoteStatus?.persistentSessionMinimumBuildVersion || connectorReleaseQuery.data?.minimumBuildVersion;
-  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(remoteStatus?.connected), buildVersion: remoteStatus?.buildVersion,
+  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(remoteStatus?.connected), installerAvailable: Boolean(detectedPlatformRelease), buildVersion: remoteStatus?.buildVersion,
     protocolVersion: typeof remoteStatus?.protocolVersion === "string" ? remoteStatus.protocolVersion : null, requiredProtocol: connectorReleaseQuery.data?.requiredProtocolVersion || "local-agent-direct-v2",
     minimumBuildVersion: minimumHelperVersion,
     latestVersion: latestHelperVersion, installationScope: detectedPlatformRelease?.installationScope,

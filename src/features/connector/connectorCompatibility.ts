@@ -13,6 +13,7 @@ export type LatestConnectorReleaseInfo = {
 
 type CompatibilityInput = {
   reachable: boolean;
+  installerAvailable: boolean;
   buildVersion?: string | null;
   protocolVersion?: string | null;
   requiredProtocol?: string | null;
@@ -51,7 +52,7 @@ export const evaluateConnectorCompatibility = (input: CompatibilityInput) => {
   const newerAvailable = Boolean(installed && latest && compare(installed, latest) < 0);
   const updateRequired = unsupported ? true : !input.reachable || !knownScope || !known ? null : false;
   const installerResolvesMinimum = !input.minimumBuildVersion || Boolean(minimum && latest && compare(latest, minimum) >= 0);
-  const offerInstaller = knownScope && Boolean(latest) && installerResolvesMinimum && (!input.reachable || !freshOnly);
+  const offerInstaller = input.installerAvailable && knownScope && Boolean(latest) && installerResolvesMinimum && (!input.reachable || !freshOnly);
   const updateAvailable = knownScope && !freshOnly && newerAvailable && offerInstaller;
   return { status, updateRequired, updateAvailable, offerInstaller, maintenanceRequired: input.reachable && unsupported && !offerInstaller } as const;
 };

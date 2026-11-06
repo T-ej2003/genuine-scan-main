@@ -468,6 +468,34 @@ describe("ConnectorDownload", () => {
     expect(screen.queryByText(/^No$/)).not.toBeInTheDocument();
   });
 
+  it("does not call a pending unsigned Windows release an available upgrade", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).minimumBuildVersion = "2026.11.6.1";
+    (response.data as any).release.platforms.windows = null;
+    (response.data as any).release.productionSignedAvailable = false;
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      agentVersion: "2026.11.6.1", buildVersion: "2026.11.6.1", protocolVersion: "local-agent-direct-v2",
+    } } as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText("No eligible upgrade")).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
+  it("does not offer a fresh-only Windows upgrade when the browser platform is unknown", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Generic Browser");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).release.platforms.windows.installationScope = "fresh-install-only";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText(/Windows release for new installations only/)).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
   it("retains normal upgrade advice when scope is absent", async () => {
     const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
     const response = await apiClient.getLatestConnectorRelease();

@@ -3,6 +3,7 @@ import { evaluateConnectorCompatibility } from "@/features/connector/connectorCo
 
 const base = {
   reachable: true,
+  installerAvailable: true,
   buildVersion: "2026.11.6.1",
   protocolVersion: "local-agent-direct-v2",
   requiredProtocol: "local-agent-direct-v2",
@@ -31,6 +32,7 @@ describe("connector compatibility and installation matrix", () => {
     ["P backend CONNECTOR_UPDATE_REQUIRED", { backendUpdateRequired: true }, "unsupported", true, false],
     ["Q backend minimum beyond latest", { minimumBuildVersion: "2026.11.6.3", installationScope: null }, "unsupported", true, false],
     ["Q unavailable even on disconnected workstation", { reachable: false, buildVersion: null, minimumBuildVersion: "2026.11.6.3", installationScope: null }, "unknown", null, false],
+    ["Q unpublished signed package", { installerAvailable: false, installationScope: null }, "supported", false, false],
     ["R malformed build", { buildVersion: "2026.11.bad" }, "unknown", null, false],
     ["R unrecognized release scope", { installationScope: "unsupported-scope" }, "supported", null, false],
     ["S stale metadata cannot override backend", { backendUpdateRequired: true, minimumBuildVersion: "2026.5.1" }, "unsupported", true, false],

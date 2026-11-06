@@ -388,7 +388,7 @@ export default function ConnectorDownload() {
   const freshInstallOnlyWindows = release?.release.platforms.windows?.installationScope === "fresh-install-only";
   const existingWindowsConnector = detectedPlatform === "windows" && Boolean(localConnector?.reachable);
   const installedConnectorVersion = localConnector?.buildVersion || localConnector?.agentVersion || (localConnector?.reachable ? "Installed version not reported" : "Not detected");
-  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(localConnector?.reachable), buildVersion: localConnector?.buildVersion,
+  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(localConnector?.reachable), installerAvailable: Boolean(detectedCard), buildVersion: localConnector?.buildVersion,
     protocolVersion: localConnector?.protocolVersion, requiredProtocol, minimumBuildVersion: release?.minimumBuildVersion || release?.release.minimumBuildVersion,
     latestVersion: availableConnectorVersion, installationScope: detectedPlatform === "windows" ? release?.release.platforms.windows?.installationScope : null });
   const detectedPlatformLabel =
@@ -606,7 +606,7 @@ export default function ConnectorDownload() {
                   </div>
                 </div>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  {recommendedCard && !(detectedPlatform === "windows" && recommendedCard.platform === "windows" && !compatibility.offerInstaller) ? (
+                  {recommendedCard && !(recommendedCard.platform === "windows" && ((detectedPlatform === "windows" && !compatibility.offerInstaller) || (localConnector?.reachable && recommendedCard.installationScope === "fresh-install-only"))) ? (
                     <Button asChild size="lg" className="sm:min-w-[240px]">
                       <a href={recommendedCard.href} data-testid={`download-printer-helper-${recommendedCard.platform}`}>
                         <Download className="h-4 w-4" />
@@ -788,7 +788,7 @@ export default function ConnectorDownload() {
                             </div>
                           </div>
                           <div className="flex flex-col gap-3 sm:flex-row">
-                            {!(detectedPlatform === "windows" && item.platform === "windows" && !compatibility.offerInstaller) ? (
+                            {!(item.platform === "windows" && ((detectedPlatform === "windows" && !compatibility.offerInstaller) || (localConnector?.reachable && item.installationScope === "fresh-install-only"))) ? (
                               <Button asChild size="lg" className="sm:min-w-[230px]">
                                 <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
                                   <Download className="h-4 w-4" />{item.action}
