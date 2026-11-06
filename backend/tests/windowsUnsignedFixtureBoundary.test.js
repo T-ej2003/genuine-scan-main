@@ -19,7 +19,9 @@ const JSZip=require('jszip');
     assert.equal(fs.existsSync(releaseRoot),false,'unsigned output must stay outside publication directories');
     const zip=await JSZip.loadAsync(fs.readFileSync(zipPath));const readme=await zip.file('README.txt').async('string');
     assert.match(readme,/NON-INSTALLABLE INSPECTION FIXTURE/);assert.match(readme,/Do not run/);assert.doesNotMatch(readme,/Run Install Connector.cmd/);
-    assert.match(await zip.file('Install Connector.cmd').async('string'),/-ExecutionPolicy AllSigned -File/);
+    const installCommand=await zip.file('Install Connector.cmd').async('string');
+    assert.match(installCommand,/Get-AuthenticodeSignature -LiteralPath \$env:INSTALL_SCRIPT/);
+    assert.match(installCommand,/-ExecutionPolicy RemoteSigned -File/);
     assert.equal(context.update({publishable:false}),false);assert.equal(fs.existsSync(releaseRoot),false);
     fs.mkdirSync(releaseRoot);const manifest=path.join(releaseRoot,'manifest.json');
     const trusted={trustLevel:'trusted',signatureStatus:'signed',relativePath:'approved-signed.exe',sha256:'synthetic-existing-record'};
@@ -36,7 +38,7 @@ const JSZip=require('jszip');
     }
     const result=spawnSync(process.execPath,[path.join(packaging,'publish-windows-connector-zip-release.mjs')],{cwd:root,encoding:'utf8'});
     assert.notEqual(result.status,0);assert.match(result.stderr,/Unsigned Windows ZIP publication is retired/);
-    console.log('PASS unsigned Windows inspection: actual ZIP outside releases, non-runnable instructions, AllSigned retained, manifest isolation, trusted metadata preservation, retired publication/overrides');
+    console.log('PASS unsigned Windows inspection: actual ZIP outside releases, non-runnable instructions, signature gate retained, manifest isolation, trusted metadata preservation, retired publication/overrides');
   } finally {
     assert(path.resolve(root).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(root,{recursive:true,force:true});
   }

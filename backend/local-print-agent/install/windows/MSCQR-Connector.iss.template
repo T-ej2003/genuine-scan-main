@@ -40,7 +40,13 @@ Filename: "{cmd}"; Parameters: "/c ""{app}\Uninstall Connector.cmd"""; Flags: ru
 
 [Code]
 var
-  UpgradeMode, UpgradePrepared, SetupCommitted: Boolean;
+  UpgradeMode, UpgradePrepared, SetupCommitted, InitializationFailed: Boolean;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if InitializationFailed then Result := 20
+  else Result := 0;
+end;
 
 function InitializeUninstall(): Boolean;
 begin
@@ -56,10 +62,41 @@ begin
   Result := not UpgradeMode;
 end;
 
+function PowerShellLiteral(const Value: String): String;
+begin
+  Result := Value;
+  StringChangeEx(Result, Chr(39), Chr(39) + Chr(39), True);
+  Result := Chr(39) + Result + Chr(39);
+end;
+
+function VerifyUpgradePayloadSignatures: Boolean;
+var Code: Integer; Params, Command, Payload: String;
+begin
+  Payload := ExpandConstant('{tmp}\mscqr-payload');
+  Command := '$runtime = Get-AuthenticodeSignature -LiteralPath ' +
+    PowerShellLiteral(Payload + '\bin\mscqr-local-print-agent.exe') +
+    '; if ($runtime.Status -ne ''Valid'' -or -not $runtime.TimeStamperCertificate -or ' +
+    '$runtime.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false) -cne ''L&D Health Ltd'') { exit 1 }; ' +
+    '$files = @(' + PowerShellLiteral(Payload + '\connector-upgrade-transaction.ps1') + ', ' +
+    PowerShellLiteral(Payload + '\connector-upgrade-staging.ps1') + ', ' +
+    PowerShellLiteral(Payload + '\connector-upgrade-backup.ps1') + ', ' +
+    PowerShellLiteral(Payload + '\connector-upgrade-state.ps1') +
+    '); foreach ($file in $files) { $signature = Get-AuthenticodeSignature -LiteralPath $file; ' +
+    'if ($signature.Status -ne ''Valid'' -or -not $signature.TimeStamperCertificate -or ' +
+    '$signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint) { exit 1 } }';
+  Params := '-NoProfile -NonInteractive -Command "' + Command + '"';
+  Code := -1;
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+    ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := Result and (Code = 0);
+end;
+
 function RunUpgrade(const Operation: String): Boolean;
 var Code: Integer; Params: String;
 begin
-  Params := '-NoProfile -NonInteractive -ExecutionPolicy AllSigned -File "' + ExpandConstant('{tmp}\mscqr-payload\connector-upgrade-transaction.ps1') +
+  Result := VerifyUpgradePayloadSignatures;
+  if not Result then exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File "' + ExpandConstant('{tmp}\mscqr-payload\connector-upgrade-transaction.ps1') +
     '" -Operation ' + Operation + ' -PayloadDirectory "' + ExpandConstant('{tmp}\mscqr-payload') +
     '" -InstallerFile "' + ExpandConstant('{srcexe}') + '" -AuthorizationFile "' +
     ExpandConstant('{param:MSCQRAUTH|}') + '" -TargetVersion "__MSCQR_CONNECTOR_VERSION__"';
@@ -109,16 +146,25 @@ var
 begin
   if CurStep = ssPostInstall then begin
     if UpgradeMode then begin
-      if not RunUpgrade('Activate') then
-        RaiseException('Connector upgrade failed. Review the durable upgrade journal; dispatch remains fenced.');
+      if not RunUpgrade('Activate') then begin
+        InitializationFailed := True;
+        Log('Connector upgrade activation failed. Review the durable upgrade journal; dispatch remains fenced.');
+        if not WizardSilent then
+          MsgBox('Connector upgrade failed. Review the durable upgrade journal; dispatch remains fenced.', mbError, MB_OK);
+      end;
       exit;
     end;
     Parameters := '/c ""' + ExpandConstant('{app}\Install Connector.cmd') + '"';
     if WizardSilent then Parameters := Parameters + ' /MSCQRSILENT';
     Parameters := Parameters + '"';
     if not Exec(ExpandConstant('{cmd}'), Parameters, ExpandConstant('{app}'), SW_HIDE,
-      ewWaitUntilTerminated, ResultCode) then
-      RaiseException('Connector initialization could not be started.');
+      ewWaitUntilTerminated, ResultCode) then begin
+      InitializationFailed := True;
+      Log('Connector initialization could not be started.');
+      if not WizardSilent then
+        MsgBox('Connector initialization could not be started. Review the setup log.', mbError, MB_OK);
+      exit;
+    end;
     { Exit 10 is emitted only after startup registration, version/protocol and
       exactly-one-process verification. It does not certify printer readiness.
       This fresh-install contract never applies to RunUpgrade: every upgrade
@@ -127,14 +173,37 @@ begin
       Log('Connector installed and runtime verified; printer setup needs attention. Open MSCQR Printer Setup and check the selected printer.');
       if not WizardSilent then
         MsgBox('MSCQR Connector is installed and running. Printer setup needs attention: open MSCQR Printer Setup, select a printer and check that Windows reports it online. Printing readiness has not been verified. See the connector setup log and install-result.json.', mbInformation, MB_OK);
-    end else if ResultCode <> 0 then
-      RaiseException('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + '). Review the connector setup log.');
+    end else if ResultCode <> 0 then begin
+      InitializationFailed := True;
+      Log('Connector initialization or verification failed (exit ' + IntToStr(ResultCode) + ').');
+      if not WizardSilent then
+        MsgBox('Connector initialization or verification failed. Review the connector setup log.', mbError, MB_OK);
+      exit;
+    end;
   end;
   if CurStep = ssDone then begin
-    if UpgradeMode then
-      if not RunUpgrade('Commit') then
-        RaiseException('Connector upgrade commit verification failed; dispatch remains fenced.');
+    if InitializationFailed then exit;
+    if UpgradeMode then begin
+      if not RunUpgrade('Commit') then begin
+        InitializationFailed := True;
+        Log('Connector upgrade commit verification failed; dispatch remains fenced.');
+        if not WizardSilent then
+          MsgBox('Connector upgrade commit verification failed; dispatch remains fenced.', mbError, MB_OK);
+        exit;
+      end;
+    end;
     SetupCommitted := True;
+  end;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and InitializationFailed then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector setup failed';
+    if UpgradeMode then
+      WizardForm.FinishedLabel.Caption := 'The connector upgrade did not complete. Close Setup to run recovery. Keep dispatch fenced and inspect the durable upgrade journal before retrying.'
+    else
+      WizardForm.FinishedLabel.Caption := 'The connector installation did not initialize successfully. Review the setup log before retrying.';
   end;
 end;
 

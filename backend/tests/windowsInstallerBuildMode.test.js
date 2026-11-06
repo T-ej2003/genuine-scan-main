@@ -28,7 +28,7 @@ const {spawnSync}=require('node:child_process');
     fs.mkdirSync(path.join(backend,'node_modules/.bin'),{recursive:true});
     fs.writeFileSync(path.join(backend,'node_modules/.bin',process.platform==='win32'?'pkg.cmd':'pkg'),'fixture');
     const preload=path.join(root,'toolchain.cjs');
-    fs.writeFileSync(preload,`const fs=require('fs');require('child_process').spawnSync=(cmd,args)=>{if(args.includes('--output'))fs.writeFileSync(args[args.indexOf('--output')+1]+'.exe',Buffer.alloc(1000001));return {status:0,stdout:JSON.stringify({ok:true,buildVersion:'2026.10.29.1'})};};require('module').syncBuiltinESMExports();`);
+    fs.writeFileSync(preload,`const fs=require('fs');require('child_process').spawnSync=(cmd,args,options)=>{if(args.includes('--output'))fs.writeFileSync(args[args.indexOf('--output')+1]+'.exe',Buffer.alloc(1000001));return {status:0,stdout:JSON.stringify({ok:true,buildVersion:options?.env?.PRINT_AGENT_BUILD_VERSION})};};require('module').syncBuiltinESMExports();`);
     const script=JSON.parse(fs.readFileSync(path.resolve(__dirname,'../package.json'))).scripts['connector:windows:build-installer'];
     assert(script.endsWith('--mode=development'));
     const result=spawnSync(process.execPath,['--require',preload,...script.split(' ').slice(1)],{cwd:backend,encoding:'utf8',env:{...process.env,WEB_APP_BASE_URL:'http://127.0.0.1:1',MSCQR_MAINTENANCE_API_ORIGIN:'',MSCQR_APPROVED_MAINTENANCE_API_ORIGIN:'',INNO_SETUP_COMPILER_PATH:path.join(root,'unavailable.exe')}});

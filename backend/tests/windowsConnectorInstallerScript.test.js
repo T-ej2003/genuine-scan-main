@@ -317,6 +317,51 @@ const run = async () => {
     installCmd.includes('set "MSCQR_WEB_APP_BASE_URL=__MSCQR_WEB_APP_BASE_URL__"'),
     "Packaged Windows CMD should inject the web app base URL"
   );
+  const scriptSignatureGate = installCmd.indexOf('Get-AuthenticodeSignature -LiteralPath $env:INSTALL_SCRIPT');
+  const scriptLaunch = installCmd.indexOf('-ExecutionPolicy RemoteSigned -File "%INSTALL_SCRIPT%"');
+  assert(
+    scriptSignatureGate >= 0 && scriptLaunch > scriptSignatureGate &&
+      installCmd.includes("$signature.Status -ne 'Valid'") &&
+      installCmd.includes("$signature.TimeStamperCertificate") &&
+      installCmd.includes("$runtime.Status -ne 'Valid'") &&
+      installCmd.includes("$signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint") &&
+      installCmd.includes("-cne 'L&D Health Ltd'") &&
+      installCmd.includes('if errorlevel 1 (') &&
+      !installCmd.includes('-ExecutionPolicy AllSigned -File "%INSTALL_SCRIPT%"'),
+    "Fresh setup must verify the signed publisher before unattended script execution without a TrustedPublisher prompt"
+  );
+  assert(
+    installerTemplate.includes('function GetCustomSetupExitCode: Integer;') &&
+      installerTemplate.includes('if InitializationFailed then Result := 20') &&
+      (installerTemplate.match(/InitializationFailed := True;/g) || []).length >= 4 &&
+      installerTemplate.includes('if InitializationFailed then exit;') &&
+      !installerTemplate.includes('RaiseException('),
+    "A failed initialization must produce a nonzero Inno exit even when message boxes are suppressed"
+  );
+  assert(
+    installerTemplate.includes('procedure CurPageChanged(CurPageID: Integer);') &&
+      installerTemplate.includes('if (CurPageID = wpFinished) and InitializationFailed then begin') &&
+      installerTemplate.includes("WizardForm.FinishedHeadingLabel.Caption := 'MSCQR Connector setup failed'") &&
+      installerTemplate.includes("WizardForm.FinishedLabel.Caption := 'The connector upgrade did not complete.") &&
+      installerTemplate.includes("WizardForm.FinishedLabel.Caption := 'The connector installation did not initialize successfully.") &&
+      installerTemplate.includes('if UpgradePrepared and not SetupCommitted then') &&
+      installerTemplate.includes("RunUpgrade('Recover')") &&
+      !installerTemplate.includes('WizardForm.Close') &&
+      !installerTemplate.includes('Abort;'),
+    "Interactive failures must show a failed Finished page while upgrade recovery still runs at setup exit"
+  );
+  assert(
+    installerTemplate.includes('function VerifyUpgradePayloadSignatures: Boolean;') &&
+      installerTemplate.includes('Result := VerifyUpgradePayloadSignatures;') &&
+      installerTemplate.includes("$runtime.Status -ne ''Valid''") &&
+      installerTemplate.includes('$signature.SignerCertificate.Thumbprint -cne $runtime.SignerCertificate.Thumbprint') &&
+      installerTemplate.includes('connector-upgrade-staging.ps1') &&
+      installerTemplate.includes('connector-upgrade-backup.ps1') &&
+      installerTemplate.includes('connector-upgrade-state.ps1') &&
+      installerTemplate.includes('-ExecutionPolicy RemoteSigned -File') &&
+      !installerTemplate.includes('-ExecutionPolicy AllSigned -File'),
+    "Upgrade execution must verify the signed transaction and sourced helper scripts before noninteractive launch"
+  );
   assert(
     readme.includes("Needs attention: connector installed and running"),
     "Windows README should describe the partial-success outcome"
