@@ -39,6 +39,8 @@ backend/local-print-agent/releases/*
 !backend/local-print-agent/releases/manifest.json
 !backend/local-print-agent/releases/2026.10.29.1
 !backend/local-print-agent/releases/2026.10.29.1/**
+!backend/local-print-agent/releases/2026.11.6.2
+!backend/local-print-agent/releases/2026.11.6.2/**
 backend/local-print-agent/releases/*/macos
 
 # Local IaC/plugin/debug artifacts
