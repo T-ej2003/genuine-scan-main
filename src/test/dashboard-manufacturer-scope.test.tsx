@@ -1,11 +1,12 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import Dashboard from "@/pages/Dashboard";
 import apiClient from "@/lib/api-client";
 import { renderWithQueryClient } from "@/test/render-with-query-client";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const mockNavigate = vi.fn();
 
@@ -35,6 +36,10 @@ vi.mock("@/contexts/AuthContext", () => ({
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/dashboard/RecentActivityCard", () => ({
+  RecentActivityCard: ({ logs }: { logs: Array<{ id: string }> }) => <div data-testid="recent-log-ids">{logs.map(log => log.id).join(",")}</div>,
 }));
 
 vi.mock("@/lib/mutation-events", () => ({
@@ -129,5 +134,37 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     expect(await screen.findByText("Manufacturer workspace details")).toBeInTheDocument();
     expect(screen.getByText("Acme Brands")).toBeInTheDocument();
     expect(screen.getByText("Bravo Health")).toBeInTheDocument();
+  });
+
+  it("reconnects dashboard events after the authenticated request scope changes", async () => {
+    const stop = vi.fn();
+    vi.mocked(apiClient.streamDashboardEvents).mockReturnValue(stop);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1));
+
+    act(() => setRequestCoordinatorScope({ id: "another-manufacturer" }));
+    await waitFor(() => expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(2));
+    expect(stop).toHaveBeenCalled();
+    act(() => setRequestCoordinatorScope(null));
+  });
+
+  it("does not merge previous-scope audit rows into the first new-scope delta", async () => {
+    const callbacks: Array<(envelope: unknown) => void> = [];
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((onEvent) => {
+      callbacks.push(onEvent as (envelope: unknown) => void);
+      return () => undefined;
+    });
+    setRequestCoordinatorScope({ id: "manufacturer-a" });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(callbacks).toHaveLength(1));
+    act(() => callbacks[0]({ type: "audit.delta", payload: { log: { id: "old-tenant-row" } } }));
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("old-tenant-row");
+
+    act(() => setRequestCoordinatorScope({ id: "manufacturer-b" }));
+    await waitFor(() => expect(callbacks).toHaveLength(2));
+    act(() => callbacks[1]({ type: "audit.delta", payload: { log: { id: "new-tenant-row" } } }));
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("new-tenant-row");
+    expect(screen.getByTestId("recent-log-ids")).not.toHaveTextContent("old-tenant-row");
+    act(() => setRequestCoordinatorScope(null));
   });
 });

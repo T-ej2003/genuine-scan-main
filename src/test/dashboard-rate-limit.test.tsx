@@ -1,6 +1,6 @@
 import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
 import Dashboard from "@/pages/Dashboard";
@@ -21,6 +21,11 @@ vi.mock("@/contexts/AuthContext", () => ({
 
 vi.mock("@/components/layout/DashboardLayout", () => ({
   DashboardLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
+vi.mock("@/components/dashboard/RecentActivityCard", () => ({
+  RecentActivityCard: ({ logs, emptyMessage }: { logs: Array<{ id: string }>; emptyMessage?: string }) =>
+    <div data-testid="recent-log-ids">{logs.length ? logs.map(log => log.id).join(",") : emptyMessage}</div>,
 }));
 
 vi.mock("@/lib/mutation-events", () => ({
@@ -110,5 +115,22 @@ describe("Dashboard rate-limit partial state", () => {
 
     await waitFor(() => expect(within(card as HTMLElement).getByText("10")).toBeInTheDocument());
     expect(screen.getByText("40 assigned to manufacturers")).toBeInTheDocument();
+  });
+
+  it("preserves loaded same-scope audit history on the first stream delta", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback as (envelope: unknown) => void;
+      return () => undefined;
+    });
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+      success: true,
+      data: { logs: [{ id: "loaded-row", createdAt: "2026-11-06T00:00:00.000Z" }] },
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("loaded-row"));
+    expect(onEvent).toBeDefined();
+    act(() => onEvent?.({ type: "audit.delta", payload: { log: { id: "new-row" } } }));
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("new-row,loaded-row");
   });
 });

@@ -5,6 +5,12 @@ import { chooseStablePrinterSelection, getPrinterDiagnosticSummary } from "@/lib
 import { buildPrinterSupportSummary, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 describe("printer user-facing helpers", () => {
+  it("keeps the safe printer authorization classification", () => {
+    expect(sanitizePrinterUiError("Printer authorization was rejected. Check access and try again.")).toBe(
+      "Printer authorization was rejected. Check access and try again."
+    );
+  });
+
   it("redacts localhost and trust details from printer errors", () => {
     expect(sanitizePrinterUiError("The browser could not reach localhost:17866")).toBe(
       "The printer helper is not available on this computer right now."

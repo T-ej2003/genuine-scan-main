@@ -11,6 +11,10 @@ export const sanitizePrinterActionError = (
 
   const value = original.toLowerCase();
 
+  if (value.includes("printing_boundary_denied")) {
+    return "Printer authorization was rejected. Check access and try again.";
+  }
+
   if (
     hasAny(value, [
       "unique constraint failed",

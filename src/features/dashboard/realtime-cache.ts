@@ -1,6 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../../shared/contracts/runtime/dashboard.ts";
 
 export const normalizeDashboardSummary = (payload: Record<string, unknown>): DashboardStatsDTO => {
@@ -20,16 +21,17 @@ export const applyDashboardSnapshotToCache = (
 ) => {
   const summary = normalizeDashboardSummary(payload);
   const qrStats = (payload.qrStats || {}) as QrStatsDTO;
-  queryClient.setQueryData(queryKeys.dashboard.stats(scopedLicenseeId), { summary, qrStats, refreshPaused: false });
+  queryClient.setQueryData([...queryKeys.dashboard.stats(scopedLicenseeId), getRequestCoordinatorScope()], { summary, qrStats, refreshPaused: false });
   return { summary, qrStats };
 };
 
 export const applyAuditDeltaToCache = (
   queryClient: QueryClient,
   log: AuditLogDTO,
-  latestLogs: AuditLogDTO[]
+  latestLogs: AuditLogDTO[],
+  scopedLicenseeId?: string
 ) => {
   const logs = [log, ...latestLogs].slice(0, 10);
-  queryClient.setQueryData(queryKeys.dashboard.audit(5), { logs, refreshPaused: false });
+  queryClient.setQueryData([...queryKeys.dashboard.audit(5), scopedLicenseeId || null, getRequestCoordinatorScope()], { logs, refreshPaused: false });
   return logs;
 };

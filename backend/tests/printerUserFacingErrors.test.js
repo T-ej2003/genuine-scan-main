@@ -29,6 +29,12 @@ const run = () => {
   );
 
   assert(
+    sanitizePrinterActionError("ERROR: PRINTING_BOUNDARY_DENIED") ===
+      "Printer authorization was rejected. Check access and try again.",
+    "Printing boundary failures should be classified without exposing SQL details"
+  );
+
+  assert(
     sanitizePrinterActionError("The browser could not reach localhost:17866") ===
       "The workstation connector is not available on this device right now.",
     "Localhost errors should be redacted"

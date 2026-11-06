@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClientCore } from "@/lib/api/internal-client-core";
-import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const originalFetch = globalThis.fetch;
 const originalDomParser = globalThis.DOMParser;
@@ -12,6 +12,201 @@ describe("internal client core HTML error handling", () => {
     globalThis.DOMParser = originalDomParser;
     vi.restoreAllMocks();
     setRequestCoordinatorScope(null);
+  });
+
+  it("keeps the session after refresh throttling and respects Retry-After", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ code: "RATE_LIMITED" }), { status: 429, headers: { "content-type": "application/json", "retry-after": "30" } }))
+      .mockResolvedValueOnce(new Response("", { status: 401 }));
+    const client = createApiClientCore();
+    const result = await client.request("/dashboard/stats");
+    expect(result.status).toBe(429);
+    expect(result.retryAfterSec).toBe(30);
+    expect(logout).not.toHaveBeenCalled();
+    expect((await client.request("/dashboard/stats")).status).toBe(429);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    window.removeEventListener("auth:logout", logout);
+  });
+
+  it("logs out on a revoked refresh token", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockResolvedValueOnce(new Response("", { status: 401 }));
+    expect((await createApiClientCore().request("/dashboard/stats")).code).toBe("UNAUTHENTICATED");
+    expect(logout).toHaveBeenCalledOnce();
+    window.removeEventListener("auth:logout", logout);
+  });
+
+  it("treats explicit scope denial as terminal but keeps CSRF 403 nonterminal", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    try {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ code: "CSRF_DENIED" }), { status: 403, headers: { "content-type": "application/json" } }));
+      expect((await createApiClientCore().request("/dashboard/stats")).status).toBe(403);
+      expect(logout).not.toHaveBeenCalled();
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response("", { status: 401 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ code: "AUTH_SCOPE_UNAVAILABLE" }), { status: 403, headers: { "content-type": "application/json" } }));
+      expect((await createApiClientCore().request("/dashboard/stats")).code).toBe("UNAUTHENTICATED");
+      expect(logout).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener("auth:logout", logout);
+    }
+  });
+
+  it("does not log out or replay a protected operation after a refresh timeout", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 401 }))
+      .mockRejectedValueOnce(Object.assign(new Error("timeout"), { name: "AbortError" }));
+    const result = await createApiClientCore().request("/dashboard/stats");
+    expect(result.code).toBe("REQUEST_TIMEOUT");
+    expect(logout).not.toHaveBeenCalled();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    window.removeEventListener("auth:logout", logout);
+  });
+
+  it("serializes refresh rotation across client instances when Web Locks are available", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    window.localStorage.removeItem("mscqr:auth-refresh-version");
+    const previousLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    let tail = Promise.resolve<unknown>(undefined);
+    Object.defineProperty(navigator, "locks", { configurable: true, value: {
+      request: (_name: string, run: () => Promise<unknown>) => {
+        const next = tail.then(run);
+        tail = next.catch(() => undefined);
+        return next;
+      },
+    } });
+    let release!: () => void;
+    const firstResponse = new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ success: true, data: { user: { id: "actor" } } }), { headers: { "content-type": "application/json" } })); });
+    globalThis.fetch = vi.fn().mockReturnValueOnce(firstResponse);
+    try {
+      const first = createApiClientCore().request("/auth/refresh", { method: "POST" });
+      const second = createApiClientCore().request("/auth/refresh", { method: "POST" });
+      await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(1));
+      release();
+      expect((await first).success).toBe(true);
+      expect((await second).code).toBe("REQUEST_SCOPE_CHANGED");
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      window.localStorage.removeItem("mscqr:auth-refresh-version");
+      if (previousLocks) Object.defineProperty(navigator, "locks", previousLocks);
+      else Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("does not start a queued refresh after logout", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const previousLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    let releaseLock!: () => void;
+    const held = new Promise<void>((resolve) => { releaseLock = resolve; });
+    Object.defineProperty(navigator, "locks", { configurable: true, value: {
+      request: (_name: string, run: () => Promise<unknown>) => held.then(run),
+    } });
+    globalThis.fetch = vi.fn();
+    try {
+      const client = createApiClientCore();
+      const pending = client.request("/auth/refresh", { method: "POST" });
+      client.logout();
+      releaseLock();
+      expect((await pending).code).toBe("REQUEST_SCOPE_CHANGED");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      if (previousLocks) Object.defineProperty(navigator, "locks", previousLocks);
+      else Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("does not replay a second tab request after another tab rotates the cookie", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    window.localStorage.removeItem("mscqr:auth-refresh-version");
+    const previousLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    let tail = Promise.resolve<unknown>(undefined);
+    Object.defineProperty(navigator, "locks", { configurable: true, value: {
+      request: (_name: string, run: () => Promise<unknown>) => {
+        const next = tail.then(run);
+        tail = next.catch(() => undefined);
+        return next;
+      },
+    } });
+    let release!: () => void;
+    const rotation = new Promise<Response>((resolve) => { release = () => resolve(new Response(JSON.stringify({ success: true, data: { user: { id: "actor" } } }), { headers: { "content-type": "application/json" } })); });
+    let protectedCalls = 0;
+    let refreshCalls = 0;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.endsWith("/auth/refresh")) { refreshCalls += 1; return rotation; }
+      protectedCalls += 1;
+      return Promise.resolve(new Response(protectedCalls <= 2 ? "" : JSON.stringify({ success: true, data: [] }), {
+        status: protectedCalls <= 2 ? 401 : 200,
+        headers: { "content-type": "application/json" },
+      }));
+    }) as typeof fetch;
+    try {
+      const first = createApiClientCore().request("/dashboard/stats");
+      const second = createApiClientCore().request("/dashboard/stats");
+      await vi.waitFor(() => expect(refreshCalls).toBe(1));
+      release();
+      expect((await first).success).toBe(true);
+      expect((await second).code).toBe("REQUEST_SCOPE_CHANGED");
+      expect(refreshCalls).toBe(1);
+      expect(protectedCalls).toBe(3);
+      for (const [, init] of vi.mocked(globalThis.fetch).mock.calls) {
+        expect(new Headers(init?.headers).has("authorization")).toBe(false);
+        expect(init?.credentials).toBe("include");
+      }
+    } finally {
+      window.localStorage.removeItem("mscqr:auth-refresh-version");
+      if (previousLocks) Object.defineProperty(navigator, "locks", previousLocks);
+      else Reflect.deleteProperty(navigator, "locks");
+    }
+  });
+
+  it("does not restore an auth scope from a refresh response arriving after logout", async () => {
+    setRequestCoordinatorScope(null);
+    let release!: (response: Response) => void;
+    globalThis.fetch = vi.fn().mockReturnValue(new Promise<Response>((resolve) => { release = resolve; }));
+    const client = createApiClientCore();
+    const pending = client.request("/auth/refresh", { method: "POST" });
+    await vi.waitFor(() => expect(globalThis.fetch).toHaveBeenCalledOnce());
+    client.logout();
+    const loggedOutScope = getRequestCoordinatorScope();
+    release(new Response(JSON.stringify({ success: true, data: { user: { id: "stale-actor" } } }), { headers: { "content-type": "application/json" } }));
+    expect((await pending).code).toBe("REQUEST_SCOPE_CHANGED");
+    expect(getRequestCoordinatorScope()).toBe(loggedOutScope);
+  });
+
+  it("refuses refresh when another actor changes the shared version while queued", async () => {
+    setRequestCoordinatorScope({ id: "actor-A", licenseeId: "tenant-A" });
+    window.localStorage.setItem("mscqr:auth-refresh-version", "before");
+    const previousLocks = Object.getOwnPropertyDescriptor(navigator, "locks");
+    let releaseLock!: () => void;
+    const held = new Promise<void>((resolve) => { releaseLock = resolve; });
+    Object.defineProperty(navigator, "locks", { configurable: true, value: { request: (_name: string, run: () => Promise<unknown>) => held.then(run) } });
+    globalThis.fetch = vi.fn();
+    try {
+      const pending = createApiClientCore().request("/auth/refresh", { method: "POST" });
+      window.localStorage.setItem("mscqr:auth-refresh-version", "actor-B-rotated");
+      releaseLock();
+      expect((await pending).code).toBe("REQUEST_SCOPE_CHANGED");
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem("mscqr:auth-refresh-version");
+      if (previousLocks) Object.defineProperty(navigator, "locks", previousLocks);
+      else Reflect.deleteProperty(navigator, "locks");
+    }
   });
 
   it("cannot resurrect cookie-auth A through a B HTTP 304 cache hit", async () => {

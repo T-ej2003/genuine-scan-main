@@ -28,6 +28,10 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
 
   const value = original.toLowerCase();
 
+  if (value === "printer authorization was rejected. check access and try again.") {
+    return "Printer authorization was rejected. Check access and try again.";
+  }
+
   if (
     hasAny(value, [
       "unique constraint failed",

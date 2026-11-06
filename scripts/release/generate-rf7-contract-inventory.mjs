@@ -183,7 +183,7 @@ for (const file of walk(path.join(root, "src"))) {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const name = ts.isIdentifier(callee) ? callee.text : ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
-      if ((name === "request" || name === "fetch") && node.arguments[0]) {
+      if ((name === "request" || name === "fetch") && callee.getText(source) !== "navigator.locks.request" && node.arguments[0]) {
         const endpoint = literalPath(node.arguments[0], source);
         let method = "GET";
         const options = node.arguments[1];

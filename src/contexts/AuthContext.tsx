@@ -4,7 +4,7 @@ import { useLocation } from "react-router";
 import { shouldBootstrapCurrentUser } from "@/contexts/auth-bootstrap";
 import apiClient from "@/lib/api-client";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
-import { clearRequestCoordinator, getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { clearRequestCoordinator, getRequestCoordinatorScope, isRequestCoordinatorScopeReady, isRequestCoordinatorUserCurrent, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import type { AuthState, PendingAuthSession, User } from "@/types";
 
 interface AuthContextType {
@@ -85,8 +85,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAttemptAtRef = useRef(0);
   const lastRefreshSuccessAtRef = useRef(0);
+  const refreshCooldownUntilRef = useRef(0);
+  const sessionGenerationRef = useRef(0);
+  const scopeRetryRef = useRef<number | null>(null);
+  const bootstrapRetryRef = useRef<number | null>(null);
+  const bootstrapRetryCountRef = useRef(0);
+  const transientRestoreRef = useRef(false);
 
   const clearSession = () => {
+    if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
+    scopeRetryRef.current = null;
+    if (bootstrapRetryRef.current !== null) window.clearTimeout(bootstrapRetryRef.current);
+    bootstrapRetryRef.current = null;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    setIsLoading(false);
+    sessionGenerationRef.current += 1;
     setRequestCoordinatorScope(null);
     setUser(null);
     setPendingAuth(null);
@@ -101,6 +115,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    sessionGenerationRef.current += 1;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    refreshCooldownUntilRef.current = 0;
     setPendingAuth(null);
     const normalized = normalizeUser({ ...payload.user, auth: payload.auth || payload.user?.auth || null });
     setRequestCoordinatorScope(normalized);
@@ -114,6 +132,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
+    sessionGenerationRef.current += 1;
+    transientRestoreRef.current = false;
+    bootstrapRetryCountRef.current = 0;
+    refreshCooldownUntilRef.current = 0;
     const auth = payload.auth || payload.user?.auth || null;
     const normalized = normalizeUser({ ...payload.user, auth });
 
@@ -140,7 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = async () => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    if (Date.now() < refreshCooldownUntilRef.current) return;
     refreshInFlightRef.current = (async () => {
+      const generation = sessionGenerationRef.current;
       lastRefreshAttemptAtRef.current = Date.now();
 
       const canRefreshSession = typeof apiClient.refreshSession === "function";
@@ -156,19 +180,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const restoreAttempts: Array<() => Promise<any>> = apiClient.getToken?.()
         ? [getCurrentUser, refreshSession]
         : [refreshSession, getCurrentUser];
+      let transientFailure = false;
+      let retryableFailure = false;
 
       for (const attempt of restoreAttempts) {
         const res = await attempt().catch((error: unknown) => ({
           success: false,
+          status: 0,
           error: error instanceof Error ? error.message : "Session restore failed",
         }));
-        if (!res?.success || !res.data) continue;
-
-        lastRefreshSuccessAtRef.current = Date.now();
-        if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) return;
+        if (generation !== sessionGenerationRef.current) return;
+        if ((attempt === refreshSession && res?.status === 401) || res?.code === "AUTH_SCOPE_UNAVAILABLE") {
+          clearSession();
+          return;
+        }
+        if (res?.success && res.data) {
+          lastRefreshSuccessAtRef.current = Date.now();
+          if (setAuthStateFromPayload(authPayloadFromResponseData(res.data))) {
+            return;
+          }
+        }
+        if (res?.status === 403 || res?.status === 429 || res?.status === 0 || (res?.status && res.status >= 500)) {
+          transientFailure = true;
+          if (res.status !== 403) retryableFailure = true;
+          const fallbackSec = Math.min(120, 10 * 2 ** Math.min(bootstrapRetryCountRef.current++, 4));
+          refreshCooldownUntilRef.current = Math.max(
+            refreshCooldownUntilRef.current,
+            Date.now() + Math.max(fallbackSec, Number(res?.retryAfterSec) || 0) * 1000,
+          );
+          continue;
+        }
       }
 
-      clearSession();
+      if (generation === sessionGenerationRef.current) {
+        transientRestoreRef.current = transientFailure && (Boolean(user) || retryableFailure);
+        if (!transientRestoreRef.current) clearSession();
+      }
     })().finally(() => {
       refreshInFlightRef.current = null;
     });
@@ -177,18 +224,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onAuthLogout = () => clearSession();
+    let retryCount = 0;
     const onScopeRefresh = () => {
+      if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
+      scopeRetryRef.current = null;
+      if (isRequestCoordinatorScopeReady()) return;
       apiClient.setToken(null);
       const scope = getRequestCoordinatorScope();
+      const generation = sessionGenerationRef.current;
+      const retry = (retryAfterSec?: number) => {
+        const delay = Number.isFinite(retryAfterSec) && Number(retryAfterSec) > 0
+          ? Number(retryAfterSec)
+          : Math.min(60, 10 * 2 ** Math.min(retryCount++, 3));
+        scopeRetryRef.current = window.setTimeout(onScopeRefresh, delay * 1000);
+      };
       void apiClient.getCurrentUser().then(response => {
-        if (response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (generation !== sessionGenerationRef.current || response.code === "REQUEST_SCOPE_CHANGED") return;
+        if (response.success && response.data) {
+          const payload = authPayloadFromResponseData(response.data);
+          if (payload?.user && isRequestCoordinatorUserCurrent(normalizeUser({ ...payload.user, auth: payload.auth || null }))) {
+            retryCount = 0;
+            setAuthStateFromPayload(payload);
+            return;
+          }
+        }
+        if (scope !== getRequestCoordinatorScope()) return;
+        if (response.code === "AUTH_SCOPE_UNAVAILABLE") { clearSession(); return; }
+        if (response.status === 403 || response.status === 429 || response.status === 0 || (response.status && response.status >= 500)) { retry(response.retryAfterSec); return; }
         if (!response.success || !setAuthStateFromPayload(authPayloadFromResponseData(response.data))) clearSession();
-      }).catch(() => { if (scope === getRequestCoordinatorScope()) clearSession(); });
+      }).catch(() => { if (generation === sessionGenerationRef.current && scope === getRequestCoordinatorScope()) retry(); });
     };
     window.addEventListener("auth:logout", onAuthLogout);
     window.addEventListener("auth:scope-refresh", onScopeRefresh);
 
     return () => {
+      if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
       window.removeEventListener("auth:logout", onAuthLogout);
       window.removeEventListener("auth:scope-refresh", onScopeRefresh);
     };
@@ -221,24 +291,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false;
+    const retryBootstrap = () => {
+      if (cancelled || !transientRestoreRef.current) return;
+      bootstrapRetryRef.current = window.setTimeout(async () => {
+        bootstrapRetryRef.current = null;
+        await refresh();
+        if (cancelled) return;
+        if (transientRestoreRef.current) retryBootstrap();
+        else setIsLoading(false);
+      }, Math.max(1, refreshCooldownUntilRef.current - Date.now()));
+    };
     (async () => {
       setIsLoading(true);
       try {
         await refresh();
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          if (transientRestoreRef.current && !user) retryBootstrap();
+          else setIsLoading(false);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
+      if (bootstrapRetryRef.current !== null) window.clearTimeout(bootstrapRetryRef.current);
+      bootstrapRetryRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname, user]);
 
   const login = async (email: string, password: string) => {
+    const generation = sessionGenerationRef.current;
     try {
       const result = await apiClient.login(email, password);
+      if (generation !== sessionGenerationRef.current) return { success: false, error: "Session changed" };
       if (result.success && result.data?.user) {
         const auth = result.data.auth || null;
         setAuthStateFromPayload({ user: result.data.user, auth });
