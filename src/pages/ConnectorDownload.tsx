@@ -349,12 +349,7 @@ export default function ConnectorDownload() {
       .map((platformKey) => {
         const item = release.release.platforms[platformKey];
         if (!item) return null;
-        if (
-          platformKey === "windows" &&
-          (item.internalOnly || item.signatureStatus !== "signed" || item.installerKind === "zip")
-        ) {
-          return null;
-        }
+        if (platformKey === "windows" && (item.internalOnly || item.signatureStatus !== "signed" || item.installerKind === "zip")) return null;
         return {
           ...item,
           ...getDownloadCardCopy(item),
@@ -391,15 +386,11 @@ export default function ConnectorDownload() {
   const availableConnectorVersion = release?.latestVersion || release?.release.version || "";
   const freshInstallOnlyWindows = release?.release.platforms.windows?.installationScope === "fresh-install-only";
   const existingWindowsConnector = detectedPlatform === "windows" && Boolean(localConnector?.reachable);
-  const installedConnectorVersion =
-    localConnector?.buildVersion || localConnector?.agentVersion || (localConnector?.reachable ? "Installed version not reported" : "Not detected");
-  const connectorUpdateRequired = Boolean(
-    localConnector?.reachable &&
-      (
-        (localConnector.protocolVersion && requiredProtocol && localConnector.protocolVersion !== requiredProtocol) ||
-        (!(freshInstallOnlyWindows && detectedPlatform === "windows") && localConnector.buildVersion && availableConnectorVersion && localConnector.buildVersion !== availableConnectorVersion)
-      ),
-  );
+  const installedConnectorVersion = localConnector?.buildVersion || localConnector?.agentVersion || (localConnector?.reachable ? "Installed version not reported" : "Not detected");
+  const connectorUpdateRequired = Boolean(localConnector?.reachable && (
+    (localConnector.protocolVersion && requiredProtocol && localConnector.protocolVersion !== requiredProtocol) ||
+    (!(freshInstallOnlyWindows && detectedPlatform === "windows") && localConnector.buildVersion && availableConnectorVersion && localConnector.buildVersion !== availableConnectorVersion)
+  ));
   const detectedPlatformLabel =
     detectedPlatform === "macos"
       ? "This computer looks like a Mac."
@@ -665,13 +656,7 @@ export default function ConnectorDownload() {
                   reachable={Boolean(localConnector?.reachable)}
                   updateRequired={connectorUpdateRequired}
                 />
-                {freshInstallOnlyWindows ? (
-                  <Alert className="mt-5 border-amber-200 bg-amber-50 text-amber-950">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Windows release for new installations only</AlertTitle>
-                    <AlertDescription>Existing connector upgrades require the authorized maintenance workflow. Keep the installed connector; this download is not an upgrade path.</AlertDescription>
-                  </Alert>
-                ) : null}
+                {freshInstallOnlyWindows ? <p className="mt-5 text-sm text-amber-800">Windows release for new installations only. Existing connector upgrades require the authorized maintenance workflow.</p> : null}
                 <div className="mt-8 grid gap-5 xl:grid-cols-2">
                   {downloadCards.map((item) => {
                     const Icon = item.icon;
@@ -803,8 +788,7 @@ export default function ConnectorDownload() {
                             {!(existingWindowsConnector && item.platform === "windows" && item.installationScope === "fresh-install-only") ? (
                               <Button asChild size="lg" className="sm:min-w-[230px]">
                                 <a href={item.href} data-testid={`download-printer-helper-${item.platform}`}>
-                                  <Download className="h-4 w-4" />
-                                  {item.action}
+                                  <Download className="h-4 w-4" />{item.action}
                                 </a>
                               </Button>
                             ) : null}

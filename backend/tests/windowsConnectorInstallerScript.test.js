@@ -165,8 +165,9 @@ const run = async () => {
   assert(
     signedReleasePublisher.includes("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION") &&
       signedReleasePublisher.includes("assertConnectorVersionMatchesSource") &&
-      signedReleasePublisher.includes("minimumBuildVersion = sourceVersion"),
-    "Signed Windows publisher should stamp the backend protocol/build contract and block source version mismatches"
+      signedReleasePublisher.includes('readLocalAgentProtocolString("LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION"') &&
+      signedReleasePublisher.includes(": sourceVersion"),
+    "Signed publisher must preserve the existing-session minimum for fresh-only releases and block source version mismatches"
   );
   assert(
     signedReleaseWorkflow.includes("npm --prefix backend run connector:windows:publish-signed") &&

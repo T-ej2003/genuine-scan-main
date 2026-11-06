@@ -418,7 +418,7 @@ describe("ConnectorDownload", () => {
     } as any : { success: false, error: "Not detected" } as any);
 
     render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
-    expect(await screen.findByText("Windows release for new installations only")).toBeInTheDocument();
+    expect(await screen.findByText(/Windows release for new installations only/)).toBeInTheDocument();
     expect(screen.queryByText(/^Yes$/i)).not.toBeInTheDocument();
     if (connected) {
       expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();

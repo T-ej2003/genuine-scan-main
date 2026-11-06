@@ -391,10 +391,8 @@ export default function PrinterSetupPage() {
   const localReady = helperReadiness.ready;
   const helperVersion = String(remoteStatus?.agentVersion || "").trim();
   const latestHelperVersion = String(connectorReleaseQuery.data?.latestVersion || "").trim();
-  const detectedPlatformRelease =
-    detectedPlatform === "unknown"
-      ? null
-      : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
+  const detectedPlatformRelease = detectedPlatform === "unknown"
+    ? null : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
   const signedConnectorUnavailable =
     detectedPlatform === "windows" &&
     connectorReleaseQuery.data?.release?.productionSignedAvailable === false &&
@@ -694,11 +692,9 @@ export default function PrinterSetupPage() {
                       : " Printing is blocked until this workstation connector is updated."}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {!freshInstallOnly ? (
-                      <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
-                        {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
-                      </Button>
-                    ) : null}
+                    {!freshInstallOnly ? <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                      {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
+                    </Button> : null}
                     <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
                       Re-check connector
                     </Button>
