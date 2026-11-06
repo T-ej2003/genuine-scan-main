@@ -15,7 +15,6 @@ on:
       - 'scripts/tests/windows-candidate-workflow.test.cjs'
 
 permissions:
-  actions: read
   contents: read
 
 jobs:
@@ -46,78 +45,3 @@ jobs:
           & ./backend/tests/windowsConnectorStateDiscovery.test.ps1
           & ./backend/tests/windowsConnectorSigningHook.test.ps1
           & ./backend/tests/windowsConnectorComponentVerification.test.ps1
-      - name: Diagnose pinned signed installer on clean GitHub Windows runner
-        if: github.event.pull_request.number == 803
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $root = Join-Path $env:RUNNER_TEMP 'mscqr-pinned-diagnostic'
-          New-Item -ItemType Directory -Path $root | Out-Null
-          gh run download 42232461905 --repo $env:GITHUB_REPOSITORY --name 'mscqr-windows-candidate-2026.11.6.2-29ce21eb66bf193d38b95407568de6d8412a854d' --dir $root
-          if ($LASTEXITCODE -ne 0) { throw 'Pinned signed installer download failed.' }
-          $installer = Join-Path $root 'MSCQR-Connector-Windows-2026.11.6.2.exe'
-          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne 'fd2bb5415415fee272af55a8d1fbff855c71944185e60ec4ad81bd685b0a34ee') { throw 'Pinned installer hash mismatch.' }
-          $installerSig = Get-AuthenticodeSignature -LiteralPath $installer
-          if ($installerSig.Status -ne 'Valid' -or -not $installerSig.TimeStamperCertificate) { throw 'Pinned installer signature invalid.' }
-          $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
-          Write-Host "Runner user: $([Security.Principal.WindowsIdentity]::GetCurrent().Name)"
-          Write-Host "Install path: $installRoot"
-          Write-Host "Preexisting install: $(Test-Path $installRoot); state: $(Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')); ambient override: $(-not [string]::IsNullOrWhiteSpace($env:PRINT_AGENT_STATE_FILE))"
-          if ((Test-Path $installRoot) -or (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or (Test-Path (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) { throw 'Diagnostic runner is not a clean fresh-install host.' }
-          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-ExecutionPolicy -List | Format-Table -HideTableHeaders; try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop; Write-Host 'Windows Forms load: PASS' } catch { Write-Host 'Windows Forms load: FAIL' }"
-          $setupLog = Join-Path $root 'inno-setup.log'
-          $setup = Start-Process -FilePath $installer -WindowStyle Hidden -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$setupLog") -Wait -PassThru
-          Write-Host "Pinned diagnostic installer exit: $($setup.ExitCode)"
-          foreach ($file in @('install-startup-task.ps1', 'bin\mscqr-local-print-agent.exe')) {
-            $path = Join-Path $installRoot $file
-            if (-not (Test-Path $path)) { Write-Host "Missing payload: $file"; continue }
-            $sig = Get-AuthenticodeSignature -LiteralPath $path
-            $zone = Get-Item -LiteralPath $path -Stream Zone.Identifier -ErrorAction SilentlyContinue
-            Write-Host "Payload $file`: signature=$($sig.Status); timestamped=$([bool]$sig.TimeStamperCertificate); signerMatchesInstaller=$($sig.SignerCertificate.Thumbprint -ceq $installerSig.SignerCertificate.Thumbprint); zoneMarker=$([bool]$zone)"
-          }
-          $connectorLog = Join-Path $installRoot 'logs\setup.log'
-          Write-Host "Connector setup log present: $(Test-Path $connectorLog)"
-          if (Test-Path $connectorLog) { Get-Content $connectorLog -Tail 25 | Write-Host }
-          $receipt = Join-Path $installRoot 'install-result.json'
-          Write-Host "Receipt present: $(Test-Path $receipt)"
-          if (Test-Path $receipt) {
-            $r = Get-Content $receipt -Raw | ConvertFrom-Json
-            Write-Host "Receipt outcome=$($r.outcome); state=$($r.state); version=$($r.installedVersion)"
-          }
-          if ($setup.ExitCode -ne 0 -and -not (Test-Path $receipt) -and -not (Test-Path $connectorLog) -and
-              -not (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json'))) {
-            $env:INSTALL_SCRIPT = Join-Path $installRoot 'install-startup-task.ps1'
-            $env:CONNECTOR_EXE = Join-Path $installRoot 'bin\mscqr-local-print-agent.exe'
-            $gateLine = Get-Content (Join-Path $installRoot 'Install Connector.cmd') | Where-Object { $_ -like '*-Command*Get-AuthenticodeSignature*' } | Select-Object -First 1
-            if ($gateLine -match '-Command "(.*)"$') {
-              & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command $Matches[1]
-              Write-Host "Installed wrapper signature gate exit: $LASTEXITCODE"
-            }
-            $wrapperOutput = & (Join-Path $installRoot 'Install Connector.cmd') /MSCQRSILENT 2>&1
-            Write-Host "Installed wrapper diagnostic exit: $LASTEXITCODE"
-            $wrapperOutput | Select-Object -Last 20 | Write-Host
-            & "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host ('32-bit PowerShell: ' + (-not [Environment]::Is64BitProcess)); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host '32-bit security module: PASS' } catch { Write-Host ('32-bit security module: FAIL ' + `$_.Exception.Message) }"
-            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host ('64-bit PowerShell: ' + [Environment]::Is64BitProcess); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host '64-bit security module: PASS' } catch { Write-Host ('64-bit security module: FAIL ' + `$_.Exception.Message) }"
-            $cmdProbe = Join-Path $installRoot 'probe-module.cmd'
-            @(
-              '@echo off',
-              'setlocal EnableExtensions',
-              'cd /d "%~dp0"',
-              '"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Write-Host (''CMD child bitness: '' + [Environment]::Is64BitProcess); Write-Host (''CMD child language mode: '' + $ExecutionContext.SessionState.LanguageMode); Write-Host (''CMD child module path: '' + $env:PSModulePath); try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; Write-Host ''CMD child import: PASS'' } catch { Write-Host (''CMD child import: FAIL '' + $_.Exception.ToString()) }"'
-            ) | Set-Content -LiteralPath $cmdProbe -Encoding ascii
-            & $cmdProbe 2>&1 | Select-Object -Last 25 | Write-Host
-            $patchedCmd = (Get-Content 'backend/local-print-agent/install/windows/Install Connector.cmd' -Raw).Replace('__MSCQR_WEB_APP_BASE_URL__', 'https://mscqr.com').Replace('__MSCQR_CONNECTOR_VERSION__', '2026.11.6.2')
-            Set-Content -LiteralPath (Join-Path $installRoot 'Install Connector.cmd') -Value $patchedCmd -Encoding ascii
-            $patchedOutput = & (Join-Path $installRoot 'Install Connector.cmd') /MSCQRSILENT 2>&1
-            $patchedExit = $LASTEXITCODE
-            Write-Host "Source-patched wrapper diagnostic exit: $patchedExit"
-            $patchedOutput | Select-Object -Last 20 | Write-Host
-            if (Test-Path $receipt) {
-              $patchedReceipt = Get-Content $receipt -Raw | ConvertFrom-Json
-              Write-Host "Source-patched receipt outcome=$($patchedReceipt.outcome); state=$($patchedReceipt.state); version=$($patchedReceipt.installedVersion)"
-            }
-            if ($patchedExit -notin @(0,10)) { throw 'Source-patched wrapper did not initialize on clean runner.' }
-            Write-Host 'Diagnostic only: this modified installed wrapper does not certify the original signed installer.'
-          }
-          if (Test-Path $setupLog) { Get-Content $setupLog -Tail 12 | Write-Host }
