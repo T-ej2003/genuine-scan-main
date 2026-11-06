@@ -521,8 +521,7 @@ function Get-AgentProcessCandidates {
       $name = [string]$_.Name
       $commandLine = [string]$_.CommandLine
       $name -in @("mscqr-local-print-agent.exe", "local-print-agent.exe", "mscqr-print-agent.exe") -or
-        ($name -ieq "node.exe" -and $commandLine -match "local-print-agent") -or
-        ($commandLine -match "mscqr-local-print-agent")
+        ($name -ieq "node.exe" -and $commandLine -match "local-print-agent")
     }
   } catch {
     throw "Cannot prove connector process state: $($_.Exception.Message)"
