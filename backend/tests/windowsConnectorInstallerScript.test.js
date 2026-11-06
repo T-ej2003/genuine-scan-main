@@ -143,7 +143,7 @@ const run = async () => {
   );
   assert(
     packagingScript.includes('INSPECTION-ONLY.zip') &&
-      signedReleasePublisher.includes('label: "Windows installer"'),
+      signedReleasePublisher.includes('label: freshInstallOnly ? "Windows installer (fresh installation only)" : "Windows installer"'),
     "Local inspection output and the governed signed Windows installer must remain distinct"
   );
   assert(

@@ -68,9 +68,24 @@ for (const [platformKey, platform] of Object.entries(latestRelease.platforms || 
 const latestDir = path.join(sourceReleaseRoot, manifest.latestVersion);
 const latestDirFilesCopied = copyDirectory(latestDir, path.join(outputReleaseRoot, manifest.latestVersion));
 
+// Keep the previous published signed installer available while the latest
+// connector is limited to fresh installations.
+const previous = manifest.releases?.find((release) =>
+  release.version !== manifest.latestVersion && release.publishedAt &&
+  release.platforms?.windows?.signatureStatus === "signed" &&
+  release.platforms.windows.trustLevel === "production");
+let previousRuntimeRelease;
+if (previous) {
+  const platform = previous.platforms.windows;
+  if (!copyFilePreservingPath(platform.relativePath)) {
+    throw new Error(`Previous signed connector is missing: ${platform.relativePath}`);
+  }
+  previousRuntimeRelease = { ...previous, platforms: { windows: platform } };
+}
+
 const runtimeManifest = {
   ...manifest,
-  releases: [latestRuntimeRelease],
+  releases: [latestRuntimeRelease, ...(previousRuntimeRelease ? [previousRuntimeRelease] : [])],
 };
 fs.writeFileSync(path.join(outputReleaseRoot, "manifest.json"), `${JSON.stringify(runtimeManifest, null, 2)}\n`);
 
@@ -82,6 +97,7 @@ console.log(
       referencedArtifactsCopied,
       latestDirFilesCopied,
       platforms: Object.keys(latestRuntimeRelease.platforms),
+      previousSignedVersion: previousRuntimeRelease?.version || null,
     },
     null,
     2

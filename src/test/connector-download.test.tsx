@@ -405,4 +405,37 @@ describe("ConnectorDownload", () => {
     expect(screen.getByText(/Update required/i)).toBeInTheDocument();
     expect(screen.getByText(/^Yes$/i)).toBeInTheDocument();
   });
+
+  it.each([true, false])("keeps fresh-only Windows release out of existing-install upgrade prompts (connected=%s)", async (connected) => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).release.platforms.windows.installationScope = "fresh-install-only";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue(connected ? {
+      success: true,
+      data: { agentVersion: "2026.10.29.1", buildVersion: "2026.10.29.1", protocolVersion: "local-agent-direct-v2" },
+    } as any : { success: false, error: "Not detected" } as any);
+
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText("Windows release for new installations only")).toBeInTheDocument();
+    expect(screen.queryByText(/^Yes$/i)).not.toBeInTheDocument();
+    if (connected) {
+      expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getAllByTestId("download-printer-helper-windows").length).toBeGreaterThan(0);
+    }
+    userAgent.mockRestore();
+  });
+
+  it("retains normal upgrade advice when scope is absent", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText(/^Yes$/i)).toBeInTheDocument();
+    expect(screen.getAllByTestId("download-printer-helper-windows").length).toBeGreaterThan(0);
+    userAgent.mockRestore();
+  });
 });

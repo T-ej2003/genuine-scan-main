@@ -55,8 +55,8 @@ type LatestConnectorReleaseInfo = {
   release?: {
     productionSignedAvailable?: boolean;
     platforms?: {
-      macos?: unknown;
-      windows?: unknown;
+      macos?: { installationScope?: "fresh-install-only" | null } | null;
+      windows?: { installationScope?: "fresh-install-only" | null } | null;
     };
   };
 } | null;
@@ -399,7 +399,8 @@ export default function PrinterSetupPage() {
     detectedPlatform === "windows" &&
     connectorReleaseQuery.data?.release?.productionSignedAvailable === false &&
     !detectedPlatformRelease;
-  const helperNeedsUpdate = Boolean(remoteStatus?.connectorUpdateRequired || (helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion));
+  const freshInstallOnly = detectedPlatformRelease?.installationScope === "fresh-install-only";
+  const helperNeedsUpdate = Boolean(remoteStatus?.connectorUpdateRequired || (!freshInstallOnly && helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion));
 
   useEffect(() => {
     if (selectedPrinterId) return;
@@ -685,15 +686,19 @@ export default function PrinterSetupPage() {
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
                   <div className="font-medium">Connector update required</div>
                   <div className="mt-1">
-                    Detected: {helperVersion || "unknown"}. Required: {latestHelperVersion || REQUIRED_CONNECTOR_VERSION} or newer.
-                    {signedConnectorUnavailable
+                    Detected: {helperVersion || "unknown"}. {freshInstallOnly ? "The backend requires a compatible connector session." : `Required: ${latestHelperVersion || REQUIRED_CONNECTOR_VERSION} or newer.`}
+                    {freshInstallOnly
+                      ? " This release is for new installations only. Existing connector upgrades require the authorized maintenance workflow; do not use this installer to upgrade."
+                      : signedConnectorUnavailable
                       ? " Signed connector release is not available yet. Production printing cannot continue."
                       : " Printing is blocked until this workstation connector is updated."}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
-                      {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
-                    </Button>
+                    {!freshInstallOnly ? (
+                      <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                        {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
+                      </Button>
+                    ) : null}
                     <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
                       Re-check connector
                     </Button>

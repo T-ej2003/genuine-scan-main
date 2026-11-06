@@ -189,6 +189,37 @@ describe("PrinterSetupPage", () => {
     });
   });
 
+  it("does not demand a fresh-install-only release from an existing connector", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: { latestVersion: "2026.11.6.2", release: { platforms: { windows: { installationScope: "fresh-install-only" } } } },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    await screen.findByText(/Latest 2026.11.6.2/);
+    expect(screen.queryByText("Connector update required")).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps backend-required update visible without offering a fresh-only installer", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+      data: { registeredPrinters: [], remoteStatus: { connected: false, connectorUpdateRequired: true, agentVersion: "2026.6.26" } },
+      refetch: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: { latestVersion: "2026.11.6.2", release: { platforms: { windows: { installationScope: "fresh-install-only" } } } },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    expect(await screen.findByText("Connector update required")).toBeInTheDocument();
+    expect(await screen.findByText(/Existing connector upgrades require the authorized maintenance workflow/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download signed connector" })).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
   it("shows a queued setup test label as pending connector confirmation", async () => {
     vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
       data: {

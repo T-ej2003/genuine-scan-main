@@ -25,6 +25,7 @@ const connectorCapabilitiesSchema = z
 
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
+  installationScope: z.enum(["fresh-install-only"]).optional(),
   installerKind: z.enum(["pkg", "zip", "exe", "msi"]),
   artifactType: z
     .enum(["macos-signed-package", "windows-signed-installer", "windows-unsigned-test-zip", "windows-legacy-installer"])
@@ -161,6 +162,7 @@ const toPublicPlatform = (
   return {
     platform: platformKey,
     label: platform.label,
+    installationScope: platform.installationScope || null,
     installerKind: platform.installerKind,
     artifactType: platform.artifactType || null,
     trustLevel,

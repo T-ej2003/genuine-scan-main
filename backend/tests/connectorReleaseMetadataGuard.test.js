@@ -95,7 +95,8 @@ const run = async () => {
 
   assert(compareConnectorVersions(sourceVersion, "2026.5.19") > 0, "Connector source version must be newer than 2026.5.19");
   assert(manifest.latestVersion === sourceVersion, "Connector manifest latestVersion must match source buildVersion");
-  assert(manifest.minimumBuildVersion === sourceVersion, "Connector manifest minimumBuildVersion must match source buildVersion");
+  assert(manifest.minimumBuildVersion === (signedWindows?.installationScope === "fresh-install-only" ? "2026.11.6.1" : sourceVersion),
+    "Fresh-only publication must preserve the existing-session minimum build");
   assert(latestRelease, "Connector manifest latestVersion must reference a release");
   if (!windows) {
     assert(latest.release.productionSignedAvailable === false, "Pending latest release should report no signed Windows connector yet");
@@ -119,6 +120,11 @@ const run = async () => {
     );
   }
   if (windows) {
+    if (sourceVersion === "2026.11.6.2") {
+      assert.equal(windows.installationScope, "fresh-install-only", "2026.11.6.2 must not advertise an uncertified upgrade");
+      assert.equal(latest.release.platforms.windows.installationScope, "fresh-install-only", "public release metadata must preserve the fresh-install scope");
+      assert.equal(latest.release.minimumBuildVersion, "2026.11.6.1", "Fresh-only release must not raise the backend minimum");
+    }
     assert(windows.buildVersion === sourceVersion, "Latest Windows artifact buildVersion must match source buildVersion");
     assert(windows.transportDiagnosticsVersion === "transport-diagnostics-v1", "Latest Windows artifact must advertise transport diagnostics v1");
     assert(windows.capabilities?.supportsTransportDiagnostics === true, "Latest Windows artifact must advertise transport diagnostics support");
