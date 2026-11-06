@@ -77,8 +77,8 @@ begin
   exit;
 #endif
   UpgradeMode := DirExists(ExpandConstant('{app}')) or
-     FileExists(ExpandConstant('{userprofile}\.mscqr\local-print-agent-state.json')) or
-     FileExists(ExpandConstant('{userprofile}\.authenticqr\local-print-agent-state.json'));
+     FileExists(ExpandConstant('{%USERPROFILE}\.mscqr\local-print-agent-state.json')) or
+     FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json'));
   if UpgradeMode then begin
     if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin
       Result := 'Existing connector requires authenticated maintenance and independently verified reconciliation. Supply MSCQRAUTH. No upgrade was performed.';
