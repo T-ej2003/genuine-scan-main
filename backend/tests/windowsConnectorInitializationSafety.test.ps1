@@ -18,9 +18,9 @@ function Get-CimInstance {
     [pscustomobject]@{ Name = 'node.exe'; CommandLine = 'node unrelated.js'; ProcessId = 5; ExecutablePath = 'C:\Program Files\nodejs\node.exe' }
   )
 }
-$candidates = @(Get-AgentProcessCandidates)
+$candidates = Get-AgentProcessCandidates
 if ($candidates.Count -ne 2 -or @($candidates | Where-Object ProcessId -eq 1).Count) {
-  throw 'Installer PowerShell process was mistaken for a running connector.'
+  throw "Installer process detection returned unexpected PIDs: $(@($candidates | ForEach-Object ProcessId) -join ',')"
 }
 function Get-AgentProcessCandidates { return ,@([pscustomobject]@{ ProcessId = 123; ExecutablePath = 'fixture' }) }
 function Write-UpgradeLog { param($Message) }
