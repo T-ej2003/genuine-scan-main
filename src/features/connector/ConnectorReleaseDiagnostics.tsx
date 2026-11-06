@@ -5,7 +5,9 @@ type ConnectorReleaseDiagnosticsProps = {
   requiredProtocol: string;
   installedVersion: string;
   reachable: boolean;
-  updateRequired: boolean;
+  updateRequired: boolean | null;
+  updateAvailable: boolean;
+  compatibility: "supported" | "unsupported" | "unknown";
 };
 
 export function ConnectorReleaseDiagnostics({
@@ -14,16 +16,20 @@ export function ConnectorReleaseDiagnostics({
   installedVersion,
   reachable,
   updateRequired,
+  updateAvailable,
+  compatibility,
 }: ConnectorReleaseDiagnosticsProps) {
   const cells = [
     ["Available", availableVersion || "Latest release", ""],
     ["Required protocol", requiredProtocol, "break-all"],
     ["Installed", installedVersion, ""],
-    ["Update required", updateRequired ? "Yes" : reachable ? "No" : "Unknown", updateRequired ? "text-amber-700" : "text-emerald-700"],
+    ["Backend compatibility", reachable ? compatibility : "unknown", compatibility === "unsupported" ? "text-amber-700" : ""],
+    ["Update required", updateRequired === null ? "Unknown" : updateRequired ? "Yes" : "No", updateRequired ? "text-amber-700" : "text-emerald-700"],
+    ["Newer release", updateAvailable ? "Available" : "No eligible upgrade", ""],
   ];
 
   return (
-    <div className="mt-5 grid gap-3 md:grid-cols-4">
+    <div className="mt-5 grid gap-3 md:grid-cols-3 lg:grid-cols-6">
       {cells.map(([label, value, valueClass]) => (
         <div key={label} className="rounded-[20px] border border-slate-200 bg-white/85 px-4 py-3 text-sm">
           <div className="text-xs uppercase tracking-[0.16em] text-slate-400">{label}</div>

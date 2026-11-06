@@ -189,6 +189,87 @@ describe("PrinterSetupPage", () => {
     });
   });
 
+  it("does not demand a fresh-install-only release from an existing connector", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: { latestVersion: "2026.11.6.2", release: { platforms: { windows: { installationScope: "fresh-install-only" } } } },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    await screen.findByText(/Latest 2026.11.6.2/);
+    expect(screen.queryByText("Connector update required")).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps backend-required update visible without offering a fresh-only installer", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
+      data: { registeredPrinters: [], remoteStatus: { connected: false, connectorUpdateRequired: true, agentVersion: "2026.6.26" } },
+      refetch: vi.fn().mockResolvedValue(undefined),
+    } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({
+      success: true,
+      data: { latestVersion: "2026.11.6.2", release: { platforms: { windows: { installationScope: "fresh-install-only" } } } },
+    } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    expect(await screen.findByText("Connector update required")).toBeInTheDocument();
+    expect(await screen.findByText(/Existing connector upgrades require the authorized maintenance workflow/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download signed connector" })).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("shows the backend minimum-build failure for a fresh-only release", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+      connected: true, agentVersion: "2026.10.29.1", buildVersion: "2026.10.29.1", protocolVersion: "local-agent-direct-v2",
+      persistentSessionMinimumBuildVersion: "2026.11.6.1", eligibleForPrinting: false,
+    } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({ success: true, data: {
+      latestVersion: "2026.11.6.2", minimumBuildVersion: "2026.11.6.1",
+      release: { platforms: { windows: { installationScope: "fresh-install-only" } } },
+    } } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    expect(await screen.findByText("Connector update required")).toBeInTheDocument();
+    expect(screen.getByText(/backend requires build 2026.11.6.1/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download signed connector" })).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("offers a certified newer release without blocking an eligible printer", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    vi.spyOn(window.navigator, "platform", "get").mockReturnValue("Win32");
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+      connected: true, trusted: true, eligibleForPrinting: true, agentVersion: "2026.11.6.1", buildVersion: "2026.11.6.1",
+      protocolVersion: "local-agent-direct-v2", persistentSessionMinimumBuildVersion: "2026.11.6.1",
+    } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({ success: true, data: {
+      latestVersion: "2026.11.6.2", minimumBuildVersion: "2026.11.6.1",
+      release: { platforms: { windows: { installationScope: null } } },
+    } } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    expect(await screen.findByText("Newer connector available")).toBeInTheDocument();
+    expect(screen.getByText(/Printing remains subject to live backend readiness/)).toBeInTheDocument();
+    expect(screen.queryByText("Connector update required")).not.toBeInTheDocument();
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the backend persistent-session rejection visible without a published installer", async () => {
+    vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({ data: { registeredPrinters: [], remoteStatus: {
+      connected: false, buildVersion: "2026.10.29.1", persistentSessionUpdateRequired: true,
+      persistentSessionMinimumBuildVersion: "2026.11.6.1", eligibleForPrinting: false,
+    } }, refetch: vi.fn().mockResolvedValue(undefined) } as any);
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue({ success: true, data: {
+      latestVersion: "2026.11.6.2", minimumBuildVersion: "2026.11.6.1",
+      release: { productionSignedAvailable: false, platforms: { windows: null } },
+    } } as any);
+    renderWithQueryClient(<MemoryRouter><PrinterSetupPage /></MemoryRouter>);
+    expect(await screen.findByText("Connector update required")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Download signed connector" })).not.toBeInTheDocument();
+  });
+
   it("shows a queued setup test label as pending connector confirmation", async () => {
     vi.mocked(useManufacturerPrinterRuntime).mockReturnValue({
       data: {

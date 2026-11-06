@@ -23,6 +23,7 @@ type PrinterStatusLike = {
   printerId?: string | null;
   agentVersion?: string | null;
   buildVersion?: string | null;
+  connectorUpdateRequired?: boolean | null;
   persistentSessionRequired?: boolean | null;
   persistentSessionCapable?: boolean | null;
   persistentSessionMinimumBuildVersion?: string | null;
@@ -58,6 +59,8 @@ const printerLabel = (status?: PrinterStatusLike | null) =>
 export const isSecurePrintReady = (status?: PrinterStatusLike | null) =>
   Boolean(
     status?.connected &&
+      !status?.connectorUpdateRequired &&
+      !status?.persistentSessionUpdateRequired &&
       status?.eligibleForPrinting &&
       status?.trusted &&
 	      status?.securePrinterSession !== false &&
@@ -99,6 +102,19 @@ export const buildSecurePrintReadiness = (status?: PrinterStatusLike | null): Se
       tone: "danger",
       summary: "MSCQR Connector update required.",
       detail: `Update MSCQR Connector to use persistent print session mode. Required ${minimum}; detected ${detected}.`,
+      recoveryAction: "refresh_printer_helper",
+      canRetry: true,
+    };
+  }
+
+  if (status?.connectorUpdateRequired) {
+    return {
+      ready: false,
+      reasonCode: "CONNECTOR_UPDATE_REQUIRED",
+      badgeLabel: "Blocked",
+      tone: "danger",
+      summary: "MSCQR Connector update required.",
+      detail: "The backend rejected this connector build or protocol. Existing installations require an authorized upgrade.",
       recoveryAction: "refresh_printer_helper",
       canRetry: true,
     };

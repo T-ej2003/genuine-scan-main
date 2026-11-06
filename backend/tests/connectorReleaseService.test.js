@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const os = require("node:os");
+const { spawnSync } = require("node:child_process");
 const JSZip = require("jszip");
 const { getLatestConnectorRelease, resolveConnectorDownload } = require("../dist/services/connectorReleaseService");
 const { LOCAL_AGENT_DIRECT_PROTOCOL_VERSION } = require("../dist/services/localAgentProtocol");
@@ -221,6 +223,24 @@ const run = async () => {
 
   const legacyWindowsPackage = resolveConnectorDownload("2026.3.12", "windows");
   assert(legacyWindowsPackage.filename.endsWith(".zip"), "Legacy Windows package should remain available");
+
+  const runtimeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-runtime-download-scope-"));
+  const originalCwd = process.cwd();
+  try {
+    const packaged = spawnSync(process.execPath, [path.join(__dirname, "../scripts/create-connector-runtime-assets.mjs"),
+      path.join(__dirname, "../local-print-agent/releases"), path.join(runtimeRoot, "local-print-agent")], { encoding: "utf8" });
+    assert(packaged.status === 0, `Runtime manifest generation must pass: ${packaged.stderr}`);
+    const runtime = JSON.parse(fs.readFileSync(path.join(runtimeRoot, "local-print-agent/releases/manifest.json"), "utf8"));
+    process.chdir(runtimeRoot);
+    for (const excluded of manifest.releases.filter((release) => !runtime.releases.some((item) => item.version === release.version))) {
+      let blocked = false;
+      try { resolveConnectorDownload(excluded.version, "windows"); } catch { blocked = true; }
+      assert(blocked, `Versioned URL must reject excluded release ${excluded.version}`);
+    }
+  } finally {
+    process.chdir(originalCwd);
+    fs.rmSync(runtimeRoot, { recursive: true, force: true });
+  }
 
   console.log("connector release service tests passed");
 };

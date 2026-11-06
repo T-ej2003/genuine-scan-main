@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       execution_mode:
-        description: "Candidate build requires production-signing approval; publishing remains blocked."
+        description: "Build a candidate, or certify and stage the pinned signed candidate for fresh installation."
         type: choice
         required: true
         default: build_verify_only
         options:
           - build_verify_only
           - publish
+          - certify_fresh_install
+          - publish_fresh_install
       connector_release_version:
         description: "Optional connector version. Defaults to backend/src/local-print-agent/version.ts and must match that source buildVersion."
         required: false
@@ -47,6 +49,7 @@ env:
 jobs:
   build-sign-windows:
     name: Build and sign Windows connector
+    if: github.event_name != 'workflow_dispatch' || inputs.execution_mode == 'build_verify_only' || inputs.execution_mode == 'publish'
     permissions:
       contents: read
       id-token: write
@@ -451,4 +454,121 @@ jobs:
           name: mscqr-windows-candidate-${{ steps.release_settings.outputs.connector_release_version }}-${{ github.sha }}
           path: |
             ${{ steps.release_settings.outputs.windows_release_output_dir }}
+          if-no-files-found: error
+
+  fresh-install:
+    name: Certify pinned signed installer for fresh installation
+    if: github.event_name == 'workflow_dispatch' && (inputs.execution_mode == 'certify_fresh_install' || inputs.execution_mode == 'publish_fresh_install')
+    runs-on: windows-2022
+    environment: production-signing
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Authenticate and download the existing signed candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $source = '230eaf8d1fa6b2c5e3a82190a6c18a16e9af39d7'
+          $expected = '47cf05c6bd44437f34693c8636eb460386f5debcdd54af9f1d3365ad680d51e6'
+          $runId = '42168502112'
+          $artifactId = '13479883655'
+          $name = "mscqr-windows-candidate-2026.11.6.2-$source"
+          $run = gh api "repos/$env:GITHUB_REPOSITORY/actions/runs/$runId" | ConvertFrom-Json
+          $artifact = gh api "repos/$env:GITHUB_REPOSITORY/actions/artifacts/$artifactId" | ConvertFrom-Json
+          if ($run.repository.full_name -cne $env:GITHUB_REPOSITORY -or $run.workflow_id -ne 273963817 -or
+              $run.path -cne '.github/workflows/windows-connector-signed-release.yml' -or
+              $run.event -cne 'workflow_dispatch' -or $run.conclusion -cne 'success' -or
+              $run.head_sha -cne $source -or $artifact.workflow_run.id -ne [long]$runId -or
+              $artifact.name -cne $name -or $artifact.expired) { throw 'Signed candidate provenance mismatch.' }
+          $signedParent = '0702577ea3c483963f17c2d19781fc7c8fee5e06'
+          $actualParent = git rev-parse "$source^"
+          $common = git merge-base $source HEAD
+          if ($LASTEXITCODE -ne 0 -or $actualParent -cne $signedParent -or
+              $common -cnotin @($source, $signedParent)) { throw 'Release policy does not share the approved signed-source lineage.' }
+          git diff --exit-code $source HEAD -- backend/src/local-print-agent backend/local-print-agent/install/windows backend/local-print-agent/packaging/build-windows-installer.mjs backend/local-print-agent/packaging/sign-inno-file.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Signed installer source changed after candidate attestation.' }
+          $version = Get-Content backend/src/local-print-agent/version.ts -Raw
+          if ($version -notmatch 'LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"2026[.]11[.]6[.]2"') { throw 'Release source version mismatch.' }
+          New-Item -ItemType Directory -Path "$env:RUNNER_TEMP\candidate" | Out-Null
+          gh run download $runId --repo $env:GITHUB_REPOSITORY --name $name --dir "$env:RUNNER_TEMP\candidate"
+          if ($LASTEXITCODE -ne 0) { throw 'Signed candidate download failed.' }
+          $installer = "$env:RUNNER_TEMP\candidate\MSCQR-Connector-Windows-2026.11.6.2.exe"
+          if ((Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected) { throw 'Signed installer digest mismatch.' }
+          $attestations = @(gh attestation verify $installer --repo $env:GITHUB_REPOSITORY --format json | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or -not @($attestations | Where-Object {
+            $_.verificationResult.statement.predicateType -ceq 'https://slsa.dev/provenance/v1' -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.repository -ceq "https://github.com/$env:GITHUB_REPOSITORY" -and
+            $_.verificationResult.statement.predicate.buildDefinition.externalParameters.workflow.path -ceq '.github/workflows/windows-connector-signed-release.yml' -and
+            $_.verificationResult.statement.predicate.buildDefinition.resolvedDependencies[0].digest.gitCommit -ceq $source -and
+            @($_.verificationResult.statement.subject | Where-Object { $_.name -ceq (Split-Path -Leaf $installer) -and $_.digest.sha256 -ceq $expected }).Count -eq 1
+          }).Count) { throw 'Authenticated installer attestation mismatch.' }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          $report = Get-Content "$env:RUNNER_TEMP\candidate\signature-report.json" -Raw | ConvertFrom-Json
+          if ($signature.Status -cne 'Valid' -or -not $signature.TimeStamperCertificate -or
+              $signature.SignerCertificate.Thumbprint -cne $report.thumbprint -or
+              $signature.SignerCertificate.GetNameInfo([Security.Cryptography.X509Certificates.X509NameType]::SimpleName,$false) -cne 'L&D Health Ltd') {
+            throw 'Signed installer Authenticode identity mismatch.'
+          }
+          "MSCQR_SIGNED_INSTALLER=$installer" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Certify first installation without maintenance authorization
+        shell: pwsh
+        run: |
+          $installRoot = Join-Path $env:LOCALAPPDATA 'MSCQR\local-print-agent'
+          if ((Test-Path $installRoot) -or (Test-Path (Join-Path $env:USERPROFILE '.mscqr\local-print-agent-state.json')) -or
+              (Test-Path (Join-Path $env:USERPROFILE '.authenticqr\local-print-agent-state.json'))) {
+            throw 'Runner is not a clean first-install host.'
+          }
+          $setupLog = Join-Path $env:RUNNER_TEMP 'mscqr-fresh-install.log'
+          $setup = Start-Process -FilePath $env:MSCQR_SIGNED_INSTALLER -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/LOG=$setupLog") -Wait -PassThru
+          if ($setup.ExitCode -ne 0) {
+            $resultPath = Join-Path $installRoot 'install-result.json'
+            if (Test-Path $resultPath) {
+              $failed = Get-Content $resultPath -Raw | ConvertFrom-Json
+              Write-Host "Installer state: $($failed.state)"
+              Write-Host "Installer message: $($failed.message)"
+            }
+            if (Test-Path $setupLog) { Get-Content $setupLog -Tail 20 | Write-Host }
+            throw "Fresh installer failed with exit $($setup.ExitCode)."
+          }
+          $result = Get-Content (Join-Path $installRoot 'install-result.json') -Raw | ConvertFrom-Json
+          $status = Invoke-RestMethod 'http://127.0.0.1:17866/status' -TimeoutSec 10
+          if ($result.outcome -notin @('success','partial') -or -not $result.localhostStatusOk -or
+              $result.installedVersion -cne '2026.11.6.2' -or $status.buildVersion -cne '2026.11.6.2' -or
+              $status.protocolVersion -cne 'local-agent-direct-v2' -or -not $status.agentId -or -not $status.deviceFingerprint) {
+            throw 'Fresh installer did not establish a verified 2026.11.6.2 runtime.'
+          }
+          Write-Host 'PASS: signed fresh installation without MSCQRAUTH; printer readiness remains a separate check.'
+
+      - uses: actions/setup-node@v6
+        if: inputs.execution_mode == 'publish_fresh_install'
+        with:
+          node-version: 24
+      - name: Stage fresh-install-only release files for review
+        if: inputs.execution_mode == 'publish_fresh_install'
+        shell: pwsh
+        env:
+          CONNECTOR_RELEASE_VERSION: 2026.11.6.2
+          WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY: 'true'
+          WINDOWS_CONNECTOR_PUBLISHER_NAME: L&D Health Ltd
+        run: |
+          if ($env:GITHUB_REF -cne 'refs/heads/fix/connector-fresh-install-publication') { throw 'Publication staging is restricted to the review branch.' }
+          $env:WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH = $env:MSCQR_SIGNED_INSTALLER
+          $env:WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH = "$env:RUNNER_TEMP\candidate\signature-report.json"
+          node backend/local-print-agent/packaging/publish-windows-connector-release.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Release metadata generation failed.' }
+      - name: Upload reviewed fresh-install distribution package
+        if: inputs.execution_mode == 'publish_fresh_install'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mscqr-fresh-install-distribution-2026.11.6.2
+          path: |
+            backend/local-print-agent/releases/manifest.json
+            backend/local-print-agent/releases/2026.11.6.2/windows
           if-no-files-found: error

@@ -129,6 +129,7 @@ const run = async () => {
     LOCAL_AGENT_MIN_VERSION_HINT === LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION,
     "Production minimum should be the persistent WebSocket connector version"
   );
+  assert(LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION === "2026.11.6.1", "Fresh-only 2026.11.6.2 must not raise the existing-session minimum");
   assert(
     !isLocalAgentPersistentSessionCapable(LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION),
     "Old REST fallback connector must not be eligible for persistent WebSocket sessions"
@@ -137,6 +138,9 @@ const run = async () => {
     isLocalAgentPersistentSessionCapable(LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION),
     "New connector build must be eligible for persistent WebSocket sessions"
   );
+  for (const malformed of ["", "2026.11.6.1-rc1", "2026.11.bad", "999999999999999999999.11.6.1"]) {
+    assert(!isLocalAgentPersistentSessionCapable(malformed), `Malformed connector build must fail closed: ${malformed}`);
+  }
   assert(
     !isLocalAgentTransportDiagnosticsCurrent({
       protocolVersion: LOCAL_AGENT_DIRECT_PROTOCOL_VERSION,

@@ -1,8 +1,7 @@
-import { LOCAL_PRINT_AGENT_SOURCE_BUILD_VERSION } from "../local-print-agent/version";
-
 export const LOCAL_AGENT_DIRECT_PROTOCOL_VERSION = "local-agent-direct-v2";
 export const LOCAL_AGENT_REST_FALLBACK_MIN_BUILD_VERSION = "2026.6.16";
-export const LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION = LOCAL_PRINT_AGENT_SOURCE_BUILD_VERSION;
+// A fresh-install-only release must not raise the minimum for existing sessions.
+export const LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION = "2026.11.6.1";
 export const LOCAL_AGENT_MIN_VERSION_HINT = LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION;
 export const LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION = "transport-diagnostics-v1";
 export const CONNECTOR_UPDATE_REQUIRED_CODE = "CONNECTOR_UPDATE_REQUIRED";
@@ -48,16 +47,17 @@ const REST_FALLBACK_CAPABILITY_FLAGS = REQUIRED_LOCAL_AGENT_CAPABILITY_FLAGS.fil
 export const isLocalAgentProtocolCompatible = (protocolVersion?: string | null) =>
   String(protocolVersion || "").trim() === LOCAL_AGENT_DIRECT_PROTOCOL_VERSION;
 
-const parseVersionParts = (value?: string | null) =>
-  String(value || "")
-    .trim()
-    .split(/[.-]/)
-    .map((part) => Number.parseInt(part, 10))
-    .filter((part) => Number.isFinite(part));
+const parseVersionParts = (value?: string | null) => {
+  const text = String(value || "").trim();
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(text)) return null;
+  const parts = text.split(".").map(Number);
+  return parts.every(Number.isSafeInteger) ? parts : null;
+};
 
 export const compareLocalAgentVersions = (left?: string | null, right?: string | null) => {
   const a = parseVersionParts(left);
   const b = parseVersionParts(right);
+  if (!a || !b) return Number.NaN;
   const length = Math.max(a.length, b.length, 3);
   for (let index = 0; index < length; index += 1) {
     const delta = (a[index] || 0) - (b[index] || 0);

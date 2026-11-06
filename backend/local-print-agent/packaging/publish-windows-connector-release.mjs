@@ -20,12 +20,15 @@ const normalize = (value) => String(value || "").trim();
 const sourceVersion = readConnectorSourceVersion(backendRoot);
 const requiredProtocolVersion = readLocalAgentProtocolString("LOCAL_AGENT_DIRECT_PROTOCOL_VERSION", backendRoot);
 const transportDiagnosticsVersion = readLocalAgentProtocolString("LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION", backendRoot);
-const minimumBuildVersion = sourceVersion;
 const connectorCapabilities = readLocalAgentCapabilities(backendRoot);
 const version = normalize(process.env.CONNECTOR_RELEASE_VERSION) || sourceVersion;
 const signedInstallerSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 const signatureReportSource = normalize(process.env.WINDOWS_CONNECTOR_SIGNATURE_REPORT_PATH);
 const publisherName = normalize(process.env.WINDOWS_CONNECTOR_PUBLISHER_NAME) || "L&D Health Ltd";
+const freshInstallOnly = process.env.WINDOWS_CONNECTOR_FRESH_INSTALL_ONLY === "true";
+const minimumBuildVersion = freshInstallOnly
+  ? readLocalAgentProtocolString("LOCAL_AGENT_PERSISTENT_SESSION_MIN_BUILD_VERSION", backendRoot)
+  : sourceVersion;
 const signedAtRaw = normalize(process.env.WINDOWS_CONNECTOR_SIGNED_AT);
 const publishedAt = new Date().toISOString();
 const signedAt = signedAtRaw ? new Date(signedAtRaw).toISOString() : publishedAt;
@@ -197,17 +200,20 @@ const nextRelease = {
   minimumBuildVersion,
   transportDiagnosticsVersion,
   capabilities: connectorCapabilities,
-  summary:
-    "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
+  summary: freshInstallOnly
+    ? "Signed Windows connector for new installations only; existing installations require authenticated maintenance."
+    : "Install the signed Windows connector once on the printing computer, then the MSCQR Connector starts automatically in the background.",
   notes: [
     "Use the signed Windows installer on the Windows PC that is connected to the printer.",
     `This connector advertises ${requiredProtocolVersion} and is compatible with the current direct-print backend.`,
     "Windows installation verifies local printer readiness before claiming success and opens Printer Setup automatically when attention is still needed.",
     `Windows should show ${publisherName} as the verified publisher for this installer.`,
+    ...(freshInstallOnly ? ["Existing connector upgrades are not certified by this release and require MSCQRAUTH through the maintenance workflow."] : []),
   ],
   platforms: {
     windows: {
-      label: "Windows installer",
+      label: freshInstallOnly ? "Windows installer (fresh installation only)" : "Windows installer",
+      ...(freshInstallOnly ? { installationScope: "fresh-install-only" } : {}),
       installerKind,
       artifactType: "windows-signed-installer",
       trustLevel: "production",
@@ -240,6 +246,7 @@ const nextRelease = {
         "Run the signed Windows installer once on the Windows computer that will print.",
         "The installer installs the connector, configures auto-start, and verifies local printer readiness.",
         `Publisher shown in Windows should be ${publisherName}.`,
+        ...(freshInstallOnly ? ["For a new installation only. Existing installations require authenticated maintenance and MSCQRAUTH."] : []),
         "Legal documents and release notes are included with the signed release output.",
       ],
     },

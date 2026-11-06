@@ -24,6 +24,7 @@ import {
 } from "@/lib/printer-diagnostics";
 import { getPrinterDispatchLabel, sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
+import { evaluateConnectorCompatibility, type LatestConnectorReleaseInfo } from "@/features/connector/connectorCompatibility";
 import { createUiActionState } from "@/lib/ui-actions";
 import { useManufacturerPrinterRuntime } from "@/features/printing/hooks";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
@@ -50,17 +51,6 @@ type PrinterTestLabelResponse = {
   message?: string | null;
 };
 
-type LatestConnectorReleaseInfo = {
-  latestVersion?: string;
-  release?: {
-    productionSignedAvailable?: boolean;
-    platforms?: {
-      macos?: unknown;
-      windows?: unknown;
-    };
-  };
-} | null;
-
 const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZPL",
   "TSPL",
@@ -73,7 +63,6 @@ const NETWORK_DIRECT_LANGUAGES: ManagedRouteForm["commandLanguage"][] = [
   "ZSIM",
   "CPCL",
 ];
-const REQUIRED_CONNECTOR_VERSION = "2026.6.13";
 type ManualFieldHelpKey = "vendor" | "model" | "host" | "port" | "resourcePath" | "printerUri";
 
 type ManualFieldGuide = {
@@ -391,15 +380,20 @@ export default function PrinterSetupPage() {
   const localReady = helperReadiness.ready;
   const helperVersion = String(remoteStatus?.agentVersion || "").trim();
   const latestHelperVersion = String(connectorReleaseQuery.data?.latestVersion || "").trim();
-  const detectedPlatformRelease =
-    detectedPlatform === "unknown"
-      ? null
-      : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
+  const detectedPlatformRelease = detectedPlatform === "unknown"
+    ? null : connectorReleaseQuery.data?.release?.platforms?.[detectedPlatform] || null;
   const signedConnectorUnavailable =
     detectedPlatform === "windows" &&
     connectorReleaseQuery.data?.release?.productionSignedAvailable === false &&
     !detectedPlatformRelease;
-  const helperNeedsUpdate = Boolean(remoteStatus?.connectorUpdateRequired || (helperVersion && latestHelperVersion && helperVersion !== latestHelperVersion));
+  const freshInstallOnly = detectedPlatformRelease?.installationScope === "fresh-install-only";
+  const minimumHelperVersion = remoteStatus?.persistentSessionMinimumBuildVersion || connectorReleaseQuery.data?.minimumBuildVersion;
+  const compatibility = evaluateConnectorCompatibility({ reachable: Boolean(remoteStatus?.connected), installerAvailable: Boolean(detectedPlatformRelease), buildVersion: remoteStatus?.buildVersion,
+    protocolVersion: typeof remoteStatus?.protocolVersion === "string" ? remoteStatus.protocolVersion : null, requiredProtocol: connectorReleaseQuery.data?.requiredProtocolVersion || "local-agent-direct-v2",
+    minimumBuildVersion: minimumHelperVersion,
+    latestVersion: latestHelperVersion, installationScope: detectedPlatformRelease?.installationScope,
+    backendUpdateRequired: Boolean(remoteStatus?.connectorUpdateRequired || remoteStatus?.persistentSessionUpdateRequired) });
+  const helperNeedsUpdate = compatibility.updateRequired === true || compatibility.updateAvailable;
 
   useEffect(() => {
     if (selectedPrinterId) return;
@@ -681,19 +675,23 @@ export default function PrinterSetupPage() {
                 </div>
                 <Badge variant={inventory.length > 0 ? "default" : "secondary"}>{inventory.length}</Badge>
               </div>
-              {helperNeedsUpdate && (detectedPlatformRelease || remoteStatus?.connectorUpdateRequired) ? (
+              {helperNeedsUpdate && (detectedPlatformRelease || remoteStatus?.connectorUpdateRequired || remoteStatus?.persistentSessionUpdateRequired) ? (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-                  <div className="font-medium">Connector update required</div>
+                  <div className="font-medium">{compatibility.updateRequired === true ? "Connector update required" : "Newer connector available"}</div>
                   <div className="mt-1">
-                    Detected: {helperVersion || "unknown"}. Required: {latestHelperVersion || REQUIRED_CONNECTOR_VERSION} or newer.
-                    {signedConnectorUnavailable
+                    Detected: {helperVersion || "unknown"}. {compatibility.updateRequired === true ? minimumHelperVersion ? `The backend requires build ${minimumHelperVersion} or newer.` : "The backend requires a compatible connector build." : `Version ${latestHelperVersion} is available.`}
+                    {freshInstallOnly
+                      ? " This release is for new installations only. Existing connector upgrades require the authorized maintenance workflow; do not use this installer to upgrade."
+                      : signedConnectorUnavailable
                       ? " Signed connector release is not available yet. Production printing cannot continue."
-                      : " Printing is blocked until this workstation connector is updated."}
+                      : !compatibility.offerInstaller
+                      ? " The published installer is not authorized for this installation. Contact support for a compatible installer."
+                      : compatibility.updateRequired === true ? " Printing is blocked until this workstation connector is updated." : " Printing remains subject to live backend readiness."}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
+                    {!freshInstallOnly && detectedPlatformRelease && compatibility.offerInstaller ? <Button size="sm" onClick={() => navigate(APP_PATHS.connectorDownload)}>
                       {detectedPlatform === "macos" ? "Download latest Mac connector" : "Download signed connector"}
-                    </Button>
+                    </Button> : null}
                     <Button size="sm" variant="outline" onClick={() => runtimeQuery.refetch()}>
                       Re-check connector
                     </Button>

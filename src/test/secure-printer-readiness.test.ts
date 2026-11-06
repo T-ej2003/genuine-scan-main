@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 
 describe("secure printer readiness", () => {
+  it.each(["connectorUpdateRequired", "persistentSessionUpdateRequired"] as const)("does not show ready when backend reports %s", (flag) => {
+    const readiness = buildSecurePrintReadiness({ connected: true, trusted: true, eligibleForPrinting: true,
+      securePrinterSession: true, freshHelperHeartbeat: true, helperConnection: true, eligiblePrinter: true,
+      stale: false, connectionClass: "TRUSTED", [flag]: true });
+    expect(readiness).toMatchObject({ ready: false, reasonCode: "CONNECTOR_UPDATE_REQUIRED" });
+  });
+
   it("shows an actionable persistent-session connector update state", () => {
     const readiness = buildSecurePrintReadiness({
       connected: true,

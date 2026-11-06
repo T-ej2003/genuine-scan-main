@@ -405,4 +405,106 @@ describe("ConnectorDownload", () => {
     expect(screen.getByText(/Update required/i)).toBeInTheDocument();
     expect(screen.getByText(/^Yes$/i)).toBeInTheDocument();
   });
+
+  it.each([true, false])("keeps fresh-only Windows release out of existing-install upgrade prompts (connected=%s)", async (connected) => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).release.platforms.windows.installationScope = "fresh-install-only";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue(connected ? {
+      success: true,
+      data: { agentVersion: "2026.10.29.1", buildVersion: "2026.10.29.1", protocolVersion: "local-agent-direct-v2" },
+    } as any : { success: false, error: "Not detected" } as any);
+
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText(/Windows release for new installations only/)).toBeInTheDocument();
+    expect(screen.queryByText(/^Yes$/i)).not.toBeInTheDocument();
+    if (connected) {
+      expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    } else {
+      expect(screen.getAllByTestId("download-printer-helper-windows").length).toBeGreaterThan(0);
+    }
+    userAgent.mockRestore();
+  });
+
+  it("reports an existing build below backend minimum without offering the fresh-only installer", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).minimumBuildVersion = "2026.11.6.1";
+    (response.data as any).release.platforms.windows.installationScope = "fresh-install-only";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      agentVersion: "2026.10.29.1", buildVersion: "2026.10.29.1", protocolVersion: "local-agent-direct-v2",
+    } } as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText("unsupported")).toBeInTheDocument();
+    expect(screen.getByText(/^Yes$/)).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    expect(screen.getByText(/Existing connector upgrades require the authorized maintenance workflow/)).toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
+  it("does not offer an upgrade-certified installer below the backend minimum", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).minimumBuildVersion = "2026.11.6.3";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText(/published installer is not authorized for this existing installation/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
+  it("shows unknown compatibility when the installed build is not reported", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      agentVersion: "2026.5.19", buildVersion: null, protocolVersion: "local-agent-direct-v2",
+    } } as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findAllByText("unknown")).not.toHaveLength(0);
+    expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
+    expect(screen.queryByText(/^No$/)).not.toBeInTheDocument();
+  });
+
+  it("does not call a pending unsigned Windows release an available upgrade", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    (response.data as any).minimumBuildVersion = "2026.11.6.1";
+    (response.data as any).release.platforms.windows = null;
+    (response.data as any).release.productionSignedAvailable = false;
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      agentVersion: "2026.11.6.1", buildVersion: "2026.11.6.1", protocolVersion: "local-agent-direct-v2",
+    } } as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText("No eligible upgrade")).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
+  it("does not offer a fresh-only Windows upgrade when the browser platform is unknown", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Generic Browser");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).release.platforms.windows.installationScope = "fresh-install-only";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText(/Windows release for new installations only/)).toBeInTheDocument();
+    expect(screen.queryByTestId("download-printer-helper-windows")).not.toBeInTheDocument();
+    userAgent.mockRestore();
+  });
+
+  it("retains normal upgrade advice when scope is absent", async () => {
+    const userAgent = vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Windows NT 10.0");
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).latestVersion = "2026.11.6.2";
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect((await screen.findAllByText("Available")).length).toBeGreaterThan(1);
+    expect(screen.getByText(/^No$/i)).toBeInTheDocument();
+    expect(screen.getAllByTestId("download-printer-helper-windows").length).toBeGreaterThan(0);
+    userAgent.mockRestore();
+  });
 });
