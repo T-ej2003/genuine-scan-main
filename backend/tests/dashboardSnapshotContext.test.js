@@ -172,7 +172,9 @@ const denied = (req) => assert.throws(
   denied(request(actor(), { requestId: "" }));
   denied(request(actor(), { originalUrl: "/api/analytics/risk-scores" }));
   denied(request(actor({ sessionStage: "MFA_BOOTSTRAP" })));
-  denied(request(actor({ role: UserRole.MANUFACTURER, authAssurance: "PASSWORD", mfaVerifiedAt: null })));
+  assert.equal(buildDashboardSnapshotBoundary(request(actor({
+    role: UserRole.MANUFACTURER, authAssurance: "PASSWORD", mfaVerifiedAt: null,
+  })), now).context.authAssurance, "password-verified", "manufacturer password plus email OTP sessions remain valid");
   denied(request(actor({
     role: UserRole.PLATFORM_SUPER_ADMIN,
     licenseeId: null,
