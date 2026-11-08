@@ -2,6 +2,8 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 
 import { randomOpaqueToken } from "../../utils/security";
+import { logger } from "../../utils/logger";
+import { isValidRequestId } from "../../utils/requestId";
 
 export const AUTHENTICATED_SESSION_CAPABILITY_BYTES = 32;
 export const AUTHENTICATED_SESSION_HASH_VERSION = "sha256-v1";
@@ -20,6 +22,20 @@ export const hashAuthenticatedSessionCapability = (raw: string) =>
 export const newAuthenticatedSessionCapability = () => randomOpaqueToken(AUTHENTICATED_SESSION_CAPABILITY_BYTES);
 
 type CapabilityDb = Pick<Prisma.TransactionClient, "$queryRaw">;
+
+const logCapabilityDenial = (requestId: string, error: unknown) => {
+  try {
+    if (!/\bAUTH_SESSION_CAPABILITY_DENIED(?:_SESSION|_LIFECYCLE)?\b/.test(String((error as Error)?.message || ""))) return;
+    // One JSON string remains one CloudWatch event with either logger format.
+    logger.error(JSON.stringify({
+      event: "auth_session_capability_denied",
+      timestamp: new Date().toISOString(),
+      requestId: isValidRequestId(requestId) ? requestId : null,
+    }));
+  } catch {
+    // Telemetry must never replace the authentication denial.
+  }
+};
 
 export const supportsAuthenticatedSessionCapability = (db: unknown): db is CapabilityDb =>
   Boolean(db && typeof (db as { $queryRaw?: unknown }).$queryRaw === "function");
@@ -51,22 +67,27 @@ export const requireAuthenticatedSessionCapability = async (
   db: CapabilityDb,
   input: { capability: string; purpose: string; requestId: string }
 ) => {
-  const rows = await db.$queryRaw<Array<{
-    sessionId: string;
-    userId: string;
-    role: string;
-    organizationId: string | null;
-    licenseeId: string | null;
-    assurance: "PASSWORD" | "ADMIN_MFA";
-  }>>`
-    SELECT * FROM app_auth.require_authenticated_session(
-      ${capability(input.capability)}, ${input.purpose}, ${input.requestId}
-    )
-  `;
-  if (rows.length !== 1 || !rows[0].sessionId || !rows[0].userId) {
-    throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+  try {
+    const rows = await db.$queryRaw<Array<{
+      sessionId: string;
+      userId: string;
+      role: string;
+      organizationId: string | null;
+      licenseeId: string | null;
+      assurance: "PASSWORD" | "ADMIN_MFA";
+    }>>`
+      SELECT * FROM app_auth.require_authenticated_session(
+        ${capability(input.capability)}, ${input.purpose}, ${input.requestId}
+      )
+    `;
+    if (rows.length !== 1 || !rows[0].sessionId || !rows[0].userId) {
+      throw new Error("AUTH_SESSION_CAPABILITY_DENIED");
+    }
+    return rows[0];
+  } catch (error) {
+    logCapabilityDenial(input.requestId, error);
+    throw error;
   }
-  return rows[0];
 };
 
 export const revokeAuthenticatedSessionByRefreshToken = async (
