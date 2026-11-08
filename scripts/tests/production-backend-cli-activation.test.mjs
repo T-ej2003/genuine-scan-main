@@ -6,7 +6,7 @@ import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APP
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_DOMAINS } from "../aws/production-app-only-contract.mjs";
 import { createBackendCliActivationAuthorization, assertBackendCliActivationAuthorization } from "../aws/production-backend-cli-authorization.mjs";
-import { assertBackendCliApprovalReadback, assertBackendCliProbe, assertBackendCliSourceImpact, createBackendCliAwsRunner, readBackendCliPredecessorSource, reserveAuthorization } from "../aws/run-production-backend-cli-activation.mjs";
+import { assertBackendCliApprovalReadback, assertBackendCliProbe, assertBackendCliSourceImpact, createBackendCliAwsRunner, readBackendCliPredecessorSource, reserveAuthorization, runBackendCliActivation } from "../aws/run-production-backend-cli-activation.mjs";
 
 const sourceSha = "a".repeat(40), candidateSourceSha = "b".repeat(40), candidateDigest = `sha256:${"c".repeat(64)}`;
 const now = Date.parse("2026-11-08T19:00:00.000Z");
@@ -134,4 +134,11 @@ test("CLI operator uses one AWS attempt without inherited credentials", () => {
     return "{}";
   });
   run(["ecs", "register-task-definition"]);
+});
+
+test("wrong probe identity is rejected before consuming approval", async () => {
+  let calls = 0;
+  await assert.rejects(() => runBackendCliActivation({ probeProfile: "mscqr-ops-admin", journalDir: "/private/tmp/unused",
+    awsRun: () => { calls++; throw Error("AWS reached"); }, githubRun: () => { calls++; throw Error("GitHub reached"); } }), /requires the approved root profile/);
+  assert.equal(calls, 0);
 });
