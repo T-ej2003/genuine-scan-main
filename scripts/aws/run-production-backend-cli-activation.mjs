@@ -208,8 +208,8 @@ if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === imp
       profile: values["aws-profile"], probeProfile: values["probe-aws-profile"], journalDir: values["journal-dir"] });
     process.stdout.write(`${JSON.stringify({ status: result.status, candidateTaskDefinition: result.candidateTaskDefinition,
       deployedBackendDigest: result.deployedBackendDigest, journalDir: values["journal-dir"] })}\n`);
-  } catch (error) {
-    process.stderr.write(`Backend CLI activation stopped: ${error?.message || "unknown error"}. Preserve the journal; do not retry an ambiguous mutation.\n`);
+  } catch {
+    process.stderr.write("Backend CLI activation stopped. Preserve the journal; do not retry an ambiguous mutation.\n");
     process.exitCode = 1;
   }
 }

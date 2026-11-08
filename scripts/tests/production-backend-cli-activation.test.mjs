@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
@@ -114,4 +115,12 @@ test("live revision 42 source is accepted only with its exact immutable digest t
   assert.equal(readBackendCliPredecessorSource(run, digest), "187326f3c85aecc55a7affd26e09c1850d9a0a33");
   assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest));
   assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageDigest: `sha256:${"0".repeat(64)}` }] }), digest));
+});
+
+test("CLI failures do not echo untrusted inputs or AWS command arguments", () => {
+  const result = spawnSync(process.execPath, [new URL("../aws/run-production-backend-cli-activation.mjs", import.meta.url).pathname,
+    "--authorization-reference", "private-token-shaped-input"], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /activation stopped/);
+  assert.doesNotMatch(result.stderr, /private-token-shaped-input|--authorization-reference/);
 });
