@@ -6,7 +6,7 @@ import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APP
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { APP_ONLY_DOMAINS } from "../aws/production-app-only-contract.mjs";
 import { createBackendCliActivationAuthorization, assertBackendCliActivationAuthorization } from "../aws/production-backend-cli-authorization.mjs";
-import { assertBackendCliApprovalReadback, assertBackendCliProbe, assertBackendCliSourceImpact, readBackendCliPredecessorSource, reserveAuthorization } from "../aws/run-production-backend-cli-activation.mjs";
+import { assertBackendCliApprovalReadback, assertBackendCliProbe, assertBackendCliSourceImpact, createBackendCliAwsRunner, readBackendCliPredecessorSource, reserveAuthorization } from "../aws/run-production-backend-cli-activation.mjs";
 
 const sourceSha = "a".repeat(40), candidateSourceSha = "b".repeat(40), candidateDigest = `sha256:${"c".repeat(64)}`;
 const now = Date.parse("2026-11-08T19:00:00.000Z");
@@ -123,4 +123,15 @@ test("CLI failures do not echo untrusted inputs or AWS command arguments", () =>
   assert.equal(result.status, 1);
   assert.match(result.stderr, /activation stopped/);
   assert.doesNotMatch(result.stderr, /private-token-shaped-input|--authorization-reference/);
+});
+
+test("CLI operator uses one AWS attempt without inherited credentials", () => {
+  const run = createBackendCliAwsRunner((_file, _args, options) => {
+    assert.equal(options.env.AWS_PROFILE, "mscqr-ops-admin");
+    assert.equal(options.env.AWS_MAX_ATTEMPTS, "1");
+    assert.equal(options.env.AWS_RETRY_MODE, "standard");
+    assert.equal(options.env.AWS_ACCESS_KEY_ID, undefined);
+    return "{}";
+  });
+  run(["ecs", "register-task-definition"]);
 });

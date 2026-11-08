@@ -33,6 +33,11 @@ const reviewedUnknownPaths = new Set([
   "src/test/dashboard-manufacturer-scope.test.tsx", "src/test/dashboard-rate-limit.test.tsx",
   "src/test/internal-client-core.test.ts", "src/test/printer-user-facing.test.ts",
 ]);
+export const createBackendCliAwsRunner = (exec = execFileSync) => createProductionAwsCommandRunner({
+  credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile: "mscqr-ops-admin",
+  exec: (file, args, options) => exec(file, args, { ...options,
+    env: { ...options.env, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" } }),
+});
 
 export function assertBackendCliSourceImpact(impact) {
   assert.equal(impact.candidateSourceSha, reviewedCandidate, "CLI route is limited to the reviewed backend candidate");
@@ -123,7 +128,7 @@ export async function runBackendCliActivation({ reference, profile = "mscqr-ops-
   assert.equal(profile, "mscqr-ops-admin", "Root and alternate deployment profiles are forbidden");
   assert.ok(["mscqr-ops-admin", "default"].includes(probeProfile), "Unapproved probe profile");
   assert.ok(path.isAbsolute(journalDir || "") && !path.resolve(journalDir).startsWith(path.resolve(root) + path.sep), "A private external journal directory is required");
-  const run = awsRun || createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE, profile, singleAttemptNamedOperator: true });
+  const run = awsRun || createBackendCliAwsRunner();
   const downloaded = downloadAppOnlyArtifact({ kind: "backendCliAuthorization", reference, repositoryRoot: root, githubRun });
   const authorization = readJson(downloaded.bytes.toString("utf8"));
   const assertFresh = () => {
