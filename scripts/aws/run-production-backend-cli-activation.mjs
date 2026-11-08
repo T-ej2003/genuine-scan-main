@@ -76,8 +76,8 @@ export function assertBackendCliProbe(result, authorization) {
   return result;
 }
 
-export function assertBackendCliApprovalReadback(authorization, { run, environment, approvals }) {
-  assertBackendCliActivationAuthorization(authorization, { run });
+export function assertBackendCliApprovalReadback(authorization, { run, environment, approvals, now = Date.now() }) {
+  assertBackendCliActivationAuthorization(authorization, { run, now });
   assert.equal(run.run_attempt, 1, "Approval workflow rerun is not authorized");
   const approved = (Array.isArray(approvals) ? approvals : []).flatMap((event) =>
     event?.state === "approved" && (event.environments || []).some((item) => item?.id === environment?.id && item?.name === "production")
@@ -127,7 +127,8 @@ export async function runBackendCliActivation({ reference, profile = "mscqr-ops-
   awsRun, githubRun = createProductionGithubCommandRunner(), probe = execFileSync, now = Date.now } = {}) {
   assert.equal(profile, "mscqr-ops-admin", "Root and alternate deployment profiles are forbidden");
   assert.equal(probeProfile, "default", "The bounded catalogue probe requires the approved root profile");
-  assert.ok(path.isAbsolute(journalDir || "") && !path.resolve(journalDir).startsWith(path.resolve(root) + path.sep), "A private external journal directory is required");
+  assert.ok(path.isAbsolute(journalDir || "") && path.resolve(journalDir) !== path.resolve(root)
+    && !path.resolve(journalDir).startsWith(path.resolve(root) + path.sep), "A private external journal directory is required");
   const run = awsRun || createBackendCliAwsRunner();
   const downloaded = downloadAppOnlyArtifact({ kind: "backendCliAuthorization", reference, repositoryRoot: root, githubRun });
   const authorization = readJson(downloaded.bytes.toString("utf8"));

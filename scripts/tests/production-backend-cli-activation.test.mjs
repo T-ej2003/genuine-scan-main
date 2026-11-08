@@ -34,16 +34,16 @@ const issue = () => createBackendCliActivationAuthorization(input, env, now);
 
 test("actual independent production review binds source, image, predecessor and requirements", () => {
   const authorization = issue();
-  assertBackendCliApprovalReadback(authorization, { run, environment, approvals });
+  assertBackendCliApprovalReadback(authorization, { run, environment, approvals, now });
   for (const changed of [
     { candidateDigest: `sha256:${"0".repeat(64)}` }, { sourceSha: candidateSourceSha },
     { predecessorTaskDefinitionArn: input.predecessorTaskDefinitionArn.replace(":42", ":43") },
     { requirementsSha256: "0".repeat(64) },
   ]) assert.throws(() => assertBackendCliActivationAuthorization({ ...authorization, ...changed }, { run, now }));
   assert.throws(() => assertBackendCliActivationAuthorization(authorization, { run, now: now + 30 * 60 * 1000 + 1 }), /expired|stale/i);
-  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run, environment, approvals: [] }), /review/);
-  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run, environment: { ...environment, can_admins_bypass: true }, approvals }), /bypass/);
-  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run: { ...run, run_attempt: 2 }, environment, approvals }));
+  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run, environment, approvals: [], now }), /review/);
+  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run, environment: { ...environment, can_admins_bypass: true }, approvals, now }), /bypass/);
+  assert.throws(() => assertBackendCliApprovalReadback(authorization, { run: { ...run, run_attempt: 2 }, environment, approvals, now }));
 });
 
 test("a configured reviewer without an actual review cannot issue CLI authorization", () => {
@@ -83,6 +83,7 @@ test("unknown or security-sensitive source ranges never qualify", () => {
 test("approval workflow cannot deploy or obtain AWS credentials", () => {
   const workflow = fs.readFileSync(new URL("../../.github/workflows/authorize-production-backend-cli-activation.yml", import.meta.url), "utf8");
   assert.match(workflow, /environment: production/);
+  assert.match(workflow, /- name: Publish approval package only\s+env:\s+GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
   assert.doesNotMatch(workflow, /id-token: write|aws-actions\/configure-aws-credentials|aws ecs|terraform|update-service|register-task-definition/);
   assert.equal(canonicalSha256({ sourceSha, candidateDigest }).length, 64);
 });
@@ -140,5 +141,12 @@ test("wrong probe identity is rejected before consuming approval", async () => {
   let calls = 0;
   await assert.rejects(() => runBackendCliActivation({ probeProfile: "mscqr-ops-admin", journalDir: "/private/tmp/unused",
     awsRun: () => { calls++; throw Error("AWS reached"); }, githubRun: () => { calls++; throw Error("GitHub reached"); } }), /requires the approved root profile/);
+  assert.equal(calls, 0);
+});
+
+test("checkout root cannot be used as the deployment journal", async () => {
+  let calls = 0;
+  await assert.rejects(() => runBackendCliActivation({ journalDir: new URL("../../", import.meta.url).pathname,
+    awsRun: () => { calls++; throw Error("AWS reached"); }, githubRun: () => { calls++; throw Error("GitHub reached"); } }), /private external journal directory/);
   assert.equal(calls, 0);
 });

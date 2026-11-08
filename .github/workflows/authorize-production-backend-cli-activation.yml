@@ -53,6 +53,7 @@ jobs:
           echo "sha256=$(sha256sum "$RUNNER_TEMP/backend-cli-authorization/approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
       - name: Publish approval package only
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           CANDIDATE_SOURCE_SHA: ${{ inputs.candidate_source_sha }}
           CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
