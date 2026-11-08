@@ -21,6 +21,7 @@ import { sanitizeRequestTelemetryPath } from "./utils/requestTelemetryPath";
 import { getClientIpTrustConfig, resolveExternalProtocol, trustedClientIpMiddleware } from "./utils/clientIp";
 import { getAuthRiskThresholds } from "./services/auth/sessionRiskService";
 import { hashToken } from "./utils/security";
+import { isValidRequestId } from "./utils/requestId";
 
 const parseBool = (value: unknown, fallback = false) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -133,12 +134,10 @@ export const createBackendApp = () => {
   });
 
   const requestTelemetryDebugPaths = new Set(["/health", "/healthz", "/health/db", "/health/latency"]);
-  // Printing and other SQL request boundaries currently accept UUID versions 1-5.
-  const validRequestId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
   app.use((req, res, next) => {
     const clientRequestId = req.get("x-request-id") || "";
-    const requestId = validRequestId.test(clientRequestId) ? clientRequestId : randomUUID();
+    const requestId = isValidRequestId(clientRequestId) ? clientRequestId : randomUUID();
     const rejectedClientRequestIdRef =
       clientRequestId !== requestId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientRequestId)
         ? hashToken(`client-request-id:${clientRequestId}`)
