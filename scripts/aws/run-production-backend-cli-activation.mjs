@@ -127,8 +127,12 @@ export async function runBackendCliActivation({ reference, profile = "mscqr-ops-
   awsRun, githubRun = createProductionGithubCommandRunner(), probe = execFileSync, now = Date.now } = {}) {
   assert.equal(profile, "mscqr-ops-admin", "Root and alternate deployment profiles are forbidden");
   assert.equal(probeProfile, "default", "The bounded catalogue probe requires the approved root profile");
-  assert.ok(path.isAbsolute(journalDir || "") && path.resolve(journalDir) !== path.resolve(root)
-    && !path.resolve(journalDir).startsWith(path.resolve(root) + path.sep), "A private external journal directory is required");
+  assert.ok(path.isAbsolute(journalDir || ""), "A private external journal directory is required");
+  const journalStat = fs.lstatSync(journalDir);
+  const journalPath = fs.realpathSync(journalDir), checkoutPath = fs.realpathSync(root);
+  assert.ok(journalStat.isDirectory() && !journalStat.isSymbolicLink() && (journalStat.mode & 0o077) === 0
+    && journalPath !== checkoutPath && !journalPath.startsWith(checkoutPath + path.sep),
+  "A private external journal directory is required");
   const run = awsRun || createBackendCliAwsRunner();
   const downloaded = downloadAppOnlyArtifact({ kind: "backendCliAuthorization", reference, repositoryRoot: root, githubRun });
   const authorization = readJson(downloaded.bytes.toString("utf8"));

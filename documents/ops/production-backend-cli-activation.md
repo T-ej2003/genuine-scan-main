@@ -16,11 +16,13 @@ The configured reviewer is currently GitHub user `T-ej2003`. The environment per
 From the clean protected-main checkout, after the approval artifact exists:
 
 ```sh
+activation_run_id=123456789 # replace with the approved authorization run ID
+mkdir -m 700 "/private/tmp/mscqr-backend-cli-activation-${activation_run_id}"
 node scripts/aws/run-production-backend-cli-activation.mjs \
   --authorization-reference '<authenticated six-field JSON reference>' \
   --aws-profile mscqr-ops-admin \
   --probe-aws-profile default \
-  --journal-dir /private/tmp/mscqr-backend-cli-activation-<run-id>
+  --journal-dir "/private/tmp/mscqr-backend-cli-activation-${activation_run_id}"
 ```
 
 The command authenticates the actual GitHub approval and current environment rules, image signature and ECR digests, source impact, requirements, and exact live predecessor. A conditional S3 claim consumes the approval before it runs the bounded read-only catalogue probe. A probe failure consumes the approval and requires a new review. Only `MATCH` with zero deltas for the exact candidate image permits activation. Every activation state is journaled locally and to the versioned production receipt bucket before the next ECS write. The AWS execution identity must be exactly `mscqr-ops-admin`; root is not accepted for deployment.

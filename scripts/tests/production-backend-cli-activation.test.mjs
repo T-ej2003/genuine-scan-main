@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
@@ -149,4 +151,16 @@ test("checkout root cannot be used as the deployment journal", async () => {
   await assert.rejects(() => runBackendCliActivation({ journalDir: new URL("../../", import.meta.url).pathname,
     awsRun: () => { calls++; throw Error("AWS reached"); }, githubRun: () => { calls++; throw Error("GitHub reached"); } }), /private external journal directory/);
   assert.equal(calls, 0);
+});
+
+test("symlinked journal directory is rejected before consuming approval", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-cli-journal-test-"));
+  const link = path.join(directory, "journal");
+  fs.symlinkSync(new URL("../../", import.meta.url).pathname, link);
+  let calls = 0;
+  try {
+    await assert.rejects(() => runBackendCliActivation({ journalDir: link,
+      awsRun: () => { calls++; throw Error("AWS reached"); }, githubRun: () => { calls++; throw Error("GitHub reached"); } }), /private external journal directory/);
+    assert.equal(calls, 0);
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
