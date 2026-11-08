@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createAppOnlyActivationAdapters, createAppOnlyEcsReaders, registerAppOnlyVerifier, executeAppOnlyVerifierTask, readAppOnlyVerifierResult } from "../aws/production-app-only-adapters.mjs";
-import { APP_ONLY } from "../aws/production-app-only-contract.mjs";
+import { APP_ONLY, buildAppOnlyCandidate, captureAppOnlyPredecessor } from "../aws/production-app-only-contract.mjs";
 import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyVerifierNetwork } from "../aws/production-app-only-policy.mjs";
 import { createAppOnlyRequirements } from "../aws/production-app-only-requirements.mjs";
 import { buildAppOnlyVerifierDefinition } from "../aws/production-app-only-verifier-command.mjs";
@@ -25,6 +25,42 @@ const readback = { taskDefinition: { ...built.definition, taskDefinitionArn: ver
 const request = () => ({ cluster: APP_ONLY.clusterArn, taskDefinition: verifierArn, launchType: "FARGATE", count: 1,
   enableExecuteCommand: false, clientToken: token, networkConfiguration: appOnlyVerifierNetwork() });
 const authorization = { authenticate: async () => {}, writeEvidence: async () => {} };
+test("activation registers an untagged predecessor without the ECS-rejected empty tags field", () => {
+  const oldDigest = identity.predecessorBackendDigest;
+  const definition = { taskDefinitionArn: predecessorArn, revision: 14, status: "ACTIVE", family: APP_ONLY.family,
+    taskRoleArn: APP_ONLY.taskRoleArn, executionRoleArn: APP_ONLY.executionRoleArn, networkMode: "awsvpc",
+    runtimePlatform: { cpuArchitecture: "X86_64", operatingSystemFamily: "LINUX" },
+    containerDefinitions: [{ name: APP_ONLY.container, image: `${APP_ONLY.backendRepository}@${oldDigest}` }] };
+  const service = { clusterArn: APP_ONLY.clusterArn, serviceArn: APP_ONLY.serviceArn, serviceName: APP_ONLY.service,
+    taskDefinition: predecessorArn, status: "ACTIVE", desiredCount: 2, runningCount: 2, pendingCount: 0,
+    deployments: [{ id: "ecs-svc/100", status: "PRIMARY", rolloutState: "COMPLETED", taskDefinition: predecessorArn }] };
+  const tasks = ["1", "2"].map((digit) => ({ taskArn: `arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task/${APP_ONLY.cluster}/${digit.repeat(32)}`,
+    clusterArn: APP_ONLY.clusterArn, group: `service:${APP_ONLY.service}`, taskDefinitionArn: predecessorArn,
+    lastStatus: "RUNNING", healthStatus: "HEALTHY", startedBy: "ecs-svc/100",
+    containers: [{ name: APP_ONLY.container, imageDigest: oldDigest }] }));
+  const predecessor = captureAppOnlyPredecessor({ service, definition: { ...definition, tags: [] }, tasks });
+  const candidate = buildAppOnlyCandidate({ ...definition, tags: [] }, identity.candidateDigest);
+  let registrations = 0;
+  const adapters = createAppOnlyActivationAdapters({ ...authorization,
+    preparation: { predecessor, candidateDigest: identity.candidateDigest }, run: (args) => {
+      switch (args[1]) {
+        case "describe-services": return { services: [service], failures: [] };
+        case "describe-task-definition": return { taskDefinition: definition, tags: [] };
+        case "list-tasks": return { taskArns: tasks.map(({ taskArn }) => taskArn) };
+        case "describe-tasks": return { tasks, failures: [] };
+        case "register-task-definition": {
+          registrations++;
+          const request = JSON.parse(args[3]);
+          assert.equal(Object.hasOwn(request, "tags"), false);
+          assert.deepEqual(request.containerDefinitions, candidate.containerDefinitions);
+          return { taskDefinition: { taskDefinitionArn: predecessorArn.replace(/:14$/, ":15") } };
+        }
+        default: throw new Error(`Unexpected AWS operation: ${args[1]}`);
+      }
+    } });
+  assert.equal(adapters.register(candidate).taskDefinitionArn, predecessorArn.replace(/:14$/, ":15"));
+  assert.equal(registrations, 1);
+});
 test("activation rechecks candidate and predecessor ECR viability without tags or mutation", async () => {
   const preparation = { candidateDigest: identity.candidateDigest, predecessor: { backendDigest: identity.predecessorBackendDigest } };
   for (const missing of [undefined, identity.candidateDigest, identity.predecessorBackendDigest]) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { setTimeout as sleep } from "node:timers/promises";
-import { APP_ONLY, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyCandidate, appOnlyServiceConfigurationSha256 } from "./production-app-only-contract.mjs";
+import { APP_ONLY, captureAppOnlyPredecessor, assertAppOnlyCas, assertAppOnlyCandidate, buildAppOnlyRegistrationRequest, appOnlyServiceConfigurationSha256 } from "./production-app-only-contract.mjs";
 import { CANONICAL_PRODUCTION_ORIGIN, CANONICAL_PRODUCTION_READINESS_URL } from "./production-backend-readiness-contract.mjs";
 import { APP_ONLY_VERIFIER, APP_ONLY_PROVISIONING, appOnlyVerifierNetwork, assertAppOnlyVerifierLaunch } from "./production-app-only-policy.mjs";
 import { buildAppOnlyVerifierDefinition, assertRegisteredAppOnlyVerifier, authenticateAppOnlyVerifierResult } from "./production-app-only-verifier-command.mjs";
@@ -81,7 +81,7 @@ export function createAppOnlyActivationAdapters({ run, preparation, authenticate
       const live = readers.readLive();
       assertAppOnlyCas(preparation.predecessor, captureAppOnlyPredecessor(live));
       assertAppOnlyCandidate(live.definition, definition, preparation.candidateDigest);
-      const response = parse(run(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(definition), "--output", "json", "--no-cli-pager"]));
+      const response = parse(run(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(buildAppOnlyRegistrationRequest(definition)), "--output", "json", "--no-cli-pager"]));
       assert.match(response.taskDefinition?.taskDefinitionArn || "", family);
       registeredArn = response.taskDefinition.taskDefinitionArn;
       return response.taskDefinition;
