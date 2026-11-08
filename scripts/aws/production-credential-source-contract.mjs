@@ -118,15 +118,16 @@ export function normalizeProductionAwsCommandArguments(args, region = REGION) {
   return Object.freeze([...args]);
 }
 
-export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false, singleAttemptKmsSign = false, singleAttemptMutation } = {}) {
+export function createProductionAwsCommandRunner({ credentialSource, profile, env = process.env, region = REGION, exec = execFileSync, injected = false, singleAttemptKmsSign = false, singleAttemptMutation, singleAttemptNamedOperator = false } = {}) {
   if (singleAttemptKmsSign && (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE || profile !== "default")) throw new Error("Single-attempt KMS signing requires the root named profile.");
+  if (singleAttemptNamedOperator && (credentialSource !== PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE || profile !== "mscqr-ops-admin")) throw new Error("Single-attempt operator execution requires the operational named profile.");
   if (singleAttemptMutation) {
     const signer = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.INHERITED_CHECKER_SESSION || credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE && profile === 'default';
     const registrar = credentialSource === PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE && profile === 'mscqr-production-release-deployer';
     if (!((singleAttemptMutation === 'KMS_SIGN' && signer) || (singleAttemptMutation === 'ECS_REGISTER' && registrar)) || env.AWS_MAX_ATTEMPTS !== '1' || env.AWS_RETRY_MODE !== 'standard') throw new Error('Exact single-attempt mutation credential/retry settings required.');
   }
   const credentialEnvironment = createProductionAwsCredentialEnvironment({ credentialSource, profile, env, region, injected });
-  const commandEnvironment = singleAttemptKmsSign || singleAttemptMutation ? Object.freeze({ ...credentialEnvironment, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" }) : credentialEnvironment;
+  const commandEnvironment = singleAttemptKmsSign || singleAttemptMutation || singleAttemptNamedOperator ? Object.freeze({ ...credentialEnvironment, AWS_MAX_ATTEMPTS: "1", AWS_RETRY_MODE: "standard" }) : credentialEnvironment;
   return (args) => {
     const command = normalizeProductionAwsCommandArguments(args, region);
     if (singleAttemptKmsSign && (command[0] !== "kms" || command[1] !== "sign")) throw new Error("Single-attempt runner permits only KMS Sign.");

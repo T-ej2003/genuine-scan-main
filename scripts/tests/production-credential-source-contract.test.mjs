@@ -293,6 +293,21 @@ test("root KMS signing uses one AWS CLI attempt without leaking ambient AWS conf
   assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.GITHUB_OIDC_RELEASE_DEPLOYER, env: oidc, singleAttemptKmsSign: true }), /root named profile/);
 });
 
+test("backend CLI operator uses one AWS attempt without accepting root or ambient retry settings", () => {
+  const calls = [];
+  const run = createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "mscqr-ops-admin", singleAttemptNamedOperator: true,
+    env: { ...oidc, AWS_MAX_ATTEMPTS: "9", AWS_RETRY_MODE: "adaptive" },
+    exec: (_file, _args, options) => { calls.push(options.env); return "{}"; } });
+  run(["ecs", "register-task-definition"]);
+  assert.equal(calls[0].AWS_PROFILE, "mscqr-ops-admin");
+  assert.equal(calls[0].AWS_MAX_ATTEMPTS, "1");
+  assert.equal(calls[0].AWS_RETRY_MODE, "standard");
+  assert.equal(calls[0].AWS_ACCESS_KEY_ID, undefined);
+  assert.throws(() => createProductionAwsCommandRunner({ credentialSource: PRODUCTION_AWS_CREDENTIAL_SOURCE.NAMED_PROFILE,
+    profile: "default", singleAttemptNamedOperator: true }), /operational named profile/);
+});
+
 test("failed-recovery evidence composition pins the root profile instead of inheriting ambient credentials", () => {
   const calls = [];
   const run = createProductionBackendFailedRecoveryEvidenceAwsRunner({
