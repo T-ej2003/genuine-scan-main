@@ -53,6 +53,7 @@ const licenseeAdmin = {
 
 (async () => {
   const prismaCalls = [];
+  let notificationListError = null;
   mockModule("config/database.js", {
     __esModule: true,
     default: {
@@ -115,7 +116,10 @@ const licenseeAdmin = {
   });
   mockModule("services/notificationService.js", {
     createUserNotification: async () => ({}),
-    listNotificationsForUser: async (params) => ({ notifications: [], total: 0, unread: 0, capturedParams: params }),
+    listNotificationsForUser: async (params) => {
+      if (notificationListError) throw notificationListError;
+      return { notifications: [], total: 0, unread: 0, capturedParams: params };
+    },
     markNotificationRead: async (params) => ({ id: params.notificationId, userId: params.userId }),
     markAllNotificationsRead: async (params) => {
       prismaCalls.push(["notifications.markAll", params]);
@@ -227,6 +231,24 @@ const licenseeAdmin = {
   assert.strictEqual(notificationListRes.statusCode, 200);
   assert.strictEqual(notificationListRes.body.data.capturedParams.userId, actorId);
   assert.strictEqual(notificationListRes.body.data.capturedParams.licenseeId, licenseeA);
+
+  const { CanonicalAuthDenial } = require("../dist/rls-waves/session-b/b01/canonicalAuthContext");
+  notificationListError = new CanonicalAuthDenial();
+  const deniedNotificationRes = createResponse();
+  await listNotifications({ ...authenticatedNotificationRequest, query: {} }, deniedNotificationRes);
+  assert.strictEqual(deniedNotificationRes.statusCode, 401);
+  assert.deepStrictEqual(deniedNotificationRes.body, { success: false, error: "Not authenticated" });
+  notificationListError = new Error("Database unavailable");
+  const failedNotificationRes = createResponse();
+  const originalConsoleError = console.error;
+  console.error = () => undefined;
+  try {
+    await listNotifications({ ...authenticatedNotificationRequest, query: {} }, failedNotificationRes);
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.strictEqual(failedNotificationRes.statusCode, 500);
+  notificationListError = null;
 
   const notificationReadRes = createResponse();
   await readNotification({
