@@ -48,7 +48,8 @@ test.describe("MSCQR disposable system integration", () => {
 });
 
 const withIsolatedPage = async (browser: Browser, run: (page: Page) => Promise<void>) => {
-  const context = await browser.newContext();
+  // Keep this disposable system test out of other suites' shared anonymous refresh bucket.
+  const context = await browser.newContext({ userAgent: "MSCQR-System-Integration-E2E" });
   try {
     const page = await context.newPage();
     await run(page);
