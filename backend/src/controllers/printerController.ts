@@ -474,7 +474,8 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
           requestId: printingRequestId(req),
         },
       });
-      if (result.outcome === "confirmed") {
+      // Manufacturer diagnostic completion and audit are authorized; registry UPDATE is not.
+      if (result.outcome === "confirmed" && req.user.role !== "MANUFACTURER_ADMIN") {
         const metadata = printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
           ? printer.metadata
           : {};
