@@ -172,13 +172,16 @@ const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
       ? `IPP attributes validated at ${result.printerUri}.`
       : "IPP endpoint does not advertise application/pdf.";
   }
-  await administerPrintingPrinter({
-    capability: printingCapability(req),
-    requestId: printingRequestId(req),
-    operation: "UPDATE",
-    printerId: printer.id,
-    payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
-  });
+  // SQL reserves printer registry UPDATE for platform and licensee administrators.
+  if (req.user!.role !== "MANUFACTURER_ADMIN") {
+    await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "UPDATE",
+      printerId: printer.id,
+      payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
+    });
+  }
   return {
     ok,
     ...(latencyMs === null ? {} : { latencyMs }),
