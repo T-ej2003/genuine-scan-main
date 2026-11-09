@@ -174,6 +174,41 @@ describe("internal client core HTML error handling", () => {
     }
   });
 
+  it("does not refresh again or clear a newer token after a stale protected 401", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    window.localStorage.removeItem("mscqr:auth-refresh-version");
+    const pending: Array<(response: Response) => void> = [];
+    let refreshCalls = 0;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.endsWith("/auth/refresh")) {
+        refreshCalls += 1;
+        return Promise.resolve(new Response(JSON.stringify({ success: true, data: { user: { id: "actor" }, accessToken: "new-token" } }), {
+          headers: { "content-type": "application/json" },
+        }));
+      }
+      if (pending.length < 2) return new Promise<Response>((resolve) => { pending.push(resolve); });
+      return Promise.resolve(new Response(JSON.stringify({ success: true, data: [] }), {
+        headers: { "content-type": "application/json" },
+      }));
+    }) as typeof fetch;
+    const client = createApiClientCore();
+    try {
+      client.setToken("old-token");
+      const first = client.request("/dashboard/stats");
+      const stale = client.request("/dashboard/stats");
+      await vi.waitFor(() => expect(pending).toHaveLength(2));
+      pending[0](new Response(null, { status: 401 }));
+      expect((await first).success).toBe(true);
+      expect(client.getToken()).toBe("new-token");
+      pending[1](new Response(null, { status: 401 }));
+      expect((await stale).code).toBe("REQUEST_SCOPE_CHANGED");
+      expect(refreshCalls).toBe(1);
+      expect(client.getToken()).toBe("new-token");
+    } finally {
+      window.localStorage.removeItem("mscqr:auth-refresh-version");
+    }
+  });
+
   it("does not restore an auth scope from a refresh response arriving after logout", async () => {
     setRequestCoordinatorScope(null);
     let release!: (response: Response) => void;

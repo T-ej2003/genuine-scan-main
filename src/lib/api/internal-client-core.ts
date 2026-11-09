@@ -399,6 +399,7 @@ export function createApiClientCore(): ApiClientCore {
           return request<{ user: any; auth?: any; accessToken?: string }>(endpoint, { ...options, skipRefreshDedup: true }).then((response) => {
             if (epoch !== sessionEpoch) return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed" };
             if (response.success) {
+              sessionEpoch += 1;
               try { window.localStorage.setItem(refreshVersionKey, crypto.randomUUID()); } catch { /* Refresh still succeeded. */ }
             }
             return response;
@@ -419,6 +420,7 @@ export function createApiClientCore(): ApiClientCore {
 
     const method = String(options.method || "GET").toUpperCase();
     const requestEpoch = sessionEpoch;
+    const requestRefreshVersion = readRefreshVersion();
     const requestScope = getRequestCoordinatorScope();
     const cacheKey = `${getRequestCoordinatorScope()}:${getToken() || "cookie"}:${endpoint}`;
     const cooldownKey = `${requestScope}:${method}:${normalizeCooldownEndpoint(endpoint)}`;
@@ -501,7 +503,8 @@ export function createApiClientCore(): ApiClientCore {
         signal: controller.signal,
       });
       const requestId = response.headers.get("x-request-id") || response.headers.get("x-correlation-id") || undefined;
-      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope()) {
+      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope() ||
+          (requestRefreshVersion !== null && requestRefreshVersion !== readRefreshVersion())) {
         pushNetworkLog({ status: response.status, ok: false, error: "Request scope changed" });
         return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed; refresh before retrying", unknownOutcome: method !== "GET" && method !== "HEAD", requestId };
       }
@@ -522,7 +525,8 @@ export function createApiClientCore(): ApiClientCore {
         : await response.text().catch((): string => "");
 
       // Parsing is asynchronous too: scope may change after headers arrive.
-      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope()) {
+      if (requestEpoch !== sessionEpoch || requestScope !== getRequestCoordinatorScope() ||
+          (requestRefreshVersion !== null && requestRefreshVersion !== readRefreshVersion())) {
         return { success: false, status: 409, code: "REQUEST_SCOPE_CHANGED", error: "Request scope changed", unknownOutcome: isStateChanging, requestId };
       }
 

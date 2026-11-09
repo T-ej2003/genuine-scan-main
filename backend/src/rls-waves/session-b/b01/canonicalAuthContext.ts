@@ -82,7 +82,17 @@ export const withDatabaseAuthenticatedSession = <T>(
   const requestId = required(input.requestId, "a request ID");
   const purpose = required(input.purpose, "a purpose");
   return runner.$transaction(async (tx) => {
-    const verified = await requireAuthenticatedSessionCapability(tx, { capability, purpose, requestId });
+    let verified;
+    try {
+      verified = await requireAuthenticatedSessionCapability(tx, { capability, purpose, requestId });
+    } catch (error) {
+      const sqlError = error as { code?: unknown; meta?: { code?: unknown; message?: unknown }; message?: unknown };
+      if (sqlError?.code === "P2010" && sqlError.meta?.code === "42501" &&
+          /\bAUTH_SESSION_CAPABILITY_DENIED\b/.test(String(sqlError.meta.message || sqlError.message || ""))) {
+        throw new CanonicalAuthDenial();
+      }
+      throw error;
+    }
     if (verified.userId !== expectedUserId || verified.sessionId !== required(claims.sessionId, "an authenticated session ID")) {
       throw new CanonicalAuthDenial();
     }
