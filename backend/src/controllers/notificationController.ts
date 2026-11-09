@@ -2,6 +2,7 @@ import { Response } from "express";
 import { z } from "zod";
 
 import { AuthRequest } from "../middleware/auth";
+import { isCanonicalAuthDenial } from "../rls-waves/session-b/b01/canonicalAuthContext";
 import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundary";
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import {
@@ -68,6 +69,7 @@ export const listNotifications = async (req: AuthRequest, res: Response) => {
       },
     });
   } catch (error) {
+    if (isCanonicalAuthDenial(error)) return res.status(401).json({ success: false, error: "Not authenticated" });
     console.error("listNotifications error:", error);
     return res.status(500).json({ success: false, error: "Failed to load notifications" });
   }
