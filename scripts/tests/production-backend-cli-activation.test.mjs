@@ -71,30 +71,35 @@ test("database proof must match exact source, digest and zero-delta catalogue", 
 });
 
 test("unknown or security-sensitive source ranges never qualify", () => {
-  const empty = { sourceClassificationComplete: true, changed: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, false])) };
-  const impact = { candidateSourceSha: "cbbb353bbae5f5a642871e90a79e76a4eb12aa82",
-    liveToCandidate: { ...empty, unknown: ["src/contexts/AuthContext.tsx"], sourceClassificationComplete: false },
-    candidateToProtected: { ...empty, unknown: [] } };
+  const empty = { sourceClassificationComplete: true, changed: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, false])),
+    unknown: [], application: [] };
+  const impact = { candidateSourceSha, liveToCandidate: { ...empty, application: ["backend/src/controllers/authController.ts"] },
+    candidateToProtected: { ...empty, releaseControl: ["scripts/aws/new-activation-tool.mjs"] } };
   assertBackendCliSourceImpact(impact);
-  assert.throws(() => assertBackendCliSourceImpact({ ...impact, candidateSourceSha }));
-  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate, unknown: ["src/pages/Unreviewed.tsx"] } }));
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate,
+    unknown: ["unknown/runtime.ts"], sourceClassificationComplete: false } }));
   assert.throws(() => assertBackendCliSourceImpact({ ...impact, candidateToProtected: { ...empty, unknown: ["src/pages/Unreviewed.tsx"], sourceClassificationComplete: false } }));
   assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate, changed: { ...empty.changed, RLS: true } } }));
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate, changed: { ...empty.changed, MIGRATIONS: true } } }));
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, candidateToProtected: { ...empty, application: ["backend/src/auth.ts"] } }));
 });
 
-test("PR 811/812 candidate permits only its reviewed auth boundary change from revision 43", () => {
-  const empty = { sourceClassificationComplete: true, changed: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, false])), reasons: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, []])), unknown: [] };
-  const authPath = "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts";
-  const impact = { candidateSourceSha: "bb9297c800a1d0b3e96ad4051a9593268df85dda",
-    liveToCandidate: { ...empty, changed: { ...empty.changed, RLS: true }, reasons: { ...empty.reasons, RLS: [authPath] } },
-    candidateToProtected: empty };
-  assertBackendCliSourceImpact(impact);
-  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate,
-    reasons: { ...impact.liveToCandidate.reasons, RLS: [authPath, "backend/src/rls-waves/session-b/b01/new.sql"] } } }));
-  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate,
-    changed: { ...impact.liveToCandidate.changed, MIGRATIONS: true } } }));
-  assert.throws(() => assertBackendCliSourceImpact({ ...impact, candidateToProtected: { ...empty,
-    changed: { ...empty.changed, RLS: true } } }));
+test("two future backend transitions need fresh source-bound approvals", () => {
+  const first = issue();
+  const nextSource = "1".repeat(40), nextCandidate = "2".repeat(40);
+  const nextEnv = { ...env, GITHUB_SHA: nextSource, GITHUB_RUN_ID: "124" };
+  const nextApproval = createProductionEnvironmentApprovalEvidence({ environmentConfig: environment,
+    repository: PRODUCTION_ENVIRONMENT_APPROVAL.repository, environment: "production", sourceSha: nextSource, workflowRef,
+    eventName: "workflow_dispatch", workflowRunId: "124", workflowRunAttempt: "1", executionActor: "operator",
+    observedAt: new Date(now + 1000).toISOString(), actualApproval });
+  const second = createBackendCliActivationAuthorization({ ...input, sourceSha: nextSource, candidateSourceSha: nextCandidate,
+    candidateDigest: `sha256:${"3".repeat(64)}`,
+    predecessorTaskDefinitionArn: input.predecessorTaskDefinitionArn.replace(":42", ":43"),
+    requirementsReference: ref(nextSource), approval: nextApproval }, nextEnv, now + 1000);
+  assert.notEqual(first.authorizationSha256, second.authorizationSha256);
+  assert.notEqual(first.predecessorTaskDefinitionArn, second.predecessorTaskDefinitionArn);
+  assert.throws(() => assertBackendCliActivationAuthorization(first, { run: { ...run, head_sha: nextSource }, now: now + 1000 }));
+  assertBackendCliActivationAuthorization(second, { run: { ...run, id: 124, head_sha: nextSource }, now: now + 1000 });
 });
 
 test("approval workflow cannot deploy or obtain AWS credentials", () => {
@@ -125,24 +130,17 @@ test("an activation approval is claimed once before any ECS mutation", () => {
   assert.equal(writes, 1);
 });
 
-test("live revision 42 source is accepted only with its exact immutable digest tag", () => {
+test("live predecessor source comes from its exact digest, not a fixed revision", () => {
   const digest = `sha256:${"f".repeat(64)}`;
   const image = { repositoryName: "mscqr-backend", registryId: "368992683803", imageDigest: digest,
-    imageTags: ["187326f3c85aecc55a7affd26e09c1850d9a0a33-connector-2026.11.6.2"] };
+    imageTags: ["1".repeat(40)] };
   const run = () => JSON.stringify({ imageDetails: [image] });
-  assert.equal(readBackendCliPredecessorSource(run, digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"), "187326f3c85aecc55a7affd26e09c1850d9a0a33");
-  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"));
-  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageDigest: `sha256:${"0".repeat(64)}` }] }), digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"));
-});
-
-test("live revision 43 source is accepted only with its exact immutable digest tag", () => {
-  const digest = `sha256:${"f".repeat(64)}`;
-  const image = { repositoryName: "mscqr-backend", registryId: "368992683803", imageDigest: digest,
-    imageTags: ["cbbb353bbae5f5a642871e90a79e76a4eb12aa82"] };
-  assert.equal(readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [image] }), digest,
-    "bb9297c800a1d0b3e96ad4051a9593268df85dda"), "cbbb353bbae5f5a642871e90a79e76a4eb12aa82");
-  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest,
-    "bb9297c800a1d0b3e96ad4051a9593268df85dda"));
+  assert.equal(readBackendCliPredecessorSource(run, digest), "1".repeat(40));
+  assert.equal(readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image,
+    imageTags: ["1".repeat(40), `${"1".repeat(40)}-backend-only`] }] }), digest), "1".repeat(40));
+  for (const altered of [{ imageTags: ["unverified"] }, { imageTags: ["1".repeat(40), "2".repeat(40)] },
+    { imageDigest: `sha256:${"0".repeat(64)}` }, { registryId: "111111111111" }])
+    assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, ...altered }] }), digest));
 });
 
 test("CLI failures do not echo untrusted inputs or AWS command arguments", () => {

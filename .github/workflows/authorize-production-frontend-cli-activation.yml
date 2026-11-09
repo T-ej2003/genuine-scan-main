@@ -1,0 +1,86 @@
+name: Authorize production frontend CLI activation
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Protected main tooling SHA, required: true, type: string }
+      candidate_source_sha: { description: Published frontend source SHA, required: true, type: string }
+      candidate_digest: { description: Immutable frontend image digest, required: true, type: string }
+      predecessor_task_definition_arn: { description: Current frontend task definition ARN, required: true, type: string }
+      backend_task_definition_arn: { description: Current backend task definition ARN, required: true, type: string }
+      backend_digest: { description: Running backend image digest, required: true, type: string }
+      backend_source_sha: { description: Running backend application source SHA, required: true, type: string }
+      web_authorization_sha256: { description: Signed web image authorization file SHA-256, required: true, type: string }
+      database_probe_sha256: { description: Verified database probe file SHA-256, required: true, type: string }
+      image_authorization_reference: { description: Current-source signed image authorization artifact reference, required: true, type: string }
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  authorize:
+    if: github.ref == 'refs/heads/main' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked evidence dependencies
+        run: npm ci
+      - name: Authenticate protected source and actual reviewer
+        id: approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          install -d -m 700 "$RUNNER_TEMP/frontend-cli-authorization"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/frontend-cli-authorization/approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/frontend-cli-authorization/approval.json" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Publish approval package only
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          CANDIDATE_SOURCE_SHA: ${{ inputs.candidate_source_sha }}
+          CANDIDATE_DIGEST: ${{ inputs.candidate_digest }}
+          PREDECESSOR_TASK_DEFINITION_ARN: ${{ inputs.predecessor_task_definition_arn }}
+          BACKEND_TASK_DEFINITION_ARN: ${{ inputs.backend_task_definition_arn }}
+          BACKEND_DIGEST: ${{ inputs.backend_digest }}
+          BACKEND_SOURCE_SHA: ${{ inputs.backend_source_sha }}
+          WEB_AUTHORIZATION_SHA256: ${{ inputs.web_authorization_sha256 }}
+          DATABASE_PROBE_SHA256: ${{ inputs.database_probe_sha256 }}
+          IMAGE_AUTHORIZATION_REFERENCE: ${{ inputs.image_authorization_reference }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          node scripts/aws/production-frontend-cli-authorization.mjs \
+            --source-sha "$SOURCE_SHA" --candidate-source-sha "$CANDIDATE_SOURCE_SHA" \
+            --candidate-digest "$CANDIDATE_DIGEST" --predecessor-task-definition-arn "$PREDECESSOR_TASK_DEFINITION_ARN" \
+            --backend-task-definition-arn "$BACKEND_TASK_DEFINITION_ARN" --backend-digest "$BACKEND_DIGEST" \
+            --backend-source-sha "$BACKEND_SOURCE_SHA" --web-authorization-sha256 "$WEB_AUTHORIZATION_SHA256" \
+            --database-probe-sha256 "$DATABASE_PROBE_SHA256" \
+            --image-authorization-reference "$IMAGE_AUTHORIZATION_REFERENCE" \
+            --approval "$RUNNER_TEMP/frontend-cli-authorization/approval.json" --approval-sha256 "${{ steps.approval.outputs.sha256 }}" \
+            --output "$RUNNER_TEMP/frontend-cli-authorization/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-frontend-cli-activation-authorization
+          path: ${{ runner.temp }}/frontend-cli-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 1
