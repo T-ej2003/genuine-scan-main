@@ -9,6 +9,7 @@ const mockModule = (relativePath, exportsValue) => {
 
 let statusMode = "denied";
 let aborts = 0;
+let completions = 0;
 let dispatches = 0;
 const printer = {
   id: "50000000-0000-4000-8000-000000000001",
@@ -19,7 +20,7 @@ const printer = {
 mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
   beginPrintingIdempotency: async () => ({ replayed: false }),
   abortPrintingIdempotency: async () => { aborts += 1; },
-  completePrintingIdempotency: async () => ({}),
+  completePrintingIdempotency: async () => { completions += 1; },
   readPrintingProjection: async ({ operation }) => {
     if (operation === "PRINTER" && statusMode === "missing") return null;
     if (operation === "PRINTER") return printer;
@@ -36,6 +37,7 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
 mockModule("services/printerTestLabelService.js", {
   printTestLabelForRegisteredPrinter: async () => {
     dispatches += 1;
+    if (statusMode === "queued") return { outcome: "queued", connectionType: "LOCAL_AGENT" };
     throw new Error("Dispatch outcome unknown");
   },
 });
@@ -82,6 +84,14 @@ const response = () => ({
     assert.equal(missing.statusCode, 404);
     assert.equal(aborts, 2, "missing printer must not leave a pending key");
     assert.equal(dispatches, 1);
+
+    statusMode = "queued";
+    const queued = response();
+    await testPrinterLabel(request, queued);
+    assert.equal(queued.statusCode, 200);
+    assert.equal(queued.body.data.outcome, "queued");
+    assert.equal(completions, 1, "accepted work must be recorded as complete");
+    assert.equal(aborts, 2, "accepted work must never release its idempotency key");
   } finally {
     console.error = originalConsoleError;
   }
