@@ -79,10 +79,11 @@ function normalizeUser(u: any): User {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigationTarget = location.pathname + location.search;
   const [user, setUser] = useState<User | null>(null);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [validatedPath, setValidatedPath] = useState(location.pathname);
+  const [validatedTarget, setValidatedTarget] = useState(navigationTarget);
   const [navigationCheckInFlight, setNavigationCheckInFlight] = useState(false);
   const [authBootstrapStatus, setAuthBootstrapStatus] = useState<"bootstrapping" | "authenticated" | "unauthenticated">("bootstrapping");
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
@@ -96,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const transientRestoreRef = useRef(false);
   const navigationValidationPending = Boolean(
     user && shouldBootstrapCurrentUser(location.pathname) && !isActivePrintSessionSuppressed() &&
-    location.pathname !== validatedPath &&
+    navigationTarget !== validatedTarget &&
     (navigationCheckInFlight || refreshInFlightRef.current !== null || transientRestoreRef.current ||
       Date.now() - lastRefreshSuccessAtRef.current >= AUTH_BOOTSTRAP_MIN_INTERVAL_MS)
   );
@@ -277,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (DISABLE_E2E_AUTH_POLLING) {
       setIsLoading(false);
-      setValidatedPath(location.pathname);
+      setValidatedTarget(navigationTarget);
       setNavigationCheckInFlight(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
       return;
@@ -285,7 +286,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (!shouldBootstrapCurrentUser(location.pathname)) {
       setIsLoading(false);
-      setValidatedPath(location.pathname);
+      setValidatedTarget(navigationTarget);
       setNavigationCheckInFlight(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
       return;
@@ -297,13 +298,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         Date.now() - lastRefreshAttemptAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS);
     if (recentlyLoaded && !refreshInFlightRef.current && !transientRestoreRef.current) {
       setIsLoading(false);
-      setValidatedPath(location.pathname);
+      setValidatedTarget(navigationTarget);
       setNavigationCheckInFlight(false);
       return;
     }
     if (user && isActivePrintSessionSuppressed()) {
       setIsLoading(false);
-      setValidatedPath(location.pathname);
+      setValidatedTarget(navigationTarget);
       setNavigationCheckInFlight(false);
       return;
     }
@@ -317,7 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (transientRestoreRef.current) retryBootstrap();
         else {
-          setValidatedPath(location.pathname);
+          setValidatedTarget(navigationTarget);
           setNavigationCheckInFlight(false);
           setIsLoading(false);
         }
@@ -332,7 +333,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           if (transientRestoreRef.current) retryBootstrap();
           else {
-            setValidatedPath(location.pathname);
+            setValidatedTarget(navigationTarget);
             setNavigationCheckInFlight(false);
             setIsLoading(false);
           }
@@ -346,7 +347,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       bootstrapRetryRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, user]);
+  }, [navigationTarget, user]);
 
   const login = async (email: string, password: string) => {
     const generation = sessionGenerationRef.current;

@@ -101,6 +101,7 @@ vi.mock("@/pages/Dashboard", async () => {
 
 vi.mock("@/pages/Batches", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
+  const { useLocation, useNavigate } = await vi.importActual<typeof import("react-router")>("react-router");
   const { useAuth } = await vi.importActual<typeof import("@/contexts/AuthContext")>("@/contexts/AuthContext");
   const { useBatches } = await vi.importActual<typeof import("@/features/batches/hooks")>("@/features/batches/hooks");
   const { useManufacturerPrinterRuntime } =
@@ -109,9 +110,13 @@ vi.mock("@/pages/Batches", async () => {
   return {
     default: function ProtectedBatchesProbe() {
       const auth = useAuth();
-      useBatches(undefined, true);
+      const location = useLocation();
+      const navigate = useNavigate();
+      useBatches(new URLSearchParams(location.search).get("licenseeId") || undefined, true);
       useManufacturerPrinterRuntime(true, true);
-      return React.createElement("div", { "data-testid": "protected-batches-probe", "data-licensee": auth.user?.licenseeId }, "Protected batches");
+      return React.createElement("div", { "data-testid": "protected-batches-probe", "data-licensee": auth.user?.licenseeId,
+        "data-search": location.search }, "Protected batches",
+        React.createElement("button", { onClick: () => navigate("/batches?licenseeId=B") }, "Switch licensee"));
     },
   };
 });
@@ -224,6 +229,27 @@ describe("auth bootstrap after reload", () => {
     await act(async () => resolveRefresh({ success: true, data: { user: manufacturerUser } } as any));
     expect(await screen.findByTestId("protected-batches-probe")).toBeInTheDocument();
     await waitFor(() => expect(apiClient.getBatches).toHaveBeenCalledOnce());
+  });
+
+  it("holds same-path licensee queries until navigation validation settles", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveRefresh: (value: Awaited<ReturnType<typeof apiClient.refreshSession>>) => void = () => undefined;
+    vi.mocked(apiClient.refreshSession)
+      .mockResolvedValueOnce({ success: true, data: { user: manufacturerUser } } as any)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }) as ReturnType<typeof apiClient.refreshSession>);
+    renderAt("/batches?licenseeId=A");
+    await screen.findByTestId("protected-batches-probe");
+    await waitFor(() => expect(apiClient.getBatches).toHaveBeenCalledOnce());
+    now += 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Switch licensee" }));
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("protected-batches-probe")).toHaveAttribute("data-search", "?licenseeId=A");
+    expect(apiClient.getBatches).toHaveBeenCalledTimes(1);
+    await act(async () => resolveRefresh({ success: true, data: { user: manufacturerUser } } as any));
+    await waitFor(() => expect(screen.getByTestId("protected-batches-probe")).toHaveAttribute("data-search", "?licenseeId=B"));
+    await waitFor(() => expect(apiClient.getBatches).toHaveBeenCalledTimes(2));
+    expect(apiClient.getBatches).toHaveBeenLastCalledWith({ licenseeId: "B", limit: 100, offset: 0 });
   });
 
   it("uses the latest route and refreshed tenant after rapid navigation", async () => {
