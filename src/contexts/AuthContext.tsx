@@ -302,7 +302,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }, Math.max(1, refreshCooldownUntilRef.current - Date.now()));
     };
     (async () => {
-      setIsLoading(true);
+      if (!user) setIsLoading(true);
       try {
         await refresh();
       } finally {

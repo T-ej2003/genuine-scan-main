@@ -1,7 +1,7 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useNavigate } from "react-router";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import apiClient from "@/lib/api-client";
@@ -25,10 +25,17 @@ function Probe() {
   const auth = useAuth();
   return <div>{auth.user?.id || "signed-out"}<button onClick={() => void auth.refresh()}>Refresh session</button></div>;
 }
+function NavigationProbe() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  return <div><span data-testid="auth-loading">{auth.isLoading ? "loading" : "ready"}</span>
+    <span>{auth.user?.id || "signed-out"}</span>
+    <button onClick={() => navigate("/batches")}>Open batches</button></div>;
+}
 const mount = () => render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><Probe /></AuthProvider></MemoryRouter>);
 
 describe("auth scope refresh", () => {
-  afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); scope = "initial"; ready = true; });
+  afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); scope = "initial"; ready = true; });
 
   it("hydrates a successful current-user response after the client updates coordinator scope", async () => {
     vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: true, data: { user } } as any);
@@ -43,6 +50,36 @@ describe("auth scope refresh", () => {
     await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
     expect(screen.getByText("actor")).toBeInTheDocument();
     expect(ready).toBe(true);
+  });
+
+  it("keeps an authenticated route visible while a background session check is pending", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveRefresh: (value: any) => void = () => {};
+    vi.mocked(apiClient.refreshSession)
+      .mockResolvedValueOnce({ success: true, data: { user } } as any)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRefresh = resolve; }));
+    render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><NavigationProbe /></AuthProvider></MemoryRouter>);
+    await screen.findByText("actor");
+    expect(screen.getByTestId("auth-loading")).toHaveTextContent("ready");
+    now += 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+    expect(screen.getByTestId("auth-loading")).toHaveTextContent("ready");
+    await act(async () => { resolveRefresh({ success: true, data: { user } }); });
+  });
+
+  it("still clears the authenticated view after a terminal background refresh rejection", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.mocked(apiClient.refreshSession)
+      .mockResolvedValueOnce({ success: true, data: { user } } as any)
+      .mockResolvedValueOnce({ success: false, status: 401 } as any);
+    render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><NavigationProbe /></AuthProvider></MemoryRouter>);
+    await screen.findByText("actor");
+    now += 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+    await screen.findByText("signed-out");
+    expect(screen.getByTestId("auth-loading")).toHaveTextContent("ready");
   });
 
   it("clears refresh cooldown after a successful access-cookie fallback", async () => {
