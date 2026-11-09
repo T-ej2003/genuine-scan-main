@@ -19,6 +19,7 @@ import {
 import { mapPrinterIdempotencyError } from "./printerIdempotencyResponse";
 import {
   administerPrintingPrinter,
+  abortPrintingIdempotency,
   beginPrintingIdempotency,
   completePrintingIdempotency,
   readPrintingProjection,
@@ -387,6 +388,8 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 };
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
+  let idempotency;
+  let dispatchStarted = false;
   try {
     if (!req.user || !isOpsRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
@@ -399,7 +402,6 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     const printerId = paramsParsed.data.id;
 
     const scope = resolveScope(req);
-    let idempotency;
     try {
       const key = String(extractIdempotencyKey(req.headers as any, req.body as any) || "").trim();
       if (!key) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
@@ -428,7 +430,12 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       operation: "PRINTER",
       subjectId: printerId,
     });
-    if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
+    if (!printer) {
+      await abortPrintingIdempotency(idempotency.context).catch(() => {
+        console.error("testPrinterLabel idempotency abort failed");
+      });
+      return res.status(404).json({ success: false, error: "Printer not found" });
+    }
 
     const confirmationMode = resolvePrinterConfirmationMode(printer as any);
     const validation = await validatePrinterTransport(req, printer);
@@ -463,6 +470,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     }
 
     try {
+      dispatchStarted = true;
       const result = await printTestLabelForRegisteredPrinter({
         printer: printer as any,
         actorUserId: scope.userId,
@@ -536,6 +544,11 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       return res.json(responsePayload);
     }
   } catch (error: any) {
+    if (idempotency && !dispatchStarted) {
+      await abortPrintingIdempotency(idempotency.context).catch(() => {
+        console.error("testPrinterLabel idempotency abort failed");
+      });
+    }
     console.error("testPrinterLabel error:", error);
     return res.status(400).json({
       success: false,
