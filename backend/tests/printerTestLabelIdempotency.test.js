@@ -11,6 +11,9 @@ let statusMode = "denied";
 let aborts = 0;
 let completions = 0;
 let dispatches = 0;
+const reservations = new Map();
+let dispatchStarted;
+let releaseDispatch;
 const printer = {
   id: "50000000-0000-4000-8000-000000000001",
   connectionType: "LOCAL_AGENT",
@@ -18,9 +21,19 @@ const printer = {
 };
 
 mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
-  beginPrintingIdempotency: async () => ({ replayed: false }),
-  abortPrintingIdempotency: async () => { aborts += 1; },
-  completePrintingIdempotency: async () => { completions += 1; },
+  beginPrintingIdempotency: async ({ key }) => {
+    const prior = reservations.get(key);
+    if (prior?.statusCode) return { replayed: true, statusCode: prior.statusCode,
+      responsePayload: prior.responsePayload };
+    if (prior) throw new Error("IDEMPOTENCY_KEY_IN_PROGRESS");
+    reservations.set(key, {});
+    return { replayed: false };
+  },
+  abortPrintingIdempotency: async ({ key }) => { reservations.delete(key); aborts += 1; },
+  completePrintingIdempotency: async ({ key, statusCode, responsePayload }) => {
+    reservations.set(key, { statusCode, responsePayload });
+    completions += 1;
+  },
   readPrintingProjection: async ({ operation }) => {
     if (operation === "PRINTER" && statusMode === "missing") return null;
     if (operation === "PRINTER") return printer;
@@ -37,6 +50,11 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
 mockModule("services/printerTestLabelService.js", {
   printTestLabelForRegisteredPrinter: async () => {
     dispatches += 1;
+    if (statusMode === "concurrent") {
+      dispatchStarted();
+      await new Promise((resolve) => { releaseDispatch = resolve; });
+      return { outcome: "queued", connectionType: "LOCAL_AGENT" };
+    }
     if (statusMode === "queued") return { outcome: "queued", connectionType: "LOCAL_AGENT" };
     throw new Error("Dispatch outcome unknown");
   },
@@ -72,26 +90,58 @@ const response = () => ({
     assert.equal(dispatches, 0, "authorization failure must not dispatch a label");
     assert.equal(aborts, 1, "a pre-dispatch denial must release its pending idempotency key");
 
+    statusMode = "queued";
+    const retried = response();
+    await testPrinterLabel(request, retried);
+    assert.equal(retried.body.data.outcome, "queued", "the same key may retry after proven non-dispatch");
+    assert.equal(dispatches, 1);
+    const completedReplay = response();
+    await testPrinterLabel(request, completedReplay);
+    assert.equal(completedReplay.body.data.outcome, "queued");
+    assert.equal(dispatches, 1, "completed work must never dispatch twice");
+
     statusMode = "dispatch-failed";
+    request.headers["x-idempotency-key"] = "ambiguous-key";
     const uncertain = response();
     await testPrinterLabel(request, uncertain);
-    assert.equal(dispatches, 1);
+    assert.equal(dispatches, 2);
     assert.equal(aborts, 1, "unknown post-dispatch outcome must keep the key fenced");
+    const pendingReplay = response();
+    await testPrinterLabel(request, pendingReplay);
+    assert.equal(pendingReplay.statusCode, 202);
+    assert.equal(dispatches, 2, "ambiguous work must not dispatch twice");
 
     statusMode = "missing";
+    request.headers["x-idempotency-key"] = "missing-key";
     const missing = response();
     await testPrinterLabel(request, missing);
     assert.equal(missing.statusCode, 404);
     assert.equal(aborts, 2, "missing printer must not leave a pending key");
-    assert.equal(dispatches, 1);
+    assert.equal(dispatches, 2);
 
     statusMode = "queued";
+    request.headers["x-idempotency-key"] = "queued-key";
     const queued = response();
     await testPrinterLabel(request, queued);
     assert.equal(queued.statusCode, 200);
     assert.equal(queued.body.data.outcome, "queued");
-    assert.equal(completions, 1, "accepted work must be recorded as complete");
+    assert.equal(completions, 2, "accepted work must be recorded as complete");
     assert.equal(aborts, 2, "accepted work must never release its idempotency key");
+
+    statusMode = "concurrent";
+    request.headers["x-idempotency-key"] = "concurrent-key";
+    const started = new Promise((resolve) => { dispatchStarted = resolve; });
+    const first = response();
+    const firstCall = testPrinterLabel(request, first);
+    await started;
+    const second = response();
+    await testPrinterLabel(request, second);
+    assert.equal(second.statusCode, 202);
+    assert.equal(dispatches, 4, "concurrent duplicate submission must not dispatch again");
+    releaseDispatch();
+    await firstCall;
+    assert.equal(first.body.data.outcome, "queued");
+    assert.equal(completions, 3);
   } finally {
     console.error = originalConsoleError;
   }
