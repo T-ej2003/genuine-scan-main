@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import apiClient from "@/lib/api-client";
 import { unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 import {
   batchAllocationMapSchema,
@@ -13,7 +14,7 @@ import {
 
 export function useBatches(licenseeId?: string, enabled = true, offset = 0) {
   return useQuery({
-    queryKey: [...queryKeys.batches.list(licenseeId), offset],
+    queryKey: [...queryKeys.batches.list(licenseeId), offset, getRequestCoordinatorScope()],
     enabled,
     queryFn: async () => {
       const response = await apiClient.getBatches({ licenseeId, limit: 100, offset });

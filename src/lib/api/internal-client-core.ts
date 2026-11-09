@@ -1,5 +1,5 @@
 import { emitMutationEvent } from "@/lib/mutation-events";
-import { clearRequestCoordinator, getRequestCoordinatorScope, isRequestCoordinatorScopeReady, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { clearRequestCoordinator, getRequestCoordinatorActorId, getRequestCoordinatorScope, isRequestCoordinatorScopeReady, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import { recordSupportNetworkLog, reportSupportRuntimeIssue } from "@/lib/support-diagnostics";
 
 export const BASE_URL = import.meta.env.VITE_API_URL || "/api";
@@ -423,7 +423,8 @@ export function createApiClientCore(): ApiClientCore {
     const requestRefreshVersion = readRefreshVersion();
     const requestScope = getRequestCoordinatorScope();
     const cacheKey = `${getRequestCoordinatorScope()}:${getToken() || "cookie"}:${endpoint}`;
-    const cooldownKey = `${requestScope}:${method}:${normalizeCooldownEndpoint(endpoint)}`;
+    const actorId = endpoint === "/auth/refresh" ? getRequestCoordinatorActorId() : null;
+    const cooldownKey = actorId ? `auth-refresh:actor:${actorId}` : `${requestScope}:${method}:${normalizeCooldownEndpoint(endpoint)}`;
     const cooldown = endpointCooldowns.get(cooldownKey);
     if (cooldown && Date.now() < cooldown.until) {
       return {
