@@ -25,6 +25,7 @@ const contracts = Object.freeze({
   recoveredCompatibility: { workflow: ".github/workflows/verify-production-app-only-compatibility.yml", artifact: "production-app-only-compatibility-recovered", file: "app-only-compatibility-recovered.json" },
   preparation: { workflow: ".github/workflows/prepare-production-app-only-deployment.yml", artifact: "production-app-only-preparation", file: "app-only-preparation.json" },
   backendCliAuthorization: { workflow: ".github/workflows/authorize-production-backend-cli-activation.yml", artifact: "production-backend-cli-activation-authorization", file: "authorization.json" },
+  frontendCliAuthorization: { workflow: ".github/workflows/authorize-production-frontend-cli-activation.yml", artifact: "production-frontend-cli-activation-authorization", file: "authorization.json" },
 });
 const sha256 = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 
