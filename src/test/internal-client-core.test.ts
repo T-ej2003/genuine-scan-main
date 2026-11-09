@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClientCore } from "@/lib/api/internal-client-core";
-import { getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { clearRequestCoordinator, getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const originalFetch = globalThis.fetch;
 const originalDomParser = globalThis.DOMParser;
@@ -30,6 +30,69 @@ describe("internal client core HTML error handling", () => {
     expect((await client.request("/dashboard/stats")).status).toBe(429);
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
     window.removeEventListener("auth:logout", logout);
+  });
+
+  it("retains an actor refresh cooldown across projection, login, and coordinator changes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-09T00:00:00Z"));
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "brand-a" });
+    let refreshCalls = 0;
+    globalThis.fetch = vi.fn((url: string) => {
+      if (url.endsWith("/auth/login")) return Promise.resolve(new Response(JSON.stringify({ success: true, data: { user: { id: "actor", licenseeId: "brand-b" } } }), { headers: { "content-type": "application/json" } }));
+      refreshCalls += 1;
+      return Promise.resolve(refreshCalls === 1
+        ? new Response("", { status: 429, headers: { "retry-after": "755" } })
+        : new Response(JSON.stringify({ success: true, data: { user: { id: refreshCalls === 2 ? "other" : "actor" } } }), { headers: { "content-type": "application/json" } }));
+    }) as typeof fetch;
+    const client = createApiClientCore();
+    try {
+      expect((await client.request("/auth/refresh", { method: "POST" })).retryAfterSec).toBe(755);
+      setRequestCoordinatorScope({ id: "actor", licenseeId: "brand-b" });
+      expect((await client.request("/auth/refresh", { method: "POST" })).status).toBe(429);
+      await client.request("/auth/login", { method: "POST", body: "{}" });
+      expect((await client.request("/auth/refresh", { method: "POST" })).status).toBe(429);
+      clearRequestCoordinator();
+      expect((await client.request("/auth/refresh", { method: "POST" })).status).toBe(429);
+      expect(refreshCalls).toBe(1);
+
+      client.logout();
+      setRequestCoordinatorScope({ id: "other" });
+      client.setToken("other-token");
+      expect((await client.request("/auth/refresh", { method: "POST" })).success).toBe(true);
+      expect(refreshCalls).toBe(2);
+      const calls = vi.mocked(globalThis.fetch).mock.calls;
+      const otherCall = calls[calls.length - 1];
+      expect(new Headers(otherCall?.[1]?.headers).get("authorization")).toBe("Bearer other-token");
+
+      setRequestCoordinatorScope({ id: "actor" });
+      expect((await client.request("/auth/refresh", { method: "POST" })).status).toBe(429);
+      vi.setSystemTime(new Date("2026-11-09T00:12:36Z"));
+      expect((await client.request("/auth/refresh", { method: "POST" })).success).toBe(true);
+      expect(refreshCalls).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains an actor cooldown from an HTTP-date Retry-After", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-09T00:00:00Z"));
+    setRequestCoordinatorScope({ id: "actor", licenseeId: "brand-a" });
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 429, headers: { "retry-after": "Mon, 09 Nov 2026 00:12:35 GMT" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, data: { user: { id: "actor" } } }), { headers: { "content-type": "application/json" } }));
+    const client = createApiClientCore();
+    try {
+      expect((await client.request("/auth/refresh", { method: "POST" })).retryAfterSec).toBe(755);
+      setRequestCoordinatorScope({ id: "actor", licenseeId: "brand-b" });
+      expect((await client.request("/auth/refresh", { method: "POST" })).status).toBe(429);
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+      vi.setSystemTime(new Date("2026-11-09T00:12:36Z"));
+      expect((await client.request("/auth/refresh", { method: "POST" })).success).toBe(true);
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("logs out on a revoked refresh token", async () => {

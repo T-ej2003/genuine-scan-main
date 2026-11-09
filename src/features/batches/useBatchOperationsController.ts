@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { buildStableBatchOverviewRows, type StableBatchOverviewRow } from "@/lib/batch-workspace";
@@ -7,6 +7,7 @@ import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 
 import { useAssignableManufacturers, useBatches } from "./hooks";
 import type { BatchRow, ManufacturerRow } from "./types";
@@ -73,7 +74,6 @@ export function useBatchOperationsController({
   const queryClient = useQueryClient();
 
   const [loading, setLoading] = useState(false);
-  const [rows, setRows] = useState<BatchRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [assignmentFilter, setAssignmentFilter] = useState<"all" | "assigned" | "unassigned">("all");
@@ -92,10 +92,13 @@ export function useBatchOperationsController({
   const licenseeScope = role === "super_admin" ? selectedLicenseeId : userLicenseeId || undefined;
   const [batchPage, setBatchPage] = useState({ scope: licenseeScope, offset: 0 });
   const batchOffset = batchPage.scope === licenseeScope ? batchPage.offset : 0;
-  const currentScope = useRef(licenseeScope);
-  currentScope.current = licenseeScope;
-  const currentOffset = useRef(batchOffset);
-  currentOffset.current = batchOffset;
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getRequestCoordinatorScope, getRequestCoordinatorScope);
+  const batchKey = JSON.stringify([securityScope, role, licenseeScope, batchOffset]);
+  const [batchState, setBatchState] = useState<{ key: string; rows: BatchRow[] }>({ key: batchKey, rows: [] });
+  const rows = useMemo(() => batchState.key === batchKey ? batchState.rows : [], [batchState, batchKey]);
+  const setRows = useCallback((next: BatchRow[]) => setBatchState({ key: batchKey, rows: next }), [batchKey]);
+  const currentBatchKey = useRef(batchKey);
+  currentBatchKey.current = batchKey;
   const batchesQuery = useBatches(licenseeScope, false, batchOffset);
   const [manufacturerPage, setManufacturerPage] = useState({ scope: userLicenseeId, offset: 0 });
   const manufacturerOffset = manufacturerPage.scope === userLicenseeId ? manufacturerPage.offset : 0;
@@ -113,20 +116,18 @@ export function useBatchOperationsController({
     setError(null);
     try {
       const result = await batchesQuery.refetch();
-      if (currentScope.current !== licenseeScope || currentOffset.current !== batchOffset) return;
-      if (!result.data) {
-        setRows([]);
+      if (currentBatchKey.current !== batchKey) return;
+      if (result.error || !result.data) {
         setError(result.error instanceof Error ? result.error.message : "Failed to load batches");
         return;
       }
 
       setRows(result.data.rows as BatchRow[]);
     } catch (error) {
-      if (currentScope.current !== licenseeScope || currentOffset.current !== batchOffset) return;
-      setRows([]);
+      if (currentBatchKey.current !== batchKey) return;
       setError(error instanceof Error ? error.message : "Failed to load batches");
     } finally {
-      if (currentScope.current === licenseeScope && currentOffset.current === batchOffset) setLoading(false);
+      if (currentBatchKey.current === batchKey) setLoading(false);
     }
   };
 
@@ -140,11 +141,10 @@ export function useBatchOperationsController({
       setRows(batchesQuery.data.rows as BatchRow[]);
       setError(null);
     }
-  }, [batchesQuery.data]);
+  }, [batchesQuery.data, setRows]);
 
   useEffect(() => {
     if (batchesQuery.error instanceof Error) {
-      setRows([]);
       setError(batchesQuery.error.message);
     }
   }, [batchesQuery.error]);
@@ -153,7 +153,7 @@ export function useBatchOperationsController({
     setRows([]);
     void fetchBatches();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [licenseeScope, batchOffset]);
+  }, [batchKey]);
 
   useEffect(() => {
     const manufacturerName = String(searchParams.get("manufacturerName") || "").trim();
@@ -168,14 +168,17 @@ export function useBatchOperationsController({
   }, [searchParams]);
 
   useEffect(() => {
-    const off = onMutationEvent(() => {
+    const off = onMutationEvent(({ endpoint }) => {
+      if (!endpoint.startsWith("/qr/") && !endpoint.startsWith("/admin/qr/") &&
+          !endpoint.includes("/qr-allocate-range") && !endpoint.startsWith("/manufacturer/print-jobs") &&
+          !endpoint.startsWith("/manufacturer/print-reissue-requests")) return;
       if (isActivePrintSessionSuppressed()) return;
       void fetchBatches();
       void fetchManufacturersForAssign();
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAssignManufacturer, userLicenseeId, licenseeScope, batchOffset, manufacturerOffset]);
+  }, [canAssignManufacturer, userLicenseeId, licenseeScope, batchOffset, manufacturerOffset, batchKey]);
 
   useEffect(() => {
     if (canAssignManufacturer) {

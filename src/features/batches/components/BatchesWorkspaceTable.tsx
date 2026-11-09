@@ -134,6 +134,7 @@ export function BatchesWorkspaceTable({
           {error}
         </div>
       )}
+      {error && rows.length > 0 && <div role="status" className="text-sm text-muted-foreground">Showing previously loaded batches.</div>}
 
       {allocationHint ? (
         <div role="status" aria-live="polite" className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
@@ -222,7 +223,7 @@ export function BatchesWorkspaceTable({
                     ) : filteredRows.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-muted-foreground">
-                          No batches found.
+                          {error ? "Batch list unavailable." : "No batches found."}
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -389,7 +390,7 @@ export function BatchesWorkspaceTable({
                     ) : filteredStableRows.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={7} className="text-muted-foreground">
-                          No source batches found.
+                          {error ? "Batch list unavailable." : "No source batches found."}
                         </TableCell>
                       </TableRow>
                     ) : (

@@ -50,6 +50,13 @@ export const clientSecurityScope = (user: Partial<User> | null | undefined) => J
   user.linkedLicensees?.map(link => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
 ] : null);
 export const getRequestCoordinatorScope = () => JSON.stringify([securityScope, scopeGeneration, scopeReady]);
+export const getRequestCoordinatorActorId = () => {
+  if (!scopeReady) return null;
+  try {
+    const actorId = JSON.parse(securityScope)?.[0];
+    return typeof actorId === "string" && actorId ? actorId : null;
+  } catch { return null; }
+};
 export const isRequestCoordinatorScopeReady = () => scopeReady;
 export const isRequestCoordinatorUserCurrent = (user: Partial<User> | null | undefined) => scopeReady && clientSecurityScope(user) === securityScope;
 export const onRequestCoordinatorScopeChange = (listener: () => void) => {
