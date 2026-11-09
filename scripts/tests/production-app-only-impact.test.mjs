@@ -13,6 +13,21 @@ test("backend-only source input does not invent infrastructure changes", () => {
   const impact = classifyAppOnlyPaths(["backend/src/services/auth/sessionRiskService.ts"]);
   assert.equal(impact.sourceClassificationComplete, true); assert.ok(Object.values(impact.changed).every((v) => v === false)); assert.equal(impact.application.length, 1);
 });
+test("manufacturer frontend changes are application inputs, while auth boundary and SQL retain security impact", () => {
+  const impact = classifyAppOnlyPaths([
+    "src/lib/api/internal-client-core.ts", "src/lib/api/request-coordinator.ts",
+    "src/features/batches/hooks.ts", "src/features/batches/useBatchOperationsController.ts",
+    "src/features/batches/components/BatchesWorkspaceTable.tsx", "src/test/internal-client-core.test.ts",
+    "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts",
+  ]);
+  assert.equal(impact.sourceClassificationComplete, true);
+  assert.equal(impact.application.length, 5);
+  assert.equal(impact.changed.RLS, true);
+  assert.deepEqual(impact.reasons.RLS, ["backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts"]);
+  for (const path of ["backend/src/rls-waves/session-b/b01/guard.sql", "documents/ops/iam/grants.json",
+    "backend/prisma/schema.prisma", "backend/prisma/migrations/1/migration.sql"])
+    assert.ok(Object.values(classifyAppOnlyPaths([path]).changed).some(Boolean), `${path} must require compatibility evidence`);
+});
 test("unknown paths and malformed paths cannot establish complete source eligibility", () => {
   assert.equal(classifyAppOnlyPaths(["unknown-executable.sh"]).sourceClassificationComplete, false);
   for (const path of ["../backend/code", "/etc/file", "scripts/../migration.sql", "lookаlike/path", "a\nfile"]) assert.throws(() => classifyAppOnlyPaths([path]));

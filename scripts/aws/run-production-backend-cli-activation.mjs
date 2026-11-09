@@ -22,8 +22,16 @@ import { assertProtectedCheckout } from "./prepare-production-initial-activation
 const root = fileURLToPath(new URL("../../", import.meta.url));
 const repository = PRODUCTION_ENVIRONMENT_APPROVAL.repository;
 const readJson = (value) => JSON.parse(value);
-const reviewedCandidate = "cbbb353bbae5f5a642871e90a79e76a4eb12aa82";
-const reviewedPredecessorTag = "187326f3c85aecc55a7affd26e09c1850d9a0a33-connector-2026.11.6.2";
+const reviewedCandidates = Object.freeze({
+  cbbb353bbae5f5a642871e90a79e76a4eb12aa82: {
+    predecessorTag: "187326f3c85aecc55a7affd26e09c1850d9a0a33-connector-2026.11.6.2",
+    rlsPath: null,
+  },
+  bb9297c800a1d0b3e96ad4051a9593268df85dda: {
+    predecessorTag: "cbbb353bbae5f5a642871e90a79e76a4eb12aa82",
+    rlsPath: "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts",
+  },
+});
 const reviewedUnknownPaths = new Set([
   "scripts/release/generate-rf7-contract-inventory.mjs", "src/contexts/AuthContext.tsx",
   "src/features/dashboard/hooks.ts", "src/features/dashboard/realtime-cache.ts", "src/lib/api/internal-client-core.ts",
@@ -40,26 +48,34 @@ export const createBackendCliAwsRunner = (exec = execFileSync) => createProducti
 });
 
 export function assertBackendCliSourceImpact(impact) {
-  assert.equal(impact.candidateSourceSha, reviewedCandidate, "CLI route is limited to the reviewed backend candidate");
-  assert.ok(impact.liveToCandidate.unknown.every((file) => reviewedUnknownPaths.has(file)), "Unreviewed live-to-candidate source path");
+  const reviewed = reviewedCandidates[impact.candidateSourceSha];
+  assert.ok(reviewed, "CLI route is limited to reviewed backend candidates");
+  assert.ok(impact.liveToCandidate.unknown.every((file) => !reviewed.rlsPath && reviewedUnknownPaths.has(file)), "Unreviewed live-to-candidate source path");
   assert.equal(impact.candidateToProtected.sourceClassificationComplete, true, "Unclassified candidate-to-tooling source path");
   for (const range of [impact.liveToCandidate, impact.candidateToProtected]) {
     assert.deepEqual(Object.keys(range.changed).sort(), [...APP_ONLY_DOMAINS].sort(), "Incomplete source impact domains");
-    assert.ok(Object.values(range.changed).every((changed) => changed === false), "Infrastructure, SQL or RLS change requires its separate release route");
+    for (const domain of APP_ONLY_DOMAINS) {
+      if (range === impact.liveToCandidate && domain === "RLS" && reviewed.rlsPath) {
+        assert.equal(range.changed.RLS, true, "Reviewed authentication boundary impact is missing");
+        assert.deepEqual(range.reasons.RLS, [reviewed.rlsPath], "Unreviewed RLS source path");
+      } else assert.equal(range.changed[domain], false, "Infrastructure, SQL or RLS change requires its separate release route");
+    }
   }
   return impact;
 }
 
-export function readBackendCliPredecessorSource(run, digest) {
+export function readBackendCliPredecessorSource(run, digest, candidateSourceSha) {
   assert.match(digest || "", /^sha256:[a-f0-9]{64}$/);
+  const predecessorTag = reviewedCandidates[candidateSourceSha]?.predecessorTag;
+  assert.ok(predecessorTag, "CLI route is limited to reviewed backend candidates");
   const response = readJson(run(["ecr", "describe-images", "--repository-name", "mscqr-backend",
     "--image-ids", `imageDigest=${digest}`, "--output", "json", "--no-cli-pager"]));
   assert.equal(response.imageDetails?.length, 1);
   const image = response.imageDetails[0];
   assert.equal(image.repositoryName, "mscqr-backend"); assert.equal(String(image.registryId), APP_ONLY.account);
   assert.equal(image.imageDigest, digest);
-  assert.deepEqual(image.imageTags, [reviewedPredecessorTag], "Live predecessor source tag changed");
-  return reviewedPredecessorTag.slice(0, 40);
+  assert.deepEqual(image.imageTags, [predecessorTag], "Live predecessor source tag changed");
+  return predecessorTag.slice(0, 40);
 }
 
 export function assertBackendCliProbe(result, authorization) {
@@ -150,7 +166,7 @@ export async function runBackendCliActivation({ reference, profile = "mscqr-ops-
   const live = readers.readLive();
   const predecessor = captureAppOnlyPredecessor(live);
   assert.equal(predecessor.taskDefinitionArn, authorization.predecessorTaskDefinitionArn);
-  const predecessorSourceSha = readBackendCliPredecessorSource(run, predecessor.backendDigest);
+  const predecessorSourceSha = readBackendCliPredecessorSource(run, predecessor.backendDigest, authorization.candidateSourceSha);
   const impact = assertBackendCliSourceImpact(deriveAppOnlyImpact({ repositoryRoot: root, liveSourceSha: predecessorSourceSha,
     candidateSourceSha: authorization.candidateSourceSha, protectedSourceSha: authorization.sourceSha }));
   const authenticateImages = () => authenticateAppOnlyImages({ sourceSha: authorization.sourceSha,

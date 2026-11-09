@@ -82,6 +82,21 @@ test("unknown or security-sensitive source ranges never qualify", () => {
   assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate, changed: { ...empty.changed, RLS: true } } }));
 });
 
+test("PR 811/812 candidate permits only its reviewed auth boundary change from revision 43", () => {
+  const empty = { sourceClassificationComplete: true, changed: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, false])), reasons: Object.fromEntries(APP_ONLY_DOMAINS.map((domain) => [domain, []])), unknown: [] };
+  const authPath = "backend/src/rls-waves/session-b/b01/canonicalAuthContext.ts";
+  const impact = { candidateSourceSha: "bb9297c800a1d0b3e96ad4051a9593268df85dda",
+    liveToCandidate: { ...empty, changed: { ...empty.changed, RLS: true }, reasons: { ...empty.reasons, RLS: [authPath] } },
+    candidateToProtected: empty };
+  assertBackendCliSourceImpact(impact);
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate,
+    reasons: { ...impact.liveToCandidate.reasons, RLS: [authPath, "backend/src/rls-waves/session-b/b01/new.sql"] } } }));
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, liveToCandidate: { ...impact.liveToCandidate,
+    changed: { ...impact.liveToCandidate.changed, MIGRATIONS: true } } }));
+  assert.throws(() => assertBackendCliSourceImpact({ ...impact, candidateToProtected: { ...empty,
+    changed: { ...empty.changed, RLS: true } } }));
+});
+
 test("approval workflow cannot deploy or obtain AWS credentials", () => {
   const workflow = fs.readFileSync(new URL("../../.github/workflows/authorize-production-backend-cli-activation.yml", import.meta.url), "utf8");
   assert.match(workflow, /environment: production/);
@@ -115,9 +130,19 @@ test("live revision 42 source is accepted only with its exact immutable digest t
   const image = { repositoryName: "mscqr-backend", registryId: "368992683803", imageDigest: digest,
     imageTags: ["187326f3c85aecc55a7affd26e09c1850d9a0a33-connector-2026.11.6.2"] };
   const run = () => JSON.stringify({ imageDetails: [image] });
-  assert.equal(readBackendCliPredecessorSource(run, digest), "187326f3c85aecc55a7affd26e09c1850d9a0a33");
-  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest));
-  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageDigest: `sha256:${"0".repeat(64)}` }] }), digest));
+  assert.equal(readBackendCliPredecessorSource(run, digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"), "187326f3c85aecc55a7affd26e09c1850d9a0a33");
+  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"));
+  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageDigest: `sha256:${"0".repeat(64)}` }] }), digest, "cbbb353bbae5f5a642871e90a79e76a4eb12aa82"));
+});
+
+test("live revision 43 source is accepted only with its exact immutable digest tag", () => {
+  const digest = `sha256:${"f".repeat(64)}`;
+  const image = { repositoryName: "mscqr-backend", registryId: "368992683803", imageDigest: digest,
+    imageTags: ["cbbb353bbae5f5a642871e90a79e76a4eb12aa82"] };
+  assert.equal(readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [image] }), digest,
+    "bb9297c800a1d0b3e96ad4051a9593268df85dda"), "cbbb353bbae5f5a642871e90a79e76a4eb12aa82");
+  assert.throws(() => readBackendCliPredecessorSource(() => JSON.stringify({ imageDetails: [{ ...image, imageTags: ["unverified"] }] }), digest,
+    "bb9297c800a1d0b3e96ad4051a9593268df85dda"));
 });
 
 test("CLI failures do not echo untrusted inputs or AWS command arguments", () => {

@@ -20,7 +20,8 @@ export function classifyAppOnlyPaths(paths) {
     else if (/^documents\/ops\/iam\//.test(path)) mark(path, ["IAM"]);
     else if (/^backend\/scripts\//.test(path)) mark(path, ["RLS", "DATABASE_SCHEMA", "MIGRATIONS"]);
     else if (/\.(?:sql|psql)$/.test(path)) mark(path, ["RLS", "DATABASE_SCHEMA", "MIGRATIONS"]);
-    else if (/^(?:backend\/src\/|backend\/Dockerfile|backend\/package(?:-lock)?\.json|shared\/)/.test(path)) application.push(path);
+    else if (/^src\/test\//.test(path)) { /* isolated frontend test harness */ }
+    else if (/^(?:src\/|backend\/src\/|backend\/Dockerfile|backend\/package(?:-lock)?\.json|shared\/)/.test(path)) application.push(path);
     else if (/^(?:\.github\/workflows\/|scripts\/aws\/|scripts\/check-|scripts\/validate-)/.test(path)
       || path === "scripts/lib/aws-dr-validation-contract.mjs") releaseControl.push(path);
     else if (/^(?:scripts\/tests\/|backend\/tests\/|documents\/|docs\/)/.test(path) || /\.md$/.test(path)
