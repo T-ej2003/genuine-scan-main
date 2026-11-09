@@ -118,12 +118,15 @@ const connectorBoundary = {
     "production gate should block before connector-confirmed setup test"
   );
 
+  const dispatchStates = [];
   const queued = await printTestLabelForRegisteredPrinter({
     printer,
     actorUserId: "manufacturer-local-test-1",
     boundary,
+    onDispatchStateChange: (state) => dispatchStates.push(state),
   });
   assert.equal(queued.outcome, "queued", "local-agent setup test endpoint should report queued");
+  assert.deepEqual(dispatchStates, ["dispatch_started"], "durable queue mutation starts the uncertain dispatch boundary");
   assert(printer.metadata.pendingLocalAgentTestLabel, "queued setup test job should be persisted on printer metadata");
   assert(!printer.metadata.lastTestLabelConfirmedAt, "queued setup test must not mark the printer confirmed");
 

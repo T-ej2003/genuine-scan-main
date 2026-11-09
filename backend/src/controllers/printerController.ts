@@ -389,7 +389,8 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
   let idempotency;
-  let dispatchStarted = false;
+  let dispatchState: "not_dispatched" | "dispatch_started" | "confirmed" = "not_dispatched";
+  let outcomeRecorded = false;
   try {
     if (!req.user || !isOpsRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
@@ -465,15 +466,15 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       });
 
       const responsePayload = { success: true, data };
-      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      await abortPrintingIdempotency(idempotency.context);
       return res.json(responsePayload);
     }
 
     try {
-      dispatchStarted = true;
       const result = await printTestLabelForRegisteredPrinter({
         printer: printer as any,
         actorUserId: scope.userId,
+        onDispatchStateChange: (state) => { dispatchState = state; },
         boundary: {
           capability: printingCapability(req),
           requestId: printingRequestId(req),
@@ -516,8 +517,10 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
 
       const responsePayload = { success: true, data: result };
       await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      outcomeRecorded = true;
       return res.json(responsePayload);
     } catch (error: any) {
+      if (outcomeRecorded) throw error;
       const data = {
         outcome: "needs_attention" as const,
         message: sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
@@ -540,11 +543,16 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       });
 
       const responsePayload = { success: true, data };
-      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      if (dispatchState === "not_dispatched") {
+        await abortPrintingIdempotency(idempotency.context);
+      } else {
+        await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+        outcomeRecorded = true;
+      }
       return res.json(responsePayload);
     }
   } catch (error: any) {
-    if (idempotency && !dispatchStarted) {
+    if (idempotency && dispatchState === "not_dispatched") {
       await abortPrintingIdempotency(idempotency.context).catch(() => {
         console.error("testPrinterLabel idempotency abort failed");
       });

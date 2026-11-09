@@ -387,10 +387,12 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
   boundary: { capability: string; requestId: string };
+  onDispatchStateChange?: (state: "dispatch_started" | "confirmed") => void;
 }): Promise<PrinterTestLabelResult> => {
   const context = buildPrinterTestScanContext(params);
   const now = new Date();
   const payloadContent = buildKnownGoodDiagnosticZplPayload();
+  params.onDispatchStateChange?.("dispatch_started");
   const stored = await mutatePrintingTestLabelJob({
     ...params.boundary,
     operation: "QUEUE",
@@ -722,6 +724,7 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
   boundary: { capability: string; requestId: string };
+  onDispatchStateChange?: (state: "dispatch_started" | "confirmed") => void;
 }) => {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     return enqueuePersistentLocalAgentPrinterTestJob(params);
@@ -736,11 +739,11 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   let gatewayQueued = false;
   try {
     if (params.printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
-      result = await dispatchGatewayPrinterTestLabel(params, () => { gatewayQueued = true; });
+      result = await dispatchGatewayPrinterTestLabel(params, () => { gatewayQueued = true; params.onDispatchStateChange?.("dispatch_started"); });
     } else if (params.printer.connectionType === PrinterConnectionType.NETWORK_IPP) {
-      result = await dispatchDirectIppTestLabel(params, () => { transportStarted = true; });
+      result = await dispatchDirectIppTestLabel(params, () => { transportStarted = true; params.onDispatchStateChange?.("dispatch_started"); });
     } else {
-      result = await dispatchDirectRawTestLabel(params, () => { transportStarted = true; });
+      result = await dispatchDirectRawTestLabel(params, () => { transportStarted = true; params.onDispatchStateChange?.("dispatch_started"); });
     }
   } catch (error) {
     if (!gatewayQueued && !transportStarted) {
@@ -756,6 +759,7 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   // A timeout or lost response retains the accepted lease. Only the actual
   // transport completion path may record completion; no expiry implies retry.
   if (result.outcome === "confirmed") {
+    params.onDispatchStateChange?.("confirmed");
     await administerPrintingPrinter({ ...params.boundary, operation: "DIAGNOSTIC_COMPLETE", printerId: params.printer.id,
       payload: { outcome: result.outcome, deviceJobRef: result.deviceJobRef } });
   }
