@@ -389,7 +389,7 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
   let idempotency;
-  const dispatchState = { current: "not_dispatched" as "not_dispatched" | "dispatch_started" | "confirmed" };
+  const dispatchState = { current: "not_dispatched" as "not_dispatched" | "queue_uncertain" | "dispatch_started" | "confirmed" };
   let outcomeRecorded = false;
   try {
     if (!req.user || !isOpsRole(req.user.role)) {

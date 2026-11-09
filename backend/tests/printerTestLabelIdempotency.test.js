@@ -53,6 +53,15 @@ mockModule("services/printerTestLabelService.js", {
     if (["lease-failed", "render-failed", "baseline-failed"].includes(statusMode)) {
       throw new Error(`${statusMode} before dispatch`);
     }
+    if (statusMode === "queue-rejected") {
+      onDispatchStateChange("queue_uncertain");
+      onDispatchStateChange("not_dispatched");
+      throw new Error("SQL rejected queue before commit");
+    }
+    if (statusMode === "queue-response-lost") {
+      onDispatchStateChange("queue_uncertain");
+      throw new Error("Durable queue response lost");
+    }
     onDispatchStateChange("dispatch_started");
     if (statusMode === "concurrent") {
       dispatchStarted();
@@ -134,7 +143,7 @@ const response = () => ({
     assert.equal(pendingReplay.statusCode, 202);
     assert.equal(pendingReplay.statusCode, 202, "ambiguous work must not dispatch twice");
 
-    for (const mode of ["ack-lost", "reconcile-failed"]) {
+    for (const mode of ["queue-response-lost", "ack-lost", "reconcile-failed"]) {
       statusMode = mode;
       request.headers["x-idempotency-key"] = mode;
       const before = aborts;
@@ -192,6 +201,16 @@ const response = () => ({
     const confirmedReplay = response();
     await testPrinterLabel(request, confirmedReplay);
     assert.equal(confirmedReplay.body.data.outcome, "confirmed", "replay retains the recorded physical outcome");
+
+    statusMode = "queue-rejected";
+    request.headers["x-idempotency-key"] = "queue-rejected-key";
+    const beforeRejectedQueue = aborts;
+    await testPrinterLabel(request, response());
+    assert.equal(aborts, beforeRejectedQueue + 1, "a confirmed SQL rejection must release the reservation");
+    statusMode = "queued";
+    const retriedRejectedQueue = response();
+    await testPrinterLabel(request, retriedRejectedQueue);
+    assert.equal(retriedRejectedQueue.body.data.outcome, "queued");
   } finally {
     console.error = originalConsoleError;
   }

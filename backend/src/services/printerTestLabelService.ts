@@ -387,40 +387,48 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
   boundary: { capability: string; requestId: string };
-  onDispatchStateChange?: (state: "dispatch_started" | "confirmed") => void;
+  onDispatchStateChange?: (state: "not_dispatched" | "queue_uncertain" | "dispatch_started" | "confirmed") => void;
 }): Promise<PrinterTestLabelResult> => {
   const context = buildPrinterTestScanContext(params);
   const now = new Date();
   const payloadContent = buildKnownGoodDiagnosticZplPayload();
-  const stored = await mutatePrintingTestLabelJob({
-    ...params.boundary,
-    operation: "QUEUE",
-    printerId: params.printer.id,
-    job: {
-      testJobId: randomUUID(),
-      status: "PENDING",
-      createdAt: now.toISOString(),
-      expiresAt: new Date(now.getTime() + PRINTER_TEST_LABEL_TIMEOUT_MS).toISOString(),
-      actorUserId: params.actorUserId,
-      printerProfileId: params.printer.id,
-      printerRegistrationId: params.printer.printerRegistrationId || null,
-      nativePrinterId: params.printer.nativePrinterId || null,
-      code: context.code,
-      scanUrl: context.scanUrl,
-      previewLabel: "MSCQR TEST",
-      printer: {
-        id: params.printer.id,
-        name: params.printer.name,
-        nativePrinterId: params.printer.nativePrinterId,
+  params.onDispatchStateChange?.("queue_uncertain");
+  let stored;
+  try {
+    stored = await mutatePrintingTestLabelJob({
+      ...params.boundary,
+      operation: "QUEUE",
+      printerId: params.printer.id,
+      job: {
+        testJobId: randomUUID(),
+        status: "PENDING",
+        createdAt: now.toISOString(),
+        expiresAt: new Date(now.getTime() + PRINTER_TEST_LABEL_TIMEOUT_MS).toISOString(),
+        actorUserId: params.actorUserId,
+        printerProfileId: params.printer.id,
+        printerRegistrationId: params.printer.printerRegistrationId || null,
+        nativePrinterId: params.printer.nativePrinterId || null,
+        code: context.code,
+        scanUrl: context.scanUrl,
+        previewLabel: "MSCQR TEST",
+        printer: {
+          id: params.printer.id,
+          name: params.printer.name,
+          nativePrinterId: params.printer.nativePrinterId,
+        },
+        calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
+        jobNumber: `SETUP-TEST-${context.code}`,
+        payloadType: PrintPayloadType.ZPL,
+        payloadContent,
+        payloadHash: sha256Hex(payloadContent),
+        commandLanguage: PrinterLanguageKind.ZPL,
       },
-      calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
-      jobNumber: `SETUP-TEST-${context.code}`,
-      payloadType: PrintPayloadType.ZPL,
-      payloadContent,
-      payloadHash: sha256Hex(payloadContent),
-      commandLanguage: PrinterLanguageKind.ZPL,
-    },
-  });
+    });
+  } catch (error) {
+    // A PostgreSQL statement rejection rolls back QUEUE; a lost response may not.
+    if ((error as { code?: string })?.code === "P2010") params.onDispatchStateChange?.("not_dispatched");
+    throw error;
+  }
   params.onDispatchStateChange?.("dispatch_started");
   return {
     outcome: "queued",
@@ -724,7 +732,7 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   printer: RegisteredPrinterWithStatus;
   actorUserId: string;
   boundary: { capability: string; requestId: string };
-  onDispatchStateChange?: (state: "dispatch_started" | "confirmed") => void;
+  onDispatchStateChange?: (state: "not_dispatched" | "queue_uncertain" | "dispatch_started" | "confirmed") => void;
 }) => {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
     return enqueuePersistentLocalAgentPrinterTestJob(params);
