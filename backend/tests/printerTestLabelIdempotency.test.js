@@ -141,6 +141,9 @@ const response = () => ({
       const uncertainResult = response();
       await testPrinterLabel(request, uncertainResult);
       assert.equal(uncertainResult.body.data.outcome, "needs_attention");
+      if (mode === "reconcile-failed") {
+        assert.match(uncertainResult.body.data.message, /printer confirmed.*recording the result needs attention/i);
+      }
       assert.equal(aborts, before, `${mode} must keep the reservation fenced`);
       const replay = response();
       await testPrinterLabel(request, replay);

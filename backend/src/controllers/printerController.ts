@@ -389,7 +389,7 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
   let idempotency;
-  let dispatchState: "not_dispatched" | "dispatch_started" | "confirmed" = "not_dispatched";
+  const dispatchState = { current: "not_dispatched" as "not_dispatched" | "dispatch_started" | "confirmed" };
   let outcomeRecorded = false;
   try {
     if (!req.user || !isOpsRole(req.user.role)) {
@@ -474,7 +474,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       const result = await printTestLabelForRegisteredPrinter({
         printer: printer as any,
         actorUserId: scope.userId,
-        onDispatchStateChange: (state) => { dispatchState = state; },
+        onDispatchStateChange: (state) => { dispatchState.current = state; },
         boundary: {
           capability: printingCapability(req),
           requestId: printingRequestId(req),
@@ -523,7 +523,9 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       if (outcomeRecorded) throw error;
       const data = {
         outcome: "needs_attention" as const,
-        message: sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
+        message: dispatchState.current === "confirmed"
+          ? "The printer confirmed the label, but recording the result needs attention. Do not retry automatically."
+          : sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
         confirmationMode,
         connectionType: printer.connectionType,
         deliveryMode: printer.deliveryMode || PrinterDeliveryMode.DIRECT,
@@ -543,7 +545,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       });
 
       const responsePayload = { success: true, data };
-      if (dispatchState === "not_dispatched") {
+      if (dispatchState.current === "not_dispatched") {
         await abortPrintingIdempotency(idempotency.context);
       } else {
         await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
@@ -552,7 +554,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       return res.json(responsePayload);
     }
   } catch (error: any) {
-    if (idempotency && dispatchState === "not_dispatched") {
+    if (idempotency && dispatchState.current === "not_dispatched") {
       await abortPrintingIdempotency(idempotency.context).catch(() => {
         console.error("testPrinterLabel idempotency abort failed");
       });
