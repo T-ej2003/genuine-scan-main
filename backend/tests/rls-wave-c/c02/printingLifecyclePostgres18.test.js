@@ -788,11 +788,37 @@ async function main() {
     )`, /PRINTING_INVALID_INPUT/);
     assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.batch}'`), "0");
   }
-  const created = json(app, `SELECT app_rls.printing_create_job(
+  const registrationHolder = psqlAsync(admin, `BEGIN;
+    SELECT id FROM public."PrinterRegistration" WHERE id='${ids.registration}' FOR UPDATE;
+    SELECT pg_sleep(1.5) /* printing_registration_lock_held */;
+    DO $lock_order$ BEGIN
+      WHILE NOT EXISTS (SELECT 1 FROM pg_stat_activity a
+        WHERE a.pid<>pg_backend_pid() AND a.query LIKE '%printing_create_lock_order_probe%'
+          AND pg_backend_pid()=ANY(pg_blocking_pids(a.pid))) LOOP
+        IF clock_timestamp()>transaction_timestamp()+interval '15 seconds' THEN
+          RAISE EXCEPTION 'print create did not reach registration lock';
+        END IF;
+        PERFORM pg_sleep(0.05);
+      END LOOP;
+    END $lock_order$;
+    SELECT id FROM public."Printer" WHERE id='${ids.printer}' FOR UPDATE;
+    COMMIT;`);
+  let registrationLockHeld = false;
+  for (let attempt = 0; attempt < 40 && !registrationLockHeld; attempt += 1) {
+    registrationLockHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity
+      WHERE wait_event='PgSleep' AND query LIKE '%printing_registration_lock_held%'`)) > 0;
+    if (!registrationLockHeld) await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.equal(registrationLockHeld, true, "registration transaction must hold its row lock");
+  const createAttempt = psqlAsync(app, `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
     'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL','${hash("print-lock")}',
     '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("print-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
-  )`);
+  ) /* printing_create_lock_order_probe */`);
+  const [registrationResult, createResult] = await Promise.all([registrationHolder, createAttempt]);
+  assert.equal(registrationResult.status, 0, registrationResult.output);
+  assert.equal(createResult.status, 0, createResult.output);
+  const created = JSON.parse(createResult.output);
   assert.equal(created.preparedCount, 1);
   assert.equal(new Date(`${psql(admin, `SELECT to_char("tokenIssuedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS') FROM public."QRCode" WHERE id='${ids.qr}'`)}Z`).toISOString(), signedAt);
   const immutableCode = psql(admin, `SELECT code FROM public."QRCode" WHERE id='${ids.qr}'`);

@@ -1868,6 +1868,10 @@ BEGIN
     ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
   END IF;
 
+  -- Match connector test-label lock order before PrintJob's printer FK lock.
+  PERFORM 1 FROM public."PrinterRegistration" pr
+    WHERE pr.id=printer_row."printerRegistrationId" FOR KEY SHARE;
+
   PERFORM set_config('app.printing_job_id',job_id,true),
           set_config('app.printing_session_row_id',session_id,true),
           set_config('app.printing_printer_id',p_printer_id,true);
