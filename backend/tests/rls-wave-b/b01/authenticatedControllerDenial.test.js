@@ -11,10 +11,11 @@ mockModule("rls-waves/session-b/b01/runtimeClients.js", {
   getB01AuthenticatedPrisma: () => ({ $transaction: (callback) => callback({}) }),
 });
 mockModule("rls-waves/session-b/b01/actorRevalidationRepository.js", {
-  revalidateAuthenticatedActor: async () => null,
+  revalidateAuthenticatedActor: async () => revalidatedActor,
 });
 mockModule("lib/canonicalDbContext.js", { installCanonicalDbContext: async () => null });
 
+let revalidatedActor = null;
 const canonical = require("../../../dist/rls-waves/session-b/b01/canonicalAuthContext");
 const claims = {
   userId: "user-1",
@@ -36,6 +37,35 @@ try {
   caught = error;
 }
 assert.equal(canonical.isCanonicalAuthDenial(caught), true, "an empty actor revalidation must be a typed denial");
+
+const dbSession = (query) => canonical.withDatabaseAuthenticatedSession(
+  claims,
+  { capability: "A".repeat(43), requestId: "aaaa5fab-7f42-474f-8014-e735a1fa8803", purpose: "auth-me" },
+  async () => "allowed",
+  { $transaction: (callback) => callback({ $queryRaw: query }) },
+);
+const sqlError = (code, sqlstate, message) => Object.assign(new Error(message), { code, meta: { code: sqlstate, message } });
+const capabilityDenied = sqlError("P2010", "42501", "AUTH_SESSION_CAPABILITY_DENIED");
+let translatedDenial;
+await assert.rejects(dbSession(async () => { throw capabilityDenied; }), (error) => {
+  translatedDenial = error;
+  return canonical.isCanonicalAuthDenial(error);
+}, "the exact SQL capability denial must use the existing unauthenticated response path");
+for (const unrelated of [
+  sqlError("P2010", "42501", "OTHER_RLS_DENIED"),
+  sqlError("P2010", "XX000", "AUTH_SESSION_CAPABILITY_DENIED"),
+  sqlError("P2028", "42501", "AUTH_SESSION_CAPABILITY_DENIED"),
+]) {
+  await assert.rejects(dbSession(async () => { throw unrelated; }), (error) => error === unrelated,
+    "unrelated database failures must retain their original identity");
+}
+revalidatedActor = {
+  userId: claims.userId, role: claims.role, organizationId: null, licenseeId: null,
+  manufacturerId: null, authAssurance: "password-verified",
+};
+assert.equal(await dbSession(async () => [{ sessionId: claims.sessionId, userId: claims.userId }]), "allowed",
+  "valid sessions must still reach the protected callback");
+revalidatedActor = null;
 
 let boundaryError = new canonical.CanonicalAuthDenial();
 let refreshError = null;
@@ -162,8 +192,12 @@ const deniedRoutes = [
   ["MFA step-up", sessionControllers.adminMfaStepUpController, request({ user: { ...claims, role: "SUPER_ADMIN" } })],
 ];
 
+const missingSession = response();
+await authControllers.me(request({ user: null }), missingSession);
+assert.deepEqual([missingSession.statusCode, missingSession.body], [401, { success: false, error: "Not authenticated" }]);
+
 for (const [name, controller, req] of deniedRoutes) {
-  boundaryError = new canonical.CanonicalAuthDenial();
+  boundaryError = name === "me" ? translatedDenial : new canonical.CanonicalAuthDenial();
   const res = response();
   await controller(req, res);
   assert.equal(res.statusCode, 401, `${name} must map failed revalidation to 401`);
