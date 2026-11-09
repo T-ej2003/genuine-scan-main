@@ -15,6 +15,7 @@ const mockModule = (relativePath, exportsValue) => {
 };
 
 let printer;
+let queueMode = "normal";
 
 const resetPrinter = () => {
   printer = {
@@ -66,7 +67,10 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
   mutatePrintingTestLabelJob: async ({ operation, job }) => {
     const current = printer.metadata.pendingLocalAgentTestLabel;
     if (operation === "QUEUE") {
+      if (queueMode === "reject") throw new Error("SQL rejected queue before commit");
+      if (current?.status === "PENDING") return { ...current, idempotent: true };
       printer.metadata.pendingLocalAgentTestLabel = job;
+      if (queueMode === "commit-lost") throw new Error("Queue response lost after commit");
       return job;
     }
     if (!current) return operation === "CLAIM" ? { available: false } : { matched: false };
@@ -119,6 +123,40 @@ const connectorBoundary = {
   );
 
   const dispatchStates = [];
+  queueMode = "reject";
+  await assert.rejects(
+    () => printTestLabelForRegisteredPrinter({
+      printer, actorUserId: "manufacturer-local-test-1", boundary,
+      onDispatchStateChange: (state) => dispatchStates.push(state),
+    }),
+    /SQL rejected queue before commit/,
+  );
+  assert.deepEqual(dispatchStates, [], "a rejected queue must remain pre-dispatch");
+  assert.equal(printer.metadata.pendingLocalAgentTestLabel, undefined);
+
+  queueMode = "commit-lost";
+  await assert.rejects(
+    () => printTestLabelForRegisteredPrinter({
+      printer, actorUserId: "manufacturer-local-test-1", boundary,
+      onDispatchStateChange: (state) => dispatchStates.push(state),
+    }),
+    /Queue response lost after commit/,
+  );
+  assert.deepEqual(dispatchStates, [], "an unacknowledged queue result cannot claim observed dispatch");
+  const committedJob = printer.metadata.pendingLocalAgentTestLabel;
+  assert(committedJob, "the durable queue must retain an ambiguously committed job");
+  queueMode = "normal";
+  const recovered = await printTestLabelForRegisteredPrinter({
+    printer, actorUserId: "manufacturer-local-test-1", boundary,
+    onDispatchStateChange: (state) => dispatchStates.push(state),
+  });
+  assert.equal(printer.metadata.pendingLocalAgentTestLabel.testJobId, committedJob.testJobId,
+    "retry must recover the same durable job instead of creating another label");
+  assert.match(recovered.message, /already queued/);
+  assert.deepEqual(dispatchStates, ["dispatch_started"]);
+
+  resetPrinter();
+  dispatchStates.length = 0;
   const queued = await printTestLabelForRegisteredPrinter({
     printer,
     actorUserId: "manufacturer-local-test-1",

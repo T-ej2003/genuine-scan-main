@@ -392,7 +392,6 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
   const context = buildPrinterTestScanContext(params);
   const now = new Date();
   const payloadContent = buildKnownGoodDiagnosticZplPayload();
-  params.onDispatchStateChange?.("dispatch_started");
   const stored = await mutatePrintingTestLabelJob({
     ...params.boundary,
     operation: "QUEUE",
@@ -422,6 +421,7 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
       commandLanguage: PrinterLanguageKind.ZPL,
     },
   });
+  params.onDispatchStateChange?.("dispatch_started");
   return {
     outcome: "queued",
     message: stored?.idempotent
