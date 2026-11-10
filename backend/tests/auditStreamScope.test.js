@@ -12,11 +12,12 @@ const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-2
 
 // Keep the real SSE middleware and controller; stub cryptography/DB hydration only.
 let actor;
+let hydrationDenied = false;
 const fixtureToken = "sse-fixture-not-a-credential";
 for (const [module, exports] of Object.entries({
   "services/auth/tokenService": {
     ACCESS_TOKEN_COOKIE: "access", AUTHENTICATED_SESSION_CAPABILITY_COOKIE: "capability",
-    verifyAccessToken: (token) => { assert.equal(token, fixtureToken); return actor; },
+    verifyAccessToken: (token) => { if (token !== fixtureToken) throw new Error("invalid fixture token"); return actor; },
   },
   "services/auth/cookieTokenProtectionService": { openCookieToken: (value) => value },
   "services/manufacturerScopeService": {
@@ -26,9 +27,10 @@ for (const [module, exports] of Object.entries({
   "services/accessControlService": { isDisabledUserRecord: () => false },
   "services/auth/authService": {}, "controllers/authControllerShared": {},
   "rls-waves/session-b/b01/canonicalAuthContext": {
-    withDatabaseAuthenticatedSession: async (_payload, _options, callback) => callback({}, {
-      userId: actor.userId, role: actor.role, authAssurance: "mfa-verified",
-    }),
+    withDatabaseAuthenticatedSession: async (_payload, _options, callback) => {
+      if (hydrationDenied) throw new Error("sensitive database detail");
+      return callback({}, { userId: actor.userId, role: actor.role, authAssurance: "mfa-verified" });
+    },
   },
   "rls-waves/session-b/b01/authenticatedSecurityRepository": { loadAuthenticatedActor: async () => ({ ...actor, id: actor.userId }) },
 })) {
@@ -36,6 +38,43 @@ for (const [module, exports] of Object.entries({
   require.cache[id] = { id, filename: id, loaded: true, exports };
 }
 const { authenticateSSE } = require("../dist/middleware/auth");
+
+test("dashboard and printer SSE denials identify validation stage without credentials", async () => {
+  const requestId = "33333333-3333-4333-8333-333333333333";
+  const messages = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => messages.push(message);
+  actor = { userId: "actor", role: "SUPER_ADMIN", licenseeId: null, orgId: null };
+  try {
+    for (const [path, token, deny, expected] of [
+      ["/events/dashboard", null, false, "missing_token"],
+      ["/events/dashboard", "bad-token", false, "token_validation_failed"],
+      ["/manufacturer/printer-agent/events", fixtureToken, true, "session_validation_failed"],
+    ]) {
+      hydrationDenied = deny;
+      const req = { path, requestId, query: {}, headers: {}, cookies: token ? { access: token, capability: "fixture-capability" } : {}, get: () => undefined };
+      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(payload) { this.body = payload; return this; } };
+      await authenticateSSE(req, res, () => { throw new Error("denied stream opened"); });
+      assert.equal(res.statusCode, 401);
+      assert.equal(JSON.parse(messages.at(-1)).reason, expected);
+    }
+    assert.equal(messages.length, 3);
+    for (const message of messages) {
+      const event = JSON.parse(message);
+      assert.equal(event.event, "sse_auth_rejected");
+      assert.equal(event.requestId, requestId);
+      assert.doesNotMatch(message, /bad-token|fixture-capability|sensitive database detail/);
+    }
+
+    const req = { path: "/events/dashboard", requestId: "invalid\nrequest", query: {}, headers: {}, cookies: {}, get: () => undefined };
+    const res = { status: () => res, json: () => res };
+    await authenticateSSE(req, res, () => {});
+    assert.equal(messages.length, 3, "unvalidated request IDs must not be logged");
+  } finally {
+    hydrationDenied = false;
+    console.warn = originalWarn;
+  }
+});
 
 test("real SSE authentication policy composes with strict scope and never serializes query tokens", async () => {
   const original = { NODE_ENV: process.env.NODE_ENV, AUTH_SSE_QUERY_TOKEN_ENABLED: process.env.AUTH_SSE_QUERY_TOKEN_ENABLED };

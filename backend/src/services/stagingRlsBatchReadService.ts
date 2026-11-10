@@ -16,6 +16,7 @@ import {
 import { AuthenticatedSessionClaims } from "../types";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
 import { requireAuthenticatedSessionCapability } from "./auth/authenticatedSessionCapabilityService";
+import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
 
 const BATCH_OPERATIONAL_READ_PURPOSE = "batch-operational-read";
 export const BATCH_OPERATIONAL_READ_TRANSACTION_OPTIONS = {
@@ -208,9 +209,11 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
       ...params,
       routeSurface: "GET /api/qr/batches",
     });
-    const payload = await runBatchOperationalReadTransaction(
+    const payload = await timeReliabilityStage(boundary.repository.requestId, boundary.repository.routeSurface, "transaction", () => runBatchOperationalReadTransaction(
       async (db) => {
-        await assertBatchOperationalCapabilityActor(db, boundary.repository, params.user);
+        await timeReliabilityStage(boundary.repository.requestId, boundary.repository.routeSurface, "capability", () =>
+          assertBatchOperationalCapabilityActor(db, boundary.repository, params.user)
+        );
         return listBatchOperationalSummaries({
           boundary: boundary.repository,
           limit: params.limit,
@@ -218,7 +221,7 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
           db,
         });
       }
-    );
+    ));
     recordStagingRlsBatchReadProof({
       contextClass,
       durationMs: Number(process.hrtime.bigint() - startedAt) / 1_000_000,

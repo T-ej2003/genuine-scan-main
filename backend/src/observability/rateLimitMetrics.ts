@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { isRedisConfigured } from "../services/redisService";
 import { normalizeClientIp } from "../utils/ipAddress";
 import { hashToken } from "../utils/security";
+import { isValidRequestId } from "../utils/requestId";
 
 type LimiterStage = "route" | "pre-auth" | "ip" | "actor";
 type AuthModel = "anonymous" | "bearer" | "cookie" | "authenticated";
@@ -191,9 +192,11 @@ export const recordRateLimitMetric = (req: Request, scope: string) => {
   };
 
   pushBounded(rateLimitMetrics, entry, MAX_RATE_LIMIT_METRICS);
+  const requestId = (req as Request & { requestId?: unknown }).requestId;
   logger.warn("rate_limit_metric", {
     event: "rate_limit_metric",
     ...entry,
+    ...(scope === "account.security:actor" && isValidRequestId(requestId) ? { requestId } : {}),
   });
   return retryAfterSec;
 };

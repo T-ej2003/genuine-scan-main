@@ -1,5 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { randomUUID } from "crypto";
+import { logger } from "../utils/logger";
+import { isValidRequestId } from "../utils/requestId";
 import { AuthenticatedSessionClaims } from "../types";
 import { UserRole } from "@prisma/client";
 import { ACCESS_TOKEN_COOKIE, AUTHENTICATED_SESSION_CAPABILITY_COOKIE, verifyAccessToken, verifyMfaBootstrapToken } from "../services/auth/tokenService";
@@ -57,6 +59,22 @@ export const getDatabaseSessionCapability = (req: Request, bearer: string | null
 
 const requestIdFor = (req: Request) =>
   String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || randomUUID());
+
+const recordSseAuthDenial = (req: Request, reason: "missing_token" | "token_validation_failed" | "session_validation_failed", credentialSource: "none" | "cookie" | "header" | "query") => {
+  const path = String(req.path || req.originalUrl || "").split("?", 1)[0];
+  const route = path === "/events/dashboard" || path === "/api/events/dashboard"
+    ? "GET /api/events/dashboard"
+    : path === "/manufacturer/printer-agent/events" || path === "/api/manufacturer/printer-agent/events"
+      ? "GET /api/manufacturer/printer-agent/events"
+      : null;
+  const requestId = (req as Request & { requestId?: unknown }).requestId;
+  if (!route || !isValidRequestId(requestId)) return;
+  try {
+    logger.warn(JSON.stringify({ event: "sse_auth_rejected", requestId, route, reason, credentialSource }));
+  } catch {
+    // Rejection telemetry must never change the authentication response.
+  }
+};
 
 export async function hydrateTenantIfNeeded(
   payload: AuthenticatedSessionClaims,
@@ -244,16 +262,23 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   const headerToken = getBearerToken(req) || "";
   const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
   const token = queryToken || headerToken || cookieToken;
+  const credentialSource = queryToken ? "query" : headerToken ? "header" : cookieToken ? "cookie" : "none";
 
-  if (!token) return res.status(401).json({ success: false, error: "No token provided" });
+  if (!token) {
+    recordSseAuthDenial(req, "missing_token", credentialSource);
+    return res.status(401).json({ success: false, error: "No token provided" });
+  }
 
+  let stage: "token" | "session" = "token";
   try {
     const decoded = verifyAccessToken(token);
+    stage = "session";
     req.databaseSessionCapability = getDatabaseSessionCapability(req, headerToken || queryToken || null);
     req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
   } catch {
+    recordSseAuthDenial(req, stage === "token" ? "token_validation_failed" : "session_validation_failed", credentialSource);
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 };
