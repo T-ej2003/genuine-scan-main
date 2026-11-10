@@ -29,6 +29,7 @@ function NavigationProbe() {
   const auth = useAuth();
   const navigate = useNavigate();
   return <div><span data-testid="auth-loading">{auth.isLoading ? "loading" : "ready"}</span>
+    <span data-testid="navigation-pending">{String(auth.navigationValidationPending)}</span>
     <span>{auth.user?.id || "signed-out"}</span>
     <button onClick={() => navigate("/batches")}>Open batches</button></div>;
 }
@@ -69,6 +70,24 @@ describe("auth scope refresh", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
     expect(screen.getByTestId("auth-loading")).toHaveTextContent("ready");
     await act(async () => { resolveRefresh({ success: true, data: { user } }); });
+  });
+
+  it("gates navigation while a cross-tab scope validation is pending", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveMe: (value: any) => void = () => {};
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: true, data: { user } } as any);
+    vi.mocked(apiClient.getCurrentUser).mockImplementation(() => new Promise(resolve => { resolveMe = resolve; }));
+    render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><NavigationProbe /></AuthProvider></MemoryRouter>);
+    await screen.findByText("actor");
+    scope = "peer"; ready = false;
+    await act(async () => { window.dispatchEvent(new Event("auth:scope-refresh")); });
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
+    now += 1_000;
+    fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+    expect(screen.getByTestId("navigation-pending")).toHaveTextContent("true");
+    await act(async () => { scope = "actor"; ready = true; resolveMe({ success: true, data: { user } }); });
+    expect(screen.getByTestId("navigation-pending")).toHaveTextContent("false");
   });
 
   it("still clears the authenticated view after a terminal background refresh rejection", async () => {

@@ -98,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigationValidationPending = Boolean(
     user && shouldBootstrapCurrentUser(location.pathname) && !isActivePrintSessionSuppressed() &&
     navigationTarget !== validatedTarget &&
-    (navigationCheckInFlight || refreshInFlightRef.current !== null || transientRestoreRef.current ||
+    (!isRequestCoordinatorScopeReady() || navigationCheckInFlight || refreshInFlightRef.current !== null || transientRestoreRef.current ||
       Date.now() - lastRefreshSuccessAtRef.current >= AUTH_BOOTSTRAP_MIN_INTERVAL_MS)
   );
 
@@ -291,6 +291,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setValidatedTarget(navigationTarget);
       setNavigationCheckInFlight(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
+      return;
+    }
+
+    if (user && !isRequestCoordinatorScopeReady()) {
+      setNavigationCheckInFlight(true);
       return;
     }
 
