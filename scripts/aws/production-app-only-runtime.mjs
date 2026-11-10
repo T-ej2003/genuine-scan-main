@@ -167,7 +167,7 @@ export async function collectAppOnlyRuntimeCompatibility({ identity, candidate, 
   // Stage-B has exact inline log resources, not the legacy AWS-managed
   // Resource:"*" grant. Source/live policy equality is checked independently.
   onStage("RUNTIME_IAM_SIMULATION");
-  const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: "exact-dependency" });
+  const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: "exact-dependency", resourceMetadata });
   assertAppOnlyRuntimeSimulations(dependencies, simulations);
   onStage("RUNTIME_FINAL_CAS");
   assertAppOnlyCas(predecessor, captureAppOnlyPredecessor(await readLive(), { unavailable: predecessor.unavailable === true }));
