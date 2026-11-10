@@ -205,8 +205,8 @@ async function runJournaledFrontendActivation({sourceSha,webAuthorization,authen
  }
  const candidate=structuredClone(buildFrontendCandidate({predecessor,authenticatedWebAuthorization}));
  const marker='MSCQRWebActivationOperation';
- if(candidate.tags?.some(tag=>tag.key===marker))throw new Error('Frontend operation tag already exists');
- candidate.tags=[...(candidate.tags||[]),{key:marker,value:operationId}];
+ if(candidate.tags?.some(tag=>tag.key===marker&&tag.value===operationId))throw new Error('Frontend operation tag already exists');
+ candidate.tags=[...(candidate.tags||[]).filter(tag=>tag.key!==marker),{key:marker,value:operationId}];
  const intent={operationId,sourceSha,authorizationSha256:webAuthorization.authorizationSha256,
   predecessorTaskDefinitionArn:predecessor.taskDefinitionArn,imageRef:webAuthorization.imageRef,
   payloadSha256:canonicalSha256(candidate)};
