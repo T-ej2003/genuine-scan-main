@@ -11,6 +11,7 @@ interface AuthContextType {
   user: User | null;
   pendingAuth: PendingAuthSession | null;
   isLoading: boolean;
+  navigationValidationPending: boolean;
   authReady: boolean;
   authBootstrapStatus: "bootstrapping" | "authenticated" | "unauthenticated";
   isAuthenticated: boolean;
@@ -78,9 +79,12 @@ function normalizeUser(u: any): User {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
+  const navigationTarget = location.pathname + location.search;
   const [user, setUser] = useState<User | null>(null);
   const [pendingAuth, setPendingAuth] = useState<PendingAuthSession | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [validatedTarget, setValidatedTarget] = useState(navigationTarget);
+  const [navigationCheckInFlight, setNavigationCheckInFlight] = useState(false);
   const [authBootstrapStatus, setAuthBootstrapStatus] = useState<"bootstrapping" | "authenticated" | "unauthenticated">("bootstrapping");
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastRefreshAttemptAtRef = useRef(0);
@@ -91,6 +95,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const bootstrapRetryRef = useRef<number | null>(null);
   const bootstrapRetryCountRef = useRef(0);
   const transientRestoreRef = useRef(false);
+  const navigationValidationPending = Boolean(
+    user && shouldBootstrapCurrentUser(location.pathname) && !isActivePrintSessionSuppressed() &&
+    navigationTarget !== validatedTarget &&
+    (!isRequestCoordinatorScopeReady() || navigationCheckInFlight || refreshInFlightRef.current !== null || transientRestoreRef.current ||
+      Date.now() - lastRefreshSuccessAtRef.current >= AUTH_BOOTSTRAP_MIN_INTERVAL_MS)
+  );
 
   const clearSession = () => {
     if (scopeRetryRef.current !== null) window.clearTimeout(scopeRetryRef.current);
@@ -100,6 +110,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     transientRestoreRef.current = false;
     bootstrapRetryCountRef.current = 0;
     setIsLoading(false);
+    setNavigationCheckInFlight(false);
     sessionGenerationRef.current += 1;
     setRequestCoordinatorScope(null);
     setUser(null);
@@ -175,9 +186,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : Promise.resolve({ success: false, error: "Session refresh is unavailable" });
       const getCurrentUser = () =>
         canGetCurrentUser
-          ? apiClient.getCurrentUser()
+          ? apiClient.getCurrentUser({ skipAuthRefresh: true })
           : Promise.resolve({ success: false, error: "Current session lookup is unavailable" });
-      const restoreAttempts: Array<() => Promise<any>> = apiClient.getToken?.()
+      const restoreAttempts: Array<() => Promise<any>> = user || apiClient.getToken?.()
         ? [getCurrentUser, refreshSession]
         : [refreshSession, getCurrentUser];
       let transientFailure = false;
@@ -208,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             refreshCooldownUntilRef.current,
             Date.now() + Math.max(fallbackSec, Number(res?.retryAfterSec) || 0) * 1000,
           );
+          if (attempt === getCurrentUser && user && res?.status !== 403) break;
           continue;
         }
       }
@@ -244,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const payload = authPayloadFromResponseData(response.data);
           if (payload?.user && isRequestCoordinatorUserCurrent(normalizeUser({ ...payload.user, auth: payload.auth || null }))) {
             retryCount = 0;
+            lastRefreshSuccessAtRef.current = Date.now();
             setAuthStateFromPayload(payload);
             return;
           }
@@ -267,13 +280,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (DISABLE_E2E_AUTH_POLLING) {
       setIsLoading(false);
+      setValidatedTarget(navigationTarget);
+      setNavigationCheckInFlight(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
       return;
     }
 
     if (!shouldBootstrapCurrentUser(location.pathname)) {
       setIsLoading(false);
+      setValidatedTarget(navigationTarget);
+      setNavigationCheckInFlight(false);
       setAuthBootstrapStatus(user ? "authenticated" : "unauthenticated");
+      return;
+    }
+
+    if (user && !isRequestCoordinatorScopeReady()) {
+      setNavigationCheckInFlight(true);
       return;
     }
 
@@ -281,12 +303,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user &&
       (Date.now() - lastRefreshSuccessAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS ||
         Date.now() - lastRefreshAttemptAtRef.current < AUTH_BOOTSTRAP_MIN_INTERVAL_MS);
-    if (recentlyLoaded) {
+    if (recentlyLoaded && !refreshInFlightRef.current && !transientRestoreRef.current) {
       setIsLoading(false);
+      setValidatedTarget(navigationTarget);
+      setNavigationCheckInFlight(false);
       return;
     }
     if (user && isActivePrintSessionSuppressed()) {
       setIsLoading(false);
+      setValidatedTarget(navigationTarget);
+      setNavigationCheckInFlight(false);
       return;
     }
 
@@ -298,17 +324,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await refresh();
         if (cancelled) return;
         if (transientRestoreRef.current) retryBootstrap();
-        else setIsLoading(false);
+        else {
+          setValidatedTarget(navigationTarget);
+          setNavigationCheckInFlight(false);
+          setIsLoading(false);
+        }
       }, Math.max(1, refreshCooldownUntilRef.current - Date.now()));
     };
     (async () => {
-      setIsLoading(true);
+      if (user) setNavigationCheckInFlight(true);
+      if (!user) setIsLoading(true);
       try {
         await refresh();
       } finally {
         if (!cancelled) {
-          if (transientRestoreRef.current && !user) retryBootstrap();
-          else setIsLoading(false);
+          if (transientRestoreRef.current) retryBootstrap();
+          else {
+            setValidatedTarget(navigationTarget);
+            setNavigationCheckInFlight(false);
+            setIsLoading(false);
+          }
         }
       }
     })();
@@ -319,7 +354,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       bootstrapRetryRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, user]);
+  }, [navigationTarget, user]);
 
   const login = async (email: string, password: string) => {
     const generation = sessionGenerationRef.current;
@@ -349,6 +384,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       pendingAuth,
       isLoading,
+      navigationValidationPending,
       authReady: !isLoading,
       authBootstrapStatus,
       isAuthenticated: !!user && user.auth?.sessionStage !== "MFA_BOOTSTRAP",
@@ -357,7 +393,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refresh,
       completeMfaSession,
     }),
-    [user, pendingAuth, isLoading, authBootstrapStatus]
+    [user, pendingAuth, isLoading, authBootstrapStatus, navigationValidationPending]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -27,10 +27,10 @@ export const createAuthApi = (core: ApiClientCore) => ({
     return response;
   },
 
-  async getCurrentUser() {
+  async getCurrentUser(options: { skipAuthRefresh?: boolean } = {}) {
     // This authoritative projection establishes the cache scope; it cannot use
     // that scope's cached identity. AuthProvider retains its in-flight/throttle guard.
-    return core.request("/auth/me");
+    return core.request("/auth/me", options);
   },
 
   async refreshSession() {
