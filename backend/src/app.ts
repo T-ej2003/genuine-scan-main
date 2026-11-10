@@ -72,6 +72,10 @@ export const createBackendApp = () => {
   const app = express();
   app.disable("etag");
   app.set("trust proxy", false);
+  app.use((req, _res, next) => {
+    (req as express.Request & { diagnosticRequestId?: string }).diagnosticRequestId = randomUUID();
+    next();
+  });
   const clientIpTrustConfig = getClientIpTrustConfig();
   app.use(trustedClientIpMiddleware(clientIpTrustConfig));
 
@@ -138,6 +142,7 @@ export const createBackendApp = () => {
   app.use((req, res, next) => {
     const clientRequestId = req.get("x-request-id") || "";
     const requestId = isValidRequestId(clientRequestId) ? clientRequestId : randomUUID();
+    const diagnosticRequestId = (req as express.Request & { diagnosticRequestId: string }).diagnosticRequestId;
     const rejectedClientRequestIdRef =
       clientRequestId !== requestId && /^[A-Za-z0-9._:-]{1,128}$/.test(clientRequestId)
         ? hashToken(`client-request-id:${clientRequestId}`)
@@ -186,6 +191,7 @@ export const createBackendApp = () => {
 
       const meta = {
         requestId,
+        diagnosticRequestId,
         rejectedClientRequestIdRef,
         method: req.method,
         path: telemetryPath,
@@ -358,15 +364,18 @@ export const createBackendApp = () => {
 
   app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
     const requestId = (req as express.Request & { requestId?: string }).requestId;
+    const diagnosticRequestId = (req as express.Request & { diagnosticRequestId?: string }).diagnosticRequestId;
     const safePath = sanitizeRequestTelemetryPath(req.originalUrl || req.path || "/");
     captureBackendException(err, {
       requestId,
+      diagnosticRequestId,
       method: req.method,
       path: safePath,
       status: 500,
     });
     logger.error("Unhandled error", {
       requestId,
+      diagnosticRequestId,
       method: req.method,
       path: safePath,
       error: getErrorMessage(err),

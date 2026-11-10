@@ -756,6 +756,7 @@ export const getBatches = async (req: AuthRequest, res: Response) => {
       user: req.user,
       requestedLicenseeId,
       requestId: (req as AuthRequest & { requestId?: string }).requestId,
+      diagnosticRequestId: (req as AuthRequest & { diagnosticRequestId?: string }).diagnosticRequestId,
       databaseSessionCapability: req.databaseSessionCapability,
       limit,
       offset,

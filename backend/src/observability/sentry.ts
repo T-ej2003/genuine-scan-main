@@ -37,6 +37,7 @@ export const captureBackendException = (
   error: unknown,
   context?: {
     requestId?: string;
+    diagnosticRequestId?: string;
     method?: string;
     path?: string;
     status?: number;
@@ -51,6 +52,7 @@ export const captureBackendException = (
 
   Sentry.withScope((scope) => {
     if (context.requestId) scope.setTag("request_id", context.requestId);
+    if (context.diagnosticRequestId) scope.setTag("diagnostic_request_id", context.diagnosticRequestId);
     if (typeof context.status === "number") scope.setTag("http_status", String(context.status));
     if (context.method || context.path) {
       scope.setContext("http", {

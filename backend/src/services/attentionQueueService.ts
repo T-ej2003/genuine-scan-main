@@ -11,6 +11,7 @@ import { isManufacturerRole, resolveAccessibleLicenseeIdsForUser } from "./manuf
 import { listNotificationsForUser } from "./notificationService";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 import { readPrintingProjection } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
 
 export type AttentionQueueItemTone = "neutral" | "verified" | "review" | "blocked" | "audit" | "support" | "print";
 
@@ -103,37 +104,42 @@ const attentionQueueScopeKey = (req: AuthRequest) =>
   ].join(":");
 
 const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<AttentionQueueSnapshot> => {
-  if (!req.user) throw new Error("Not authenticated");
+  const user = req.user;
+  if (!user) throw new Error("Not authenticated");
 
-  const canOpenIncidentRoute = isPlatformRole(req.user.role);
-  const licenseeIds = await resolveAccessibleLicenseeIdsForUser(req.user);
+  const canOpenIncidentRoute = isPlatformRole(user.role);
+  const diagnosticRequestId = (req as AuthRequest & { diagnosticRequestId?: string }).diagnosticRequestId;
+  const route = "GET /api/dashboard/attention-queue";
+  const licenseeIds = await timeReliabilityStage(diagnosticRequestId, route, "scope", () => resolveAccessibleLicenseeIdsForUser(user));
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const notificationPromise = listNotificationsForUser({
-    userId: req.user.userId,
-    role: req.user.role,
-    licenseeId: req.user.licenseeId,
+  const notificationPromise = timeReliabilityStage(diagnosticRequestId, route, "notifications", () => listNotificationsForUser({
+    userId: user.userId,
+    role: user.role,
+    licenseeId: user.licenseeId,
     licenseeIds,
-    orgId: req.user.orgId,
+    orgId: user.orgId,
     limit: 5,
     offset: 0,
     unreadOnly: true,
     databaseBoundary: b03BoundaryForRequest(req, "notification-list"),
-  });
+  }));
 
   const attentionBoundary = b03BoundaryForRequest(req, "attention-queue");
-  const attentionPromise = attentionBoundary.run((db) => readAttentionQueueProjection(db, {
-    licenseeId: getEffectiveLicenseeId(req),
-    since,
-    requestId: attentionBoundary.requestId,
-  }));
-  const printingAttentionPromise = readPrintingProjection({
+  const attentionPromise = timeReliabilityStage(diagnosticRequestId, route, "attention-transaction", () => attentionBoundary.run((db) =>
+    timeReliabilityStage(diagnosticRequestId, route, "attention-projection", () => readAttentionQueueProjection(db, {
+      licenseeId: getEffectiveLicenseeId(req),
+      since,
+      requestId: attentionBoundary.requestId,
+    }))
+  ));
+  const printingAttentionPromise = timeReliabilityStage(diagnosticRequestId, route, "printing-projection", () => readPrintingProjection({
     capability: String(req.databaseSessionCapability || ""),
     requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
     operation: "ATTENTION_QUEUE",
     subjectId: "00000000-0000-4000-8000-000000000000",
     options: { licenseeId: getEffectiveLicenseeId(req) || null },
-  });
+  }));
 
   const [
     notifications,
@@ -160,7 +166,7 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
       title: firstNotification.title,
       body: firstNotification.body,
       tone: "neutral",
-      route: notificationRoute(firstNotification.data, req.user.role),
+      route: notificationRoute(firstNotification.data, user.role),
       createdAt: firstIso(firstNotification.createdAt),
       count: notifications.unread,
     });

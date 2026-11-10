@@ -2,6 +2,7 @@ import { BatchLifecycleState, Prisma, QRStatus } from "@prisma/client";
 
 import prisma from "../config/database";
 import { CanonicalTransactionClient } from "../lib/canonicalDbContext";
+import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
 import { listReservableQrCodeSummaries } from "./printReservationService";
 import {
   buildBatchPrintReadinessFromSummary,
@@ -14,6 +15,7 @@ const lineageBackfillState = new Map<string, number>();
 export type BatchOperationalRepositoryBoundary = {
   databaseSessionCapability: string;
   requestId: string;
+  diagnosticRequestId?: string;
   purpose: "batch-operational-read";
   auditId: string;
   requestedLicenseeId: string | null;
@@ -494,7 +496,7 @@ export const listBatchOperationalSummaries = async (params: {
 
   let scopeFingerprint = "";
   const readBatches = async () => {
-    const [scope] = await params.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
+    const [scope] = await timeReliabilityStage(params.boundary.diagnosticRequestId, params.boundary.routeSurface, "scope", () => params.db.$queryRaw<Array<{ scope_fingerprint: string }>>`
       SELECT scope_fingerprint
       FROM app_rls.batch_operational_scope(
         ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
@@ -503,9 +505,9 @@ export const listBatchOperationalSummaries = async (params: {
         ${params.boundary.routeSurface},
         ${params.boundary.focusBatchId}
       )
-    `;
+    `);
     scopeFingerprint = fingerprint(scope?.scope_fingerprint);
-    const rows = await params.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
+    const rows = await timeReliabilityStage(params.boundary.diagnosticRequestId, params.boundary.routeSurface, "rows", () => params.db.$queryRaw<Array<{ row_data: Prisma.JsonValue }>>`
       SELECT row_data
       FROM app_rls.batch_operational_rows(
         ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
@@ -517,11 +519,11 @@ export const listBatchOperationalSummaries = async (params: {
         CAST(${params.limit} AS integer),
         CAST(${params.offset} AS integer)
       )
-    `;
+    `);
     return rows.map((row) => batchFromFunction(row.row_data, true));
   };
   const readTotal = async () => {
-    const [row] = await params.db.$queryRaw<Array<{ total: bigint | number | string }>>`
+    const [row] = await timeReliabilityStage(params.boundary.diagnosticRequestId, params.boundary.routeSurface, "total", () => params.db.$queryRaw<Array<{ total: bigint | number | string }>>`
       SELECT total
       FROM app_rls.batch_operational_total(
         ${params.boundary.databaseSessionCapability}, ${params.boundary.purpose}, ${params.boundary.requestId},
@@ -531,14 +533,16 @@ export const listBatchOperationalSummaries = async (params: {
         ${params.boundary.focusBatchId},
         ${scopeFingerprint}
       )
-    `;
+    `);
     return safeCount(row?.total, "total");
   };
   const batches = await readBatches();
   const total = await readTotal();
   const authorizedBoundary = { ...params.boundary, scopeFingerprint };
   return {
-    rows: batches.length ? await enrichBatchSummaries(batches, params.db, authorizedBoundary) : batches,
+    rows: batches.length ? await timeReliabilityStage(params.boundary.diagnosticRequestId, params.boundary.routeSurface, "enrichment", () =>
+      enrichBatchSummaries(batches, params.db, authorizedBoundary)
+    ) : batches,
     total,
   };
 };

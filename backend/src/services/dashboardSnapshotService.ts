@@ -6,6 +6,7 @@ import prisma from "../config/database";
 import { CanonicalDbContext, CanonicalTransactionClient } from "../lib/canonicalDbContext";
 import { AuthRequest } from "../middleware/auth";
 import { getAdminStepUpWindowMinutes } from "./auth/authService";
+import { timeReliabilityStage } from "../observability/reliabilityStageTiming";
 import { summarizeQrStatusCounts } from "./qrStatusMetrics";
 import { getOrComputeVersionedCache } from "./versionedCacheService";
 
@@ -36,6 +37,7 @@ export type DashboardSnapshot = {
 
 type DashboardBoundary = {
   databaseSessionCapability: string;
+  diagnosticRequestId?: string;
   context: CanonicalDbContext;
   auditId: string;
   requestedLicenseeId: string | null;
@@ -124,6 +126,7 @@ export const buildDashboardSnapshotBoundary = (
 
   return {
     databaseSessionCapability,
+    diagnosticRequestId: (req as AuthRequest & { diagnosticRequestId?: string }).diagnosticRequestId,
     auditId: randomUUID(),
     requestedLicenseeId: selector,
     routeSurface: routeSurface(req),
@@ -153,7 +156,7 @@ export const loadInventoryAggregate = async (
   boundary: DashboardBoundary,
   expectedScopeFingerprint: string
 ): Promise<DashboardSnapshot> => {
-  const [row] = await tx.$queryRaw<DashboardDataRow[]>`
+  const [row] = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "data", () => tx.$queryRaw<DashboardDataRow[]>`
     SELECT *
     FROM app_rls.dashboard_snapshot_data(
       ${boundary.databaseSessionCapability},
@@ -164,7 +167,7 @@ export const loadInventoryAggregate = async (
       ${boundary.routeSurface},
       ${expectedScopeFingerprint}
     )
-  `;
+  `);
   if (!row) throw new Error("Dashboard snapshot function returned no result");
 
   const allStatuses = {
@@ -196,7 +199,7 @@ export const computeDashboardSnapshot = async (
   boundary: DashboardBoundary,
   options: { scopeOnly?: boolean } = {}
 ): Promise<DashboardSnapshot | null> => {
-  const [scope] = await tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
+  const [scope] = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "scope", () => tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
     SELECT scope_fingerprint
     FROM app_rls.dashboard_snapshot_scope(
       ${boundary.databaseSessionCapability},
@@ -206,13 +209,15 @@ export const computeDashboardSnapshot = async (
       ${boundary.requestedLicenseeId},
       ${boundary.routeSurface}
     )
-  `;
+  `);
   const fingerprint = String(scope?.scope_fingerprint || "");
   if (!/^[0-9a-f]{32}$/i.test(fingerprint)) throw new DashboardSnapshotAccessError();
   if (options.scopeOnly) return null;
   const cacheKey = createHash("sha256").update(`v1:${fingerprint}`).digest("hex");
-  return getOrComputeVersionedCache(DASHBOARD_CACHE_NAMESPACE, cacheKey, DASHBOARD_CACHE_TTL_SEC, () =>
-    loadInventoryAggregate(tx, boundary, fingerprint)
+  return timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "cache", () =>
+    getOrComputeVersionedCache(DASHBOARD_CACHE_NAMESPACE, cacheKey, DASHBOARD_CACHE_TTL_SEC, () =>
+      loadInventoryAggregate(tx, boundary, fingerprint)
+    )
   );
 };
 
@@ -222,9 +227,11 @@ export const getDashboardSnapshot = async (req: AuthRequest) => {
     let snapshot: DashboardSnapshot | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        snapshot = await prisma.$transaction(
-          (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
-          { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+        snapshot = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "transaction", () =>
+          prisma.$transaction(
+            (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
+            { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }
+          )
         );
         break;
       } catch (error) {
