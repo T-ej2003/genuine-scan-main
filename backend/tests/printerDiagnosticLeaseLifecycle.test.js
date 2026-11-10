@@ -32,15 +32,16 @@ const boundary = { capability: 'isolated-authorized-capability', requestId: '500
     tokens.signQrPayload = () => 'synthetic-signed-token';
     tokens.buildScanUrl = () => 'https://isolated.invalid/scan/synthetic';
     renderer.resolvePrinterLanguageRenderer = () => ({ render: () => ({ payloadType: 'ZPL', payloadContent: '^XA^XZ' }) });
-    let operations, sends, baselineFailure, sendFailure, closureFailure, renderFailure;
+    let operations, sends, baselineFailure, sendFailure, closureFailure, renderFailure, states, leaseFailure;
     const reset = () => {
-      operations = []; sends = 0; baselineFailure = false; sendFailure = false; closureFailure = false; renderFailure = false;
+      operations = []; sends = 0; baselineFailure = false; sendFailure = false; closureFailure = false; renderFailure = false; leaseFailure = false; states = [];
     };
     repository.administerPrintingPrinter = async input => {
       operations.push(input.operation);
       assert.equal(input.printerId, printer.id);
       assert.equal(input.capability, boundary.capability);
       assert.equal(input.requestId, boundary.requestId);
+      if (input.operation === 'DIAGNOSTIC_LEASE' && leaseFailure) throw Error('lease unavailable');
       if (input.operation === 'DIAGNOSTIC_ABORT' && closureFailure) throw Error('authoritative closure unavailable');
       return {};
     };
@@ -55,7 +56,12 @@ const boundary = { capability: 'isolated-authorized-capability', requestId: '500
       return { bytesWritten: 6 };
     };
     const realRender = renderer.resolvePrinterLanguageRenderer;
-    const run = () => printTestLabelForRegisteredPrinter({ printer, actorUserId: 'isolated-maker', boundary });
+    const run = () => printTestLabelForRegisteredPrinter({ printer, actorUserId: 'isolated-maker', boundary,
+      onDispatchStateChange: state => states.push(state) });
+
+    reset(); leaseFailure = true;
+    await assert.rejects(run(), /lease unavailable/);
+    assert.deepEqual(states, [], 'failed lease must not mark dispatch');
 
     reset();
     await assert.rejects(printTestLabelForRegisteredPrinter({ printer: { ...printer, connectionType: 'UNSUPPORTED' }, actorUserId: 'isolated-maker', boundary }),
@@ -67,6 +73,7 @@ const boundary = { capability: 'isolated-authorized-capability', requestId: '500
     await assert.rejects(run(), /deterministic render rejection/);
     assert.deepEqual(operations, ['DIAGNOSTIC_LEASE', 'DIAGNOSTIC_ABORT']);
     assert.equal(sends, 0);
+    assert.deepEqual(states, [], 'failed rendering must not mark dispatch');
     renderer.resolvePrinterLanguageRenderer = realRender;
 
     reset();
@@ -75,23 +82,27 @@ const boundary = { capability: 'isolated-authorized-capability', requestId: '500
       /gateway deterministic render rejection/);
     assert.deepEqual(operations, ['DIAGNOSTIC_LEASE', 'DIAGNOSTIC_ABORT']);
     assert.equal(sends, 0);
+    assert.deepEqual(states, [], 'failed gateway rendering must not mark dispatch');
     renderer.resolvePrinterLanguageRenderer = realRender;
 
     reset(); baselineFailure = true;
     await assert.rejects(run(), /baseline unavailable/);
     assert.deepEqual(operations, ['DIAGNOSTIC_LEASE', 'DIAGNOSTIC_ABORT']);
     assert.equal(sends, 0);
+    assert.deepEqual(states, [], 'failed Zebra baseline must not mark dispatch');
 
     reset(); sendFailure = true;
     await assert.rejects(run(), /transport outcome uncertain/);
     assert.deepEqual(operations, ['DIAGNOSTIC_LEASE']);
     assert.equal(sends, 1);
+    assert.deepEqual(states, ['dispatch_started'], 'uncertain transport must remain fenced');
 
     reset();
     const completed = await run();
     assert.equal(completed.outcome, 'confirmed');
     assert.deepEqual(operations, ['DIAGNOSTIC_LEASE', 'DIAGNOSTIC_COMPLETE']);
     assert.equal(sends, 1);
+    assert.deepEqual(states, ['dispatch_started', 'confirmed']);
 
     reset(); baselineFailure = true; closureFailure = true;
     await assert.rejects(run(), /lease closure is unverified/);
