@@ -111,12 +111,13 @@ export async function collectAppOnlyDeploymentPreparation({ sourceSha, compatibi
     assert.match(body.approvalSha256 || "", /^[a-f0-9]{64}$/);
   }
   const readers = createAppOnlyEcsReaders(run), live = readers.readLive();
+  const age = Date.now() - Date.parse(body.generatedAt);
+  assert.ok(Number.isFinite(age) && age >= 0 && age <= APP_ONLY.maxEvidenceAgeMs, "Stale verifier execution artifact");
   const verifier = recovered
     ? authenticateHistoricalVerifierInputs({ inputs: body.inputs, sourceSha: body.sourceSha, live, repositoryRoot,
       taskDefinitionArn: body.taskDefinitionArn, run })
-    : authenticateAppOnlyVerifierInputs({ inputs: body.inputs, sourceSha, live, repositoryRoot });
-  const age = Date.now() - Date.parse(body.generatedAt);
-  assert.ok(Number.isFinite(age) && age >= 0 && age <= APP_ONLY.maxEvidenceAgeMs, "Stale verifier execution artifact");
+    : authenticateAppOnlyVerifierInputs({ inputs: body.inputs, sourceSha, live, repositoryRoot,
+      now: Date.parse(body.generatedAt) });
   assert.equal((recovered ? body.recovery : body.registration).taskDefinitionArn, body.taskDefinitionArn);
   assert.equal((recovered ? body.recovery : body.registration).preparationSha256, body.inputs.preparation.preparationSha256);
   assert.match(body.taskArn || "", new RegExp(`^arn:aws:ecs:${APP_ONLY.region}:${APP_ONLY.account}:task/${APP_ONLY.cluster}/[a-f0-9]{32}$`));
@@ -306,10 +307,17 @@ export function authenticateAppOnlyDeploymentInputs({ inputs, sourceSha, live, r
   assert.equal(approved.sourceSha, sourceSha);
   const age = now - Date.parse(approved.generatedAt);
   assert.ok(Number.isFinite(age) && age >= 0 && age <= APP_ONLY.maxEvidenceAgeMs, "Stale deployment preparation");
-  authenticateAppOnlyVerifierInputs({ inputs: inputs.inputs, sourceSha, live, repositoryRoot, now });
+  // The verifier inputs were fresh when the release preparation was produced;
+  // the database result itself must still be fresh at each deployment check.
+  const preparedAt = Date.parse(approved.generatedAt);
+  authenticateAppOnlyVerifierInputs({ inputs: inputs.inputs, sourceSha, live, repositoryRoot, now: preparedAt });
+  authenticateAppOnlyVerifierResult({ message: JSON.stringify(inputs.database),
+    identity: inputs.verifiedInputs?.preparation.identity || inputs.inputs.preparation.identity,
+    requirementsSha256: inputs.verifiedInputs?.requirements.requirementsSha256 || inputs.inputs.requirements.requirementsSha256,
+    verificationContractSha256: inputs.verifiedInputs?.preparation.verificationContractSha256 || inputs.inputs.preparation.verificationContractSha256, now });
   assertAppOnlyCas(approved.predecessor, captureAppOnlyPredecessor(live));
   const actual = prepareAppOnlyDeployment({ ...inputs.inputs, sourceSha, live, database: inputs.database,
-    verifiedInputs: inputs.verifiedInputs, predecessorSourceSha: approved.predecessorSourceSha, repositoryRoot, now });
+    verifiedInputs: inputs.verifiedInputs, predecessorSourceSha: approved.predecessorSourceSha, repositoryRoot, now: preparedAt });
   const { preparationSha256: recomputed, ...body } = actual; void recomputed;
   body.generatedAt = approved.generatedAt;
   assert.deepEqual(body, approved, "Deployment producer closure was substituted");

@@ -194,3 +194,23 @@ test(`deployment consumer preserves opaque ID and rejects substituted proof and 
   assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...context, now: input.now + APP_ONLY.maxEvidenceAgeMs + 1 }));
 });
 }
+
+test("deployment reauthenticates historical verifier inputs at preparation time while requiring a fresh database result", () => {
+  const input = fixture(); input.databaseSecretArn = input.verifierIam.databaseSecretArn;
+  const verifierInputs = { schemaVersion: 1, kind: "APP_ONLY_VERIFIER_INPUTS", preparation: prepareAppOnlyVerifier(input),
+    images: input.images, iam: input.iam, verifierIam: input.verifierIam, runtime: input.runtime,
+    verifierImage: input.verifierImage, requirements: input.requirements, requirementsReference: {} };
+  const { evidenceSha256: ignored, ...database } = input.database; void ignored;
+  input.database = signed({ ...database, generatedAt: new Date(input.now + 8 * 60_000).toISOString() });
+  const preparation = prepareAppOnlyDeployment({ ...input, now: input.now + 10 * 60_000 });
+  const deploymentInputs = { schemaVersion: 1, kind: "APP_ONLY_DEPLOYMENT_INPUTS", preparation,
+    inputs: verifierInputs, database: input.database, compatibilityReference: { sourceSha: input.sourceSha },
+    verifierTaskArn: "fixture", verifierTaskDefinitionArn: "fixture" };
+  const context = { inputs: deploymentInputs, sourceSha: input.sourceSha, live: input.live,
+    repositoryRoot: input.repositoryRoot, now: input.now + 16 * 60_000 };
+  assert.deepEqual(authenticateAppOnlyDeploymentInputs(context), preparation);
+  assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...context, now: input.now + 24 * 60_000 }),
+    /Stale compatibility evidence/);
+  const changed = structuredClone(deploymentInputs); changed.database.domains.RLS_POLICIES = "UNPROVEN";
+  assert.throws(() => authenticateAppOnlyDeploymentInputs({ ...context, inputs: changed }));
+});
