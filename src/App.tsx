@@ -16,6 +16,7 @@ import RouteMetricsTracker from "@/components/RouteMetricsTracker";
 import { RouteScrollReset } from "@/components/RouteScrollReset";
 import { SeoController } from "@/components/seo/SeoController";
 import { MutationEventBridge, queryClient } from "@/lib/query-client";
+import { clientSecurityScope } from "@/lib/api/request-coordinator";
 
 const Login = lazy(() => import("@/pages/Login"));
 const AcceptInvite = lazy(() => import("@/pages/AcceptInvite"));
@@ -176,9 +177,23 @@ function HelpRoleRoute({
    Routes
 ========================= */
 function AppRoutes() {
+  const location = useLocation();
+  const { user, navigationValidationPending } = useAuth();
+  const renderedLocation = React.useRef(location);
+  const displayScope = clientSecurityScope(user);
+  const renderedScope = React.useRef(displayScope);
+  React.useLayoutEffect(() => {
+    if (!navigationValidationPending) {
+      renderedLocation.current = location;
+      renderedScope.current = displayScope;
+    }
+  }, [location, displayScope, navigationValidationPending]);
+  const keepPreviousRoute = navigationValidationPending && renderedScope.current === displayScope;
+  if (navigationValidationPending && !keepPreviousRoute) return <LoadingScreen />;
+
   return (
     <Suspense fallback={<LoadingScreen />}>
-      <Routes>
+      <Routes location={keepPreviousRoute ? renderedLocation.current : location}>
         {/* Public */}
         <Route path="/" element={<Index />} />
         <Route path="/trust" element={<TrustCenter />} />

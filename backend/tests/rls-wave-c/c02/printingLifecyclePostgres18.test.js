@@ -662,6 +662,15 @@ async function main() {
   )`);
   assert.equal(relinked.printerRegistrationId, ids.registration);
   assert.equal(relinked.nativePrinterId, "printing-native");
+  const validationBefore = json(admin, `SELECT jsonb_build_object('status',"lastValidationStatus",'message',"lastValidationMessage")
+    FROM public."Printer" WHERE id='${ids.printer}'`);
+  denied(app, `SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','UPDATE','${ids.printer}',
+    '{"lastValidationStatus":"READY","lastValidationMessage":"unapproved manufacturer update"}'::jsonb
+  )`, /PRINTING_BOUNDARY_DENIED/);
+  assert.deepEqual(json(admin, `SELECT jsonb_build_object('status',"lastValidationStatus",'message',"lastValidationMessage")
+    FROM public."Printer" WHERE id='${ids.printer}'`), validationBefore,
+    "manufacturer validation must not mutate printer registry through UPDATE");
   assert.deepEqual(json(admin, `SELECT jsonb_build_object(
     'active',"isActive",'default',"isDefault",'registration',"printerRegistrationId",
     'native',"nativePrinterId",'status',"lastValidationStatus"

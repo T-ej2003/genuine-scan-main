@@ -173,13 +173,15 @@ const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
       ? `IPP attributes validated at ${result.printerUri}.`
       : "IPP endpoint does not advertise application/pdf.";
   }
-  await administerPrintingPrinter({
-    capability: printingCapability(req),
-    requestId: printingRequestId(req),
-    operation: "UPDATE",
-    printerId: printer.id,
-    payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
-  });
+  if (req.user!.role !== "MANUFACTURER_ADMIN") {
+    await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "UPDATE",
+      printerId: printer.id,
+      payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
+    });
+  }
   return {
     ok,
     ...(latencyMs === null ? {} : { latencyMs }),
@@ -480,7 +482,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
           requestId: printingRequestId(req),
         },
       });
-      if (result.outcome === "confirmed") {
+      if (result.outcome === "confirmed" && req.user.role !== "MANUFACTURER_ADMIN") {
         const metadata = printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
           ? printer.metadata
           : {};
