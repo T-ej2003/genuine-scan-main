@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createApiClientCore } from "@/lib/api/internal-client-core";
+import { createAuthApi } from "@/lib/api/internal-client-auth";
 import { clearRequestCoordinator, getRequestCoordinatorScope, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 const originalFetch = globalThis.fetch;
@@ -12,6 +13,17 @@ describe("internal client core HTML error handling", () => {
     globalThis.DOMParser = originalDomParser;
     vi.restoreAllMocks();
     setRequestCoordinatorScope(null);
+  });
+
+  it("lets the provider inspect /auth/me without an implicit second refresh", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ success: false, error: "Invalid or expired token" }),
+      { status: 401, headers: { "content-type": "application/json" } },
+    ));
+    const auth = createAuthApi(createApiClientCore());
+    const response = await auth.getCurrentUser({ skipAuthRefresh: true });
+    expect(response.status).toBe(401);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the session after refresh throttling and respects Retry-After", async () => {

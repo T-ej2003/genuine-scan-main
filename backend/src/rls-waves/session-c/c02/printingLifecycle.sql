@@ -1868,6 +1868,17 @@ BEGIN
     ) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
   END IF;
 
+  -- Lock registration before the printer FK, including non-key trust updates.
+  IF printer_row."printerRegistrationId" IS NOT NULL THEN
+    PERFORM 1 FROM public."PrinterRegistration" pr
+      WHERE pr.id=printer_row."printerRegistrationId" AND pr."userId"=actor."userId"
+        AND pr."orgId" IS NOT DISTINCT FROM printer_row."orgId"
+        AND pr."licenseeId" IS NOT DISTINCT FROM printer_row."licenseeId"
+        AND pr."trustStatus"='TRUSTED' AND pr."revokedAt" IS NULL
+      FOR SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
+  END IF;
+
   PERFORM set_config('app.printing_job_id',job_id,true),
           set_config('app.printing_session_row_id',session_id,true),
           set_config('app.printing_printer_id',p_printer_id,true);

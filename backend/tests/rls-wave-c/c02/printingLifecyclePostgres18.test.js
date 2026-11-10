@@ -168,6 +168,7 @@ async function main() {
   for (const table of ["Batch", "QRCode", "PrintJob", "PrintSession", "PrintItem", "Printer", "PrinterRegistration", "PrinterAgentSession", "ActionIdempotencyKey"]) {
     denied(app, `SELECT * FROM public."${table}" LIMIT 1`);
   }
+  denied(app, `UPDATE public."PrinterRegistration" SET "trustStatus"='REVOKED' WHERE id='${ids.registration}'`);
   // Each psql call is a distinct backend process. The database, not a process map,
   // serializes replacement and signed-message sequence advancement.
   const sessionA = "50000000-0000-4000-8000-000000000901";
@@ -661,6 +662,15 @@ async function main() {
   )`);
   assert.equal(relinked.printerRegistrationId, ids.registration);
   assert.equal(relinked.nativePrinterId, "printing-native");
+  const validationBefore = json(admin, `SELECT jsonb_build_object('status',"lastValidationStatus",'message',"lastValidationMessage")
+    FROM public."Printer" WHERE id='${ids.printer}'`);
+  denied(app, `SELECT app_rls.printing_printer_administration(
+    '${caps.maker}','printing-printer-admin','${requestId()}','UPDATE','${ids.printer}',
+    '{"lastValidationStatus":"READY","lastValidationMessage":"unapproved manufacturer update"}'::jsonb
+  )`, /PRINTING_BOUNDARY_DENIED/);
+  assert.deepEqual(json(admin, `SELECT jsonb_build_object('status',"lastValidationStatus",'message',"lastValidationMessage")
+    FROM public."Printer" WHERE id='${ids.printer}'`), validationBefore,
+    "manufacturer validation must not mutate printer registry through UPDATE");
   assert.deepEqual(json(admin, `SELECT jsonb_build_object(
     'active',"isActive",'default',"isDefault",'registration',"printerRegistrationId",
     'native',"nativePrinterId",'status',"lastValidationStatus"
@@ -788,12 +798,57 @@ async function main() {
     )`, /PRINTING_INVALID_INPUT/);
     assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.batch}'`), "0");
   }
-  const created = json(app, `SELECT app_rls.printing_create_job(
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=now() WHERE id='${ids.registration}'`);
+  denied(app, `SELECT app_rls.printing_create_job(
+    '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
+    'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL','${hash("revoked-lock")}',
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("revoked-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
+  )`, /PRINTER_ATTESTATION_STALE/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.batch}'`), "0");
+  psql(admin, `UPDATE public."PrinterRegistration" SET "revokedAt"=NULL WHERE id='${ids.registration}'`);
+  const registrationHolder = psqlAsync(admin, `BEGIN;
+    UPDATE public."PrinterRegistration" SET "lastSeenAt"=clock_timestamp() WHERE id='${ids.registration}';
+    SELECT pg_sleep(1.5) /* printing_registration_lock_held */;
+    DO $lock_order$ BEGIN
+      WHILE (SELECT count(*) FROM pg_stat_activity a
+        WHERE a.pid<>pg_backend_pid()
+          AND (a.query LIKE '%printing_create_lock_order_probe%'
+            OR a.query LIKE '%printing_test_label_lock_order_probe%')
+          AND a.wait_event_type='Lock' AND cardinality(pg_blocking_pids(a.pid))>0)<2 LOOP
+        IF clock_timestamp()>transaction_timestamp()+interval '15 seconds' THEN
+          RAISE EXCEPTION 'print create and diagnostic did not reach registration lock';
+        END IF;
+        PERFORM pg_sleep(0.05);
+      END LOOP;
+    END $lock_order$;
+    SELECT id FROM public."Printer" WHERE id='${ids.printer}' FOR UPDATE;
+    COMMIT;`);
+  let registrationLockHeld = false;
+  for (let attempt = 0; attempt < 40 && !registrationLockHeld; attempt += 1) {
+    registrationLockHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity
+      WHERE wait_event='PgSleep' AND query LIKE '%printing_registration_lock_held%'`)) > 0;
+    if (!registrationLockHeld) await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.equal(registrationLockHeld, true, "registration transaction must hold its row lock");
+  const createAttempt = psqlAsync(app, `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
     'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL','${hash("print-lock")}',
     '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("print-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
-  )`);
+  ) /* printing_create_lock_order_probe */`);
+  const diagnosticAttempt = psqlAsync(app, `SELECT app_rls.printing_test_label_job(
+    NULL,'${requestId()}','CLAIM','${ids.printer}',
+    jsonb_build_object('registrationId','${ids.registration}','agentId','printing-agent',
+      'deviceFingerprint','printing-device','nonce','concurrent_test_claim_0001','issuedAt',now()),
+    '{}'::jsonb
+  ) /* printing_test_label_lock_order_probe */`);
+  const [registrationResult, createResult, diagnosticResult] = await Promise.all([registrationHolder, createAttempt, diagnosticAttempt]);
+  assert.equal(registrationResult.status, 0, registrationResult.output);
+  assert.equal(createResult.status, 0, createResult.output);
+  assert.equal(diagnosticResult.status, 0, diagnosticResult.output);
+  assert.equal(JSON.parse(diagnosticResult.output).available, false);
+  const created = JSON.parse(createResult.output);
   assert.equal(created.preparedCount, 1);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_CREATED' AND "entityId"='${created.job.id}'`), "1");
   assert.equal(new Date(`${psql(admin, `SELECT to_char("tokenIssuedAt",'YYYY-MM-DD"T"HH24:MI:SS.MS') FROM public."QRCode" WHERE id='${ids.qr}'`)}Z`).toISOString(), signedAt);
   const immutableCode = psql(admin, `SELECT code FROM public."QRCode" WHERE id='${ids.qr}'`);
   psql(admin, `UPDATE public."Printer" SET metadata=jsonb_set(
