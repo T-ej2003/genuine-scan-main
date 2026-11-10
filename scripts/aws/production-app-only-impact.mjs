@@ -20,10 +20,11 @@ export function classifyAppOnlyPaths(paths) {
     else if (/^documents\/ops\/iam\//.test(path)) mark(path, ["IAM"]);
     else if (/^backend\/scripts\//.test(path)) mark(path, ["RLS", "DATABASE_SCHEMA", "MIGRATIONS"]);
     else if (/\.(?:sql|psql)$/.test(path)) mark(path, ["RLS", "DATABASE_SCHEMA", "MIGRATIONS"]);
-    else if (/^src\/test\//.test(path)) { /* isolated frontend test harness */ }
-    else if (/^(?:src\/|backend\/src\/|backend\/Dockerfile|backend\/package(?:-lock)?\.json|shared\/)/.test(path)) application.push(path);
+    else if (/^(?:src\/test\/|e2e\/)/.test(path)) { /* isolated test harness */ }
+    else if (/^(?:src\/|backend\/src\/|backend\/Dockerfile|backend\/package(?:-lock)?\.json|backend\/local-print-agent\/(?:install\/|packaging\/|releases\/manifest\.json$)|shared\/)/.test(path)
+      || path === ".dockerignore") application.push(path);
     else if (/^(?:\.github\/workflows\/|scripts\/aws\/|scripts\/check-|scripts\/validate-)/.test(path)
-      || path === "scripts/lib/aws-dr-validation-contract.mjs") releaseControl.push(path);
+      || path === "scripts/lib/aws-dr-validation-contract.mjs" || path === "scripts/release/generate-rf7-contract-inventory.mjs") releaseControl.push(path);
     else if (/^(?:scripts\/tests\/|backend\/tests\/|documents\/|docs\/)/.test(path) || /\.md$/.test(path)
       || path === "scripts/p2-test-db-tls.mjs") { /* source-only isolated harness; never a production input */ }
     else unknown.push(path);
