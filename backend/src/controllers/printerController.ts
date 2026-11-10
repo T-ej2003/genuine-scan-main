@@ -19,6 +19,7 @@ import {
 import { mapPrinterIdempotencyError } from "./printerIdempotencyResponse";
 import {
   administerPrintingPrinter,
+  abortPrintingIdempotency,
   beginPrintingIdempotency,
   completePrintingIdempotency,
   readPrintingProjection,
@@ -172,13 +173,15 @@ const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
       ? `IPP attributes validated at ${result.printerUri}.`
       : "IPP endpoint does not advertise application/pdf.";
   }
-  await administerPrintingPrinter({
-    capability: printingCapability(req),
-    requestId: printingRequestId(req),
-    operation: "UPDATE",
-    printerId: printer.id,
-    payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
-  });
+  if (req.user!.role !== "MANUFACTURER_ADMIN") {
+    await administerPrintingPrinter({
+      capability: printingCapability(req),
+      requestId: printingRequestId(req),
+      operation: "UPDATE",
+      printerId: printer.id,
+      payload: { lastValidationStatus: ok ? "READY" : "BLOCKED", lastValidationMessage: detail },
+    });
+  }
   return {
     ok,
     ...(latencyMs === null ? {} : { latencyMs }),
@@ -387,6 +390,9 @@ export const testPrinter = async (req: AuthRequest, res: Response) => {
 };
 
 export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
+  let idempotency;
+  const dispatchState = { current: "not_dispatched" as "not_dispatched" | "queue_uncertain" | "dispatch_started" | "confirmed" };
+  let outcomeRecorded = false;
   try {
     if (!req.user || !isOpsRole(req.user.role)) {
       return res.status(403).json({ success: false, error: "Access denied" });
@@ -399,7 +405,6 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
     const printerId = paramsParsed.data.id;
 
     const scope = resolveScope(req);
-    let idempotency;
     try {
       const key = String(extractIdempotencyKey(req.headers as any, req.body as any) || "").trim();
       if (!key) throw new Error("IDEMPOTENCY_KEY_REQUIRED");
@@ -428,7 +433,12 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       operation: "PRINTER",
       subjectId: printerId,
     });
-    if (!printer) return res.status(404).json({ success: false, error: "Printer not found" });
+    if (!printer) {
+      await abortPrintingIdempotency(idempotency.context).catch(() => {
+        console.error("testPrinterLabel idempotency abort failed");
+      });
+      return res.status(404).json({ success: false, error: "Printer not found" });
+    }
 
     const confirmationMode = resolvePrinterConfirmationMode(printer as any);
     const validation = await validatePrinterTransport(req, printer);
@@ -458,7 +468,7 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       });
 
       const responsePayload = { success: true, data };
-      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      await abortPrintingIdempotency(idempotency.context);
       return res.json(responsePayload);
     }
 
@@ -466,12 +476,13 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       const result = await printTestLabelForRegisteredPrinter({
         printer: printer as any,
         actorUserId: scope.userId,
+        onDispatchStateChange: (state) => { dispatchState.current = state; },
         boundary: {
           capability: printingCapability(req),
           requestId: printingRequestId(req),
         },
       });
-      if (result.outcome === "confirmed") {
+      if (result.outcome === "confirmed" && req.user.role !== "MANUFACTURER_ADMIN") {
         const metadata = printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
           ? printer.metadata
           : {};
@@ -508,11 +519,15 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
 
       const responsePayload = { success: true, data: result };
       await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      outcomeRecorded = true;
       return res.json(responsePayload);
     } catch (error: any) {
+      if (outcomeRecorded) throw error;
       const data = {
         outcome: "needs_attention" as const,
-        message: sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
+        message: dispatchState.current === "confirmed"
+          ? "The printer confirmed the label, but recording the result needs attention. Do not retry automatically."
+          : sanitizePrinterActionError(error?.message, "The live printer test could not complete right now."),
         confirmationMode,
         connectionType: printer.connectionType,
         deliveryMode: printer.deliveryMode || PrinterDeliveryMode.DIRECT,
@@ -532,10 +547,20 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
       });
 
       const responsePayload = { success: true, data };
-      await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+      if (dispatchState.current === "not_dispatched") {
+        await abortPrintingIdempotency(idempotency.context);
+      } else {
+        await completePrintingIdempotency({ ...idempotency.context, statusCode: 200, responsePayload });
+        outcomeRecorded = true;
+      }
       return res.json(responsePayload);
     }
   } catch (error: any) {
+    if (idempotency && dispatchState.current === "not_dispatched") {
+      await abortPrintingIdempotency(idempotency.context).catch(() => {
+        console.error("testPrinterLabel idempotency abort failed");
+      });
+    }
     console.error("testPrinterLabel error:", error);
     return res.status(400).json({
       success: false,
