@@ -208,8 +208,12 @@ export const assertEcrRepositoryPolicyResponse = (response, { repositoryName, re
 
 const ecrPrincipalMatches = (principal, principalArn) => principal === "*" || [principal?.AWS].flat().some((value) => value === "*"
   || value === principalArn || value === ACCOUNT || value === `arn:aws:iam::${ACCOUNT}:root`);
+// An account principal delegates authority; it is not a direct grant to an IAM role with no identity Allow.
+const ecrDirectPrincipalMatches = (principal, principalArn) => principal === "*" || [principal?.AWS].flat().some((value) => value === "*" || value === principalArn);
 const ecrStatementMatches = (statement, { principalArn, action, resource }) => ecrPrincipalMatches(statement.Principal, principalArn)
   && actionMatches(statement.Action, action) && (!Object.hasOwn(statement, "Resource") || resourceMatches(statement.Resource, resource));
+const ecrDirectAllowMatches = (statement, item) => ecrDirectPrincipalMatches(statement.Principal, item.principalArn)
+  && actionMatches(statement.Action, item.action) && (!Object.hasOwn(statement, "Resource") || resourceMatches(statement.Resource, item.resource));
 
 async function collectEcrRepositoryPolicyMetadata(dependency, runtimeDependencies, aws, readEcrRepositoryPolicy) {
   const match = ECR_REPOSITORY_ARN.exec(dependency.resource || "");
@@ -237,11 +241,12 @@ async function collectEcrRepositoryPolicyMetadata(dependency, runtimeDependencie
   if (parsed.statements.some((statement) => statement.Condition || statement.NotPrincipal || statement.NotAction || statement.NotResource)) {
     throw new Error(`Runtime ECR repository policy contains unsupported inverse or condition semantics for ${dependency.resource}.`);
   }
-  if (parsed.statements.some((statement) => statement.Effect === "Deny" && required.some((item) => ecrStatementMatches(statement, item)))
-    || required.some((item) => !parsed.statements.some((statement) => statement.Effect === "Allow" && ecrStatementMatches(statement, item)))) {
+  if (parsed.statements.some((statement) => statement.Effect === "Deny" && required.some((item) => ecrStatementMatches(statement, item)))) {
     throw new Error(`Runtime ECR repository policy does not authorize the exact runtime pull for ${dependency.resource}.`);
   }
-  const state = { resource: dependency.resource, repositoryName, imageDigest, imageAvailability: "EXISTS", repositoryPolicyState: "ALLOWS_RUNTIME", repositoryPolicySha256: canonicalSha256(parsed.policy) };
+  const repositoryPolicyState = required.every((item) => parsed.statements.some((statement) => statement.Effect === "Allow" && ecrDirectAllowMatches(statement, item)))
+    ? "ALLOWS_RUNTIME" : "NO_INTERSECTING_DENY";
+  const state = { resource: dependency.resource, repositoryName, imageDigest, imageAvailability: "EXISTS", repositoryPolicyState, repositoryPolicySha256: canonicalSha256(parsed.policy) };
   return Object.freeze({ ...state, metadataSha256: canonicalSha256(state) });
 }
 
@@ -326,7 +331,7 @@ export function addEncryptionDependencies(candidate, dependencies, resourceMetad
     const metadata = resourceMetadata?.[dependency.resource];
     const expected = metadata && canonicalSha256({ resource: metadata.resource, repositoryName: metadata.repositoryName, imageDigest: metadata.imageDigest, imageAvailability: metadata.imageAvailability, repositoryPolicyState: metadata.repositoryPolicyState, repositoryPolicySha256: metadata.repositoryPolicySha256 });
     const policyStateValid = metadata?.repositoryPolicyState === "NO_POLICY" && metadata.repositoryPolicySha256 === canonicalSha256(null)
-      || metadata?.repositoryPolicyState === "ALLOWS_RUNTIME" && HEX.test(metadata.repositoryPolicySha256 || "");
+      || ["ALLOWS_RUNTIME", "NO_INTERSECTING_DENY"].includes(metadata?.repositoryPolicyState) && HEX.test(metadata.repositoryPolicySha256 || "");
     if (!metadata || metadata.resource !== dependency.resource || !policyStateValid
       || metadata.repositoryName !== dependency.context?.repositoryName || metadata.imageDigest !== dependency.context?.imageDigest || metadata.imageAvailability !== "EXISTS"
       || metadata.metadataSha256 !== expected) throw new Error(`Runtime ECR image or repository-policy metadata is missing or stale for ${dependency.resource}.`);
@@ -706,7 +711,7 @@ export async function collectLiveRolePolicyIdentity(principalArns, aws, candidat
   return Object.freeze({ ...body, identitySha256: canonicalSha256(body) });
 }
 
-export async function simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode = "managed-wildcard" } = {}) {
+export async function simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode = "managed-wildcard", resourceMetadata } = {}) {
   if (typeof aws !== "function") throw new Error("Runtime closure requires authenticated IAM simulation.");
   if (!["managed-wildcard", "exact-dependency"].includes(loggingResourceMode)) throw new Error("Runtime logging simulation mode is unsupported.");
   const simulations = {};
@@ -736,7 +741,17 @@ export async function simulateRuntimeDependencies(dependencies, aws, { loggingRe
     // lowercase the request without changing the policy or resource boundary.
     const args = ["iam", "simulate-principal-policy", "--policy-source-arn", dependency.principalArn, "--action-names", dependency.action.toLowerCase(), "--resource-arns", resource];
     if (dependency.action === "kms:Decrypt") args.push("--context-entries", `ContextKeyName=kms:ViaService,ContextKeyValues=${dependency.context?.["kms:ViaService"]},ContextKeyType=string`);
-    const allowed = decisionFor(await aws(args), dependency.action, resource) === "allowed";
+    const iamDecision = decisionFor(await aws(args), dependency.action, resource);
+    const metadata = resourceMetadata?.[dependency.resource];
+    const repositoryAllows = dependency.action.startsWith("ecr:") && dependency.resource !== "*"
+      && ROLE_ARN.test(dependency.principalArn) && metadata?.resource === dependency.resource
+      && metadata.repositoryName === dependency.context?.repositoryName && metadata.imageDigest === dependency.context?.imageDigest
+      && metadata.imageAvailability === "EXISTS" && metadata.repositoryPolicyState === "ALLOWS_RUNTIME"
+      && HEX.test(metadata.repositoryPolicySha256 || "")
+      && metadata.metadataSha256 === canonicalSha256({ resource: metadata.resource, repositoryName: metadata.repositoryName,
+        imageDigest: metadata.imageDigest, imageAvailability: metadata.imageAvailability,
+        repositoryPolicyState: metadata.repositoryPolicyState, repositoryPolicySha256: metadata.repositoryPolicySha256 });
+    const allowed = iamDecision === "allowed" || iamDecision === "implicitDeny" && repositoryAllows;
     simulations[dependency.dependencyId] = { principalArn: dependency.principalArn, action: dependency.action, resource: dependency.resource, decision: allowed ? "allowed" : "denied" };
   }
   return Object.freeze(simulations);
@@ -747,7 +762,7 @@ export async function collectRuntimeConsumabilityEvidence({ sourceSha, candidate
   const dependencies = addEncryptionDependencies(candidate, deriveEcsRuntimeDependencies(candidate), resourceMetadata);
   const livePolicyIdentity = await collectLiveRolePolicyIdentity(dependencies.map(({ principalArn }) => principalArn), aws, candidate);
   const green = Boolean(sourceGreenExecutionPolicy(candidate));
-  const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: green ? "exact-dependency" : "managed-wildcard" });
+  const simulations = await simulateRuntimeDependencies(dependencies, aws, { loggingResourceMode: green ? "exact-dependency" : "managed-wildcard", resourceMetadata });
   if (green && canonicalSha256(await collectLiveRolePolicyIdentity(dependencies.map(({ principalArn }) => principalArn), aws, candidate)) !== canonicalSha256(livePolicyIdentity)) {
     throw new Error("Green runtime IAM changed during dependency simulation.");
   }

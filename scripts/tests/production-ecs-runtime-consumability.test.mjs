@@ -576,7 +576,7 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
     await assert.rejects(() => collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal, Action: "ecr:Batch*Image" }))), /does not authorize/, JSON.stringify(Principal));
   }
   const accountAllow = await collectRuntimeResourceMetadata(value, policyAws(policyWith({ ...allowPull(), Principal: { AWS: registryId } })));
-  assert.equal(accountAllow[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  assert.equal(accountAllow[repository].repositoryPolicyState, "NO_INTERSECTING_DENY");
   const foreignDeny = await collectRuntimeResourceMetadata(value, policyAws(policyWith(allowPull(), { Effect: "Deny", Principal: { AWS: "arn:aws:iam::000000000000:root" }, Action: "ecr:*" })));
   assert.equal(foreignDeny[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
   for (const Resource of [`${repository.slice(0, -7)}*`, `${repository.slice(0, -1)}?`, ["arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker", repository]]) {
@@ -625,6 +625,77 @@ test("real DescribeImages detail identity and ECR policy state fail closed on ev
   assert.throws(() => assertRuntimeConsumabilityEvidence(passing(value, authenticated).evidence, { sourceSha, candidate: changedRepository, livePolicyIdentity: passing(value, authenticated).livePolicyIdentity, resourceMetadata: authenticated }), /stale|missing/);
   const staleDigest = structuredClone(authenticated); staleDigest[repository].imageDigest = `sha256:${"0".repeat(64)}`;
   assert.throws(() => passing(value, staleDigest), /image or repository-policy metadata/);
+});
+
+test("same-account ECR pull accepts identity or repository authority and rejects denials and ambiguity", async () => {
+  const executionRoleArn = "arn:aws:iam::368992683803:role/mscqr-ecs-execution-role";
+  const repository = "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend";
+  const value = { executionRoleArn, taskRoleArn: "arn:aws:iam::368992683803:role/mscqr-ecs-task-role",
+    containerDefinitions: [{ name: "backend", image: `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}` }] };
+  const pulls = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage"];
+  const policy = (...Statement) => ({ Version: "2012-10-17", Statement });
+  const allowPull = { Effect: "Allow", Principal: { AWS: executionRoleArn }, Action: pulls, Resource: repository };
+  const retirementDeny = { Effect: "Deny", Principal: "*", Action: ["ecr:BatchDeleteImage", "ecr:DeleteRepository"], Resource: repository };
+  const legacyPublisherRead = { Effect: "Allow", Principal: { AWS: "arn:aws:iam::368992683803:role/github-actions-mscqr-deploy" },
+    Action: "ecr:GetRepositoryPolicy", Resource: repository };
+  const metadataFor = (document, imageDigest = digest) => collectRuntimeResourceMetadataCore(value, async (args) => {
+    if (args[1] === "describe-images") return { imageDetails: [{ registryId, repositoryName, imageDigest }] };
+    if (args[1] === "get-repository-policy") return ecrPolicyResponse(document);
+    throw new Error(args.slice(0, 2).join(" "));
+  });
+  const dependencies = deriveEcsRuntimeDependencies(value);
+  const simulate = (resourceMetadata, decisions = {}, mutate = (result) => result) => simulateRuntimeDependencies(dependencies, async (args) => {
+    const action = args[args.indexOf("--action-names") + 1];
+    const resource = args[args.indexOf("--resource-arns") + 1];
+    return { EvaluationResults: [mutate({ EvalActionName: action, EvalResourceName: resource,
+      EvalDecision: decisions[action] || "allowed", MissingContextValues: [] }, action)] };
+  }, { resourceMetadata });
+  const decisions = Object.fromEntries(pulls.map((action) => [action.toLowerCase(), "implicitDeny"]));
+  const allAllowed = (results) => Object.values(results).every(({ decision }) => decision === "allowed");
+  const identity = await metadataFor(policy(retirementDeny, legacyPublisherRead));
+  assert.equal(identity[repository].repositoryPolicyState, "NO_INTERSECTING_DENY");
+  assert.doesNotThrow(() => addEncryptionDependencies(value, dependencies, identity));
+  assert.equal(allAllowed(await simulate(identity)), true);
+  const resource = await metadataFor(policy(allowPull, retirementDeny));
+  assert.equal(resource[repository].repositoryPolicyState, "ALLOWS_RUNTIME");
+  assert.equal(allAllowed(await simulate(resource, decisions)), true);
+  assert.equal(allAllowed(await simulate(undefined, decisions)), false);
+  const partial = await metadataFor(policy({ ...allowPull, Action: pulls[0] }));
+  assert.equal(partial[repository].repositoryPolicyState, "NO_INTERSECTING_DENY");
+  assert.equal(allAllowed(await simulate(partial)), true);
+  assert.equal(allAllowed(await simulate(partial, decisions)), false);
+  const delegated = await metadataFor(policy({ ...allowPull, Principal: { AWS: `arn:aws:iam::${registryId}:root` } }));
+  assert.equal(delegated[repository].repositoryPolicyState, "NO_INTERSECTING_DENY");
+  assert.equal(allAllowed(await simulate(delegated, decisions)), false);
+  await assert.rejects(() => metadataFor(policy(allowPull, { Effect: "Deny", Principal: "*", Action: pulls[2], Resource: repository })), /does not authorize/);
+  assert.equal(allAllowed(await simulate(resource, { ...decisions, "ecr:batchgetimage": "explicitDeny" })), false);
+  assert.equal(allAllowed(await simulate(resource, { ...decisions, "ecr:getauthorizationtoken": "implicitDeny" })), false);
+  assert.equal(allAllowed(await simulate(identity, { "ecr:batchgetimage": "implicitDeny" })), false);
+  assert.equal(allAllowed(await simulate(resource, decisions, (result, action) => action === "ecr:batchgetimage"
+    ? { ...result, OrganizationsDecisionDetail: { AllowedByOrganizations: false } } : result)), false);
+  assert.equal(allAllowed(await simulate(resource, decisions, (result, action) => action === "ecr:batchgetimage"
+    ? { ...result, PermissionsBoundaryDecisionDetail: { AllowedByPermissionsBoundary: false } } : result)), false);
+  assert.equal(allAllowed(await simulate(resource, decisions, (result, action) => action === "ecr:batchgetimage"
+    ? { ...result, MissingContextValues: ["aws:PrincipalTag/team"] } : result)), false);
+  assert.equal(allAllowed(await simulate(resource, decisions, (result, action) => action === "ecr:batchgetimage"
+    ? { ...result, EvalResourceName: "*" } : result)), false);
+  const stale = structuredClone(resource); stale[repository].imageDigest = `sha256:${"0".repeat(64)}`;
+  assert.equal(allAllowed(await simulate(stale, decisions)), false);
+  await assert.rejects(() => metadataFor(policy(allowPull), `sha256:${"0".repeat(64)}`), /image availability/);
+  const wrongRole = { ...value, executionRoleArn: "arn:aws:iam::368992683803:role/other-execution-role" };
+  const wrongDependencies = deriveEcsRuntimeDependencies(wrongRole);
+  const wrongMetadata = await collectRuntimeResourceMetadataCore(wrongRole, async (args) => {
+    if (args[1] === "describe-images") return { imageDetails: [{ registryId, repositoryName, imageDigest: digest }] };
+    if (args[1] === "get-repository-policy") return ecrPolicyResponse(policy(allowPull));
+    throw new Error(args.slice(0, 2).join(" "));
+  });
+  assert.equal(wrongMetadata[repository].repositoryPolicyState, "NO_INTERSECTING_DENY");
+  assert.equal(Object.values(await simulateRuntimeDependencies(wrongDependencies, async (args) => ({ EvaluationResults: [{
+    EvalActionName: args[args.indexOf("--action-names") + 1], EvalResourceName: args[args.indexOf("--resource-arns") + 1],
+    EvalDecision: args.includes("ecr:getauthorizationtoken") ? "allowed" : "implicitDeny", MissingContextValues: [] }] }), { resourceMetadata: wrongMetadata })).every(({ decision }) => decision === "allowed"), false);
+  assert.throws(() => deriveEcsRuntimeDependencies({ ...value, containerDefinitions: [{ name: "backend",
+    image: `000000000000.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@${digest}` }] }), /exact production ECR digest/);
+  assert.throws(() => deriveEcsRuntimeDependencies({ ...value, executionRoleArn: "arn:aws:iam::000000000000:role/foreign" }), /outside the production account/);
 });
 
 test("scheduled secret deletion and availability TOCTOU fail before runtime mutation", async () => {
