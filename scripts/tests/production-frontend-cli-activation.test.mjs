@@ -115,6 +115,7 @@ test("one-use journal claim is exclusive and every record has exact S3 readback"
     assert.equal(journal.claimOperation(id, "FRONTEND:AUTHORIZATION:CLAIM", claim), true);
     assert.deepEqual(journal.readOperation(id, "FRONTEND:AUTHORIZATION:CLAIM"), claim);
     assert.throws(() => journal.claimOperation(id, "FRONTEND:AUTHORIZATION:CLAIM", claim));
+    assert.throws(() => journal.claimOperation(id, "FRONTEND:AUTHORIZATION:CLAIM", { sourceSha: "f".repeat(40) }));
     assert.equal(objects.size, 1);
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });

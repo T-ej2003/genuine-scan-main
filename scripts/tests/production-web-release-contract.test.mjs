@@ -368,9 +368,10 @@ test("frontend activation updates once and rollback can only restore its capture
   assert.deepEqual(updates, [candidateArn, taskArn]);
 });
 
-test("journaled frontend activation reuses registration, service update and completion after lost responses", async () => {
+test("journaled frontend activation replaces inherited operation tag and reconciles lost responses", async () => {
   const authorization = fixture().authorization;
   const candidateArn = taskArn.replace(":20", ":29"); const operationId = "f".repeat(64);
+  const predecessorTask = { ...task, tags: [{ key: "MSCQRWebActivationOperation", value: "e".repeat(64) }, { key: "Owner", value: "web" }] };
   const records = new Map(); let active = taskArn, registered, registrations = 0, updates = 0, failAt = "register";
   const journal = { readOperation: async (_, phase) => records.get(phase) || null,
     writeOperation: async (_, phase, value) => {
@@ -383,7 +384,7 @@ test("journaled frontend activation reuses registration, service update and comp
     deployments: [{ ...service.deployments[0], taskDefinition: active }] });
   const options = { sourceSha, webAuthorization: authorization, verifyWebAuthorization: () => true, now: createdAt,
     journal, operationId, readService: async () => current(),
-    describeTaskDefinition: async arn => arn === taskArn ? task : registered,
+    describeTaskDefinition: async arn => arn === taskArn ? predecessorTask : registered,
     listTaskDefinitions: async () => registered ? [candidateArn] : [],
     registerTaskDefinition: async candidate => { registrations++; registered = { ...candidate, taskDefinitionArn: candidateArn,
       revision: 29, status: "ACTIVE" }; if (failAt === "register") throw Error("registration response lost"); return { taskDefinitionArn: candidateArn }; },
@@ -392,6 +393,7 @@ test("journaled frontend activation reuses registration, service update and comp
     waitStable: async () => {}, verifyHealth: async () => ({ ready: true, loginStatus: 200 }) };
   await assert.rejects(runGovernedFrontendActivation(options), /registration response lost/);
   assert.equal(registrations, 1); assert.equal(updates, 0);
+  assert.deepEqual(registered.tags, [{ key: "Owner", value: "web" }, { key: "MSCQRWebActivationOperation", value: operationId }]);
   failAt = "update";
   await assert.rejects(runGovernedFrontendActivation(options), /update response lost/);
   assert.equal(registrations, 1); assert.equal(updates, 1);
@@ -403,6 +405,24 @@ test("journaled frontend activation reuses registration, service update and comp
   await assert.rejects(runGovernedFrontendActivation({ ...options, sourceSha: "0".repeat(40) }), /authorization|source|release/);
   active = taskArn;
   await assert.rejects(runGovernedFrontendActivation(options), /CONFLICTED/);
+});
+
+test("journaled frontend activation rejects an operation ID already on its predecessor", async () => {
+  const operationId = "f".repeat(64); let registrations = 0, updates = 0;
+  const predecessorTask = { ...task, tags: [{ key: "MSCQRWebActivationOperation", value: operationId }] };
+  const records = new Map();
+  const journal = { readOperation: async (_, phase) => records.get(phase) || null,
+    writeOperation: async (_, phase, value) => { records.set(phase, value); return true; },
+    claimOperation: async () => { throw Error("unexpected native claim"); } };
+  await assert.rejects(runGovernedFrontendActivation({ sourceSha, webAuthorization: fixture().authorization,
+    verifyWebAuthorization: () => true, now: createdAt, journal, operationId,
+    readService: async () => service, describeTaskDefinition: async () => predecessorTask,
+    listTaskDefinitions: async () => [], registerTaskDefinition: async () => { registrations++; },
+    updateService: async () => { updates++; }, waitStable: async () => {},
+    verifyHealth: async () => ({ ready: true, loginStatus: 200 }),
+  }), /Frontend operation tag already exists/);
+  assert.equal(registrations, 0); assert.equal(updates, 0);
+  assert.deepEqual([...records.keys()], ["FRONTEND:PREDECESSOR"]);
 });
 
 test("web workflow and IAM are fixed, OIDC-only, and isolated from Stage-B four-image authority", () => {
