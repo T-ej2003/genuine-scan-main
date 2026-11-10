@@ -173,7 +173,6 @@ const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
       ? `IPP attributes validated at ${result.printerUri}.`
       : "IPP endpoint does not advertise application/pdf.";
   }
-  // SQL reserves printer registry UPDATE for platform and licensee administrators.
   if (req.user!.role !== "MANUFACTURER_ADMIN") {
     await administerPrintingPrinter({
       capability: printingCapability(req),
@@ -483,7 +482,6 @@ export const testPrinterLabel = async (req: AuthRequest, res: Response) => {
           requestId: printingRequestId(req),
         },
       });
-      // Manufacturer diagnostic completion and audit are authorized; registry UPDATE is not.
       if (result.outcome === "confirmed" && req.user.role !== "MANUFACTURER_ADMIN") {
         const metadata = printer.metadata && typeof printer.metadata === "object" && !Array.isArray(printer.metadata)
           ? printer.metadata
