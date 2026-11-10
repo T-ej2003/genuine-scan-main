@@ -186,9 +186,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : Promise.resolve({ success: false, error: "Session refresh is unavailable" });
       const getCurrentUser = () =>
         canGetCurrentUser
-          ? apiClient.getCurrentUser()
+          ? apiClient.getCurrentUser({ skipAuthRefresh: true })
           : Promise.resolve({ success: false, error: "Current session lookup is unavailable" });
-      const restoreAttempts: Array<() => Promise<any>> = apiClient.getToken?.()
+      const restoreAttempts: Array<() => Promise<any>> = user || apiClient.getToken?.()
         ? [getCurrentUser, refreshSession]
         : [refreshSession, getCurrentUser];
       let transientFailure = false;
@@ -219,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             refreshCooldownUntilRef.current,
             Date.now() + Math.max(fallbackSec, Number(res?.retryAfterSec) || 0) * 1000,
           );
+          if (attempt === getCurrentUser && user && res?.status !== 403) break;
           continue;
         }
       }
@@ -255,6 +256,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const payload = authPayloadFromResponseData(response.data);
           if (payload?.user && isRequestCoordinatorUserCurrent(normalizeUser({ ...payload.user, auth: payload.auth || null }))) {
             retryCount = 0;
+            lastRefreshSuccessAtRef.current = Date.now();
             setAuthStateFromPayload(payload);
             return;
           }

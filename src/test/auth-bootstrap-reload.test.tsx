@@ -188,6 +188,44 @@ describe("auth bootstrap after reload", () => {
     await waitFor(() => expect(apiClient.getPrinterConnectionStatus).toHaveBeenCalledTimes(1));
   });
 
+  it("validates a known cookie session without rotating it on ordinary navigation", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let resolveMe: (value: Awaited<ReturnType<typeof apiClient.getCurrentUser>>) => void = () => undefined;
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: true, data: { user: manufacturerUser } } as any);
+    vi.mocked(apiClient.getCurrentUser).mockImplementation(() => new Promise(resolve => { resolveMe = resolve; }) as ReturnType<typeof apiClient.getCurrentUser>);
+
+    renderAt("/dashboard");
+    await screen.findByTestId("protected-dashboard-probe");
+    now += 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(1));
+    expect(apiClient.refreshSession).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("protected-dashboard-probe")).toBeInTheDocument();
+    expect(apiClient.getBatches).not.toHaveBeenCalled();
+
+    await act(async () => resolveMe({ success: true, data: { user: manufacturerUser } } as any));
+    expect(await screen.findByTestId("protected-batches-probe")).toBeInTheDocument();
+    expect(apiClient.refreshSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not rotate a known session when the validation read is throttled", async () => {
+    let now = 100_000;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    vi.mocked(apiClient.refreshSession).mockResolvedValue({ success: true, data: { user: manufacturerUser } } as any);
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValue({ success: false, status: 429, retryAfterSec: 755 } as any);
+
+    renderAt("/dashboard");
+    await screen.findByTestId("protected-dashboard-probe");
+    now += 61_000;
+    fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledOnce());
+    expect(apiClient.refreshSession).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("protected-dashboard-probe")).toBeInTheDocument();
+    expect(apiClient.getBatches).not.toHaveBeenCalled();
+  });
+
   it("holds the old route and destination queries until navigation validation settles", async () => {
     let now = 100_000;
     vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -265,6 +303,7 @@ describe("auth bootstrap after reload", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
     fireEvent.click(screen.getByRole("button", { name: "Open latest batches" }));
     expect(apiClient.getBatches).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledTimes(2));
     await act(async () => resolveRefresh({ success: true, data: { user: { ...manufacturerUser, licenseeId: "licensee-2" } } } as any));
     expect(await screen.findByTestId("protected-batches-probe")).toHaveAttribute("data-licensee", "licensee-2");
     expect(window.location.search).toBe("?view=latest");
@@ -282,6 +321,7 @@ describe("auth bootstrap after reload", () => {
     await screen.findByTestId("protected-dashboard-probe");
     now += 61_000;
     fireEvent.click(screen.getByRole("button", { name: "Open batches" }));
+    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByRole("button", { name: "Log out" }));
     await act(async () => resolveRefresh({ success: true, data: { user: manufacturerUser } } as any));
     await waitFor(() => expect(window.location.pathname).toBe("/login"));

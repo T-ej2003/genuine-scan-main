@@ -1,6 +1,6 @@
 import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useNavigate } from "react-router";
 
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
@@ -35,6 +35,9 @@ function NavigationProbe() {
 const mount = () => render(<MemoryRouter initialEntries={["/dashboard"]}><AuthProvider><Probe /></AuthProvider></MemoryRouter>);
 
 describe("auth scope refresh", () => {
+  beforeEach(() => {
+    vi.mocked(apiClient.getCurrentUser).mockResolvedValue({ success: false, status: 401 } as any);
+  });
   afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.clearAllMocks(); scope = "initial"; ready = true; });
 
   it("hydrates a successful current-user response after the client updates coordinator scope", async () => {
@@ -90,8 +93,10 @@ describe("auth scope refresh", () => {
     mount();
     await screen.findByText("actor");
     expect(apiClient.refreshSession).toHaveBeenCalledOnce();
+    await act(async () => { await Promise.resolve(); });
     fireEvent.click(screen.getByRole("button", { name: "Refresh session" }));
-    await waitFor(() => expect(apiClient.refreshSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(apiClient.getCurrentUser).toHaveBeenCalledTimes(2));
+    expect(apiClient.refreshSession).toHaveBeenCalledOnce();
   });
 
   it("retries a transient scope refresh after Retry-After", async () => {
