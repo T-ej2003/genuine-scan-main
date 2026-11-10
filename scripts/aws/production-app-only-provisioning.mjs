@@ -115,6 +115,7 @@ export function verifyAppOnlyEffectivePermissions({ run, verifierArn, predecesso
   const context = (definition = `${family}2147483647`, cluster = APP_ONLY.clusterArn, passedTo = "ecs-tasks.amazonaws.com") => [
     ["aws:RequestedRegion", APP_ONLY.region, "string"], ["ecs:cluster", cluster, "string"],
     ["ecs:task-definition", definition, "string"], ["ecs:enable-execute-command", "false", "string"],
+    ["ecs:CreateAction", "RegisterTaskDefinition", "string"],
     ["iam:PassedToService", passedTo, "string"], ["kms:ResourceAliases", "alias/mscqr-unrelated-simulation-probe", "string"],
   ].map(([ContextKeyName, value, ContextKeyType]) => ({ ContextKeyName, ContextKeyValues: [value], ContextKeyType }));
   const cases = [
