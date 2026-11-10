@@ -52,3 +52,15 @@ test("only the exact isolated TLS fixture helper is classified as test tooling",
   assert.ok(Object.values(result.changed).every((changed) => !changed));
   assert.equal(classifyAppOnlyPaths(["scripts/p2-production-db-tls.mjs"]).sourceClassificationComplete, false);
 });
+
+test("historical connector packaging and test paths are classified without waiving live security domains", () => {
+  const application = [".dockerignore", "backend/local-print-agent/install/windows/Install Connector.cmd",
+    "backend/local-print-agent/packaging/build-connector-release.mjs", "backend/local-print-agent/releases/manifest.json"];
+  const result = classifyAppOnlyPaths([...application, "e2e/system-integration.spec.ts",
+    "scripts/release/generate-rf7-contract-inventory.mjs", "backend/src/rls-waves/session-c/c02/printingLifecycle.sql"]);
+  assert.equal(result.sourceClassificationComplete, true);
+  assert.deepEqual(result.application, application);
+  assert.deepEqual(result.releaseControl, ["scripts/release/generate-rf7-contract-inventory.mjs"]);
+  assert.equal(result.changed.RLS, true);
+  assert.equal(classifyAppOnlyPaths(["backend/local-print-agent/unknown-runtime.sh"]).sourceClassificationComplete, false);
+});
