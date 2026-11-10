@@ -142,6 +142,7 @@ test("effective verification checks fixed positive and negative scopes and rejec
     assert.deepEqual(args.slice(0, 2), ["iam", "simulate-principal-policy"]);
     const action = value("--action-names"), resource = value("--resource-arns"), role = value("--policy-source-arn");
     const ctx = Object.fromEntries(JSON.parse(value("--context-entries")).map((e) => [e.ContextKeyName, e.ContextKeyValues[0]]));
+    assert.equal(ctx["ecs:CreateAction"], "RegisterTaskDefinition");
     const isApp = role === APP_ONLY.roleArn;
     assert.equal(action, action.toLowerCase());
     const allowed = isApp ? action === "ecs:updateservice" && resource === APP_ONLY.serviceArn && ctx["ecs:cluster"] === APP_ONLY.clusterArn && ctx["ecs:task-definition"].includes(`/${APP_ONLY.family}:`)
