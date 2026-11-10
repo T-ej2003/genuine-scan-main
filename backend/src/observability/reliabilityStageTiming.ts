@@ -12,11 +12,11 @@ type Route =
 
 type Stage =
   | "transaction" | "scope" | "data" | "cache" | "capability"
-  | "notifications" | "attention-projection" | "printing-projection"
+  | "notifications" | "attention-transaction" | "attention-projection" | "printing-projection"
   | "rows" | "total" | "enrichment";
 
 export const timeReliabilityStage = async <T>(
-  requestId: unknown,
+  diagnosticRequestId: unknown,
   route: Route,
   stage: Stage,
   work: () => Promise<T>
@@ -30,10 +30,10 @@ export const timeReliabilityStage = async <T>(
     throw error;
   } finally {
     const durationMs = Math.round((performance.now() - startedAt) * 10) / 10;
-    if (isValidRequestId(requestId) && (outcome === "error" || durationMs >= 250)) {
+    if (isValidRequestId(diagnosticRequestId) && (outcome === "error" || durationMs >= 250)) {
       try {
         logger.info(JSON.stringify({
-          event: "production_reliability_stage", requestId, route, stage, durationMs, outcome,
+          event: "production_reliability_stage", diagnosticRequestId, route, stage, durationMs, outcome,
         }));
       } catch {
         // Diagnostic logging must never change the request outcome.

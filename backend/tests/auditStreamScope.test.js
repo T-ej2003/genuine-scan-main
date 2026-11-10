@@ -17,9 +17,13 @@ const fixtureToken = "sse-fixture-not-a-credential";
 for (const [module, exports] of Object.entries({
   "services/auth/tokenService": {
     ACCESS_TOKEN_COOKIE: "access", AUTHENTICATED_SESSION_CAPABILITY_COOKIE: "capability",
-    verifyAccessToken: (token) => { if (token !== fixtureToken) throw new Error("invalid fixture token"); return actor; },
+    verifyAccessToken: (token) => {
+      if (token === "expired-token") throw Object.assign(new Error("expired fixture token"), { name: "TokenExpiredError" });
+      if (token !== fixtureToken) throw new Error("invalid fixture token");
+      return actor;
+    },
   },
-  "services/auth/cookieTokenProtectionService": { openCookieToken: (value) => value },
+  "services/auth/cookieTokenProtectionService": { openCookieToken: (value) => ["corrupt-cookie", "unavailable-key-cookie"].includes(value) ? null : value },
   "services/manufacturerScopeService": {
     isManufacturerRole: () => false, isPlatformRole: (role) => role === "SUPER_ADMIN",
     isLicenseeAdminRole: (role) => role === "LICENSEE_ADMIN",
@@ -41,35 +45,41 @@ const { authenticateSSE } = require("../dist/middleware/auth");
 
 test("dashboard and printer SSE denials identify validation stage without credentials", async () => {
   const requestId = "33333333-3333-4333-8333-333333333333";
+  const diagnosticRequestId = "44444444-4444-4444-8444-444444444444";
   const messages = [];
   const originalWarn = console.warn;
   console.warn = (message) => messages.push(message);
   actor = { userId: "actor", role: "SUPER_ADMIN", licenseeId: null, orgId: null };
   try {
-    for (const [path, token, deny, expected] of [
-      ["/events/dashboard", null, false, "missing_token"],
-      ["/events/dashboard", "bad-token", false, "token_validation_failed"],
-      ["/manufacturer/printer-agent/events", fixtureToken, true, "session_validation_failed"],
+    for (const [path, token, deny, expected, source] of [
+      ["/events/dashboard", null, false, "missing_token", "none"],
+      ["/events/dashboard", "", false, "token_validation_failed", "cookie"],
+      ["/events/dashboard", "corrupt-cookie", false, "token_validation_failed", "cookie"],
+      ["/events/dashboard", "unavailable-key-cookie", false, "token_validation_failed", "cookie"],
+      ["/events/dashboard", "expired-token", false, "token_validation_failed", "cookie"],
+      ["/manufacturer/printer-agent/events", fixtureToken, true, "session_validation_failed", "cookie"],
     ]) {
       hydrationDenied = deny;
-      const req = { path, requestId, query: {}, headers: {}, cookies: token ? { access: token, capability: "fixture-capability" } : {}, get: () => undefined };
+      const req = { path, requestId, diagnosticRequestId, query: {}, headers: {}, cookies: token === null ? {} : { access: token, capability: "fixture-capability" }, get: () => undefined };
       const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(payload) { this.body = payload; return this; } };
       await authenticateSSE(req, res, () => { throw new Error("denied stream opened"); });
       assert.equal(res.statusCode, 401);
       assert.equal(JSON.parse(messages.at(-1)).reason, expected);
+      assert.equal(JSON.parse(messages.at(-1)).credentialSource, source);
     }
-    assert.equal(messages.length, 3);
+    assert.equal(messages.length, 6);
     for (const message of messages) {
       const event = JSON.parse(message);
       assert.equal(event.event, "sse_auth_rejected");
       assert.equal(event.requestId, requestId);
-      assert.doesNotMatch(message, /bad-token|fixture-capability|sensitive database detail/);
+      assert.equal(event.diagnosticRequestId, diagnosticRequestId);
+      assert.doesNotMatch(message, /corrupt-cookie|unavailable-key-cookie|expired-token|fixture-capability|sensitive database detail/);
     }
 
-    const req = { path: "/events/dashboard", requestId: "invalid\nrequest", query: {}, headers: {}, cookies: {}, get: () => undefined };
+    const req = { path: "/events/dashboard", requestId: "invalid\nrequest", diagnosticRequestId: "invalid\nrequest", query: {}, headers: {}, cookies: {}, get: () => undefined };
     const res = { status: () => res, json: () => res };
     await authenticateSSE(req, res, () => {});
-    assert.equal(messages.length, 3, "unvalidated request IDs must not be logged");
+    assert.equal(messages.length, 6, "unvalidated request IDs must not be logged");
   } finally {
     hydrationDenied = false;
     console.warn = originalWarn;
@@ -98,7 +108,7 @@ test("real SSE authentication policy composes with strict scope and never serial
       const req = {
         query: { ...query, ...(mode === "query" ? { token: fixtureToken } : {}) },
         headers: mode === "header" ? { authorization: `Bearer ${fixtureToken}` } : {},
-        cookies: { capability: "fixture-capability", ...(mode === "cookie" ? { access: fixtureToken } : {}) },
+        cookies: { capability: "fixture-capability", access: mode === "cookie" ? fixtureToken : "corrupt-cookie" },
         get: () => undefined, on: (_event, fn) => { close = fn; },
       };
       const res = { status: (value) => { status = value; return res; }, json: (value) => { sent.push(JSON.stringify(value)); return res; }, end: () => {}, setHeader: () => {}, flushHeaders: () => {}, write: (value) => sent.push(value) };

@@ -18,7 +18,7 @@ console.info = (message) => messages.push(message);
   delete first.durationMs;
   assert.deepEqual(first, {
     event: "production_reliability_stage",
-    requestId,
+    diagnosticRequestId: requestId,
     route: "GET /api/qr/batches",
     stage: "scope",
     outcome: "ok",

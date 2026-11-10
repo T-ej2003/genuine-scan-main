@@ -11,6 +11,7 @@ try {
     path: "/auth/refresh",
     ip: "192.0.2.5",
     requestId: "11111111-1111-4111-8111-111111111111",
+    diagnosticRequestId: "22222222-2222-4222-8222-222222222222",
     headers: {},
     query: {},
     params: {},
@@ -19,16 +20,21 @@ try {
   };
   recordRateLimitMetric(req, "account.security:actor");
   assert.equal(emitted[0].meta.requestId, req.requestId);
+  assert.equal(emitted[0].meta.diagnosticRequestId, req.diagnosticRequestId);
   assert.equal(emitted[0].meta.offenderKind, "ip-ua");
   assert.doesNotMatch(JSON.stringify(emitted[0]), /192\.0\.2\.5|test-browser/);
 
   req.requestId = "unvalidated\nrequest";
+  req.diagnosticRequestId = "unvalidated\nrequest";
   recordRateLimitMetric(req, "account.security:actor");
   assert.equal(Object.hasOwn(emitted[1].meta, "requestId"), false);
+  assert.equal(Object.hasOwn(emitted[1].meta, "diagnosticRequestId"), false);
 
   req.requestId = "22222222-2222-4222-8222-222222222222";
+  req.diagnosticRequestId = "33333333-3333-4333-8333-333333333333";
   recordRateLimitMetric(req, "other:actor");
   assert.equal(Object.hasOwn(emitted[2].meta, "requestId"), false);
+  assert.equal(Object.hasOwn(emitted[2].meta, "diagnosticRequestId"), false);
 } finally {
   console.warn = originalWarn;
 }

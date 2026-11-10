@@ -108,12 +108,12 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
   if (!user) throw new Error("Not authenticated");
 
   const canOpenIncidentRoute = isPlatformRole(user.role);
-  const requestId = (req as AuthRequest & { requestId?: string }).requestId;
+  const diagnosticRequestId = (req as AuthRequest & { diagnosticRequestId?: string }).diagnosticRequestId;
   const route = "GET /api/dashboard/attention-queue";
-  const licenseeIds = await timeReliabilityStage(requestId, route, "scope", () => resolveAccessibleLicenseeIdsForUser(user));
+  const licenseeIds = await timeReliabilityStage(diagnosticRequestId, route, "scope", () => resolveAccessibleLicenseeIdsForUser(user));
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-  const notificationPromise = timeReliabilityStage(requestId, route, "notifications", () => listNotificationsForUser({
+  const notificationPromise = timeReliabilityStage(diagnosticRequestId, route, "notifications", () => listNotificationsForUser({
     userId: user.userId,
     role: user.role,
     licenseeId: user.licenseeId,
@@ -126,12 +126,14 @@ const getAttentionQueueSnapshotUncached = async (req: AuthRequest): Promise<Atte
   }));
 
   const attentionBoundary = b03BoundaryForRequest(req, "attention-queue");
-  const attentionPromise = timeReliabilityStage(requestId, route, "attention-projection", () => attentionBoundary.run((db) => readAttentionQueueProjection(db, {
-    licenseeId: getEffectiveLicenseeId(req),
-    since,
-    requestId: attentionBoundary.requestId,
-  })));
-  const printingAttentionPromise = timeReliabilityStage(requestId, route, "printing-projection", () => readPrintingProjection({
+  const attentionPromise = timeReliabilityStage(diagnosticRequestId, route, "attention-transaction", () => attentionBoundary.run((db) =>
+    timeReliabilityStage(diagnosticRequestId, route, "attention-projection", () => readAttentionQueueProjection(db, {
+      licenseeId: getEffectiveLicenseeId(req),
+      since,
+      requestId: attentionBoundary.requestId,
+    }))
+  ));
+  const printingAttentionPromise = timeReliabilityStage(diagnosticRequestId, route, "printing-projection", () => readPrintingProjection({
     capability: String(req.databaseSessionCapability || ""),
     requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
     operation: "ATTENTION_QUEUE",

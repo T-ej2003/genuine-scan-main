@@ -109,6 +109,7 @@ export const buildBatchOperationalReadBoundary = (
     user: AuthenticatedSessionClaims;
     requestedLicenseeId: unknown;
     requestId: unknown;
+    diagnosticRequestId?: string;
     routeSurface: BatchOperationalRouteSurface;
     batchId?: unknown;
     databaseSessionCapability: unknown;
@@ -173,6 +174,7 @@ export const buildBatchOperationalReadBoundary = (
     repository: {
       databaseSessionCapability,
       requestId,
+      diagnosticRequestId: params.diagnosticRequestId,
       purpose: BATCH_OPERATIONAL_READ_PURPOSE,
       auditId,
       requestedLicenseeId,
@@ -196,6 +198,7 @@ type LoadBatchListPayloadParams = {
   user: AuthenticatedSessionClaims;
   requestedLicenseeId: unknown;
   requestId: unknown;
+  diagnosticRequestId?: string;
   limit: number;
   offset: number;
   databaseSessionCapability: unknown;
@@ -209,9 +212,9 @@ export const listScopedBatchReadPayload = async (params: LoadBatchListPayloadPar
       ...params,
       routeSurface: "GET /api/qr/batches",
     });
-    const payload = await timeReliabilityStage(boundary.repository.requestId, boundary.repository.routeSurface, "transaction", () => runBatchOperationalReadTransaction(
+    const payload = await timeReliabilityStage(boundary.repository.diagnosticRequestId, boundary.repository.routeSurface, "transaction", () => runBatchOperationalReadTransaction(
       async (db) => {
-        await timeReliabilityStage(boundary.repository.requestId, boundary.repository.routeSurface, "capability", () =>
+        await timeReliabilityStage(boundary.repository.diagnosticRequestId, boundary.repository.routeSurface, "capability", () =>
           assertBatchOperationalCapabilityActor(db, boundary.repository, params.user)
         );
         return listBatchOperationalSummaries({

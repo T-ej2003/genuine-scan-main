@@ -37,6 +37,7 @@ export type DashboardSnapshot = {
 
 type DashboardBoundary = {
   databaseSessionCapability: string;
+  diagnosticRequestId?: string;
   context: CanonicalDbContext;
   auditId: string;
   requestedLicenseeId: string | null;
@@ -125,6 +126,7 @@ export const buildDashboardSnapshotBoundary = (
 
   return {
     databaseSessionCapability,
+    diagnosticRequestId: (req as AuthRequest & { diagnosticRequestId?: string }).diagnosticRequestId,
     auditId: randomUUID(),
     requestedLicenseeId: selector,
     routeSurface: routeSurface(req),
@@ -154,7 +156,7 @@ export const loadInventoryAggregate = async (
   boundary: DashboardBoundary,
   expectedScopeFingerprint: string
 ): Promise<DashboardSnapshot> => {
-  const [row] = await timeReliabilityStage(boundary.context.requestId, boundary.routeSurface, "data", () => tx.$queryRaw<DashboardDataRow[]>`
+  const [row] = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "data", () => tx.$queryRaw<DashboardDataRow[]>`
     SELECT *
     FROM app_rls.dashboard_snapshot_data(
       ${boundary.databaseSessionCapability},
@@ -197,7 +199,7 @@ export const computeDashboardSnapshot = async (
   boundary: DashboardBoundary,
   options: { scopeOnly?: boolean } = {}
 ): Promise<DashboardSnapshot | null> => {
-  const [scope] = await timeReliabilityStage(boundary.context.requestId, boundary.routeSurface, "scope", () => tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
+  const [scope] = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "scope", () => tx.$queryRaw<Array<{ scope_fingerprint: string }>>`
     SELECT scope_fingerprint
     FROM app_rls.dashboard_snapshot_scope(
       ${boundary.databaseSessionCapability},
@@ -212,7 +214,7 @@ export const computeDashboardSnapshot = async (
   if (!/^[0-9a-f]{32}$/i.test(fingerprint)) throw new DashboardSnapshotAccessError();
   if (options.scopeOnly) return null;
   const cacheKey = createHash("sha256").update(`v1:${fingerprint}`).digest("hex");
-  return timeReliabilityStage(boundary.context.requestId, boundary.routeSurface, "cache", () =>
+  return timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "cache", () =>
     getOrComputeVersionedCache(DASHBOARD_CACHE_NAMESPACE, cacheKey, DASHBOARD_CACHE_TTL_SEC, () =>
       loadInventoryAggregate(tx, boundary, fingerprint)
     )
@@ -225,7 +227,7 @@ export const getDashboardSnapshot = async (req: AuthRequest) => {
     let snapshot: DashboardSnapshot | null = null;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        snapshot = await timeReliabilityStage(boundary.context.requestId, boundary.routeSurface, "transaction", () =>
+        snapshot = await timeReliabilityStage(boundary.diagnosticRequestId, boundary.routeSurface, "transaction", () =>
           prisma.$transaction(
             (tx) => computeDashboardSnapshot(tx as CanonicalTransactionClient, boundary),
             { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }

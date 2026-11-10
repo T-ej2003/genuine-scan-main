@@ -9,8 +9,15 @@ const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtection
 const valid = "aaaa5fab-7f42-474f-8014-e735a1fa8803";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const originalWarn = logger.warn;
+const originalError = logger.error;
 const completions = [];
-logger.warn = (message, meta) => { if (message === "HTTP request completed") completions.push(meta); };
+const sseDenials = [];
+const errors = [];
+logger.warn = (message, meta) => {
+  if (message === "HTTP request completed") completions.push(meta);
+  if (typeof message === "string" && message.includes('"sse_auth_rejected"')) sseDenials.push(JSON.parse(message));
+};
+logger.error = (message, meta) => { if (message === "Unhandled error") errors.push(meta); };
 
 (async () => {
   const server = await new Promise((resolve) => {
@@ -27,10 +34,35 @@ logger.warn = (message, meta) => { if (message === "HTTP request completed") com
       else assert.notEqual(observed, supplied);
       const meta = completions.at(-1);
       assert.equal(meta.requestId, observed);
+      assert.match(meta.diagnosticRequestId, uuid);
       const safeRejected = /^[A-Za-z0-9._:-]{1,128}$/.test(supplied) && supplied !== valid;
       assert.equal(meta.rejectedClientRequestIdRef,
         safeRejected ? hashToken(`client-request-id:${supplied}`) : null);
     }
+
+    const missingClientIdResponse = await fetch(url);
+    assert.equal(missingClientIdResponse.status, 401);
+    assert.match(missingClientIdResponse.headers.get("x-request-id"), uuid);
+    assert.match(completions.at(-1).diagnosticRequestId, uuid);
+
+    const sameClientIdResponses = await Promise.all(Array.from({ length: 3 }, () =>
+      fetch(url, { headers: { "x-request-id": valid } })));
+    assert.ok(sameClientIdResponses.every((response) => response.headers.get("x-request-id") === valid));
+    const diagnosticIds = completions.slice(-3).map((entry) => entry.diagnosticRequestId);
+    assert.equal(new Set(diagnosticIds).size, 3, "concurrent requests sharing a client UUID need unique server diagnostic IDs");
+
+    const sseResponse = await fetch(`http://127.0.0.1:${server.address().port}/api/events/dashboard`, {
+      headers: { "x-request-id": valid },
+    });
+    assert.equal(sseResponse.status, 401);
+    assert.equal(sseDenials.at(-1).diagnosticRequestId, completions.at(-1).diagnosticRequestId);
+    assert.equal(sseDenials.at(-1).requestId, valid);
+
+    const malformedBody = await fetch(url, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{",
+    });
+    assert.equal(malformedBody.status, 500);
+    assert.match(errors.at(-1).diagnosticRequestId, uuid, "pre-parser failures retain a server diagnostic ID");
 
     const originalVerify = tokenService.verifyAccessToken;
     const originalSession = canonicalAuth.withDatabaseAuthenticatedSession;
@@ -60,6 +92,7 @@ logger.warn = (message, meta) => { if (message === "HTTP request completed") com
     }
   } finally {
     logger.warn = originalWarn;
+    logger.error = originalError;
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
   console.log("request ID boundary tests passed");

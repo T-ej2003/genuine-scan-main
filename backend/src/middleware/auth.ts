@@ -13,7 +13,7 @@ import {
   resolveManufacturerSessionScope,
 } from "../services/manufacturerScopeService";
 import { isDisabledUserRecord } from "../services/accessControlService";
-import { readCookie } from "../utils/cookies";
+import { getRequestCookies, readCookie } from "../utils/cookies";
 import {
   getAdminStepUpWindowMinutes,
   getPasswordReauthWindowMinutes,
@@ -36,6 +36,7 @@ export interface AuthRequest extends Request {
   user?: AuthenticatedSessionClaims;
   authMode?: "bearer" | "cookie";
   databaseSessionCapability?: string | null;
+  diagnosticRequestId?: string;
 }
 
 export const DATABASE_SESSION_CAPABILITY_HEADER = "x-database-session-capability";
@@ -68,9 +69,10 @@ const recordSseAuthDenial = (req: Request, reason: "missing_token" | "token_vali
       ? "GET /api/manufacturer/printer-agent/events"
       : null;
   const requestId = (req as Request & { requestId?: unknown }).requestId;
-  if (!route || !isValidRequestId(requestId)) return;
+  const diagnosticRequestId = (req as Request & { diagnosticRequestId?: unknown }).diagnosticRequestId;
+  if (!route || !isValidRequestId(diagnosticRequestId)) return;
   try {
-    logger.warn(JSON.stringify({ event: "sse_auth_rejected", requestId, route, reason, credentialSource }));
+    logger.warn(JSON.stringify({ event: "sse_auth_rejected", diagnosticRequestId, ...(isValidRequestId(requestId) ? { requestId } : {}), route, reason, credentialSource }));
   } catch {
     // Rejection telemetry must never change the authentication response.
   }
@@ -260,12 +262,13 @@ export const optionalAuth = async (req: AuthRequest, _res: Response, next: NextF
 export const authenticateSSE = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const queryToken = allowSseQueryToken() ? (req.query.token as string | undefined) || "" : "";
   const headerToken = getBearerToken(req) || "";
-  const cookieToken = !queryToken && !headerToken ? getCookieAccessToken(req) || "" : "";
+  const cookiePresent = !queryToken && !headerToken && Object.hasOwn(getRequestCookies(req), ACCESS_TOKEN_COOKIE);
+  const cookieToken = cookiePresent ? getCookieAccessToken(req) || "" : "";
   const token = queryToken || headerToken || cookieToken;
-  const credentialSource = queryToken ? "query" : headerToken ? "header" : cookieToken ? "cookie" : "none";
+  const credentialSource = queryToken ? "query" : headerToken ? "header" : cookiePresent ? "cookie" : "none";
 
   if (!token) {
-    recordSseAuthDenial(req, "missing_token", credentialSource);
+    recordSseAuthDenial(req, cookiePresent ? "token_validation_failed" : "missing_token", credentialSource);
     return res.status(401).json({ success: false, error: "No token provided" });
   }
 

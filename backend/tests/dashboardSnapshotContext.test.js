@@ -239,7 +239,18 @@ const denied = (req) => assert.throws(
 
   const dataCallsBeforeDeniedScope = calls.data.length;
   denyScope = true;
-  await assert.rejects(getDashboardSnapshot(request(undefined, { requestId: "dashboard-request-3" })), DashboardSnapshotAccessError);
+  const diagnosticRequestId = "55555555-5555-4555-8555-555555555555";
+  const timingEvents = [];
+  const originalInfo = console.info;
+  console.info = (message) => timingEvents.push(JSON.parse(message));
+  try {
+    await assert.rejects(getDashboardSnapshot(request(undefined, { requestId: "dashboard-request-3", diagnosticRequestId })), DashboardSnapshotAccessError);
+  } finally {
+    console.info = originalInfo;
+  }
+  assert.deepStrictEqual(timingEvents.map(({ stage, diagnosticRequestId: id }) => [stage, id]), [
+    ["scope", diagnosticRequestId], ["transaction", diagnosticRequestId],
+  ]);
   assert.strictEqual(calls.data.length, dataCallsBeforeDeniedScope, "revoked scope cannot consume a cached snapshot");
   denyScope = false;
 

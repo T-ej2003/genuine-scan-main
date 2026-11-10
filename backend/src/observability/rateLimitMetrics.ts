@@ -193,10 +193,12 @@ export const recordRateLimitMetric = (req: Request, scope: string) => {
 
   pushBounded(rateLimitMetrics, entry, MAX_RATE_LIMIT_METRICS);
   const requestId = (req as Request & { requestId?: unknown }).requestId;
+  const diagnosticRequestId = (req as Request & { diagnosticRequestId?: unknown }).diagnosticRequestId;
   logger.warn("rate_limit_metric", {
     event: "rate_limit_metric",
     ...entry,
     ...(scope === "account.security:actor" && isValidRequestId(requestId) ? { requestId } : {}),
+    ...(scope === "account.security:actor" && isValidRequestId(diagnosticRequestId) ? { diagnosticRequestId } : {}),
   });
   return retryAfterSec;
 };
