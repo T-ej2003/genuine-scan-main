@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53",
+  "sourceContractSha256": "a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -62,7 +62,7 @@
     },
     {
       "path": "scripts/rls/generate-clean-room-rls-sql.mjs",
-      "sha256": "6adc02a0eb6c9979c1af6788c8accb848d66e7d7f1b0846aeb909231dd77cbe7"
+      "sha256": "799e48b19470ba152e3eb58af92fc77fae02c4469d79812a23c7ecff9e4943d4"
     },
     {
       "path": "scripts/rls/verify-full-rls-package.mjs",
@@ -366,7 +366,7 @@
     },
     {
       "path": "backend/tests/dashboardSnapshotApplicationPathPostgres18.test.js",
-      "sha256": "74879114dac9de2be153df6384584703ca77685327b23090404fa75f18b3e11b"
+      "sha256": "c239cb0b9d7eb4f1c2819aca65a338e6db44df7441e7788e79e4bdab8b38b06f"
     },
     {
       "path": "backend/tests/batchOperationalReadApplicationPathPostgres18.test.js",
@@ -8952,7 +8952,7 @@
       "policyName": "full_rls_internal_authowner_qrcode_select",
       "name": "full_rls_internal_authowner_qrcode_select",
       "command": "SELECT",
-      "predicate": "((((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"licenseeId\"=ANY(string_to_array(current_setting('app.operational_scope_licensee_ids',true),',')))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )) OR (((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))) AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND \"licenseeId\"=app_rls.current_licensee_id()) OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'))))",
+      "predicate": "((((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND (SELECT app_rls.attributed_request()) AND (SELECT app_rls.current_purpose())='dashboard-snapshot-read' AND (\n  ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (SELECT app_rls.current_assurance()) IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND (SELECT app_rls.current_assurance()) IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        ((SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"licenseeId\"=ANY(string_to_array(current_setting('app.operational_scope_licensee_ids',true),',')))\n        OR ((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=(SELECT app_rls.current_licensee_id()))\n        OR ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND ((SELECT app_rls.current_licensee_id()) IS NULL OR \"licenseeId\"=(SELECT app_rls.current_licensee_id())))\n      )) OR (((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND (SELECT app_rls.attributed_request()) AND (SELECT app_rls.current_purpose())='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ((((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND (SELECT app_rls.current_assurance()) IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (SELECT app_rls.current_assurance()) IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))) AND ((((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND \"licenseeId\"=(SELECT app_rls.current_licensee_id())) OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'))))",
       "projectedColumns": [
         "batchId",
         "code",
@@ -8992,7 +8992,7 @@
         "dashboard-snapshot-read"
       ],
       "scopeType": "purpose-dispatched-internal-function-boundary",
-      "scopePredicate": "((((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND app_rls.attributed_request() AND app_rls.current_purpose()='dashboard-snapshot-read' AND (\n  (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR ((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"licenseeId\"=ANY(string_to_array(current_setting('app.operational_scope_licensee_ids',true),',')))\n        OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=app_rls.current_licensee_id())\n        OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR \"licenseeId\"=app_rls.current_licensee_id()))\n      )) OR (((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))) AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND \"licenseeId\"=app_rls.current_licensee_id()) OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'))))",
+      "scopePredicate": "((((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND (SELECT app_rls.attributed_request()) AND (SELECT app_rls.current_purpose())='dashboard-snapshot-read' AND (\n  ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (SELECT app_rls.current_assurance()) IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))\n  OR (((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND (SELECT app_rls.current_assurance()) IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass'))\n)) AND (\n        ((SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND \"licenseeId\"=ANY(string_to_array(current_setting('app.operational_scope_licensee_ids',true),',')))\n        OR ((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') AND \"licenseeId\"=(SELECT app_rls.current_licensee_id()))\n        OR ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND ((SELECT app_rls.current_licensee_id()) IS NULL OR \"licenseeId\"=(SELECT app_rls.current_licensee_id())))\n      )) OR (((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND (SELECT app_rls.attributed_request()) AND (SELECT app_rls.current_purpose())='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ((((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND (SELECT app_rls.current_assurance()) IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR ((SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (SELECT app_rls.current_assurance()) IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))) AND ((((SELECT app_rls.current_role()) IN ('LICENSEE_ADMIN','ORG_ADMIN') OR (SELECT app_rls.current_role()) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN')) AND \"licenseeId\"=(SELECT app_rls.current_licensee_id())) OR (SELECT app_rls.current_role()) IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER'))))",
       "certificationStatus": "pending",
       "internalHelperOnly": true,
       "roleKey": "authOwner"
@@ -12815,55 +12815,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53"
+      "marker": "mscqr-full-rls-clean-room:certification:a012fec5cb86a193e1a8d2b638f116676e44cc6e09204622c82a99641d903f75"
     }
   ]
 }

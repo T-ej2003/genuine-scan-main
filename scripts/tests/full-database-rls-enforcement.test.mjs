@@ -47,6 +47,19 @@ test("operational read policies validate the session once per SQL statement", ()
   }
 });
 
+test("QRCode operational policy caches only request-stable context", () => {
+  const policy = packageInputs().policies.rows.find((row) => row.policyName === "full_rls_internal_authowner_qrcode_select");
+  assert(policy);
+  for (const helper of ["attributed_request", "current_purpose", "current_role", "current_assurance", "current_licensee_id"]) {
+    const call = `app_rls.${helper}()`;
+    assert(policy.scopePredicate.includes(`(SELECT ${call})`), helper);
+    assert(!policy.scopePredicate.replaceAll(`(SELECT ${call})`, "").includes(call), helper);
+  }
+  assert(policy.scopePredicate.includes("(SELECT app_rls.operational_read_session_valid())"));
+  assert(policy.scopePredicate.includes("clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())"));
+  assert(!policy.scopePredicate.includes("(SELECT clock_timestamp())"));
+});
+
 test("B03 policies validate the session once per SQL statement", () => {
   const policies = packageInputs().policies.rows.filter((row) =>
     row.scopePredicate?.includes("app_rls.b03_authenticated_context_valid()")
