@@ -2039,11 +2039,15 @@ const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
   const predicate = group.length === 1
     ? group[0].predicate
     : `(${group.map((policy) => `(${policy.predicate})`).join(" OR ")})`;
+  // QRCode aggregates scan every row; evaluate request-stable context once while retaining the live expiry check.
+  const scopedPredicate = group[0].table === "QRCode" && group[0].command === "SELECT"
+    ? predicate.replaceAll(/app_rls\.(attributed_request|current_purpose|current_role|current_assurance|current_licensee_id)\(\)/g, "(SELECT app_rls.$1())")
+    : predicate;
   return {
     table: group[0].table,
     name: shortName(`full_rls_internal_${group[0].roleKey || "owner"}`, group[0].table, group[0].command),
     command: group[0].command,
-    predicate,
+    predicate: scopedPredicate,
     projectedColumns: [...new Set(group.flatMap((policy) => policy.projectedColumns || []))].sort(),
     columns: [],
     sourceCommandRuleIds,
@@ -2052,7 +2056,7 @@ const internalPolicies = [...internalPolicyGroups.values()].map((group) => {
     assurance: "source-rule-specific",
     purpose: [...new Set(group.flatMap((policy) => policy.purpose))].sort(),
     scopeType: group.length === 1 ? group[0].scopeType : "purpose-dispatched-internal-function-boundary",
-    scopePredicate: predicate,
+    scopePredicate: scopedPredicate,
     certificationStatus: "pending",
     internalHelperOnly: true,
     roleKey: group[0].roleKey || "owner",

@@ -336,7 +336,7 @@ const main = async () => {
     ]) assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit attribution`);
     assert(auditRows.filter((row) => row.details?.requestId === "dashboard-pg-manufacturer-selected").every((row) => row.orgId === ids.orgB && row.licenseeId === ids.licenseeB));
 
-    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 100000);
+    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 200000);
     assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
     await bootstrap.$executeRawUnsafe(`
       INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
@@ -347,10 +347,10 @@ const main = async () => {
     const { bumpCacheNamespaceVersion } = require("../dist/services/versionedCacheService");
     await bumpCacheNamespaceVersion("dashboard-snapshot");
     const stressStart = performance.now();
-    expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-100k-tenant")), {
+    expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-large-tenant")), {
       totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
     }, "large tenant isolation");
-    expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-100k-platform")), {
+    expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-large-platform")), {
       totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
     }, "large platform fallback");
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
