@@ -7,6 +7,8 @@ process.env.PUBLIC_VERIFY_RATE_LIMIT_PER_MIN = "3";
 const {
   loginIpLimiter,
   loginActorLimiter,
+  sessionReadIpLimiter,
+  sessionReadPreAuthRouteLimiter,
   secureSessionPreAuthRouteLimiter,
   mfaPreAuthRouteLimiter,
 } = require("../dist/routes/modules/authRoutes");
@@ -137,6 +139,17 @@ const loginApp = express();
 loginApp.use(express.json());
 loginApp.post("/auth/login", loginIpLimiter, loginActorLimiter, (_req, res) => res.status(200).json({ success: true }));
 
+const sessionReadApp = express();
+sessionReadApp.get("/auth/me", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+sessionReadApp.get("/auth/mfa/status", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
+
+const sessionReadIpCapApp = express();
+sessionReadIpCapApp.use((req, _res, next) => {
+  Object.defineProperty(req, "ip", { value: "198.51.100.90", configurable: true });
+  next();
+});
+sessionReadIpCapApp.get("/auth/me", sessionReadIpLimiter, (_req, res) => res.status(200).json({ success: true }));
+
 const verifyCodeApp = express();
 verifyCodeApp.get("/verify/:code", verifyCodeIpLimiter, verifyCodeActorLimiter, (_req, res) => res.status(200).json({ success: true }));
 
@@ -213,6 +226,42 @@ const verifySessionMutationApp = express();
 verifySessionMutationApp.post("/verify/session/abc/intake", verifySessionMutationPreAuthRouteLimiter, (_req, res) => res.status(200).json({ success: true }));
 
 (async () => {
+  await assertRateLimitAfter({
+    app: sessionReadApp,
+    path: "/auth/me",
+    method: "GET",
+    headers: { cookie: "aq_access=synthetic-session-a" },
+    allowed: 70,
+    description: "authenticated session-read pre-auth bucket",
+  });
+  await assertAllowedFor({
+    app: sessionReadApp,
+    path: "/auth/mfa/status",
+    method: "GET",
+    headers: { cookie: "aq_access=synthetic-session-b" },
+    count: 20,
+    description: "independent session-read identity",
+  });
+  const sessionReadServer = await startServer(sessionReadApp);
+  try {
+    const sharedBucket = await fetch(`${sessionReadServer.baseUrl}/auth/mfa/status?tenant=other`, {
+      headers: { cookie: "aq_access=synthetic-session-a", "user-agent": "rotated-agent" },
+    });
+    assert.strictEqual(sharedBucket.status, 429, "changing route, tenant hint, or user agent must not reset one session bucket");
+    const concurrent = await Promise.all(Array.from({ length: 20 }, () => fetch(`${sessionReadServer.baseUrl}/auth/me`, {
+      headers: { cookie: "aq_access=synthetic-session-c" },
+    })));
+    assert(concurrent.every((response) => response.status === 200), "normal concurrent reads must remain within the existing session budget");
+  } finally {
+    await stopServer(sessionReadServer.server);
+  }
+  await assertRateLimitAfter({
+    app: sessionReadIpCapApp,
+    path: "/auth/me",
+    method: "GET",
+    allowed: 6000,
+    description: "session-read trusted client IP ceiling",
+  });
   await assertRateLimitAfter({
     app: loginApp,
     path: "/auth/login",

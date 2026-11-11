@@ -10,6 +10,8 @@ import {
 import { requireAdministrationMutator } from "../../middleware/rbac";
 import { requireCsrf } from "../../middleware/csrf";
 import { isTemporaryPasswordOnlyRole } from "../../services/auth/authService";
+import { ACCESS_TOKEN_COOKIE } from "../../services/auth/tokenService";
+import { readCookie } from "../../utils/cookies";
 import {
   composeRequestResolvers,
   buildPublicActorRateLimitKey,
@@ -190,8 +192,18 @@ const sessionReadPreAuthRouteLimiter = createSharedRateLimiter({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) =>
-    buildPublicActorRateLimitKey(req, "auth.session-read:pre-auth", composeRequestResolvers(fromAuthorizationBearer, fromUserAgent)),
+    buildPublicActorRateLimitKey(req, "auth.session-read:pre-auth", composeRequestResolvers(
+      fromAuthorizationBearer, (currentReq) => readCookie(currentReq, ACCESS_TOKEN_COOKIE)
+    )),
   handler: createRateLimitJsonHandler("auth.session-read:pre-auth", "Too many account session reads. Please wait before retrying."),
+});
+
+const sessionReadIpLimiter = createPublicIpRateLimiter({
+  scope: "auth.session-read:ip",
+  windowMs: 10 * 60 * 1000,
+  // Leave room for 100 accounts at the existing 60-read budget behind one viewer IP.
+  max: 6000,
+  message: "Too many account session reads. Please wait before retrying.",
 });
 
 const secureSessionRouteLimiter = createSharedRateLimiter({
@@ -299,7 +311,7 @@ export const createAuthRoutes = () => {
   router.post("/auth/forgot-password", passwordRecoveryIpLimiter, passwordRecoveryActorLimiter, forgotPassword);
   router.post("/auth/reset-password", passwordRecoveryIpLimiter, passwordRecoveryActorLimiter, resetPassword);
 
-  router.get("/auth/me", authenticateAnySession, sessionReadRouteLimiter, me);
+  router.get("/auth/me", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, authenticateAnySession, sessionReadRouteLimiter, me);
   router.post("/auth/refresh", secureSessionPreAuthRouteLimiter, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, refresh);
   router.post("/auth/logout", secureSessionPreAuthRouteLimiter, authenticateAnySession, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, logout);
   router.get("/auth/sessions", sessionReadPreAuthRouteLimiter, authenticate, sessionReadRouteLimiter, listSessions);
@@ -307,7 +319,7 @@ export const createAuthRoutes = () => {
   router.post("/auth/sessions/:id/revoke", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, revokeSessionController);
   router.post("/auth/step-up/password", secureSessionPreAuthRouteLimiter, authenticate, secureSessionRouteLimiter, secureSessionIpLimiter, secureSessionActorLimiter, requireCsrf, passwordStepUpController);
 
-  router.get("/auth/mfa/status", authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);
+  router.get("/auth/mfa/status", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);
   router.post("/auth/mfa/setup/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireMfaPolicyRole, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaSetupController);
   router.post("/auth/mfa/setup/confirm", mfaPreAuthRouteLimiter, authenticateAnySession, requireMfaPolicyRole, requireRecentAdminMfaForSetup, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, confirmAdminMfaSetupController);
   router.post("/auth/mfa/challenge/begin", mfaPreAuthRouteLimiter, authenticateAnySession, requireMfaPolicyRole, mfaRouteLimiter, mfaMutationIpLimiter, mfaMutationActorLimiter, requireCsrf, beginAdminMfaChallengeController);
@@ -328,6 +340,8 @@ export const createAuthRoutes = () => {
 };
 
 export {
+  sessionReadIpLimiter,
+  sessionReadPreAuthRouteLimiter,
   secureSessionPreAuthRouteLimiter,
   mfaPreAuthRouteLimiter,
 };
