@@ -1,0 +1,366 @@
+{
+  "kind": "PRODUCTION_RLS_49_OBJECT_SCOPE",
+  "predecessorSourceSha": "697ff65ad8dc4c7add0fce9584dfeeaeec189bb8",
+  "databaseInstance": "mscqr-production-rls-green-phase2",
+  "databaseResourceId": "db-3C27FYJOJ2IY27X7QGQG5YB4IM",
+  "sqlSha256": "178a244a89cfff6553bd8f87385f8fb97b1bb8d08e4e627fe2f1c0018f8e857e",
+  "predecessorCatalogue": {
+    "policies": "f1cf5606800673aa4f7737e18befa256d7ab46e2bfb6dd88ff2858443af2455d",
+    "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023",
+    "routines": "afe1bf251149197bc19fc84f40c0749878f92a51e7abf0dd600c66b6c0e5df20",
+    "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
+    "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63"
+  },
+  "successorCatalogue": {
+    "policies": "55a55c5e731e5afdd8d94a83eb3f107f9385ee6e04bb16290398ac441593fe67",
+    "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023",
+    "routines": "8a8b886b7e88dedd0c494123691be8839b02b9991303bdd1b12fadfd39cb1cf6",
+    "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
+    "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63"
+  },
+  "objects": [
+    {
+      "kind": "routines",
+      "identity": "app_rls.batch_scope_fingerprint(requested_licensee_id text, route_surface text, focus_batch_id text)",
+      "predecessorHash": "cac1b2fb37a0ba2de20528fad8d32115965f15bdae939728e610eeb47ba3a7a1",
+      "targetHash": "ce897b1228ea2f3eca021aa103fb98ae18a257b519b587d88633575be529ca22",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.operational_read_session_deadline()",
+      "predecessorHash": null,
+      "targetHash": "f9e8b828b157f31fd812ac0849365a7bdcae34b0be3214c2d7e6ffce7c3a4194",
+      "owner": "mscqr_prd_rls_phase2_auth_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.printing_connector_event(p_registration_id text, p_agent_id text, p_device_fingerprint text, p_nonce text, p_issued_at timestamp without time zone, p_request_id text, p_operation text, p_job_id text, p_item_id text, p_printer_id text, p_payload_hash text, p_device_job_ref text, p_details jsonb)",
+      "predecessorHash": "9e0a7e95c1ee278bd567a9e45b53e5e943e0397f1d9f1b19dd96d677bf2d8cf7",
+      "targetHash": "2c4e7612f02c020494d1edc3fda8efda497175101e13f6a52cf043bc9a305f5e",
+      "owner": "mscqr_prd_rls_phase2_auth_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.printing_control_job(p_capability text, p_purpose text, p_request_id text, p_job_id text, p_operation text, p_reason text)",
+      "predecessorHash": "988183f56adc5768ba333688120b4f4f3d9f07946f75b6b42ec581e7dbcb2554",
+      "targetHash": "5cabc5f393926f8471e7ce5c11b8629af4c51f9f7d1fe1595038b7224574f910",
+      "owner": "mscqr_prd_rls_phase2_auth_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.printing_reissue_request(p_capability text, p_purpose text, p_request_id text, p_operation text, p_reissue_id text, p_original_job_id text, p_quantity integer, p_range_start text, p_range_end text, p_reason text, p_decision_note text)",
+      "predecessorHash": "c065e60fe90f5f07d2f3a51a0a8483bbc382ca593bc0619126eee33e7bf365f3",
+      "targetHash": "1d5ce67f31e33c0d4081b729a0f49e0a168ffab960669c0ead05779be54468f7",
+      "owner": "mscqr_prd_rls_phase2_auth_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "ActionIdempotencyKey.b03_authenticated_actionidempotencykey_insert",
+      "predecessorHash": "3584644dd372f36dfc3f4d63721bc95e2835d8ecd94f1832b88d53e8c4700076",
+      "targetHash": "0dca5dbcfd593ebc3655b6f93e85c6059db0a74607b6fcda453d320a50bb15ae",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "ActionIdempotencyKey.b03_authenticated_actionidempotencykey_select",
+      "predecessorHash": "5ee190527f336a6aab17fcecee8d32af654ee7e1c9af32fbf9f419b10d93be58",
+      "targetHash": "e63e21dca396e868ae7631dbace5a7e1043503f8e0442edce08540108efa8bd0",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "ActionIdempotencyKey.b03_authenticated_actionidempotencykey_update",
+      "predecessorHash": "80237621d2a39f383fb1f4345a8934b8b05c51e72d329cab55818d30f22898b9",
+      "targetHash": "95e298e92ed62e820e58d9591a941c16ed33c05837c3adb3202c6760925d480c",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "AuditLog.b03_authenticated_auditlog_insert",
+      "predecessorHash": "300547fe47c3bfd2672d89205e7d41ee0652d9b5f5875dff78f210ff1e11b24e",
+      "targetHash": "aaa7bf2d120a6b1db92a076248bd590bee4a202abc86b6d33b02ebd3d299ebbf",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "AuditLog.b03_authenticated_auditlog_select",
+      "predecessorHash": "3b87c6185ae270a52c3b68ca277f206110131fe4f412dddd608a83b2c316b825",
+      "targetHash": "52bd780f86664444dde63e23d6328172e8859758521262f9fad654df1e90ca63",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "AuditLog.full_rls_internal_authowner_auditlog_insert",
+      "predecessorHash": "a9d056590a07b4222fe67321bf4ea85b6bbe09ea18e79104b988d506eb3c2a2a",
+      "targetHash": "4c008d5388cf45eaefa4e5b76716b479105953613a796c952fe5c64a8646438a",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "AuditLog.full_rls_internal_authowner_auditlog_select",
+      "predecessorHash": "a69b1a360f24e251b3368c96164bef2bbfcfd0407db3bbc877a29b7d8e005af4",
+      "targetHash": "5c40eb46dd2d20b3c746ac204246c6b008e1456dcd818556b0d6a525d9076e24",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "AuditLogOutbox.b03_authenticated_auditlogoutbox_insert",
+      "predecessorHash": "eb35fe9a74303bb5d9671f2e95d5c39797f7ca28d31cb9ce7d685f0150833a23",
+      "targetHash": "6cd46960cd85b82d6a5cfd95c0660d1590972a9db87b11edac02dafb91b3426b",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Batch.b03_authenticated_batch_select",
+      "predecessorHash": "6c547269ebd6d3c304c5d280129875fae65cffed4c493cad15281511291b4172",
+      "targetHash": "6e1b5a40d19bb92dd5335c52b18f81e206e9a915001e485be64a3548a7d2c2cf",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Batch.full_rls_internal_authowner_batch_select",
+      "predecessorHash": "ebfd3d5d82de31d7cd76df19022b542b75b81a126a31d7e20f324dc65c3cadbd",
+      "targetHash": "fd38e9b0dde750cec9e5789c526408f33661416beef6d4e9b1ffbe14d0e942ce",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Incident.b03_authenticated_incident_select",
+      "predecessorHash": "cb3bde96d650cb4277ff46d60a69723ddd110f66845ab68287d26d09f35c0eae",
+      "targetHash": "62aa331e2926f3829226c8c94f789f3fe6cf2bd1a1ae78a2256d8dc2d3488f9d",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "IncidentCommunication.b03_authenticated_incidentcommunication_insert",
+      "predecessorHash": "d831d77cc6a5c03b10bbef85b41adc6c5c04beaa78321de121bb9f9c416f998c",
+      "targetHash": "7d193fb676ef2751485f7ed55bc1e779be1f9e1612a7c0e721e39812c18391c3",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "IncidentCommunication.b03_authenticated_incidentcommunication_select",
+      "predecessorHash": "a22502bb01c0a6b397efc65d4a42ff1d55c86997eb5f37c4932334ed3e8287f9",
+      "targetHash": "a0ea8665761f8e5fe1ce36202f1c5840b7c868ddc54119c3a97b408261bea35a",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "IncidentCommunication.b03_authenticated_incidentcommunication_update",
+      "predecessorHash": "dd760572e514af0d1b0ad68f22caca00a2dc42a93f1af984071b522f5bef3c8e",
+      "targetHash": "a957e755ef921930e4a54636926ee9578889a23d64fa21dec5a86088bbed8d51",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "IncidentEvent.b03_authenticated_incidentevent_insert",
+      "predecessorHash": "b92ecc31d007c195ffa939ec25704853548b7e02cf52716a5ca93324c864bac3",
+      "targetHash": "43c4ed27b12eed0590c3108d08af418173d1da4b2ba582b347143c9db4211b9f",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "IncidentHandoff.b03_authenticated_incidenthandoff_select",
+      "predecessorHash": "ae4616ef58dcccb66677ddddf181722b4d5ca7decac154a6d7cbf96f9b8d6fae",
+      "targetHash": "cd306a5e8029d4e5938a06a4019486d0ff25b0e4d76928882133b8a47c9c9996",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "InventoryStatusRollup.full_rls_internal_authowner_inventorystatusrollup_select",
+      "predecessorHash": "ff56c3c7e9d3ac2be36e187002a71ee1514b4a465e232454a50a57025070c442",
+      "targetHash": "b6d0296fc93ee4381022ade9d3c5bd6b8ca8d0e2eb65709f482c63c4f97a189d",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Licensee.b03_authenticated_licensee_select",
+      "predecessorHash": "56d1758bbc73b6ba0e82402766192b7f910aba1dd6e86c75aa025b5e4e295300",
+      "targetHash": "2b6aa792d57d0d4012936c8fffa0eabb93a9c3fa4df220210a8b443a0f657ca6",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Licensee.full_rls_internal_authowner_licensee_select",
+      "predecessorHash": "de80cdd4085b4bd820c75cfe005402ffe33e12aded59ba96a390fbb6b106b149",
+      "targetHash": "a02b90e6b697d060e0531747373844e7b4dab3284ae633bfd21ce5885f71a55c",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "ManufacturerLicenseeLink.b03_authenticated_manufacturerlicenseelink_select",
+      "predecessorHash": "fd8caa27f98d3727e7709bcdf364c32ce18af1cecf8e769b66ca7f47ac0697a0",
+      "targetHash": "9830590cfea3d110e277d88874e3e5f451a5c264117c4c829c5812cc4d379405",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "ManufacturerLicenseeLink.full_rls_internal_authowner_manufacturerlicenseelink_select",
+      "predecessorHash": "2533f0fbcd47f8731f24a3f2823f65a01fe53ed0cb31253e2959519e6e218e69",
+      "targetHash": "1a55ade169c24d9435707417847dea8468242828992a7e7c9fb273820e2888a0",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Notification.b03_authenticated_notification_insert",
+      "predecessorHash": "f925d439ca806438773659a6b5e6c7f226be74f12b47d911f9c99f497a703580",
+      "targetHash": "d22be1937f2a94c05803cd7852711bffcc1398a612b8a504a8167633711a2c61",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Notification.b03_authenticated_notification_select",
+      "predecessorHash": "4b84f085bf127e893c7311158677aab23e77152e4ca8e6f53b4a7c75ee0c1a3e",
+      "targetHash": "473638b76f91edcc0419d1bd4eadda4db5589e67b9b2ecbc5b53e8c404e5c440",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Notification.b03_authenticated_notification_update",
+      "predecessorHash": "49afeb0f5c1cb6fafabcf62a2edda08438df3fc53317b618e6c63ed6251ef8ea",
+      "targetHash": "61dc1deba5cd9c172ae058d9a6a2b46fa969df96d8e57763a714cd9780c4585a",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Organization.b03_authenticated_organization_select",
+      "predecessorHash": "e5a0eabc811b06139ebaaa00ac6a3111a347719b458ed6e3b74fb4231953d71f",
+      "targetHash": "cbdf7ed9963088d734ec33df4d0c2fb48f375e26f712ad1f48c1390875c8d72e",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "Organization.full_rls_internal_authowner_organization_select",
+      "predecessorHash": "4587803b4ef4888ddc401bb3030fe20bdcd4c8330ad569ddf98b8b4490f33f1f",
+      "targetHash": "d3f72498143bee6a24a0fc6dc76cadddc338b871b5fc10c7a05c55cf724e318a",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "PolicyAlert.b03_authenticated_policyalert_select",
+      "predecessorHash": "ee6e58bb3a0fba3f384f9a7187ab064d034e5bf0245c4908e6fb97460882d49a",
+      "targetHash": "d2d382ecfd808b50200beee6d671a4524665babf31ce96c17fed54df39b3196c",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "PrintItem.full_rls_internal_authowner_printitem_select",
+      "predecessorHash": "1a2ba638c341d95a2f25ac5c2a760df368505c4493f04b83ef2678ddde28a828",
+      "targetHash": "ebca10f5ff88cfb582105348925d7992f4455f06c99796484620025106dee137",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "PrintJob.full_rls_internal_authowner_printjob_select",
+      "predecessorHash": "7d3b49678e39bd23c14b38ca6d8f3f9ae7e019900120cf0574905d5ea78ebc11",
+      "targetHash": "ca75d12d6db760fb5530b2762621863bbd599a28b1b61acba0e18ff142ce59a9",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "PrintSession.full_rls_internal_authowner_printsession_select",
+      "predecessorHash": "bc4f914dd627748f4666b79f898e848dace2997305b1a17de51e4b9d28c8d702",
+      "targetHash": "10bac107dba7101059f0dbe5cb0821bc6862e910aedd1bb9834eb5f0a2c3838b",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "QRCode.b03_authenticated_qrcode_select",
+      "predecessorHash": "2aa092bc8eaa2d636db97b14b2a0f55ef428827d26a819c81c9134b799bfd45d",
+      "targetHash": "8e8e6584b8cfbd05a0c19ef32612304edbab33e0dfab1c306963c318223a5382",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "QRCode.full_rls_internal_authowner_qrcode_select",
+      "predecessorHash": "80cbb38ebc6004a128edb55596e9eaa95f6e78bc4de9c5c264bcc1b49442cd3f",
+      "targetHash": "ce6bccbde0ff6fccffc509a368d8e8e6867714a859189dfb51f148fdc192fc35",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "QrScanLog.b03_authenticated_qrscanlog_select",
+      "predecessorHash": "0e1915ee652f8a1f732f7d299ac5d605e8444c2ca883d604ec90b0a7e79176f1",
+      "targetHash": "ca5ece2c2e21d8a359f92a3078430c28fcb8c353b79d7a61061c4c0d71f27387",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportIssueReport.b03_authenticated_supportissuereport_insert",
+      "predecessorHash": "61939bef7e78a1d69614ae8ffd0a6965881cdefb39d2f0531cce204f08f43fbf",
+      "targetHash": "e69d4329f602b62f3fa8935c3a9531f1121ad10505d3b5dbf75380d9c70392d8",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportIssueReport.b03_authenticated_supportissuereport_select",
+      "predecessorHash": "8208d825120ba3090e410b9c00244675151e811099beb0d4d8eaef5fb2f57ec8",
+      "targetHash": "0c35a7ec94ef51b2b04f93a43978384f05aa3d32846e22efd99abe38b50309d1",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportIssueReport.b03_authenticated_supportissuereport_update",
+      "predecessorHash": "c22abe950e81b1643de39c51d831f9ad83000b09f203046b9716307f3d2dc20f",
+      "targetHash": "0518b4e1963a54ee4e9b142e65fc72bab724e184441179cb814fbfd7b8395013",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportTicket.b03_authenticated_supportticket_select",
+      "predecessorHash": "a08ee454da51d4041cfc59effdbb6f0481b2d2fbf474f6232360c6ab09a2d7f3",
+      "targetHash": "65eff2c64f25ce7b03720adf25c838f4fdccbc632522f376bd967f202ca00ff5",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportTicket.b03_authenticated_supportticket_update",
+      "predecessorHash": "a728c30645ceeb6fae0c42db1e25151dbd1f5baa703de4df33edfb00623c7ca7",
+      "targetHash": "25dbef76797ffcd54569560a4fff95c156142d33329ada4bb225905da6cba678",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportTicketMessage.b03_authenticated_supportticketmessage_insert",
+      "predecessorHash": "34d62e909487f5b4370a836a24204b6eaaf6b3b1d2bf6bfda7840ebb54c8544f",
+      "targetHash": "2d9a12b59fb9ef2bef3a5ad046ea6cf95cc1e56d8112b6d0d477df0ef703a9f3",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "SupportTicketMessage.b03_authenticated_supportticketmessage_select",
+      "predecessorHash": "2c9838a9519f9da5156fb4361b0bebfc83f3df6059e0175049957c0e736d8745",
+      "targetHash": "4ce2b96ca9f1c4ddc988de2e46eb859c98c1e16cfa90935f96c99d3d96cc34d4",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "User.b03_authenticated_user_select",
+      "predecessorHash": "ab96b60562738c142b3dae6f7054bca8e77f1d5910432766a3fde4656cb0eab2",
+      "targetHash": "ce3ff26d17b8fdef46abbe1a164241807e8cc413caae6e1f976fb228b93d2bfe",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "policies",
+      "identity": "User.full_rls_internal_authowner_user_select",
+      "predecessorHash": "d8e99a8367641c944de0ef954bf9c1d91b24b9ff330aa335602365ab524c68ab",
+      "targetHash": "00daba239b5686ffb781065ddd137a915801e41d830f4948330644b1f024b257",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.batch_operational_rows(audit_id text, requested_licensee_id text, route_surface text, focus_batch_id text, expected_scope_fingerprint text, page_limit integer, page_offset integer)",
+      "predecessorHash": "337794dec6af94d88b6035d0d3d6ef24af8d1d729ec8eddb0aa00c02269dc10e",
+      "targetHash": "24254f3eb40c24a787d6210fbbbf85719e1dae9bb1c5a9100ef330523f01907f",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    },
+    {
+      "kind": "routines",
+      "identity": "app_rls.dashboard_snapshot_data(audit_id text, requested_licensee_id text, route_surface text, expected_scope_fingerprint text)",
+      "predecessorHash": "e4d43f8817b33ebf3cd7c5c1bfb95538d7cbe20ee90858319dcd8c67343e05c7",
+      "targetHash": "b249757ca3e7c861153d6bb3876109499317afdfbfc0e9cde00a3564c10f8d4d",
+      "owner": "mscqr_prd_rls_phase2_owner"
+    }
+  ]
+}
