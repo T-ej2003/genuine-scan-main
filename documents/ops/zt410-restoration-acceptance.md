@@ -13,7 +13,7 @@ This is an operator-run acceptance check after an approved backend, database, an
 
 1. Confirm the connector selects `windows-raw-zpl`. Record a redacted final-command summary: byte count, SHA-256, language, `^PW`/`^LL`, QR and graphic command counts. Do not log the QR token or signed payload. The fixture hash is an offline reference, not an expected hash for a different authorized test identity.
 2. Observe one physical label: readable QR, correct text and bounds, no black block, no printer pause. Record UTC time and printer and Windows queue states. Queue disappearance alone does not prove printing.
-3. Verify a valid signed receipt reaches the backend and that job, item, inventory, and audit records reconcile exactly once. Record request and diagnostic IDs.
+3. Verify a valid signed spool receipt reaches the backend and that job, item, inventory, and audit records reconcile exactly once. Record request and diagnostic IDs. The current Windows queue API supplies no positive physical-print confirmation; unless a separately certified signal is available, expect an indeterminate state requiring authorized manual reconciliation rather than automatic `PRINTED`.
 4. If the printer pauses, output is unreadable, confirmation is unavailable, or the receipt is lost, stop. Treat the physical outcome as indeterminate. Do not automatically resend, confirm, consume, reallocate, or reset. Preserve connector journal, queue evidence, printer state, and backend event IDs for authorized reconciliation.
 
 ## Release and database boundary
