@@ -1363,11 +1363,30 @@ async function main() {
   assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${uncertainJobId}'`), "PAUSED:NEEDS_OPERATOR_ACTION");
   assert.equal(psql(admin, `SELECT state||':'||"pipelineState" FROM public."PrintItem" WHERE id='${uncertainItemId}'`), "FROZEN:NEEDS_OPERATOR_ACTION");
   assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${uncertainQrId}'`), "ALLOCATED");
+  const uncertainReissue = () => `SELECT app_rls.printing_reissue_request(
+    '${caps.maker}','printing-reissue','${requestId()}','CREATE',NULL,
+    '${uncertainJobId}',1,NULL,NULL,'Physical outcome is unconfirmed',NULL
+  )`;
+  denied(app, uncertainReissue(), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','uncertain_confirm_${requestId()}',now()::timestamp,
+    '${requestId()}','CONFIRM','${uncertainJobId}','${uncertainItemId}','${ids.printer}','${hash('uncertain')}',NULL,'{}'::jsonb
+  )`, /query returned no rows/);
   denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','RESUME','Unsafe replay')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
   denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','ABANDON','Unsafe release')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
   json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','STOP','Hold for reconciliation')`);
   assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${uncertainItemId}'`), "FROZEN");
   assert.equal(psql(admin, `SELECT "pipelineState" FROM public."PrintJob" WHERE id='${uncertainJobId}'`), "NEEDS_OPERATOR_ACTION");
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','ABANDON','Unsafe release')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  denied(app, uncertainReissue(), /PRINTING_BOUNDARY_DENIED/);
+  const approvedUncertainReissueId = "50000000-0000-4000-8000-000000000902";
+  psql(admin, `INSERT INTO public."PrintReissueRequest"(id,"originalPrintJobId","requestedByUserId","approvedByUserId","licenseeId","manufacturerId","batchId","requestedByRole","targetApproverRole",quantity,status,reason,"approvedAt","updatedAt")
+    VALUES('${approvedUncertainReissueId}','${uncertainJobId}','${ids.maker}','${ids.checker}','${ids.licenseeA}','${ids.maker}','${ids.raceBatch}','MANUFACTURER_ADMIN','LICENSEE_ADMIN',1,'APPROVED','Prior approval',now(),now())`);
+  denied(app, `SELECT app_rls.printing_reissue_request(
+    '${caps.maker}','printing-reissue','${requestId()}','EXECUTE','${approvedUncertainReissueId}',
+    NULL,NULL,NULL,NULL,'Prior approval',NULL
+  )`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${uncertainJobId}'`), "0");
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItemEvent" WHERE "printItemId"='${uncertainItemId}' AND "eventType"='INCIDENT_RAISED'`), "1");
 
   const catalog = json(admin, `SELECT jsonb_build_object(

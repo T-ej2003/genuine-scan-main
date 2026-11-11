@@ -214,9 +214,13 @@ export const refresh = async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
     }
     const sqlFailure = error as { code?: unknown; meta?: { code?: unknown; message?: unknown } } | null;
-    const refreshBoundaryDenied = sqlFailure?.code === "P2010" && sqlFailure.meta?.code === "42501" &&
-      /\b(?:B01_REFRESH_[A-Z_]+|B01_SCOPE_SWITCH_ROLE)_DENIED\b/.test(String(sqlFailure.meta?.message || ""));
-    if (isCanonicalAuthDenial(error) || refreshBoundaryDenied) {
+    const sqlDenial = sqlFailure?.code === "P2010" && sqlFailure.meta?.code === "42501"
+      ? String(sqlFailure.meta?.message || "").split("\n", 1)[0].trim().replace(/^ERROR:\s*/, "")
+      : "";
+    if (sqlDenial === "B01_SCOPE_SWITCH_ROLE_DENIED") {
+      return res.status(403).json({ success: false, error: "The requested workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
+    }
+    if (isCanonicalAuthDenial(error) || sqlDenial === "B01_REFRESH_BEARER_DENIED") {
       clearAuthCookies(res);
       return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
     }

@@ -86,6 +86,23 @@ const run = async ({ print, wait } = {}) => {
   }), { errorCode: "queue_confirmation_unavailable" });
   assert.deepEqual(uncertain, ["chunk_ack", "label_spooled", "label_failed"]);
 
+  const receiptFailureSession = { ...session };
+  let receiptFailureWrites = 0;
+  const receiptFailureAdapters = {
+    send: async (_ws, _session, _printer, event) => {
+      if (event.type === "label_failed") throw new Error("receipt socket closed");
+    },
+    print: async () => {
+      receiptFailureWrites += 1;
+      return { printPath: "USB_RAW", labelLanguage: "ZPL", jobRef: "uncertain-receipt", bytesWritten: Buffer.byteLength(zpl) };
+    },
+    wait: async () => ({ confirmed: false, confirmationUnavailable: true }),
+  };
+  await assert.rejects(runPersistentPrintChunk({}, receiptFailureSession, payload, session.selectedPrinterId, receiptFailureAdapters),
+    { errorCode: "queue_confirmation_unavailable" }, "transport failure must not hide the original physical uncertainty");
+  await runPersistentPrintChunk({}, receiptFailureSession, payload, session.selectedPrinterId, receiptFailureAdapters);
+  assert.equal(receiptFailureWrites, 1, "a lost uncertainty receipt must not trigger another physical print");
+
   let acceptedWrites = 0;
   const lostReceipt = [];
   const lostReceiptSession = { ...session };

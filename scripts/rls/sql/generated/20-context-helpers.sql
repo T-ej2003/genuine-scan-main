@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc'
+    AND source_contract_sha256='7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10071,6 +10071,8 @@ BEGIN
     THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:='SENT'; target_pipeline:='RESUME_PENDING'; target_session:='RESUME_PENDING';
   ELSE
+    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     IF job_row.status IN ('CONFIRMED','CANCELLED','STOPPED') THEN
       RETURN jsonb_build_object('jobId',p_job_id,'status',job_row.status,'idempotent',true);
     END IF;
@@ -10080,8 +10082,6 @@ BEGIN
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
     target_pipeline:='STOPPED';
     target_session:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
-    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
-    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     IF p_operation='STOP' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
     THEN target_pipeline:='NEEDS_OPERATOR_ACTION'; END IF;
     UPDATE public."PrintItem" SET state='CANCELLED', "pipelineState"='STOPPED',
@@ -11053,14 +11053,16 @@ BEGIN
       IF request_row.status::text='EXECUTED' THEN
         RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',true);
       END IF;
-      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."pipelineState",j."printMode",
         j."payloadType",j.quantity,j."itemCount",
         ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id
         INTO STRICT job_row
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
-        WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j,ps;
+        WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
       original_session_id:=job_row.original_session_id;
       IF job_row."printMode"='LOCAL_AGENT'::public."PrintDispatchMode" THEN
         IF job_row.original_registration_id IS NULL THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;

@@ -239,8 +239,16 @@ assert.equal(boundaryDeniedRefresh.cleared, 1, "an exact refresh boundary denial
 refreshError = sqlError("P2010", "42501", "ERROR: B01_SCOPE_SWITCH_ROLE_DENIED");
 const forbiddenScopeRefresh = response();
 await authControllers.refresh(request(), forbiddenScopeRefresh);
-assert.equal(forbiddenScopeRefresh.statusCode, 401);
-assert.equal(forbiddenScopeRefresh.cleared, 1);
+assert.equal(forbiddenScopeRefresh.statusCode, 403);
+assert.equal(forbiddenScopeRefresh.cleared, 0, "an invalid scope request must not revoke a valid session");
+assert.equal(forbiddenScopeRefresh.body.code, "AUTH_SCOPE_UNAVAILABLE");
+for (const message of ["ERROR: B01_REFRESH_OPERATION_DENIED", "ERROR: unrelated B01_REFRESH_BEARER_DENIED detail"]) {
+  refreshError = sqlError("P2010", "42501", message);
+  const unrelatedRefresh = response();
+  await authControllers.refresh(request(), unrelatedRefresh);
+  assert.equal(unrelatedRefresh.statusCode, 500);
+  assert.equal(unrelatedRefresh.cleared, 0, "only a confirmed bearer denial may clear refresh cookies");
+}
 refreshError = sqlError("P2010", "42501", "ERROR: OTHER_RLS_DENIED");
 const unrelatedSqlDenial = response();
 await authControllers.refresh(request(), unrelatedSqlDenial);

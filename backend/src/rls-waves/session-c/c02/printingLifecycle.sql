@@ -1991,6 +1991,8 @@ BEGIN
     THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:='SENT'; target_pipeline:='RESUME_PENDING'; target_session:='RESUME_PENDING';
   ELSE
+    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     IF job_row.status IN ('CONFIRMED','CANCELLED','STOPPED') THEN
       RETURN jsonb_build_object('jobId',p_job_id,'status',job_row.status,'idempotent',true);
     END IF;
@@ -2000,8 +2002,6 @@ BEGIN
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
     target_pipeline:='STOPPED';
     target_session:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
-    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
-    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     IF p_operation='STOP' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
     THEN target_pipeline:='NEEDS_OPERATOR_ACTION'; END IF;
     UPDATE public."PrintItem" SET state='CANCELLED', "pipelineState"='STOPPED',
@@ -2973,14 +2973,16 @@ BEGIN
       IF request_row.status::text='EXECUTED' THEN
         RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',true);
       END IF;
-      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
+      SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."pipelineState",j."printMode",
         j."payloadType",j.quantity,j."itemCount",
         ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id
         INTO STRICT job_row
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
-        WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j,ps;
+        WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
       original_session_id:=job_row.original_session_id;
       IF job_row."printMode"='LOCAL_AGENT'::public."PrintDispatchMode" THEN
         IF job_row.original_registration_id IS NULL THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
