@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c'
+    AND source_contract_sha256='71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7743eacef2f044840378b93e981e3a62ab38366075c3b0d0687b2f1238aaf29c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:71169fe173272c5089f40a16def04abdf3ce83c448394c8506ebf46d4d04ce53')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -261,7 +261,7 @@ RETURNS TABLE(
   total_qr_codes bigint,active_licensees bigint,manufacturers bigint,total_batches bigint,
   dormant bigint,active bigint,activated bigint,allocated bigint,printed bigint,redeemed bigint,blocked bigint,scanned bigint,
   rollup_authoritative boolean
-) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
+) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls SET jit=off AS $function$
 DECLARE
   fingerprint text;
   rollup_total bigint;
@@ -355,9 +355,12 @@ BEGIN
            count(*) FILTER (WHERE qcode."status"='PRINTED'),count(*) FILTER (WHERE qcode."status"='REDEEMED'),
            count(*) FILTER (WHERE qcode."status"='BLOCKED'),count(*) FILTER (WHERE qcode."status"='SCANNED')
       INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
-    FROM public."QRCode" qcode
-    WHERE (
-      (app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (
+    FROM (
+      SELECT qcode."status" FROM public."QRCode" qcode
+      WHERE app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND qcode."licenseeId"=app_rls.current_licensee_id()
+      UNION ALL
+      SELECT qcode."status" FROM public."QRCode" qcode
+      WHERE app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER') AND EXISTS (
         SELECT 1 FROM public."Batch" b WHERE b."id"=qcode."batchId" AND b."manufacturerId"=app_rls.current_user_id()
       ) AND EXISTS (
         SELECT 1 FROM public."ManufacturerLicenseeLink" ml
@@ -366,10 +369,15 @@ BEGIN
         WHERE ml."manufacturerId"=app_rls.current_user_id() AND ml."licenseeId"=qcode."licenseeId"
           AND l."isActive"=TRUE AND l."suspendedAt" IS NULL AND o."isActive"=TRUE
           AND (app_rls.current_licensee_id() IS NULL OR ml."licenseeId"=app_rls.current_licensee_id())
-      ))
-      OR (app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') AND qcode."licenseeId"=app_rls.current_licensee_id())
-      OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND (app_rls.current_licensee_id() IS NULL OR qcode."licenseeId"=app_rls.current_licensee_id()))
-    );
+      )
+      UNION ALL
+      SELECT qcode."status" FROM public."QRCode" qcode
+      WHERE app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NULL
+      UNION ALL
+      SELECT qcode."status" FROM public."QRCode" qcode
+      WHERE app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_licensee_id() IS NOT NULL
+        AND qcode."licenseeId"=app_rls.current_licensee_id()
+    ) qcode;
   END IF;
   RETURN NEXT;
 END
@@ -545,7 +553,7 @@ RETURNS TABLE(scope_fingerprint text) LANGUAGE sql VOLATILE SECURITY INVOKER SET
 $function$;
 
 CREATE FUNCTION app_rls.batch_operational_rows(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,page_limit integer,page_offset integer)
-RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls SET jit=off AS $function$
 DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);

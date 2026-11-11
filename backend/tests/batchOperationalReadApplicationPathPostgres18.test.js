@@ -137,6 +137,8 @@ const main = async () => {
   try {
     const [{ major }] = await prisma.$queryRawUnsafe("SELECT current_setting('server_version_num')::int / 10000 AS major");
     assert.equal(major, 18);
+    const [rowFunction] = await bootstrap.$queryRawUnsafe("SELECT proconfig FROM pg_catalog.pg_proc WHERE oid='app_rls.batch_operational_rows(text,text,text,text,text,integer,integer)'::regprocedure");
+    assert(rowFunction?.proconfig?.includes("jit=off"), "batch rows must avoid per-request RLS JIT compilation");
 
     const createdAt = ["2026-07-01T10:00:00.000Z", "2026-07-01T11:00:00.000Z", "2026-07-01T12:00:00.000Z"]
       .map((value) => new Date(value));
@@ -377,6 +379,23 @@ const main = async () => {
     }
     assert(auditRows.filter((row) => row.details?.requestId === "batch-pg-manufacturer-selected")
       .every((row) => row.orgId === ids.orgA && row.licenseeId === ids.licenseeA));
+
+    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 100000);
+    assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
+    await bootstrap.$executeRawUnsafe(`
+      INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
+      SELECT gen_random_uuid()::text, 'batch-stress-' || n, $1, $2, 'ACTIVE', now()
+      FROM generate_series(1, $3::integer) AS n
+    `, ids.licenseeB, ids.foreign, stressRows);
+    await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
+    const stressStart = performance.now();
+    const stressPage = expectSuccess(await invoke(getBatches, {
+      user: tenantClaims(), requestId: "batch-pg-100k-tenant", query: { limit: "2", offset: "0" },
+      originalUrl: "/api/qr/batches",
+    }), "large tenant page");
+    assert.equal(stressPage.meta.total, 3, "foreign inventory cannot change the tenant total");
+    assert.equal(stressPage.data[0]._count.qrCodes, 2);
+    console.log(`${stressRows} batch application path ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("batch operational reads PostgreSQL 18 application-path proof passed");
   } finally {

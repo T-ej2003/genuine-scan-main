@@ -1133,7 +1133,7 @@ RETURNS TABLE(
   total_qr_codes bigint,active_licensees bigint,manufacturers bigint,total_batches bigint,
   dormant bigint,active bigint,activated bigint,allocated bigint,printed bigint,redeemed bigint,blocked bigint,scanned bigint,
   rollup_authoritative boolean
-) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
+) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls SET jit=off AS $function$
 DECLARE
   fingerprint text;
   rollup_total bigint;
@@ -1227,9 +1227,12 @@ BEGIN
            count(*) FILTER (WHERE qcode.${q("status")}='PRINTED'),count(*) FILTER (WHERE qcode.${q("status")}='REDEEMED'),
            count(*) FILTER (WHERE qcode.${q("status")}='BLOCKED'),count(*) FILTER (WHERE qcode.${q("status")}='SCANNED')
       INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
-    FROM public.${q("QRCode")} qcode
-    WHERE (
-      (${manufacturerRoles} AND EXISTS (
+    FROM (
+      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+      WHERE ${tenantAdminRoles} AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
+      UNION ALL
+      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+      WHERE ${manufacturerRoles} AND EXISTS (
         SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=qcode.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()
       ) AND EXISTS (
         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
@@ -1238,10 +1241,15 @@ BEGIN
         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=qcode.${q("licenseeId")}
           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
           AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
-      ))
-      OR (${tenantAdminRoles} AND qcode.${q("licenseeId")}=app_rls.current_licensee_id())
-      OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR qcode.${q("licenseeId")}=app_rls.current_licensee_id()))
-    );
+      )
+      UNION ALL
+      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+      WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NULL
+      UNION ALL
+      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+      WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NOT NULL
+        AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
+    ) qcode;
   END IF;
   RETURN NEXT;
 END
@@ -1419,7 +1427,7 @@ $function$;`;
 
 const batchOperationalRowFunctionsSql = `
 CREATE FUNCTION app_rls.batch_operational_rows(audit_id text,requested_licensee_id text,route_surface text,focus_batch_id text,expected_scope_fingerprint text,page_limit integer,page_offset integer)
-RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls AS $function$
+RETURNS TABLE(row_data jsonb) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls SET jit=off AS $function$
 DECLARE fingerprint text; focus_licensee_id text; source_batch_id text;
 BEGIN
   fingerprint := app_rls.authorize_batch_operational_read(audit_id,requested_licensee_id,route_surface,focus_batch_id);

@@ -128,6 +128,8 @@ const main = async () => {
   try {
     const [{ major }] = await prisma.$queryRawUnsafe("SELECT current_setting('server_version_num')::int / 10000 AS major");
     assert.equal(major, 18);
+    const [snapshotFunction] = await bootstrap.$queryRawUnsafe("SELECT proconfig FROM pg_catalog.pg_proc WHERE oid='app_rls.dashboard_snapshot_data(text,text,text,text)'::regprocedure");
+    assert(snapshotFunction?.proconfig?.includes("jit=off"), "dashboard data must avoid per-request RLS JIT compilation");
     await bootstrap.$transaction([
       bootstrap.user.create({ data: {
         id: ids.orgAdminA,
@@ -333,6 +335,25 @@ const main = async () => {
       "dashboard-pg-delta-revoked",
     ]) assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit attribution`);
     assert(auditRows.filter((row) => row.details?.requestId === "dashboard-pg-manufacturer-selected").every((row) => row.orgId === ids.orgB && row.licenseeId === ids.licenseeB));
+
+    const stressRows = Number(process.env.MSCQR_PERF_ROWS || 100000);
+    assert(Number.isInteger(stressRows) && stressRows >= 1 && stressRows <= 200000);
+    await bootstrap.$executeRawUnsafe(`
+      INSERT INTO public."QRCode" (id, code, "licenseeId", "batchId", status, "updatedAt")
+      SELECT gen_random_uuid()::text, 'dashboard-stress-' || n, $1, $2, 'ACTIVE', now()
+      FROM generate_series(1, $3::integer) AS n
+    `, ids.licenseeB, ids.batchB, stressRows);
+    await bootstrap.$executeRawUnsafe('ANALYZE public."QRCode"');
+    const { bumpCacheNamespaceVersion } = require("../dist/services/versionedCacheService");
+    await bumpCacheNamespaceVersion("dashboard-snapshot");
+    const stressStart = performance.now();
+    expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-100k-tenant")), {
+      totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
+    }, "large tenant isolation");
+    expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-100k-platform")), {
+      totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
+    }, "large platform fallback");
+    console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");
   } finally {
