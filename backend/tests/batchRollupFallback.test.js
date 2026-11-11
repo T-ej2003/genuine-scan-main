@@ -30,7 +30,7 @@ const batch = {
     if (sql.includes("batch_reservable_qr_summaries")) return [];
     if (sql.includes("batch_status_fallback")) {
       fallbackCalls += 1;
-      return [{ batch_id: batchId, status: QRStatus.DORMANT, count: 140 }];
+      return [{ batch_id: batchId, status: QRStatus.DORMANT, count: batch._count?.qrCodes ?? batch.totalCodes }];
     }
     throw new Error(`Unexpected summary query: ${sql}`);
   } };
@@ -41,5 +41,13 @@ const batch = {
   rollupCount = 140;
   await enrichBatchSummaries([batch], db, boundary);
   assert.equal(fallbackCalls, 1, "matching rollups avoid extra QR status reads");
+  batch._count = { qrCodes: 130 };
+  rollupCount = 130;
+  const [allocated] = await enrichBatchSummaries([batch], db, boundary);
+  assert.equal(allocated.unassignedRemainingCodes, 130);
+  assert.equal(fallbackCalls, 1, "parent allocation does not make a correct live rollup stale");
+  rollupCount = 129;
+  await enrichBatchSummaries([batch], db, boundary);
+  assert.equal(fallbackCalls, 2, "a true mismatch still checks live QR status");
   console.log("Stale batch rollup fallback passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

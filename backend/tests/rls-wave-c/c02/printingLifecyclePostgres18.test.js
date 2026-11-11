@@ -1240,6 +1240,136 @@ async function main() {
     await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,capability:caps.maker,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
   } finally {await new Promise(resolve=>maintenanceServer.close(resolve));delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;}
 
+  const stopJobId = "50000000-0000-4000-8000-000000000597";
+  const stopSessionId = "50000000-0000-4000-8000-000000000598";
+  const stopQrId = "50000000-0000-4000-8000-000000000699";
+  const stopItemId = "50000000-0000-4000-8000-000000000799";
+  psql(admin, `
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId",status,"updatedAt")
+      VALUES('${stopQrId}','synthetic-stop-code','${ids.licenseeA}','${ids.raceBatch}','ALLOCATED',now());
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+      VALUES('${stopJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerId",status,"totalItems","updatedAt")
+      VALUES('${stopSessionId}','${stopJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','ACTIVE',1,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","updatedAt")
+      VALUES('${stopItemId}','${stopSessionId}','${stopQrId}','synthetic-stop-code','RESERVED','QUEUED',now());
+  `);
+  const stopSql = (capability) => `SELECT app_rls.printing_control_job(
+    '${capability}','printing-job-control','${requestId()}','${stopJobId}','STOP','Synthetic operator stop'
+  )`;
+  denied(app, stopSql(caps.outsider), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `BEGIN; ${stopSql(caps.maker)}; SELECT 1/0; COMMIT`, /division by zero/);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${stopJobId}'`), "PENDING");
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${stopItemId}'`), "RESERVED");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_STOP' AND "entityId"='${stopJobId}'`), "0");
+  const stopped = json(app, stopSql(caps.maker));
+  assert.equal(stopped.status, "STOPPED");
+  assert.equal(stopped.sessionStatus, "STOPPED");
+  assert.equal(json(app, `SELECT app_rls.printing_readiness('${caps.maker}','printing-readiness','${requestId()}','JOB','${stopJobId}','{}'::jsonb)`).job.status, "STOPPED");
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${stopJobId}'`), "STOPPED");
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${stopItemId}'`), "CANCELLED");
+  assert.equal(json(app, stopSql(caps.maker)).idempotent, true);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_STOP' AND "entityId"='${stopJobId}'`), "1");
+
+  const orphanJobId = "50000000-0000-4000-8000-000000000596";
+  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,quantity,"updatedAt")
+    VALUES('${orphanJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING',1,now())`);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${orphanJobId}','STOP','Synthetic missing session')`, /query returned no rows/);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${orphanJobId}'`), "PENDING");
+
+  const raceStop = async (suffix, itemState, connectorOperation) => {
+    const jobId = `50000000-0000-4000-8000-00000000059${suffix}`;
+    const sessionId = `50000000-0000-4000-8000-00000000058${suffix}`;
+    const qrId = `50000000-0000-4000-8000-00000000069${suffix}`;
+    const itemId = `50000000-0000-4000-8000-00000000079${suffix}`;
+    psql(admin, `
+      INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+        VALUES('${jobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','SENT','LOCAL_AGENT','SENT_TO_PRINTER',1,now());
+      INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+        VALUES('${qrId}','synthetic-stop-race-${suffix}','${ids.licenseeA}','${ids.raceBatch}','${jobId}','ALLOCATED',now());
+      INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+        VALUES('${sessionId}','${jobId}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,1,now());
+      INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","agentAckedAt","updatedAt")
+        VALUES('${itemId}','${sessionId}','${qrId}','synthetic-stop-race-${suffix}','${itemState}',
+          '${itemState === "AGENT_ACKED" ? "PRINTER_ACKNOWLEDGED" : "SENT_TO_PRINTER"}',now(),
+          ${itemState === "AGENT_ACKED" ? "now()" : "NULL"},now());
+    `);
+    const marker = `stop_${connectorOperation.toLowerCase()}_probe`;
+    const holder = psqlAsync(admin, `BEGIN; SELECT id FROM public."PrintJob" WHERE id='${jobId}' FOR UPDATE;
+      DO $hold$ BEGIN
+        WHILE (SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'
+          AND (query LIKE '%printing_connector_event(%' OR query LIKE '%printing_control_job(%')
+          AND cardinality(pg_blocking_pids(pid))>0)<2 LOOP
+          IF clock_timestamp()>transaction_timestamp()+interval '10 seconds' THEN RAISE EXCEPTION 'stop race did not reach job lock'; END IF;
+          PERFORM pg_sleep(0.05);
+          PERFORM pg_stat_clear_snapshot();
+        END LOOP;
+      END $hold$; COMMIT; /* ${marker}_holder */`);
+    let lockHeld = false;
+    for (let attempt = 0; attempt < 80 && !lockHeld; attempt += 1) {
+      lockHeld = Number(psql(admin, `SELECT count(*) FROM pg_stat_activity WHERE wait_event='PgSleep' AND query LIKE '%${marker}_holder%'`)) > 0;
+      if (!lockHeld) await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert(lockHeld, "stop race holder must acquire the job lock");
+    const connector = psqlAsync(app, `SELECT app_rls.printing_connector_event(
+      '${ids.registration}','printing-agent','printing-device','stop_race_${suffix}_${connectorOperation.toLowerCase()}_nonce',now()::timestamp,
+      '${requestId()}','${connectorOperation}','${jobId}','${itemId}','${ids.printer}','${hash(marker)}','synthetic-spool','{}'::jsonb
+    ) /* ${marker} */`);
+    const stop = psqlAsync(app, `SELECT app_rls.printing_control_job(
+      '${caps.maker}','printing-job-control','${requestId()}','${jobId}','STOP','Concurrent synthetic stop'
+    ) /* ${marker} */`);
+    const [holderResult, connectorResult, stopResult] = await Promise.all([holder, connector, stop]);
+    assert.equal(holderResult.status, 0, JSON.stringify({ holder: holderResult.output, connector: connectorResult.output, stop: stopResult.output }));
+    assert.equal(stopResult.status, 0, stopResult.output);
+    const final = json(admin, `SELECT jsonb_build_object('job',(SELECT status FROM public."PrintJob" WHERE id='${jobId}'),
+      'session',(SELECT status FROM public."PrintSession" WHERE id='${sessionId}'),
+      'item',(SELECT state FROM public."PrintItem" WHERE id='${itemId}'),
+      'qr',(SELECT status FROM public."QRCode" WHERE id='${qrId}'),
+      'stopAudit',(SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_STOP' AND "entityId"='${jobId}'))`);
+    return { connectorResult, stopResult: JSON.parse(stopResult.output), final };
+  };
+  const ackRace = await raceStop("5", "ISSUED", "ACK");
+  assert.deepEqual([ackRace.final.job, ackRace.final.session, ackRace.final.item, ackRace.final.qr],
+    ["STOPPED", "STOPPED", "CANCELLED", "ALLOCATED"]);
+  assert.equal(ackRace.final.stopAudit, 1);
+  const confirmRace = await raceStop("4", "AGENT_ACKED", "CONFIRM");
+  assert.equal(confirmRace.final.stopAudit, confirmRace.final.job === "STOPPED" ? 1 : 0);
+  assert.deepEqual(
+    [confirmRace.final.session, confirmRace.final.item, confirmRace.final.qr],
+    confirmRace.final.job === "STOPPED" ? ["STOPPED", "CANCELLED", "ALLOCATED"] : ["COMPLETED", "PRINT_CONFIRMED", "PRINTED"]
+  );
+  assert(["STOPPED", "CONFIRMED"].includes(confirmRace.final.job));
+
+  const uncertainJobId = "50000000-0000-4000-8000-000000000593";
+  const uncertainSessionId = "50000000-0000-4000-8000-000000000583";
+  const uncertainItemId = "50000000-0000-4000-8000-000000000793";
+  const uncertainQrId = "50000000-0000-4000-8000-000000000693";
+  psql(admin, `
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+      VALUES('${uncertainJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','SENT','LOCAL_AGENT','SENT_TO_PRINTER',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+      VALUES('${uncertainQrId}','synthetic-uncertain-code','${ids.licenseeA}','${ids.raceBatch}','${uncertainJobId}','ALLOCATED',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+      VALUES('${uncertainSessionId}','${uncertainJobId}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,1,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","updatedAt")
+      VALUES('${uncertainItemId}','${uncertainSessionId}','${uncertainQrId}','synthetic-uncertain-code','ISSUED','SENT_TO_PRINTER',now(),now());
+  `);
+  const uncertainFail = () => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','uncertain_${requestId()}',now()::timestamp,
+    '${requestId()}','FAIL','${uncertainJobId}','${uncertainItemId}','${ids.printer}','${hash('uncertain')}',NULL,
+    '{"reason":"physical_outcome_unconfirmed","outcomeIndeterminate":true}'::jsonb
+  )`;
+  json(app, uncertainFail());
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${uncertainJobId}'`), "PAUSED:NEEDS_OPERATOR_ACTION");
+  assert.equal(psql(admin, `SELECT state||':'||"pipelineState" FROM public."PrintItem" WHERE id='${uncertainItemId}'`), "FROZEN:NEEDS_OPERATOR_ACTION");
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${uncertainQrId}'`), "ALLOCATED");
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','RESUME','Unsafe replay')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','ABANDON','Unsafe release')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${uncertainJobId}','STOP','Hold for reconciliation')`);
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${uncertainItemId}'`), "FROZEN");
+  assert.equal(psql(admin, `SELECT "pipelineState" FROM public."PrintJob" WHERE id='${uncertainJobId}'`), "NEEDS_OPERATOR_ACTION");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItemEvent" WHERE "printItemId"='${uncertainItemId}' AND "eventType"='INCIDENT_RAISED'`), "1");
+
   const catalog = json(admin, `SELECT jsonb_build_object(
     'force',(SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
       WHERE n.nspname='public' AND c.relname IN ('Batch','QRCode','PrintJob','PrintSession','PrintItem','Printer','PrinterRegistration','PrinterAgentSession')

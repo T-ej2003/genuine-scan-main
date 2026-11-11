@@ -479,6 +479,7 @@ export const handleTrustedSessionProgressMessage = async (
       messageSeq: message.messageSeq,
       bytesWritten: message.bytesWritten || null,
       reason: message.error || null,
+      outcomeIndeterminate: message.type === "label_failed" && message.error === "physical_outcome_unconfirmed",
     },
   });
   if (["chunk_ack","chunk_spooled","label_spooled"].includes(message.type)) {

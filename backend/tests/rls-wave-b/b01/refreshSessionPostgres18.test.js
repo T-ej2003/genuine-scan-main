@@ -95,6 +95,7 @@ const main = async () => {
 
   const seedActor = async ({ id, active = true, membershipActive = true, mfaEnabled = false, role = "MANUFACTURER" }) => {
     const tenantScoped = role.startsWith("MANUFACTURER") || ["LICENSEE_ADMIN", "ORG_ADMIN"].includes(role);
+    const mfaRequired = ["ORG_ADMIN", "SUPER_ADMIN", "PLATFORM_SUPER_ADMIN"].includes(role);
     await admin.$executeRaw`
       INSERT INTO b01_refresh_wave.actor(
         id,email,name,role,organization_id,licensee_id,manufacturer_id,active,email_verified_at,
@@ -102,7 +103,7 @@ const main = async () => {
       ) VALUES (
         ${id},${`${id}@example.test`},${id},${role},${`${id}-org`},${`${id}-licensee`},
         ${role.startsWith("MANUFACTURER") ? id : null},${active},${now},
-        ${true},${mfaEnabled},${mfaEnabled ? now : null}
+        ${mfaRequired},${mfaEnabled},${mfaEnabled ? now : null}
       )
     `;
     if (tenantScoped) {
@@ -311,7 +312,20 @@ const main = async () => {
     assert.equal(controllerActive, 1);
     assert.equal(controllerRotated, 1);
 
-    await seedActor({ id: "controller-mfa-bootstrap", role: "LICENSEE_ADMIN", mfaEnabled: true });
+    for (const role of ["LICENSEE_ADMIN", "MANUFACTURER_ADMIN", "MANUFACTURER_USER"]) {
+      const id = `no-mfa-${role.toLowerCase()}`;
+      await seedActor({ id, role });
+      await seedToken({ id: `token-${id}`, userId: id, rawToken: `raw-${id}` });
+      const response = await routeRequest({
+        method: "POST", route: "/auth/refresh", requestId: `request-${id}`, rawRefreshToken: `raw-${id}`,
+      });
+      assert.equal(response.status, 200, `${role} must refresh without mandatory MFA`);
+      assert.equal(response.body.data.auth.sessionStage, "ACTIVE");
+      assert.equal(response.body.data.auth.mfaRequired, false);
+      assert.equal(response.body.data.auth.authAssurance, "PASSWORD");
+    }
+
+    await seedActor({ id: "controller-mfa-bootstrap", role: "ORG_ADMIN", mfaEnabled: true });
     await seedToken({
       id: "token-controller-mfa-bootstrap",
       userId: "controller-mfa-bootstrap",
@@ -663,7 +677,7 @@ const main = async () => {
       /B01_REFRESH_CLAIM_AMBIGUOUS/
     );
 
-    await seedActor({ id: "actor-claim-order", role: "LICENSEE_ADMIN", mfaEnabled: true });
+    await seedActor({ id: "actor-claim-order", role: "ORG_ADMIN", mfaEnabled: true });
     const claimOrderPredecessorHash = await seedToken({
       id: "token-claim-order",
       userId: "actor-claim-order",
@@ -934,7 +948,7 @@ const main = async () => {
     assert.equal(sessions[0].createdIpHash, "c".repeat(64));
     assert.equal(sessions[0].createdUserAgent, "authenticated-proof");
 
-    await seedActor({ id: "recent-mfa-user", role: "LICENSEE_ADMIN", mfaEnabled: true });
+    await seedActor({ id: "recent-mfa-user", role: "ORG_ADMIN", mfaEnabled: true });
     await seedToken({
       id: "recent-mfa-token",
       userId: "recent-mfa-user",
@@ -943,7 +957,7 @@ const main = async () => {
     });
     const recentMfaContext = {
       userId: "recent-mfa-user",
-      role: "LICENSEE_ADMIN",
+      role: "ORG_ADMIN",
       organizationId: "recent-mfa-user-org",
       licenseeId: "recent-mfa-user-licensee",
       manufacturerId: null,

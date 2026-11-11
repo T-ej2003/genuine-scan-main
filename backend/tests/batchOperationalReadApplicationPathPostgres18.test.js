@@ -305,6 +305,18 @@ const main = async () => {
     })).status, 404);
     await bootstrap.user.update({ where: { id: ids.tenantA }, data: { isActive: true } });
 
+    await bootstrap.refreshToken.update({
+      where: { id: "10000000-0000-4000-9000-000000000031" },
+      data: { sessionCapabilityExpiresAt: new Date(Date.now() - 1_000) },
+    });
+    assert.equal((await invoke(getBatches, {
+      user: tenantClaims(), requestId: "batch-pg-expired-capability", originalUrl: "/api/qr/batches",
+    })).status, 404, "capability expiry is checked on the next statement");
+    await bootstrap.refreshToken.update({
+      where: { id: "10000000-0000-4000-9000-000000000031" },
+      data: { sessionCapabilityExpiresAt: sessionExpiry },
+    });
+
     await bootstrap.manufacturerLicenseeLink.delete({
       where: { manufacturerId_licenseeId: { manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeA } },
     });
@@ -358,7 +370,7 @@ const main = async () => {
     for (const requestId of [
       "batch-pg-foreign-scope", "batch-pg-foreign-focus", "batch-pg-missing-platform-selector",
       "batch-pg-weak-platform", "batch-pg-forged-actor",
-      "batch request with spaces", "batch-pg-inactive-actor", "batch-pg-stale-membership",
+      "batch request with spaces", "batch-pg-inactive-actor", "batch-pg-expired-capability", "batch-pg-stale-membership",
       "batch-pg-malformed-context", "batch-pg-wrong-purpose",
     ]) {
       assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit success attribution`);

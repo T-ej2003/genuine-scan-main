@@ -69,6 +69,16 @@ async function main() {
     await tx.$queryRaw(Prisma.sql`SELECT * FROM app_auth.require_authenticated_session(${capability},${purpose},${requestId()})`);
     return callback(tx);
   });
+  const attentionRequestId = requestId();
+  const attention = await app.$transaction(async (tx) => {
+    await tx.$queryRaw(Prisma.sql`SELECT * FROM app_auth.require_authenticated_session(${capability},${"attention-queue"},${attentionRequestId})`);
+    return repository.readAttentionQueueProjection(tx, {
+      licenseeId: ids.licensee,
+      since: new Date(Date.now() - 24 * 60 * 60_000),
+      requestId: attentionRequestId,
+    });
+  });
+  assert(Number.isInteger(attention.auditEvents.count));
   const auditPayload = (suffix) => ({ userId: ids.user, orgId: ids.org, licenseeId: ids.licensee, action: `B03_${suffix}`, entityType: "Certification", entityId: suffix, details: { suffix, at: new Date("2026-10-01T00:00:00.000Z"), omitted: undefined } });
 
   await assert.rejects(app.auditLogOutbox.findMany(), /permission denied/i);

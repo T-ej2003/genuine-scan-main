@@ -113,7 +113,8 @@ mockModule("services/auth/sessionRiskService.js", {
         sessionLicenseeId: null, sessionOrganizationId: null, scopeVersion: null,
         selectedLicenseeId: null, selectedLicenseeName: null, selectedLicenseePrefix: null,
         selectedLicenseeBrandName: null, selectedLicenseeOrganizationId: null, linkedLicensees: [],
-        mfaRequired: true, mfaEnabled: mockedMfaStatus.enabled, mfaEnrolled: mockedMfaStatus.enabled,
+        mfaRequired: [UserRole.SUPER_ADMIN, UserRole.PLATFORM_SUPER_ADMIN, UserRole.ORG_ADMIN].includes(prismaUser.role),
+        mfaEnabled: mockedMfaStatus.enabled, mfaEnrolled: mockedMfaStatus.enabled,
         mfaLastUsedAt: mockedMfaStatus.lastUsedAt, mfaMethods: ["TOTP"], mfaPreferredMethod: "TOTP",
       },
     };
@@ -328,6 +329,24 @@ const run = async () => {
     /MFA_STATUS_UNAVAILABLE/,
     "MFA status failures must not be converted into an unenrolled bootstrap session"
   );
+
+  failMfaStatusRead = false;
+  mockedMfaStatus = { enabled: false, lastUsedAt: null };
+  for (const role of [UserRole.LICENSEE_ADMIN, UserRole.MANUFACTURER_ADMIN, UserRole.MANUFACTURER_USER]) {
+    prismaUser = { ...baseUser, id: `ordinary-${role}`, role };
+    const session = await loginWithPassword({
+      email: prismaUser.email,
+      password: "correct-password",
+      ipHash: "ordinary-ip-hash",
+      userAgent: "ordinary-agent",
+      requestId: `ordinary-${role}-login`,
+    });
+    assert.strictEqual(session.sessionStage, "ACTIVE", `${role} must authenticate without MFA bootstrap`);
+    assert.strictEqual(session.auth?.mfaRequired, false);
+    assert.strictEqual(session.auth?.authAssurance, "PASSWORD");
+    assert.strictEqual(session.auth?.stepUpMethod, "PASSWORD_REAUTH");
+    assert(session.refreshToken, `${role} must receive an active refresh session`);
+  }
 
   console.log("admin login MFA cycle tests passed");
 };

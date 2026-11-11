@@ -578,7 +578,7 @@ const outboxSecurity = Object.freeze({
     ["AuditLog","INSERT",`current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND ${outboxOperation}='audit-consume' AND id IS NOT NULL AND "userId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_user_id',true),'') AND "orgId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_organization_id',true),'') AND "licenseeId" IS NOT DISTINCT FROM NULLIF(current_setting('app.b03_audit_licensee_id',true),'')`],
   ],
 });
-const b03AuthenticatedBinding = `app_rls.b03_authenticated_context_valid()`;
+const b03AuthenticatedBinding = `((SELECT app_rls.b03_authenticated_context_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline()))`;
 const b03SupportEmailWorkerBinding = `current_user={{AUTH_OWNER}} AND session_user={{WORKER_ROLE}} AND current_setting('app.system_identity',true)='identity-worker' AND current_setting('app.job_type',true)='SUPPORT_RESPONSE_EMAIL'`;
 const b03SupportResponseNotificationBinding = `${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='support-report-response' AND current_setting('app.b03_actor_role',true) IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND channel='EMAIL' AND type='support_issue_response' AND data->>'supportReportId'=current_setting('app.b03_support_report_id',true) AND "licenseeId" IS NOT DISTINCT FROM nullif(current_setting('app.b03_licensee_id',true),'') AND "userId" IS NOT DISTINCT FROM nullif(current_setting('app.b03_target_user_id',true),'')`;
 const b03AttentionRead = `${b03AuthenticatedBinding} AND current_setting('app.b03_operation',true)='attention-read'`;

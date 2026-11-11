@@ -1966,7 +1966,7 @@ BEGIN
     p_capability,p_purpose,p_request_id,NULL
   );
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.id,j."batchId",j."manufacturerId",j.status
+  SELECT j.id,j."batchId",j."manufacturerId",j.status,j."pipelineState"
     INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
     p_capability,p_purpose,p_request_id,job_row."batchId"
@@ -1974,6 +1974,9 @@ BEGIN
   IF actor.role='MANUFACTURER_ADMIN' AND job_row."manufacturerId"<>actor."userId" THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
+  SELECT ps.id INTO STRICT session_row
+    FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id;
+  PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT ps.id,ps.status INTO STRICT session_row
     FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',p_job_id,true),
@@ -1984,6 +1987,8 @@ BEGIN
     target_job_status:='PAUSED'; target_pipeline:='PAUSED'; target_session:='PAUSED';
   ELSIF p_operation='RESUME' THEN
     IF job_row.status<>'PAUSED' OR session_row.status NOT IN ('PAUSED','RESUME_PENDING') THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:='SENT'; target_pipeline:='RESUME_PENDING'; target_session:='RESUME_PENDING';
   ELSE
     IF job_row.status IN ('CONFIRMED','CANCELLED','STOPPED') THEN
@@ -1993,11 +1998,15 @@ BEGIN
       SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id AND pi."printConfirmedAt" IS NOT NULL
     ) THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_PRESENT'; END IF;
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
-    target_pipeline:=CASE WHEN p_operation='ABANDON' THEN 'STOPPED' ELSE 'STOPPED' END;
+    target_pipeline:='STOPPED';
     target_session:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
+    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+    IF p_operation='STOP' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN target_pipeline:='NEEDS_OPERATOR_ACTION'; END IF;
     UPDATE public."PrintItem" SET state='CANCELLED', "pipelineState"='STOPPED',
       "failureReason"=nullif(btrim(p_reason),''),"updatedAt"=now_at
-      WHERE "printSessionId"=session_row.id AND state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED');
+      WHERE "printSessionId"=session_row.id AND state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED','FROZEN');
   END IF;
   UPDATE public."PrintSession" SET status=target_session,
     "failedReason"=CASE WHEN p_operation IN ('STOP','ABANDON') THEN nullif(btrim(p_reason),'') ELSE "failedReason" END,
@@ -2224,19 +2233,29 @@ BEGIN
     IF item_row.state IN ('FAILED','FROZEN') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'failed',true,'idempotent',true);
     END IF;
-    UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
-      "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at
-      WHERE id=item_row.id;
-    UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','connector_failure'),500),
-      "updatedAt"=now_at WHERE id=session_row.id;
-    UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',
-      "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at WHERE id=job_row.id;
+    IF p_details->>'outcomeIndeterminate'='true' THEN
+      IF item_row.state NOT IN ('ISSUED','AGENT_ACKED') THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      UPDATE public."PrintItem" SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=item_row.id;
+      UPDATE public."PrintSession" SET status='PAUSED',"failedReason"='physical_outcome_unconfirmed',
+        "updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=job_row.id;
+    ELSE
+      UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
+        "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at
+        WHERE id=item_row.id;
+      UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','connector_failure'),500),
+        "updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',
+        "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at WHERE id=job_row.id;
+    END IF;
   END IF;
   INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
   VALUES(gen_random_uuid()::text,item_row.id,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemEventType",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'INCIDENT_RAISED' ELSE 'FAILED' END END::public."PrintItemEventType",
     item_row.state,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemState",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'FROZEN' ELSE 'FAILED' END END::public."PrintItemState",
     p_details,audit_actor,now_at);
   INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",

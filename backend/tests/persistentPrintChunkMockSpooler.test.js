@@ -73,15 +73,18 @@ const run = async ({ print, wait } = {}) => {
     print: async () => { throw new Error("mock spooler unavailable"); },
     wait: async () => { throw new Error("must not wait after rejected submission"); },
   }), /mock spooler unavailable/);
-  assert.deepEqual(unavailable, ["chunk_ack"]);
+  assert.deepEqual(unavailable, ["chunk_ack", "label_failed"]);
 
   const uncertain = [];
   await assert.rejects(runPersistentPrintChunk({}, { ...session }, payload, session.selectedPrinterId, {
-    send: async (_ws, _session, _printer, event) => uncertain.push(event.type),
+    send: async (_ws, _session, _printer, event) => {
+      uncertain.push(event.type);
+      if (event.type === "label_failed") assert.equal(event.error, "physical_outcome_unconfirmed");
+    },
     print: async () => ({ printPath: "USB_RAW", labelLanguage: "ZPL", jobRef: "uncertain-job", bytesWritten: Buffer.byteLength(zpl) }),
     wait: async () => ({ confirmed: false, confirmationUnavailable: true }),
   }), { errorCode: "queue_confirmation_unavailable" });
-  assert.deepEqual(uncertain, ["chunk_ack", "label_spooled"]);
+  assert.deepEqual(uncertain, ["chunk_ack", "label_spooled", "label_failed"]);
 
   let acceptedWrites = 0;
   const lostReceipt = [];
@@ -101,7 +104,7 @@ const run = async ({ print, wait } = {}) => {
     /signed receipt transport lost/);
   await runPersistentPrintChunk({}, lostReceiptSession, payload, session.selectedPrinterId, lostReceiptAdapters);
   assert.equal(acceptedWrites, 1, "An accepted spool submission must not be retried after a lost receipt");
-  assert.deepEqual(lostReceipt, ["chunk_ack", "label_spooled"]);
+  assert.deepEqual(lostReceipt, ["chunk_ack", "label_spooled", "label_failed"]);
 
   let attempted = false;
   await assert.rejects(runPersistentPrintChunk({}, { ...session }, {

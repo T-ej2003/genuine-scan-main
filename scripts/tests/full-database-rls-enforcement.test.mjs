@@ -35,6 +35,30 @@ test("generated package is bound to the current source contract", () => {
   assert.equal(checksums.migrationSetDigest, source.migrationSetDigest);
 });
 
+test("operational read policies validate the session once per SQL statement", () => {
+  const policies = packageInputs().policies.rows.filter((row) =>
+    row.scopePredicate?.includes("app_rls.operational_read_session_valid()")
+  );
+  assert(policies.length > 0);
+  for (const policy of policies) {
+    assert(!policy.scopePredicate.replaceAll("(SELECT app_rls.operational_read_session_valid())", "")
+      .includes("app_rls.operational_read_session_valid()"), policy.policyName);
+    assert(policy.scopePredicate.includes("clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())"), policy.policyName);
+  }
+});
+
+test("B03 policies validate the session once per SQL statement", () => {
+  const policies = packageInputs().policies.rows.filter((row) =>
+    row.scopePredicate?.includes("app_rls.b03_authenticated_context_valid()")
+  );
+  assert(policies.length > 0);
+  for (const policy of policies) {
+    assert(!policy.scopePredicate.replaceAll("(SELECT app_rls.b03_authenticated_context_valid())", "")
+      .includes("app_rls.b03_authenticated_context_valid()"), policy.policyName);
+    assert(policy.scopePredicate.includes("clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())"), policy.policyName);
+  }
+});
+
 test("focused certification writes a family artifact without replacing full evidence", () => {
   assert.match(certificationEvidencePath({}), /disposable-certification-result\.json$/);
   assert.match(

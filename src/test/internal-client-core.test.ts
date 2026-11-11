@@ -153,6 +153,55 @@ describe("internal client core HTML error handling", () => {
     window.removeEventListener("auth:logout", logout);
   });
 
+  it("does not refresh or log out when session validation is temporarily unavailable", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    try {
+      globalThis.fetch = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ code: "AUTH_TEMPORARILY_UNAVAILABLE" }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      ));
+      const response = await createApiClientCore().request("/dashboard/stats");
+      expect(response.status).toBe(503);
+      expect(globalThis.fetch).toHaveBeenCalledOnce();
+      expect(logout).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("auth:logout", logout);
+    }
+  });
+
+  it("coalesces concurrent protected 401s when refresh is temporarily unavailable", async () => {
+    setRequestCoordinatorScope({ id: "actor" });
+    const logout = vi.fn();
+    window.addEventListener("auth:logout", logout);
+    let releaseRefresh!: () => void;
+    const refreshPending = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+    let refreshCalls = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/auth/refresh")) {
+        refreshCalls += 1;
+        await refreshPending;
+        return new Response("", { status: 503 });
+      }
+      return new Response("", { status: 401 });
+    }) as typeof fetch;
+    try {
+      const client = createApiClientCore();
+      const first = client.request("/dashboard/stats");
+      const second = client.request("/qr/batches");
+      await vi.waitFor(() => expect(refreshCalls).toBe(1));
+      releaseRefresh();
+      expect((await first).status).toBe(503);
+      expect((await second).status).toBe(503);
+      expect(refreshCalls).toBe(1);
+      expect(logout).not.toHaveBeenCalled();
+    } finally {
+      releaseRefresh();
+      window.removeEventListener("auth:logout", logout);
+    }
+  });
+
   it("serializes refresh rotation across client instances when Web Locks are available", async () => {
     setRequestCoordinatorScope({ id: "actor" });
     window.localStorage.removeItem("mscqr:auth-refresh-version");

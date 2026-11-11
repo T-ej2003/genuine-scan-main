@@ -213,8 +213,16 @@ export const refresh = async (req: Request, res: Response) => {
     if (category === "MANUFACTURER_SCOPE_DENIED") {
       return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
     }
+    const sqlFailure = error as { code?: unknown; meta?: { code?: unknown; message?: unknown } } | null;
+    const refreshBoundaryDenied = sqlFailure?.code === "P2010" && sqlFailure.meta?.code === "42501" &&
+      /\b(?:B01_REFRESH_[A-Z_]+|B01_SCOPE_SWITCH_ROLE)_DENIED\b/.test(String(sqlFailure.meta?.message || ""));
+    if (isCanonicalAuthDenial(error) || refreshBoundaryDenied) {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
+    }
     console.error("Refresh error:", error);
-    return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
+    const transient = error instanceof Error && "code" in error && error.code === "P2028";
+    return res.status(transient ? 503 : 500).json({ success: false, error: "Session refresh is temporarily unavailable." });
   }
 };
 

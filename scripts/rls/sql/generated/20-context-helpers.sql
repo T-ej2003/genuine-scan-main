@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5d56ccbb7138197c7a70fc2667c5280a0c438bcd7b977bd88d6562c41c4c7c67'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5d56ccbb7138197c7a70fc2667c5280a0c438bcd7b977bd88d6562c41c4c7c67'
+    AND source_contract_sha256='4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5d56ccbb7138197c7a70fc2667c5280a0c438bcd7b977bd88d6562c41c4c7c67')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:4bee84b5f8e9fbe3bf462a954e2548e11955eef287e41717f9b553e13fade5bc')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -386,7 +386,7 @@ DECLARE
   primary_count bigint;
   membership_fingerprint text;
 BEGIN
-  IF NOT ((current_user='mscqr_rls_cert_auth_owner' AND app_rls.operational_read_session_valid()) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))))
+  IF NOT ((current_user='mscqr_rls_cert_auth_owner' AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline())) AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND (((app_rls.current_role() IN ('LICENSEE_ADMIN','ORG_ADMIN') OR app_rls.current_role() IN ('MANUFACTURER','MANUFACTURER_ADMIN','MANUFACTURER_USER')) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (app_rls.current_role() IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass'))))
      OR app_rls.current_user_id() IS NULL OR app_rls.current_role() IS NULL
      OR route_surface IS NULL
      OR (requested_licensee_id IS NOT NULL AND btrim(requested_licensee_id)='')
@@ -764,6 +764,27 @@ END
 $fn$;
 
 REVOKE ALL ON FUNCTION app_rls.operational_read_session_valid() FROM PUBLIC;
+
+-- Cache the authenticated row lookup per statement; compare this deadline
+-- against the live clock in each policy evaluation so mid-statement expiry denies.
+CREATE OR REPLACE FUNCTION app_rls.operational_read_session_deadline()
+RETURNS timestamp without time zone
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+  SELECT LEAST(s."sessionCapabilityExpiresAt",s."expiresAt")
+  FROM public."RefreshToken" s
+  WHERE session_user='mscqr_rls_cert_app'
+    AND current_setting('app.auth_session_verified',true)='1'
+    AND s.id=current_setting('app.auth_session_id',true)
+    AND s."userId"=current_setting('app.user_id',true)
+    AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+    AND s."sessionCapabilityHashVersion"='sha256-v1'
+    AND s."sessionCapabilityRevokedAt" IS NULL
+    AND s."revokedAt" IS NULL
+    AND s."sessionCapabilityExpiresAt" IS NOT NULL
+    AND s."expiresAt" IS NOT NULL
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.operational_read_session_deadline() FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_capability text,
@@ -10025,7 +10046,7 @@ BEGIN
     p_capability,p_purpose,p_request_id,NULL
   );
   PERFORM set_config('app.printing_job_id',p_job_id,true);
-  SELECT j.id,j."batchId",j."manufacturerId",j.status
+  SELECT j.id,j."batchId",j."manufacturerId",j.status,j."pipelineState"
     INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
     p_capability,p_purpose,p_request_id,job_row."batchId"
@@ -10033,6 +10054,9 @@ BEGIN
   IF actor.role='MANUFACTURER_ADMIN' AND job_row."manufacturerId"<>actor."userId" THEN
     RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
+  SELECT ps.id INTO STRICT session_row
+    FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id;
+  PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT ps.id,ps.status INTO STRICT session_row
     FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',p_job_id,true),
@@ -10043,6 +10067,8 @@ BEGIN
     target_job_status:='PAUSED'; target_pipeline:='PAUSED'; target_session:='PAUSED';
   ELSIF p_operation='RESUME' THEN
     IF job_row.status<>'PAUSED' OR session_row.status NOT IN ('PAUSED','RESUME_PENDING') THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:='SENT'; target_pipeline:='RESUME_PENDING'; target_session:='RESUME_PENDING';
   ELSE
     IF job_row.status IN ('CONFIRMED','CANCELLED','STOPPED') THEN
@@ -10052,11 +10078,15 @@ BEGIN
       SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id AND pi."printConfirmedAt" IS NOT NULL
     ) THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_PRESENT'; END IF;
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
-    target_pipeline:=CASE WHEN p_operation='ABANDON' THEN 'STOPPED' ELSE 'STOPPED' END;
+    target_pipeline:='STOPPED';
     target_session:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
+    IF p_operation='ABANDON' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+    IF p_operation='STOP' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
+    THEN target_pipeline:='NEEDS_OPERATOR_ACTION'; END IF;
     UPDATE public."PrintItem" SET state='CANCELLED', "pipelineState"='STOPPED',
       "failureReason"=nullif(btrim(p_reason),''),"updatedAt"=now_at
-      WHERE "printSessionId"=session_row.id AND state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED');
+      WHERE "printSessionId"=session_row.id AND state NOT IN ('PRINT_CONFIRMED','CLOSED','CANCELLED','FROZEN');
   END IF;
   UPDATE public."PrintSession" SET status=target_session,
     "failedReason"=CASE WHEN p_operation IN ('STOP','ABANDON') THEN nullif(btrim(p_reason),'') ELSE "failedReason" END,
@@ -10283,19 +10313,29 @@ BEGIN
     IF item_row.state IN ('FAILED','FROZEN') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'failed',true,'idempotent',true);
     END IF;
-    UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
-      "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at
-      WHERE id=item_row.id;
-    UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','connector_failure'),500),
-      "updatedAt"=now_at WHERE id=session_row.id;
-    UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',
-      "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at WHERE id=job_row.id;
+    IF p_details->>'outcomeIndeterminate'='true' THEN
+      IF item_row.state NOT IN ('ISSUED','AGENT_ACKED') THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      UPDATE public."PrintItem" SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=item_row.id;
+      UPDATE public."PrintSession" SET status='PAUSED',"failedReason"='physical_outcome_unconfirmed',
+        "updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=job_row.id;
+    ELSE
+      UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
+        "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at
+        WHERE id=item_row.id;
+      UPDATE public."PrintSession" SET status='FAILED',"failedReason"=left(coalesce(p_details->>'reason','connector_failure'),500),
+        "updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',
+        "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at WHERE id=job_row.id;
+    END IF;
   END IF;
   INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
   VALUES(gen_random_uuid()::text,item_row.id,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemEventType",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'INCIDENT_RAISED' ELSE 'FAILED' END END::public."PrintItemEventType",
     item_row.state,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE 'FAILED' END::public."PrintItemState",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'FROZEN' ELSE 'FAILED' END END::public."PrintItemState",
     p_details,audit_actor,now_at);
   INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",

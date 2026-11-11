@@ -27,6 +27,27 @@ $fn$;
 
 REVOKE ALL ON FUNCTION app_rls.operational_read_session_valid() FROM PUBLIC;
 
+-- Cache the authenticated row lookup per statement; compare this deadline
+-- against the live clock in each policy evaluation so mid-statement expiry denies.
+CREATE OR REPLACE FUNCTION app_rls.operational_read_session_deadline()
+RETURNS timestamp without time zone
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
+  SELECT LEAST(s."sessionCapabilityExpiresAt",s."expiresAt")
+  FROM public."RefreshToken" s
+  WHERE session_user={{APP_ROLE}}
+    AND current_setting('app.auth_session_verified',true)='1'
+    AND s.id=current_setting('app.auth_session_id',true)
+    AND s."userId"=current_setting('app.user_id',true)
+    AND s."sessionCapabilityHash"=current_setting('app.auth_session_hash',true)
+    AND s."sessionCapabilityHashVersion"='sha256-v1'
+    AND s."sessionCapabilityRevokedAt" IS NULL
+    AND s."revokedAt" IS NULL
+    AND s."sessionCapabilityExpiresAt" IS NOT NULL
+    AND s."expiresAt" IS NOT NULL
+$fn$;
+
+REVOKE ALL ON FUNCTION app_rls.operational_read_session_deadline() FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION app_rls.operational_read_bind_actor(
   p_capability text,
   p_purpose text,

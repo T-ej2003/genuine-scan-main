@@ -1154,6 +1154,10 @@ export const runPersistentPrintChunk = async (
       // A print call can throw after submitting bytes. Do not turn an
       // ambiguous physical attempt into a failed/retryable backend item.
       console.error("persistent dispatch requires reconciliation", { chunkId, printJobId, printItemId });
+      await send(ws, session, selectedPrinterId, {
+        type: "label_failed", chunkId, printJobId, printItemId, payloadHash,
+        error: "physical_outcome_unconfirmed",
+      });
       throw error;
     }
   }

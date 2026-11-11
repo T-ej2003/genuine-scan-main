@@ -1248,7 +1248,8 @@ END
 $function$;`;
 
 const batchOperationalAssurance = `(((${tenantAdminRoles} OR ${manufacturerRoles}) AND app_rls.current_assurance() IN ('password-verified','mfa-verified','step-up-verified','dual-approved-break-glass')) OR (${platformRoles} AND app_rls.current_assurance() IN ('mfa-verified','step-up-verified','dual-approved-break-glass')))`;
-const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND app_rls.operational_read_session_valid())`;
+// Cache the row lookup, but retain a live expiry check for every policy row.
+const operationalSessionBinding = `(current_user=${lit(roleNames.authOwner)} AND (SELECT app_rls.operational_read_session_valid()) AND clock_timestamp()<(SELECT app_rls.operational_read_session_deadline()))`;
 const batchOperationalBase = `(${operationalSessionBinding} AND app_rls.attributed_request() AND app_rls.current_purpose()='batch-operational-read' AND app_rls.current_request_id() ~ '^[A-Za-z0-9._:-]{1,128}$' AND ${batchOperationalAssurance})`;
 const batchOperationalLinkedLicensee = (licenseeExpression) => `EXISTS (
   SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} scope_ml
@@ -2336,6 +2337,7 @@ const expectedRoutineIdentities = [
   ["app_rls", "b03_assert_requested_scope", "p_licensee_id text, p_organization_id text"],
   ["app_rls", "operational_read_bind_actor", "p_capability text, p_purpose text, p_request_id text, p_requested_licensee_id text"],
   ["app_rls", "operational_read_session_valid", ""],
+  ["app_rls", "operational_read_session_deadline", ""],
   ["app_auth", "b01_preauth_audit", "p_action text, p_entity_type text, p_entity_id text, p_at timestamp without time zone, p_details jsonb"],
   ["app_rls", "b01_authenticated_actor", "p_expected_user_id text, p_expected_session_id text, p_request_id text"],
   ["app_public", "public_verify_bind", "p_operation text, p_request_id text, p_qr_id text, p_code text, p_decision_id text, p_session_id text, p_idempotency_hash text"],

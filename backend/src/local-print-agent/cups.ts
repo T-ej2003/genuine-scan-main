@@ -1222,8 +1222,10 @@ const waitForWindowsJobCompletion = async (params: { printerId: string; jobRef: 
 
     const stdout = String(result.stdout || "").trim();
     if (!stdout || stdout === "DONE") {
+      // Queue absence does not prove the device printed the label.
       return {
-        confirmed: true as const,
+        confirmed: false as const,
+        confirmationUnavailable: true as const,
         queue: "windows" as const,
         jobRef: params.jobRef,
       };

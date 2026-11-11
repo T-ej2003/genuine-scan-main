@@ -16,6 +16,7 @@ const registration = {
   publicKeyPem: pair.publicKey.export({ type: "spki", format: "pem" }).toString(),
 };
 const operations = [];
+const connectorCalls = [];
 const published = [];
 const persisted = new Map();
 let legacyHeartbeatFails = false;
@@ -28,7 +29,7 @@ mock("rls-waves/session-c/c02/printingLifecycleRepository", {
     if (legacyHeartbeatFails && input.operation === "HEARTBEAT") throw new Error("fixture legacy projection failed");
     return { registration, printer: { id: "printer-db-id", nativePrinterId: "native-printer" } };
   },
-  recordConnectorEvent: async (input) => { operations.push(input.operation); return input.operation === "CLAIM" ? claim : {}; },
+  recordConnectorEvent: async (input) => { operations.push(input.operation); connectorCalls.push(input); return input.operation === "CLAIM" ? claim : {}; },
 });
 mock("rls-waves/session-c/c02/printingConnectorSessionRepository", {
   mutatePrintingConnectorSession: async ({ operation, sessionId, registrationId, payload }) => {
@@ -292,5 +293,21 @@ test("label/chunk terminal receipts are deduplicated and conflicting identities 
   await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, message("chunk_confirmed", { printJobId: "foreign-job" })), { errorCode: "chunk_item_mismatch" });
   await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, message("chunk_confirmed", { sessionId: randomUUID() })), { errorCode: "session_identity_mismatch" });
   assert.deepEqual(operations, ["CLAIM", "ACK", "CONFIRM"]);
+  await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+});
+
+test("uncertain physical outcome reaches SQL as a signed, scoped reconciliation event", async () => {
+  const session = await boundary.openTrustedPrinterAgentSession(hello());
+  const chunk = await boundary.buildNextPrintChunkForSession(session);
+  const message = { type: "label_failed", sessionId: session.id, chunkId: chunk.chunkId,
+    printJobId: claim.printJobId, printItemId: claim.printItemId, payloadHash: "payload-fixture",
+    error: "physical_outcome_unconfirmed", issuedAt: new Date().toISOString(), nonce: randomUUID(), messageSeq: 1 };
+  message.signature = signing.signPrinterAgentPayload(privateKey, signing.buildPrinterAgentSessionPayload({
+    ...message, messageType: message.type, registrationId: registration.id, agentId: registration.agentId,
+    deviceFingerprint: registration.deviceFingerprint, selectedPrinterId: session.selectedPrinterId, connectorVersion: version,
+  }));
+  await boundary.handleTrustedSessionProgressMessage(session, message);
+  assert.equal(connectorCalls.at(-1).operation, "FAIL");
+  assert.equal(connectorCalls.at(-1).details.outcomeIndeterminate, true);
   await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
 });

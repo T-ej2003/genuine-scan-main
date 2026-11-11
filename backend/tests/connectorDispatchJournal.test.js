@@ -105,9 +105,11 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     }] };
     let spools = 0;
     const events = [];
+    const uncertainOutcomes = [];
     const adapters = {
       send: async (_ws, _session, _printer, event) => {
         events.push(event.type);
+        if (event.type === 'label_failed') uncertainOutcomes.push(event.error);
         if (event.type === 'label_spooled') throw new Error('injected lost receipt');
       },
       print: async () => { spools++; return { printPath: 'USB_RAW', labelLanguage: 'ZPL', jobRef: 'simulated' }; },
@@ -118,7 +120,9 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'reconnected-chunk' }, 'simulator', adapters),
       { errorCode: 'dispatch_reconciliation_required' });
     assert.equal(spools, 1, 'reconnect must not submit a second automatic physical attempt');
-    assert(!events.includes('label_failed') && !events.includes('chunk_failed'), 'uncertain delivery must not be classified as failed');
+    assert.deepEqual(uncertainOutcomes, ['physical_outcome_unconfirmed'],
+      'the attempted spool reports uncertainty; a competing reservation must not report a false terminal state');
+    assert(!events.includes('chunk_failed'), 'a failed receipt must not confirm physical failure');
     let testSpools = 0;
     const diagnosticEvents = [];
     const diagnostic = { testJobId: 'diagnostic-item', payloadContent: zpl, payloadHash, payloadType: 'ZPL' };
