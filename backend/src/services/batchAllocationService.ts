@@ -372,7 +372,7 @@ const buildCountMaps = async (
 
   const missingBatchIds = batches.filter((batch) => {
     const counts = countsMap.get(batch.id);
-    return !counts || Object.values(counts).reduce((total, value) => total + value, 0) !== batch.totalCodes;
+    return !counts || Object.values(counts).reduce((total, value) => total + value, 0) !== (batch._count?.qrCodes ?? batch.totalCodes);
   }).map((batch) => batch.id);
   if (missingBatchIds.length > 0) {
     for (const batchId of missingBatchIds) countsMap.delete(batchId);

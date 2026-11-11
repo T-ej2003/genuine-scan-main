@@ -141,7 +141,7 @@ describe("manufacturer header event ordering", () => {
     view.unmount();
   });
 
-  it("blocks stale readiness on stream loss and stops fallback polling after reconnect", async () => {
+  it.each([502, 503])("blocks stale readiness after upstream HTTP %i and stops fallback polling after reconnect", async (status) => {
     vi.useFakeTimers();
     let onError: (() => void) | undefined;
     let onOpen: (() => void) | undefined;
@@ -153,7 +153,7 @@ describe("manufacturer header event ordering", () => {
     });
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: false, error: "Unavailable" });
     vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({ success: false, error: "Unavailable" });
-    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: false, status: 503 });
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: false, status });
     const view = renderHook(() => useManufacturerPrinterConnection({ user, contextualHelpRoute: "/",
       currentPath: "/", navigate: vi.fn(), toast: vi.fn() }));
     act(() => snapshot({ serverTime: "2026-10-28T12:00:01.000Z", status: ready }));

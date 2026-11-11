@@ -13,6 +13,7 @@ const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-2
 // Keep the real SSE middleware and controller; stub cryptography/DB hydration only.
 let actor;
 let hydrationDenied = false;
+let hydrationError = null;
 const fixtureToken = "sse-fixture-not-a-credential";
 for (const [module, exports] of Object.entries({
   "services/auth/tokenService": {
@@ -32,6 +33,7 @@ for (const [module, exports] of Object.entries({
   "services/auth/authService": {}, "controllers/authControllerShared": {},
   "rls-waves/session-b/b01/canonicalAuthContext": {
     withDatabaseAuthenticatedSession: async (_payload, _options, callback) => {
+      if (hydrationError) throw hydrationError;
       if (hydrationDenied) throw new Error("sensitive database detail");
       return callback({}, { userId: actor.userId, role: actor.role, authAssurance: "mfa-verified" });
     },
@@ -41,7 +43,23 @@ for (const [module, exports] of Object.entries({
   const id = require.resolve(`../dist/${module}`);
   require.cache[id] = { id, filename: id, loaded: true, exports };
 }
-const { authenticateSSE } = require("../dist/middleware/auth");
+const { authenticate, authenticateAnySession, authenticateSSE } = require("../dist/middleware/auth");
+
+test("expired hydration transactions are unavailable, not invalid sessions", async () => {
+  actor = { userId: "actor", role: "SUPER_ADMIN", licenseeId: null, orgId: null };
+  hydrationError = Object.assign(new Error("transaction expired"), { code: "P2028" });
+  try {
+    for (const middleware of [authenticate, authenticateAnySession, authenticateSSE]) {
+      const req = { path: "/events/dashboard", query: {}, headers: {}, cookies: { access: fixtureToken, capability: "fixture-capability" }, get: () => undefined };
+      const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(payload) { this.body = payload; return this; } };
+      await middleware(req, res, () => { throw new Error("expired transaction admitted a request"); });
+      assert.equal(res.statusCode, 503);
+      assert.doesNotMatch(JSON.stringify(res.body), /transaction expired|P2028|fixture-capability/);
+    }
+  } finally {
+    hydrationError = null;
+  }
+});
 
 test("dashboard and printer SSE denials identify validation stage without credentials", async () => {
   const requestId = "33333333-3333-4333-8333-333333333333";

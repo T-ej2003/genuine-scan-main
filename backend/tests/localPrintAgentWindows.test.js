@@ -9,6 +9,7 @@ const {
 } = require("../dist/local-print-agent/cups");
 const {
   isRawWindowsZplPayload,
+  printLabel,
   validateZplPayloadForRawPrint,
 } = require("../dist/local-print-agent/render");
 const {
@@ -16,6 +17,9 @@ const {
   buildOfficialMscqrWordmarkGfaCommand,
   classifyIndustrialZplPrinterProfile,
 } = require("../dist/printing/zplCompatibilityContract");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -353,6 +357,27 @@ const run = async () => {
     unavailableConfirmation.confirmationUnavailable === true && unavailableConfirmation.confirmed === false,
     "Missing or opaque spooler refs should not be converted into physical printer failures"
   );
+  if (process.platform !== "win32") {
+    const fakeTools = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-windows-queue-"));
+    const originalPath = process.env.PATH;
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      fs.writeFileSync(path.join(fakeTools, "powershell.exe"), "#!/bin/sh\nprintf 'DONE'\n", { mode: 0o700 });
+      process.env.PATH = `${fakeTools}:${originalPath}`;
+      Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+      const queueGone = await waitForLocalPrintJobCompletion({
+        printerId: "ZDesigner ZT410-300dpi ZPL",
+        jobRef: "winspool-id:ZDesigner ZT410-300dpi ZPL:42",
+        timeoutMs: 1000,
+      });
+      assert(queueGone.confirmed === false && queueGone.confirmationUnavailable === true,
+        "A missing Windows queue entry must not prove physical printing");
+    } finally {
+      Object.defineProperty(process, "platform", originalPlatform);
+      process.env.PATH = originalPath;
+      fs.rmSync(fakeTools, { recursive: true, force: true });
+    }
+  }
 
   const validZpl = [
     "^XA",
@@ -364,6 +389,48 @@ const run = async () => {
     "^FO90,150^BQN,2,5^FDLA,https://mscqr.example.test/scan/c_connector_contract^FS",
     "^XZ",
   ].join("\n");
+  if (process.platform !== "win32") {
+    const fakeTools = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-windows-raw-capture-"));
+    const capturePath = path.join(fakeTools, "captured.zpl");
+    const originalPath = process.env.PATH;
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    try {
+      fs.writeFileSync(path.join(fakeTools, "powershell.exe"), [
+        "#!/bin/sh",
+        "while [ \"$#\" -gt 0 ]; do",
+        "  if [ \"$1\" = \"-PayloadPath\" ]; then shift; cp \"$1\" \"$MSCQR_TEST_CAPTURE_PATH\"; fi",
+        "  shift",
+        "done",
+        "printf 'JOB_ID=42\\nRAW_WRITTEN=1\\n'",
+      ].join("\n"), { mode: 0o700 });
+      process.env.PATH = `${fakeTools}:${originalPath}`;
+      process.env.MSCQR_TEST_CAPTURE_PATH = capturePath;
+      Object.defineProperty(process, "platform", { configurable: true, value: "win32" });
+      const result = await printLabel({
+        printerId: "ZDesigner ZT410-300dpi ZPL",
+        printerName: "ZDesigner ZT410-300dpi ZPL",
+        printerLanguages: ["ZPL"],
+        printerDpi: 300,
+        request: {
+          code: "synthetic-qr",
+          scanUrl: "https://mscqr.example.test/synthetic",
+          payloadType: "ZPL",
+          payloadContent: validZpl,
+          copies: 1,
+          printPath: "auto",
+          labelLanguage: "AUTO",
+        },
+      });
+      assert(result.printPath === "windows-raw-zpl", "Production ZPL must select the Windows RAW spooler");
+      assert(fs.readFileSync(capturePath).equals(Buffer.from(validZpl, "utf8")),
+        "The final spooler input must contain the exact approved ZPL bytes");
+    } finally {
+      Object.defineProperty(process, "platform", originalPlatform);
+      process.env.PATH = originalPath;
+      delete process.env.MSCQR_TEST_CAPTURE_PATH;
+      fs.rmSync(fakeTools, { recursive: true, force: true });
+    }
+  }
   const mutateOfficialGraphicCommand = () => {
     const command = buildOfficialMscqrWordmarkGfaCommand();
     const prefix = command.slice(0, command.lastIndexOf(",") + 1);
@@ -374,6 +441,10 @@ const run = async () => {
   assert(
     isRawWindowsZplPayload({ payloadType: "ZPL", labelLanguage: "ZPL", payloadContent: validZpl }),
     "Windows ZPL payloads should be routed to the RAW spooler path"
+  );
+  assert(
+    isRawWindowsZplPayload({ payloadType: "ZPL", labelLanguage: "AUTO", payloadContent: validZpl }),
+    "AUTO labels resolved as validated ZPL should use the RAW spooler path"
   );
   assert(
     validateZplPayloadForRawPrint(validZpl, {

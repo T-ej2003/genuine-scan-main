@@ -73,5 +73,6 @@ test("generated package exposes exact functions and QRRange read policy only", (
   assert.doesNotMatch(policies, /tenant_directory_qrrange_(insert|update|delete)/i);
   assert.match(rollback, /DROP FUNCTION IF EXISTS app_rls\.read_licensee_directory/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS app_rls\.read_user_directory/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS app_rls\.operational_read_session_deadline\(\)/);
   assert.doesNotMatch(executableSql, /GRANT EXECUTE ON ALL FUNCTIONS|GRANT ALL ON ALL FUNCTIONS/);
 });

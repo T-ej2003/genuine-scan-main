@@ -12,6 +12,7 @@ const {
   supportsNetworkDirectPayload,
 } = require("../dist/services/printPayloadService");
 const { getZebraQrConfig } = require("../dist/printing/zebraQrSizing");
+const { isRawWindowsZplPayload, validateZplPayloadForRawPrint } = require("../dist/local-print-agent/render");
 const { hashToken, signQrPayload } = require("../dist/services/qrTokenService");
 const { generateHumanLabelSerial } = require("../dist/services/labelSerialService");
 const { MSCQR_WORDMARK_ZPL_GRAPHIC } = require("../dist/printing/generated/brandWordmarkZpl");
@@ -83,6 +84,14 @@ const run = () => {
   assert(
     resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO" }) === "JSON",
     "Local-agent AUTO printers should resolve to JSON payloads for workstation rendering"
+  );
+  assert(
+    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZT410-300dpi ZPL" }) === "ZPL",
+    "An identified 300dpi ZPL workstation printer should use the validated raw label path"
+  );
+  assert(
+    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZD421-203dpi ZPL" }) === "JSON",
+    "An unsupported 203dpi workstation printer must retain the existing renderer"
   );
   assert(
     resolvePayloadType({ connectionType: "NETWORK_DIRECT", commandLanguage: "AUTO" }) === "ZPL",
@@ -178,7 +187,7 @@ const run = () => {
     exp: Math.floor(tokenExpiresAt.getTime() / 1000),
     nonce: "nonce-governed-1",
   });
-  const governedPayload = buildApprovedPrintPayload({
+  const governedInput = {
     printer: {
       id: "printer-1",
       name: "Zebra printer",
@@ -204,7 +213,22 @@ const run = () => {
     printJobId: "job-1",
     printItemId: "item-1",
     serialContext: ukSerialContext,
+  };
+  const governedPayload = buildApprovedPrintPayload(governedInput);
+  const autoZplPayload = buildApprovedPrintPayload({
+    ...governedInput,
+    printer: { ...governedInput.printer, name: "ZDesigner ZT410-300dpi ZPL", commandLanguage: "AUTO" },
   });
+  assert(autoZplPayload.payloadType === "ZPL" && autoZplPayload.payloadContent.startsWith("^XA")
+    && autoZplPayload.payloadContent.includes("^BQN") && autoZplPayload.payloadContent.trim().endsWith("^XZ"),
+    "Identified 300dpi AUTO printer should receive complete validated QR ZPL");
+  assert(isRawWindowsZplPayload({ payloadType: autoZplPayload.payloadType, labelLanguage: autoZplPayload.commandLanguage, payloadContent: autoZplPayload.payloadContent }),
+    "The production payload must select the Windows RAW path");
+  const rawSpoolContent = validateZplPayloadForRawPrint(autoZplPayload.payloadContent, {
+    printerName: "ZDesigner ZT410-300dpi ZPL", printerLanguages: ["ZPL"], printerDpi: 300,
+  });
+  assert(Buffer.from(rawSpoolContent, "utf8").equals(Buffer.from(autoZplPayload.payloadContent.trim(), "utf8")),
+    "Windows RAW spool bytes must equal the validated production ZPL bytes");
   assert(governedPayload.scanToken === governedToken, "Claim-time payload generation must preserve replay epoch");
   const diagnostics = buildPrintPayloadDiagnostics({
     payloadType: governedPayload.payloadType,

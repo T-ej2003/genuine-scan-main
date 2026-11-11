@@ -12,7 +12,7 @@ import {
 } from "../printing/printPayloadSafety";
 import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { getZebraQrConfig, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
-import { buildOfficialMscqrWordmarkGfaCommand } from "../printing/zplCompatibilityContract";
+import { buildOfficialMscqrWordmarkGfaCommand, classifyIndustrialZplPrinterProfile, inferZplPrinterDpi } from "../printing/zplCompatibilityContract";
 import { generateHumanLabelSerial, type LabelSerialContext } from "./labelSerialService";
 import { buildVerifyUrl } from "./qrService";
 import { hashToken, signQrPayload } from "./qrTokenService";
@@ -399,6 +399,9 @@ export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayload
   if (printer.commandLanguage === PrinterCommandLanguage.ESC_POS) return PrintPayloadType.ESC_POS;
   const language = resolveLanguageKind(printer);
   if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT && language === PrinterLanguageKind.AUTO) {
+    if (inferZplPrinterDpi(printer.name) === 300 && classifyIndustrialZplPrinterProfile({
+      printerName: printer.name, dpi: getResolvedLayout(printer).dpi,
+    }).compatible) return PrintPayloadType.ZPL;
     return PrintPayloadType.JSON;
   }
   if (language === PrinterLanguageKind.ZPL || language === PrinterLanguageKind.ZSIM || language === PrinterLanguageKind.AUTO) {

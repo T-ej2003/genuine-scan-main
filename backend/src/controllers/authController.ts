@@ -213,8 +213,20 @@ export const refresh = async (req: Request, res: Response) => {
     if (category === "MANUFACTURER_SCOPE_DENIED") {
       return res.status(403).json({ success: false, error: "The requested manufacturer workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
     }
+    const sqlFailure = error as { code?: unknown; meta?: { code?: unknown; message?: unknown } } | null;
+    const sqlDenial = sqlFailure?.code === "P2010" && sqlFailure.meta?.code === "42501"
+      ? String(sqlFailure.meta?.message || "").split("\n", 1)[0].trim().replace(/^ERROR:\s*/, "")
+      : "";
+    if (sqlDenial === "B01_SCOPE_SWITCH_ROLE_DENIED") {
+      return res.status(403).json({ success: false, error: "The requested workspace is unavailable.", code: "AUTH_SCOPE_UNAVAILABLE" });
+    }
+    if (isCanonicalAuthDenial(error) || sqlDenial === "B01_REFRESH_BEARER_DENIED") {
+      clearAuthCookies(res);
+      return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
+    }
     console.error("Refresh error:", error);
-    return res.status(401).json({ success: false, error: "Session expired. Please sign in again." });
+    const transient = error instanceof Error && "code" in error && error.code === "P2028";
+    return res.status(transient ? 503 : 500).json({ success: false, error: "Session refresh is temporarily unavailable." });
   }
 };
 

@@ -88,6 +88,8 @@ assert(
 assert(!auditRoutesSource.includes("...auditExportLimiters"), "audit routes should not use spread-applied audit export limiters");
 
 assert(authRoutesSource.includes("const sessionReadPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth session limiter");
+assert(authRoutesSource.includes('router.get("/auth/me", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, authenticateAnySession, sessionReadRouteLimiter, me);'), "auth/me must limit requests before session hydration");
+assert(authRoutesSource.includes('router.get("/auth/mfa/status", sessionReadIpLimiter, sessionReadPreAuthRouteLimiter, authenticateAnySession, sessionReadRouteLimiter, getAdminMfaStatusController);'), "MFA status must limit requests before session hydration");
 assert(authRoutesSource.includes("const secureSessionPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth secure-session limiter");
 assert(authRoutesSource.includes("const mfaPreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth MFA limiter");
 assert(authRoutesSource.includes("const adminInvitePreAuthRouteLimiter = createSharedRateLimiter("), "auth routes should define a shared pre-auth invite limiter");

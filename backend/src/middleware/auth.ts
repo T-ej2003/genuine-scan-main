@@ -61,6 +61,12 @@ export const getDatabaseSessionCapability = (req: Request, bearer: string | null
 const requestIdFor = (req: Request) =>
   String((req as Request & { requestId?: string }).requestId || req.get("x-request-id") || randomUUID());
 
+const isExpiredAuthTransaction = (error: unknown) =>
+  error !== null && typeof error === "object" && "code" in error && error.code === "P2028";
+
+const authTemporarilyUnavailable = (res: Response) =>
+  res.status(503).json({ success: false, error: "Authentication is temporarily unavailable." });
+
 const recordSseAuthDenial = (req: Request, reason: "missing_token" | "token_validation_failed" | "session_validation_failed", credentialSource: "none" | "cookie" | "header" | "query") => {
   const path = String(req.path || req.originalUrl || "").split("?", 1)[0];
   const route = path === "/events/dashboard" || path === "/api/events/dashboard"
@@ -176,26 +182,27 @@ export async function hydrateTenantIfNeeded(
 }
 
 const parseAnySessionToken = async (token: string, capability: string | null, requestId: string): Promise<AuthenticatedSessionClaims> => {
+  let decoded: AuthenticatedSessionClaims;
   try {
-    const decoded = verifyAccessToken(token);
-    return hydrateTenantIfNeeded(decoded, capability, requestId);
+    decoded = verifyAccessToken(token);
   } catch {
-    const decoded = verifyMfaBootstrapToken(token);
-    return hydrateTenantIfNeeded({
-      userId: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-      licenseeId: decoded.licenseeId ?? null,
-      orgId: decoded.orgId ?? null,
-      scopeVersion: decoded.scopeVersion ?? null,
-      linkedLicenseeIds: decoded.linkedLicenseeIds ?? null,
+    const bootstrap = verifyMfaBootstrapToken(token);
+    decoded = {
+      userId: bootstrap.userId,
+      email: bootstrap.email,
+      role: bootstrap.role,
+      licenseeId: bootstrap.licenseeId ?? null,
+      orgId: bootstrap.orgId ?? null,
+      scopeVersion: bootstrap.scopeVersion ?? null,
+      linkedLicenseeIds: bootstrap.linkedLicenseeIds ?? null,
       sessionStage: "MFA_BOOTSTRAP",
       authAssurance: "PASSWORD",
       authenticatedAt: null,
       mfaVerifiedAt: null,
-      sessionId: decoded.sessionId,
-    }, capability, requestId);
+      sessionId: bootstrap.sessionId,
+    };
   }
+  return hydrateTenantIfNeeded(decoded, capability, requestId);
 };
 
 const allowSseQueryToken = () => {
@@ -215,7 +222,8 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
     req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
-  } catch {
+  } catch (error) {
+    if (isExpiredAuthTransaction(error)) return authTemporarilyUnavailable(res);
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 };
@@ -231,7 +239,8 @@ export const authenticateAnySession = async (req: AuthRequest, res: Response, ne
     req.user = await parseAnySessionToken(token, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = bearer ? "bearer" : "cookie";
     return next();
-  } catch {
+  } catch (error) {
+    if (isExpiredAuthTransaction(error)) return authTemporarilyUnavailable(res);
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 };
@@ -280,7 +289,8 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
     req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";
     return next();
-  } catch {
+  } catch (error) {
+    if (isExpiredAuthTransaction(error)) return authTemporarilyUnavailable(res);
     recordSseAuthDenial(req, stage === "token" ? "token_validation_failed" : "session_validation_failed", credentialSource);
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
