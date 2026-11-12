@@ -53,6 +53,11 @@ export function deriveAppOnlyImpact({ repositoryRoot, liveSourceSha, candidateSo
         result.unknown = result.unknown.filter((file) => file !== "package.json");
         result.releaseControl.push("package.json");
         result.sourceClassificationComplete = result.unknown.length === 0;
+      } else if (result.unknown.includes("package-lock.json") && appOnlyRootPackageVersionOnlyChange(
+        before, after, JSON.parse(git(["show", `${base}:package-lock.json`])), JSON.parse(git(["show", `${head}:package-lock.json`])))) {
+        result.unknown = result.unknown.filter((file) => file !== "package.json" && file !== "package-lock.json");
+        result.application.push("package.json", "package-lock.json");
+        result.sourceClassificationComplete = result.unknown.length === 0;
       }
     }
     return result;
@@ -66,4 +71,15 @@ export function deriveAppOnlyImpact({ repositoryRoot, liveSourceSha, candidateSo
 export function appOnlyPackageScriptsChanged(before, after) {
   const withoutScripts = (value) => Object.fromEntries(Object.entries(value).filter(([key]) => key !== "scripts"));
   return canonicalSha256(withoutScripts(before)) === canonicalSha256(withoutScripts(after));
+}
+
+export function appOnlyRootPackageVersionOnlyChange(before, after, beforeLock, afterLock) {
+  const oldVersion = before?.version, newVersion = after?.version;
+  if (typeof oldVersion !== "string" || typeof newVersion !== "string" || oldVersion === newVersion
+    || beforeLock?.version !== oldVersion || beforeLock?.packages?.[""]?.version !== oldVersion
+    || afterLock?.version !== newVersion || afterLock?.packages?.[""]?.version !== newVersion) return false;
+  const packageWithoutVersion = (value) => { const copy = structuredClone(value); delete copy.version; return copy; };
+  const lockWithoutVersion = (value) => { const copy = packageWithoutVersion(value); delete copy.packages[""].version; return copy; };
+  return canonicalSha256(packageWithoutVersion(before)) === canonicalSha256(packageWithoutVersion(after))
+    && canonicalSha256(lockWithoutVersion(beforeLock)) === canonicalSha256(lockWithoutVersion(afterLock));
 }
