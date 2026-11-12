@@ -1997,8 +1997,13 @@ BEGIN
       RETURN jsonb_build_object('jobId',p_job_id,'status',job_row.status,'idempotent',true);
     END IF;
     IF p_operation='ABANDON' AND EXISTS (
-      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id AND pi."printConfirmedAt" IS NOT NULL
-    ) THEN RAISE EXCEPTION 'PHYSICAL_CONFIRMATION_PRESENT'; END IF;
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND (pi.state IN ('ISSUED','AGENT_ACKED','PRINT_CONFIRMED','CLOSED','FROZEN')
+          OR pi."issuedAt" IS NOT NULL OR pi."dispatchedAt" IS NOT NULL
+          OR pi."agentAckedAt" IS NOT NULL OR pi."printConfirmedAt" IS NOT NULL
+          OR pi."deviceJobRef" IS NOT NULL
+          OR coalesce(pi."confirmationEvidence",'{}'::jsonb)<>'{}'::jsonb)
+    ) THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
     target_pipeline:='STOPPED';
     target_session:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
@@ -2205,7 +2210,8 @@ BEGIN
     END IF;
     IF item_row.state<>'ISSUED' THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED',
-      "agentAckedAt"=now_at,"deviceJobRef"=nullif(p_device_job_ref,''),
+      "agentAckedAt"=now_at,"confirmationDeadlineAt"=now_at+interval '10 minutes',
+      "deviceJobRef"=nullif(p_device_job_ref,''),
       "dispatchMetadata"=p_details,"updatedAt"=now_at WHERE id=item_row.id;
   ELSIF p_operation='CONFIRM' THEN
     IF item_row.state IN ('PRINT_CONFIRMED','CLOSED') THEN

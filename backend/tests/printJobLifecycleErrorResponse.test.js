@@ -1,6 +1,10 @@
 const assert = require("assert");
 const { BatchStateTransitionError } = require("../dist/services/batchStateMachineService");
-const { describePrintJobCreateFailure } = require("../dist/controllers/print-job/errorResponses");
+const { describePrintJobCreateFailure, isPhysicalOutcomeUnconfirmed } = require("../dist/controllers/print-job/errorResponses");
+
+assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "P0001", message: "ERROR: PHYSICAL_OUTCOME_UNCONFIRMED" } }), true);
+assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "42501", message: "ERROR: PHYSICAL_OUTCOME_UNCONFIRMED" } }), false);
+assert.strictEqual(isPhysicalOutcomeUnconfirmed({ code: "P2010", meta: { code: "P0001", message: "ERROR: OTHER_FAILURE\nPHYSICAL_OUTCOME_UNCONFIRMED" } }), false);
 
 const error = new BatchStateTransitionError(
   "INVALID_STATE_TRANSITION",

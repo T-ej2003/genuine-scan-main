@@ -880,11 +880,23 @@ async function main() {
     '${ids.registration}','printing-agent','printing-device','confirm_too_early',now()::timestamp,
     '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("early")}','spool-1','{}'::jsonb
   )`, /PRINT_ACK_REQUIRED/);
+  denied(app, `BEGIN; SELECT app_rls.printing_control_job(
+    '${caps.maker}','printing-job-control','${requestId()}','${created.job.id}','ABANDON','Unsafe after connector claim'
+  ); ROLLBACK`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
   const ack = json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','ack_nonce_0000001',now()::timestamp,
     '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("ack")}','spool-1','{}'::jsonb
   )`);
   assert.equal(ack.operation, "ACK");
+  denied(app, `SELECT app_rls.printing_control_job(
+    '${caps.outsider}','printing-job-control','${requestId()}','${created.job.id}','ABANDON','Other tenant'
+  )`, /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `BEGIN; SELECT app_rls.printing_control_job(
+    '${caps.maker}','printing-job-control','${requestId()}','${created.job.id}','ABANDON','Unsafe after connector claim'
+  ); ROLLBACK`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${created.job.id}'`), "SENT");
+  assert.equal(psql(admin, `SELECT "confirmationDeadlineAt" IS NOT NULL FROM public."PrintItem" WHERE id='${claim.printItemId}'`), "t",
+    "a signed local ACK must have a deadline for bounded reconciliation");
   const replayAck = json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','ack_nonce_0000002',now()::timestamp,
     '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("ack-replay")}','spool-1','{}'::jsonb
@@ -1270,6 +1282,27 @@ async function main() {
   assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${stopItemId}'`), "CANCELLED");
   assert.equal(json(app, stopSql(caps.maker)).idempotent, true);
   assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_STOP' AND "entityId"='${stopJobId}'`), "1");
+
+  const unclaimedJobId = "50000000-0000-4000-8000-000000000599";
+  const unclaimedSessionId = "50000000-0000-4000-8000-000000000587";
+  const unclaimedQrId = "50000000-0000-4000-8000-000000000697";
+  const unclaimedItemId = "50000000-0000-4000-8000-000000000797";
+  psql(admin, `
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+      VALUES('${unclaimedJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId",status,"updatedAt")
+      VALUES('${unclaimedQrId}','synthetic-unclaimed-code','${ids.licenseeA}','${ids.raceBatch}','ALLOCATED',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerId",status,"totalItems","updatedAt")
+      VALUES('${unclaimedSessionId}','${unclaimedJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','ACTIVE',1,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","updatedAt")
+      VALUES('${unclaimedItemId}','${unclaimedSessionId}','${unclaimedQrId}','synthetic-unclaimed-code','RESERVED','QUEUED',now());
+  `);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.outsider}','printing-job-control','${requestId()}','${unclaimedJobId}','ABANDON','Wrong tenant')`, /PRINTING_BOUNDARY_DENIED/);
+  assert.equal(json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${unclaimedJobId}','ABANDON','Never claimed')`).status, "CANCELLED");
+  assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${unclaimedSessionId}'`), "CANCELLED");
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${unclaimedItemId}'`), "CANCELLED");
+  assert.equal(json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${unclaimedJobId}','ABANDON','Never claimed')`).idempotent, true);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_ABANDON' AND "entityId"='${unclaimedJobId}'`), "1");
 
   const orphanJobId = "50000000-0000-4000-8000-000000000596";
   psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,quantity,"updatedAt")

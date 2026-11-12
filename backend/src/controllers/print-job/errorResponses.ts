@@ -146,6 +146,11 @@ const extractReviewedSqlLifecycleError = (error: any): keyof typeof reviewedSqlL
   return match[1] as keyof typeof reviewedSqlLifecycleErrors;
 };
 
+export const isPhysicalOutcomeUnconfirmed = (error: any) =>
+  error?.message === "PRINT_SESSION_NOT_ABANDONABLE" ||
+  (error?.code === "P2010" && error?.meta?.code === "P0001" &&
+    /^ERROR:\s+PHYSICAL_OUTCOME_UNCONFIRMED(?:\r?\n|$)/.test(String(error?.meta?.message || "")));
+
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
   if ((printerStatus as any)?.persistentSessionUpdateRequired || (printerStatus as any)?.connectorUpdateRequired) {
     return "CONNECTOR_UPDATE_REQUIRED";
