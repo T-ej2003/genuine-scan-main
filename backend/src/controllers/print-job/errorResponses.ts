@@ -106,7 +106,6 @@ export const describeMissingPrinterReadinessFields = (printerStatus: PrinterStat
 
 const hasAny = (value: string, fragments: string[]) => fragments.some((fragment) => value.includes(fragment));
 const VIRTUAL_PRINTER_TERMS = ["fax", "microsoft print to pdf", "print to pdf", "pdf", "onenote", "xps", "document writer"];
-
 const hasVirtualSelectedPrinter = (printerStatus: PrinterStatusLike | null | undefined) =>
   hasAny(
     [
@@ -133,7 +132,6 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
   "INVALID_STATE_TRANSITION",
   "RECOVERY_REQUIRED_BEFORE_NEW_PRINT",
 ]);
-
 const reviewedSqlLifecycleErrors = {
   QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
   PRINTER_ATTESTATION_STALE: "The printer connection is no longer ready. Refresh the connector and printer status before starting the print run.",
@@ -145,12 +143,9 @@ const extractReviewedSqlLifecycleError = (error: any): keyof typeof reviewedSqlL
   if (!match || !(match[1] in reviewedSqlLifecycleErrors)) return null;
   return match[1] as keyof typeof reviewedSqlLifecycleErrors;
 };
-
 export const isPhysicalOutcomeUnconfirmed = (error: any) =>
-  error?.message === "PRINT_SESSION_NOT_ABANDONABLE" ||
-  (error?.code === "P2010" && error?.meta?.code === "P0001" &&
+  error?.message === "PRINT_SESSION_NOT_ABANDONABLE" || (error?.code === "P2010" && error?.meta?.code === "P0001" &&
     /^ERROR:\s+PHYSICAL_OUTCOME_UNCONFIRMED(?:\r?\n|$)/.test(String(error?.meta?.message || "")));
-
 const classifyPrinterReadinessError = (printerStatus: PrinterStatusLike | null | undefined): PrintJobErrorCode => {
   if ((printerStatus as any)?.persistentSessionUpdateRequired || (printerStatus as any)?.connectorUpdateRequired) {
     return "CONNECTOR_UPDATE_REQUIRED";

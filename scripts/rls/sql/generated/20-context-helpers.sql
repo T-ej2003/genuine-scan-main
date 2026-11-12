@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='43a940b8377ad29e2e3033a553f79b9348e1c24c414c05fcebe12cc6a30e0107'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:43a940b8377ad29e2e3033a553f79b9348e1c24c414c05fcebe12cc6a30e0107'
+    AND source_contract_sha256='be75d09d75873700811d53f74ee338570b32c451024a5e02561ae0498bd5da84'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:be75d09d75873700811d53f74ee338570b32c451024a5e02561ae0498bd5da84'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:43a940b8377ad29e2e3033a553f79b9348e1c24c414c05fcebe12cc6a30e0107')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:be75d09d75873700811d53f74ee338570b32c451024a5e02561ae0498bd5da84')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10090,7 +10090,7 @@ BEGIN
           OR pi."issuedAt" IS NOT NULL OR pi."dispatchedAt" IS NOT NULL
           OR pi."agentAckedAt" IS NOT NULL OR pi."printConfirmedAt" IS NOT NULL
           OR pi."deviceJobRef" IS NOT NULL
-          OR coalesce(pi."confirmationEvidence",'{}'::jsonb)<>'{}'::jsonb)
+          OR coalesce(pi."confirmationEvidence",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb))
     ) THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     target_job_status:=CASE WHEN p_operation='ABANDON' THEN 'CANCELLED' ELSE 'STOPPED' END;
     target_pipeline:='STOPPED';
@@ -10210,14 +10210,14 @@ BEGIN
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
-    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' AND j.status IN ('PENDING','SENT')
      ORDER BY j."createdAt",j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
-    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId"
+    SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO STRICT job_row FROM public."PrintJob" j
      WHERE j.id=p_job_id AND j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
        AND j."printMode"='LOCAL_AGENT' FOR UPDATE;
@@ -10228,9 +10228,11 @@ BEGIN
   PERFORM set_config('app.printing_licensee_id',(
     SELECT b."licenseeId" FROM public."Batch" b WHERE b.id=job_row."batchId"
   ),true);
-  SELECT ps.id,ps."issuedItems" INTO STRICT session_row FROM public."PrintSession" ps
-   WHERE ps."printJobId"=job_row.id AND ps."printerRegistrationId"=p_registration_id
-     AND ps.status='ACTIVE' FOR UPDATE;
+  SELECT ps.id,ps."issuedItems",ps.status INTO STRICT session_row FROM public."PrintSession" ps
+     WHERE ps."printJobId"=job_row.id AND ps."printerRegistrationId"=p_registration_id
+       AND (ps.status='ACTIVE' OR (p_operation='CONFIRM' AND (
+         (ps.status='PAUSED' AND job_row."pipelineState"='NEEDS_OPERATOR_ACTION') OR
+         (ps.status='COMPLETED' AND job_row.status='CONFIRMED')))) FOR UPDATE;
   audit_actor:=registration."userId";
   PERFORM set_config('app.printing_session_row_id',session_row.id,true),
           set_config('app.printing_printer_id',printer_row.id,true);
@@ -10302,13 +10304,15 @@ BEGIN
       "deviceJobRef"=nullif(p_device_job_ref,''),
       "dispatchMetadata"=p_details,"updatedAt"=now_at WHERE id=item_row.id;
   ELSIF p_operation='CONFIRM' THEN
+    IF session_row.status='COMPLETED' AND item_row.state NOT IN ('PRINT_CONFIRMED','CLOSED')
+    THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     IF item_row.state IN ('PRINT_CONFIRMED','CLOSED') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'confirmed',true,'idempotent',true);
     END IF;
     IF item_row.state<>'AGENT_ACKED' THEN RAISE EXCEPTION 'PRINT_ACK_REQUIRED'; END IF;
     UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details,
-      "deviceJobRef"=coalesce(nullif(p_device_job_ref,''),"deviceJobRef"),"updatedAt"=now_at
+      "deviceJobRef"=coalesce(nullif(p_device_job_ref,''),"deviceJobRef"),"failureReason"=NULL,"updatedAt"=now_at
       WHERE id=item_row.id;
     UPDATE public."QRCode" SET status='PRINTED',"printedAt"=now_at,"printedByUserId"=audit_actor,
       "updatedAt"=now_at WHERE id=item_row."qrCodeId" AND "printJobId"=job_row.id;
@@ -10317,11 +10321,19 @@ BEGIN
     SELECT count(*) INTO remaining FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED');
     IF remaining=0 THEN
-      UPDATE public."PrintSession" SET status='COMPLETED',"completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintSession" SET status='COMPLETED',"failedReason"=NULL,
+        "completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
       UPDATE public."PrintJob" SET status='CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
-        "confirmedAt"=now_at,"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
+        "failureReason"=NULL,"confirmedAt"=now_at,"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
       UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED',"printedAt"=now_at,"updatedAt"=now_at
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
+    ELSIF job_row."pipelineState"='NEEDS_OPERATOR_ACTION' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi."pipelineState"='NEEDS_OPERATOR_ACTION'
+    ) THEN
+      UPDATE public."PrintSession" SET status='ACTIVE',"failedReason"=NULL,"updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status='SENT',"pipelineState"='SENT_TO_PRINTER',
+        "failureReason"=NULL,"updatedAt"=now_at WHERE id=job_row.id;
     END IF;
   ELSE
     IF item_row.state IN ('FAILED','FROZEN') THEN
@@ -11228,6 +11240,7 @@ CREATE OR REPLACE FUNCTION app_rls.printing_worker_reconcile(
 ) RETURNS integer
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE affected integer:=0; now_at timestamp without time zone:=transaction_timestamp();
+  job_row record; session_row record; item_row record; job_expired boolean;
 BEGIN
   IF session_user<>'mscqr_rls_cert_worker' OR p_operation NOT IN ('EXPIRE_CONFIRMATIONS','RECONCILE_BATCHES')
      OR p_request_id !~* '^[0-9a-f-]{36}$' OR p_limit NOT BETWEEN 1 AND 1000
@@ -11235,15 +11248,36 @@ BEGIN
   PERFORM set_config('app.printing_operation','printing-worker-'||lower(p_operation),true),
           set_config('app.printing_request_id',p_request_id,true);
   IF p_operation='EXPIRE_CONFIRMATIONS' THEN
-    WITH target AS (
-      SELECT pi.id FROM public."PrintItem" pi
-       WHERE pi.state='AGENT_ACKED' AND pi."confirmationDeadlineAt"<now_at
-       ORDER BY pi."confirmationDeadlineAt",pi.id FOR UPDATE SKIP LOCKED LIMIT p_limit
-    )
-    UPDATE public."PrintItem" pi SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
-      "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at
-      FROM target t WHERE pi.id=t.id;
-    GET DIAGNOSTICS affected=ROW_COUNT;
+    -- Keep the acknowledged item confirmable; timeout alone cannot prove physical failure.
+    FOR job_row IN SELECT j.id FROM public."PrintJob" j
+      WHERE j.status IN ('PENDING','SENT') AND EXISTS (
+        SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
+        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED' AND pi."confirmationDeadlineAt"<now_at
+          AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+      ) ORDER BY j.id FOR UPDATE OF j SKIP LOCKED LIMIT p_limit
+    LOOP
+      SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
+        WHERE ps."printJobId"=job_row.id FOR UPDATE;
+      job_expired:=false;
+      FOR item_row IN SELECT pi.id FROM public."PrintItem" pi
+        WHERE pi."printSessionId"=session_row.id AND pi.state='AGENT_ACKED'
+          AND pi."confirmationDeadlineAt"<now_at AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+        ORDER BY pi."confirmationDeadlineAt",pi.id FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
+      LOOP
+        UPDATE public."PrintItem" SET "pipelineState"='NEEDS_OPERATOR_ACTION',
+          "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at
+          WHERE id=item_row.id;
+        affected:=affected+1;
+        job_expired:=true;
+      END LOOP;
+      IF job_expired THEN
+        UPDATE public."PrintSession" SET status='PAUSED',"failedReason"='confirmation_deadline_expired',
+          "updatedAt"=now_at WHERE id=session_row.id;
+        UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
+          "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at WHERE id=job_row.id;
+      END IF;
+      EXIT WHEN affected>=p_limit;
+    END LOOP;
   ELSE
     WITH target AS (
       SELECT b.id FROM public."Batch" b
