@@ -41,6 +41,49 @@ module.exports=async function certifyBackendNetwork({admin,worker,app,capability
       await cycle();assert.equal(submits,before+(['preflight','lost-reservation'].includes(scenario)?0:1),'redelivery cannot resubmit an uncertain item');
       console.log(`PASS PostgreSQL backend network ${mode}/${scenario}`);
     }
+    const resumedQr=randomUUID(),resumedItem=randomUUID(),sessionId=psql(admin,`SELECT id FROM public."PrintSession" WHERE "printJobId"='${job}'`);
+    const ownerId=psql(admin,`SELECT "licenseeId" FROM public."Batch" WHERE id='${batchId}'`);
+    psql(admin,`INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+      VALUES('${resumedQr}','synthetic-resume-${resumedQr}','${ownerId}','${batchId}','${job}','ALLOCATED',now());
+      INSERT INTO public."PrintItem" SELECT (jsonb_populate_record(NULL::public."PrintItem",to_jsonb(pi)||
+        jsonb_build_object('id','${resumedItem}','qrCodeId','${resumedQr}','code','synthetic-resume-${resumedQr}',
+          'state','RESERVED','pipelineState','QUEUED','issueSequence',2,'attemptCount',0,
+          'dispatchMetadata',NULL,'confirmationEvidence',NULL,'issuedAt',NULL,'agentAckedAt',NULL,
+          'dispatchedAt',NULL,'confirmationDeadlineAt',NULL))).* FROM public."PrintItem" pi WHERE pi.id='${item}';
+      UPDATE public."PrintJob" SET quantity=2,"itemCount"=2 WHERE id='${job}';
+      UPDATE public."PrintSession" SET "totalItems"=2 WHERE id='${sessionId}';`);
+    for(const mode of ['NETWORK_DIRECT','NETWORK_IPP']) {
+      reset(mode);
+      const metadata=mode==='NETWORK_DIRECT'?{transportReference:'tcp:100',startingLabelCount:'100'}:{transportReference:'ipp:42',ippJobId:'42'};
+      const evidence=mode==='NETWORK_DIRECT'
+        ?{kind:'ZEBRA_ODOMETER',printerId,startingLabelCount:'100',confirmedLabelCount:'101'}
+        :{kind:'IPP_COMPLETED',printerId,ippJobId:'42',jobState:'9',jobStateReasons:[]};
+      psql(admin,`UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED',
+        "issuedAt"=now()-interval '20 minutes',"agentAckedAt"=now()-interval '20 minutes',
+        "confirmationDeadlineAt"=now()-interval '10 minutes',"dispatchMetadata"='${JSON.stringify(metadata)}'::jsonb WHERE id='${item}';
+        UPDATE public."PrintJob" SET status='SENT',"pipelineState"='PRINTER_ACKNOWLEDGED' WHERE id='${job}';
+        UPDATE public."PrintSession" SET "issuedItems"=1,status='ACTIVE' WHERE id='${sessionId}';`);
+      assert.equal(psql(worker,`SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${randomUUID()}',1)`),'1');
+      assert.equal(psql(admin,`SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${job}'`),'PAUSED:NEEDS_OPERATOR_ACTION');
+      assert.equal((await saved.run({operation:mode==='NETWORK_DIRECT'?'CLAIM_DIRECT':'CLAIM_IPP',jobId:job,requestId:randomUUID(),client})).available,false);
+      const confirmation=await saved.run({operation:'CONFIRM',jobId:job,requestId:randomUUID(),details:{itemIds:[item],transportReference:metadata.transportReference,confirmationEvidence:evidence},client});
+      assert.equal(confirmation.remaining,1);
+      assert.equal(psql(admin,`SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${job}'`),'PAUSED:PAUSED');
+      assert.equal(psql(admin,`SELECT status FROM public."PrintSession" WHERE id='${sessionId}'`),'PAUSED');
+      assert.equal(JSON.parse(psql(app,`SELECT app_rls.printing_control_job('${capability}','printing-job-control','${randomUUID()}','${job}','RESUME','Continue reserved work')`)).sessionStatus,'RESUME_PENDING');
+      const resumed=await saved.run({operation:mode==='NETWORK_DIRECT'?'CLAIM_DIRECT':'CLAIM_IPP',jobId:job,requestId:randomUUID(),client});
+      assert.equal(resumed.items?.[0]?.id,resumedItem);
+      assert.equal(psql(admin,`SELECT status FROM public."PrintSession" WHERE id='${sessionId}'`),'ACTIVE');
+      assert.equal((await saved.run({operation:'CONFIRM',jobId:job,requestId:randomUUID(),details:{itemIds:[item],transportReference:metadata.transportReference,confirmationEvidence:evidence},client})).idempotent,true);
+      assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${item}'`),'PRINT_CONFIRMED');
+      console.log(`PASS PostgreSQL ${mode} late confirmation resumes only reserved work`);
+      psql(admin,`UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+        "dispatchedAt"=NULL,"agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL WHERE id='${resumedItem}';
+        UPDATE public."QRCode" SET status='ALLOCATED',"printedAt"=NULL,"printedByUserId"=NULL WHERE id='${resumedQr}';`);
+    }
+    psql(admin,`DELETE FROM public."PrintItem" WHERE id='${resumedItem}';DELETE FROM public."QRCode" WHERE id='${resumedQr}';
+      UPDATE public."PrintJob" SET quantity=1,"itemCount"=1 WHERE id='${job}';
+      UPDATE public."PrintSession" SET "totalItems"=1 WHERE id='${sessionId}';`);
     reset('NETWORK_DIRECT');
     const claims=await Promise.all(Array.from({length:4},()=>saved.run({operation:'CLAIM_DIRECT',jobId:job,requestId:randomUUID(),client})));
     assert.equal(claims.filter(result=>result.available).length,1,'one durable reservation across concurrent worker connections');

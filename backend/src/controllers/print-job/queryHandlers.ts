@@ -17,7 +17,7 @@ import {
   printJobIdParamSchema,
   reissuePrintJobSchema,
 } from "./shared";
-import { describeMissingPrinterReadinessFields } from "./errorResponses";
+import { describeMissingPrinterReadinessFields, isPhysicalOutcomeUnconfirmed } from "./errorResponses";
 import {
   createReissueRequestSchema,
   listReissueRequestsQuerySchema,
@@ -447,7 +447,7 @@ export const abandonManufacturerPrintJob = async (req: AuthRequest, res: Respons
     });
   } catch (error: any) {
     console.error("abandonManufacturerPrintJob error:", error);
-    if (error?.message === "PRINT_SESSION_NOT_ABANDONABLE") {
+    if (isPhysicalOutcomeUnconfirmed(error)) {
       return res.status(409).json({
         success: false,
         error: "This print run already reached the printer or has confirmed labels. It cannot be abandoned automatically.",
