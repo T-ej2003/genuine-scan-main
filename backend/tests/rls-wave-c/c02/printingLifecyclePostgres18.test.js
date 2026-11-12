@@ -911,6 +911,50 @@ async function main() {
     '${caps.maker}','printing-sample-scan','${requestId()}','${created.job.id}','${immutableCode}','{"scanner":"focused-proof"}'::jsonb
   )`);
   assert.equal(sample.satisfied, true);
+  const serializedOld='00000000-0000-4000-8000-000000000901',serializedNew='00000000-0000-4000-8000-000000000902';
+  const serializedOldSession=randomUUID(),serializedNewSession=randomUUID(),serializedOldQr=randomUUID(),serializedNewQr=randomUUID();
+  const serializedOldItem=randomUUID(),serializedNewItem=randomUUID();
+  psql(admin,`INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"createdAt","updatedAt")
+    VALUES('${serializedOld}','${ids.raceBatch}','${ids.maker}','${ids.printer}','SENT','LOCAL_AGENT','PRINTER_ACKNOWLEDGED',1,'1800-01-01',now()),
+      ('${serializedNew}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,'1801-01-01',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+    VALUES('${serializedOldSession}','${serializedOld}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,1,now()),
+      ('${serializedNewSession}','${serializedNew}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,0,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+    VALUES('${serializedOldQr}','serialized-old-${serializedOldQr}','${ids.licenseeA}','${ids.raceBatch}','${serializedOld}','ALLOCATED',now()),
+      ('${serializedNewQr}','serialized-new-${serializedNewQr}','${ids.licenseeA}','${ids.raceBatch}','${serializedNew}','ALLOCATED',now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","agentAckedAt","confirmationDeadlineAt","updatedAt")
+    VALUES('${serializedOldItem}','${serializedOldSession}','${serializedOldQr}','serialized-old','AGENT_ACKED','PRINTER_ACKNOWLEDGED',now()-interval '20 minutes',now()-interval '20 minutes',now()-interval '10 minutes',now()),
+      ('${serializedNewItem}','${serializedNewSession}','${serializedNewQr}','serialized-new','RESERVED','QUEUED',NULL,NULL,NULL,now());`);
+  const serializedClaim=(nonce)=>`SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device',
+    '${nonce}',now()::timestamp,'${requestId()}','CLAIM',NULL,NULL,'${ids.printer}','${hash(nonce)}',NULL,'{}'::jsonb)`;
+  const holdTransition=async(sql,marker,role=app)=>{
+    const holder=psqlAsync(role,`BEGIN; ${sql}; SELECT pg_sleep(4) /* ${marker} */; COMMIT`);
+    let held=false;
+    for(let attempt=0;attempt<120&&!held;attempt++){
+      held=psql(admin,`SELECT count(*) FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND wait_event='PgSleep' AND query LIKE '%${marker}%'`) !== '0';
+      if(!held)await new Promise(resolve=>setTimeout(resolve,25));
+    }
+    assert(held,`${marker}: transition must finish inside a still-open transaction`);
+    const blocked=json(app,serializedClaim(`${marker}_claim`));
+    assert.equal(blocked.available,false,`${marker}: no newer claim during uncertain transition`);
+    assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${serializedNewItem}'`),'RESERVED');
+    const result=await holder;
+    assert.equal(result.status,0,result.output);
+  };
+  await holdTransition(`SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${serializedOld}','STOP','Synthetic serial fence')`,'serial_stop');
+  assert.equal(psql(admin,`SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${serializedOld}'`),'STOPPED:NEEDS_OPERATOR_ACTION');
+  psql(admin,`UPDATE public."PrintJob" SET status='SENT',"pipelineState"='PRINTER_ACKNOWLEDGED' WHERE id='${serializedOld}';
+    UPDATE public."PrintSession" SET status='ACTIVE' WHERE id='${serializedOldSession}';
+    UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED' WHERE id='${serializedOldItem}';`);
+  await holdTransition(`SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',1)`,'serial_reconcile',worker);
+  assert.equal(psql(admin,`SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${serializedOld}'`),'PAUSED:NEEDS_OPERATOR_ACTION');
+  assert.equal(json(app,serializedClaim('serial_after_reconcile')).available,false);
+  psql(admin,`DELETE FROM public."PrintItem" WHERE id IN ('${serializedOldItem}','${serializedNewItem}');
+    DELETE FROM public."QRCode" WHERE id IN ('${serializedOldQr}','${serializedNewQr}');
+    DELETE FROM public."PrintSession" WHERE id IN ('${serializedOldSession}','${serializedNewSession}');
+    DELETE FROM public."PrintJob" WHERE id IN ('${serializedOld}','${serializedNew}');`);
+  console.log('PASS PostgreSQL printer-scoped STOP/reconcile versus claim interleaving');
   const quorumBatchIds = quorumCases.map((entry) => `'${entry.batch}'`).join(",");
   const quorumJobIds = quorumCases.map((entry) => `'${entry.job}'`).join(",");
   const quorumQrIds = quorumCases.flatMap((entry) => entry.qrs).map((entry) => `'${entry.id}'`).join(",");
@@ -1157,7 +1201,7 @@ async function main() {
   const winningLease=concurrentLeases[leaseRace.findIndex(result=>result.status===0)];
   json(app,gatewayDiagnostic('DIAGNOSTIC_COMPLETE',winningLease));
   assert.equal(json(app,gatewayCheck()).allowed,true);
-  await require('./gatewayClaimLifecycleFixture')({admin,psql,appFactory:createBackendApp,printerId:gatewayPrinter,batchId:ids.raceBatch,secret:'disposable-maintenance-gateway',hash});
+  await require('./gatewayClaimLifecycleFixture')({admin,worker,app,capability:caps.maker,psql,appFactory:createBackendApp,printerId:gatewayPrinter,batchId:ids.raceBatch,secret:'disposable-maintenance-gateway',hash});
   // Restore the worker-race fixture's transport after gateway failure injection.
   psql(admin,`UPDATE public."PrintJob" SET "printerId"='${directPrinter}',"printMode"='NETWORK_DIRECT',status='PENDING',"pipelineState"='QUEUED' WHERE "batchId"='${ids.raceBatch}';
     UPDATE public."PrintSession" SET "printerId"='${directPrinter}',status='ACTIVE' WHERE "batchId"='${ids.raceBatch}';

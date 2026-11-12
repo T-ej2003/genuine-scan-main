@@ -1957,6 +1957,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $fn$
 DECLARE actor record; job_row record; session_row record; now_at timestamp without time zone:=transaction_timestamp();
+  printer_id text;
   target_job_status public."PrintJobStatus"; target_pipeline public."PrintPipelineState"; target_session public."PrintSessionStatus";
 BEGIN
   IF p_purpose<>'printing-job-control' OR p_operation NOT IN ('PAUSE','RESUME','STOP','ABANDON')
@@ -1966,8 +1967,12 @@ BEGIN
     p_capability,p_purpose,p_request_id,NULL
   );
   PERFORM set_config('app.printing_job_id',p_job_id,true);
+  SELECT j."printerId" INTO STRICT printer_id FROM public."PrintJob" j WHERE j.id=p_job_id;
+  IF printer_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('printing_printer_'||printer_id,0));
+  END IF;
   SELECT j.id,j."batchId",j."manufacturerId",j.status,j."pipelineState"
-    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id FOR UPDATE;
+    INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id AND j."printerId" IS NOT DISTINCT FROM printer_id FOR UPDATE;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
     p_capability,p_purpose,p_request_id,job_row."batchId"
   );
@@ -2138,6 +2143,8 @@ BEGIN
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
+    IF NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0))
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO job_row FROM public."PrintJob" j
@@ -2150,6 +2157,7 @@ BEGIN
         AND prior_job.status IN ('PAUSED','STOPPED') AND prior_job."pipelineState"='NEEDS_OPERATOR_ACTION')
     THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
   ELSE
+    PERFORM pg_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0));
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO STRICT job_row FROM public."PrintJob" j
      WHERE j.id=p_job_id AND j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
@@ -2712,6 +2720,8 @@ BEGIN
     IF p_operation='CHECK_DISPATCH' THEN RETURN jsonb_build_object('allowed',true); END IF;
   END IF;
   IF p_operation='CLAIM' THEN
+    IF NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0))
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     -- A previous gateway claim may already have reached the printer. Its
     -- odometer evidence cannot be shared with another automatic operation.
     IF EXISTS (SELECT 1 FROM public."PrintItem" pi JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
@@ -2730,6 +2740,7 @@ BEGIN
       ORDER BY j."createdAt",j.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
   ELSE
+    PERFORM pg_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0));
     SELECT j.id,j."jobNumber",j."batchId",j."manufacturerId",j."printerId",j.status,j."printMode",
       j."pipelineState",j."payloadType",j."payloadHash",j.quantity,j."itemCount",j."rangeStart",
       j."rangeEnd",j."sentAt",j."completedAt",j."failureReason",j."reprintOfJobId",
@@ -2746,6 +2757,9 @@ BEGIN
     INTO STRICT session_row FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   IF p_operation='CLAIM' THEN
+    IF session_row.status NOT IN ('ACTIVE','RESUME_PENDING') OR
+      (session_row.status='RESUME_PENDING' AND job_row."pipelineState"<>'RESUME_PENDING')
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     SELECT pi.id,pi."qrCodeId",pi.state INTO item_row FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
       ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
@@ -2753,7 +2767,7 @@ BEGIN
     PERFORM set_config('app.printing_item_id',item_row.id,true);
     UPDATE public."PrintItem" SET state='ISSUED',"pipelineState"='SENT_TO_PRINTER',
       "attemptCount"="attemptCount"+1,"issuedAt"=coalesce("issuedAt",now_at),"updatedAt"=now_at WHERE id=item_row.id;
-    UPDATE public."PrintSession" SET "issuedItems"="issuedItems"+1,"updatedAt"=now_at WHERE id=session_row.id;
+    UPDATE public."PrintSession" SET status='ACTIVE',"issuedItems"="issuedItems"+1,"updatedAt"=now_at WHERE id=session_row.id;
     UPDATE public."PrintJob" SET status='SENT',"pipelineState"='SENT_TO_PRINTER',
       "sentAt"=coalesce("sentAt",now_at),"updatedAt"=now_at WHERE id=job_row.id;
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
@@ -2784,8 +2798,9 @@ BEGIN
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details,"updatedAt"=now_at WHERE id=item_row.id;
     UPDATE public."QRCode" SET status='PRINTED',"printedAt"=coalesce("printedAt",now_at),
       "printedByUserId"=job_row."manufacturerId","updatedAt"=now_at WHERE id=item_row."qrCodeId";
+    UPDATE public."PrintSession" SET "confirmedItems"="confirmedItems"+1,"updatedAt"=now_at WHERE id=session_row.id;
     SELECT count(*) INTO remaining FROM public."PrintItem" pi
-      WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED','FAILED','CANCELLED');
+      WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED');
     IF remaining=0 THEN
       UPDATE public."PrintSession" SET status='COMPLETED',"confirmedItems"="totalItems",
         "completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
@@ -2793,6 +2808,21 @@ BEGIN
         "confirmedAt"=now_at,"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
       UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED',"printedAt"=now_at,"updatedAt"=now_at
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
+    ELSIF session_row.status='PAUSED' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')
+    ) THEN
+      IF EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id AND pi.state='FAILED') THEN
+        UPDATE public."PrintSession" SET status='FAILED',"completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
+        UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
+      ELSE
+        UPDATE public."PrintJob" SET "pipelineState"='PAUSED',"failureReason"=NULL,"updatedAt"=now_at WHERE id=job_row.id;
+      END IF;
+    ELSIF session_row.status='STOPPED' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')
+    ) THEN
+      UPDATE public."PrintJob" SET "pipelineState"='STOPPED',"updatedAt"=now_at WHERE id=job_row.id;
     END IF;
   ELSE
     IF item_row.state='FAILED' THEN RETURN jsonb_build_object('idempotent',true,'printItemId',item_row.id); END IF;
@@ -3209,13 +3239,18 @@ BEGIN
           set_config('app.printing_request_id',p_request_id,true);
   IF p_operation='EXPIRE_CONFIRMATIONS' THEN
     -- Keep the acknowledged item confirmable; timeout alone cannot prove physical failure.
-    FOR job_row IN SELECT j.id FROM public."PrintJob" j
+    FOR job_row IN SELECT j.id,j."printerId" FROM public."PrintJob" j
       WHERE j.status IN ('PENDING','SENT','PAUSED') AND EXISTS (
         SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
         WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED' AND pi."confirmationDeadlineAt"<now_at
           AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
-      ) ORDER BY j.id FOR UPDATE OF j SKIP LOCKED LIMIT p_limit
+      ) ORDER BY j.id LIMIT p_limit
     LOOP
+      IF job_row."printerId" IS NOT NULL AND NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||job_row."printerId",0))
+      THEN CONTINUE; END IF;
+      PERFORM 1 FROM public."PrintJob" j WHERE j.id=job_row.id AND j."printerId" IS NOT DISTINCT FROM job_row."printerId"
+        AND j.status IN ('PENDING','SENT','PAUSED') FOR UPDATE SKIP LOCKED;
+      IF NOT FOUND THEN CONTINUE; END IF;
       SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
         WHERE ps."printJobId"=job_row.id FOR UPDATE;
       job_expired:=false;
@@ -3300,7 +3335,12 @@ BEGIN
           SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
           WHERE ps."printJobId"=j.id AND pi.state='RESERVED'
         )
-      ORDER BY j."createdAt",j.id FOR UPDATE SKIP LOCKED LIMIT 1;
+      ORDER BY j."createdAt",j.id LIMIT 1;
+    IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
+    IF NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||job_row."printerId",0))
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
+    PERFORM 1 FROM public."PrintJob" j WHERE j.id=job_row.id AND j."printerId"=job_row."printerId"
+      AND j."printMode"=mode_value AND j.status IN ('PENDING','SENT') FOR UPDATE SKIP LOCKED;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
     PERFORM set_config('app.printing_job_id',job_row.id,true),
             set_config('app.printing_batch_id',job_row."batchId",true),
@@ -3322,6 +3362,9 @@ BEGIN
       INTO STRICT session_row FROM public."PrintSession" ps
       WHERE ps."printJobId"=job_row.id FOR UPDATE;
     PERFORM set_config('app.printing_session_row_id',session_row.id,true);
+    IF session_row.status NOT IN ('ACTIVE','RESUME_PENDING') OR
+      (session_row.status='RESUME_PENDING' AND job_row."pipelineState"<>'RESUME_PENDING')
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
     WITH selected AS (
       SELECT pi.id FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
@@ -3334,6 +3377,9 @@ BEGIN
       FROM selected s WHERE pi.id=s.id RETURNING pi.id
     )
     SELECT array_agg(id ORDER BY id) INTO item_ids FROM issued;
+    IF item_ids IS NULL THEN RETURN jsonb_build_object('available',false); END IF;
+    UPDATE public."PrintSession" SET status='ACTIVE',"issuedItems"="issuedItems"+cardinality(item_ids),"updatedAt"=now_at
+      WHERE id=session_row.id;
     UPDATE public."PrintJob" SET status='SENT',"pipelineState"='SENT_TO_PRINTER',
       "sentAt"=coalesce("sentAt",now_at),"updatedAt"=now_at WHERE id=job_row.id;
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
@@ -3367,14 +3413,14 @@ BEGIN
     );
   END IF;
 
-  SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode"
+  SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j."printMode",j.status
     INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_job_id AND j."printMode" IN ('NETWORK_DIRECT','NETWORK_IPP') FOR UPDATE;
   PERFORM set_config('app.printing_job_id',job_row.id,true),
           set_config('app.printing_batch_id',job_row."batchId",true),
           set_config('app.printing_printer_id',job_row."printerId",true);
   PERFORM 1 FROM public."Printer" p WHERE p.id=job_row."printerId" AND p."deliveryMode"='DIRECT' AND p."connectionType"::text=job_row."printMode"::text;
   IF NOT FOUND THEN RAISE EXCEPTION 'PRINTING_WORKER_SCOPE_DENIED' USING ERRCODE='42501'; END IF;
-  SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
+  SELECT ps.id,ps.status INTO STRICT session_row FROM public."PrintSession" ps
     WHERE ps."printJobId"=job_row.id FOR UPDATE;
   PERFORM set_config('app.printing_session_row_id',session_row.id,true);
   SELECT coalesce(array_agg(value #>> '{}'),'{}'::text[]) INTO item_ids
@@ -3415,6 +3461,11 @@ BEGIN
          NOT EXISTS(SELECT 1 FROM jsonb_array_elements_text(p_details->'confirmationEvidence'->'jobStateReasons') reason WHERE lower(reason) LIKE '%completed-with-errors%') AND
          NOT EXISTS(SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED' AND pi."dispatchMetadata"->>'ippJobId' IS DISTINCT FROM p_details->'confirmationEvidence'->>'ippJobId') END,false)
     THEN RAISE EXCEPTION 'PHYSICAL_PRINT_CONFIRMATION_REQUIRED' USING ERRCODE='55000'; END IF;
+    IF NOT EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state='AGENT_ACKED') THEN
+      IF EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids) AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED'))
+      THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      RETURN jsonb_build_object('printJobId',job_row.id,'operation',p_operation,'itemCount',cardinality(item_ids),'idempotent',true);
+    END IF;
     UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details->'confirmationEvidence'||jsonb_build_object(
         'runtimeIdentity','identity-background-worker','transport',job_row."printMode",
@@ -3428,8 +3479,12 @@ BEGIN
     UPDATE public."QRCode" q SET status='PRINTED',"printedAt"=coalesce(q."printedAt",now_at),
       "printedByUserId"=job_row."manufacturerId","updatedAt"=now_at
       WHERE q.id IN (SELECT pi."qrCodeId" FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids));
+    UPDATE public."PrintSession" SET "confirmedItems"=(
+      SELECT count(*) FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('PRINT_CONFIRMED','CLOSED')
+    ),"updatedAt"=now_at WHERE id=session_row.id;
     SELECT count(*) INTO remaining FROM public."PrintItem" pi
-      WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED','FAILED','CANCELLED');
+      WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED');
     IF remaining=0 THEN
       UPDATE public."PrintSession" SET status='COMPLETED',"confirmedItems"="totalItems",
         "completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
@@ -3437,6 +3492,21 @@ BEGIN
         "confirmedAt"=now_at,"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
       UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED',"printedAt"=now_at,"updatedAt"=now_at
         WHERE id=job_row."batchId" AND "lifecycleState"='PRINT_ACKNOWLEDGED';
+    ELSIF session_row.status='PAUSED' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')
+    ) THEN
+      IF EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id AND pi.state='FAILED') THEN
+        UPDATE public."PrintSession" SET status='FAILED',"completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
+        UPDATE public."PrintJob" SET status='FAILED',"pipelineState"='FAILED',"completedAt"=now_at,"updatedAt"=now_at WHERE id=job_row.id;
+      ELSE
+        UPDATE public."PrintJob" SET "pipelineState"='PAUSED',"failureReason"=NULL,"updatedAt"=now_at WHERE id=job_row.id;
+      END IF;
+    ELSIF session_row.status='STOPPED' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')
+    ) THEN
+      UPDATE public."PrintJob" SET "pipelineState"='STOPPED',"updatedAt"=now_at WHERE id=job_row.id;
     END IF;
   ELSE
     IF p_details->>'failureClassification' IS DISTINCT FROM 'PRE_DISPATCH_FAILURE' OR EXISTS(

@@ -1,7 +1,7 @@
 // Invoked only inside the disposable PostgreSQL 18 application certification.
 // Real gateway auth/claim/FAIL routes and database transitions; simulated device
 // transport never opens a socket. Fixture-only admin resets are not production APIs.
-module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printerId,batchId,secret,hash}) {
+module.exports=async function certifyGatewayClaims({admin,worker,app,capability,psql,appFactory,printerId,batchId,secret,hash}) {
   const assert=require('node:assert/strict');
   const fs=require('node:fs/promises');const os=require('node:os');const path=require('node:path');
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'mscqr-pg-gateway-'));
@@ -102,11 +102,45 @@ module.exports=async function certifyGatewayClaims({admin,psql,appFactory,printe
       }
       console.log(`PASS PostgreSQL gateway lifecycle ${scenario}`);
     }
+    const {randomUUID}=require('node:crypto');
+    const extraQr=randomUUID(),extraItem=randomUUID(),sessionId=psql(admin,`SELECT id FROM public."PrintSession" WHERE "printJobId"='${job}'`);
+    psql(admin,`INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+      SELECT '${extraQr}','synthetic-gateway-resume-${extraQr}',"licenseeId",'${batchId}','${job}','ALLOCATED',now()
+      FROM public."Batch" WHERE id='${batchId}';
+      INSERT INTO public."PrintItem" SELECT (jsonb_populate_record(NULL::public."PrintItem",to_jsonb(pi)||
+        jsonb_build_object('id','${extraItem}','qrCodeId','${extraQr}','code','synthetic-gateway-resume-${extraQr}',
+          'state','RESERVED','pipelineState','QUEUED','issueSequence',2,'attemptCount',0,
+          'dispatchMetadata',NULL,'confirmationEvidence',NULL,'issuedAt',NULL,'agentAckedAt',NULL,
+          'dispatchedAt',NULL,'confirmationDeadlineAt',NULL))).* FROM public."PrintItem" pi WHERE pi.id='${item}';
+      UPDATE public."PrintJob" SET quantity=2,"itemCount"=2 WHERE id='${job}';
+      UPDATE public."PrintSession" SET "totalItems"=2 WHERE id='${sessionId}';`);
+    for(const mode of ['NETWORK_DIRECT','NETWORK_IPP']) {
+      psql(admin,`UPDATE public."Printer" SET "connectionType"='${mode}' WHERE id='${printerId}';
+        UPDATE public."PrintJob" SET status='SENT',"printMode"='${mode}',"pipelineState"='PRINTER_ACKNOWLEDGED' WHERE id='${job}';
+        UPDATE public."PrintSession" SET status='ACTIVE',"issuedItems"=1,"confirmedItems"=0 WHERE id='${sessionId}';
+        UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED',
+          "issuedAt"=now()-interval '20 minutes',"agentAckedAt"=now()-interval '20 minutes',
+          "confirmationDeadlineAt"=now()-interval '10 minutes' WHERE id='${item}';
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+          "agentAckedAt"=NULL,"dispatchedAt"=NULL WHERE id='${extraItem}';`);
+      assert.equal(psql(worker,`SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${randomUUID()}',1)`),'1');
+      const command=(operation,jobId,itemId,details)=>`SELECT app_rls.printing_gateway_job('isolated-maintenance-gateway','${hash(secret)}',
+        '${randomUUID()}','${operation}','${mode}',${jobId?`'${jobId}'`:'NULL'},${itemId?`'${itemId}'`:'NULL'},'${JSON.stringify(details)}'::jsonb)`;
+      assert.equal(JSON.parse(psql(app,command('CONFIRM',job,item,{physical:true}))).remainingToPrint,1);
+      assert.equal(psql(admin,`SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${job}'`),'PAUSED:PAUSED');
+      assert.equal(JSON.parse(psql(app,`SELECT app_rls.printing_control_job('${capability}','printing-job-control','${randomUUID()}','${job}','RESUME','Continue reserved work')`)).sessionStatus,'RESUME_PENDING');
+      assert.equal(JSON.parse(psql(app,command('CLAIM',null,null,{}))).item?.id,extraItem);
+      assert.equal(psql(admin,`SELECT status FROM public."PrintSession" WHERE id='${sessionId}'`),'ACTIVE');
+      console.log(`PASS PostgreSQL gateway ${mode} late confirmation resumes reserved work`);
+    }
+    psql(admin,`DELETE FROM public."PrintItem" WHERE id='${extraItem}';DELETE FROM public."QRCode" WHERE id='${extraQr}';
+      UPDATE public."PrintJob" SET quantity=1,"itemCount"=1,"printMode"='NETWORK_DIRECT' WHERE id='${job}';
+      UPDATE public."PrintSession" SET "totalItems"=1 WHERE id='${sessionId}';
+      UPDATE public."Printer" SET "connectionType"='NETWORK_DIRECT' WHERE id='${printerId}';`);
     // A stale or unclassified failure cannot overwrite an accepted outcome.
     const sql=(operation,details)=>`SELECT app_rls.printing_gateway_job('isolated-maintenance-gateway','${hash(secret)}','${require('crypto').randomUUID()}','${operation}','NETWORK_DIRECT','${job}','${item}','${JSON.stringify(details)}'::jsonb)`;
     psql(admin,`UPDATE public."PrintJob" SET status='SENT' WHERE id='${job}';UPDATE public."PrintItem" SET state='AGENT_ACKED' WHERE id='${item}';`);
     // Connection uses the application's RLS role, supplied by parent.
-    const app=process.env.MSCQR_PRINTING_APP_URL;
     assert.match(psql(app,sql('FAIL',{reason:'late',gatewayMetadata:{failureClassification:'PRE_DISPATCH_FAILURE'}}),true),/GATEWAY_FAILURE_RECONCILIATION_REQUIRED/);
     assert.equal(state(),'AGENT_ACKED');
   } finally {
