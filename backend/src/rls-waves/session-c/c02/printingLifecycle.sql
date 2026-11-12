@@ -2018,7 +2018,8 @@ BEGIN
     ))
     THEN target_pipeline:='NEEDS_OPERATOR_ACTION'; END IF;
     UPDATE public."PrintItem" SET
-      state=CASE WHEN state IN ('ISSUED','AGENT_ACKED') OR "issuedAt" IS NOT NULL OR "dispatchedAt" IS NOT NULL
+      state=CASE WHEN state IN ('ISSUED','AGENT_ACKED') THEN state
+        WHEN "issuedAt" IS NOT NULL OR "dispatchedAt" IS NOT NULL
         OR "agentAckedAt" IS NOT NULL OR "deviceJobRef" IS NOT NULL
         OR coalesce("confirmationEvidence",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
         THEN 'FROZEN'::public."PrintItemState" ELSE 'CANCELLED'::public."PrintItemState" END,
@@ -2144,6 +2145,10 @@ BEGIN
        AND j."printMode"='LOCAL_AGENT' AND j.status IN ('PENDING','SENT')
      ORDER BY j."createdAt",j.id FOR UPDATE OF j SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
+    IF EXISTS (SELECT 1 FROM public."PrintJob" prior_job
+      WHERE prior_job."printerId"=printer_row.id AND prior_job.id<>job_row.id
+        AND prior_job.status IN ('PAUSED','STOPPED') AND prior_job."pipelineState"='NEEDS_OPERATOR_ACTION')
+    THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
   ELSE
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO STRICT job_row FROM public."PrintJob" j
@@ -2161,6 +2166,7 @@ BEGIN
        AND (ps.status='ACTIVE'
          OR (p_operation='CLAIM' AND ps.status='RESUME_PENDING' AND job_row."pipelineState"='RESUME_PENDING')
          OR (ps.status='PAUSED' AND job_row.status='PAUSED' AND p_operation IN ('ACK','CONFIRM','FAIL'))
+         OR (ps.status='STOPPED' AND job_row.status='STOPPED' AND p_operation IN ('ACK','CONFIRM','FAIL'))
          OR (ps.status='COMPLETED' AND job_row.status='CONFIRMED' AND p_operation IN ('ACK','CONFIRM'))
          OR (ps.status='FAILED' AND job_row.status='FAILED' AND p_operation='FAIL')) FOR UPDATE;
   audit_actor:=registration."userId";
@@ -2269,6 +2275,11 @@ BEGIN
         -- No physical outcome remains open; the operator may explicitly resume reserved work.
         UPDATE public."PrintJob" SET "pipelineState"='PAUSED',"failureReason"=NULL,"updatedAt"=now_at WHERE id=job_row.id;
       END IF;
+    ELSIF session_row.status='STOPPED' AND NOT EXISTS (
+      SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+        AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')
+    ) THEN
+      UPDATE public."PrintJob" SET "pipelineState"='STOPPED',"updatedAt"=now_at WHERE id=job_row.id;
     END IF;
   ELSE
     IF item_row.state IN ('FAILED','FROZEN') THEN
@@ -2278,15 +2289,21 @@ BEGIN
     IF p_details->>'outcomeIndeterminate'='true' THEN
       UPDATE public."PrintItem" SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
         "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=item_row.id;
-      UPDATE public."PrintSession" SET status='PAUSED',"failedReason"='physical_outcome_unconfirmed',
-        "updatedAt"=now_at WHERE id=session_row.id;
-      UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
-        "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=job_row.id;
+      UPDATE public."PrintSession" SET status=CASE WHEN session_row.status='STOPPED' THEN 'STOPPED'::public."PrintSessionStatus" ELSE 'PAUSED'::public."PrintSessionStatus" END,
+        "failedReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=session_row.id;
+      UPDATE public."PrintJob" SET status=CASE WHEN job_row.status='STOPPED' THEN 'STOPPED'::public."PrintJobStatus" ELSE 'PAUSED'::public."PrintJobStatus" END,
+        "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=job_row.id;
     ELSE
       UPDATE public."PrintItem" SET state='FAILED',"pipelineState"='FAILED',"failedAt"=now_at,
         "failureReason"=left(coalesce(p_details->>'reason','connector_failure'),500),"updatedAt"=now_at
         WHERE id=item_row.id;
-      IF EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+      IF session_row.status='STOPPED' THEN
+        UPDATE public."PrintJob" SET "pipelineState"=CASE WHEN EXISTS (
+            SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
+              AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN'))
+            THEN 'NEEDS_OPERATOR_ACTION'::public."PrintPipelineState" ELSE 'STOPPED'::public."PrintPipelineState" END,
+          "updatedAt"=now_at WHERE id=job_row.id;
+      ELSIF EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
         AND pi.state IN ('ISSUED','AGENT_ACKED','FROZEN')) THEN
         UPDATE public."PrintSession" SET status='PAUSED',"failedReason"=coalesce("failedReason",left(coalesce(p_details->>'reason','connector_failure'),500)),
           "updatedAt"=now_at WHERE id=session_row.id;

@@ -1381,6 +1381,22 @@ async function main() {
     `);
     return { jobId, sessionId };
   };
+  const resumed = createExpiredRun('resume', 1, 1);
+  const [resumedExpired, resumedReserved] = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${resumed.sessionId}'`).split(',');
+  psql(admin, `UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+    "agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL WHERE id='${resumedReserved}'`);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
+  json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_confirm_nonce_1',now()::timestamp,
+    '${requestId()}','CONFIRM','${resumed.jobId}','${resumedExpired}','${ids.printer}','${hash('resume-confirm')}','spool-resume','{"physical":true}'::jsonb)`);
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${resumed.jobId}'`), 'PAUSED:PAUSED');
+  assert.equal(json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${resumed.jobId}','RESUME','Continue reserved work')`).sessionStatus, 'RESUME_PENDING');
+  psql(admin, `UPDATE public."PrintJob" SET "createdAt"='2000-01-01' WHERE id='${resumed.jobId}'`);
+  const resumedClaim = json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_claim_nonce_1',now()::timestamp,
+    '${requestId()}','CLAIM','${resumed.jobId}',NULL,'${ids.printer}','${hash('resume-claim')}',NULL,'{}'::jsonb)`);
+  assert.equal(resumedClaim.printJobId, resumed.jobId);
+  assert.equal(resumedClaim.printItemId, resumedReserved);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${resumed.sessionId}'`), 'ACTIVE');
+
   for (const count of [1, 49, 50, 51, 100, 125]) {
     const run = createExpiredRun(`limit${count}`, count);
     let processed = 0;
@@ -1454,21 +1470,15 @@ async function main() {
   denied(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','paused_wrong_printer',now()::timestamp,
     '${requestId()}','ACK','${mixed.jobId}','${laterAcked}','${ids.foreignPrinter}','${hash('wrong-printer')}',NULL,'{}'::jsonb)`, /query returned no rows/);
 
-  const resumed = createExpiredRun('resume', 1, 1);
-  const [resumedExpired, resumedReserved] = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${resumed.sessionId}'`).split(',');
-  psql(admin, `UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
-    "agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL WHERE id='${resumedReserved}'`);
-  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
-  json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_confirm_nonce_1',now()::timestamp,
-    '${requestId()}','CONFIRM','${resumed.jobId}','${resumedExpired}','${ids.printer}','${hash('resume-confirm')}','spool-resume','{"physical":true}'::jsonb)`);
-  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${resumed.jobId}'`), 'PAUSED:PAUSED');
-  assert.equal(json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${resumed.jobId}','RESUME','Continue reserved work')`).sessionStatus, 'RESUME_PENDING');
-  psql(admin, `UPDATE public."PrintJob" SET "createdAt"='2000-01-01' WHERE id='${resumed.jobId}'`);
-  const resumedClaim = json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_claim_nonce_1',now()::timestamp,
-    '${requestId()}','CLAIM','${resumed.jobId}',NULL,'${ids.printer}','${hash('resume-claim')}',NULL,'{}'::jsonb)`);
-  assert.equal(resumedClaim.printJobId, resumed.jobId);
-  assert.equal(resumedClaim.printItemId, resumedReserved);
-  assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${resumed.sessionId}'`), 'ACTIVE');
+  const stoppedFailure = createExpiredRun('stopped-failure', 1);
+  const stoppedFailureItem = psql(admin, `SELECT id FROM public."PrintItem" WHERE "printSessionId"='${stoppedFailure.sessionId}'`);
+  json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${stoppedFailure.jobId}','STOP','Stop uncertain work')`);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','stopped_fail_nonce_1',now()::timestamp,
+    '${requestId()}','FAIL','${stoppedFailure.jobId}','${stoppedFailureItem}','${ids.printer}','${hash('stopped-fail')}','spool-stop','{"reason":"definite_connector_failure"}'::jsonb)`).operation, 'FAIL');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${stoppedFailure.jobId}'`), 'STOPPED:STOPPED');
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${stoppedFailureItem}'`), 'FAILED');
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','stopped_fail_nonce_2',now()::timestamp,
+    '${requestId()}','FAIL','${stoppedFailure.jobId}','${stoppedFailureItem}','${ids.printer}','${hash('stopped-fail-retry')}','spool-stop','{}'::jsonb)`).idempotent, true);
 
   const raceStop = async (suffix, itemState, connectorOperation) => {
     const jobId = `50000000-0000-4000-8000-00000000059${suffix}`;
@@ -1520,21 +1530,41 @@ async function main() {
       'item',(SELECT state FROM public."PrintItem" WHERE id='${itemId}'),
       'qr',(SELECT status FROM public."QRCode" WHERE id='${qrId}'),
       'stopAudit',(SELECT count(*) FROM public."AuditLog" WHERE action='PRINT_JOB_STOP' AND "entityId"='${jobId}'))`);
-    return { connectorResult, stopResult: JSON.parse(stopResult.output), final };
+    return { jobId, itemId, connectorResult, stopResult: JSON.parse(stopResult.output), final };
   };
   const ackRace = await raceStop("5", "ISSUED", "ACK");
   assert.deepEqual([ackRace.final.job, ackRace.final.session, ackRace.final.item, ackRace.final.qr],
-    ["STOPPED", "STOPPED", "FROZEN", "ALLOCATED"]);
+    ["STOPPED", "STOPPED", ackRace.connectorResult.status === 0 ? "AGENT_ACKED" : "ISSUED", "ALLOCATED"]);
   assert.equal(ackRace.final.pipeline, 'NEEDS_OPERATOR_ACTION');
   assert.equal(ackRace.final.stopAudit, 1);
+  const heldClaimJob = randomUUID();
+  const heldClaimSession = randomUUID();
+  const heldClaimQr = randomUUID();
+  const heldClaimItem = randomUUID();
+  psql(admin, `
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"createdAt","updatedAt")
+      VALUES('${heldClaimJob}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,'1900-01-01',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","updatedAt")
+      VALUES('${heldClaimSession}','${heldClaimJob}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+      VALUES('${heldClaimQr}','synthetic-held-claim','${ids.licenseeA}','${ids.raceBatch}','${heldClaimJob}','ACTIVATED',now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","updatedAt")
+      VALUES('${heldClaimItem}','${heldClaimSession}','${heldClaimQr}','synthetic-held-claim','RESERVED','QUEUED',now());
+  `);
+  const blockedClaim = json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','stopped_claim_nonce_1',now()::timestamp,
+    '${requestId()}','CLAIM',NULL,NULL,'${ids.printer}','${hash('stopped-claim')}',NULL,'{}'::jsonb)`);
+  assert.equal(blockedClaim.available, false);
+  assert.equal(blockedClaim.reconciliationRequired, true);
+  const stoppedAck = json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','stopped_ack_nonce_1',now()::timestamp,
+    '${requestId()}','ACK','${ackRace.jobId}','${ackRace.itemId}','${ids.printer}','${hash('stopped-ack')}','spool-stop','{}'::jsonb)`);
+  assert(stoppedAck.operation === 'ACK' || stoppedAck.idempotent === true);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','stopped_confirm_nonce_1',now()::timestamp,
+    '${requestId()}','CONFIRM','${ackRace.jobId}','${ackRace.itemId}','${ids.printer}','${hash('stopped-confirm')}','spool-stop','{"physical":true}'::jsonb)`).operation, 'CONFIRM');
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${ackRace.jobId}'`), 'CONFIRMED');
   const confirmRace = await raceStop("4", "AGENT_ACKED", "CONFIRM");
-  assert.equal(confirmRace.final.stopAudit, confirmRace.final.job === "STOPPED" ? 1 : 0);
-  assert.deepEqual(
-    [confirmRace.final.session, confirmRace.final.item, confirmRace.final.qr],
-    confirmRace.final.job === "STOPPED" ? ["STOPPED", "FROZEN", "ALLOCATED"] : ["COMPLETED", "PRINT_CONFIRMED", "PRINTED"]
-  );
-  if (confirmRace.final.job === 'STOPPED') assert.equal(confirmRace.final.pipeline, 'NEEDS_OPERATOR_ACTION');
-  assert(["STOPPED", "CONFIRMED"].includes(confirmRace.final.job));
+  assert([0, 1].includes(Number(confirmRace.final.stopAudit)));
+  assert.deepEqual([confirmRace.final.job, confirmRace.final.session, confirmRace.final.item, confirmRace.final.qr],
+    ["CONFIRMED", "COMPLETED", "PRINT_CONFIRMED", "PRINTED"]);
 
   const uncertainJobId = "50000000-0000-4000-8000-000000000593";
   const uncertainSessionId = "50000000-0000-4000-8000-000000000583";
