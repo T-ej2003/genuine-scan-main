@@ -18,6 +18,7 @@ const printer = {
   connectionType: "LOCAL_AGENT",
   deliveryMode: "DIRECT",
 };
+let statusPrinterId = printer.id;
 
 mockModule("services/networkPrinterSocketService.js", {
   testNetworkPrinterConnectivity: async () => ({ latencyMs: 3 }),
@@ -36,7 +37,7 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
   readPrintingProjection: async ({ operation }) => {
     if (operation === "PRINTER") return printer;
     if (denyStatus) throw new Error("PRINTING_BOUNDARY_DENIED");
-    return { trusted: true, connected: true, eligibleForPrinting: true };
+    return { trusted: true, connected: true, eligibleForPrinting: true, printerId: statusPrinterId };
   },
   administerPrintingPrinter: async ({ operation }) => {
     if (operation.startsWith("AUDIT_")) {
@@ -93,6 +94,18 @@ const response = () => ({
     assert.equal(manufacturer.body.data.outcome, "queued");
     assert.equal(updates, 0);
     assert.equal(dispatches, 1);
+
+    statusPrinterId = "50000000-0000-4000-8000-000000000099";
+    const wrongPrinter = response();
+    await testPrinterLabel(request, wrongPrinter);
+    assert.equal(wrongPrinter.body.data.outcome, "needs_attention", "a healthy connector for another printer must not queue this profile");
+    assert.equal(dispatches, 1, "mismatched printer profile must not be dispatched");
+    statusPrinterId = null;
+    const unboundPrinter = response();
+    await testPrinterLabel(request, unboundPrinter);
+    assert.equal(unboundPrinter.body.data.outcome, "needs_attention", "missing profile binding must fail closed");
+    assert.equal(dispatches, 1);
+    statusPrinterId = printer.id;
 
     for (const route of [
       { connectionType: "NETWORK_DIRECT", deliveryMode: "DIRECT" },

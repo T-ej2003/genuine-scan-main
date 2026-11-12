@@ -38,7 +38,7 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
     if (operation === "PRINTER" && statusMode === "missing") return null;
     if (operation === "PRINTER") return printer;
     if (operation === "PRINTER_STATUS" && statusMode === "denied") throw new Error("PRINTING_BOUNDARY_DENIED");
-    return { trusted: true, connected: true, eligibleForPrinting: true };
+    return { trusted: true, connected: true, eligibleForPrinting: true, printerId: printer.id };
   },
   administerPrintingPrinter: async ({ operation }) => {
     if (operation === "AUDIT_TEST_LABEL_ATTENTION" && statusMode === "dispatch-failed") {
