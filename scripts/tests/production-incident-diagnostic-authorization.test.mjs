@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import JSZip from "jszip";
 import { createProductionEnvironmentApprovalEvidence, PRODUCTION_ENVIRONMENT_APPROVAL } from "../aws/production-github-environment-approval.mjs";
 import { createIncidentDiagnosticAuthorization, assertIncidentDiagnosticAuthorization, incidentJournalPolicy, incidentSecretPolicy, incidentTaskDefinition, resolveIncidentDiagnosticAuthorization } from "../aws/production-incident-diagnostic-authorization.mjs";
+
+assert.match(readFileSync(new URL("../../.github/workflows/authorize-production-incident-diagnostic.yml", import.meta.url), "utf8"),
+  /- name: Produce one-use diagnostic authorization\n\s+env:\n\s+GITHUB_TOKEN: \$\{\{ github\.token \}\}/);
 
 const diagnosticSourceSha = "a".repeat(40);
 const now = new Date("2026-11-12T14:00:00.000Z");

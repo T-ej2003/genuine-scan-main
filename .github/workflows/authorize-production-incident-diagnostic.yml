@@ -55,6 +55,7 @@ jobs:
             --execution-actor "$GITHUB_ACTOR" --require-actual-approval
       - name: Produce one-use diagnostic authorization
         env:
+          GITHUB_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           IMAGE_DIGEST: ${{ inputs.image_digest }}
           PUBLICATION_RUN_ID: ${{ inputs.publication_run_id }}
