@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
-import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
 import { PrismaClient } from "@prisma/client";
 import { INCIDENT_DATABASE, INCIDENT_ROLE, INCIDENT_SOURCE_SHA } from "./production-incident-diagnostic-queries.mjs";
 import { buildIncidentDiagnosticSql } from "./production-incident-diagnostic-sql.mjs";
@@ -14,7 +13,7 @@ const account = "368992683803";
 const region = "eu-west-2";
 const bucket = "mscqr-prod-euw2-artifacts-368992683803-eu-west-2-an";
 const applicationName = "mscqr-incident-20261112-read";
-const roleArnPrefix = `arn:aws:sts::${account}:assumed-role/mscqr-production-full-rls-green-read-only-canary-task/`;
+const taskRoleArn = `arn:aws:iam::${account}:role/mscqr-production-full-rls-green-read-only-canary-task`;
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const json = (value) => `${JSON.stringify(value)}\n`;
 const sha = /^[a-f0-9]{64}$/;
@@ -32,6 +31,7 @@ export function validateIncidentTaskInput({ env, argv, now = new Date() }) {
       || !sha.test(authorization.approvalEvidenceSha256) || !env.MSCQR_INCIDENT_ADMIN_PASSWORD
       || Date.parse(authorization.issuedAt) > now.getTime()
       || now.getTime() >= Date.parse(authorization.expiresAt)) throw new Error("Diagnostic authorization identity or expiry is invalid.");
+  if (!/^\/v2\/credentials\/[^/?#]+$/.test(String(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || ""))) throw new Error("Diagnostic task credentials endpoint is invalid.");
   const sql = buildIncidentDiagnosticSql(authorization);
   if (authorization.provisionSha256 !== digest(sql.provision) || authorization.querySha256 !== digest(sql.query)
       || authorization.teardownSha256 !== digest(sql.teardown)) throw new Error("Diagnostic SQL digest is not bound to the authorization.");
@@ -51,14 +51,19 @@ export function runScopedSql(sql, password) {
     maxBuffer: 4096, env: { ...process.env, PGPASSWORD: password, PGSSLMODE: "require", PGCONNECT_TIMEOUT: "3" } });
 }
 
-export async function runIncidentTask({ env = process.env, argv = process.argv.slice(2), now = () => new Date(), s3, sts,
+export async function readEcsTaskRole(path, fetchImpl = fetch) {
+  const response = await fetchImpl(`http://169.254.170.2${path}`, { signal: AbortSignal.timeout(2000) });
+  if (!response.ok) throw new Error("Diagnostic task role identity is unavailable.");
+  return (await response.json()).RoleArn;
+}
+
+export async function runIncidentTask({ env = process.env, argv = process.argv.slice(2), now = () => new Date(), s3,
+  readTaskRole = readEcsTaskRole,
   createClient, executeSql = runScopedSql, imageSource = () => JSON.parse(readFileSync("/app/image-source.json", "utf8")) } = {}) {
   const { authorization, databaseUrl, sql } = validateIncidentTaskInput({ env, argv, now: now() });
   if (JSON.stringify(imageSource()) !== JSON.stringify({ gitSha: authorization.diagnosticSourceSha })) throw new Error("Diagnostic image source is invalid.");
   const s3Client = s3 ?? new S3Client({ region, maxAttempts: 1 });
-  const stsClient = sts ?? new STSClient({ region, maxAttempts: 1 });
-  const identity = await stsClient.send(new GetCallerIdentityCommand({}));
-  if (identity.Account !== account || !String(identity.Arn || "").startsWith(roleArnPrefix)) throw new Error("Diagnostic task role identity is invalid.");
+  if (await readTaskRole(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI) !== taskRoleArn) throw new Error("Diagnostic task role identity is invalid.");
   const taskInputSha256 = digest(json(authorization));
   const prefix = `production-incident-20261112/${authorization.executionId}/`;
   const reserve = json({ kind: "INCIDENT_DIAGNOSTIC_RESERVED", executionId: authorization.executionId,
@@ -113,7 +118,7 @@ export async function runIncidentTask({ env = process.env, argv = process.argv.s
   if (primaryError || cleanupError) { status = "FAILED_OR_INDETERMINATE"; evidence = null; }
   const terminal = json({ kind: "INCIDENT_DIAGNOSTIC_TERMINAL", status, executionId: authorization.executionId,
     sourceSha: authorization.sourceSha, diagnosticSourceSha: authorization.diagnosticSourceSha,
-    database: INCIDENT_DATABASE, databaseRole: INCIDENT_ROLE, taskRoleArn: identity.Arn,
+    database: INCIDENT_DATABASE, databaseRole: INCIDENT_ROLE, taskRoleArn,
     provisionSha256: authorization.provisionSha256, querySha256: authorization.querySha256,
     teardownSha256: authorization.teardownSha256, taskInputSha256, reservationSha256,
     failurePhases: [primaryPhase, cleanupError && "CLEANUP"].filter(Boolean),

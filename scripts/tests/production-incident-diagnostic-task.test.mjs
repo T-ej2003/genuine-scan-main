@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { buildIncidentDiagnosticSql } from "../../backend/scripts/production-incident-diagnostic-sql.mjs";
-import { validateIncidentTaskInput, runIncidentTask } from "../../backend/scripts/production-incident-diagnostic-task.mjs";
+import { validateIncidentTaskInput, readEcsTaskRole, runIncidentTask } from "../../backend/scripts/production-incident-diagnostic-task.mjs";
 
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const issuedAt = "2026-11-12T13:55:00.000Z";
@@ -20,6 +20,7 @@ fixtureUrl.username = "mscqr_prod_rls_canary_read";
 fixtureUrl.password = fixturePassword;
 const env = { NODE_ENV: "production", RUN_DB_MIGRATIONS_ON_START: "false", AWS_REGION: "eu-west-2",
   AWS_DEFAULT_REGION: "eu-west-2", AWS_EXECUTION_ENV: "AWS_ECS_FARGATE", GIT_SHA: diagnosticSourceSha,
+  AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "/v2/credentials/local-test",
   RELEASE_GIT_SHA: diagnosticSourceSha, MSCQR_INCIDENT_DIAGNOSTIC_AUTHORIZATION: JSON.stringify(authorization),
   MSCQR_INCIDENT_ADMIN_PASSWORD: "local-admin-only",
   RLS_CANARY_DATABASE_URL: fixtureUrl.toString() };
@@ -27,10 +28,13 @@ const clock = () => new Date("2026-11-12T14:00:00.000Z");
 assert.equal(validateIncidentTaskInput({ env, argv: [], now: clock() }).authorization.executionId, executionId);
 assert.throws(() => validateIncidentTaskInput({ env, argv: [], now: new Date(expiresAt) }), /expiry/);
 assert.throws(() => validateIncidentTaskInput({ env: { ...env, UNREVIEWED: "1" }, argv: [], now: clock() }), /runtime/);
+assert.throws(() => validateIncidentTaskInput({ env: { ...env, AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: "https://hostile.invalid" }, argv: [], now: clock() }), /credentials endpoint/);
 assert.throws(() => validateIncidentTaskInput({ env: { ...env, MSCQR_INCIDENT_DIAGNOSTIC_AUTHORIZATION: JSON.stringify({ ...authorization, querySha256: "c".repeat(64) }) }, argv: [], now: clock() }), /digest/);
 
 const objects = new Map();
+const awsCalls = [];
 const s3 = { async send(command) {
+  awsCalls.push(command.constructor.name);
   const { Key, Body } = command.input;
   if (command.constructor.name === "PutObjectCommand") {
     if (objects.has(Key)) throw new Error("PreconditionFailed");
@@ -40,7 +44,6 @@ const s3 = { async send(command) {
   const bytes = Buffer.from(objects.get(Key));
   return { ContentLength: bytes.length, Body: { async transformToByteArray() { return bytes; } } };
 } };
-const sts = { async send() { return { Account: "368992683803", Arn: "arn:aws:sts::368992683803:assumed-role/mscqr-production-full-rls-green-read-only-canary-task/test" }; } };
 const result = { identity: [{ role: "mscqr_prd_rls_phase2_owner", session_role: "mscqr_prod_rls_canary_read",
   database_name: "mscqr_production_rls_green_phase2", read_only: "on" }], rls: Array.from({ length: 12 }, () => ({ rls_enabled: true, force_rls: true })),
   printJobs: [], printEvents: [], testLabel: [], testLabelAudit: [], sessions: [], support: [], batch: [], qrCounts: [], activity: [] };
@@ -48,22 +51,35 @@ const statements = [];
 const administrativeStatements = [];
 const executeSql = async (statement) => { administrativeStatements.push(statement); };
 const imageSource = () => ({ gitSha: diagnosticSourceSha });
+const expectedTaskRole = "arn:aws:iam::368992683803:role/mscqr-production-full-rls-green-read-only-canary-task";
+const readTaskRole = async (path) => { assert.equal(path, env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI); return expectedTaskRole; };
+assert.equal(await readEcsTaskRole(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI, async (url, options) => {
+  assert.equal(url, "http://169.254.170.2/v2/credentials/local-test");
+  assert.ok(options.signal);
+  return { ok: true, async json() { return { RoleArn: expectedTaskRole, SecretAccessKey: "not-recorded" }; } };
+}), expectedTaskRole);
+await assert.rejects(readEcsTaskRole(env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
+  async () => ({ ok: false })), /identity is unavailable/);
 const createClient = () => ({ async $transaction(callback) { return callback({
   async $executeRawUnsafe(statement) { statements.push(statement); },
   async $queryRawUnsafe(statement) { statements.push(statement); return statement.includes(" AS evidence") ? [{ evidence: result }] : [{ set_config: executionId }]; },
 }); }, async $disconnect() {} });
-const first = await runIncidentTask({ env, argv: [], now: clock, s3, sts, createClient, executeSql, imageSource });
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, createClient, executeSql, imageSource,
+  readTaskRole: async () => "arn:aws:iam::368992683803:role/unexpected" }), /task role identity/);
+assert.equal(objects.size, 0);
+const first = await runIncidentTask({ env, argv: [], now: clock, s3, createClient, executeSql, imageSource, readTaskRole });
 assert.equal(first.status, "COMPLETE");
+assert.equal(awsCalls[0], "PutObjectCommand");
 assert.deepEqual(statements, sql.queryStatements);
 assert.deepEqual(administrativeStatements, [sql.provision, sql.teardown]);
 assert.equal(objects.size, 2);
 assert.ok(![...objects.values()].join("").includes(fixturePassword));
 assert.doesNotMatch([...objects.values()].join(""), /tokenHash|sessionCapabilityHash/);
-await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, sts, createClient, executeSql, imageSource }), /PreconditionFailed/);
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, createClient, executeSql, imageSource, readTaskRole }), /PreconditionFailed/);
 assert.equal(objects.size, 2);
 objects.clear();
 administrativeStatements.length = 0;
-await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, sts, executeSql, imageSource,
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, executeSql, imageSource, readTaskRole,
   createClient: () => { throw new Error("synthetic read failure"); } }), /synthetic read failure/);
 assert.deepEqual(administrativeStatements, [sql.provision, sql.teardown]);
 assert.equal(JSON.parse(objects.get(`production-incident-20261112/${executionId}/terminal.json`)).evidence, null);
@@ -77,7 +93,7 @@ for (const provisionCommitted of [true, false]) {
     administrativeStatements.push(statement);
     if (statement === sql.provision) throw provisionError;
   };
-  await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, sts, executeSql: attempt,
+  await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, executeSql: attempt, readTaskRole,
     createClient, imageSource }), (error) => error === provisionError);
   assert.deepEqual(administrativeStatements, [sql.provision, sql.teardown]);
   assert.deepEqual(JSON.parse(objects.get(`production-incident-20261112/${executionId}/terminal.json`)).failurePhases, ["PROVISION"]);
@@ -85,21 +101,21 @@ for (const provisionCommitted of [true, false]) {
 
 objects.clear();
 const cleanupError = new Error("cleanup identity mismatch");
-await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, sts, createClient, imageSource,
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, createClient, imageSource, readTaskRole,
   executeSql: async (statement) => { if (statement === sql.teardown) throw cleanupError; } }), (error) => error === cleanupError);
 assert.deepEqual(JSON.parse(objects.get(`production-incident-20261112/${executionId}/terminal.json`)).failurePhases, ["CLEANUP"]);
 assert.equal(JSON.parse(objects.get(`production-incident-20261112/${executionId}/terminal.json`)).evidence, null);
 
 objects.clear();
 const provisionError = new Error("provision timed out");
-await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, sts, createClient, imageSource,
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, s3, createClient, imageSource, readTaskRole,
   executeSql: async (statement) => { throw statement === sql.provision ? provisionError : cleanupError; } }),
   (error) => error instanceof AggregateError && error.errors[0] === provisionError && error.errors[1] === cleanupError);
 assert.deepEqual(JSON.parse(objects.get(`production-incident-20261112/${executionId}/terminal.json`)).failurePhases, ["PROVISION", "CLEANUP"]);
 
 objects.clear();
 const receiptError = new Error("terminal receipt unavailable");
-await assert.rejects(runIncidentTask({ env, argv: [], now: clock, sts, createClient, imageSource,
+await assert.rejects(runIncidentTask({ env, argv: [], now: clock, createClient, imageSource, readTaskRole,
   s3: { send(command) { if (command.input.Key?.endsWith("terminal.json") && command.constructor.name === "PutObjectCommand") throw receiptError;
     return s3.send(command); } }, executeSql: async (statement) => { if (statement === sql.provision) throw provisionError; } }),
   (error) => error instanceof AggregateError && error.errors[0] === provisionError && error.errors[1] === receiptError);
