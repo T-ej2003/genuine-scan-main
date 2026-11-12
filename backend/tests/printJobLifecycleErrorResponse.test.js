@@ -58,6 +58,18 @@ assert.strictEqual(staleAttestationFailure.payload.code, "PRINTER_ATTESTATION_ST
 assert.strictEqual(staleAttestationFailure.payload.requestId, "req-stale");
 assert.doesNotMatch(JSON.stringify(staleAttestationFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
 
+const activeJobFailure = describePrintJobCreateFailure(
+  Object.assign(new Error("Prisma raw query failed"), {
+    code: "P2010",
+    meta: { code: "P0001", message: "ERROR: ACTIVE_PRINT_JOB_EXISTS" },
+  }),
+  { requestId: "req-active", failureStage: "transaction_started" }
+);
+assert.strictEqual(activeJobFailure.status, 409);
+assert.strictEqual(activeJobFailure.payload.code, "active_print_job_exists");
+assert.strictEqual(activeJobFailure.payload.requestId, "req-active");
+assert.doesNotMatch(JSON.stringify(activeJobFailure.payload), /P2010|P0001|Prisma|queryRaw|printJobId|printSessionId/i);
+
 for (const error of [
   Object.assign(new Error("unknown raw query failure"), {
     code: "P2010",
@@ -66,6 +78,10 @@ for (const error of [
   Object.assign(new Error("permission denied"), {
     code: "P2010",
     meta: { code: "42501", message: "ERROR: permission denied for table QRCode" },
+  }),
+  Object.assign(new Error("authorization denied"), {
+    code: "P2010",
+    meta: { code: "42501", message: "ERROR: ACTIVE_PRINT_JOB_EXISTS" },
   }),
   Object.assign(new Error("unrelated SQL failure"), {
     code: "P2010",
