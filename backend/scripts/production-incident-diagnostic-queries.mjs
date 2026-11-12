@@ -27,16 +27,22 @@ export const INCIDENT_QUERIES = Object.freeze({
   printJobs: `SELECT j.id, j.status, j."pipelineState", j."printerId", j."createdAt", j."updatedAt", j."sentAt", j."completedAt",
       s.id AS session_id, s.status AS session_status, s."createdAt" AS session_created_at,
       s."updatedAt" AS session_updated_at, s."completedAt" AS session_completed_at,
-      s."issuedItems", s."confirmedItems", s."frozenItems"
+      s."issuedItems", s."confirmedItems", s."frozenItems",
+      COALESCE(s.status IN ('ACTIVE','PAUSED','RESUME_PENDING'), false) AS active_conflict
     FROM public."PrintJob" j LEFT JOIN public."PrintSession" s ON s."printJobId" = j.id
     WHERE j."batchId" = '3f0eb49e-7536-46d4-8ff9-b680a5c7b58a'
       AND j."manufacturerId" = 'cd8ddbcd-ce8f-4cc1-8178-9e65140c1c68'
-    ORDER BY j."createdAt" DESC, j.id LIMIT 20`,
+      AND j.status IN ('PENDING','SENT','PAUSED')
+      AND (s.status IN ('ACTIVE','PAUSED','RESUME_PENDING') OR s.id IS NULL)
+    ORDER BY active_conflict DESC, j."createdAt" DESC, j.id LIMIT 20`,
   printEvents: `SELECT e."printItemId", e."eventType", e."previousState", e."nextState", e."createdAt"
     FROM public."PrintItemEvent" e JOIN public."PrintItem" i ON i.id = e."printItemId"
     JOIN public."PrintSession" s ON s.id = i."printSessionId"
-    WHERE s."batchId" = '3f0eb49e-7536-46d4-8ff9-b680a5c7b58a'
-      AND s."manufacturerId" = 'cd8ddbcd-ce8f-4cc1-8178-9e65140c1c68'
+    JOIN public."PrintJob" j ON j.id = s."printJobId"
+    WHERE j."batchId" = '3f0eb49e-7536-46d4-8ff9-b680a5c7b58a'
+      AND j."manufacturerId" = 'cd8ddbcd-ce8f-4cc1-8178-9e65140c1c68'
+      AND j.status IN ('PENDING','SENT','PAUSED')
+      AND s.status IN ('ACTIVE','PAUSED','RESUME_PENDING')
     ORDER BY e."createdAt" DESC, e.id LIMIT 30`,
   testLabel: `SELECT p.id,
       p.metadata->'pendingLocalAgentTestLabel'->>'testJobId' AS test_job_id,
