@@ -11,6 +11,7 @@ type PrintJobErrorCode =
   | "BATCH_ALREADY_RELEASED"
   | "QR_NOT_IN_PRINT_JOB"
   | "INVALID_STATE_TRANSITION"
+  | "ACTIVE_PRINT_JOB_EXISTS"
   | "active_print_job_exists"
   | "batch_not_found"
   | "batch_not_printable"
@@ -138,6 +139,7 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
 const reviewedSqlLifecycleErrors = {
   QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
   PRINTER_ATTESTATION_STALE: "The printer connection is no longer ready. Refresh the connector and printer status before starting the print run.",
+  ACTIVE_PRINT_JOB_EXISTS: "An active print run already exists for this batch. Review its status before starting another.",
 } as const satisfies Partial<Record<PrintJobErrorCode, string>>;
 const extractReviewedSqlLifecycleError = (error: any): keyof typeof reviewedSqlLifecycleErrors | null => {
   if (error?.code !== "P2010" || error?.meta?.code !== "P0001") return null;
@@ -207,7 +209,7 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
       status: 409,
       logReason: reviewedSqlLifecycleError.toLowerCase(),
       payload: withFailureContext({
-        code: reviewedSqlLifecycleError,
+        code: reviewedSqlLifecycleError === "ACTIVE_PRINT_JOB_EXISTS" ? "active_print_job_exists" : reviewedSqlLifecycleError,
         message: reviewedSqlLifecycleErrors[reviewedSqlLifecycleError],
       }, context),
     };

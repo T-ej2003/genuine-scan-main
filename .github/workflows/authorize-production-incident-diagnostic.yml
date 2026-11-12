@@ -1,0 +1,73 @@
+name: Authorize one production incident database diagnostic
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha: { description: Exact protected main containing the reviewed diagnostic, required: true, type: string }
+      image_digest: { description: Immutable backend-only diagnostic image digest, required: true, type: string }
+      publication_run_id: { description: Successful exact-source backend-only image publication run, required: true, type: string }
+      execution_id: { description: Fresh one-use UUID, required: true, type: string }
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  authorize-incident-diagnostic:
+    name: Authorize fixed November 12 incident read
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Authenticate protected source
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "T-ej2003/genuine-scan-main"
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          test "$SOURCE_SHA" = "$(git rev-parse HEAD)"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          install -d -m 700 "$RUNNER_TEMP/incident-diagnostic-authorization"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked authorization dependencies
+        run: npm ci
+      - name: Authenticate actual production environment approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = "$(gh api repos/T-ej2003/genuine-scan-main/branches/main --jq .commit.sha)"
+          node scripts/aws/production-github-environment-approval.mjs \
+            --output "$RUNNER_TEMP/incident-diagnostic-authorization/environment-approval.json" \
+            --repository "$GITHUB_REPOSITORY" --environment production --source-sha "$SOURCE_SHA" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" --event-name "$GITHUB_EVENT_NAME" \
+            --workflow-run-id "$GITHUB_RUN_ID" --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --execution-actor "$GITHUB_ACTOR" --require-actual-approval
+      - name: Produce one-use diagnostic authorization
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          IMAGE_DIGEST: ${{ inputs.image_digest }}
+          PUBLICATION_RUN_ID: ${{ inputs.publication_run_id }}
+          EXECUTION_ID: ${{ inputs.execution_id }}
+        run: |
+          set -euo pipefail
+          node scripts/aws/production-incident-diagnostic-authorization.mjs \
+            "$RUNNER_TEMP/incident-diagnostic-authorization/environment-approval.json" \
+            "$SOURCE_SHA" "$IMAGE_DIGEST" "$PUBLICATION_RUN_ID" "$EXECUTION_ID" \
+            "$RUNNER_TEMP/incident-diagnostic-authorization/authorization.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-incident-20261112-diagnostic-authorization
+          path: ${{ runner.temp }}/incident-diagnostic-authorization/authorization.json
+          if-no-files-found: error
+          retention-days: 1

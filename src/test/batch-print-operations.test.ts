@@ -243,6 +243,24 @@ describe("batch print operations", () => {
     );
   });
 
+  it("does not tell an operator to retry when an active print run blocks creation", async () => {
+    vi.mocked(apiClient.createPrintJob).mockResolvedValueOnce({
+      success: false, status: 409, errorCode: "active_print_job_exists",
+      message: "An active print run already exists for this batch.",
+    });
+    const toast = vi.fn();
+    const setPrintProgressError = setter();
+    await createPrintJob(operationContext({ toast, setPrintProgressError }));
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Existing print run",
+      description: "An active print run already exists for this batch. Review its status before starting another.",
+    }));
+    expect(setPrintProgressError).toHaveBeenCalledWith(
+      "An active print run already exists for this batch. Review its status before starting another."
+    );
+    expect(apiClient.createPrintJob).toHaveBeenCalledTimes(1);
+  });
+
   it("does not hand off or wake REST polling when the persistent session is disconnected", async () => {
     const disconnectedStatus = {
       ...productionReadyPrinterStatus,

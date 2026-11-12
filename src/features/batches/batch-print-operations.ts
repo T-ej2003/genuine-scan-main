@@ -330,6 +330,9 @@ export const printJobCreateFailureMessage = (response: {
   if (errorCode === "batch_not_printable") {
     return "There are no labels ready to print in this batch.";
   }
+  if (errorCode === "active_print_job_exists") {
+    return "An active print run already exists for this batch. Review its status before starting another.";
+  }
   if (errorCode === "invalid_state_transition") {
     const responseData =
       response.data && typeof response.data === "object" && !Array.isArray(response.data)
@@ -656,6 +659,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
     }
 
     const raw = String(response.errorCode || response.code || response.error || "Error").toLowerCase();
+    const activePrintJobExists = raw === "active_print_job_exists";
     const isBusy =
       (raw.includes("conflict") ||
         raw.includes("busy") ||
@@ -669,8 +673,8 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       `${safeError} ${responseMessage} ${raw}`
     );
     toast({
-      title: isBusy ? "Batch busy" : "Print needs attention",
-      description: isBusy ? "These codes were just allocated by another job. Please retry." : safeError,
+      title: activePrintJobExists ? "Existing print run" : isBusy ? "Batch busy" : "Print needs attention",
+      description: activePrintJobExists ? safeError : isBusy ? "These codes were just allocated by another job. Please retry." : safeError,
       variant: "destructive",
     });
     setPrintProgressPhase(failedBeforePrint ? "Failed before print" : "Print needs attention");
