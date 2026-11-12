@@ -56,7 +56,7 @@ export function deriveAppOnlyImpact({ repositoryRoot, liveSourceSha, candidateSo
       } else if (result.unknown.includes("package-lock.json") && appOnlyRootPackageVersionOnlyChange(
         before, after, JSON.parse(git(["show", `${base}:package-lock.json`])), JSON.parse(git(["show", `${head}:package-lock.json`])))) {
         result.unknown = result.unknown.filter((file) => file !== "package.json" && file !== "package-lock.json");
-        result.releaseControl.push("package.json", "package-lock.json");
+        result.application.push("package.json", "package-lock.json");
         result.sourceClassificationComplete = result.unknown.length === 0;
       }
     }

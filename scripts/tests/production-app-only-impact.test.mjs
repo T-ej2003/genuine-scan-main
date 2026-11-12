@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classifyAppOnlyPaths, appOnlyPackageScriptsChanged, appOnlyRootPackageVersionOnlyChange,
   deriveAppOnlyImpact } from "../aws/production-app-only-impact.mjs";
+import { assertFrontendCliSourceImpact } from "../aws/run-production-frontend-cli-activation.mjs";
 for (const [path, domain] of [
   ["backend/prisma/schema.prisma", "DATABASE_SCHEMA"], ["backend/prisma/migrations/1/migration.sql", "MIGRATIONS"],
   ["backend/src/rls-waves/session-a/policy.sql", "RLS"], ["scripts/rls/sql/generated/runtime-policy.sql", "RLS"],
@@ -51,7 +52,7 @@ test("root package classification permits only scripts changes, never dependenci
   assert.equal(classifyAppOnlyPaths(["package.json"]).sourceClassificationComplete, false);
 });
 
-test("paired root package versions are release metadata only when all other content is unchanged", () => {
+test("paired root package versions are recognized only when all other content is unchanged", () => {
   const before = { name: "app", version: "1.0.0", scripts: { build: "vite" }, dependencies: { example: "1" }, config: { flag: true } };
   const after = { ...before, version: "1.0.1" };
   const beforeLock = { name: "app", version: "1.0.0", packages: { "": { name: "app", version: "1.0.0", dependencies: { example: "1" } } } };
@@ -67,7 +68,7 @@ test("paired root package versions are release metadata only when all other cont
   assert.equal(allowed(before), false);
 });
 
-test("source impact accepts the paired version change but retains unrelated unknown and RLS paths", () => {
+test("paired version impact requires a new frontend image and retains unrelated unknown paths", () => {
   const directory = mkdtempSync(join(tmpdir(), "mscqr-package-impact-"));
   const git = (...args) => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8" }).trim();
   try {
@@ -80,8 +81,10 @@ test("source impact accepts the paired version change but retains unrelated unkn
     write("1.0.1"); git("add", "."); git("commit", "-qm", "release identity"); const candidate = git("rev-parse", "HEAD");
     const accepted = deriveAppOnlyImpact({ repositoryRoot: directory, liveSourceSha: baseline, candidateSourceSha: candidate, protectedSourceSha: candidate });
     assert.equal(accepted.liveToCandidate.sourceClassificationComplete, true);
-    assert.deepEqual(accepted.liveToCandidate.releaseControl, ["package.json", "package-lock.json"]);
+    assert.deepEqual(accepted.liveToCandidate.application, ["package.json", "package-lock.json"]);
     assert.ok(Object.values(accepted.liveToCandidate.changed).every((value) => !value));
+    assert.throws(() => assertFrontendCliSourceImpact({ candidateSourceSha: baseline, sourceSha: candidate, repositoryRoot: directory }),
+      /Frontend application changed after image publication/);
     writeFileSync(join(directory, "unknown.sh"), "echo unsafe\n"); git("add", "."); git("commit", "-qm", "unknown");
     const head = git("rev-parse", "HEAD");
     const rejected = deriveAppOnlyImpact({ repositoryRoot: directory, liveSourceSha: baseline, candidateSourceSha: head, protectedSourceSha: head });
