@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { classifyAppOnlyPaths, appOnlyPackageScriptsChanged } from "../aws/production-app-only-impact.mjs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { classifyAppOnlyPaths, appOnlyPackageScriptsChanged, appOnlyRootPackageVersionOnlyChange,
+  deriveAppOnlyImpact } from "../aws/production-app-only-impact.mjs";
 for (const [path, domain] of [
   ["backend/prisma/schema.prisma", "DATABASE_SCHEMA"], ["backend/prisma/migrations/1/migration.sql", "MIGRATIONS"],
   ["backend/src/rls-waves/session-a/policy.sql", "RLS"], ["scripts/rls/sql/generated/runtime-policy.sql", "RLS"],
@@ -44,6 +49,45 @@ test("root package classification permits only scripts changes, never dependenci
   assert.equal(appOnlyPackageScriptsChanged(before, { ...before, dependencies: { example: "2" } }), false);
   assert.equal(appOnlyPackageScriptsChanged(before, { ...before, arbitrary: "new" }), false);
   assert.equal(classifyAppOnlyPaths(["package.json"]).sourceClassificationComplete, false);
+});
+
+test("paired root package versions are release metadata only when all other content is unchanged", () => {
+  const before = { name: "app", version: "1.0.0", scripts: { build: "vite" }, dependencies: { example: "1" }, config: { flag: true } };
+  const after = { ...before, version: "1.0.1" };
+  const beforeLock = { name: "app", version: "1.0.0", packages: { "": { name: "app", version: "1.0.0", dependencies: { example: "1" } } } };
+  const afterLock = structuredClone(beforeLock); afterLock.version = "1.0.1"; afterLock.packages[""].version = "1.0.1";
+  const allowed = (nextPackage = after, nextLock = afterLock) => appOnlyRootPackageVersionOnlyChange(before, nextPackage, beforeLock, nextLock);
+  assert.equal(allowed(), true);
+  assert.equal(allowed({ ...after, dependencies: { example: "2" } }), false);
+  assert.equal(allowed({ ...after, scripts: { build: "other" } }), false);
+  assert.equal(allowed({ ...after, config: { flag: false } }), false);
+  assert.equal(allowed(after, { ...afterLock, packages: { "": { ...afterLock.packages[""], dependencies: { example: "2" } } } }), false);
+  assert.equal(allowed(after, { ...afterLock, version: "1.0.2" }), false);
+  assert.equal(allowed(after, { ...afterLock, packages: { "": { ...afterLock.packages[""], version: "1.0.2" } } }), false);
+  assert.equal(allowed(before), false);
+});
+
+test("source impact accepts the paired version change but retains unrelated unknown and RLS paths", () => {
+  const directory = mkdtempSync(join(tmpdir(), "mscqr-package-impact-"));
+  const git = (...args) => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8" }).trim();
+  try {
+    git("init", "-q"); git("config", "user.name", "Test"); git("config", "user.email", "test@example.invalid");
+    const write = (version) => {
+      writeFileSync(join(directory, "package.json"), JSON.stringify({ name: "app", version, scripts: { build: "vite" } }));
+      writeFileSync(join(directory, "package-lock.json"), JSON.stringify({ name: "app", version, packages: { "": { name: "app", version } } }));
+    };
+    write("1.0.0"); git("add", "."); git("commit", "-qm", "baseline"); const baseline = git("rev-parse", "HEAD");
+    write("1.0.1"); git("add", "."); git("commit", "-qm", "release identity"); const candidate = git("rev-parse", "HEAD");
+    const accepted = deriveAppOnlyImpact({ repositoryRoot: directory, liveSourceSha: baseline, candidateSourceSha: candidate, protectedSourceSha: candidate });
+    assert.equal(accepted.liveToCandidate.sourceClassificationComplete, true);
+    assert.deepEqual(accepted.liveToCandidate.releaseControl, ["package.json", "package-lock.json"]);
+    assert.ok(Object.values(accepted.liveToCandidate.changed).every((value) => !value));
+    writeFileSync(join(directory, "unknown.sh"), "echo unsafe\n"); git("add", "."); git("commit", "-qm", "unknown");
+    const head = git("rev-parse", "HEAD");
+    const rejected = deriveAppOnlyImpact({ repositoryRoot: directory, liveSourceSha: baseline, candidateSourceSha: head, protectedSourceSha: head });
+    assert.deepEqual(rejected.liveToCandidate.unknown, ["unknown.sh"]);
+    assert.equal(rejected.liveToCandidate.sourceClassificationComplete, false);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("only the exact isolated TLS fixture helper is classified as test tooling", () => {
