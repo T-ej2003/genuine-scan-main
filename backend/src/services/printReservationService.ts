@@ -25,6 +25,7 @@ const REUSABLE_FAILURE_PATTERNS = [
 ];
 
 type EvidenceFields = {
+  issuedAt?: Date | string | null;
   agentAckedAt?: Date | string | null;
   dispatchedAt?: Date | string | null;
   printConfirmedAt?: Date | string | null;
@@ -75,7 +76,8 @@ const hasNonEmptyJsonEvidence = (value: unknown) => {
 
 export const hasPrintItemPhysicalEvidence = (item: EvidenceFields) =>
   Boolean(
-    item.agentAckedAt ||
+    item.issuedAt ||
+      item.agentAckedAt ||
       item.dispatchedAt ||
       item.printConfirmedAt ||
       item.deviceJobRef ||
@@ -99,8 +101,7 @@ export const isZeroEvidencePrintItemReusable = (item: ReusablePrintItemCandidate
     itemState === PrintItemState.CANCELLED &&
     sessionStatus === PrintSessionStatus.STOPPED &&
     (jobStatus === PrintJobStatus.STOPPED || jobStatus === PrintJobStatus.PARTIALLY_COMPLETED) &&
-    !item.printConfirmedAt &&
-    !hasNonEmptyJsonEvidence(item.confirmationEvidence);
+    !hasPrintItemPhysicalEvidence(item);
   if (stoppedUnconfirmedRecovery) return true;
 
   if (hasPrintItemPhysicalEvidence(item)) return false;
@@ -121,6 +122,7 @@ const reusablePrintItemSql = Prisma.sql`
   AND (
     (
       pi."state" IN (CAST(${PrintItemState.FAILED} AS "PrintItemState"), CAST(${PrintItemState.FROZEN} AS "PrintItemState"))
+      AND pi."issuedAt" IS NULL
       AND pi."agentAckedAt" IS NULL
       AND pi."dispatchedAt" IS NULL
       AND pi."deviceJobRef" IS NULL
@@ -137,6 +139,10 @@ const reusablePrintItemSql = Prisma.sql`
     )
     OR (
       pi."state" = CAST(${PrintItemState.CANCELLED} AS "PrintItemState")
+      AND pi."issuedAt" IS NULL
+      AND pi."agentAckedAt" IS NULL
+      AND pi."dispatchedAt" IS NULL
+      AND pi."deviceJobRef" IS NULL
       AND ps."status" = CAST(${PrintSessionStatus.STOPPED} AS "PrintSessionStatus")
       AND pj."status" IN (CAST(${PrintJobStatus.STOPPED} AS "PrintJobStatus"), CAST(${PrintJobStatus.PARTIALLY_COMPLETED} AS "PrintJobStatus"))
     )

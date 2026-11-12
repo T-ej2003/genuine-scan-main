@@ -1362,6 +1362,114 @@ async function main() {
     'spool-expired','{"physical":true}'::jsonb
   )`).idempotent, true);
 
+  const createExpiredRun = (label, count, unexpired = 0) => {
+    const jobId = randomUUID();
+    const sessionId = randomUUID();
+    psql(admin, `
+      INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+        VALUES('${jobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','SENT','LOCAL_AGENT','SENT_TO_PRINTER',${count + unexpired},now());
+      INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+        VALUES('${sessionId}','${jobId}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',${count + unexpired},${count + unexpired},now());
+      INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+        SELECT gen_random_uuid()::text,'expiry-${label}-'||n,'${ids.licenseeA}','${ids.raceBatch}','${jobId}','ACTIVATED',now()
+        FROM generate_series(1,${count + unexpired}) n;
+      INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","agentAckedAt","confirmationDeadlineAt","updatedAt")
+        SELECT gen_random_uuid()::text,'${sessionId}',q.id,q.code,'AGENT_ACKED','PRINTER_ACKNOWLEDGED',
+          now()-interval '20 minutes',now()-interval '20 minutes',
+          CASE WHEN substring(q.code from '[0-9]+$')::integer<=${count} THEN now()-interval '10 minutes' ELSE now()+interval '10 minutes' END,now()
+        FROM public."QRCode" q WHERE q."printJobId"='${jobId}';
+    `);
+    return { jobId, sessionId };
+  };
+  for (const count of [1, 49, 50, 51, 100, 125]) {
+    const run = createExpiredRun(`limit${count}`, count);
+    let processed = 0;
+    for (let pass = 0; pass < Math.ceil(count / 50) + 1; pass++) {
+      const next = Number(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`));
+      assert(next <= 50, `reconciliation exceeds its page bound for ${count} items`);
+      processed += next;
+      if (next === 0) break;
+    }
+    assert.equal(processed, count, `all ${count} expired acknowledgements need bounded reconciliation`);
+    assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${run.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`), String(count));
+    assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${run.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
+    assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${run.sessionId}'`), 'PAUSED');
+    assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '0');
+  }
+  const alreadyPaused = createExpiredRun('already-paused', 1);
+  psql(admin, `UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='PAUSED' WHERE id='${alreadyPaused.jobId}';
+    UPDATE public."PrintSession" SET status='PAUSED' WHERE id='${alreadyPaused.sessionId}'`);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${alreadyPaused.jobId}','RESUME','Unsafe in-flight work')`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${alreadyPaused.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
+  const partial = createExpiredRun('partial', 2);
+  const partialItems = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${partial.sessionId}'`).split(',');
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',1)`), '1');
+  const firstPartial = psql(admin, `SELECT id FROM public."PrintItem" WHERE "printSessionId"='${partial.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_confirm_nonce_1',now()::timestamp,
+    '${requestId()}','CONFIRM','${partial.jobId}','${firstPartial}','${ids.printer}','${hash('partial-confirm-1')}','spool-partial','{"physical":true}'::jsonb)`).operation, 'CONFIRM');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${partial.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION',
+    'unmarked overdue work must keep the parent paused');
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',1)`), '1');
+  const secondPartial = partialItems.find((id) => id !== firstPartial);
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_confirm_nonce_2',now()::timestamp,
+    '${requestId()}','CONFIRM','${partial.jobId}','${secondPartial}','${ids.printer}','${hash('partial-confirm-2')}','spool-partial','{"physical":true}'::jsonb)`).remainingToPrint, 0);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${partial.jobId}'`), 'CONFIRMED');
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_ack_retry_nonce_1',now()::timestamp,
+    '${requestId()}','ACK','${partial.jobId}','${firstPartial}','${ids.printer}','${hash('partial-ack-retry')}','spool-partial','{}'::jsonb)`).idempotent, true);
+  const concurrentRun = createExpiredRun('concurrent', 100);
+  const simultaneous = await Promise.all(Array.from({ length: 2 }, () =>
+    psqlAsync(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`)));
+  assert(simultaneous.every((result) => result.status === 0), JSON.stringify(simultaneous));
+  const concurrentProcessed = simultaneous.reduce((sum, result) => sum + Number(result.output), 0);
+  assert(concurrentProcessed <= 100);
+  assert.equal(Number(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`)) + concurrentProcessed, 100);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`), '100');
+
+  const mixed = createExpiredRun('mixed', 1, 2);
+  const [expiredMixed, laterAcked, laterFailed] = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${mixed.sessionId}'`).split(',');
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
+  psql(admin, `UPDATE public."PrintItem" SET state='ISSUED',"pipelineState"='SENT_TO_PRINTER',"agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL WHERE id IN ('${laterAcked}','${laterFailed}')`);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE id='${mixed.jobId}' AND status IN ('PENDING','SENT')`), '0',
+    'the paused job must not be selected for a new claim');
+  const receipt = (operation, itemId, nonce, details = '{}') => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','${nonce}',now()::timestamp,
+    '${requestId()}','${operation}','${mixed.jobId}','${itemId}','${ids.printer}','${hash(nonce)}','spool-mixed','${details}'::jsonb)`;
+  assert.equal(json(app, receipt('ACK', laterAcked, 'paused_ack_nonce_1')).operation, 'ACK');
+  assert.equal(json(app, receipt('ACK', laterAcked, 'paused_ack_nonce_2')).idempotent, true);
+  denied(app, receipt('ACK', laterAcked, 'paused_ack_nonce_1'), /duplicate key/);
+  assert.equal(json(app, receipt('CONFIRM', expiredMixed, 'paused_confirm_nonce_1', '{"physical":true}')).operation, 'CONFIRM');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${mixed.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
+  assert.equal(json(app, receipt('FAIL', laterFailed, 'paused_fail_nonce_1', '{"reason":"definite_pre_dispatch_failure"}')).operation, 'FAIL');
+  assert.equal(json(app, receipt('FAIL', laterFailed, 'paused_fail_nonce_2', '{"reason":"definite_pre_dispatch_failure"}')).idempotent, true);
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${mixed.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
+  assert.equal(json(app, receipt('CONFIRM', laterAcked, 'paused_confirm_nonce_2', '{"physical":true}')).operation, 'CONFIRM');
+  assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${mixed.sessionId}'`), 'FAILED');
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${mixed.jobId}'`), 'FAILED');
+  assert.equal(json(app, receipt('FAIL', laterFailed, 'paused_fail_nonce_3')).idempotent, true);
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" q JOIN public."PrintItem" pi ON pi."qrCodeId"=q.id WHERE pi.id='${laterFailed}'`), 'ACTIVATED');
+  denied(app, receipt('ACK', laterFailed, 'paused_invalid_ack'), /query returned no rows|INVALID_STATE_TRANSITION/);
+  denied(app, receipt('CONFIRM', laterFailed, 'paused_invalid_confirm'), /query returned no rows|PRINT_ACK_REQUIRED/);
+  denied(app, receipt('ACK', randomUUID(), 'paused_cross_item'), /query returned no rows/);
+  denied(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','paused_wrong_printer',now()::timestamp,
+    '${requestId()}','ACK','${mixed.jobId}','${laterAcked}','${ids.foreignPrinter}','${hash('wrong-printer')}',NULL,'{}'::jsonb)`, /query returned no rows/);
+
+  const resumed = createExpiredRun('resume', 1, 1);
+  const [resumedExpired, resumedReserved] = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${resumed.sessionId}'`).split(',');
+  psql(admin, `UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+    "agentAckedAt"=NULL,"confirmationDeadlineAt"=NULL WHERE id='${resumedReserved}'`);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
+  json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_confirm_nonce_1',now()::timestamp,
+    '${requestId()}','CONFIRM','${resumed.jobId}','${resumedExpired}','${ids.printer}','${hash('resume-confirm')}','spool-resume','{"physical":true}'::jsonb)`);
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${resumed.jobId}'`), 'PAUSED:PAUSED');
+  assert.equal(json(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}','${resumed.jobId}','RESUME','Continue reserved work')`).sessionStatus, 'RESUME_PENDING');
+  psql(admin, `UPDATE public."PrintJob" SET "createdAt"='2000-01-01' WHERE id='${resumed.jobId}'`);
+  const resumedClaim = json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','resume_claim_nonce_1',now()::timestamp,
+    '${requestId()}','CLAIM','${resumed.jobId}',NULL,'${ids.printer}','${hash('resume-claim')}',NULL,'{}'::jsonb)`);
+  assert.equal(resumedClaim.printJobId, resumed.jobId);
+  assert.equal(resumedClaim.printItemId, resumedReserved);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintSession" WHERE id='${resumed.sessionId}'`), 'ACTIVE');
+
   const raceStop = async (suffix, itemState, connectorOperation) => {
     const jobId = `50000000-0000-4000-8000-00000000059${suffix}`;
     const sessionId = `50000000-0000-4000-8000-00000000058${suffix}`;
@@ -1407,6 +1515,7 @@ async function main() {
     assert.equal(holderResult.status, 0, JSON.stringify({ holder: holderResult.output, connector: connectorResult.output, stop: stopResult.output }));
     assert.equal(stopResult.status, 0, stopResult.output);
     const final = json(admin, `SELECT jsonb_build_object('job',(SELECT status FROM public."PrintJob" WHERE id='${jobId}'),
+      'pipeline',(SELECT "pipelineState" FROM public."PrintJob" WHERE id='${jobId}'),
       'session',(SELECT status FROM public."PrintSession" WHERE id='${sessionId}'),
       'item',(SELECT state FROM public."PrintItem" WHERE id='${itemId}'),
       'qr',(SELECT status FROM public."QRCode" WHERE id='${qrId}'),
@@ -1415,14 +1524,16 @@ async function main() {
   };
   const ackRace = await raceStop("5", "ISSUED", "ACK");
   assert.deepEqual([ackRace.final.job, ackRace.final.session, ackRace.final.item, ackRace.final.qr],
-    ["STOPPED", "STOPPED", "CANCELLED", "ALLOCATED"]);
+    ["STOPPED", "STOPPED", "FROZEN", "ALLOCATED"]);
+  assert.equal(ackRace.final.pipeline, 'NEEDS_OPERATOR_ACTION');
   assert.equal(ackRace.final.stopAudit, 1);
   const confirmRace = await raceStop("4", "AGENT_ACKED", "CONFIRM");
   assert.equal(confirmRace.final.stopAudit, confirmRace.final.job === "STOPPED" ? 1 : 0);
   assert.deepEqual(
     [confirmRace.final.session, confirmRace.final.item, confirmRace.final.qr],
-    confirmRace.final.job === "STOPPED" ? ["STOPPED", "CANCELLED", "ALLOCATED"] : ["COMPLETED", "PRINT_CONFIRMED", "PRINTED"]
+    confirmRace.final.job === "STOPPED" ? ["STOPPED", "FROZEN", "ALLOCATED"] : ["COMPLETED", "PRINT_CONFIRMED", "PRINTED"]
   );
+  if (confirmRace.final.job === 'STOPPED') assert.equal(confirmRace.final.pipeline, 'NEEDS_OPERATOR_ACTION');
   assert(["STOPPED", "CONFIRMED"].includes(confirmRace.final.job));
 
   const uncertainJobId = "50000000-0000-4000-8000-000000000593";

@@ -57,6 +57,11 @@ const run = () => {
   );
 
   assert(
+    !isZeroEvidencePrintItemReusable(abandonedZeroEvidenceItem({ issuedAt: new Date() })),
+    "Issued items must not be silently reused"
+  );
+
+  assert(
     !isZeroEvidencePrintItemReusable(abandonedZeroEvidenceItem({ dispatchedAt: new Date() })),
     "Dispatched items must not be silently reused"
   );
@@ -72,8 +77,18 @@ const run = () => {
   );
 
   assert(
-    isZeroEvidencePrintItemReusable(stoppedUnconfirmedItem()),
-    "Stopped unconfirmed print items should be recoverable even when they were dispatched but not confirmed"
+    !isZeroEvidencePrintItemReusable(stoppedUnconfirmedItem()),
+    "Stopped items with spooler evidence must not be reusable without reconciliation"
+  );
+
+  assert(
+    !isZeroEvidencePrintItemReusable(stoppedUnconfirmedItem({ issuedAt: new Date(), agentAckedAt: null, dispatchedAt: null, deviceJobRef: null })),
+    "Issued items must not be silently reused after a stop"
+  );
+
+  assert(
+    isZeroEvidencePrintItemReusable(stoppedUnconfirmedItem({ agentAckedAt: null, dispatchedAt: null, deviceJobRef: null })),
+    "Stopped items without physical evidence remain reusable"
   );
 
   assert(
