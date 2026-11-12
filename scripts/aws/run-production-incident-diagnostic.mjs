@@ -63,6 +63,7 @@ export async function executeIncidentDiagnostic({ authorization, aws, protectedM
   assert.equal(canonicalSha256(definition), authorization.taskDefinitionSha256);
   const installed = [];
   let attemptedRun = false;
+  let runRejected = false;
   let stopped = false;
   let taskArn = null;
   let terminal = null;
@@ -71,8 +72,8 @@ export async function executeIncidentDiagnostic({ authorization, aws, protectedM
     for (const [role, name, document] of [[executionRole, secretPolicyName, authorization.executionSecretPolicy],
       [taskRole, journalPolicyName, authorization.journalPolicy]]) {
       if (now().getTime() >= Date.parse(authorization.expiresAt)) throw new Error("Diagnostic approval expired during capability installation.");
+      installed.push([role, name, document]);
       call(["iam", "put-role-policy", "--role-name", role, "--policy-name", name, "--policy-document", JSON.stringify(document)]);
-      installed.push([role, name]);
       assert.equal(canonicalJson(policy(role, name)), canonicalJson(document), "Installed IAM capability differs from the reviewed document.");
     }
     const registered = call(["ecs", "register-task-definition", "--cli-input-json", JSON.stringify(definition)]).taskDefinition;
@@ -91,6 +92,7 @@ export async function executeIncidentDiagnostic({ authorization, aws, protectedM
     if (now().getTime() >= Date.parse(authorization.expiresAt)) throw new Error("Diagnostic approval expired before task launch.");
     attemptedRun = true;
     const launched = call(["ecs", "run-task", "--cli-input-json", JSON.stringify(request)]);
+    runRejected = Array.isArray(launched.tasks) && launched.tasks.length === 0;
     assert.deepEqual(launched.failures || [], []);
     assert.equal(launched.tasks?.length, 1);
     taskArn = launched.tasks[0].taskArn;
@@ -115,7 +117,10 @@ export async function executeIncidentDiagnostic({ authorization, aws, protectedM
         || observed.tasks[0].containers?.[0]?.exitCode !== 0) throw new Error("Diagnostic task or terminal receipt is incomplete.");
   } finally {
     // An ambiguous RunTask or unstopped task keeps the expiring capability in place for forensic review.
-    if (!attemptedRun || stopped) for (const [role, name] of installed.reverse()) {
+    if (!attemptedRun || runRejected || stopped) for (const [role, name, document] of installed.reverse()) {
+      const found = policy(role, name);
+      if (!found) continue;
+      assert.equal(canonicalJson(found), canonicalJson(document), "IAM cleanup target differs from the reviewed document.");
       call(["iam", "delete-role-policy", "--role-name", role, "--policy-name", name]);
       if (policy(role, name)) throw new Error("Diagnostic IAM capability cleanup failed.");
     }

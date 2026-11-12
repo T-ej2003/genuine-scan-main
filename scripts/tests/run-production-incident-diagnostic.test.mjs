@@ -66,4 +66,39 @@ await assert.rejects(executeIncidentDiagnostic({ authorization: { ...authorizati
 assert.equal(calls.slice(before).some((name) => name === "iam put-role-policy" || name === "ecs run-task"), false);
 await assert.rejects(executeIncidentDiagnostic({ authorization, aws, protectedMain: () => ({}), cleanCheckout: () => false,
   waitForStopped: async () => {}, readTerminal: async () => ({}), now: () => now }), /clean protected-main/);
+
+const attempt = (runner) => executeIncidentDiagnostic({ authorization, aws: runner, protectedMain: () => ({}),
+  cleanCheckout: () => true, waitForStopped: async () => {}, readTerminal: async () => ({}), now: () => now });
+const putTimeout = new Error("IAM response lost after commit");
+let firstPut = true;
+await assert.rejects(attempt((args) => {
+  if (args.slice(0, 2).join(" ") === "iam put-role-policy" && firstPut) {
+    firstPut = false;
+    aws(args);
+    throw putTimeout;
+  }
+  return aws(args);
+}), (error) => error === putTimeout);
+assert.equal(policies.size, 0);
+
+await assert.rejects(attempt((args) => {
+  if (args.slice(0, 2).join(" ") === "iam put-role-policy") throw new Error("IAM rejected before commit");
+  return aws(args);
+}), /IAM rejected before commit/);
+assert.equal(policies.size, 0);
+
+await assert.rejects(attempt((args) => args.slice(0, 2).join(" ") === "ecs run-task"
+  ? { failures: [{ reason: "RESOURCE:CPU" }], tasks: [] } : aws(args)));
+assert.equal(policies.size, 0);
+
+await assert.rejects(attempt((args) => args.slice(0, 2).join(" ") === "ecs run-task"
+  ? { failures: [], tasks: [] } : aws(args)));
+assert.equal(policies.size, 0);
+
+await assert.rejects(attempt((args) => {
+  if (args.slice(0, 2).join(" ") === "ecs run-task") throw new Error("ambiguous ECS response");
+  return aws(args);
+}), /ambiguous ECS response/);
+assert.equal(policies.size, 2);
+policies.clear();
 console.log("exact one-use diagnostic launcher contract passed");
