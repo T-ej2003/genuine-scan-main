@@ -144,9 +144,9 @@ const validatePrinterTransport = async (req: AuthRequest, printer: any) => {
       operation: "PRINTER_STATUS",
       subjectId: req.user!.userId,
     });
-    ok = Boolean(status?.trusted && status?.connected && status?.eligibleForPrinting && status?.printerId === printer.id);
-    detail = ok ? "Trusted connector and selected printer are ready." : String(status?.trusted && status?.connected && status?.eligibleForPrinting
-      ? "The connector is connected to a different registered printer." : status?.error || "Trusted connector is not ready.");
+    const ready = status?.trusted && status?.connected && status?.eligibleForPrinting;
+    ok = Boolean(ready && status?.registrationId && status.registrationId === printer.printerRegistrationId && status?.printerId && [printer.id, printer.nativePrinterId].includes(status.printerId));
+    detail = ready ? (ok ? "Trusted connector and selected printer are ready." : "The connector is connected to a different registered printer.") : String(status?.error || "Trusted connector is not ready.");
   } else if (printer.deliveryMode === PrinterDeliveryMode.SITE_GATEWAY) {
     const lastSeen = printer.gatewayLastSeenAt ? new Date(printer.gatewayLastSeenAt).getTime() : NaN;
     ok = printer.gatewayStatus === "ONLINE" && Number.isFinite(lastSeen) && Date.now() - lastSeen < 120_000;
