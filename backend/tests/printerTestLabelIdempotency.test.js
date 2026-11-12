@@ -16,6 +16,7 @@ let dispatchStarted;
 let releaseDispatch;
 const printer = {
   id: "50000000-0000-4000-8000-000000000001",
+  printerRegistrationId: "50000000-0000-4000-8000-000000000010",
   connectionType: "LOCAL_AGENT",
   deliveryMode: "DIRECT",
 };
@@ -38,7 +39,7 @@ mockModule("rls-waves/session-c/c02/printingLifecycleRepository.js", {
     if (operation === "PRINTER" && statusMode === "missing") return null;
     if (operation === "PRINTER") return printer;
     if (operation === "PRINTER_STATUS" && statusMode === "denied") throw new Error("PRINTING_BOUNDARY_DENIED");
-    return { trusted: true, connected: true, eligibleForPrinting: true };
+    return { trusted: true, connected: true, eligibleForPrinting: true, printerId: printer.id, registrationId: printer.printerRegistrationId };
   },
   administerPrintingPrinter: async ({ operation }) => {
     if (operation === "AUDIT_TEST_LABEL_ATTENTION" && statusMode === "dispatch-failed") {
