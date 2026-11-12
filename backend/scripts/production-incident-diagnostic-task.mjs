@@ -52,8 +52,7 @@ export function runScopedSql(sql, password) {
 }
 
 export async function runIncidentTask({ env = process.env, argv = process.argv.slice(2), now = () => new Date(), s3, sts,
-  createClient, executeSql = runScopedSql, imageSource = () => JSON.parse(readFileSync("/app/image-source.json", "utf8")),
-  onFailure = () => {} } = {}) {
+  createClient, executeSql = runScopedSql, imageSource = () => JSON.parse(readFileSync("/app/image-source.json", "utf8")) } = {}) {
   const { authorization, databaseUrl, sql } = validateIncidentTaskInput({ env, argv, now: now() });
   if (JSON.stringify(imageSource()) !== JSON.stringify({ gitSha: authorization.diagnosticSourceSha })) throw new Error("Diagnostic image source is invalid.");
   const s3Client = s3 ?? new S3Client({ region, maxAttempts: 1 });
@@ -77,10 +76,15 @@ export async function runIncidentTask({ env = process.env, argv = process.argv.s
   let client;
   let status = "FAILED_OR_INDETERMINATE";
   let evidence = null;
-  let provisioned = false;
+  let provisionAttempted = false;
+  let provisionCompleted = false;
+  let primaryError;
+  let primaryPhase;
+  let cleanupError;
   try {
+    provisionAttempted = true;
     await executeSql(sql.provision, env.MSCQR_INCIDENT_ADMIN_PASSWORD);
-    provisioned = true;
+    provisionCompleted = true;
     client = createClient?.(databaseUrl) ?? new PrismaClient({ datasources: { db: { url: databaseUrl } } });
     evidence = await client.$transaction(async (tx) => {
       for (const statement of sql.queryStatements.slice(0, 3)) await tx.$executeRawUnsafe(statement);
@@ -96,24 +100,35 @@ export async function runIncidentTask({ env = process.env, argv = process.argv.s
       return { result, resultSha256: digest(bytes) };
     }, { maxWait: 2000, timeout: 15000 });
   } catch (error) {
-    onFailure(error);
-    // Preserve the one-use reservation and report only a generic failure category.
+    primaryError = error;
+    primaryPhase = provisionCompleted ? "READ" : "PROVISION";
   } finally {
-    await client?.$disconnect().catch(() => {});
-    if (provisioned) {
+    try { await client?.$disconnect(); }
+    catch (error) { primaryError ??= error; primaryPhase ??= "DISCONNECT"; }
+    if (provisionAttempted) {
       try { await executeSql(sql.teardown, env.MSCQR_INCIDENT_ADMIN_PASSWORD); if (evidence) status = "COMPLETE"; }
-      catch (error) { onFailure(error); evidence = null; }
+      catch (error) { cleanupError = error; evidence = null; }
     }
   }
+  if (primaryError || cleanupError) { status = "FAILED_OR_INDETERMINATE"; evidence = null; }
   const terminal = json({ kind: "INCIDENT_DIAGNOSTIC_TERMINAL", status, executionId: authorization.executionId,
     sourceSha: authorization.sourceSha, diagnosticSourceSha: authorization.diagnosticSourceSha,
     database: INCIDENT_DATABASE, databaseRole: INCIDENT_ROLE, taskRoleArn: identity.Arn,
     provisionSha256: authorization.provisionSha256, querySha256: authorization.querySha256,
     teardownSha256: authorization.teardownSha256, taskInputSha256, reservationSha256,
+    failurePhases: [primaryPhase, cleanupError && "CLEANUP"].filter(Boolean),
     rowCounts: evidence ? Object.fromEntries(Object.entries(evidence.result).map(([key, value]) => [key, value.length])) : null,
     at: now().toISOString(), evidence });
   if (Buffer.byteLength(terminal) > 70 * 1024) throw new Error("Diagnostic terminal record exceeds reviewed bound.");
-  const receiptSha256 = await putOnce(`${prefix}terminal.json`, terminal);
+  let receiptSha256;
+  try { receiptSha256 = await putOnce(`${prefix}terminal.json`, terminal); }
+  catch (receiptError) {
+    const errors = [primaryError, cleanupError, receiptError].filter(Boolean);
+    if (errors.length > 1) throw new AggregateError(errors, "Incident diagnostic and terminal receipt failed");
+    throw receiptError;
+  }
+  if (primaryError && cleanupError) throw new AggregateError([primaryError, cleanupError], "Incident diagnostic and cleanup failed");
+  if (primaryError || cleanupError) throw primaryError || cleanupError;
   return { status, executionId: authorization.executionId, reservationSha256, receiptSha256, terminalKey: `${prefix}terminal.json` };
 }
 

@@ -66,29 +66,45 @@ export function buildIncidentDiagnosticSql({ executionId, issuedAt, expiresAt } 
   const provision = `BEGIN; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='5s';
     ${preflight}; CREATE SCHEMA "${diagnosticSchema}" AUTHORIZATION "${owner}";
     SET ROLE "${owner}";
+    COMMENT ON SCHEMA "${diagnosticSchema}" IS ${literal(marker)};
     GRANT USAGE ON SCHEMA "${diagnosticSchema}" TO "${reader}";
     ${policies};
+    ${names.map((table) => `COMMENT ON POLICY "${policyName(table)}" ON public."${table}" IS ${literal(marker)}`).join(";\n    ")};
     ${functionSql}; COMMENT ON FUNCTION ${functionName} IS ${literal(marker)};
     REVOKE ALL ON FUNCTION ${functionName} FROM PUBLIC;
     GRANT EXECUTE ON FUNCTION ${functionName} TO "${reader}";
     RESET ROLE; COMMIT;`;
   const teardown = `BEGIN; SET LOCAL lock_timeout='1s'; SET LOCAL statement_timeout='5s';
-    DO $preflight$ BEGIN IF current_database()<>${literal(INCIDENT_DATABASE)} OR current_user<>'mscqr_prod_admin'
-      OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+    DO $preflight$ BEGIN
+      IF current_database()<>${literal(INCIDENT_DATABASE)} OR current_user<>'mscqr_prod_admin'
+        THEN RAISE EXCEPTION 'Incident diagnostic cleanup identity mismatch'; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=${literal(diagnosticSchema)})
+        AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname=ANY(ARRAY[${names.map((name) => literal(policyName(name))).join(",")}]))
+        THEN RETURN; END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace n WHERE n.nspname=${literal(diagnosticSchema)}
+          AND pg_catalog.pg_get_userbyid(n.nspowner)=${literal(owner)}
+          AND pg_catalog.obj_description(n.oid,'pg_namespace')=${literal(marker)})
+        OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
           WHERE n.nspname=${literal(diagnosticSchema)} AND p.proname='production_incident_20261112_diagnostic' AND p.pronargs=0
             AND pg_catalog.pg_get_userbyid(p.proowner)=${literal(owner)}
             AND pg_catalog.obj_description(p.oid,'pg_proc')=${literal(marker)})
-      OR (SELECT count(*) FROM pg_catalog.pg_policies WHERE schemaname='public'
-          AND policyname=ANY(ARRAY[${names.map((name) => literal(policyName(name))).join(",")}] ))<>${names.length}
-      THEN RAISE EXCEPTION 'Incident diagnostic cleanup target mismatch'; END IF; END $preflight$;
+        OR (SELECT count(*) FROM (VALUES ${names.map((name) => `(${literal(name)},${literal(policyName(name))})`).join(",")}) expected(table_name,policy_name)
+          JOIN pg_catalog.pg_class c ON c.relname=expected.table_name
+          JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace AND n.nspname='public'
+          JOIN pg_catalog.pg_policy p ON p.polrelid=c.oid AND p.polname=expected.policy_name
+          WHERE p.polcmd='r' AND p.polpermissive AND p.polroles=ARRAY[(SELECT oid FROM pg_catalog.pg_roles WHERE rolname=${literal(owner)})]
+            AND pg_catalog.obj_description(p.oid,'pg_policy')=${literal(marker)})<>${names.length}
+        THEN RAISE EXCEPTION 'Incident diagnostic cleanup target mismatch'; END IF;
+    END $preflight$;
     SET ROLE "${owner}";
-    REVOKE EXECUTE ON FUNCTION ${functionName} FROM "${reader}";
-    DROP FUNCTION ${functionName};
-    ${names.map((table) => `DROP POLICY "${policyName(table)}" ON public."${table}"`).join(";\n    ")};
-    REVOKE USAGE ON SCHEMA "${diagnosticSchema}" FROM "${reader}";
-    DROP SCHEMA "${diagnosticSchema}";
+    DROP FUNCTION IF EXISTS ${functionName};
+    ${names.map((table) => `DROP POLICY IF EXISTS "${policyName(table)}" ON public."${table}"`).join(";\n    ")};
+    DROP SCHEMA IF EXISTS "${diagnosticSchema}";
     RESET ROLE;
-    COMMIT;`;
+    COMMIT;
+    DO $verify$ BEGIN IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname=${literal(diagnosticSchema)})
+      OR EXISTS (SELECT 1 FROM pg_catalog.pg_policy WHERE polname=ANY(ARRAY[${names.map((name) => literal(policyName(name))).join(",")}] ))
+      THEN RAISE EXCEPTION 'Incident diagnostic cleanup verification failed'; END IF; END $verify$;`;
   const queryStatements = Object.freeze([
     "SET TRANSACTION READ ONLY",
     "SET LOCAL statement_timeout='8s'",
