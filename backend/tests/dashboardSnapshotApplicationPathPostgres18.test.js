@@ -439,9 +439,11 @@ const main = async () => {
     expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-large-tenant")), {
       totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
     }, "large tenant isolation");
+    const platformStart = performance.now();
     expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-large-platform")), {
       totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
     }, "large platform fallback");
+    assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");
