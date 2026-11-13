@@ -1,5 +1,5 @@
 const assert = require("node:assert");
-const { createHash } = require("node:crypto");
+const { createHash, randomBytes, randomUUID } = require("node:crypto");
 const { EventEmitter } = require("node:events");
 const { PrismaClient } = require("@prisma/client");
 
@@ -16,6 +16,7 @@ const ids = {
   manufacturerB: "00000000-0000-4000-8000-000000000304",
   platformA: "00000000-0000-4000-8000-000000000307",
   orgAdminA: "00000000-0000-4000-8000-000000000308",
+  superAdminA: "00000000-0000-4000-8000-000000000309",
   batchA: "00000000-0000-4000-8000-000000000401",
   batchB: "00000000-0000-4000-8000-000000000402",
 };
@@ -79,7 +80,7 @@ const platformClaims = (overrides = {}) => ({
 });
 const capability = (value) => createHash("sha256").update(`dashboard-snapshot:${value}`).digest("base64url").slice(0, 43);
 const capabilities = Object.fromEntries(
-  [ids.adminA, ids.manufacturerA, ids.platformA, ids.orgAdminA].map((userId) => [userId, capability(userId)])
+  [ids.adminA, ids.manufacturerA, ids.platformA, ids.orgAdminA, ids.superAdminA].map((userId) => [userId, capability(userId)])
 );
 const capabilityFor = (user) => capabilities[user.userId] || capabilities[user.role?.includes("MANUFACTURER") ? ids.manufacturerA : ids.adminA];
 const request = (user, requestId, query = {}, originalUrl = "/api/dashboard/stats") => ({
@@ -139,6 +140,12 @@ const main = async () => {
         orgId: ids.orgA,
         licenseeId: ids.licenseeA,
       } }),
+      bootstrap.user.create({ data: {
+        id: ids.superAdminA,
+        email: "super-admin-dashboard@example.invalid",
+        name: "Dashboard Super Admin",
+        role: "SUPER_ADMIN",
+      } }),
       bootstrap.manufacturerLicenseeLink.create({ data: {
         manufacturerId: ids.manufacturerA,
         licenseeId: ids.licenseeB,
@@ -166,6 +173,7 @@ const main = async () => {
       [ids.manufacturerA, ids.orgA, "PASSWORD"],
       [ids.platformA, null, "ADMIN_MFA"],
       [ids.orgAdminA, ids.orgA, "PASSWORD"],
+      [ids.superAdminA, null, "ADMIN_MFA"],
     ].map(([userId, orgId, assurance], index) => ({
       id: `00000000-0000-4000-9000-00000000003${index + 1}`,
       userId, orgId, tokenHash: createHash("sha256").update(`dashboard-refresh-${userId}`).digest("hex"),
@@ -180,11 +188,14 @@ const main = async () => {
       email: "org-admin-dashboard@example.invalid",
       role: "ORG_ADMIN",
     }), success("dashboard-pg-org-rollup"))), {
-      totalQRCodes: 9,
+      totalQRCodes: 1,
       activeLicensees: 1,
       manufacturers: 2,
       totalBatches: 1,
-    }, "organization administrator rollup");
+    }, "stale rollup cannot override authoritative tenant inventory");
+    const partialRollup = await getDashboardSnapshot(request(platformClaims(), success("dashboard-pg-partial-rollup")));
+    assert.equal(partialRollup.totalQRCodes, 2, "one batch rollup cannot omit another batch");
+    assert.deepEqual(partialRollup.qr.byStatus, { ACTIVE: 2 }, "QR status counts come from authoritative rows");
 
     await bootstrap.inventoryStatusRollup.delete({ where: { batchId: ids.batchA } });
     const fallback = await getDashboardSnapshot(request(tenantClaims(), success("dashboard-pg-tenant-fallback")));
@@ -198,6 +209,21 @@ const main = async () => {
       manufacturers: manufacturerAll.manufacturers,
       totalBatches: manufacturerAll.totalBatches,
     }, { totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2 });
+    const [fingerprint] = await prisma.$transaction((tx) => tx.$queryRaw`
+      SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
+        ${capabilities[ids.manufacturerA]}, 'dashboard-snapshot-read',
+        ${success("dashboard-pg-fingerprint-parity")}, ${randomUUID()}, NULL, 'GET /api/dashboard/stats'
+      )
+    `);
+    const [expectedFingerprint] = await bootstrap.$queryRaw`
+      SELECT md5(concat_ws('|', 'manufacturer', ${ids.manufacturerA}, 'MANUFACTURER', 'all',
+        string_agg(ml."licenseeId"||':'||ml."isPrimary"::text||':'||extract(epoch FROM ml."updatedAt")::text,',' ORDER BY ml."licenseeId"))) AS value
+      FROM public."ManufacturerLicenseeLink" ml
+      JOIN public."Licensee" l ON l.id=ml."licenseeId"
+      JOIN public."Organization" o ON o.id=l."orgId"
+      WHERE ml."manufacturerId"=${ids.manufacturerA} AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive"
+    `;
+    assert.equal(fingerprint.scope_fingerprint, expectedFingerprint.value, "manufacturer fingerprint keeps its original membership semantics");
     const manufacturerSelected = await getDashboardSnapshot(request(
       manufacturerClaims(),
       success("dashboard-pg-manufacturer-selected"),
@@ -216,6 +242,11 @@ const main = async () => {
       manufacturers: 4,
       totalBatches: 2,
     }, "platform global aggregate");
+    expectStats(await invoke(getDashboardStats, request(platformClaims({
+      userId: ids.superAdminA, email: "super-admin-dashboard@example.invalid", role: "SUPER_ADMIN",
+    }), success("dashboard-pg-super-admin"))), {
+      totalQRCodes: 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
+    }, "super administrator retains the scoped dashboard");
     expectStats(await invoke(getDashboardStats, request(platformClaims(), success("dashboard-pg-platform-selected"), { licenseeId: ids.licenseeA })), {
       totalQRCodes: 1,
       activeLicensees: 1,
@@ -262,6 +293,63 @@ const main = async () => {
     expectStats(await invoke(getDashboardStats, request(manufacturerClaims(), success("dashboard-pg-password-manufacturer"))), {
       totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2,
     }, "manufacturer password assurance retains its existing scoped dashboard");
+    await bootstrap.user.update({ where: { id: ids.manufacturerA }, data: { role: "MANUFACTURER_ADMIN" } });
+    expectStats(await invoke(getDashboardStats, request(manufacturerClaims({ role: "MANUFACTURER_ADMIN" }), success("dashboard-pg-manufacturer-admin"))), {
+      totalQRCodes: 2, activeLicensees: 2, manufacturers: 1, totalBatches: 2,
+    }, "manufacturer administrator retains password-based scoped access");
+    const priorSecrets = { jwt: process.env.JWT_SECRET_CURRENT, tokenHash: process.env.TOKEN_HASH_SECRET_CURRENT };
+    process.env.JWT_SECRET_CURRENT = randomBytes(32).toString("base64url");
+    process.env.TOKEN_HASH_SECRET_CURRENT = randomBytes(32).toString("base64url");
+    let server;
+    try {
+      const { createBackendApp } = require("../dist/app");
+      const { signAccessToken } = require("../dist/services/auth/tokenService");
+      const { sealCookieToken } = require("../dist/services/auth/cookieTokenProtectionService");
+      const link = await bootstrap.manufacturerLicenseeLink.findUniqueOrThrow({
+        where: { manufacturerId_licenseeId: { manufacturerId: ids.manufacturerA, licenseeId: ids.licenseeA } },
+        select: { updatedAt: true },
+      });
+      const token = signAccessToken({
+        ...manufacturerClaims({ role: "MANUFACTURER_ADMIN" }),
+        sessionId: "00000000-0000-4000-9000-000000000032",
+        scopeVersion: link.updatedAt.toISOString(),
+      });
+      const headers = {
+        authorization: `Bearer ${token}`,
+        "x-database-session-capability": sealCookieToken(capabilities[ids.manufacturerA], "auth.database-session"),
+      };
+      server = await new Promise((resolve) => {
+        const listener = createBackendApp().listen(0, "127.0.0.1", () => resolve(listener));
+      });
+      const origin = `http://127.0.0.1:${server.address().port}`;
+      const stats = await fetch(`${origin}/api/dashboard/stats`, { headers, signal: AbortSignal.timeout(15000) });
+      assert.equal(stats.status, 200, "real authenticated dashboard HTTP request succeeds");
+      assert.equal((await stats.json()).data.totalQRCodes, 2);
+      const abort = new AbortController();
+      const events = await fetch(`${origin}/api/events/dashboard`, { headers,
+        signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15000)]) });
+      try {
+        assert.equal(events.status, 200, "real authenticated dashboard SSE request succeeds");
+        const reader = events.body.getReader();
+        const decoder = new TextDecoder();
+        let stream = "";
+        for (let index = 0; index < 16 && stream.length < 65536 && !stream.includes('"type":"snapshot"'); index += 1) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          stream += decoder.decode(chunk.value, { stream: true });
+        }
+        assert.match(stream, /"type":"snapshot"/);
+      } finally { abort.abort(); }
+    } finally {
+      if (server) await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      for (const [key, value] of [["JWT_SECRET_CURRENT", priorSecrets.jwt], ["TOKEN_HASH_SECRET_CURRENT", priorSecrets.tokenHash]]) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+    await bootstrap.user.update({ where: { id: ids.manufacturerA }, data: { role: "MANUFACTURER" } });
+    await bootstrap.refreshToken.updateMany({ where: { userId: ids.manufacturerA }, data: { sessionCapabilityExpiresAt: new Date(0) } });
+    assert.equal((await invoke(getDashboardStats, request(manufacturerClaims(), "dashboard-pg-expired-capability"))).status, 404);
+    await bootstrap.refreshToken.updateMany({ where: { userId: ids.manufacturerA }, data: { sessionCapabilityExpiresAt: sessionExpiry } });
     assert.equal((await invoke(getDashboardStats, request(
       manufacturerClaims({ userId: ids.adminA, email: "admin-a@example.invalid" }),
       "dashboard-pg-forged-role",
@@ -331,6 +419,7 @@ const main = async () => {
       "dashboard-pg-weak-platform",
       "dashboard-pg-forged-role",
       "dashboard-pg-disabled-actor",
+      "dashboard-pg-expired-capability",
       "dashboard-pg-wrong-purpose",
       "dashboard-pg-delta-revoked",
     ]) assert(!auditRows.some((row) => row.details?.requestId === requestId), `${requestId} denial must not commit attribution`);
@@ -350,9 +439,35 @@ const main = async () => {
     expectStats(await invoke(getDashboardStats, request(tenantClaims(), "dashboard-pg-large-tenant")), {
       totalQRCodes: 1, activeLicensees: 1, manufacturers: 2, totalBatches: 1,
     }, "large tenant isolation");
+    const platformStart = performance.now();
     expectStats(await invoke(getDashboardStats, request(platformClaims(), "dashboard-pg-large-platform")), {
       totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
     }, "large platform fallback");
+    assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
+    if (stressRows === 200000) {
+      const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
+      const auditId = randomUUID();
+      await bootstrap.refreshToken.updateMany({
+        where: { userId: ids.platformA },
+        data: { sessionCapabilityExpiresAt: new Date(Date.now() + 400) },
+      });
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const [scope] = await tx.$queryRaw`
+          SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats'
+          )
+        `;
+        await tx.$queryRaw`
+          SELECT * FROM app_rls.dashboard_snapshot_data(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats', ${scope.scope_fingerprint}
+          )
+        `;
+      }), /dashboard access denied: session expired during snapshot/);
+      assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
+        "expired partial snapshot rolls back its success audit");
+    }
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");
