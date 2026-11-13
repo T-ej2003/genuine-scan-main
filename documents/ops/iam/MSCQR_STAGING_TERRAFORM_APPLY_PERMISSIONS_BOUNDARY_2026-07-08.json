@@ -47,6 +47,16 @@
       }
     },
     {
+      "Sid": "DenyProductionEcrLifecycleRestoration",
+      "Effect": "Deny",
+      "Action": "ecr:PutLifecyclePolicy",
+      "Resource": [
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-backend",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-web",
+        "arn:aws:ecr:eu-west-2:368992683803:repository/mscqr-worker"
+      ]
+    },
+    {
       "Sid": "DenyPermissionsBoundaryTampering",
       "Effect": "Deny",
       "Action": [

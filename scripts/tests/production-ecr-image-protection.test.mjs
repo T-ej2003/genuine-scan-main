@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { digest as policyDigest } from "../aws/component-iam-installation-contract.mjs";
 import yaml from "js-yaml";
 import { addProtectedImage, addRetainedHistoricalWorker, appendOpenRecoveryJournals, readRecoveryJournals, finalizeProtectedInventory, inspectProtectedImages, createAwsRunner, verifyEcrManifestChildren, assertLifecyclePreviewSafe, classifyRepositoryProtectionError, publishMonitorMetrics } from "../aws/production-ecr-image-monitor.mjs";
 import { assertEcrRepositoryProtection, ECR_PROTECTION, verifyRepository } from "../aws/verify-production-ecr-repository-protection.mjs";
@@ -185,6 +186,16 @@ test("Terraform and publishers cannot restore count-based expiration", () => {
     const policy = JSON.parse(fs.readFileSync(file, "utf8"));
     assert.ok(policy.Statement.every((statement) => !JSON.stringify(statement.Action).includes("PutLifecyclePolicy")));
   }
+});
+
+test("reviewed legacy publisher successor removes only lifecycle restoration", () => {
+  const policy = JSON.parse(fs.readFileSync("documents/ops/iam/MSCQR_GITHUB_ACTIONS_LEGACY_ECR_POLICY_SUCCESSOR_2026-10-26.json", "utf8"));
+  assert.equal(policyDigest(policy), "3cf72ee83cfa64dc6e3b298259cd231d266d9fcbd678cf47dc4b4c302d1b59ef");
+  const actions = policy.Statement.find((statement) => statement.Sid === "EcrPushPullAndRepoControls")?.Action;
+  assert.ok(actions?.includes("ecr:PutImage"));
+  assert.ok(actions?.includes("ecr:GetLifecyclePolicy"));
+  assert.ok(!actions?.includes("ecr:PutLifecyclePolicy"));
+  assert.ok(policy.Statement.some((statement) => statement.Sid === "EcsDeploy"));
 });
 
 test("EventBridge targets use exact-rule SNS topic policy without an execution role", () => {
