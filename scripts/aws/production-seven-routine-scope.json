@@ -1,0 +1,94 @@
+{
+  "kind": "PRODUCTION_RLS_SEVEN_ROUTINE_SCOPE",
+  "predecessorSourceSha": "7407b80b7919ca88f53e4a6d05596701fe00d0e0",
+  "reviewedTargetSourceSha": "b9bb6394b648343954d2435dcb214faf74998f0b",
+  "databaseInstance": "mscqr-production-rls-green-phase2",
+  "databaseResourceId": "db-3C27FYJOJ2IY27X7QGQG5YB4IM",
+  "sqlSha256": "9c474250e13f61be31f72d180b72cd07bbad43d0a726f1b70212d91576f10d06",
+  "predecessorCatalogue": {
+    "routines": "8a8b886b7e88dedd0c494123691be8839b02b9991303bdd1b12fadfd39cb1cf6",
+    "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63",
+    "policies": "55a55c5e731e5afdd8d94a83eb3f107f9385ee6e04bb16290398ac441593fe67",
+    "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
+    "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023"
+  },
+  "successorCatalogue": {
+    "routines": "c6bbc2c99b6ce13261215ee82f14a8b445a584111a877a47fe547770ca7fa3d3",
+    "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63",
+    "policies": "55a55c5e731e5afdd8d94a83eb3f107f9385ee6e04bb16290398ac441593fe67",
+    "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
+    "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023"
+  },
+  "objects": [
+    {
+      "identity": "app_rls.printing_connector_event(p_registration_id text, p_agent_id text, p_device_fingerprint text, p_nonce text, p_issued_at timestamp without time zone, p_request_id text, p_operation text, p_job_id text, p_item_id text, p_printer_id text, p_payload_hash text, p_device_job_ref text, p_details jsonb)",
+      "predecessorHash": "2c4e7612f02c020494d1edc3fda8efda497175101e13f6a52cf043bc9a305f5e",
+      "targetHash": "769ba6e81dbf730d80059414b30d68f2c167260c953a99df2501d0fb50ddc7f8",
+      "owner": "mscqr_prd_rls_phase2_auth_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_app",
+        "mscqr_prd_rls_phase2_auth_owner"
+      ]
+    },
+    {
+      "identity": "app_rls.printing_control_job(p_capability text, p_purpose text, p_request_id text, p_job_id text, p_operation text, p_reason text)",
+      "predecessorHash": "5cabc5f393926f8471e7ce5c11b8629af4c51f9f7d1fe1595038b7224574f910",
+      "targetHash": "06069d7de9f329d6f11048087fe8234b9e8075556eca18a16509b992744346cc",
+      "owner": "mscqr_prd_rls_phase2_auth_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_app",
+        "mscqr_prd_rls_phase2_auth_owner"
+      ]
+    },
+    {
+      "identity": "app_rls.printing_gateway_job(p_gateway_id text, p_gateway_secret_hash text, p_request_id text, p_operation text, p_mode text, p_job_id text, p_item_id text, p_details jsonb)",
+      "predecessorHash": "dbf8eb2c991082df2431457585d324f5f037e30148cab0dd1e9b331a127db77a",
+      "targetHash": "e0eb397911460e2c86bf1037e3ce7563aa0435151fcd63fcd7caf1122ec38ac7",
+      "owner": "mscqr_prd_rls_phase2_auth_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_app",
+        "mscqr_prd_rls_phase2_auth_owner"
+      ]
+    },
+    {
+      "identity": "app_rls.printing_worker_network_job(p_operation text, p_request_id text, p_job_id text, p_details jsonb)",
+      "predecessorHash": "3a9a21a8dee1e804c11c6e499ab093349adf0fc1dc2bf6c6696567d00d13b1a4",
+      "targetHash": "b44be07afd2b0cf567633e5beedd279d9fa0a3cbce9b80c2617da2fb0b93ca0c",
+      "owner": "mscqr_prd_rls_phase2_auth_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_auth_owner",
+        "mscqr_prd_rls_phase2_worker"
+      ]
+    },
+    {
+      "identity": "app_rls.printing_worker_reconcile(p_operation text, p_request_id text, p_limit integer)",
+      "predecessorHash": "9821aef77fe823ff975a0273bccc2980740bc6a3e776a438681d19185658901b",
+      "targetHash": "6acac67a6886f9899d9a8d18dde525e7302a2a6658af8d4cee7d0d7e5da5f483",
+      "owner": "mscqr_prd_rls_phase2_auth_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_auth_owner",
+        "mscqr_prd_rls_phase2_worker"
+      ]
+    },
+    {
+      "identity": "app_rls.dashboard_scope_fingerprint(requested_licensee_id text)",
+      "predecessorHash": "565bea3cf7186b00fdcf509c806f1cf500a194eaf2e00634eaa9f2f05ceafbad",
+      "targetHash": "1b89828e04fc90445fa2b5567f0419b1fe6ef67e1aabb71542bcef646fc9305f",
+      "owner": "mscqr_prd_rls_phase2_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_auth_owner",
+        "mscqr_prd_rls_phase2_owner"
+      ]
+    },
+    {
+      "identity": "app_rls.dashboard_snapshot_data(audit_id text, requested_licensee_id text, route_surface text, expected_scope_fingerprint text)",
+      "predecessorHash": "b249757ca3e7c861153d6bb3876109499317afdfbfc0e9cde00a3564c10f8d4d",
+      "targetHash": "71a1dc90f6e975fad4d3809d79209f8b35a06dcfe77aaece9ac4a1ae8cee0b13",
+      "owner": "mscqr_prd_rls_phase2_owner",
+      "grants": [
+        "mscqr_prd_rls_phase2_auth_owner",
+        "mscqr_prd_rls_phase2_owner"
+      ]
+    }
+  ]
+}
