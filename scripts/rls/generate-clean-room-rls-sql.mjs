@@ -974,6 +974,9 @@ DECLARE
   membership_count bigint;
   primary_count bigint;
   membership_fingerprint text;
+  actor_licensee_linked boolean;
+  actor_organization_linked boolean;
+  selector_linked boolean;
 BEGIN
   IF NOT app_rls.attributed_request()
      OR app_rls.current_purpose()<>'dashboard-snapshot-read'
@@ -1024,35 +1027,18 @@ BEGIN
        OR app_rls.current_organization_id() IS NOT NULL
        OR app_rls.current_licensee_id() IS DISTINCT FROM selector
     THEN RAISE EXCEPTION 'dashboard access denied: manufacturer scope'; END IF;
-    SELECT count(*),count(*) FILTER (WHERE ml.${q("isPrimary")}),string_agg(ml.${q("licenseeId")}||':'||ml.${q("isPrimary")}::text||':'||extract(epoch FROM ml.${q("updatedAt")})::text,',' ORDER BY ml.${q("licenseeId")})
-      INTO membership_count,primary_count,membership_fingerprint
+    SELECT count(*),count(*) FILTER (WHERE ml.${q("isPrimary")}),string_agg(ml.${q("licenseeId")}||':'||ml.${q("isPrimary")}::text||':'||extract(epoch FROM ml.${q("updatedAt")})::text,',' ORDER BY ml.${q("licenseeId")}),
+           bool_or(ml.${q("licenseeId")}=actor_licensee_id),bool_or(l.${q("orgId")}=actor_organization_id),bool_or(ml.${q("licenseeId")}=selector)
+      INTO membership_count,primary_count,membership_fingerprint,actor_licensee_linked,actor_organization_linked,selector_linked
     FROM public.${q("ManufacturerLicenseeLink")} ml
     JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
     JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
     WHERE ml.${q("manufacturerId")}=app_rls.current_user_id()
       AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE;
     IF membership_count NOT BETWEEN 1 AND 100 OR primary_count>1
-       OR (actor_licensee_id IS NOT NULL AND NOT EXISTS (
-         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
-         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
-         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
-         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=actor_licensee_id
-           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
-       ))
-       OR (actor_organization_id IS NOT NULL AND NOT EXISTS (
-         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
-         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
-         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
-         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND l.${q("orgId")}=actor_organization_id
-           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
-       ))
-       OR (selector IS NOT NULL AND NOT EXISTS (
-         SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
-         JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
-         JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
-         WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=selector
-           AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
-       ))
+       OR (actor_licensee_id IS NOT NULL AND NOT coalesce(actor_licensee_linked,FALSE))
+       OR (actor_organization_id IS NOT NULL AND NOT coalesce(actor_organization_linked,FALSE))
+       OR (selector IS NOT NULL AND NOT coalesce(selector_linked,FALSE))
     THEN RAISE EXCEPTION 'dashboard access denied'; END IF;
     RETURN md5(concat_ws('|','manufacturer',app_rls.current_user_id(),app_rls.current_role(),coalesce(selector,'all'),membership_fingerprint));
   END IF;
@@ -1136,15 +1122,6 @@ RETURNS TABLE(
 ) LANGUAGE plpgsql VOLATILE SECURITY INVOKER SET search_path=pg_catalog,app_rls SET jit=off AS $function$
 DECLARE
   fingerprint text;
-  rollup_total bigint;
-  rollup_dormant bigint;
-  rollup_active bigint;
-  rollup_activated bigint;
-  rollup_allocated bigint;
-  rollup_printed bigint;
-  rollup_redeemed bigint;
-  rollup_blocked bigint;
-  rollup_scanned bigint;
 BEGIN
   fingerprint := app_rls.authorize_dashboard_snapshot(audit_id,requested_licensee_id,route_surface);
   IF expected_scope_fingerprint IS DISTINCT FROM fingerprint THEN RAISE EXCEPTION 'dashboard access denied: scope fingerprint'; END IF;
@@ -1196,61 +1173,35 @@ BEGIN
     OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR b.${q("licenseeId")}=app_rls.current_licensee_id()))
   );
 
-  SELECT coalesce(sum(r.${q("totalCodes")}),0),coalesce(sum(r.${q("dormant")}),0),coalesce(sum(r.${q("active")}),0),
-         coalesce(sum(r.${q("activated")}),0),coalesce(sum(r.${q("allocated")}),0),coalesce(sum(r.${q("printed")}),0),
-         coalesce(sum(r.${q("redeemed")}),0),coalesce(sum(r.${q("blocked")}),0),coalesce(sum(r.${q("scanned")}),0)
-    INTO rollup_total,rollup_dormant,rollup_active,rollup_activated,rollup_allocated,rollup_printed,rollup_redeemed,rollup_blocked,rollup_scanned
-  FROM public.${q("InventoryStatusRollup")} r
-  WHERE (
-    (${manufacturerRoles} AND r.${q("manufacturerId")}=app_rls.current_user_id() AND EXISTS (
+  rollup_authoritative:=FALSE;
+  SELECT count(*),count(*) FILTER (WHERE qcode.${q("status")}='DORMANT'),count(*) FILTER (WHERE qcode.${q("status")}='ACTIVE'),
+         count(*) FILTER (WHERE qcode.${q("status")}='ACTIVATED'),count(*) FILTER (WHERE qcode.${q("status")}='ALLOCATED'),
+         count(*) FILTER (WHERE qcode.${q("status")}='PRINTED'),count(*) FILTER (WHERE qcode.${q("status")}='REDEEMED'),
+         count(*) FILTER (WHERE qcode.${q("status")}='BLOCKED'),count(*) FILTER (WHERE qcode.${q("status")}='SCANNED')
+    INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
+  FROM (
+    SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+    WHERE ${tenantAdminRoles} AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
+    UNION ALL
+    SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+    WHERE ${manufacturerRoles} AND EXISTS (
+      SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=qcode.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()
+    ) AND EXISTS (
       SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
       JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
       JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
-      WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=r.${q("licenseeId")}
+      WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=qcode.${q("licenseeId")}
         AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
         AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
-    ))
-    OR (${tenantAdminRoles} AND r.${q("licenseeId")}=app_rls.current_licensee_id())
-    OR (${platformRoles} AND (app_rls.current_licensee_id() IS NULL OR r.${q("licenseeId")}=app_rls.current_licensee_id()))
-  );
-
-  IF rollup_total>0 OR rollup_dormant>0 OR rollup_active>0 OR rollup_activated>0 OR rollup_allocated>0
-     OR rollup_printed>0 OR rollup_redeemed>0 OR rollup_blocked>0 OR rollup_scanned>0
-  THEN
-    rollup_authoritative:=TRUE;
-    total_qr_codes:=rollup_total; dormant:=rollup_dormant; active:=rollup_active; activated:=rollup_activated;
-    allocated:=rollup_allocated; printed:=rollup_printed; redeemed:=rollup_redeemed; blocked:=rollup_blocked; scanned:=rollup_scanned;
-  ELSE
-    rollup_authoritative:=FALSE;
-    SELECT count(*),count(*) FILTER (WHERE qcode.${q("status")}='DORMANT'),count(*) FILTER (WHERE qcode.${q("status")}='ACTIVE'),
-           count(*) FILTER (WHERE qcode.${q("status")}='ACTIVATED'),count(*) FILTER (WHERE qcode.${q("status")}='ALLOCATED'),
-           count(*) FILTER (WHERE qcode.${q("status")}='PRINTED'),count(*) FILTER (WHERE qcode.${q("status")}='REDEEMED'),
-           count(*) FILTER (WHERE qcode.${q("status")}='BLOCKED'),count(*) FILTER (WHERE qcode.${q("status")}='SCANNED')
-      INTO total_qr_codes,dormant,active,activated,allocated,printed,redeemed,blocked,scanned
-    FROM (
-      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
-      WHERE ${tenantAdminRoles} AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
-      UNION ALL
-      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
-      WHERE ${manufacturerRoles} AND EXISTS (
-        SELECT 1 FROM public.${q("Batch")} b WHERE b.${q("id")}=qcode.${q("batchId")} AND b.${q("manufacturerId")}=app_rls.current_user_id()
-      ) AND EXISTS (
-        SELECT 1 FROM public.${q("ManufacturerLicenseeLink")} ml
-        JOIN public.${q("Licensee")} l ON l.${q("id")}=ml.${q("licenseeId")}
-        JOIN public.${q("Organization")} o ON o.${q("id")}=l.${q("orgId")}
-        WHERE ml.${q("manufacturerId")}=app_rls.current_user_id() AND ml.${q("licenseeId")}=qcode.${q("licenseeId")}
-          AND l.${q("isActive")}=TRUE AND l.${q("suspendedAt")} IS NULL AND o.${q("isActive")}=TRUE
-          AND (app_rls.current_licensee_id() IS NULL OR ml.${q("licenseeId")}=app_rls.current_licensee_id())
-      )
-      UNION ALL
-      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
-      WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NULL
-      UNION ALL
-      SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
-      WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NOT NULL
-        AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
-    ) qcode;
-  END IF;
+    )
+    UNION ALL
+    SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+    WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NULL
+    UNION ALL
+    SELECT qcode.${q("status")} FROM public.${q("QRCode")} qcode
+    WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NOT NULL
+      AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
+  ) qcode;
   RETURN NEXT;
 END
 $function$;`;
