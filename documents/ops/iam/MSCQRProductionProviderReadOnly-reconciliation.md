@@ -85,15 +85,15 @@ completion evidence but can never issue another mutation.
 
 ## Version retention and mutation ceiling
 
-The repository has no reviewed ProviderReadOnly policy-version pruning rule.
-Preparation therefore permits one through four versions and fails closed at
-five. It never selects or deletes a version. The transaction grants neither
-`iam:DeletePolicyVersion` nor `iam:SetDefaultPolicyVersion` and performs no
-attachment mutation.
+Ordinary reconciliation still fails closed at five versions and never deletes a
+version. The owner-approved bounded v1 policy below is a separate operation;
+it does not permit generic pruning or authorize IAM execution. Neither operation
+grants `iam:SetDefaultPolicyVersion` or performs attachment mutation.
 
 The executor remains the existing protected-production OIDC role
 `mscqr-production-initial-activation-policy-reconciler`. Its source policy adds
-only exact ProviderReadOnly read/CreatePolicyVersion access and Get/Put access
+exact ProviderReadOnly read/CreatePolicyVersion access, separately installed
+exact-policy DeletePolicyVersion access for bounded retirement, and Get/Put access
 to the dedicated reconciliation-journal prefix. Updating that executor policy
 is a separate governed installation-plan transaction. The existing root
 bootstrap contract can update only its exact inline permissions predecessor;
@@ -188,3 +188,94 @@ scripts/tests/workflow-yaml.test.mjs`. Tests use disposable local files and fake
 AWS reads; they do not certify live production access. Production execution
 requires this change merged, exact-source reauthentication and a separate
 production approval.
+
+
+## Owner-approved bounded v1 retirement (not execution approval)
+
+The authenticated six-object export41515673270 proves both historical operations
+completed and their authorizations were consumed. The owner then approved the
+specific v1 retention decision in
+`MSCQRProductionProviderReadOnly-v1-retention.json`. That decision preserves
+native v2-v5, v5 as default, all original receipt bytes/inventories, and requires a
+verified durable archive of all five complete documents and version metadata.
+It is not an IAM execution authorization. No historical journal is rewritten or
+reinterpreted as pruning authority.
+
+The release preparation order is explicit:
+
+1. Merge reviewed retention source. Separately prepare, authorize and execute
+   the existing **initial-activation reconciler installation** mechanism for the
+   sole new executor statement `RetireExactProviderReadOnlyPolicyVersion`.
+   It permits DeletePolicyVersion only on the exact ProviderReadOnly policy ARN;
+   all prior policy/trust/PassRole scope is unchanged. The installer recognizes
+   the exact previously reviewed document without that statement, in addition to
+   its unchanged historical predecessors. Verify native predecessor, state,
+   version capacity, exact saved plan and fresh installation approval/MFA before
+   that separate IAM permission installation. This source merge installs nothing.
+   No runtime self-installation is permitted. If the installer plan contains
+   unrelated changes or has insufficient version capacity, stop.
+2. From exact protected main, run the existing CLI with `--mode prepare-retirement`
+   and its existing explicit root read profile, `--source-sha` and
+   `--preparation-out`. Reads only: authenticate role-only attachment topology,
+   exact v1-v5 documents/hashes, version creation metadata and defaultv5. Keep
+   preparation outside the repository. It contains archive checksum and the
+   exact v1 deletion request, not the five raw documents.
+3. Use the existing `authorize-production-provider-readonly-policy-reconciliation`
+   workflow with that exact preparation and checksum. Its fresh production
+   approval binds the distinct retirement operation, source, inventory, v1 hash,
+   archive checksum and one-policy/one-version write plan. A normal read-update
+   authorization cannot authorize retirement, nor the reverse.
+4. After **separate execution approval**, dispatch the existing execution workflow
+   with `operation=retire-v1`, exact preparation bytes/checksum and the completed
+   authorization run/attempt. The job selects only `execute-retirement`; no
+   arbitrary AWS arguments, version, policy ARN or archive location is accepted.
+5. The same conditional-write, delete-denied protected journal stores a complete
+   `version-archive.json` under the retirement operation ID. All five native
+   documents/creation metadata are hash-verified and read back before the one-use
+   write-attempt and final fresh source/authorization/live-state CAS. Only then
+   may the executor issue DeletePolicyVersion once, with hardcoded VersionIdv1.
+   Native verification must prove retained v2-v5, unchanged defaultv5 and unchanged
+   attachment topology before completion is journaled. No CreatePolicyVersion or
+   default change occurs in this phase. Archive contents are never returned in
+   the public execution-result artifact.
+6. After verified retirement, prepare and separately authorize **ordinary**
+   ProviderReadOnly reconciliation against the remaining four versions. It adds
+   only the reviewed B03 policy metadata-read ARN. Existing CreatePolicyVersion
+   uncertainty/replay protections apply. Replacement failure leaves v5 default
+   and the protected archive intact; it never repeats retirement or reconstructs
+   v1 automatically. Only successful metadata reconciliation permits the B03
+   registration prerequisite to continue.
+
+IAM scopes DeletePolicyVersion to a policy ARN, not an individual version ID.
+The reviewed fixed runtime, exact source/preparation authorization and final CAS
+pin v1; native permission alone must never be described as a v1-only permission.
+Required/forbidden native simulations and exact installed policy readback remain
+part of the separate installation approval. The root profile must not be used to
+bypass executor installation or the journal's explicit read deny.
+
+Recovery is read-first. If interrupted before a write-attempt, a newly prepared
+fresh authorization may adopt only the same immutable zero-write reservation,
+source, inventory and archive checksum. Once the attempt exists, execution can
+only authenticate the exact four-version post-state and persist completion;
+it never calls deletion again. A lost delete response follows that same path.
+An unchanged five-version state after an attempt is **ambiguous**, including a
+crash between attempt persistence and API invocation. Preserve evidence and
+obtain a separately reviewed disposition from native audit evidence; do not retry
+or remove the attempt. Authorization/source drift prevents a new mutation.
+Original expired authorization may prove an already attempted write only; it
+cannot regain deletion authority. Re-execution still needs the workflow's fresh
+production environment approval. A terminal replay performs no IAM write.
+
+Rollback reconstruction is not automatic and cannot recreate the original v1
+version ID. Preserve the protected archive and original receipts; independently
+verify archived canonical document hash and metadata against the approved
+retention policy and native export evidence. Any reconstruction must use those
+exact bytes as a **new** version under its own fresh reviewed authorization and
+capacity/default plan. Do not detach policies, change defaults, erase journals,
+or bypass the five-version ceiling to restore an historical version.
+
+Local tests cover exact five-version preparation, changed defaults/documents,
+authorization mismatch/expiry, archive/readback failure, concurrency, lost delete
+responses, interrupted completion, replay and separate replacement failure.
+These are disposable tests, not evidence of a production retirement. No production
+retirement, permission installation or replacement is authorized by this document.
