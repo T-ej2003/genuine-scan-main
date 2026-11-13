@@ -4,7 +4,7 @@
   "reviewedTargetSourceSha": "b9bb6394b648343954d2435dcb214faf74998f0b",
   "databaseInstance": "mscqr-production-rls-green-phase2",
   "databaseResourceId": "db-3C27FYJOJ2IY27X7QGQG5YB4IM",
-  "sqlSha256": "9a2cf8eff97d125c08614522d9578b30c3645d598a402c7e89af61a313362bcf",
+  "sqlSha256": "9c474250e13f61be31f72d180b72cd07bbad43d0a726f1b70212d91576f10d06",
   "predecessorCatalogue": {
     "routines": "8a8b886b7e88dedd0c494123691be8839b02b9991303bdd1b12fadfd39cb1cf6",
     "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63",
@@ -13,7 +13,7 @@
     "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023"
   },
   "successorCatalogue": {
-    "routines": "cdaf1364ba8b856a3737362e42d8c119400c9b699a25e766d4d6a0d5c0c1674a",
+    "routines": "c6bbc2c99b6ce13261215ee82f14a8b445a584111a877a47fe547770ca7fa3d3",
     "tables": "9546a7a6cd84651fc0b0387470d3847f269d6ecb4497cd0a0a97b0494525de63",
     "policies": "55a55c5e731e5afdd8d94a83eb3f107f9385ee6e04bb16290398ac441593fe67",
     "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
@@ -23,7 +23,7 @@
     {
       "identity": "app_rls.printing_connector_event(p_registration_id text, p_agent_id text, p_device_fingerprint text, p_nonce text, p_issued_at timestamp without time zone, p_request_id text, p_operation text, p_job_id text, p_item_id text, p_printer_id text, p_payload_hash text, p_device_job_ref text, p_details jsonb)",
       "predecessorHash": "2c4e7612f02c020494d1edc3fda8efda497175101e13f6a52cf043bc9a305f5e",
-      "targetHash": "323c68784daa9b78c53dcbc7d0ca8a7abbed0d48d15caaf59f39fb6b0f099e8a",
+      "targetHash": "769ba6e81dbf730d80059414b30d68f2c167260c953a99df2501d0fb50ddc7f8",
       "owner": "mscqr_prd_rls_phase2_auth_owner",
       "grants": [
         "mscqr_prd_rls_phase2_app",

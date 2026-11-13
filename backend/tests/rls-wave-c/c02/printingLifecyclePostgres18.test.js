@@ -1151,6 +1151,17 @@ async function main() {
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE state='ISSUED'`), issuedBefore);
   const fenceStatus = json(app, maintenanceSql(caps.maker,'MAINTENANCE_STATUS'));
   assert.equal(fenceStatus.state,'DISPATCH_FENCED');
+  const advisoryHolder = new PrismaClient({ datasources: { db: { url: admin } } });
+  try {
+    await advisoryHolder.$transaction(async tx => {
+      await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtextextended('printing_printer_${ids.printer}',0))::text AS held`);
+      const lockedClaim = await psqlAsync(app, `SELECT app_rls.printing_connector_event(
+        '${ids.registration}','printing-agent','printing-device','maintenance_lock_race_1',now()::timestamp,
+        '${requestId()}','CLAIM','${requestId()}',NULL,'${ids.printer}',NULL,NULL,'{}'::jsonb)`);
+      assert.notEqual(lockedClaim.status, 0, `fenced claim returned ${lockedClaim.output}`);
+      assert.match(lockedClaim.output, /CONNECTOR_MAINTENANCE_FENCED/);
+    }, { timeout: 10000 });
+  } finally { await advisoryHolder.$disconnect(); }
   assert.equal(fenceStatus.upgradeAllowed,false,'backend fencing alone must never authorize legacy replacement');
   const settledLocalDiagnostics=json(app,maintenanceSql(caps.maker,'MAINTENANCE_INVENTORY'));
   assert.equal(settledLocalDiagnostics.inventory.localDiagnostics.length,0,

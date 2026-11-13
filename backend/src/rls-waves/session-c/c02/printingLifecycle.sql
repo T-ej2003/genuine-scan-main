@@ -2143,9 +2143,9 @@ BEGIN
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
+    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     IF NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0))
     THEN RETURN jsonb_build_object('available',false,'reconciliationRequired',true); END IF;
-    PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     SELECT j.id,j."batchId",j."manufacturerId",j."jobNumber",j."reprintOfJobId",j.status,j."pipelineState"
       INTO job_row FROM public."PrintJob" j
      WHERE j."printerId"=printer_row.id AND j."manufacturerId"=registration."userId"
