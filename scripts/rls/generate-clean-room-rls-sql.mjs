@@ -1202,6 +1202,9 @@ BEGIN
     WHERE ${platformRoles} AND app_rls.current_licensee_id() IS NOT NULL
       AND qcode.${q("licenseeId")}=app_rls.current_licensee_id()
   ) qcode;
+  IF NOT coalesce(clock_timestamp()<app_rls.operational_read_session_deadline(),FALSE) THEN
+    RAISE EXCEPTION 'dashboard access denied: session expired during snapshot';
+  END IF;
   RETURN NEXT;
 END
 $function$;`;

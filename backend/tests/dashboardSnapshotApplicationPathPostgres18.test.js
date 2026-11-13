@@ -444,6 +444,30 @@ const main = async () => {
       totalQRCodes: stressRows + 2, activeLicensees: 2, manufacturers: 4, totalBatches: 2,
     }, "large platform fallback");
     assert(performance.now() - platformStart < 5000, "large platform dashboard stays within its transaction budget");
+    if (stressRows === 200000) {
+      const expiryRequestId = "dashboard-pg-mid-snapshot-expiry";
+      const auditId = randomUUID();
+      await bootstrap.refreshToken.updateMany({
+        where: { userId: ids.platformA },
+        data: { sessionCapabilityExpiresAt: new Date(Date.now() + 400) },
+      });
+      await assert.rejects(prisma.$transaction(async (tx) => {
+        const [scope] = await tx.$queryRaw`
+          SELECT scope_fingerprint FROM app_rls.dashboard_snapshot_scope(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats'
+          )
+        `;
+        await tx.$queryRaw`
+          SELECT * FROM app_rls.dashboard_snapshot_data(
+            ${capabilities[ids.platformA]}, 'dashboard-snapshot-read', ${expiryRequestId},
+            ${auditId}, NULL, 'GET /api/dashboard/stats', ${scope.scope_fingerprint}
+          )
+        `;
+      }), /dashboard access denied: session expired during snapshot/);
+      assert.equal(await bootstrap.auditLog.count({ where: { id: auditId } }), 0,
+        "expired partial snapshot rolls back its success audit");
+    }
     console.log(`${stressRows} dashboard application paths ${Math.round(performance.now() - stressStart)}ms`);
 
     console.log("dashboard snapshot PostgreSQL 18 application-path proof passed");
