@@ -16,6 +16,7 @@ import { buildAppOnlyVerifierCommand, authenticateAppOnlyVerifierResult } from "
 import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from "../aws/apply-production-printing-routine-delta.mjs";
 import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
+import { buildProductionSevenRoutinePackage } from "../aws/production-seven-routine-package.mjs";
 import { PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
 import { buildC02SessionPrerequisitePackage } from "../aws/production-c02-session-package.mjs";
 import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
@@ -35,6 +36,7 @@ const sqlRoot = path.join(root, "scripts/rls/sql/generated");
 const evidenceRoot = path.join(root, "documents/security/rls-program/generated");
 const targetDatabase = "mscqr_production_rls_green_phase2";
 const administrator = "mscqr_prod_admin";
+const sevenRoutineCollector = createRequire(import.meta.url)("../aws/production-printing-routine-delta-executor.cjs").collectAppOnlyDatabaseCatalogueRows;
 const liveTaskEvidence = (sourceSha, candidateSourceSha, digest, taskId = "9") => ({ taskArn: `arn:aws:ecs:eu-west-2:368992683803:task/mscqr-prod-euw2-main/${taskId.repeat(32)}`,
   taskDefinitionArn: "arn:aws:ecs:eu-west-2:368992683803:task-definition/security-rebaseline:1", containerName: "security-rebaseline", containerExitCode: 0,
   probeRuntimeSourceSha: sourceSha, probeImageSourceSha: sourceSha, probeImageDigest: `sha256:${"a".repeat(64)}`,
@@ -47,6 +49,7 @@ const combinedC02Runtime = createRequire(import.meta.url)("../aws/production-c02
 const c02Runtime = createRequire(import.meta.url)("../aws/production-c02-session-executor.cjs");
 const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
 const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
+const sevenRoutineRuntime = createRequire(import.meta.url)("../aws/production-seven-routine-executor.cjs");
 const printingRoutine = (source, name) => {
   const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
   assert.equal(source.split(marker).length, 2);
@@ -348,6 +351,54 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(securityRebaselineCanonical.protectedMainSha, sourceSha);
       assert.equal(securityRebaselineCanonical.candidateSourceSha, context.candidateSourceSha);
       assert.equal(securityRebaselineCanonical.appOnlyRequirementsSha256, requirements.requirementsSha256);
+      const sevenScope = JSON.parse(fs.readFileSync(path.join(root, "scripts/aws/production-seven-routine-scope.json"), "utf8"));
+      const sevenPackage = buildProductionSevenRoutinePackage({ sourceSha, requirements,
+        securityInventory: securityRebaselineCanonical, repositoryRoot: root,
+        databaseIdentity: { DBInstanceIdentifier: sevenScope.databaseInstance, DbiResourceId: sevenScope.databaseResourceId,
+          EngineVersion: "18.4", DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
+      const oldGeneratedSource = run("git", ["show", `${sevenScope.predecessorSourceSha}:scripts/rls/sql/generated/20-context-helpers.sql`]);
+      const oldDefinition = (identity) => {
+        const name = identity.slice("app_rls.".length, identity.indexOf("("));
+        const marker = new RegExp(`(?:CREATE OR REPLACE|CREATE) FUNCTION app_rls\\.${name}\\(`);
+        const match = marker.exec(oldGeneratedSource);
+        assert.ok(match, `Missing predecessor ${name}`);
+        const tag = /\bAS (\$[a-z_]*\$)/.exec(oldGeneratedSource.slice(match.index))?.[1];
+        assert.ok(tag);
+        const end = oldGeneratedSource.indexOf(`\n${tag};`, match.index);
+        assert.ok(end > match.index);
+        return oldGeneratedSource.slice(match.index, end + tag.length + 2)
+          .replace(/^CREATE FUNCTION/, "CREATE OR REPLACE FUNCTION")
+          .replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_");
+      };
+      await administratorClient.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+        await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
+        for (const row of sevenScope.objects.slice(0, 5)) await tx.$executeRawUnsafe(oldDefinition(row.identity));
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+        await tx.$executeRawUnsafe("REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner");
+        for (const row of sevenScope.objects.slice(5)) await tx.$executeRawUnsafe(oldDefinition(row.identity));
+        await tx.$executeRawUnsafe("RESET ROLE");
+      }, { maxWait: 10000, timeout: 180000 });
+      const sevenDigest = () => administratorClient.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+        return sevenRoutineRuntime.catalogueDigest(await sevenRoutineCollector(tx));
+      }, { maxWait: 10000, timeout: 60000 });
+      assert.deepEqual(await sevenDigest(), sevenPackage.predecessorCatalogue,
+        "Disposable predecessor must match the authenticated 7407 routine catalogue");
+      await assert.rejects(administratorClient.$transaction(tx => sevenRoutineRuntime.executeProductionSevenRoutineTransaction({
+        tx, package: sevenPackage, checkpoint: stage => { if (stage === "after-3") throw new Error("forced seven-routine rollback"); },
+      }), { maxWait: 10000, timeout: 180000 }), /forced seven-routine rollback/);
+      assert.deepEqual(await sevenDigest(), sevenPackage.predecessorCatalogue, "Forced failure must roll back every function change");
+      assert.deepEqual(await administratorClient.$transaction(tx => sevenRoutineRuntime.executeProductionSevenRoutineTransaction({
+        tx, package: sevenPackage,
+      }), { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 7 });
+      assert.deepEqual(await sevenDigest(), sevenPackage.successorCatalogue);
+      assert.deepEqual(await administratorClient.$transaction(tx => sevenRoutineRuntime.executeProductionSevenRoutineTransaction({
+        tx, package: sevenPackage,
+      }), { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
       const canonicalMemberships = securityRebaselineCanonical.objects.filter(({ collection }) => ["roleMemberships","roleMembers","operatorMemberships"].includes(collection));
       assert.ok(canonicalMemberships.length > 0 && canonicalMemberships.every(({ identity }) => !identity.includes("mscqr_p2_test")));
       assert.ok(canonicalMemberships.some(({ identity }) => identity.includes("rdsadmin")), "canonical PG18 harness grantors map to the production semantic identity");
