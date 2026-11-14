@@ -8482,6 +8482,34 @@
     },
     {
       "table": "PrintItemEvent",
+      "command": "SELECT",
+      "columns": [
+        "printItemId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-5-connector-event",
+        "release-fix-5-connector-identity",
+        "release-fix-5-connector-registration",
+        "release-fix-5-connector-session",
+        "release-fix-5-control-job",
+        "release-fix-5-create-job",
+        "release-fix-5-gateway-job",
+        "release-fix-5-idempotency",
+        "release-fix-5-maintenance-gate",
+        "release-fix-5-printer-administration",
+        "release-fix-5-readiness",
+        "release-fix-5-record-sample",
+        "release-fix-5-reissue-request",
+        "release-fix-5-release-batch",
+        "release-fix-5-test-label-job",
+        "release-fix-5-worker-network",
+        "release-fix-5-worker-reconcile"
+      ]
+    },
+    {
+      "table": "PrintItemEvent",
       "command": "INSERT",
       "columns": [
         "id",
@@ -8492,6 +8520,35 @@
         "details",
         "actorUserId",
         "createdAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner",
+      "contracts": [
+        "release-fix-5-connector-event",
+        "release-fix-5-connector-identity",
+        "release-fix-5-connector-registration",
+        "release-fix-5-connector-session",
+        "release-fix-5-control-job",
+        "release-fix-5-create-job",
+        "release-fix-5-gateway-job",
+        "release-fix-5-idempotency",
+        "release-fix-5-maintenance-gate",
+        "release-fix-5-printer-administration",
+        "release-fix-5-readiness",
+        "release-fix-5-record-sample",
+        "release-fix-5-reissue-request",
+        "release-fix-5-release-batch",
+        "release-fix-5-test-label-job",
+        "release-fix-5-worker-network",
+        "release-fix-5-worker-reconcile"
+      ]
+    },
+    {
+      "table": "PrintJobChunk",
+      "command": "SELECT",
+      "columns": [
+        "printJobId",
+        "printSessionId"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",

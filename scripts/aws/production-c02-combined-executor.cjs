@@ -18,7 +18,11 @@ function validatePackage(pkg) {
     for (const definition of pkg.definitions) {
         assert.ok(definition.sql.startsWith(`CREATE OR REPLACE FUNCTION app_rls.${definition.name}(`));
     }
-    assert.equal(pkg.policySql.length, 6);
+    assert.equal(pkg.policySql.length, 10);
+    assert.deepEqual(pkg.evidenceGrants, [
+        'GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";'
+    ]);
     assert.equal(pkg.migrationSql, 'ALTER TABLE "PrinterAgentSession"\n  ADD COLUMN "lastMessageSeq" INTEGER NOT NULL DEFAULT 0;');
     assert.equal(hash(pkg.migrationSql + '\n'), pkg.sessionPackage.migrationSha256);
     for (const digest of [pkg.predecessorRequirementsSha256, pkg.successorRequirementsSha256]) assert.match(digest, /^[a-f0-9]{64}$/);
@@ -115,12 +119,12 @@ async function executeC02CombinedTransaction({ tx, pkg, checkpoint = async () =>
     await tx.$executeRawUnsafe('RESET ROLE');
     await tx.$executeRawUnsafe('SET LOCAL ROLE mscqr_prd_rls_phase2_owner');
     await tx.$executeRawUnsafe('REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner');
-    for (const sql of pkg.policySql)
+    for (const sql of [...pkg.evidenceGrants, ...pkg.policySql])
         await tx.$executeRawUnsafe(sql);
     await tx.$executeRawUnsafe('RESET ROLE');
     await checkpoint('before-combined-verification');
     assert.equal(canonicalJson(await digest()), canonicalJson(pkg.successorCatalogue), 'Combined C02 successor mismatch');
-    return { status: 'APPLIED', writeCount: base.writeCount + 13 };
+    return { status: 'APPLIED', writeCount: base.writeCount + 19 };
 }
 async function main() {
     let client;

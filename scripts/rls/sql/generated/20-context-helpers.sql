@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='afefdaabde7724a39ad0bdc72a50cca519035f190c76a5a778fd3d552d54be22'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:afefdaabde7724a39ad0bdc72a50cca519035f190c76a5a778fd3d552d54be22'
+    AND source_contract_sha256='70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:afefdaabde7724a39ad0bdc72a50cca519035f190c76a5a778fd3d552d54be22')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8402,16 +8402,10 @@ BEGIN
             q.status,q."replayEpoch",q."printJobId"
           FROM public."QRCode" q
            WHERE q."batchId"=batch_row.id
-             AND q.status IN ('ALLOCATED'::public."QRStatus",'ACTIVATED'::public."QRStatus")
+             AND q.status='ALLOCATED'::public."QRStatus" AND q."printJobId" IS NULL
              AND (nullif(p_options->>'rangeStart','') IS NULL OR q."displayCode">=p_options->>'rangeStart')
              AND (nullif(p_options->>'rangeEnd','') IS NULL OR q."displayCode"<=p_options->>'rangeEnd')
-             AND (q."printJobId" IS NULL OR NOT EXISTS (
-               SELECT 1 FROM public."PrintItem" pi
-               WHERE pi."qrCodeId"=q.id AND (
-                 pi."printConfirmedAt" IS NOT NULL
-                 OR pi.state NOT IN ('FAILED'::public."PrintItemState",'FROZEN'::public."PrintItemState",'CANCELLED'::public."PrintItemState")
-               )
-             ))
+             AND NOT EXISTS (SELECT 1 FROM public."PrintItem" pi WHERE pi."qrCodeId"=q.id)
            ORDER BY q."displayCode",q.id
            LIMIT LEAST(GREATEST(coalesce(NULLIF(p_options->>'limit','')::integer,500),1),200000)
         ) q
@@ -11040,9 +11034,10 @@ CREATE OR REPLACE FUNCTION app_rls.printing_reissue_request(
   p_original_job_id text,p_quantity integer,p_range_start text,p_range_end text,p_reason text,p_decision_note text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job_row record; request_row record; request_id text; replacement_job_id text;
-  target_batch_id text;
+DECLARE actor record; batch_row record; job_row record; original_session_row record; request_row record; request_id text; replacement_job_id text;
+  target_batch_id text; target_original_job_id text;
   replacement_session_id text; original_session_id text; moved_count integer;
+  item_count integer; safe_item_count integer;
   now_at timestamp without time zone:=transaction_timestamp();
 BEGIN
   IF p_purpose<>'printing-reissue' OR p_operation NOT IN ('CREATE','FORWARD','APPROVE','REJECT','CANCEL','EXECUTE')
@@ -11053,15 +11048,23 @@ BEGIN
   IF p_operation='CREATE' THEN
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_job_id',p_original_job_id,true);
-    SELECT j.id,j."batchId",j."manufacturerId",j.status
+    SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j WHERE j.id=p_original_job_id;
+    PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||target_batch_id,0));
+    SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."pipelineState",
+      j.quantity,j."itemCount",j."sentAt",j."confirmedAt",j."completedAt"
       INTO STRICT job_row FROM public."PrintJob" j WHERE j.id=p_original_job_id FOR UPDATE;
+    IF job_row."batchId" IS DISTINCT FROM target_batch_id THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,job_row."batchId");
-    PERFORM set_config('app.printing_job_id',p_original_job_id,true);
+    SELECT ps.id,ps.status,ps."totalItems",ps."issuedItems",ps."confirmedItems",
+      ps."frozenItems",ps."completedAt" INTO STRICT original_session_row
+      FROM public."PrintSession" ps WHERE ps."printJobId"=job_row.id;
+    PERFORM set_config('app.printing_job_id',p_original_job_id,true),
+            set_config('app.printing_original_session_id',original_session_row.id,true);
     IF actor.role<>'MANUFACTURER_ADMIN' OR job_row."manufacturerId"<>actor."userId"
-       OR job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED')
+       OR job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED')
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
-      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED') FOR UPDATE;
+      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED');
     IF request_id IS NOT NULL THEN
       RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
         SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
@@ -11073,6 +11076,48 @@ BEGIN
           request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
         FROM public."PrintReissueRequest" request WHERE request.id=request_id
       ) r);
+    END IF;
+    SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
+      FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
+    IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+       OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
+       OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
+    THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    IF job_row.status='STOPPED' THEN
+      IF job_row."pipelineState"<>'STOPPED' OR original_session_row.status<>'STOPPED'
+         OR job_row."completedAt" IS NULL OR original_session_row."completedAt" IS NULL
+         OR job_row."sentAt" IS NOT NULL OR job_row."confirmedAt" IS NOT NULL
+         OR original_session_row."issuedItems"<>0 OR original_session_row."confirmedItems"<>0
+         OR original_session_row."frozenItems"<>0 OR job_row."itemCount" IS DISTINCT FROM job_row.quantity
+         OR original_session_row."totalItems"<>job_row.quantity
+         OR coalesce(p_quantity,job_row.quantity)<>job_row.quantity
+         OR p_range_start IS NOT NULL OR p_range_end IS NOT NULL
+      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+      SELECT count(*),count(*) FILTER (WHERE
+        pi.state='CANCELLED' AND pi."pipelineState"='STOPPED' AND pi."attemptCount"=0
+        AND pi."currentRenderTokenHash" IS NULL AND pi."deviceJobRef" IS NULL
+        AND pi."issuedAt" IS NULL AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+        AND pi."confirmationDeadlineAt" IS NULL AND pi."printConfirmedAt" IS NULL
+        AND pi."closedAt" IS NULL AND pi."frozenAt" IS NULL AND pi."failedAt" IS NULL
+        AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+        AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+        AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+        AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
+        AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
+        AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
+        AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
+      ) INTO item_count,safe_item_count FROM public."PrintItem" pi
+      JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_row.id;
+      IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity
+         OR EXISTS (SELECT 1 FROM public."PrintItemEvent" e JOIN public."PrintItem" pi ON pi.id=e."printItemId"
+           WHERE pi."printSessionId"=original_session_row.id)
+         OR EXISTS (SELECT 1 FROM public."PrintJobChunk" c WHERE c."printJobId"=job_row.id
+           OR c."printSessionId"=original_session_row.id)
+         OR EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id)
+         OR EXISTS (SELECT 1 FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
+           WHERE j."batchId"=job_row."batchId" AND j.id<>job_row.id
+             AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))
+      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
     END IF;
     request_id:=gen_random_uuid()::text;
     PERFORM set_config('app.printing_reissue_id',request_id,true);
@@ -11091,6 +11136,13 @@ BEGIN
   ELSE
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,NULL);
     PERFORM set_config('app.printing_reissue_id',p_reissue_id,true);
+    IF p_operation='EXECUTE' THEN
+      SELECT r."originalPrintJobId" INTO STRICT target_original_job_id
+        FROM public."PrintReissueRequest" r WHERE r.id=p_reissue_id;
+      PERFORM set_config('app.printing_job_id',target_original_job_id,true);
+      SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j WHERE j.id=target_original_job_id;
+      PERFORM pg_advisory_xact_lock(hashtextextended('printing_batch_'||target_batch_id,0));
+    END IF;
     SELECT r.id,r."originalPrintJobId",r."replacementPrintJobId",r."requestedByUserId",
       r."approvedByUserId",r."licenseeId",r."manufacturerId",r."batchId",r."requestedByRole",
       r."targetApproverRole",r.quantity,r."affectedRangeStart",r."affectedRangeEnd",r."decisionNote",
@@ -11098,9 +11150,13 @@ BEGIN
       r."executedAt",r."createdAt",r."updatedAt" INTO STRICT request_row
       FROM public."PrintReissueRequest" r
       WHERE r.id=p_reissue_id FOR UPDATE;
+    IF p_operation='EXECUTE' AND request_row."originalPrintJobId" IS DISTINCT FROM target_original_job_id
+    THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     PERFORM set_config('app.printing_job_id',request_row."originalPrintJobId",true);
-    SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j
-      WHERE j.id=request_row."originalPrintJobId";
+    IF p_operation<>'EXECUTE' THEN
+      SELECT j."batchId" INTO STRICT target_batch_id FROM public."PrintJob" j
+        WHERE j.id=request_row."originalPrintJobId";
+    END IF;
     SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(p_capability,p_purpose,p_request_id,target_batch_id);
     PERFORM set_config('app.printing_reissue_id',p_reissue_id,true),
             set_config('app.printing_job_id',request_row."originalPrintJobId",true);
@@ -11112,16 +11168,63 @@ BEGIN
         RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',true);
       END IF;
       SELECT j.id,j."batchId",j."manufacturerId",j."printerId",j.status,j."pipelineState",j."printMode",
-        j."payloadType",j.quantity,j."itemCount",
-        ps.id AS original_session_id,ps."printerRegistrationId" AS original_registration_id
+        j."payloadType",j.quantity,j."itemCount",j."sentAt",j."confirmedAt",j."completedAt",
+        ps.id AS original_session_id,ps.status AS original_session_status,
+        ps."totalItems" AS original_total_items,ps."issuedItems" AS original_issued_items,
+        ps."confirmedItems" AS original_confirmed_items,ps."frozenItems" AS original_frozen_items,
+        ps."completedAt" AS original_completed_at,ps."printerRegistrationId" AS original_registration_id
         INTO STRICT job_row
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
         WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j;
+      IF job_row."batchId" IS DISTINCT FROM target_batch_id THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
+        FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
+      IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+         OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
+         OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
+      THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
       THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
       original_session_id:=job_row.original_session_id;
+      PERFORM set_config('app.printing_original_session_id',original_session_id,true);
+      IF job_row.status='STOPPED' THEN
+        IF job_row."pipelineState"<>'STOPPED' OR job_row.original_session_status<>'STOPPED'
+           OR job_row."completedAt" IS NULL OR job_row.original_completed_at IS NULL
+           OR job_row."sentAt" IS NOT NULL OR job_row."confirmedAt" IS NOT NULL
+           OR job_row.original_issued_items<>0 OR job_row.original_confirmed_items<>0
+           OR job_row.original_frozen_items<>0 OR job_row."itemCount" IS DISTINCT FROM job_row.quantity
+           OR job_row.original_total_items<>job_row.quantity
+           OR coalesce(request_row.quantity,job_row.quantity)<>job_row.quantity
+           OR request_row."affectedRangeStart" IS NOT NULL OR request_row."affectedRangeEnd" IS NOT NULL
+        THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+        SELECT count(*),count(*) FILTER (WHERE
+          pi.state='CANCELLED' AND pi."pipelineState"='STOPPED' AND pi."attemptCount"=0
+          AND pi."currentRenderTokenHash" IS NULL AND pi."deviceJobRef" IS NULL
+          AND pi."issuedAt" IS NULL AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+          AND pi."confirmationDeadlineAt" IS NULL AND pi."printConfirmedAt" IS NULL
+          AND pi."closedAt" IS NULL AND pi."frozenAt" IS NULL AND pi."failedAt" IS NULL
+          AND coalesce(pi."dispatchMetadata",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+          AND coalesce(pi."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+          AND q."batchId"=job_row."batchId" AND q."licenseeId"=actor."batchLicenseeId"
+          AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
+          AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
+          AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
+          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
+        ) INTO item_count,safe_item_count FROM public."PrintItem" pi
+        JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_id;
+        IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity
+           OR EXISTS (SELECT 1 FROM public."PrintItemEvent" e JOIN public."PrintItem" pi ON pi.id=e."printItemId"
+             WHERE pi."printSessionId"=original_session_id)
+           OR EXISTS (SELECT 1 FROM public."PrintJobChunk" c WHERE c."printJobId"=job_row.id
+             OR c."printSessionId"=original_session_id)
+           OR EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=job_row.id)
+           OR EXISTS (SELECT 1 FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
+             WHERE j."batchId"=job_row."batchId" AND j.id<>job_row.id
+               AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))
+        THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+      END IF;
       IF job_row."printMode"='LOCAL_AGENT'::public."PrintDispatchMode" THEN
         IF job_row.original_registration_id IS NULL THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE'; END IF;
         PERFORM set_config('app.printing_registration_id',job_row.original_registration_id,true);
@@ -11262,7 +11365,11 @@ BEGIN
   END IF;
   PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
     'PRINT_REISSUE_'||p_operation,'PrintReissueRequest',request_id,
-    jsonb_build_object('originalPrintJobId',coalesce(request_row."originalPrintJobId",p_original_job_id),'quantity',p_quantity));
+    jsonb_build_object('originalPrintJobId',coalesce(request_row."originalPrintJobId",p_original_job_id),'quantity',p_quantity)
+      || CASE WHEN p_operation='EXECUTE' THEN jsonb_build_object(
+        'replacementPrintJobId',replacement_job_id,'originalPrintSessionId',original_session_id,
+        'replacementPrintSessionId',replacement_session_id,'movedCount',moved_count)
+        ELSE '{}'::jsonb END);
   RETURN to_jsonb(request_row)||jsonb_build_object('idempotent',false);
 END
 $fn$;

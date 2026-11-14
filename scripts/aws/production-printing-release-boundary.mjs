@@ -10,9 +10,10 @@ export const PRINTING_RELEASE_OBJECTS = Object.freeze({
     assert.equal(contract.definitionStatus, "production-reviewed");
     return `app_rls.${name}(${contract.identityArguments})`;
   }),
-  tables: ["PrinterAgentSession"],
+  tables: ["PrinterAgentSession", "PrintItemEvent", "PrintJobChunk"],
   policies: ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update",
-    ...["select", "insert", "update"].map(command => `PrinterAgentSession.printing_lifecycle_printeragentsession_${command}`)],
+    ...["select", "insert", "update"].map(command => `PrinterAgentSession.printing_lifecycle_printeragentsession_${command}`),
+    "PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"],
   schemas: [], roles: [],
 });
 const collections = ["routines", "tables", "policies", "schemas", "roles"];

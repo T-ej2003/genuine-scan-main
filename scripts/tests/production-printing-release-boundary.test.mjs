@@ -9,14 +9,17 @@ import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import fs from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
 const runtime = createRequire(import.meta.url)("../aws/production-c02-combined-executor.cjs");
 const oldSha = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", sourceSha = "a".repeat(40);
 const seal = body => { const { requirementsSha256, ...rest } = body; return { ...rest, requirementsSha256: canonicalSha256(rest) }; };
-const requirements = (sha, hash) => seal({ sourceSha: sha, candidateSourceSha: sha,
+const requirements = (sha, hash, historical = false) => seal({ sourceSha: sha, candidateSourceSha: sha,
   objects: Object.fromEntries(Object.keys(B03_DELTA_OBJECTS).map(key => [key,
-    [...B03_DELTA_OBJECTS[key], ...PRINTING_RELEASE_OBJECTS[key]].map(identity => ({ identity, sha256: hash.repeat(64) }))])) });
-const predecessor = requirements(oldSha, "1"), successor = requirements(sourceSha, "2");
+    [...B03_DELTA_OBJECTS[key], ...PRINTING_RELEASE_OBJECTS[key]]
+      .filter(identity => !historical || !["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"].includes(identity))
+      .map(identity => ({ identity, sha256: hash.repeat(64) }))])) });
+const predecessor = requirements(oldSha, "1", true), successor = requirements(sourceSha, "2");
 const after = () => catalogueAfterPrinting({ predecessor, successor, b03Objects: B03_DELTA_OBJECTS });
 
 test("combined boundary advances only reviewed printing identities and preserves original B03 rows", () => {
@@ -24,7 +27,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 13);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 17);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -60,7 +63,12 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 6); assert.equal(pkg.policySql.length, 6);
+  assert.equal(pkg.definitions.length, 6); assert.equal(pkg.policySql.length, 10);
+  assert.deepEqual(pkg.evidenceGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['PrintItemEvent', 'PrintJobChunk']);
+  const broadened = { ...pkg, evidenceGrants: [...pkg.evidenceGrants] };
+  broadened.evidenceGrants[0] = broadened.evidenceGrants[0].replace('SELECT ("printItemId")', 'SELECT ("printItemId", "details")');
+  const { packageSha256: _ignored, ...body } = broadened;
+  assert.throws(() => runtime.validatePackage({ ...body, packageSha256: canonicalSha256(body) }));
   assert.throws(() => runtime.validatePackage({ ...pkg, sourceSha: oldSha }));
   const task = buildC02SessionTask({ sourceSha, hostname: "test.invalid", combinedRequirements: { predecessor, successor } });
   assert.ok(Buffer.byteLength(task.serialized) < 60 * 1024);
@@ -70,6 +78,25 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), '{"status":"blocked","reason":"c02-combined-failed-closed"}');
+});
+
+test("combined C02 selects the same narrow grants from production-role generated SQL", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-c02-grants-"));
+  try {
+    for (const name of ["backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
+      "backend/prisma/migrations/20261028210000_printer_agent_session_sequence/migration.sql",
+      "scripts/rls/sql/generated/20-context-helpers.sql", "scripts/rls/sql/generated/21-runtime-grants.sql",
+      "scripts/rls/sql/generated/30-policies.sql"]) {
+      const target = path.join(temporary, name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      const source = fs.readFileSync(name, "utf8");
+      fs.writeFileSync(target, name.startsWith("scripts/") ? source.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_") : source);
+    }
+    const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor, repositoryRoot: temporary });
+    assert.deepEqual(pkg.evidenceGrants, buildC02CombinedPackage({ sourceSha, predecessor, successor }).evidenceGrants);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test("combined C02 refuses contradictory, uncommitted or duplicated Prisma history", async () => {
