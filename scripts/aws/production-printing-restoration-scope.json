@@ -1,0 +1,11 @@
+{
+  "kind": "PRODUCTION_PRINTING_RESTORATION_SCOPE",
+  "sqlSha256": "54f64acfb417b6eec532e3136d5c5e2220ee2a2ab3be3dc00a69b142b2fa72bd",
+  "successorCatalogue": {
+    "routines": "6e27bb06cd9c3386064dffef05072646cb94471c8218a6737e243aa0f0ed4dfc",
+    "tables": "476216520f8f695e822d34defc826b70eb76d15a83a1ea1cfeceea82649c08c4",
+    "policies": "17f52214b5139e2e421dfcbe14c30d714f095c66245733d48b631fdf44c564d1",
+    "schemas": "d18a09f2eb4608c1267c78d20c5a7cede0c9fe5dda622ee2f4ea7f4e91aebb0c",
+    "roles": "8b635d92ee484fc217fb651d6b1bf7fdfd02d23a0fee964a8092ee3050fd7023"
+  }
+}

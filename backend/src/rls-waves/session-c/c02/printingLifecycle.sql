@@ -3349,7 +3349,9 @@ BEGIN
     FOR job_row IN SELECT j.id,j."printerId" FROM public."PrintJob" j
       WHERE j.status IN ('PENDING','SENT','PAUSED') AND EXISTS (
         SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
-        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED' AND pi."confirmationDeadlineAt"<now_at
+        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED'
+          AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
           AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
       ) ORDER BY j.id LIMIT p_limit
     LOOP
@@ -3363,8 +3365,11 @@ BEGIN
       job_expired:=false;
       FOR item_row IN SELECT pi.id FROM public."PrintItem" pi
         WHERE pi."printSessionId"=session_row.id AND pi.state='AGENT_ACKED'
-          AND pi."confirmationDeadlineAt"<now_at AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
-        ORDER BY pi."confirmationDeadlineAt",pi.id FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
+          AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
+          AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+        ORDER BY coalesce(pi."confirmationDeadlineAt",pi."agentAckedAt"+interval '10 minutes'),pi.id
+        FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
       LOOP
         UPDATE public."PrintItem" SET "pipelineState"='NEEDS_OPERATOR_ACTION',
           "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at

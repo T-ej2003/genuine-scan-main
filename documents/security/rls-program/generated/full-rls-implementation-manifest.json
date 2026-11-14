@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b",
+  "sourceContractSha256": "5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -64,7 +64,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "f6f168756bc52d977032b7a32f2591ba6c2cf6cbba398b2a403c1be3f3cb5a7e"
+      "sha256": "23178d3f2502a8576a1746f98e07635f4e8a814ce774b422b0ec07deb6218ccf"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -116,7 +116,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "92ae6fb724bc0ef8dcdee082093f28e8c74335a739c9b01a373ca8a237b32dfd"
+      "sha256": "8b663f8b6a08b44753f1de82dcb15fe34782217629126ae24f5f77b3fb1738f2"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
