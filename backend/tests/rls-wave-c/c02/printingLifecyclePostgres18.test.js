@@ -1582,6 +1582,36 @@ async function main() {
     `);
     return { jobId, sessionId };
   };
+  const recentNullDeadline = createExpiredRun('recent-null-deadline', 1);
+  psql(admin, `UPDATE public."PrintItem" SET "agentAckedAt"=clock_timestamp(),"confirmationDeadlineAt"=NULL
+    WHERE "printSessionId"='${recentNullDeadline.sessionId}'`);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '0',
+    'a recent acknowledgement without an explicit deadline must remain confirmable');
+  const recentNullItemId = psql(admin, `SELECT id FROM public."PrintItem" WHERE "printSessionId"='${recentNullDeadline.sessionId}'`);
+  json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','recent_null_confirm',now()::timestamp,
+    '${requestId()}','CONFIRM','${recentNullDeadline.jobId}','${recentNullItemId}','${ids.printer}',
+    '${hash('recent-null-confirm')}','spool-recent','{"physical":true}'::jsonb
+  )`);
+  const legacyNullDeadline = createExpiredRun('legacy-null-deadline', 1);
+  psql(admin, `UPDATE public."PrintItem" SET "confirmationDeadlineAt"=NULL
+    WHERE "printSessionId"='${legacyNullDeadline.sessionId}'`);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1',
+    'an old acknowledged item with no deadline must reach operator reconciliation');
+  assert.equal(psql(admin, `SELECT state||':'||"pipelineState" FROM public."PrintItem"
+    WHERE "printSessionId"='${legacyNullDeadline.sessionId}'`), 'AGENT_ACKED:NEEDS_OPERATOR_ACTION');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob"
+    WHERE id='${legacyNullDeadline.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${legacyNullDeadline.jobId}' AND status='ACTIVATED'`), '1');
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '0',
+    'an acknowledged item already awaiting operator action must not be processed again');
+  const legacyNullItemId = psql(admin, `SELECT id FROM public."PrintItem" WHERE "printSessionId"='${legacyNullDeadline.sessionId}'`);
+  json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','legacy_null_late_confirm',now()::timestamp,
+    '${requestId()}','CONFIRM','${legacyNullDeadline.jobId}','${legacyNullItemId}','${ids.printer}',
+    '${hash('legacy-null-confirm')}','spool-legacy','{"physical":true}'::jsonb
+  )`);
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${legacyNullDeadline.jobId}'`), 'CONFIRMED');
   const resumed = createExpiredRun('resume', 1, 1);
   const [resumedExpired, resumedReserved] = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${resumed.sessionId}'`).split(',');
   psql(admin, `UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,

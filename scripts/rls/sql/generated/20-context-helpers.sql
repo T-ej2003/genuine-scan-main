@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
+    AND source_contract_sha256='7c5931966a1ecd12ac770467243f6b88af058f7c7f149a3527c9a14d0221c800'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:7c5931966a1ecd12ac770467243f6b88af058f7c7f149a3527c9a14d0221c800'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:7c5931966a1ecd12ac770467243f6b88af058f7c7f149a3527c9a14d0221c800')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11391,7 +11391,9 @@ BEGIN
     FOR job_row IN SELECT j.id,j."printerId" FROM public."PrintJob" j
       WHERE j.status IN ('PENDING','SENT','PAUSED') AND EXISTS (
         SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
-        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED' AND pi."confirmationDeadlineAt"<now_at
+        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED'
+          AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
           AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
       ) ORDER BY j.id LIMIT p_limit
     LOOP
@@ -11405,8 +11407,11 @@ BEGIN
       job_expired:=false;
       FOR item_row IN SELECT pi.id FROM public."PrintItem" pi
         WHERE pi."printSessionId"=session_row.id AND pi.state='AGENT_ACKED'
-          AND pi."confirmationDeadlineAt"<now_at AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
-        ORDER BY pi."confirmationDeadlineAt",pi.id FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
+          AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
+          AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+        ORDER BY coalesce(pi."confirmationDeadlineAt",pi."agentAckedAt"+interval '10 minutes'),pi.id
+        FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
       LOOP
         UPDATE public."PrintItem" SET "pipelineState"='NEEDS_OPERATOR_ACTION',
           "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at
