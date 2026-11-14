@@ -1,6 +1,6 @@
 # MSCQR printing certification — 14 November 2026
 
-This is the evidence record for the existing manufacturer printing path. No production deployment, production data change, historical replay, or physical label was performed. **The complete workflow is not certified for deployment.** The current implementation branch is `fix/printing-worker-recovery`, based on protected main with restoration commit `19d7f2c2` cherry-picked. Hosted PostgreSQL 18.4 results cited below belong to protected main until the new branch completes CI.
+This is the evidence record for the existing manufacturer printing path. No production deployment, production data change, historical replay, or physical label was performed. **The complete workflow is not certified for deployment.** The implementation branch is `fix/printing-worker-recovery`, based on protected main with restoration commit `19d7f2c2` cherry-picked. PR #841 run `43606879909` exercised the branch source on hosted PostgreSQL 18.4.
 
 SOURCE_SHA=`bde15ec247d6abeeb8bb6a0e6cd6ba4f082dc73d` (fetched protected `origin/main`; PR #839 merge `cbdcc209b1058f903bbafd19742484b2ba03e827`, PR #840 merge is main). Baseline Git trees: backend `29247ad9e3266b14c2e561d4e268372ede855015`, frontend `ac5baa5b912e542e05e8a0ab1903b9cc28c9a056`, connector `4562803df430b24380d49c3f16efc832e62b0dcc`. Baseline `backend/src/rls-waves/session-c/c02/printingLifecycle.sql` SHA-256: `23178d3f2502a8576a1746f98e07635f4e8a814ce774b422b0ec07deb6218ccf`. The worktree patch changes no printing SQL.
 
@@ -85,11 +85,11 @@ FIXES_IMPLEMENTED=Existing guarded recovery made available for STOPPED rows; mis
 
 SIMPLIFICATIONS=The policy contract now derives its expected names from the generated policy catalogue instead of a fixed count. The existing `handleUserSafeError` is reused for print read/abandon errors. No production logic was removed without replacement.
 
-BACKEND_TESTS=PASS: backend build; print response, reservation, payload, reissue range, local ACK, signed trust, printer session, dispatch journal, Windows adapter, and direct worker tests. New 409/500 redaction regression passed. Full backend suite was not rerun.
+BACKEND_TESTS=PASS: backend build; print response, reservation, payload, reissue range, local ACK, signed trust, printer session, dispatch journal, Windows adapter, and direct worker tests. New 409/500 redaction regression passed. PR #841 backend and quality-gates jobs passed at source commit `20953398` (PR head `1f439a65` before this documentation update).
 
-FRONTEND_TESTS=PASS: production build, TypeScript check, 78 Vitest tests across six printing files plus 23 start-print dialog tests, including the older-registration regression. The earlier manufacturer recovery Playwright test passed once (9.8 s) on an isolated local Vite server with auth bootstrap enabled. The default system-test server disables bootstrap, so that fixture cannot authenticate under its default config; this is a test harness limit, not a production login result.
+FRONTEND_TESTS=PASS: production build, TypeScript check, 78 Vitest tests across six printing files plus 23 start-print dialog tests, including the older-registration regression. PR #841 frontend job and Playwright smoke passed at the same source. The earlier manufacturer recovery Playwright test passed once (9.8 s) on an isolated local Vite server with auth bootstrap enabled. The default system-test server disables bootstrap, so that fixture cannot authenticate under its default config; this is a test harness limit, not a production login result.
 
-DATABASE_TESTS=PASS on local disposable PostgreSQL 18.6: printing-family certification reports `application-path-certified`, migrations from zero, rollback verified, and no residue (`documents/diagnostics/MSCQR_PRINTING_LOCAL_PG18_CERTIFICATION.json`). It now launches the actual worker process for one, ten, and 150 synthetic acknowledged items, kills its database session to verify recovery, and overlaps two worker processes. The existing combined test also covers STOPPED guards, NULL deadline, late/duplicate ACK, concurrent creation/recovery, tenant isolation, atomic reservation, ownership and FORCE RLS. Exact-main GitHub run `43596405802` previously passed PostgreSQL 18.4; branch-head 18.4 certification remains pending CI. Static SQL and bounded routine-delta contracts pass (22/22). Local full-package verifier previously hit a Homebrew catalogue privilege mismatch (`subscription_conninfo_acl`); exact-main hosted PostgreSQL 18.4 verifier passed.
+DATABASE_TESTS=PASS on local disposable PostgreSQL 18.6: printing-family certification reports `application-path-certified`, migrations from zero, rollback verified, and no residue (`documents/diagnostics/MSCQR_PRINTING_LOCAL_PG18_CERTIFICATION.json`). It launches the actual worker process for one, ten, and 150 synthetic acknowledged items, kills its database session to verify recovery, and overlaps two worker processes. The combined test covers STOPPED guards, NULL deadline, late/duplicate ACK, concurrent creation/recovery, tenant isolation, atomic reservation, ownership and FORCE RLS. PR #841 run `43606879909` passed the authentication, QR and printing application-path step on PostgreSQL 18.4, plus the full RLS package verifier. Static SQL and bounded routine-delta contracts pass (22/22). Local full-package verifier previously hit a Homebrew catalogue privilege mismatch (`subscription_conninfo_acl`); the hosted verifier passed.
 
 CONNECTOR_TESTS=PASS for signed protocol, dispatch journal duplicate/restart/reconnect, payload, and synthetic Windows adapter tests. UNVERIFIED for a running actual Windows connector with actual spooler submission. The synthetic adapter is not a substitute for hardware.
 
@@ -114,7 +114,7 @@ PRODUCTION_DEPLOYMENT_READY=FAIL
 RESTORATION_COMMIT=`19d7f2c2f0b6d8dda8d67fcce6b16835aa676bbe` (preserved by cherry-pick `7d147de8` on current protected main).
 PRINTING_WORKER_IMPLEMENTED=PASS: isolated mode in `backend/src/worker.ts` starts the existing reconciler and no unrelated background loop.
 PRINTING_WORKER_MODE=`MSCQR_WORKER_MODE=printing`.
-PRINTING_WORKER_TESTS=PASS on local PostgreSQL 18.6 for actual process startup, shutdown, scheduling, restart, NULL/expired deadlines, database disconnect and two-process overlap; static isolation and fail-closed startup tests pass. Hosted PostgreSQL 18.4 branch-head run is pending.
+PRINTING_WORKER_TESTS=PASS on local PostgreSQL 18.6 and hosted PostgreSQL 18.4 for actual process startup, shutdown, scheduling, restart, NULL/expired deadlines, database disconnect and two-process overlap; static isolation and fail-closed startup tests pass.
 RECONCILER_ACTIVE_IN_TEST=PASS: actual worker logs successful cycles and commits one, ten and 150 synthetic item reconciliations.
 RECONCILER_PRODUCTION_STATUS=FAIL: the backend has workers disabled and the only separate service is support email mode.
 CONNECTOR_AUTHENTICATION=PASS in signed protocol/session tests; live Windows identity unverified.
@@ -123,10 +123,10 @@ CONNECTOR_DISPATCH=PASS in protocol/journal tests with controlled synthetic outp
 CONNECTOR_ACK=PASS in signature, tamper, duplicate and backend-boundary tests; live physical ACK unverified.
 CONNECTOR_INSTALLER_STATUS=FAIL: no production-signed current Windows installer demonstrated; signing/publication remains external.
 FRONTEND_PRINTING_TESTS=PASS for printing Vitest cases, TypeScript and production build; one local manufacturer recovery browser test passed in prior restoration evidence.
-BACKEND_PRINTING_TESTS=PASS for focused printing, worker and connector suites; full backend suite pending CI.
-POSTGRESQL_18_4_TESTS=UNVERIFIED for this branch head; protected-main hosted run passed, local PostgreSQL 18.6 run passed.
+BACKEND_PRINTING_TESTS=PASS for focused printing, worker and connector suites and PR #841 backend job.
+POSTGRESQL_18_4_TESTS=PASS for disposable hosted clean-room printing application path at source commit `20953398`, run `43606879909`. Incremental migration from the actual deployed catalogue remains unverified.
 REMAINING_HARDWARE_BOUNDARIES=Actual Windows connector installation, selected ZT410 registration, Windows spooler receipt and Zebra output; no physical label was printed.
-RELEASE_CANDIDATE_SHA=`20953398d7ca3da321c954dcd1f5aa503aff3ce6` (focused code commit; exact-head CI pending). The documentation commit that carries this record is not the source-code SHA.
+RELEASE_CANDIDATE_SHA=`20953398d7ca3da321c954dcd1f5aa503aff3ce6` (focused source commit; PR #841 hosted PostgreSQL 18.4 and application checks passed). Documentation-only commits do not change this source SHA.
 
 PRINTING_SOFTWARE_READY=UNVERIFIED
 PRINTING_WORKER_READY=PASS for local software and validated configuration; production activation remains FAIL as reported separately.
