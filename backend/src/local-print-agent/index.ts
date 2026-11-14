@@ -410,10 +410,7 @@ const requirePrinter = async (printerId: string | null | undefined) => {
     throw Object.assign(new Error(`${printer.printerName} is offline.`), { statusCode: 409 });
   }
 
-  if (
-    explicitPrinterId &&
-    isVirtualNonLabelPrinter(printer)
-  ) {
+  if (isVirtualNonLabelPrinter(printer)) {
     throw Object.assign(
       new Error("Fax/PDF printers cannot be used for MSCQR labels. Choose a ZPL-compatible label printer."),
       { statusCode: 409 }

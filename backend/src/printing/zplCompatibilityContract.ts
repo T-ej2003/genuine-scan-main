@@ -90,6 +90,9 @@ export const isZplCompatibleLanguageList = (languages: Array<string | null | und
     return normalized === "ZPL" || normalized === "ZPL2" || normalized === "ZPL-II" || normalized === "ZSIM";
   });
 
+export const isVirtualPrinterIdentity = (...values: unknown[]) =>
+  values.some((value) => /fax|pdf|onenote|xps|document writer/i.test(String(value || "")));
+
 export const inferZplPrinterDpi = (...values: unknown[]) => {
   const combined = values.map((value) => String(value || "")).join(" ");
   const match = combined.match(/(\d{3,4})\s*dpi/i);
@@ -110,6 +113,7 @@ export const classifyIndustrialZplPrinterProfile = (params: {
     : Array.isArray(params.printerLanguages)
       ? params.printerLanguages
       : [];
+  if (isVirtualPrinterIdentity(params.printerName, params.model)) return { profileId: "unsupported_virtual_printer", compatible: false, reason: "unsupported_virtual_printer" };
   if (!isZplCompatibleLanguageList(languages)) return { profileId: UNSUPPORTED_NON_ZPL_PROFILE_ID, compatible: false, reason: "unsupported_printer_language" };
 
   const rawDpi = params.dpi ?? params.printerDpi;

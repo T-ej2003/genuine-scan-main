@@ -249,24 +249,18 @@ export default function PrinterDiagnostics() {
     });
     await loadDiagnostics();
   };
-
   const confirmZplPrinter = async (printerId: string) => {
     setConfirmingZplId(printerId);
     try {
-      const response = await apiClient.applyLocalPrinterCalibration({
-        printerId, zplCompatible: true, dpi: 300, labelWidthMm: 40, labelHeightMm: 50,
-      });
+      const response = await apiClient.applyLocalPrinterCalibration({ printerId, zplCompatible: true, dpi: 300, labelWidthMm: 40, labelHeightMm: 50 });
       toast({
         title: response.success ? "ZPL setup confirmed" : "ZPL setup could not be confirmed",
         description: response.success ? "The connector will use this printer's 300 dpi ZPL profile." : sanitizePrinterUiError(response.error),
         variant: response.success ? undefined : "destructive",
       });
       if (response.success) await loadDiagnostics({ force: true });
-    } finally {
-      setConfirmingZplId(null);
-    }
+    } finally { setConfirmingZplId(null); }
   };
-
   const copySupportSummary = async () => {
     const summary = buildPrinterSupportSummary({
       localAgent,
@@ -1608,12 +1602,8 @@ export default function PrinterDiagnostics() {
                       </div>
                       {printer.online !== false && (!printer.languages?.some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language.toUpperCase())) || printer.dpi !== 300) ? (
                         <div className="mt-3 space-y-2 text-xs">
-                          <p>{printer.dpi != null && printer.dpi !== 300
-                            ? `This printer reports ${printer.dpi} dpi. Select a 300 dpi printer or matching driver before printing.`
-                            : "Windows cannot confirm this printer's complete ZPL setup. Confirm only after setting ZPL mode, 300 dpi, and media at least 40 × 50 mm with sufficient printable width for 472 dots."}</p>
-                          <Button size="sm" variant="outline" disabled={confirmingZplId === printer.printerId || (printer.dpi != null && printer.dpi !== 300)} onClick={() => confirmZplPrinter(printer.printerId)}>
-                            I confirm this printer's ZPL setup
-                          </Button>
+                          <p>{printer.dpi != null && printer.dpi !== 300 ? `This printer reports ${printer.dpi} dpi. Select a 300 dpi printer or matching driver before printing.` : "Windows cannot confirm this printer's complete ZPL setup. Confirm only after setting ZPL mode, 300 dpi, and media at least 40 × 50 mm with sufficient printable width for 472 dots."}</p>
+                          <Button size="sm" variant="outline" disabled={confirmingZplId === printer.printerId || (printer.dpi != null && printer.dpi !== 300)} onClick={() => confirmZplPrinter(printer.printerId)}>I confirm this printer's ZPL setup</Button>
                         </div>
                       ) : null}
                     </div>

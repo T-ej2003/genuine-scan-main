@@ -95,6 +95,10 @@ const run = () => {
     "Confirmed 300 dpi ZPL emulation should be accepted"
   );
   assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "Microsoft Print to PDF", printerLanguages: ["ZPL"], printerDpi: 300 }).reason === "unsupported_virtual_printer",
+    "A virtual queue must fail even if it advertises ZPL and 300 dpi"
+  );
+  assert(
     classifyIndustrialZplPrinterProfile({
       printerName: "ZDesigner ZT410-203dpi ZPL",
       printerLanguages: ["ZPL"],

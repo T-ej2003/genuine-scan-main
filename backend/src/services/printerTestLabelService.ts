@@ -745,6 +745,8 @@ export const printTestLabelForRegisteredPrinter = async (params: {
     const calibration = params.printer.calibrationProfile && typeof params.printer.calibrationProfile === "object" && !Array.isArray(params.printer.calibrationProfile)
       ? params.printer.calibrationProfile as Record<string, unknown> : {};
     const profile = classifyIndustrialZplPrinterProfile({
+      printerName: params.printer.name,
+      model: params.printer.model,
       languages: Array.isArray(capabilities.languages) ? capabilities.languages as string[] : [],
       dpi: Number(capabilities.dpi ?? calibration.dpi ?? 0) || null,
     });

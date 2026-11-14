@@ -58,6 +58,9 @@ export const sanitizePrinterUiError = (raw?: string | null, fallback = "Printing
   if (hasAny(value, ["printer_session_required", "printer_session_disconnected", "persistent printer session"])) {
     return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry.";
   }
+  if (hasAny(value, ["unsupported_virtual_printer", "virtual queues cannot print"])) {
+    return "Fax/PDF virtual queues cannot print MSCQR labels. Select a physical ZPL-compatible printer.";
+  }
   if (hasAny(value, ["unsupported_printer_language", "not confirmed as zpl-compatible"])) {
     return "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.";
   }

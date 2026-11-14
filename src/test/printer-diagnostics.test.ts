@@ -20,6 +20,8 @@ describe("printer diagnostics summary", () => {
     expect(chooseStablePrinterSelection(printers, "emulated-zpl")?.printerId).toBe("emulated-zpl");
     expect(getPrinterSelectionRank({ printerId: "brand-agnostic", printerName: "Canon compatible", languages: ["ZPL"], online: true }))
       .toBe(getPrinterSelectionRank({ printerId: "native", printerName: "Zebra native", languages: ["ZPL"], online: true }));
+    expect(getPrinterSelectionRank({ printerId: "Microsoft Print to PDF", printerName: "Microsoft Print to PDF", languages: ["ZPL"], online: true }))
+      .toBeLessThan(getPrinterSelectionRank({ printerId: "compatible", printerName: "TSC ZPL emulator", languages: ["ZPL"], online: true }));
   });
   it("blocks old connectors even when a printer is visible", () => {
     const summary = getPrinterDiagnosticSummary({

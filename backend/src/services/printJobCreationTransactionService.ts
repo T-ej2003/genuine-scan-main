@@ -6,17 +6,11 @@ import {
 } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { getQrTokenExpiryDate, hashToken, randomNonce, signQrPayload } from "./qrTokenService";
 import { classifyIndustrialZplPrinterProfile } from "../printing/zplCompatibilityContract";
+import { resolvePayloadType } from "./printPayloadService";
 
 type TransactionEventLogger = (event: string, data: Record<string, unknown>) => void;
 type TransactionStageLogger = (stage: string, event: string, data?: Record<string, unknown>) => void;
 
-const payloadTypeFor = (printer: any) => {
-  if (printer.connectionType === PrinterConnectionType.NETWORK_IPP) return PrintPayloadType.PDF;
-  const language = String(printer.commandLanguage || "ZPL").toUpperCase();
-  return Object.values(PrintPayloadType).includes(language as PrintPayloadType)
-    ? (language as PrintPayloadType)
-    : PrintPayloadType.ZPL;
-};
 export const createPrintJobRecords = async (params: {
   capability: string;
   requestId: string;
@@ -59,8 +53,11 @@ export const createPrintJobRecords = async (params: {
   if (!printer) throw Object.assign(new Error("PRINTER_NOT_FOUND"), { statusCode: 404 });
   const qrRows = Array.isArray(readiness.printableItems) ? readiness.printableItems.slice(0, params.quantity) : [];
   if (qrRows.length !== params.quantity) throw new Error(`NOT_ENOUGH_CODES:${qrRows.length}`);
-  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT && ["ZPL", "ZSIM"].includes(String(printer.commandLanguage))) {
+  const payloadType = resolvePayloadType(printer);
+  if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT && payloadType === PrintPayloadType.ZPL) {
     const profile = classifyIndustrialZplPrinterProfile({
+      printerName: printer.name,
+      model: printer.model,
       languages: Array.isArray(printer.capabilitySummary?.languages) ? printer.capabilitySummary.languages : [],
       dpi: Number(printer.capabilitySummary?.dpi ?? printer.calibrationProfile?.dpi ?? 0) || null,
     });
@@ -97,7 +94,6 @@ export const createPrintJobRecords = async (params: {
     };
   });
   const printMode = printer.connectionType as PrintDispatchMode;
-  const payloadType = payloadTypeFor(printer);
   params.onStage("print_job_creation_started", "print_job_creation_started", {
     batchId: params.batchId,
     printerId: printer.id,

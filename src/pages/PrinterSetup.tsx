@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useToast } from "@/hooks/use-toast";
+import { PrinterZplSetupNotice } from "@/components/printing/PrinterZplSetupNotice";
 import apiClient from "@/lib/api-client";
 import {
   deriveManagedPrinterAutoDetect,
@@ -786,14 +787,7 @@ export default function PrinterSetupPage() {
               </div>
             </div>
 
-            {selectedPrinter && (!selectedPrinter.languages?.some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language.toUpperCase())) || selectedPrinter.dpi !== 300) ? (
-              <div className="rounded-lg border p-3 text-sm">
-                {selectedPrinter.dpi != null && selectedPrinter.dpi !== 300
-                  ? `This printer reports ${selectedPrinter.dpi} dpi; MSCQR's ZPL label needs 300 dpi. Choose a matching printer or driver.`
-                  : "ZPL mode or 300 dpi is not confirmed for this printer. Check its language mode and 40 × 50 mm media before printing."}
-                <Button className="ml-2" size="sm" variant="outline" onClick={() => navigate("/printer-diagnostics")}>Confirm ZPL setup</Button>
-              </div>
-            ) : null}
+            {selectedPrinter ? <PrinterZplSetupNotice printer={selectedPrinter} onOpenDiagnostics={() => navigate("/printer-diagnostics")} /> : null}
 
             {recommendedUsbPrinter && selectedPrinter ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-950">

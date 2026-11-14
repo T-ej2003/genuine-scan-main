@@ -139,6 +139,7 @@ const NON_LABEL_PRINTER_TERMS = [
   "print to pdf",
   "document writer",
 ];
+const VIRTUAL_PRINTER_TERMS = ["fax", "pdf", "onenote", "xps", "document writer"];
 
 const printerSearchText = (printer: PrinterInventoryRow) =>
   [
@@ -157,7 +158,8 @@ const printerSearchText = (printer: PrinterInventoryRow) =>
     .toLowerCase();
 
 export const isPreferredLabelPrinter = (printer?: PrinterInventoryRow | null) =>
-  Boolean(printer && toUpperList(printer.languages).some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language)));
+  Boolean(printer && !hasAny(`${printer.printerId} ${printer.printerName} ${printer.model}`.toLowerCase(), VIRTUAL_PRINTER_TERMS) &&
+    toUpperList(printer.languages).some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language)));
 
 export const isLowerPriorityPrinter = (printer?: PrinterInventoryRow | null) =>
   Boolean(printer && !isPreferredLabelPrinter(printer) && hasAny(printerSearchText(printer), NON_LABEL_PRINTER_TERMS));

@@ -303,31 +303,18 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
     };
   }
   if (msg.includes("PRINTER_MAPPING_MISSING")) {
-    const printerStatus = error?.printerStatus || null;
     return {
-      status: 409,
-      logReason: "printer_mapping_missing",
+      status: 409, logReason: "printer_mapping_missing",
       payload: withFailureContext({
         code: "printer_mapping_missing",
-        message:
-          "The saved printer is not linked to this computer's selected label printer. Select the registered printer again or refresh printer setup.",
+        message: "The saved printer is not linked to this computer's selected label printer. Select the registered printer again or refresh printer setup.",
         details: { missingFields: ["localPrinterMapping"] },
-        data: { printerStatus },
+        data: { printerStatus: error?.printerStatus || null },
       }, context),
     };
   }
-  if (msg.startsWith("PRINTER_ZPL_PROFILE_UNVERIFIED")) {
-    return {
-      status: 409,
-      logReason: "zpl_printer_setup_required",
-      payload: withFailureContext({
-        code: "zpl_printer_setup_required",
-        message: msg.includes("unsupported_printer_dpi")
-          ? "This label requires a 300 dpi ZPL printer. Select a matching printer or update its driver."
-          : "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing.",
-      }, context),
-    };
-  }
+  if (msg.startsWith("PRINTER_ZPL_PROFILE_UNVERIFIED")) return { status: 409, logReason: "zpl_printer_setup_required",
+    payload: withFailureContext({ code: "zpl_printer_setup_required", message: sanitizePrinterActionError(msg) }, context) };
   if (msg.includes("PRINTER_INACTIVE")) {
     return {
       status: 409,

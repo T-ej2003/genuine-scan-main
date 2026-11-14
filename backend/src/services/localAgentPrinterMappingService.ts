@@ -1,5 +1,5 @@
 import { PrinterConnectionType } from "@prisma/client";
-import { isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
+import { isVirtualPrinterIdentity, isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
 
 import prisma from "../config/database";
 
@@ -8,25 +8,11 @@ const normalizePrinterIdentity = (value: unknown) => String(value || "").trim();
 const samePrinterText = (left: unknown, right: unknown) =>
   normalizePrinterIdentity(left).toLowerCase() === normalizePrinterIdentity(right).toLowerCase();
 
-const VIRTUAL_PRINTER_TERMS = ["fax", "microsoft print to pdf", "print to pdf", "pdf", "onenote", "xps", "document writer", "airprint"];
-
-const toSearchText = (...values: unknown[]) =>
-  values
-    .flatMap((value) => (Array.isArray(value) ? value : [value]))
-    .map((value) => normalizePrinterIdentity(value).toLowerCase())
-    .filter(Boolean)
-    .join(" ");
-
-const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
-
-const rowSearchText = (row: any) =>
-  toSearchText(row?.printerId, row?.printerName, row?.model, row?.connection, row?.protocols, row?.languages);
+const isVirtualPrinterRow = (row: any) =>
+  Boolean(row && isVirtualPrinterIdentity(row.printerId, row.printerName, row.model));
 
 const isSafeLabelPrinterRow = (row: any) =>
-  Boolean(row && row.online !== false && isZplCompatibleLanguageList(Array.isArray(row.languages) ? row.languages : []));
-
-const isVirtualPrinterRow = (row: any) =>
-  Boolean(row && !isSafeLabelPrinterRow(row) && hasAny(rowSearchText(row), VIRTUAL_PRINTER_TERMS));
+  Boolean(row && row.online !== false && !isVirtualPrinterRow(row) && isZplCompatibleLanguageList(Array.isArray(row.languages) ? row.languages : []));
 
 const savedProfileLooksLikeLabelPrinter = (printer: any) =>
   isZplCompatibleLanguageList([printer?.commandLanguage]);

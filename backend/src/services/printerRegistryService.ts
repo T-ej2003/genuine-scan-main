@@ -173,13 +173,17 @@ export const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connec
     const calibration = printer.calibrationProfile && typeof printer.calibrationProfile === "object" && !Array.isArray(printer.calibrationProfile)
       ? printer.calibrationProfile as Record<string, unknown> : {};
     const profile = classifyIndustrialZplPrinterProfile({
+      printerName: printer.name,
+      model: printer.model,
       languages: Array.isArray(capabilities.languages) ? capabilities.languages as string[] : [],
       dpi: Number(capabilities.dpi ?? calibration.dpi ?? 0) || null,
     });
     if (!profile.compatible) return {
       state: "BLOCKED",
       summary: "ZPL printer setup needs confirmation",
-      detail: profile.reason === "unsupported_printer_dpi"
+      detail: profile.reason === "unsupported_virtual_printer"
+        ? "Fax/PDF virtual queues cannot print MSCQR labels. Select a physical ZPL-compatible printer."
+        : profile.reason === "unsupported_printer_dpi"
         ? "This label requires a 300 dpi ZPL printer. Select a matching printer or update its driver."
         : "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing.",
       connectionStatus,

@@ -3,7 +3,7 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 
-import { inferZplPrinterDpi, isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
+import { inferZplPrinterDpi, isVirtualPrinterIdentity, isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
 
 const execFileAsync = promisify(execFile);
 
@@ -156,17 +156,6 @@ const WINDOWS_PORT_PROBE_TIMEOUT_MS = Math.max(
 );
 const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
 const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
-const VIRTUAL_PRINTER_TERMS = [
-  "fax",
-  "microsoft print to pdf",
-  "print to pdf",
-  "pdf",
-  "onenote",
-  "xps",
-  "document writer",
-  "airprint",
-];
-
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 
 const truncateDiagnosticText = (value: unknown, max = 1200) => {
@@ -205,25 +194,11 @@ const normalizePrinterKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-const printerSearchText = (printer: LocalAgentPrinter) =>
-  [
-    printer.printerId,
-    printer.printerName,
-    printer.model,
-    printer.connection,
-    printer.deviceUri,
-    printer.portName,
-    ...(printer.protocols || []),
-    ...(printer.languages || []),
-    ...(printer.mediaSizes || []),
-  ]
-    .join(" ")
-    .toLowerCase();
-
-const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
+export const isVirtualNonLabelPrinter = (printer?: LocalAgentPrinter | null) =>
+  Boolean(printer && isVirtualPrinterIdentity(printer.printerId, printer.printerName, printer.model));
 
 export const isPreferredLabelPrinter = (printer?: LocalAgentPrinter | null) =>
-  Boolean(printer && isZplCompatibleLanguageList(printer.languages));
+  Boolean(printer && !isVirtualNonLabelPrinter(printer) && isZplCompatibleLanguageList(printer.languages));
 
 export const zplPrinterIdentity = (printer: LocalAgentPrinter) =>
   JSON.stringify([printer.printerId, printer.model, printer.portName, printer.deviceUri]);
@@ -232,17 +207,10 @@ export const applyConfirmedZplCapabilities = (
   printer: LocalAgentPrinter,
   confirmation?: { zplCompatible?: boolean; dpi?: number; zplPrinterIdentity?: string } | null
 ): LocalAgentPrinter => {
-  if (!confirmation?.zplCompatible || confirmation.zplPrinterIdentity !== zplPrinterIdentity(printer) || confirmation.dpi !== 300 ||
+  if (isVirtualNonLabelPrinter(printer) || !confirmation?.zplCompatible || confirmation.zplPrinterIdentity !== zplPrinterIdentity(printer) || confirmation.dpi !== 300 ||
       (printer.dpi != null && printer.dpi !== 300) ||
       (printer.languages.length > 0 && !isZplCompatibleLanguageList(printer.languages))) return printer;
   return { ...printer, languages: [...new Set([...printer.languages, "ZPL"])], dpi: printer.dpi ?? 300 };
-};
-
-export const isVirtualNonLabelPrinter = (printer?: LocalAgentPrinter | null) => {
-  if (!printer) return false;
-  if (isPreferredLabelPrinter(printer)) return false;
-  const text = printerSearchText(printer);
-  return hasAny(text, VIRTUAL_PRINTER_TERMS);
 };
 
 export const getPrinterSelectionRank = (printer: LocalAgentPrinter) => {

@@ -5,6 +5,7 @@ const {
   parseWindowsPrinterDiscovery,
   parseWindowsPrinters,
   applyConfirmedZplCapabilities,
+  isVirtualNonLabelPrinter,
   zplPrinterIdentity,
   resolveSelectedPrinter,
   waitForLocalPrintJobCompletion,
@@ -89,6 +90,11 @@ const run = async () => {
   assert(applyConfirmedZplCapabilities(unknown, { ...confirmation, zplCompatible: false }).languages.length === 0, "Unconfirmed mode must remain unknown");
   assert(applyConfirmedZplCapabilities({ ...unknown, portName: "USB005" }, confirmation).languages.length === 0, "Confirmation must expire if the printer port changes");
   assert(applyConfirmedZplCapabilities({ ...unknown, languages: compatible[3].languages }, confirmation).languages.every((language) => language !== "ZPL"), "Conflicting driver language must not be overridden");
+  const virtualZpl = { ...unknown, printerId: "Microsoft Print to PDF", printerName: "Microsoft Print to PDF", languages: ["ZPL"], dpi: 300 };
+  assert(isVirtualNonLabelPrinter(virtualZpl), "A virtual queue must remain blocked even if it advertises ZPL");
+  const virtualUnknown = { ...virtualZpl, languages: [] };
+  assert(applyConfirmedZplCapabilities(virtualUnknown, { ...confirmation, zplPrinterIdentity: zplPrinterIdentity(virtualUnknown) }).languages.length === 0,
+    "Operator confirmation must not turn a virtual queue into a physical printer");
   const calibrated = mergeCalibrationProfile({ calibrationProfiles: { [unknown.printerId]: { zplCompatible: true, dpi: 300, offsetXmm: 2 } } }, unknown.printerId, { darkness: 8 });
   assert(calibrated.calibrationProfiles[unknown.printerId].zplCompatible === true && calibrated.calibrationProfiles[unknown.printerId].offsetXmm === 2, "Updating calibration must preserve operator confirmation and existing offsets");
 

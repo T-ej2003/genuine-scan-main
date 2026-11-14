@@ -400,6 +400,7 @@ export const resolvePayloadType = (printer: PrinterPayloadProfile): PrintPayload
   const language = resolveLanguageKind(printer);
   if (printer.connectionType === PrinterConnectionType.LOCAL_AGENT && language === PrinterLanguageKind.AUTO) {
     if (classifyIndustrialZplPrinterProfile({
+      printerName: printer.name,
       languages: Array.isArray(printer.capabilitySummary?.languages) ? printer.capabilitySummary.languages as string[] : [],
       dpi: Number(printer.capabilitySummary?.dpi ?? printer.calibrationProfile?.dpi ?? 0) || null,
     }).compatible) return PrintPayloadType.ZPL;

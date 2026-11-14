@@ -284,6 +284,11 @@ const run = () => {
       printers: [{ printerId: "Fax", printerName: "Fax", languages: [], online: true }] }
   ), "Exact registration must not make a virtual printer a valid label destination");
   assert(!hasExactTrustedSelectedPrinterMatch(
+    { name: "Microsoft Print to PDF", nativePrinterId: "Microsoft Print to PDF", commandLanguage: "ZPL", printerRegistrationId: "reg-1" },
+    { selectedPrinterId: "Microsoft Print to PDF", selectedPrinterName: "Microsoft Print to PDF", registrationId: "reg-1", eligibleForPrinting: true, stale: false,
+      printers: [{ printerId: "Microsoft Print to PDF", printerName: "Microsoft Print to PDF", languages: ["ZPL"], dpi: 300, online: true }] }
+  ), "A ZPL claim must not make a virtual queue a valid label destination");
+  assert(!hasExactTrustedSelectedPrinterMatch(
     { name: "Factory printer", nativePrinterId: "factory-usb-1", commandLanguage: "ZPL", printerRegistrationId: "reg-1" },
     { selectedPrinterId: "factory-usb-1", selectedPrinterName: "Factory printer", registrationId: "reg-1", eligibleForPrinting: true, stale: false,
       printers: [{ printerId: "factory-usb-1", printerName: "Factory printer", languages: ["ZPL"], dpi: 203, online: true }] }

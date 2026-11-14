@@ -35,6 +35,9 @@ export const sanitizePrinterActionError = (
   if (hasAny(value, ["heartbeat", "trust", "attestation", "signature", "fingerprint", "certificate", "mtls"])) {
     return "The secure printer connection is not ready yet. Refresh and try again in a moment.";
   }
+  if (hasAny(value, ["unsupported_virtual_printer", "virtual queues cannot print"])) {
+    return "Fax/PDF virtual queues cannot print MSCQR labels. Select a physical ZPL-compatible printer.";
+  }
   if (hasAny(value, ["unsupported_printer_language", "not confirmed as zpl-compatible"])) {
     return "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.";
   }
