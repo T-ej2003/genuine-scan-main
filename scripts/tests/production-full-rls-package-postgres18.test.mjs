@@ -17,6 +17,7 @@ import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from 
 import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
 import { buildProductionSevenRoutinePackage } from "../aws/production-seven-routine-package.mjs";
+import { buildProductionPrintingRestorationPackage } from "../aws/production-printing-restoration-package.mjs";
 import { PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
 import { buildC02SessionPrerequisitePackage } from "../aws/production-c02-session-package.mjs";
 import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
@@ -50,6 +51,7 @@ const c02Runtime = createRequire(import.meta.url)("../aws/production-c02-session
 const b01Runtime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-executor.cjs");
 const b01ReadOnlyRuntime = createRequire(import.meta.url)("../aws/production-b01-prerequisite-readonly.cjs");
 const sevenRoutineRuntime = createRequire(import.meta.url)("../aws/production-seven-routine-executor.cjs");
+const restorationRuntime = createRequire(import.meta.url)("../aws/production-printing-restoration-executor.cjs");
 const printingRoutine = (source, name) => {
   const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
   assert.equal(source.split(marker).length, 2);
@@ -351,6 +353,55 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(securityRebaselineCanonical.protectedMainSha, sourceSha);
       assert.equal(securityRebaselineCanonical.candidateSourceSha, context.candidateSourceSha);
       assert.equal(securityRebaselineCanonical.appOnlyRequirementsSha256, requirements.requirementsSha256);
+      const restorationPackage = buildProductionPrintingRestorationPackage({ sourceSha, requirements,
+        securityInventory: securityRebaselineCanonical, repositoryRoot: root,
+        databaseIdentity: { DBInstanceIdentifier: "mscqr-production-rls-green-phase2",
+          DbiResourceId: "db-3C27FYJOJ2IY27X7QGQG5YB4IM", EngineVersion: "18.4",
+          DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
+      assert.equal(restorationPackage.mutations.length, 9);
+      t.diagnostic(JSON.stringify({ printingRestorationDelta: { predecessor: restorationPackage.predecessorCatalogue,
+        successor: restorationPackage.successorCatalogue, sqlSha256: restorationPackage.sqlSha256 } }));
+      const deployedPrintingSource = run("git", ["show", "5fec457aad39cf22320e820b071943dec3e96ec0:scripts/rls/sql/generated/20-context-helpers.sql"]);
+      const deployedFunction = identity => {
+        const name = identity.slice("app_rls.".length, identity.indexOf("("));
+        const marker = `CREATE OR REPLACE FUNCTION app_rls.${name}(`;
+        const start = deployedPrintingSource.indexOf(marker), end = deployedPrintingSource.indexOf("\n$fn$;", start);
+        assert.ok(start >= 0 && end > start);
+        return deployedPrintingSource.slice(start, end + 6).replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_");
+      };
+      await administratorClient.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+        for (const row of restorationPackage.mutations.slice(5, 9).filter(row => row.sql.startsWith("CREATE POLICY"))) {
+          const [, name, table] = /^CREATE POLICY "([^"]+)" ON public\."([^"]+)" /.exec(row.sql);
+          await tx.$executeRawUnsafe(`DROP POLICY "${name}" ON public."${table}"`);
+        }
+        for (const row of restorationPackage.mutations.slice(3, 5))
+          await tx.$executeRawUnsafe(row.sql.replace(/^GRANT /, "REVOKE ").replace(/ TO /, " FROM "));
+        await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
+        for (const row of restorationPackage.mutations.slice(0, 3)) await tx.$executeRawUnsafe(deployedFunction(row.identity));
+        await tx.$executeRawUnsafe("RESET ROLE");
+        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
+        await tx.$executeRawUnsafe("REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner");
+        await tx.$executeRawUnsafe("RESET ROLE");
+      }, { maxWait: 10000, timeout: 180000 });
+      const restorationDigest = () => administratorClient.$transaction(async tx => {
+        await tx.$executeRawUnsafe("SET TRANSACTION READ ONLY");
+        return restorationRuntime.catalogueDigest(await sevenRoutineCollector(tx));
+      }, { maxWait: 10000, timeout: 60000 });
+      assert.deepEqual(await restorationDigest(), restorationPackage.predecessorCatalogue);
+      await assert.rejects(administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
+        tx, package: restorationPackage, checkpoint: stage => { if (stage === "after-5") throw new Error("forced printing rollback"); },
+      }), { maxWait: 10000, timeout: 180000 }), /forced printing rollback/);
+      assert.deepEqual(await restorationDigest(), restorationPackage.predecessorCatalogue);
+      assert.deepEqual(await administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
+        tx, package: restorationPackage,
+      }), { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 9 });
+      assert.deepEqual(await restorationDigest(), restorationPackage.successorCatalogue);
+      assert.deepEqual(await administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
+        tx, package: restorationPackage,
+      }), { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
       const sevenScope = JSON.parse(fs.readFileSync(path.join(root, "scripts/aws/production-seven-routine-scope.json"), "utf8"));
       const sevenInputs = { sourceSha, requirements, securityInventory: securityRebaselineCanonical, repositoryRoot: root,
         databaseIdentity: { DBInstanceIdentifier: sevenScope.databaseInstance, DbiResourceId: sevenScope.databaseResourceId,
