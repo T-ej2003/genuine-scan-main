@@ -4,14 +4,17 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { z } from "zod";
+import { isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
+import { isAuthorizedConnectorUiOrigin } from "./uiOrigin";
 
 import {
   buildCapabilitySummary,
+  applyConfirmedZplCapabilities,
   buildSetupVerification,
-  isPreferredLabelPrinter,
   isVirtualNonLabelPrinter,
   listLocalPrinters,
   resolveSelectedPrinter,
+  zplPrinterIdentity,
   type LocalAgentPrinter,
   type LocalAgentPrinterDiscoveryDiagnostics,
   type LocalAgentSetupVerification,
@@ -268,12 +271,18 @@ app.use((_req, res, next) => {
 });
 app.use(
   cors({
-    origin: true,
+    origin: (origin, callback) => callback(null, origin && isAuthorizedConnectorUiOrigin(origin) ? origin : false),
     methods: ["GET", "POST", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Access-Control-Request-Private-Network"],
   })
 );
 app.use(express.json({ limit: "1mb" }));
+app.use((req, res, next) => {
+  if (req.method === "POST" && !isAuthorizedConnectorUiOrigin(req.get("origin"))) {
+    return res.status(403).json({ success: false, error: "This site is not authorized to change connector settings." });
+  }
+  next();
+});
 
 const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState; snapshot: AgentSnapshot }> => {
   if (!forceRefresh && inventoryCache && inventoryCache.expiresAt > Date.now()) {
@@ -292,7 +301,7 @@ const buildSnapshot = async (forceRefresh = false): Promise<{ state: AgentState;
 
   let state = await loadAgentState();
   const inventory = await listLocalPrinters();
-  const printers = inventory.printers;
+  const printers = inventory.printers.map((printer) => applyConfirmedZplCapabilities(printer, state.calibrationProfiles[printer.printerId]));
   const selection = resolveSelectedPrinter(printers, state.selectedPrinterId);
   const resolvedSelectedId = selection.printerId;
   if (resolvedSelectedId !== state.selectedPrinterId) {
@@ -391,14 +400,10 @@ const requirePrinter = async (printerId: string | null | undefined) => {
   const { state, snapshot } = await buildSnapshot(true);
   const explicitPrinterId = String(printerId || "").trim();
   const resolvedPrinterId = String(explicitPrinterId || snapshot.selectedPrinterId || "").trim();
-  const printer =
-    snapshot.printers.find((item) => item.printerId === resolvedPrinterId) ||
-    snapshot.printers.find((item) => item.isDefault) ||
-    snapshot.printers[0] ||
-    null;
+  const printer = snapshot.printers.find((item) => item.printerId === resolvedPrinterId) || null;
 
   if (!printer) {
-    throw Object.assign(new Error("No local printer is available."), { statusCode: 404 });
+    throw Object.assign(new Error(explicitPrinterId ? "Selected printer is no longer available. Choose an active printer." : "No local printer is available."), { statusCode: 404 });
   }
 
   if (!printer.online) {
@@ -407,11 +412,10 @@ const requirePrinter = async (printerId: string | null | undefined) => {
 
   if (
     explicitPrinterId &&
-    isVirtualNonLabelPrinter(printer) &&
-    snapshot.printers.some((item) => item.online !== false && isPreferredLabelPrinter(item))
+    isVirtualNonLabelPrinter(printer)
   ) {
     throw Object.assign(
-      new Error("Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."),
+      new Error("Fax/PDF printers cannot be used for MSCQR labels. Choose a ZPL-compatible label printer."),
       { statusCode: 409 }
     );
   }
@@ -526,7 +530,17 @@ const saveCalibration = async (req: express.Request, res: express.Response) => {
     }
 
     const { state, printer } = await requirePrinter(printerId);
-    const nextState = mergeCalibrationProfile(state, printer.printerId, req.body || {});
+    if (req.body?.zplCompatible === true && (
+      Number(req.body?.dpi) !== 300 ||
+      (printer.dpi != null && printer.dpi !== 300) ||
+      (printer.languages.length > 0 && !isZplCompatibleLanguageList(printer.languages))
+    )) {
+      return res.status(409).json({ success: false, error: "Confirm a 300 dpi printer in ZPL mode with a matching Windows driver before saving this profile." });
+    }
+    const nextState = mergeCalibrationProfile(state, printer.printerId, {
+      ...(req.body || {}),
+      ...(req.body?.zplCompatible === true ? { zplPrinterIdentity: zplPrinterIdentity(printer) } : {}),
+    });
     await saveAgentState(nextState);
     invalidateInventoryCache();
 

@@ -229,6 +229,7 @@ export const createLocalAgentPrintingApi = () => {
 
     async applyLocalPrinterCalibration(payload: {
       printerId: string;
+      zplCompatible?: boolean;
       dpi?: number;
       labelWidthMm?: number;
       labelHeightMm?: number;
@@ -246,11 +247,12 @@ export const createLocalAgentPrintingApi = () => {
       try {
         const normalizedPayload = {
           printerId,
+          zplCompatible: payload.zplCompatible,
           dpi: Number(payload.dpi || 0) || undefined,
           labelWidthMm: Number(payload.labelWidthMm || 0) || undefined,
           labelHeightMm: Number(payload.labelHeightMm || 0) || undefined,
-          offsetXmm: Number(payload.offsetXmm || 0) || 0,
-          offsetYmm: Number(payload.offsetYmm || 0) || 0,
+          offsetXmm: payload.offsetXmm == null ? undefined : Number(payload.offsetXmm),
+          offsetYmm: payload.offsetYmm == null ? undefined : Number(payload.offsetYmm),
           darkness: Number(payload.darkness || 0) || undefined,
           speed: Number(payload.speed || 0) || undefined,
         };

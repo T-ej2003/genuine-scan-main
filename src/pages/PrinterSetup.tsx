@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api-client";
 import {
   deriveManagedPrinterAutoDetect,
-  findRecommendedUsbZebraAlternative,
+  findRecommendedUsbZplAlternative,
   normalizePrinterInventoryRows,
   type PrinterInventoryRow,
 } from "@/lib/printer-diagnostics";
@@ -414,7 +414,7 @@ export default function PrinterSetupPage() {
     [selectedPrinter]
   );
   const recommendedUsbPrinter = useMemo(
-    () => findRecommendedUsbZebraAlternative(inventory, selectedPrinter),
+    () => findRecommendedUsbZplAlternative(inventory, selectedPrinter),
     [inventory, selectedPrinter]
   );
   const recommendedSignature = useMemo(
@@ -591,7 +591,7 @@ export default function PrinterSetupPage() {
         const response = await apiClient.selectLocalPrinter(recommendedUsbPrinter.printerId);
         if (!response.success) {
           toast({
-            title: "USB Zebra was not selected",
+            title: "USB label printer was not selected",
             description: sanitizePrinterUiError(response.error, "MSCQR could not switch the local printer selection."),
             variant: "destructive",
           });
@@ -600,7 +600,7 @@ export default function PrinterSetupPage() {
         setSelectedPrinterId(recommendedUsbPrinter.printerId);
         await Promise.allSettled([inventoryQuery.refetch(), runtimeQuery.refetch()]);
         toast({
-          title: "USB Zebra selected",
+          title: "USB label printer selected",
           description: "Print a setup test label on this USB route before starting production labels.",
         });
       } finally {
@@ -786,15 +786,24 @@ export default function PrinterSetupPage() {
               </div>
             </div>
 
+            {selectedPrinter && (!selectedPrinter.languages?.some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language.toUpperCase())) || selectedPrinter.dpi !== 300) ? (
+              <div className="rounded-lg border p-3 text-sm">
+                {selectedPrinter.dpi != null && selectedPrinter.dpi !== 300
+                  ? `This printer reports ${selectedPrinter.dpi} dpi; MSCQR's ZPL label needs 300 dpi. Choose a matching printer or driver.`
+                  : "ZPL mode or 300 dpi is not confirmed for this printer. Check its language mode and 40 × 50 mm media before printing."}
+                <Button className="ml-2" size="sm" variant="outline" onClick={() => navigate("/printer-diagnostics")}>Confirm ZPL setup</Button>
+              </div>
+            ) : null}
+
             {recommendedUsbPrinter && selectedPrinter ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-950">
-                <div className="font-medium">Network Zebra queue is broken</div>
+                <div className="font-medium">Network label printer queue is broken</div>
                 <div className="mt-1 text-xs leading-5">
                   Saved WiFi queue points to{" "}
                   {selectedPrinter.windowsPortHost
                     ? `${selectedPrinter.windowsPortHost}:${selectedPrinter.windowsPortNumber || 9100}`
                     : selectedPrinter.windowsPortName || selectedPrinter.portName || "its saved Windows TCP/IP port"}
-                  , which is unreachable from this workstation. USB Zebra is available on{" "}
+                  , which is unreachable from this workstation. A ZPL-compatible USB printer is available on{" "}
                   {recommendedUsbPrinter.portName || recommendedUsbPrinter.windowsPortName || "USB"}.
                   {Number(selectedPrinter.stuckJobCount || 0) > 0
                     ? ` Windows queue has ${selectedPrinter.stuckJobCount} stuck MSCQR job${Number(selectedPrinter.stuckJobCount) === 1 ? "" : "s"}.`
@@ -804,8 +813,8 @@ export default function PrinterSetupPage() {
                   <ActionButton
                     size="sm"
                     onClick={useRecommendedUsbPrinter}
-                    state={saving ? createUiActionState("pending", "Switching this workstation to the USB Zebra.") : createUiActionState("enabled")}
-                    idleLabel="Use USB Zebra"
+                    state={saving ? createUiActionState("pending", "Switching this workstation to the USB label printer.") : createUiActionState("enabled")}
+                    idleLabel="Use USB printer"
                     pendingLabel="Switching..."
                   />
                   <Button size="sm" variant="outline" onClick={() => navigate(APP_PATHS.connectorDownload)}>

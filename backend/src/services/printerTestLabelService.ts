@@ -21,6 +21,7 @@ import { sendRawPayloadToNetworkPrinter } from "./networkPrinterSocketService";
 import { resolvePrinterConfirmationMode, type PrintConfirmationMode } from "./printConfirmationService";
 import { buildKnownGoodDiagnosticZplPayload, resolvePayloadType, supportsNetworkDirectPayload, type PrinterPayloadProfile } from "./printPayloadService";
 import { getZebraTotalLabelCount, waitForZebraLabelConfirmation } from "./zebraPrinterStatusService";
+import { classifyIndustrialZplPrinterProfile } from "../printing/zplCompatibilityContract";
 import { administerPrintingPrinter, mutatePrintingTestLabelJob } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 
 const PRINTER_TEST_LABEL_TIMEOUT_MS = Math.max(
@@ -310,6 +311,8 @@ const enqueueGatewayPrinterTestJob = (params: {
             id: params.printer.id,
             name: params.printer.name,
             nativePrinterId: params.printer.nativePrinterId,
+            languages: (params.printer.capabilitySummary as any)?.languages || [],
+            dpi: (params.printer.capabilitySummary as any)?.dpi || null,
           },
           calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
           jobNumber,
@@ -415,6 +418,8 @@ const enqueuePersistentLocalAgentPrinterTestJob = async (params: {
           id: params.printer.id,
           name: params.printer.name,
           nativePrinterId: params.printer.nativePrinterId,
+          languages: (params.printer.capabilitySummary as any)?.languages || [],
+          dpi: (params.printer.capabilitySummary as any)?.dpi || null,
         },
         calibrationProfile: (params.printer.calibrationProfile as Record<string, unknown> | null) || null,
         jobNumber: `SETUP-TEST-${context.code}`,
@@ -537,7 +542,7 @@ export const confirmGatewayPrinterTestJob = (params: {
       job.connectionType === PrinterConnectionType.NETWORK_IPP
         ? "The site connector printed the live IPP test label and the printer confirmed completion."
         : job.connectionType === PrinterConnectionType.LOCAL_AGENT
-          ? "The workstation connector printed the diagnostic Zebra RAW ZPL test label."
+          ? "The workstation connector submitted the diagnostic RAW ZPL test label to the printer queue."
         : "The site connector printed the live label test and the printer confirmed completion.",
     confirmationMode: params.confirmationMode || null,
     connectionType: job.connectionType as PrinterConnectionType,
@@ -735,6 +740,15 @@ export const printTestLabelForRegisteredPrinter = async (params: {
   onDispatchStateChange?: (state: "not_dispatched" | "queue_uncertain" | "dispatch_started" | "confirmed") => void;
 }) => {
   if (params.printer.connectionType === PrinterConnectionType.LOCAL_AGENT) {
+    const capabilities = params.printer.capabilitySummary && typeof params.printer.capabilitySummary === "object" && !Array.isArray(params.printer.capabilitySummary)
+      ? params.printer.capabilitySummary as Record<string, unknown> : {};
+    const calibration = params.printer.calibrationProfile && typeof params.printer.calibrationProfile === "object" && !Array.isArray(params.printer.calibrationProfile)
+      ? params.printer.calibrationProfile as Record<string, unknown> : {};
+    const profile = classifyIndustrialZplPrinterProfile({
+      languages: Array.isArray(capabilities.languages) ? capabilities.languages as string[] : [],
+      dpi: Number(capabilities.dpi ?? calibration.dpi ?? 0) || null,
+    });
+    if (!profile.compatible) throw new Error(`PRINTER_ZPL_PROFILE_UNVERIFIED:${profile.reason}`);
     return enqueuePersistentLocalAgentPrinterTestJob(params);
   }
   if (params.printer.connectionType !== PrinterConnectionType.NETWORK_IPP &&

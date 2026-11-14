@@ -83,6 +83,18 @@ const run = () => {
     "Generic / Text Only must not be accepted as a ZPL printer"
   );
   assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "Zebra ZPL 300dpi", printerLanguages: [], printerDpi: 300 }).reason === "unsupported_printer_language",
+    "A queue name alone must not establish ZPL mode"
+  );
+  assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "Compatible emulation", printerLanguages: ["ZSIM"], printerDpi: null }).reason === "unverified_printer_dpi",
+    "Unknown DPI must require operator confirmation"
+  );
+  assert(
+    classifyIndustrialZplPrinterProfile({ printerName: "Compatible emulation", printerLanguages: ["ZSIM"], printerDpi: 300 }).compatible,
+    "Confirmed 300 dpi ZPL emulation should be accepted"
+  );
+  assert(
     classifyIndustrialZplPrinterProfile({
       printerName: "ZDesigner ZT410-203dpi ZPL",
       printerLanguages: ["ZPL"],

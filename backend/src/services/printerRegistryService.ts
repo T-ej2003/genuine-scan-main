@@ -10,6 +10,7 @@ import { createHash, randomBytes } from "crypto";
 
 import prisma from "../config/database";
 import { inspectIppPrinter } from "../printing/ippClient";
+import { classifyIndustrialZplPrinterProfile } from "../printing/zplCompatibilityContract";
 import {
   ensurePrinterProfileForPrinter,
   getPrinterProfileForPrinter,
@@ -134,7 +135,7 @@ export type PrinterRegistryStatus = {
   connectionStatus?: PrinterConnectionStatus | null;
 };
 
-const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connectionStatus: PrinterConnectionStatus): PrinterRegistryStatus => {
+export const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connectionStatus: PrinterConnectionStatus): PrinterRegistryStatus => {
   if (!connectionStatus.connected || !connectionStatus.eligibleForPrinting) {
     return {
       state: connectionStatus.connectionClass === "BLOCKED" ? "BLOCKED" : "OFFLINE",
@@ -152,7 +153,7 @@ const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connectionSta
       summary: "Saved printer link needs refresh",
       detail: relinkAssessment.eligible
         ? "This computer can see the same local printer, but the saved printer is linked to an older connector install. Relink it before starting a print run."
-        : "The saved printer is linked to an older connector install. Open Printer Setup and choose the ZDesigner printer again.",
+        : "The saved printer is linked to an older connector install. Open Printer Setup and choose the registered label printer again.",
       connectionStatus,
     };
   }
@@ -162,6 +163,25 @@ const buildLocalPrinterStatus = (printer: RegisteredPrinterRecord, connectionSta
       state: "ATTENTION",
       summary: "Different local printer selected",
       detail: `Active workstation printer is ${connectionStatus.selectedPrinterName || connectionStatus.printerName || activeNativePrinterId}. Switch the local agent before printing.`,
+      connectionStatus,
+    };
+  }
+
+  if (printer.commandLanguage === PrinterCommandLanguage.ZPL || printer.commandLanguage === PrinterCommandLanguage.ZSIM) {
+    const capabilities = printer.capabilitySummary && typeof printer.capabilitySummary === "object" && !Array.isArray(printer.capabilitySummary)
+      ? printer.capabilitySummary as Record<string, unknown> : {};
+    const calibration = printer.calibrationProfile && typeof printer.calibrationProfile === "object" && !Array.isArray(printer.calibrationProfile)
+      ? printer.calibrationProfile as Record<string, unknown> : {};
+    const profile = classifyIndustrialZplPrinterProfile({
+      languages: Array.isArray(capabilities.languages) ? capabilities.languages as string[] : [],
+      dpi: Number(capabilities.dpi ?? calibration.dpi ?? 0) || null,
+    });
+    if (!profile.compatible) return {
+      state: "BLOCKED",
+      summary: "ZPL printer setup needs confirmation",
+      detail: profile.reason === "unsupported_printer_dpi"
+        ? "This label requires a 300 dpi ZPL printer. Select a matching printer or update its driver."
+        : "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing.",
       connectionStatus,
     };
   }
@@ -384,7 +404,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
       protocols: Array.isArray((raw as any).protocols) ? (raw as any).protocols : [],
       languages: Array.isArray((raw as any).languages) ? (raw as any).languages : [],
       mediaSizes: Array.isArray((raw as any).mediaSizes) ? (raw as any).mediaSizes : [],
-      dpi: Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
+      dpi: (raw as any).dpi != null && Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
     } as Record<string, unknown>;
     const metadata = {
       connection: toNullableString((raw as any).connection, 80),
@@ -399,9 +419,14 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
     };
     const existingPrinter = await prisma.printer.findUnique({
       where,
-      select: { metadata: true },
+      select: { metadata: true, calibrationProfile: true },
     });
     const mergedMetadata = mergePrinterMetadata(existingPrinter?.metadata, metadata);
+    const calibrationProfile = nativePrinterId === String(params.selectedPrinterId || "").trim()
+      ? params.calibrationProfile || null
+      : existingPrinter?.calibrationProfile && typeof existingPrinter.calibrationProfile === "object" && !Array.isArray(existingPrinter.calibrationProfile)
+        ? existingPrinter.calibrationProfile as Record<string, unknown>
+        : null;
     const printer = await prisma.printer.upsert({
       where,
       create: {
@@ -425,7 +450,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
         lastValidationStatus: params.connected ? "READY" : "OFFLINE",
         lastValidationMessage: params.connected ? null : "Local agent reported printer unavailable",
         capabilitySummary: toNullableJsonValue(capabilitySummary),
-        calibrationProfile: toNullableJsonValue(params.calibrationProfile || null),
+        calibrationProfile: toNullableJsonValue(calibrationProfile),
         metadata: toNullableJsonValue(mergedMetadata),
       },
       update: {
@@ -445,7 +470,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
         lastValidationStatus: params.connected ? "READY" : "OFFLINE",
         lastValidationMessage: params.connected ? null : "Local agent reported printer unavailable",
         capabilitySummary: toNullableJsonValue(capabilitySummary),
-        calibrationProfile: toNullableJsonValue(params.calibrationProfile),
+        calibrationProfile: toNullableJsonValue(calibrationProfile),
         metadata: toNullableJsonValue(mergedMetadata),
       },
     });

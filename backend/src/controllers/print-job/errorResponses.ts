@@ -32,7 +32,8 @@ type PrintJobErrorCode =
   | "print_signing_configuration_invalid"
   | "print_service_unavailable"
   | "session_expired"
-  | "unsupported_printer_route";
+  | "unsupported_printer_route"
+  | "zpl_printer_setup_required";
 
 type PrinterStatusLike = {
   registrationId?: string | null;
@@ -309,9 +310,21 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
       payload: withFailureContext({
         code: "printer_mapping_missing",
         message:
-          "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.",
+          "The saved printer is not linked to this computer's selected label printer. Select the registered printer again or refresh printer setup.",
         details: { missingFields: ["localPrinterMapping"] },
         data: { printerStatus },
+      }, context),
+    };
+  }
+  if (msg.startsWith("PRINTER_ZPL_PROFILE_UNVERIFIED")) {
+    return {
+      status: 409,
+      logReason: "zpl_printer_setup_required",
+      payload: withFailureContext({
+        code: "zpl_printer_setup_required",
+        message: msg.includes("unsupported_printer_dpi")
+          ? "This label requires a 300 dpi ZPL printer. Select a matching printer or update its driver."
+          : "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing.",
       }, context),
     };
   }
@@ -321,15 +334,15 @@ export const describePrintJobCreateFailure = (error: any, context?: PrintJobFail
       logReason: "printer_inactive",
       payload: withFailureContext({
         code: "invalid_printer",
-        message: "Choose the ZDesigner printer again, then start the print run.",
+        message: "Choose an active ZPL-compatible printer, then start the print run.",
       }, context),
     };
   }
   if (msg.includes("PRINTER_SELECTION_MISMATCH")) {
     const printerStatus = error?.printerStatus || null;
     const message = hasVirtualSelectedPrinter(printerStatus)
-      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
-      : "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
+      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose a ZPL-compatible label printer."
+      : "Choose a ZPL-compatible printer under Printer on this computer, then refresh printer setup.";
     return {
       status: 409,
       logReason: "printer_selection_mismatch",

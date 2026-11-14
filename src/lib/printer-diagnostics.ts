@@ -128,7 +128,6 @@ const toUpperList = (values: string[] | null | undefined) =>
   Array.isArray(values) ? values.map((value) => String(value || "").trim().toUpperCase()).filter(Boolean) : [];
 const toCleanString = (value: unknown, max = 512) => String(value || "").trim().slice(0, max);
 const SUPPORTED_NETWORK_DIRECT_LANGUAGES = ["ZPL", "TSPL", "EPL", "CPCL"] as const;
-const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zpl"];
 const NON_LABEL_PRINTER_TERMS = [
   "canon",
   "airprint",
@@ -158,12 +157,12 @@ const printerSearchText = (printer: PrinterInventoryRow) =>
     .toLowerCase();
 
 export const isPreferredLabelPrinter = (printer?: PrinterInventoryRow | null) =>
-  Boolean(printer && hasAny(printerSearchText(printer), LABEL_PRINTER_TERMS));
+  Boolean(printer && toUpperList(printer.languages).some((language) => ["ZPL", "ZPL2", "ZPL-II", "ZSIM"].includes(language)));
 
 export const isLowerPriorityPrinter = (printer?: PrinterInventoryRow | null) =>
-  Boolean(printer && hasAny(printerSearchText(printer), NON_LABEL_PRINTER_TERMS));
+  Boolean(printer && !isPreferredLabelPrinter(printer) && hasAny(printerSearchText(printer), NON_LABEL_PRINTER_TERMS));
 
-const isUsbZebraPrinter = (printer?: PrinterInventoryRow | null) =>
+const isUsbZplPrinter = (printer?: PrinterInventoryRow | null) =>
   Boolean(
     printer &&
       isPreferredLabelPrinter(printer) &&
@@ -172,28 +171,22 @@ const isUsbZebraPrinter = (printer?: PrinterInventoryRow | null) =>
         printer.usbAvailable)
   );
 
-export const findRecommendedUsbZebraAlternative = (
+export const findRecommendedUsbZplAlternative = (
   printers: PrinterInventoryRow[],
   selectedPrinter?: PrinterInventoryRow | null
 ) => {
   if (!selectedPrinter || !isPreferredLabelPrinter(selectedPrinter)) return null;
   const selectedBlocked = selectedPrinter.online === false || selectedPrinter.queueHasErrors;
   if (!selectedBlocked) return null;
-  return printers.find((printer) => printer.printerId !== selectedPrinter.printerId && printer.online !== false && isUsbZebraPrinter(printer)) || null;
+  return printers.find((printer) => printer.printerId !== selectedPrinter.printerId && printer.online !== false && isUsbZplPrinter(printer)) || null;
 };
 
 export const getPrinterSelectionRank = (printer: PrinterInventoryRow) => {
-  const text = printerSearchText(printer);
   let score = 0;
   if (printer.online === false) score -= 100;
   if (printer.isDefault) score += 2;
-  for (const term of LABEL_PRINTER_TERMS) {
-    if (text.includes(term)) score += 25;
-  }
-  for (const term of NON_LABEL_PRINTER_TERMS) {
-    if (text.includes(term)) score -= 20;
-  }
-  if (toUpperList(printer.languages).includes("ZPL")) score += 30;
+  if (isPreferredLabelPrinter(printer)) score += 40;
+  if (isLowerPriorityPrinter(printer)) score -= 20;
   return score;
 };
 
@@ -324,7 +317,7 @@ export const normalizePrinterInventoryRows = (rows: unknown): PrinterInventoryRo
       protocols: Array.isArray((row as any).protocols) ? (row as any).protocols : [],
       languages: Array.isArray((row as any).languages) ? (row as any).languages : [],
       mediaSizes: Array.isArray((row as any).mediaSizes) ? (row as any).mediaSizes : [],
-      dpi: Number.isFinite(Number((row as any).dpi)) ? Number((row as any).dpi) : null,
+      dpi: (row as any).dpi != null && Number.isFinite(Number((row as any).dpi)) ? Number((row as any).dpi) : null,
       deviceUri: toCleanString((row as any).deviceUri, 512) || null,
       portName: toCleanString((row as any).portName, 180) || null,
       windowsPortName: toCleanString((row as any).windowsPortName, 180) || null,
@@ -434,7 +427,7 @@ export const getPrinterDiagnosticSummary = (params: {
     printers[0] ||
     null;
   const selectedPrinterId = String(selectedPrinter?.printerId || "").trim();
-  const recommendedUsbPrinter = findRecommendedUsbZebraAlternative(printers, selectedPrinter);
+  const recommendedUsbPrinter = findRecommendedUsbZplAlternative(printers, selectedPrinter);
   const selectedPortHost = selectedPrinter?.windowsPortHost || null;
   const selectedPortNumber = selectedPrinter?.windowsPortNumber || (selectedPortHost ? 9100 : null);
 
@@ -462,13 +455,13 @@ export const getPrinterDiagnosticSummary = (params: {
     const stuckCount = Number(selectedPrinter?.stuckJobCount || 0);
     return {
       state: "blocked_with_alternative",
-      badgeLabel: "Use USB Zebra",
-      title: "Network Zebra queue is broken",
+      badgeLabel: "Use USB printer",
+      title: "Network label printer queue is broken",
       summary: `Saved WiFi queue points to ${endpoint}, which is unreachable from this workstation.`,
       detail: `${recommendedUsbPrinter.printerName} is available on ${recommendedUsbPrinter.portName || recommendedUsbPrinter.windowsPortName || "USB"}.${stuckCount > 0 ? ` Windows queue has ${stuckCount} stuck MSCQR job${stuckCount === 1 ? "" : "s"}.` : ""}`,
       tone: "danger",
       nextSteps: [
-        "Choose USB Zebra instead.",
+        "Choose the compatible USB label printer instead.",
         "Print a setup test label on the USB route.",
         "Update the WiFi printer IP before using the network queue again.",
       ],
@@ -478,7 +471,7 @@ export const getPrinterDiagnosticSummary = (params: {
   }
 
   if (selectedPrinter?.queueHasErrors) {
-    const hostCopy = selectedPortHost ? ` Saved Zebra IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
+    const hostCopy = selectedPortHost ? ` Saved printer IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
     const stuckCopy = Number(selectedPrinter.stuckJobCount || 0) > 0 ? " Windows queue has stuck jobs." : "";
     return {
       state: "printer_offline",
@@ -489,7 +482,7 @@ export const getPrinterDiagnosticSummary = (params: {
       tone: "danger",
       nextSteps: [
         "Clear stuck MSCQR print jobs from this printer queue.",
-        "Use a healthy USB Zebra route if one is available.",
+        "Use a healthy USB ZPL printer if one is available.",
         "Update the saved WiFi printer IP before using this network queue again.",
       ],
       selectedPrinter,
@@ -585,7 +578,7 @@ export const getPrinterDiagnosticSummary = (params: {
   }
 
   if (selectedPrinter?.online === false) {
-    const hostCopy = selectedPortHost ? ` Saved Zebra IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
+    const hostCopy = selectedPortHost ? ` Saved printer IP is stale or unreachable: ${selectedPortHost}:${selectedPortNumber || 9100}.` : "";
     const stuckCopy = Number(selectedPrinter.stuckJobCount || 0) > 0 ? " Windows queue has stuck jobs." : "";
     return {
       state: "printer_offline",

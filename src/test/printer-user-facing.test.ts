@@ -76,7 +76,7 @@ describe("printer user-facing helpers", () => {
       })
     ).toBe("This batch needs to be allocated before printing.");
     expect(printJobCreateFailureMessage({ errorCode: "invalid_printer" })).toBe(
-      "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup."
+      "Choose a ZPL-compatible printer under Printer on this computer, then refresh printer setup."
     );
     expect(
       printJobCreateFailureMessage({
@@ -87,8 +87,9 @@ describe("printer user-facing helpers", () => {
       "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
     );
     expect(printJobCreateFailureMessage({ errorCode: "printer_mapping_missing" })).toBe(
-      "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup."
+      "The saved printer is not linked to this computer's selected label printer. Select the registered printer again or refresh printer setup."
     );
+    expect(printJobCreateFailureMessage({ errorCode: "zpl_printer_setup_required", message: "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing." })).toContain("Confirm ZPL mode");
     expect(printJobCreateFailureMessage({ errorCode: "printer_status_unavailable" })).toBe(
       "Printer status is temporarily unavailable."
     );

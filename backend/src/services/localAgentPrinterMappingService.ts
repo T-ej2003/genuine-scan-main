@@ -1,4 +1,5 @@
 import { PrinterConnectionType } from "@prisma/client";
+import { isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
 
 import prisma from "../config/database";
 
@@ -7,7 +8,6 @@ const normalizePrinterIdentity = (value: unknown) => String(value || "").trim();
 const samePrinterText = (left: unknown, right: unknown) =>
   normalizePrinterIdentity(left).toLowerCase() === normalizePrinterIdentity(right).toLowerCase();
 
-const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl"];
 const VIRTUAL_PRINTER_TERMS = ["fax", "microsoft print to pdf", "print to pdf", "pdf", "onenote", "xps", "document writer", "airprint"];
 
 const toSearchText = (...values: unknown[]) =>
@@ -19,24 +19,17 @@ const toSearchText = (...values: unknown[]) =>
 
 const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
 
-const hasLanguage = (row: any, language: string) =>
-  Array.isArray(row?.languages) &&
-  row.languages.some((value: unknown) => normalizePrinterIdentity(value).toUpperCase() === language);
-
 const rowSearchText = (row: any) =>
   toSearchText(row?.printerId, row?.printerName, row?.model, row?.connection, row?.protocols, row?.languages);
 
 const isSafeLabelPrinterRow = (row: any) =>
-  Boolean(row && row.online !== false && (hasLanguage(row, "ZPL") || hasAny(rowSearchText(row), LABEL_PRINTER_TERMS)));
+  Boolean(row && row.online !== false && isZplCompatibleLanguageList(Array.isArray(row.languages) ? row.languages : []));
 
 const isVirtualPrinterRow = (row: any) =>
   Boolean(row && !isSafeLabelPrinterRow(row) && hasAny(rowSearchText(row), VIRTUAL_PRINTER_TERMS));
 
 const savedProfileLooksLikeLabelPrinter = (printer: any) =>
-  hasAny(
-    toSearchText(printer?.name, printer?.model, printer?.nativePrinterId, printer?.commandLanguage),
-    LABEL_PRINTER_TERMS
-  );
+  isZplCompatibleLanguageList([printer?.commandLanguage]);
 
 export const hasExactTrustedSelectedPrinterMatch = (printer: any, printerStatus: any) => {
   const expectedNativePrinterId = normalizePrinterIdentity(printer?.nativePrinterId);
@@ -48,6 +41,9 @@ export const hasExactTrustedSelectedPrinterMatch = (printer: any, printerStatus:
   const activeAgentId = normalizePrinterIdentity(printerStatus?.agentId);
   const expectedDeviceFingerprint = normalizePrinterIdentity(printer?.deviceFingerprint);
   const activeDeviceFingerprint = normalizePrinterIdentity(printerStatus?.deviceFingerprint);
+  const selectedInventoryRow = Array.isArray(printerStatus?.printers)
+    ? printerStatus.printers.find((row: any) => samePrinterText(row?.printerId, selectedNativePrinterId))
+    : null;
 
   return Boolean(
     expectedNativePrinterId &&
@@ -59,7 +55,12 @@ export const hasExactTrustedSelectedPrinterMatch = (printer: any, printerStatus:
       (!expectedAgentId || samePrinterText(expectedAgentId, activeAgentId)) &&
       (!expectedDeviceFingerprint || samePrinterText(expectedDeviceFingerprint, activeDeviceFingerprint)) &&
       printerStatus?.eligibleForPrinting === true &&
-      printerStatus?.stale === false
+      printerStatus?.stale === false &&
+      (!Array.isArray(printerStatus?.printers) || printerStatus.printers.length === 0 || selectedInventoryRow) &&
+      selectedInventoryRow?.online !== false &&
+      !isVirtualPrinterRow(selectedInventoryRow) &&
+      (!isZplCompatibleLanguageList([printer?.commandLanguage]) || !selectedInventoryRow ||
+        (isSafeLabelPrinterRow(selectedInventoryRow) && Number(selectedInventoryRow.dpi) === 300))
   );
 };
 
@@ -72,17 +73,10 @@ export const pickSafeHeartbeatPrinterForProfile = (printer: any, printerStatus: 
   const byNativeId = safeRows.find((row: any) => samePrinterText(row?.printerId, expectedNativePrinterId));
   if (byNativeId) return byNativeId;
 
-  const byProfileName = safeRows.find((row: any) => samePrinterText(row?.printerName, printer.name));
+  const byProfileName = !expectedNativePrinterId && safeRows.find((row: any) => samePrinterText(row?.printerName, printer.name));
   if (byProfileName) return byProfileName;
 
-  const profileText = toSearchText(printer?.name, printer?.nativePrinterId);
-  const byContainedName = safeRows.find((row: any) => {
-    const rowText = rowSearchText(row);
-    return profileText && (rowText.includes(profileText) || profileText.includes(rowText));
-  });
-  if (byContainedName) return byContainedName;
-
-  return safeRows.length === 1 ? safeRows[0] : null;
+  return null;
 };
 
 const throwPrinterMappingMissing = (params: {

@@ -18,11 +18,12 @@ const printerId = "40000000-0000-4000-8000-000000000002";
 const jobId = "40000000-0000-4000-8000-000000000003";
 const sessionId = "40000000-0000-4000-8000-000000000004";
 const events = [];
+let printerProfile = { id: printerId, connectionType: "LOCAL_AGENT", commandLanguage: "ZPL", capabilitySummary: { languages: ["ZPL"], dpi: 300 } };
 
 const run = async () => {
   repository.readPrintingProjection = async ({ operation }) => operation === "PRINTABLE_ITEMS"
     ? { batch: { id: batchId, manufacturerId: "maker" }, printableItems: [{ id: "qr", batchId, licenseeId: "licensee" }] }
-    : { id: printerId, connectionType: "LOCAL_AGENT", commandLanguage: "ZPL" };
+    : printerProfile;
   tokens.signQrPayload = () => "signed-fixture";
   tokens.hashToken = () => "token-hash";
   tokens.randomNonce = () => "nonce";
@@ -46,6 +47,10 @@ const run = async () => {
     events.push("database_commit");
     return { job: { id: jobId }, session: { id: sessionId }, preparedCount: 1 };
   };
+  printerProfile = { ...printerProfile, capabilitySummary: { languages: ["ZPL"], dpi: 203 } };
+  await assert.rejects(createPrintJobRecords(params), /PRINTER_ZPL_PROFILE_UNVERIFIED:unsupported_printer_dpi/);
+  assert.equal(events.includes("database_commit"), false, "Unsupported printer must fail before QR reservation commits");
+  printerProfile = { ...printerProfile, capabilitySummary: { languages: ["ZPL"], dpi: 300 } };
   await createPrintJobRecords(params);
   const committed = events.findIndex((event) => event === "database_commit");
   const started = events.findIndex((event) => event.name === "print_job_creation_started");

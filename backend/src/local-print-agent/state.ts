@@ -6,6 +6,8 @@ const STATE_SOURCE = Symbol("connector-state-source");
 const STATE_CONTENT_HASH = Symbol("connector-state-content-hash");
 
 export type CalibrationProfile = {
+  zplCompatible?: boolean;
+  zplPrinterIdentity?: string;
   dpi?: number;
   labelWidthMm?: number;
   labelHeightMm?: number;
@@ -47,6 +49,7 @@ const sanitizeCalibrationProfile = (value: unknown): CalibrationProfile => {
 
   return {
     ...source,
+    zplCompatible: typeof source.zplCompatible === "boolean" ? source.zplCompatible : undefined,
     dpi: toNumber("dpi"),
     labelWidthMm: toNumber("labelWidthMm"),
     labelHeightMm: toNumber("labelHeightMm"),
@@ -198,7 +201,7 @@ export const mergeCalibrationProfile = (
 ): AgentState => {
   const merged: CalibrationProfile = {
     ...(state.calibrationProfiles[printerId] || {}),
-    ...sanitizeCalibrationProfile(profile),
+    ...Object.fromEntries(Object.entries(sanitizeCalibrationProfile(profile)).filter(([, value]) => value !== undefined)),
   };
   return {
     ...state,

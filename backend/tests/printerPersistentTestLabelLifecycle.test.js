@@ -35,6 +35,7 @@ const resetPrinter = () => {
     isActive: true,
     metadata: {},
     calibrationProfile: null,
+    capabilitySummary: { languages: ["ZPL"], dpi: 300 },
     profile: { activeLanguage: "ZPL", statusConfig: null },
   };
 };

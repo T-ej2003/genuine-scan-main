@@ -110,15 +110,14 @@ export const classifyIndustrialZplPrinterProfile = (params: {
     : Array.isArray(params.printerLanguages)
       ? params.printerLanguages
       : [];
-  const combined = `${params.printerName || ""} ${params.model || ""} ${languages.join(" ")}`;
-  const isZpl = isZplCompatibleLanguageList(languages) || /\bZPL(?:-?II|2)?\b/i.test(combined) || /\bZSIM\b/i.test(combined);
-  if (!isZpl) return { profileId: UNSUPPORTED_NON_ZPL_PROFILE_ID, compatible: false, reason: "unsupported_printer_language" };
+  if (!isZplCompatibleLanguageList(languages)) return { profileId: UNSUPPORTED_NON_ZPL_PROFILE_ID, compatible: false, reason: "unsupported_printer_language" };
 
   const rawDpi = params.dpi ?? params.printerDpi;
-  const dpi = Number.isFinite(Number(rawDpi)) ? Number(rawDpi) : inferZplPrinterDpi(combined);
-  if (dpi && dpi !== ZPL_300DPI_COMPATIBILITY_CONTRACT.requiredDpi) {
+  const dpi = rawDpi != null && Number.isFinite(Number(rawDpi)) ? Number(rawDpi) : null;
+  if (!dpi) return { profileId: "zpl_unverified_dpi", compatible: false, reason: "unverified_printer_dpi", dpi: null };
+  if (dpi !== ZPL_300DPI_COMPATIBILITY_CONTRACT.requiredDpi) {
     return { profileId: "zpl_unsupported_dpi", compatible: false, reason: "unsupported_printer_dpi", dpi };
   }
 
-  return { profileId: ZPL_300DPI_GENERIC_PROFILE_ID, compatible: true, reason: null, dpi: dpi || 300 };
+  return { profileId: ZPL_300DPI_GENERIC_PROFILE_ID, compatible: true, reason: null, dpi };
 };

@@ -13,6 +13,7 @@ const {
   pickSafeHeartbeatPrinterForProfile,
 } = require("../dist/services/localAgentPrinterMappingService");
 const { assessLocalAgentPrinterRelink } = require("../dist/services/localAgentPrinterRelinkService");
+const { buildLocalPrinterStatus } = require("../dist/services/printerRegistryService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -155,11 +156,13 @@ const run = () => {
   );
   assert(
     virtualSelectionFailure.payload.message ===
-      "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer.",
+      "Fax/PDF printers cannot be used for MSCQR labels. Choose a ZPL-compatible label printer.",
     "Virtual printer mismatch should return specific copy"
   );
 
   const printerNotFoundFailure = describePrintJobCreateFailure(new Error("PRINTER_NOT_FOUND"));
+  const unsupportedZpl = describePrintJobCreateFailure(new Error("PRINTER_ZPL_PROFILE_UNVERIFIED:unsupported_printer_dpi"));
+  assert(unsupportedZpl.status === 409 && unsupportedZpl.payload.errorCode === "zpl_printer_setup_required", "Unsupported printer profile should fail with actionable 409 before reservation");
   assert(printerNotFoundFailure.status === 404, "Missing printer profiles should return not found");
   assert(
     printerNotFoundFailure.payload.errorCode === "printer_not_found",
@@ -263,6 +266,28 @@ const run = () => {
     repairedHeartbeatPrinter?.printerId === "ZDesigner ZT410-300dpi ZPL",
     "Server-side mapping should repair stale Fax selection using trusted heartbeat inventory"
   );
+  const compatiblePrinter = { name: "Factory printer", nativePrinterId: "factory-usb-1", commandLanguage: "ZPL" };
+  const compatibleStatus = { selectedPrinterId: "Fax", printers: [
+    { printerId: "Fax", printerName: "Fax", online: true, languages: [] },
+    { printerId: "factory-usb-1", printerName: "Factory printer", online: true, languages: ["ZPL"] },
+  ] };
+  assert(pickSafeHeartbeatPrinterForProfile(compatiblePrinter, compatibleStatus)?.printerId === "factory-usb-1", "Non-Zebra ZPL printer should repair by exact native identity");
+  assert(pickSafeHeartbeatPrinterForProfile({ ...compatiblePrinter, nativePrinterId: "different-printer" }, compatibleStatus) === null, "A sole compatible printer must not replace a mismatched registration");
+  const readyStatus = { connected: true, eligibleForPrinting: true, trusted: true, stale: false, selectedPrinterId: "factory-usb-1", registrationId: "reg-1" };
+  const registered = { ...compatiblePrinter, connectionType: "LOCAL_AGENT", printerRegistrationId: "reg-1" };
+  assert(buildLocalPrinterStatus({ ...registered, capabilitySummary: { languages: ["ZPL"], dpi: 300 } }, readyStatus).state === "READY", "Compatible non-Zebra ZPL printer should be ready");
+  assert(buildLocalPrinterStatus({ ...registered, capabilitySummary: { languages: ["ZPL"], dpi: 203 } }, readyStatus).state === "BLOCKED", "203 dpi ZPL printer must be blocked before job creation");
+  assert(buildLocalPrinterStatus({ ...registered, capabilitySummary: { languages: ["ZPL"], dpi: null } }, readyStatus).state === "BLOCKED", "Unknown DPI must require confirmation before job creation");
+  assert(!hasExactTrustedSelectedPrinterMatch(
+    { name: "Fax", nativePrinterId: "Fax", printerRegistrationId: "reg-1" },
+    { selectedPrinterId: "Fax", selectedPrinterName: "Fax", registrationId: "reg-1", eligibleForPrinting: true, stale: false,
+      printers: [{ printerId: "Fax", printerName: "Fax", languages: [], online: true }] }
+  ), "Exact registration must not make a virtual printer a valid label destination");
+  assert(!hasExactTrustedSelectedPrinterMatch(
+    { name: "Factory printer", nativePrinterId: "factory-usb-1", commandLanguage: "ZPL", printerRegistrationId: "reg-1" },
+    { selectedPrinterId: "factory-usb-1", selectedPrinterName: "Factory printer", registrationId: "reg-1", eligibleForPrinting: true, stale: false,
+      printers: [{ printerId: "factory-usb-1", printerName: "Factory printer", languages: ["ZPL"], dpi: 203, online: true }] }
+  ), "Live 203 dpi inventory must not satisfy a trusted 300 dpi ZPL registration");
 
   assert(
     hasExactTrustedSelectedPrinterMatch(

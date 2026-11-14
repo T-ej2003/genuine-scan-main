@@ -199,8 +199,8 @@ describe("batch print operations", () => {
     vi.mocked(apiClient.createPrintJob).mockResolvedValueOnce({
       success: false,
       errorCode: "print_payload_invalid",
-      message: "Generated ZPL looks unsafe for this Zebra profile.",
-      error: "unsafe_zpl_payload",
+      message: "Generated ZPL looks unsafe for this printer profile.",
+      error: "invalid_zpl_print_payload",
     });
     const setPrintProgressPhase = setter();
     const setPrintProgressError = setter();

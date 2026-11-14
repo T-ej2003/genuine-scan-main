@@ -5,7 +5,7 @@ import type { IncomingMessage } from "http";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
 import { reserveAutomaticDispatch } from "./dispatchJournal";
-import { printLabel } from "./render";
+import { printLabel, validateZplPayloadForRawPrint } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, buildPrinterAgentSessionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import {
@@ -53,6 +53,15 @@ interface ConnectorWorkPayload {
   calibrationProfile?: Record<string, unknown> | null;
   labels?: ConnectorWorkPayload[];
 }
+
+export const validateConnectorZplAttempt = (content: string, payloadType: string | null | undefined, printer: ConnectorWorkPayload["printer"]) => {
+  if (String(payloadType || "").toUpperCase() !== "ZPL") return;
+  validateZplPayloadForRawPrint(content, {
+    printerName: printer?.name || null,
+    printerLanguages: Array.isArray(printer?.languages) ? printer.languages : [],
+    printerDpi: Number(printer?.dpi || 0) || null,
+  });
+};
 const responseRecord = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === "object" ? value as Record<string, unknown> : {};
 
@@ -889,6 +898,7 @@ const runLocalDiagnosticTestJob = async (payload: ConnectorWorkPayload, printerI
     printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
     payloadDiagnostics,
   });
+  validateConnectorZplAttempt(payloadContent, payload.payloadType || "ZPL", payload.printer);
   if (!await reserveAutomaticDispatch({ printJobId: `diagnostic:${testJobId}`, printItemId: `diagnostic:${testJobId}`, printerId: printerId, payloadHash })) {
     throw Object.assign(new Error("Diagnostic attempt requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
   }
@@ -896,7 +906,7 @@ const runLocalDiagnosticTestJob = async (payload: ConnectorWorkPayload, printerI
     const result = await printLabel({
       printerId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || printerId).trim(),
-      printerLanguages: ["ZPL"],
+      printerLanguages: Array.isArray(payload.printer?.languages) ? payload.printer.languages : [],
       printerDpi: Number(payload.printer?.dpi || 0) || null,
       calibrationProfile: null,
       request: {
@@ -972,6 +982,7 @@ export const runPersistentDiagnosticTestJob = async (
     labelLanguage: payload.commandLanguage || "ZPL",
     payloadContent,
   });
+  validateConnectorZplAttempt(payloadContent, payload.payloadType || "ZPL", payload.printer);
   if (!await reserveAutomaticDispatch({ printJobId: `diagnostic:${testJobId}`, printItemId: `diagnostic:${testJobId}`, printerId: selectedPrinterId, payloadHash })) {
     throw Object.assign(new Error("Diagnostic attempt requires reconciliation; replay refused."), { errorCode: "dispatch_reconciliation_required" });
   }
@@ -979,7 +990,7 @@ export const runPersistentDiagnosticTestJob = async (
     const result = await print({
       printerId: selectedPrinterId,
       printerName: String(payload.printer?.name || payload.selectedPrinterName || selectedPrinterId).trim(),
-      printerLanguages: ["ZPL"],
+      printerLanguages: Array.isArray(payload.printer?.languages) ? payload.printer.languages : [],
       printerDpi: Number(payload.printer?.dpi || 0) || null,
       calibrationProfile: null,
       request: {
@@ -1086,6 +1097,7 @@ export const runPersistentPrintChunk = async (
       labelLanguage: label.commandLanguage || null,
       payloadContent,
     });
+    validateConnectorZplAttempt(payloadContent, label.payloadType, printer);
     console.info("persistent printer session spool start", {
       sessionId: session.sessionId,
       chunkId,
@@ -1270,6 +1282,7 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     }
 
     validated = validateClaimedLocalPrintJobForAttempt(payload);
+    validateConnectorZplAttempt(validated.payloadContent, payload.payloadType, payload.printer);
     const payloadDiagnostics = buildPrintPayloadDiagnostics({
       payloadType: payload.payloadType || null,
       labelLanguage: payload.commandLanguage || payload.labelLanguage || null,
