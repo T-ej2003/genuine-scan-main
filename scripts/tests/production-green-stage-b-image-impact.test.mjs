@@ -232,9 +232,11 @@ test("Terraform classification stays bounded and runtime image behavior remains 
   assert.deepEqual(ecrReport.imageAffectingFiles, []);
   assert.equal(ecrReport.imageReuseCompatible, true);
   assert.equal(classifyStageBImageReusePath("infra/aws/terraform/production-ecr-protection/unreviewed.tf").category, "unknown");
-  for (const file of ["main.tf", "versions.tf", ".terraform.lock.hcl"])
-    assert.deepEqual(classifyStageBImageReusePath(`infra/aws/terraform/production-support-email-worker/${file}`), { file: `infra/aws/terraform/production-support-email-worker/${file}`, category: "terraformOnly", imageAffecting: false });
+  for (const worker of ["support-email", "printing"])
+    for (const file of ["main.tf", "versions.tf", ".terraform.lock.hcl"])
+      assert.deepEqual(classifyStageBImageReusePath(`infra/aws/terraform/production-${worker}-worker/${file}`), { file: `infra/aws/terraform/production-${worker}-worker/${file}`, category: "terraformOnly", imageAffecting: false });
   assert.equal(classifyStageBImageReusePath("infra/aws/terraform/production-support-email-worker/unreviewed.tf").category, "unknown");
+  assert.equal(classifyStageBImageReusePath("infra/aws/terraform/production-printing-worker/unreviewed.tf").category, "unknown");
   for (const file of [
     "infra/aws/terraform/production-green-stage-b/main.tf",
     "infra/aws/terraform/production-green-stage-b-image-publisher/main.tf",

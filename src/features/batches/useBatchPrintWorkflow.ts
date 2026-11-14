@@ -259,8 +259,9 @@ export function useBatchPrintWorkflow({
         if (matchingLocal) return matchingLocal.id;
       }
 
-      const preferred =
-        printers.find((row) => row.isDefault && row.isActive) || printers.find((row) => row.isActive);
+      const eligible = printers.filter((row) => row.isActive &&
+        (row.connectionType !== "LOCAL_AGENT" || !preferredRegistrationId || row.printerRegistrationId === preferredRegistrationId));
+      const preferred = eligible.find((row) => row.isDefault) || eligible[0];
       return preferred?.id || "";
     });
   };
@@ -462,7 +463,7 @@ export function useBatchPrintWorkflow({
           row.isActive &&
           (!printerStatus.registrationId || row.printerRegistrationId === printerStatus.registrationId)
       );
-      return matchingLocal?.id || previous;
+      return matchingLocal?.id || "";
     });
   }, [printerStatus.registrationId, registeredPrinters, selectedPrinterId]);
 

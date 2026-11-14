@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const { generateKeyPairSync, randomUUID } = require("node:crypto");
-const { readFileSync } = require("node:fs");
+const { readFileSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
 
 const enabled = process.env.MSCQR_PRINTING_POSTGRES18_TEST === "true";
@@ -1879,6 +1879,92 @@ async function main() {
   assert.equal(psql(app, printingSessionPrerequisiteSql("mscqr_rls_cert_")), "t|t|t|t|t",
     "The restricted runtime role must independently verify its installed C02 session prerequisite");
 
+  const launchPrintingWorker = () => {
+    const child = spawn(process.execPath, [path.resolve(__dirname, "../../../dist/worker.js")], {
+      cwd: path.resolve(__dirname, "../../.."),
+      env: {
+        ...process.env,
+        NODE_ENV: "test", DATABASE_URL: worker, MSCQR_C03_WORKER_DATABASE_URL: worker,
+        MSCQR_WORKER_MODE: "printing", REDIS_URL: "", REDIS_HOST: "",
+        RUN_PRINT_RECONCILER: "true", RUN_DISTRIBUTED_LEASES: "true",
+        INTEGRATION_DISABLE_BACKGROUND_LOOPS: "false", INTEGRATION_WORKER_BOOT_ONLY: "false",
+        PRINT_CONFIRMATION_RECONCILE_INTERVAL_MS: "5000", LOG_FORMAT: "json",
+      },
+    });
+    let logs = "";
+    child.stdout.on("data", (chunk) => { logs += chunk; });
+    child.stderr.on("data", (chunk) => { logs += chunk; });
+    return { child, logs: () => logs };
+  };
+  const waitForWorker = async (check, workers) => {
+    const until = Date.now() + 20_000;
+    while (Date.now() < until) {
+      if (check()) return;
+      assert(workers.every(({ child }) => child.exitCode === null), workers.map(({ logs }) => logs()).join("\n"));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    assert.fail(`Printing worker did not reach its expected state: ${workers.map(({ logs }) => logs()).join("\n")}`);
+  };
+  const stopWorker = async ({ child }) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      assert.equal(child.exitCode, 0);
+      return;
+    }
+    child.kill("SIGTERM");
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("Printing worker did not shut down")), 5_000);
+      child.once("exit", () => { clearTimeout(timeout); resolve(); });
+    });
+    assert.equal(child.exitCode, 0);
+  };
+  const workerTimings = {};
+  const workerRun = createExpiredRun("actual-printing-worker", 1);
+  psql(admin, `UPDATE public."PrintItem" SET "confirmationDeadlineAt"=NULL WHERE "printSessionId"='${workerRun.sessionId}'`);
+  const liveWorker = launchPrintingWorker();
+  const firstCycleStartedAt = Date.now();
+  try {
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${workerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "1" && /Printing reconciliation cycle completed/.test(liveWorker.logs()), [liveWorker]);
+    assert.match(liveWorker.logs(), /Printing worker started/);
+    assert.match(liveWorker.logs(), /Printing reconciliation cycle completed/);
+  } finally {
+    await stopWorker(liveWorker);
+  }
+  workerTimings.oneItemMs = Date.now() - firstCycleStartedAt;
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${workerRun.jobId}' AND status='ACTIVATED'`), "1");
+  const tenItemRun = createExpiredRun("actual-printing-worker-ten", 10);
+  const restartedWorker = launchPrintingWorker();
+  const tenStartedAt = Date.now();
+  try {
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${tenItemRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "10", [restartedWorker]);
+    assert.match(restartedWorker.logs(), /Printing worker started/);
+  } finally {
+    await stopWorker(restartedWorker);
+  }
+  workerTimings.tenItemsMs = Date.now() - tenStartedAt;
+  const interruptedWorker = launchPrintingWorker();
+  try {
+    await waitForWorker(() => /Printing reconciliation cycle completed/.test(interruptedWorker.logs()), [interruptedWorker]);
+    const workerRole = psql(worker, "SELECT current_user");
+    assert.match(workerRole, /^mscqr_rls_cert_[a-z_]+$/);
+    assert.notEqual(psql(admin, `SELECT count(*) FROM pg_stat_activity WHERE usename='${workerRole}' AND datname=current_database()`), "0");
+    psql(admin, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='${workerRole}' AND datname=current_database() AND pid<>pg_backend_pid()`);
+    const reconnectRun = createExpiredRun("actual-worker-db-reconnect", 1);
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${reconnectRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "1", [interruptedWorker]);
+  } finally {
+    await stopWorker(interruptedWorker);
+  }
+  const concurrentWorkerRun = createExpiredRun("actual-concurrent-workers", 150);
+  const overlap = [launchPrintingWorker(), launchPrintingWorker()];
+  const overlapStartedAt = Date.now();
+  try {
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.every(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap);
+    assert(overlap.every(({ logs }) => /Printing worker started/.test(logs())), overlap.map(({ logs }) => logs()).join("\n"));
+  } finally {
+    await Promise.all(overlap.map(stopWorker));
+  }
+  workerTimings.hundredFiftyItemsMs = Date.now() - overlapStartedAt;
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), "0");
+
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),
     "utf8"
@@ -1898,6 +1984,10 @@ async function main() {
   assert.equal(Number(psql(admin, `SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE
     (n.nspname='app_auth' AND p.proname='require_authenticated_session')
     OR (n.nspname='app_rls' AND p.proname IN ('read_licensee_directory','session_c_admin_command','qr_allocate_range'))`)), 4);
+  if (process.env.MSCQR_PRINTING_PERFORMANCE_EVIDENCE_PATH) {
+    assert(path.isAbsolute(process.env.MSCQR_PRINTING_PERFORMANCE_EVIDENCE_PATH));
+    writeFileSync(process.env.MSCQR_PRINTING_PERFORMANCE_EVIDENCE_PATH, `${JSON.stringify(workerTimings, null, 2)}\n`);
+  }
   console.log("Release Fix 5 PostgreSQL 18 printing lifecycle proof passed");
 }
 

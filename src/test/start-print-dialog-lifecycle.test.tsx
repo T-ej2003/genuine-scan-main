@@ -112,6 +112,18 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
+  it("does not select a saved default from an older connector registration", async () => {
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: true,
+      data: { ...verified, registrationId: "registration-new" } });
+    const view = mount();
+    await waitFor(() => expect(apiClient.listRegisteredPrinters).toHaveBeenCalled());
+    await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe(""));
+    act(() => view.result.current.openPrintPack(batch));
+    expect(view.result.current.dialogProps.selectedPrinterCanPrint).toBe(false);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it("does not expire verification when the already selected printer is selected again", async () => {
     const view = mount();
     await waitFor(() => expect(view.result.current.dialogProps.selectedPrinterProfileId).toBe("profile-1"));
