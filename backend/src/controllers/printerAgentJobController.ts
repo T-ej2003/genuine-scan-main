@@ -19,14 +19,16 @@ import { publishPrintJobViewEvent } from "../services/printJobRealtimeService";
 import { recordConnectorEvent } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { claimLocalAgentPrinterTestJob } from "../services/printerTestLabelService";
 
-export const localAgentErrorResponse = (res: Response, error: any) =>
-  res.status(error?.statusCode || 500).json({
+export const localAgentErrorResponse = (res: Response, error: any) => {
+  const statusCode = error?.statusCode || 500;
+  return res.status(statusCode).json({
     success: false,
-    error: error?.message || "Internal server error",
-    ...(error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
+    error: statusCode >= 500 ? "Internal server error" : error?.message || "Internal server error",
+    ...(statusCode < 500 && error?.errorCode ? { code: error.errorCode, errorCode: error.errorCode } : {}),
     ...(error?.serverTime ? { serverTime: error.serverTime } : {}),
     ...(error?.timestampSkewSeconds != null ? { timestampSkewSeconds: error.timestampSkewSeconds } : {}),
   });
+};
 
 const requestId = (req: Request) => {
   const value = String(getLocalAgentRequestId(req) || "").trim();

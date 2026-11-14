@@ -91,7 +91,7 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
     : props.error
     ? "Review the failure details before retrying or closing this session."
     : stoppedOrPartial
-      ? "The confirmed labels remain printed. Unprinted labels require controlled recovery."
+      ? "Confirmed labels stay recorded. Review item evidence before requesting recovery."
     : isCompleted
       ? "All labels for the current secure print session were confirmed."
       : "Live direct-print status for your current secure print session.";
@@ -145,7 +145,7 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
           ) : stoppedOrPartial ? (
             <div className="flex items-center gap-2 text-xs text-amber-700">
               <CircleCheckBig className="h-3.5 w-3.5" />
-              {safePrinted.toLocaleString()} of {safeTotal.toLocaleString()} labels confirmed. Unprinted labels remain recoverable.
+              {safePrinted.toLocaleString()} of {safeTotal.toLocaleString()} labels confirmed. Only items proven unissued can be recovered.
             </div>
           ) : (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">

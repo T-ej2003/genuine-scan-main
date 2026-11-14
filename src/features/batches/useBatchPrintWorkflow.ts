@@ -604,7 +604,7 @@ export function useBatchPrintWorkflow({
             terminal: true,
           });
           setPrintProgressOpen(true);
-          setPrintProgressNotice("Unprinted labels remain recoverable through the controlled recovery flow.");
+          setPrintProgressNotice("Only items proven unissued are eligible for controlled recovery.");
         } else {
           await Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
         }

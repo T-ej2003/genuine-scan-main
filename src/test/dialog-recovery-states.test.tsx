@@ -757,7 +757,7 @@ describe("dialog recovery states", () => {
     expect(screen.getByRole("button", { name: "Refresh connector" })).toBeInTheDocument();
   });
 
-  it("shows stopped partially completed progress as recoverable without live controls", () => {
+  it("shows stopped partially completed progress without promising recovery", () => {
     render(
       <PrintProgressDialog
         open
@@ -782,13 +782,13 @@ describe("dialog recovery states", () => {
     );
 
     expect(screen.getByText("Print run stopped")).toBeInTheDocument();
-    expect(screen.getByText("4 of 10 labels confirmed. Unprinted labels remain recoverable.")).toBeInTheDocument();
+    expect(screen.getByText("4 of 10 labels confirmed. Only items proven unissued can be recovered.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
   });
 
-  it("shows stopped partially completed current print run as recoverable without live controls", () => {
+  it("shows stopped partially completed current print run without promising recovery", () => {
     renderPrintDialog({
       printJobId: "job-stopped",
       printProgressPhase: "Partially completed",
@@ -813,10 +813,33 @@ describe("dialog recovery states", () => {
     });
 
     expect(screen.getByText("Print run stopped")).toBeInTheDocument();
-    expect(screen.getByText("Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow.")).toBeInTheDocument();
+    expect(screen.getByText("Confirmed labels stay recorded. Review item evidence before requesting recovery.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Pause print run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Stop print run" })).not.toBeInTheDocument();
+  });
+
+  it("offers the guarded reissue request for a stopped run without starting another print", () => {
+    const onOpenPrintReissueDialog = vi.fn();
+    const onStartPrint = vi.fn();
+    renderPrintDialog({
+      recentPrintJobs: [{
+        id: "job-stopped-before-dispatch",
+        status: "STOPPED",
+        pipelineState: "STOPPED",
+        printMode: "LOCAL_AGENT",
+        quantity: 1,
+        itemCount: 1,
+        createdAt: new Date().toISOString(),
+        session: { status: "STOPPED", totalItems: 1, confirmedItems: 0 },
+      } as any],
+      onOpenPrintReissueDialog,
+      onStartPrint,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Request reissue" }));
+    expect(onOpenPrintReissueDialog).toHaveBeenCalledWith(expect.objectContaining({ id: "job-stopped-before-dispatch" }));
+    expect(onStartPrint).not.toHaveBeenCalled();
   });
 
   it("uses backend completed session state for active local-agent progress", () => {

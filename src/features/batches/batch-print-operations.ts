@@ -162,7 +162,7 @@ export const syncProgressFromPrintJob = (
   if (stoppedOrPartial) {
     setPrintProgressPhase(job.status === "PARTIALLY_COMPLETED" ? "Partially completed" : "Print run stopped");
     setPrintProgressError(null);
-    setPrintProgressNotice?.("Unprinted labels remain recoverable through the controlled recovery flow.");
+    setPrintProgressNotice?.("Only items proven unissued are eligible for controlled recovery.");
     return;
   }
   if (job.status === "FAILED") {
