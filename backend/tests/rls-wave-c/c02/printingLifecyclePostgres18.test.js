@@ -1436,6 +1436,11 @@ async function main() {
     '${ids.registration}','synthetic-stopped-conflicting-chunk',1,1,1,'["${stopItemId}"]'::jsonb,now())`);
   denied(app, executeStopped(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
   psql(admin, `DELETE FROM public."PrintJobChunk" WHERE id='50000000-0000-4000-8000-000000000795'`);
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()-interval '1 second'
+    WHERE "printerRegistrationId"='${ids.registration}'`);
+  denied(app, executeStopped(), /PRINTER_ATTESTATION_STALE/);
+  psql(admin, `UPDATE public."PrinterAttestation" SET "expiresAt"=now()+interval '10 minutes'
+    WHERE "printerRegistrationId"='${ids.registration}'`);
   const recoveredStop = json(app, executeStopped());
   assert.equal(recoveredStop.status, "EXECUTED");
   assert.equal(json(app, executeStopped()).idempotent, true);
