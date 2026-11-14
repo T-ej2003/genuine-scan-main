@@ -3,7 +3,7 @@ import net from "net";
 import os from "os";
 import { promisify } from "util";
 
-import { inferZplPrinterDpi } from "../printing/zplCompatibilityContract";
+import { inferZplPrinterDpi, isVirtualPrinterIdentity, isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
 
 const execFileAsync = promisify(execFile);
 
@@ -156,18 +156,6 @@ const WINDOWS_PORT_PROBE_TIMEOUT_MS = Math.max(
 );
 const JOB_POLL_MS = Math.max(500, Number(process.env.PRINT_AGENT_JOB_POLL_MS || 1200) || 1200);
 const JOB_WAIT_TIMEOUT_MS = Math.max(5_000, Number(process.env.PRINT_AGENT_JOB_WAIT_TIMEOUT_MS || 60_000) || 60_000);
-const LABEL_PRINTER_TERMS = ["zdesigner", "zebra", "zt410", "zt411", "zpl", "zpl-ii", "zpl ii", "zsim"];
-const VIRTUAL_PRINTER_TERMS = [
-  "fax",
-  "microsoft print to pdf",
-  "print to pdf",
-  "pdf",
-  "onenote",
-  "xps",
-  "document writer",
-  "airprint",
-];
-
 const toCleanString = (value: unknown, max = 180) => String(value || "").trim().slice(0, max);
 
 const truncateDiagnosticText = (value: unknown, max = 1200) => {
@@ -206,44 +194,31 @@ const normalizePrinterKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
 
-const printerSearchText = (printer: LocalAgentPrinter) =>
-  [
-    printer.printerId,
-    printer.printerName,
-    printer.model,
-    printer.connection,
-    printer.deviceUri,
-    printer.portName,
-    ...(printer.protocols || []),
-    ...(printer.languages || []),
-    ...(printer.mediaSizes || []),
-  ]
-    .join(" ")
-    .toLowerCase();
-
-const hasAny = (value: string, terms: string[]) => terms.some((term) => value.includes(term));
-
-const hasPrinterLanguage = (printer: LocalAgentPrinter, language: string) =>
-  (printer.languages || []).some((value) => String(value || "").trim().toUpperCase() === language);
+export const isVirtualNonLabelPrinter = (printer?: LocalAgentPrinter | null) =>
+  Boolean(printer && isVirtualPrinterIdentity(printer.printerId, printer.printerName, printer.model));
 
 export const isPreferredLabelPrinter = (printer?: LocalAgentPrinter | null) =>
-  Boolean(printer && (hasAny(printerSearchText(printer), LABEL_PRINTER_TERMS) || hasPrinterLanguage(printer, "ZPL")));
+  Boolean(printer && !isVirtualNonLabelPrinter(printer) && isZplCompatibleLanguageList(printer.languages));
 
-export const isVirtualNonLabelPrinter = (printer?: LocalAgentPrinter | null) => {
-  if (!printer) return false;
-  if (isPreferredLabelPrinter(printer)) return false;
-  const text = printerSearchText(printer);
-  return hasAny(text, VIRTUAL_PRINTER_TERMS);
+export const zplPrinterIdentity = (printer: LocalAgentPrinter) =>
+  JSON.stringify([printer.printerId, printer.model, printer.portName, printer.deviceUri]);
+
+export const applyConfirmedZplCapabilities = (
+  printer: LocalAgentPrinter,
+  confirmation?: { zplCompatible?: boolean; dpi?: number; zplPrinterIdentity?: string } | null
+): LocalAgentPrinter => {
+  if (isVirtualNonLabelPrinter(printer) || !confirmation?.zplCompatible || confirmation.zplPrinterIdentity !== zplPrinterIdentity(printer) || confirmation.dpi !== 300 ||
+      (printer.dpi != null && printer.dpi !== 300) ||
+      (printer.languages.length > 0 && !isZplCompatibleLanguageList(printer.languages))) return printer;
+  return { ...printer, languages: [...new Set([...printer.languages, "ZPL"])], dpi: printer.dpi ?? 300 };
 };
 
 export const getPrinterSelectionRank = (printer: LocalAgentPrinter) => {
-  const text = printerSearchText(printer);
   let score = 0;
   if (printer.online === false) score -= 100;
   if (printer.isDefault) score += 10;
   if (String(printer.connection || "").toLowerCase() === "usb") score += 12;
-  if (hasPrinterLanguage(printer, "ZPL")) score += 40;
-  if (hasAny(text, LABEL_PRINTER_TERMS)) score += 35;
+  if (isPreferredLabelPrinter(printer)) score += 40;
   if (isVirtualNonLabelPrinter(printer)) score -= 80;
   return score;
 };
@@ -513,8 +488,8 @@ const parseWindowsPrinterRows = (
     printers.push({
       name,
       driverName: toCleanString((row as any).DriverName || (row as any).driverName) || null,
-      dpi: inferWindowsDpi(toCleanString((row as any).DriverName || (row as any).driverName) || null, name),
-      languages: inferWindowsLanguages(toCleanString((row as any).DriverName || (row as any).driverName) || null, name),
+      dpi: inferWindowsDpi(toCleanString((row as any).DriverName || (row as any).driverName) || null),
+      languages: inferWindowsLanguages(toCleanString((row as any).DriverName || (row as any).driverName) || null),
       portName,
       portHost: toCleanString(port?.PrinterHostAddress || port?.printerHostAddress || port?.HostAddress, 180) || null,
       portNumber: Number.isFinite(Number(port?.PortNumber || port?.portNumber)) ? Number(port?.PortNumber || port?.portNumber) : null,
@@ -717,8 +692,8 @@ const isWindowsNetworkPortReachable = (host: string, port: number) =>
     socket.once("error", finish);
   });
 
-const inferWindowsLanguages = (driverName: string | null, printerName: string) => {
-  const combined = `${driverName || ""} ${printerName}`.toUpperCase();
+const inferWindowsLanguages = (driverName: string | null) => {
+  const combined = String(driverName || "").toUpperCase();
   const languages: string[] = [];
   if (combined.includes("ZPL") || combined.includes("ZPL-II") || combined.includes("ZPL II") || combined.includes("ZSIM")) languages.push("ZPL");
   if (combined.includes("TSPL")) languages.push("TSPL");
@@ -729,7 +704,7 @@ const inferWindowsLanguages = (driverName: string | null, printerName: string) =
   return uniqueStrings(languages, 8);
 };
 
-const inferWindowsDpi = (driverName: string | null, printerName: string) => inferZplPrinterDpi(driverName, printerName);
+const inferWindowsDpi = (driverName: string | null) => inferZplPrinterDpi(driverName);
 
 export const buildCapabilitySummary = (
   printers: LocalAgentPrinter[],
@@ -744,7 +719,7 @@ export const buildCapabilitySummary = (
     languages: uniqueStrings(selected.languages.length > 0 ? selected.languages : ["AUTO"], 12),
     supportsRaster: true,
     supportsPdf: true,
-    dpiOptions: selected.dpi ? [selected.dpi] : [300],
+    dpiOptions: selected.dpi ? [selected.dpi] : [],
     mediaSizes: selected.mediaSizes.slice(0, 12),
   };
 };
@@ -862,9 +837,9 @@ export const buildSetupVerification = (params: {
 
   const message = params.selection.printer
     ? isVirtualNonLabelPrinter(params.selection.printer)
-      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose the ZDesigner label printer."
+      ? "Fax/PDF printers cannot be used for MSCQR labels. Choose a ZPL-compatible label printer."
       : params.selection.printer.queueHasErrors
-        ? `${params.selection.printer.printerName} has a Windows queue error. Clear the queue or choose another Zebra printer.`
+        ? `${params.selection.printer.printerName} has a Windows queue error. Clear the queue or choose another ZPL-compatible printer.`
       : `${params.selection.printer.printerName} is installed, but Windows is not exposing it as an online printer yet.`
     : "Printers were detected, but MSCQR could not resolve a usable printer yet.";
 

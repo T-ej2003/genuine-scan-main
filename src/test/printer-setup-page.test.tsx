@@ -181,9 +181,9 @@ describe("PrinterSetupPage", () => {
 
     expect(await screen.findByText("Connector update required")).toBeInTheDocument();
     expect(screen.getByText(/Detected: 2026.5.23/i)).toBeInTheDocument();
-    expect(await screen.findByText("Network Zebra queue is broken")).toBeInTheDocument();
+    expect(await screen.findByText("Network label printer queue is broken")).toBeInTheDocument();
     expect(screen.getByText(/10.45.144.9:9100/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Use USB Zebra" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use USB printer" }));
     await waitFor(() => {
       expect(apiClient.selectLocalPrinter).toHaveBeenCalledWith("ZDesigner ZT410-300dpi ZPL");
     });

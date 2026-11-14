@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 const read = (file) => readFileSync(file, "utf8");
 const sql = read("backend/src/rls-waves/session-c/c02/printingLifecycle.sql");
 const rollback = read("backend/src/rls-waves/session-c/c02/printingLifecycleRollback.sql");
+const policies = read("scripts/rls/sql/generated/30-policies.sql");
 const contracts = read("scripts/rls/lib/named-sql-function-contracts.mjs");
 const repository = read("backend/src/rls-waves/session-c/c02/printingLifecycleRepository.ts");
 const connector = read("backend/src/controllers/printerAgentJobController.ts");
@@ -43,7 +44,10 @@ assert.doesNotMatch(sql, /ORG_ADMIN|MANUFACTURER_USER|'MANUFACTURER'/);
 assert.doesNotMatch(sql, /UPDATE\s+public\."QRCode"\s+SET\s+code\b/i);
 assert.doesNotMatch(sql, /USING\s*\(\s*true\s*\)|WITH CHECK\s*\(\s*true\s*\)|BYPASSRLS/i);
 assert.doesNotMatch(rollback, /\bCASCADE\b/i);
-assert.equal([...rollback.matchAll(/^DROP POLICY IF EXISTS printing_lifecycle_/gm)].length, 43);
+assert.deepEqual(
+  [...rollback.matchAll(/^DROP POLICY IF EXISTS (printing_lifecycle_\w+)/gm)].map((match) => match[1]).sort(),
+  [...policies.matchAll(/^CREATE POLICY "(printing_lifecycle_\w+)"/gm)].map((match) => match[1]).sort()
+);
 assert.doesNotMatch(contracts, /GRANT\s+(?:ALL|EXECUTE)\s+ON\s+ALL\s+FUNCTIONS/i);
 assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\('printing_batch_'/);
 assert.match(sql, /p\."licenseeId"=batch_row\."licenseeId"[\s\S]*p\."assignedUserId"=actor\."userId"/);

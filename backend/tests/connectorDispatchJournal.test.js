@@ -97,9 +97,9 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     assert.equal(await reserveAutomaticDispatch({...legacy,printJobId:'approved-reissue-of-legacy'}),false,'ambiguous item-only markers must not be inferred to authorize another physical attempt');
     const { createHash } = require('node:crypto');
     const { runPersistentPrintChunk, runPersistentDiagnosticTestJob } = require('../dist/local-print-agent/directPrintWorker');
-    const zpl = '^XA^FDLOCAL-SYNTHETIC^FS^XZ';
+    const zpl = require('../dist/printing/printPayloadSafety').buildKnownGoodDiagnosticZplPayload();
     const payloadHash = createHash('sha256').update(zpl).digest('hex');
-    const payload = { chunkId: 'first-chunk', printJobId: 'synthetic-job', printer: {}, labels: [{
+    const payload = { chunkId: 'first-chunk', printJobId: 'synthetic-job', printer: { languages: ['ZPL'], dpi: 300 }, labels: [{
       printItemId: 'reconnect-item', code: 'synthetic', scanUrl: 'http://127.0.0.1/synthetic',
       payloadContent: zpl, payloadHash, payloadType: 'ZPL', commandLanguage: 'ZPL',
     }] };
@@ -116,6 +116,11 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       wait: async () => { throw new Error('unexpected confirmation'); },
     };
     const session = () => ({ sessionId: 'synthetic', registrationId: 'synthetic', selectedPrinterId: 'simulator', messageSeq: 0 });
+    const beforeUnsupported = (await fs.readdir(root)).length;
+    await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'unsupported-chunk', printer: { languages: [], dpi: null } }, 'simulator', adapters),
+      { errorCode: 'unsupported_printer_language' });
+    assert.equal((await fs.readdir(root)).length, beforeUnsupported, 'unsupported printer must fail before durable dispatch reservation');
+    assert.equal(spools, 0, 'unsupported printer must not reach the spooler');
     await assert.rejects(runPersistentPrintChunk({}, session(), payload, 'simulator', adapters), /injected lost receipt/);
     await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'reconnected-chunk' }, 'simulator', adapters),
       { errorCode: 'dispatch_reconciliation_required' });
@@ -125,7 +130,7 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
     assert(!events.includes('chunk_failed'), 'a failed receipt must not confirm physical failure');
     let testSpools = 0;
     const diagnosticEvents = [];
-    const diagnostic = { testJobId: 'diagnostic-item', payloadContent: zpl, payloadHash, payloadType: 'ZPL' };
+    const diagnostic = { testJobId: 'diagnostic-item', payloadContent: zpl, payloadHash, payloadType: 'ZPL', printer: { languages: ['ZPL'], dpi: 300 } };
     const diagnosticAdapters = {
       send: async (_ws, _session, _printer, event) => diagnosticEvents.push(event.type),
       print: async () => { testSpools++; return { printPath: 'USB_RAW', labelLanguage: 'ZPL', jobRef: 'simulated' }; },

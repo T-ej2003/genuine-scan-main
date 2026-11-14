@@ -63,7 +63,7 @@ export const listManufacturerPrintJobs = async (req: AuthRequest, res: Response)
     return res.json({ success: true, data: rows });
   } catch (error: any) {
     console.error("listManufacturerPrintJobs error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return handleUserSafeError(res, error, "Print jobs could not be loaded.");
   }
 };
 
@@ -90,7 +90,7 @@ export const getManufacturerPrintJobStatus = async (req: AuthRequest, res: Respo
     return res.json({ success: true, data: view });
   } catch (error: any) {
     console.error("getManufacturerPrintJobStatus error:", error);
-    return res.status(500).json({ success: false, error: error?.message || "Internal server error" });
+    return handleUserSafeError(res, error, "Print job status could not be loaded.");
   }
 };
 
@@ -112,7 +112,7 @@ const handleUserSafeError = (res: Response, error: any, fallback: string) => {
     success: false,
     error: statusCode >= 500 ? fallback : message,
     message: statusCode >= 500 ? fallback : message,
-    ...(code ? { code, errorCode: code } : {}),
+    ...(statusCode < 500 && code ? { code, errorCode: code } : {}),
   });
 };
 
@@ -248,6 +248,13 @@ export const createManufacturerPrintReissueRequest = async (req: AuthRequest, re
     return res.status(result.idempotent ? 200 : 201).json({ success: true, data: result.request, meta: { idempotent: result.idempotent } });
   } catch (error: any) {
     console.error("createManufacturerPrintReissueRequest error:", error);
+    if (isPhysicalOutcomeUnconfirmed(error)) {
+      return res.status(409).json({
+        success: false,
+        code: "PHYSICAL_OUTCOME_UNCONFIRMED",
+        error: "Physical output is uncertain. Review print history before requesting recovery.",
+      });
+    }
     return handleUserSafeError(res, error, "Print reissue request could not be created.");
   }
 };
@@ -458,6 +465,6 @@ export const abandonManufacturerPrintJob = async (req: AuthRequest, res: Respons
     if (error?.message === "PRINT_JOB_NOT_FOUND") {
       return res.status(404).json({ success: false, error: "Print job not found" });
     }
-    return res.status(500).json({ success: false, error: error?.message || "Print run could not be closed." });
+    return handleUserSafeError(res, error, "Print run could not be closed.");
   }
 };

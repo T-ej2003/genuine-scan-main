@@ -5,6 +5,7 @@ import { reconcilePrintingLifecycle } from "../rls-waves/session-c/c02/printingL
 import { resumePendingNetworkDirectJobs } from "./networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./networkIppPrintService";
 import { withDistributedLease } from "./distributedLeaseService";
+import { isRedisConfigured } from "./redisService";
 
 const RECONCILE_INTERVAL_MS = Math.max(
   5_000,
@@ -46,7 +47,11 @@ export const runPrintConfirmationReconciliationCycle = async () => {
   if (isShutdownStarted()) return;
   await reconcileExpiredAcknowledgedItems();
   if (isShutdownStarted()) return;
-  await Promise.allSettled([resumePendingNetworkDirectJobs(), resumePendingNetworkIppJobs()]);
+  const resumes = await Promise.allSettled([resumePendingNetworkDirectJobs(), resumePendingNetworkIppJobs()]);
+  for (const [index, result] of resumes.entries()) {
+    if (result.status === "rejected") logger.error("Printing network resume failed", { mode: index === 0 ? "direct" : "ipp", error: String(result.reason) });
+  }
+  return resumes.filter((result) => result.status === "rejected").length;
 };
 
 export const startPrintConfirmationReconciler = () => {
@@ -59,11 +64,14 @@ export const startPrintConfirmationReconciler = () => {
   const tick = async () => {
     if (stopped || isShutdownStarted()) return;
     try {
-      await withDistributedLease(
+      if (!isRedisConfigured()) throw new Error("Printing reconciliation requires configured Redis for distributed leases");
+      const startedAt = Date.now();
+      const lease = await withDistributedLease(
         "print-confirmation-reconciler",
         Math.max(RECONCILE_INTERVAL_MS * 3, 60_000),
         runPrintConfirmationReconciliationCycle
       );
+      if (lease.acquired) logger.info("Printing reconciliation cycle completed", { durationMs: Date.now() - startedAt, networkResumeFailures: lease.result });
     } catch (error: any) {
       logger.error("Print confirmation reconciliation cycle failed", {
         error: error?.message || error,

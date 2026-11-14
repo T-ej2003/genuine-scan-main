@@ -35,8 +35,14 @@ export const sanitizePrinterActionError = (
   if (hasAny(value, ["heartbeat", "trust", "attestation", "signature", "fingerprint", "certificate", "mtls"])) {
     return "The secure printer connection is not ready yet. Refresh and try again in a moment.";
   }
+  if (hasAny(value, ["unsupported_virtual_printer", "virtual queues cannot print"])) {
+    return "Fax/PDF virtual queues cannot print MSCQR labels. Select a physical ZPL-compatible printer.";
+  }
   if (hasAny(value, ["unsupported_printer_language", "not confirmed as zpl-compatible"])) {
     return "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile.";
+  }
+  if (hasAny(value, ["unverified_printer_dpi", "printer dpi is unknown", "confirm a 300 dpi printer", "confirm zpl mode"])) {
+    return "Confirm this printer is in ZPL mode with 300 dpi and 40 × 50 mm media in Printer Diagnostics before printing.";
   }
   if (hasAny(value, ["unsupported_printer_dpi", "certified for 300dpi"])) {
     return "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer.";

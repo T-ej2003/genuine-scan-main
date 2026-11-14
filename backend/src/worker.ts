@@ -17,7 +17,7 @@ import {
   startHotEventPartitionMaintenanceWorker,
   stopHotEventPartitionMaintenanceWorker,
 } from "./services/hotEventPartitionService";
-import { closeRedisConnections, getRedisHealth } from "./services/redisService";
+import { closeRedisConnections, getRedisHealth, isRedisConfigured } from "./services/redisService";
 import { markDistributedLeaseShutdown } from "./services/distributedLeaseService";
 
 dotenv.config();
@@ -82,6 +82,18 @@ const boot = async () => {
     await prisma.$queryRaw`SELECT 1`;
     if (!(await getRedisHealth()).ready) throw new Error("Support email worker requires Redis");
     startSupportResponseEmailOutboxWorker();
+    startKeepAlive();
+    return;
+  }
+  if (workerMode === "printing") {
+    if (!parseBool(process.env.RUN_PRINT_RECONCILER, true) || !parseBool(process.env.RUN_DISTRIBUTED_LEASES, true)) {
+      throw new Error("Printing worker reconciliation and leases must be enabled");
+    }
+    if (!isRedisConfigured()) throw new Error("Printing worker requires configured Redis for distributed leases");
+    if (!(await getRedisHealth()).ready) throw new Error("Printing worker requires healthy Redis for distributed leases");
+    await prisma.$queryRaw`SELECT 1`;
+    stopPrintConfirmationReconcilerWorker = startPrintConfirmationReconciler();
+    logger.info("Printing worker started", { mode: workerMode, redisLease: isRedisConfigured() });
     startKeepAlive();
     return;
   }

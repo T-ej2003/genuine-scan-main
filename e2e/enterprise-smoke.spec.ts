@@ -263,8 +263,8 @@ const buildE2EPrinterPayload = () => {
         commandLanguage: "ZPL",
         protocols: ["DRIVER_QUEUE"],
         languages: ["ZPL"],
-        mediaSizes: ["50x30mm"],
-        dpi: 203,
+        mediaSizes: ["40x50mm"],
+        dpi: 300,
       },
     ],
     capabilitySummary: {
@@ -273,8 +273,8 @@ const buildE2EPrinterPayload = () => {
       languages: ["ZPL"],
       supportsRaster: true,
       supportsPdf: true,
-      dpiOptions: [203],
-      mediaSizes: ["50x30mm"],
+      dpiOptions: [300],
+      mediaSizes: ["40x50mm"],
     },
   };
 };

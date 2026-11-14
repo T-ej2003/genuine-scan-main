@@ -11,6 +11,7 @@ import {
   readLocalAgentCapabilities,
   readLocalAgentProtocolString,
 } from "./source-version.mjs";
+import { normalizeWebAppBaseUrl } from "./web-app-origin.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,12 +39,12 @@ const connectorPkgTargets = String(
 const normalizeEnv = (value) => String(value || "").trim();
 const isTruthy = (value) => /^(1|true|yes|on)$/i.test(normalizeEnv(value));
 const hasEnvOverride = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
-const webAppBaseUrl = normalizeEnv(process.env.WEB_APP_BASE_URL).replace(/\/+$/g, "");
 const windowsUnsignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_UNSIGNED_INSTALLER_PATH);
 const windowsSignedInstallerSource = normalizeEnv(process.env.WINDOWS_CONNECTOR_SIGNED_INSTALLER_PATH);
 if (windowsUnsignedInstallerSource || windowsSignedInstallerSource) {
   throw new Error('Development fixtures cannot be published. Windows publication requires the governed signed Windows workflow, not connector:release artifact-path overrides.');
 }
+const { baseUrl: webAppBaseUrl, origin: webAppOrigin } = normalizeWebAppBaseUrl(process.env.WEB_APP_BASE_URL);
 const macSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_SIGN_IDENTITY);
 const macApplicationSigningIdentity = normalizeEnv(process.env.MACOS_CONNECTOR_APP_SIGN_IDENTITY);
 const requireMacNotarization = hasEnvOverride("MACOS_CONNECTOR_REQUIRE_NOTARIZATION")
@@ -83,10 +84,6 @@ const resolveMacNotaryConfig = () => {
 };
 
 const macNotaryConfig = resolveMacNotaryConfig();
-
-if (!webAppBaseUrl) {
-  throw new Error("WEB_APP_BASE_URL is required to package the public Windows connector installer.");
-}
 
 if (macNotaryConfig && !macSigningIdentity) {
   throw new Error("MACOS_CONNECTOR_SIGN_IDENTITY is required when macOS notarization is configured.");
@@ -208,6 +205,7 @@ fi
 export PRINT_AGENT_HOST="\${PRINT_AGENT_HOST:-127.0.0.1}"
 export PRINT_AGENT_PORT="\${PRINT_AGENT_PORT:-17866}"
 export PRINT_AGENT_VERSION="\${PRINT_AGENT_VERSION:-${version}}"
+export PRINT_AGENT_WEB_APP_ORIGIN="${webAppOrigin}"
 
 exec "$AGENT_BIN" >> "$LOG_DIR/agent.log" 2>&1
 `;

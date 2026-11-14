@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { readConnectorSourceVersion, assertConnectorVersionMatchesSource } from "./source-version.mjs";
 import { windowsBuildMode } from "./windows-build-mode.mjs";
+import { normalizeWebAppBaseUrl } from "./web-app-origin.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,7 +18,7 @@ const releaseRoot = path.join(backendRoot, "local-print-agent", "releases");
 const defaultVersion = readConnectorSourceVersion(backendRoot);
 const version = String(process.env.CONNECTOR_RELEASE_VERSION || defaultVersion).trim();
 if (buildMode.productionEligible) assertConnectorVersionMatchesSource(version, backendRoot);
-const webAppBaseUrl = String(process.env.WEB_APP_BASE_URL || "").trim().replace(/\/+$/g, "");
+const { baseUrl: webAppBaseUrl } = normalizeWebAppBaseUrl(process.env.WEB_APP_BASE_URL);
 const windowsPkgTarget = String(process.env.WINDOWS_CONNECTOR_PKG_TARGET || "node24-win-x64").trim();
 const minWindowsBinaryBytes = 1_000_000;
 const pkgBinary = process.platform === "win32"
@@ -28,10 +29,6 @@ const innoSetupDefaults = [
   "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe",
   "C:\\Program Files\\Inno Setup 6\\ISCC.exe",
 ];
-
-if (!webAppBaseUrl) {
-  throw new Error("WEB_APP_BASE_URL is required to build the Windows installer scaffold.");
-}
 
 const ensureDir = (dirPath) => {
   fs.mkdirSync(dirPath, { recursive: true });

@@ -22,7 +22,7 @@ const persisted = new Map();
 let legacyHeartbeatFails = false;
 const claim = { available: true, printJobId: "job-fixture", printItemId: "item-fixture",
   manufacturerId: registration.userId, batch: { id: "batch-fixture", licenseeId: "tenant-fixture" },
-  printer: { id: "printer-db-id" }, qrCode: {},
+  printer: { id: "printer-db-id", capabilitySummary: { languages: ["ZSIM"], dpi: 300 } }, qrCode: {},
 };
 mock("rls-waves/session-c/c02/printingLifecycleRepository", {
   resolvePrintingConnectorIdentity: async (input) => {
@@ -102,6 +102,8 @@ test(`connector continuation preserves authenticated selector ${selectedPrinterI
   // Match session_ready handling: retain the connector's original selection.
   const connectorSession = { sessionId: session.id, registrationId: session.registrationId, messageSeq: 0 };
   const chunk = await boundary.buildNextPrintChunkForSession(session);
+  assert.equal(chunk.printer.dpi, 300, "Persistent chunk must carry the registered DPI to the connector");
+  assert.deepEqual(chunk.printer.languages, ["ZSIM"], "Persistent chunk must carry the registered language");
   const sign = (type, selector = selectedPrinterId, context = connectorSession) => buildSignedSessionMessage({
     type, selectedPrinterId: selector, session: context,
     chunkId: chunk.chunkId, printJobId: claim.printJobId, printItemId: claim.printItemId,

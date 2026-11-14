@@ -4,10 +4,25 @@ import {
   deriveManagedPrinterAutoDetect,
   buildPrinterReadinessDisplay,
   getPrinterDiagnosticSummary,
+  chooseStablePrinterSelection,
+  normalizePrinterInventoryRows,
+  getPrinterSelectionRank,
   shouldPreferNetworkDirectSummary,
 } from "@/lib/printer-diagnostics";
 
 describe("printer diagnostics summary", () => {
+  it("keeps a selected non-Zebra ZPL printer and leaves unknown DPI unverified", () => {
+    const printers = normalizePrinterInventoryRows([
+      { printerId: "emulated-zpl", printerName: "Factory emulator", languages: ["ZSIM"], dpi: null, online: true },
+      { printerId: "zebra", printerName: "Zebra ZT410", languages: ["ZPL"], dpi: 300, online: true },
+    ]);
+    expect(printers[0].dpi).toBeNull();
+    expect(chooseStablePrinterSelection(printers, "emulated-zpl")?.printerId).toBe("emulated-zpl");
+    expect(getPrinterSelectionRank({ printerId: "brand-agnostic", printerName: "Canon compatible", languages: ["ZPL"], online: true }))
+      .toBe(getPrinterSelectionRank({ printerId: "native", printerName: "Zebra native", languages: ["ZPL"], online: true }));
+    expect(getPrinterSelectionRank({ printerId: "Microsoft Print to PDF", printerName: "Microsoft Print to PDF", languages: ["ZPL"], online: true }))
+      .toBeLessThan(getPrinterSelectionRank({ printerId: "compatible", printerName: "TSC ZPL emulator", languages: ["ZPL"], online: true }));
+  });
   it("blocks old connectors even when a printer is visible", () => {
     const summary = getPrinterDiagnosticSummary({
       localAgent: { reachable: true, connected: true, error: null },
@@ -78,7 +93,7 @@ describe("printer diagnostics summary", () => {
     });
 
     expect(summary.state).toBe("blocked_with_alternative");
-    expect(summary.title).toBe("Network Zebra queue is broken");
+    expect(summary.title).toBe("Network label printer queue is broken");
     expect(summary.summary).toContain("10.45.144.9:9100");
     expect(summary.detail).toContain("USB001");
     expect(summary.recommendedPrinter?.printerId).toBe("ZDesigner ZT410-300dpi ZPL");

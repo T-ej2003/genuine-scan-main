@@ -37,6 +37,7 @@ vi.mock("@/lib/api-client", () => ({
     createNetworkPrinter: vi.fn(),
     updateNetworkPrinter: vi.fn(),
     selectLocalPrinter: vi.fn(),
+    applyLocalPrinterCalibration: vi.fn(),
   },
 }));
 
@@ -96,6 +97,20 @@ describe("PrinterDiagnostics managed printer controls", () => {
         },
       },
     } as any);
+    vi.mocked(apiClient.applyLocalPrinterCalibration).mockResolvedValue({ success: true } as any);
+  });
+
+  it("requires an explicit confirmation for an unknown-brand ZPL printer profile", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: true, data: {
+      connected: true, selectedPrinterId: "factory-usb", selectedPrinterName: "Factory label queue",
+      printers: [{ printerId: "factory-usb", printerName: "Factory label queue", model: "Generic industrial driver", online: true, languages: [], dpi: null }],
+    } } as any);
+    render(<MemoryRouter><PrinterDiagnostics /></MemoryRouter>);
+    const button = await screen.findByRole("button", { name: "I confirm this printer's ZPL setup" });
+    fireEvent.click(button);
+    await waitFor(() => expect(apiClient.applyLocalPrinterCalibration).toHaveBeenCalledWith({
+      printerId: "factory-usb", zplCompatible: true, dpi: 300, labelWidthMm: 40, labelHeightMm: 50,
+    }));
   });
 
   it("opens the network route dialog from the saved network route card", async () => {

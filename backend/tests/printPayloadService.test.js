@@ -86,8 +86,12 @@ const run = () => {
     "Local-agent AUTO printers should resolve to JSON payloads for workstation rendering"
   );
   assert(
-    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZT410-300dpi ZPL" }) === "ZPL",
-    "An identified 300dpi ZPL workstation printer should use the validated raw label path"
+    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZT410-300dpi ZPL", capabilitySummary: { languages: ["ZPL"], dpi: 300 } }) === "ZPL",
+    "A driver-confirmed 300dpi ZPL workstation printer should use the validated raw label path"
+  );
+  assert(
+    resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZT410-300dpi ZPL" }) === "JSON",
+    "A printer name without capability evidence must not enable RAW ZPL"
   );
   assert(
     resolvePayloadType({ connectionType: "LOCAL_AGENT", commandLanguage: "AUTO", name: "ZDesigner ZD421-203dpi ZPL" }) === "JSON",
@@ -217,7 +221,7 @@ const run = () => {
   const governedPayload = buildApprovedPrintPayload(governedInput);
   const autoZplPayload = buildApprovedPrintPayload({
     ...governedInput,
-    printer: { ...governedInput.printer, name: "ZDesigner ZT410-300dpi ZPL", commandLanguage: "AUTO" },
+    printer: { ...governedInput.printer, name: "ZDesigner ZT410-300dpi ZPL", commandLanguage: "AUTO", capabilitySummary: { languages: ["ZPL"], dpi: 300 } },
   });
   assert(autoZplPayload.payloadType === "ZPL" && autoZplPayload.payloadContent.startsWith("^XA")
     && autoZplPayload.payloadContent.includes("^BQN") && autoZplPayload.payloadContent.trim().endsWith("^XZ"),

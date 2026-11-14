@@ -382,6 +382,7 @@ export const buildNextPrintChunkForSession = async (
       name: claimed.printer.name,
       nativePrinterId: claimed.printer.nativePrinterId,
       selectedPrinterId: session.selectedPrinterId,
+      dpi: Number(claimed.printer.capabilitySummary?.dpi || claimed.printer.calibrationProfile?.dpi || 0) || null,
       languages: claimed.printer.capabilitySummary?.languages || [],
     },
     calibrationProfile: claimed.printer.calibrationProfile || null,

@@ -68,7 +68,9 @@ const requirements = { requirementsSha256: "a".repeat(64), objects: {
   tables: [{ identity: "User", sha256: "b".repeat(64) }], policies: [{ identity: "User.tenant", sha256: "c".repeat(64) }],
   schemas: [{ identity: "app_rls", sha256: "d".repeat(64) }], roles: [{ identity: "mscqr_prd_rls_phase2_app", sha256: "e".repeat(64) }],
 } };
-const contract = { sourceSha: "f".repeat(40), requirementsSha256: requirements.requirementsSha256, identities,
+const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const ancestorSha = execFileSync("git", ["rev-parse", "HEAD^"], { encoding: "utf8" }).trim();
+const contract = { sourceSha, requirementsSha256: requirements.requirementsSha256, identities,
   predecessorSha256: EXPECTED_PRINTING_ROUTINE_PREDECESSORS,
   successorSha256: Object.fromEntries(requirements.objects.routines.map(({ identity, sha256 }) => [identity, sha256])),
   sqlSha256: Object.fromEntries(routines.map(({ name, sql }) => [name, hash(sql)])) };
@@ -168,7 +170,7 @@ test("requirements discovery accepts only the exact protected producer run and i
 });
 
 test("requirements discovery skips authenticated different candidates and deterministically selects the newest exact match", () => {
-  const different = "e".repeat(40);
+  const different = ancestorSha;
   const mixed = artifactFixture({ records: [
     { runId: 300, artifactId: 600, candidateSourceSha: different },
     { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha },
@@ -185,7 +187,7 @@ test("requirements discovery skips authenticated different candidates and determ
 });
 
 test("requirements discovery is complete across pages and rejects partial, duplicate, or exhausted searches", () => {
-  const records = [{ runId: 300, artifactId: 600, candidateSourceSha: "e".repeat(40) }, { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha }];
+  const records = [{ runId: 300, artifactId: 600, candidateSourceSha: ancestorSha }, { runId: 100, artifactId: 400, candidateSourceSha: contract.sourceSha }];
   const paged = artifactFixture({ records });
   paged.pages.splice(0, 1, { total_count: 2, workflow_runs: [paged.values[0].run] }, { total_count: 2, workflow_runs: [paged.values[1].run] });
   assert.equal(discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: paged.githubRun }).runId, "100");
@@ -194,7 +196,7 @@ test("requirements discovery is complete across pages and rejects partial, dupli
     [{ total_count: 2, workflow_runs: [paged.values[0].run, paged.values[0].run] }],
     Array.from({ length: 11 }, () => ({ total_count: 0, workflow_runs: [] })),
   ]) assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: artifactFixture({ records, runPages }).githubRun }));
-  const noMatch = artifactFixture({ records: [{ runId: 300, artifactId: 600, candidateSourceSha: "e".repeat(40) }] });
+  const noMatch = artifactFixture({ records: [{ runId: 300, artifactId: 600, candidateSourceSha: ancestorSha }] });
   assert.throws(() => discoverCanonicalRequirementsReference({ sourceSha: contract.sourceSha, githubRun: noMatch.githubRun }), /absent or ambiguous/);
   const partialArtifacts = artifactFixture();
   const partialArtifact = partialArtifacts.values[0].artifact;

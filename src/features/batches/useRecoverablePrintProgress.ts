@@ -55,7 +55,7 @@ export function useRecoverablePrintProgress({
       if (!response.success || !response.data) {
         if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
           const seconds = Math.max(1, Math.ceil(Number(response.retryAfterSec || 10)));
-          setPrintProgressNotice(`Status refresh paused for ${seconds} seconds. The print run remains recoverable.`);
+          setPrintProgressNotice(`Status refresh paused for ${seconds} seconds. The print status view remains available.`);
           return;
         }
         setPrintProgressNotice(

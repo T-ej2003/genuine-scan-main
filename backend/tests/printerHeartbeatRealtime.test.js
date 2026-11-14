@@ -20,7 +20,7 @@ mock("services/printerConnectionService", {
   emitConnectionEvent: (event) => { order.push("event"); assert.equal(event.userId, "maker-fixture"); assert.deepEqual(event.status, status); },
   onPrinterConnectionEvent: (listener) => { connectionListener = listener; return () => { connectionListener = null; }; },
 });
-mock("services/printerRegistryService", {});
+mock("services/printerRegistryService", { localPrinterInventoryWithCapabilities: (rows) => rows });
 mock("services/auditService", {});
 mock("services/notificationService", {});
 mock("services/versionedCacheService", { bumpCacheNamespaceVersion: async () => { order.push("invalidate"); } });

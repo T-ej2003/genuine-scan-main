@@ -5,13 +5,14 @@ const { createHash } = require("node:crypto");
 require("../dist/local-print-agent/dispatchJournal").reserveAutomaticDispatch = async () => true;
 const { runPersistentPrintChunk } = require("../dist/local-print-agent/directPrintWorker");
 
-const zpl = "^XA^FO20,20^FDTEST^FS^XZ";
+const { buildKnownGoodDiagnosticZplPayload } = require("../dist/printing/printPayloadSafety");
+const zpl = buildKnownGoodDiagnosticZplPayload();
 const payloadHash = createHash("sha256").update(zpl).digest("hex");
 const payload = {
   type: "print_chunk",
   chunkId: "isolated-chunk",
   printJobId: "isolated-job",
-  printer: { name: "isolated-queue", languages: ["ZPL"] },
+  printer: { name: "isolated-queue", languages: ["ZPL"], dpi: 300 },
   labels: [{ printItemId: "isolated-item", code: "isolated-code", scanUrl: "https://example.test/scan",
     payloadType: "ZPL", payloadContent: zpl, payloadHash, commandLanguage: "ZPL" }],
 };

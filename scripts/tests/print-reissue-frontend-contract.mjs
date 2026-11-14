@@ -14,7 +14,7 @@ const approvalHandler = batchesPage.slice(approvalHandlerStart, approvalHandlerE
 
 assert.match(apiClient, /\/manufacturer\/print-reissue-requests\/\$\{encodeURIComponent\(requestId\)\}\/print/);
 assert.match(apiClient, /print-approved-reissue/);
-assert.match(batchesPage, /listPrintReissueRequests\(\{ status: isManufacturer \? undefined : "PENDING", limit: 25 \}\)/);
+assert.match(batchesPage, /listPrintReissueRequests\(\{\s*status: isManufacturer \? undefined : "PENDING",\s*limit: 25,\s*force: Boolean\(options\?\.force\),\s*\}\)/);
 assert.match(batchesPage, /apiClient\.printApprovedReissueRequest\(requestId\)/);
 assert.match(batchesPage, /Printer verification expired\. Refresh printer helper before printing\./);
 assert.match(batchesPage, /onOpenExistingPrintProgress/);

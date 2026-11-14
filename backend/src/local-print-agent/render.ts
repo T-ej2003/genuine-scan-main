@@ -77,18 +77,22 @@ export const validateZplPayloadForRawPrint = (payloadContent: string, context: Z
   const trimmed = String(payloadContent || "").trim();
   const profile = classifyIndustrialZplPrinterProfile({
     printerName: context.printerName || null,
-    languages: context.printerLanguages || ["ZPL"],
+    languages: context.printerLanguages || [],
     dpi: context.printerDpi ?? null,
   });
   if (!profile.compatible) {
     throw Object.assign(
       new Error(
-        profile.reason === "unsupported_printer_dpi"
+        profile.reason === "unverified_printer_dpi"
+          ? "Printer DPI is unknown. Confirm 300 dpi and ZPL mode in printer setup before printing."
+          : profile.reason === "unsupported_virtual_printer"
+          ? "Fax/PDF virtual queues cannot print MSCQR labels. Select a physical ZPL-compatible printer."
+          : profile.reason === "unsupported_printer_dpi"
           ? "This label template is certified for 300dpi. Select a 300dpi ZPL-compatible printer."
           : "This printer is not confirmed as ZPL-compatible. Select a 300dpi ZPL-compatible industrial label printer or update the connector profile."
       ),
       {
-        errorCode: profile.reason === "unsupported_printer_dpi" ? "unsupported_printer_dpi" : "unsupported_printer_language",
+        errorCode: profile.reason,
         zplValidationErrors: [profile.reason || "unsupported_printer_profile"],
         printerProfile: profile,
       }

@@ -381,12 +381,12 @@ export function BatchPrintJobDialog({
   const canStopJob = (job: PrintJobRow) =>
     isJobActive(job) || isJobPaused(job);
   const canRequestReissue = (job: PrintJobRow) =>
-    job.status === "CONFIRMED" || job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED";
+    job.status === "CONFIRMED" || job.status === "STOPPED" || job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED";
   const printControlTitle =
     printControlDialog.action === "stop" ? "Stop print run" : "Pause print run";
   const printControlDescription =
     printControlDialog.action === "stop"
-      ? "Stopping prevents any new label dispatch. Already confirmed labels stay printed and the remaining labels stay visible for controlled recovery."
+      ? "Stopping prevents new label dispatch. Labels already sent may still print; only items proven unissued can be recovered."
       : "Pausing stops new label dispatch while preserving labels already confirmed by MSCQR.";
   const activePrintJob =
     (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
@@ -815,7 +815,7 @@ export function BatchPrintJobDialog({
                 ) : null}
                 <div className="text-xs text-muted-foreground">
                   {activeStoppedOrPartial
-                    ? "Confirmed labels stay printed. Unprinted labels remain recoverable through the controlled recovery flow."
+                    ? "Confirmed labels stay recorded. Review item evidence before requesting recovery."
                     : activeCompleted
                     ? "MSCQR received backend confirmation for this print run."
                     : activeFailedBeforePrint
@@ -1138,7 +1138,7 @@ export function BatchPrintJobDialog({
           </div>
           {printControlDialog.action === "stop" ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-              Stopping does not mark unconfirmed labels as printed. Remaining labels stay recoverable through controlled reissue or a new approved run.
+              Stopping does not mark unconfirmed labels as printed. Only items proven unissued are eligible for controlled recovery.
             </div>
           ) : null}
           <div className="flex justify-end gap-2">

@@ -34,6 +34,8 @@ const {spawnSync}=require('node:child_process');
     const result=spawnSync(process.execPath,['--require',preload,...script.split(' ').slice(1)],{cwd:backend,encoding:'utf8',env:{...process.env,WEB_APP_BASE_URL:'http://127.0.0.1:1',MSCQR_MAINTENANCE_API_ORIGIN:'',MSCQR_APPROVED_MAINTENANCE_API_ORIGIN:'',INNO_SETUP_COMPILER_PATH:path.join(root,'unavailable.exe')}});
     assert.equal(result.status,0,result.stderr);
     const stage=path.join(backend,'.connector-build/windows-installer-development');
+    const packagedCommand=fs.readFileSync(path.join(stage,'staging/Install Connector.cmd'),'utf8');
+    assert(packagedCommand.includes('set "MSCQR_WEB_APP_BASE_URL=http://127.0.0.1:1"'), 'The configured web-app URL must reach the actual Windows installer command');
     const metadata=JSON.parse(fs.readFileSync(path.join(stage,'staging/installer-build.json')));
     assert.equal(metadata.productionEligible,false);
     assert.equal(metadata.maintenanceOrigin,'MSCQR_DEVELOPMENT_UPGRADES_DISABLED');

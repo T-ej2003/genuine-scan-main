@@ -104,6 +104,9 @@ jobs:
           MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
         run: |
           mkdir -m 700 "$RUNNER_TEMP/backend-recovery-certification"
+          psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -v ON_ERROR_STOP=1 -c 'ALTER SYSTEM SET autovacuum = off'
+          psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -v ON_ERROR_STOP=1 -c 'SELECT pg_reload_conf()'
+          test "$(psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -Atc 'SHOW autovacuum')" = off
           started="$(date +%s)"
           if timeout --kill-after=30s 120m npm run rls:full-certify; then
             echo "Full RLS certification passed in $(( $(date +%s) - started )) seconds."
@@ -124,6 +127,16 @@ jobs:
     name: App-only deployment contract and real PostgreSQL
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      redis:
+        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -179,7 +192,11 @@ jobs:
           for family in manufacturer-scope qr-system printing-lifecycle; do
             export MSCQR_FULL_RLS_CERTIFICATION_FAMILY="$family"
             export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/startex-evidence/$family.json"
-            node scripts/rls/certify-clean-room-database.mjs
+            if [ "$family" = printing-lifecycle ]; then
+              REDIS_URL=redis://127.0.0.1:6379/0 node scripts/rls/certify-clean-room-database.mjs
+            else
+              node scripts/rls/certify-clean-room-database.mjs
+            fi
             test "$(psql "$MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_stat_activity WHERE datname LIKE 'mscqr_full_rls_cert_%'")" = "0"
           done
           node --test backend/tests/qrAllocationAuditProjection.test.js
@@ -306,6 +323,14 @@ jobs:
           export TF_DATA_DIR="$(mktemp -d)"
           terraform -chdir=infra/aws/terraform/production-support-email-worker init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/aws/terraform/production-support-email-worker validate -no-color
+
+      - name: Validate printing worker infrastructure
+        run: |
+          node --test scripts/tests/production-printing-worker.test.mjs
+          terraform -chdir=infra/aws/terraform/production-printing-worker fmt -check
+          export TF_DATA_DIR="$(mktemp -d)"
+          terraform -chdir=infra/aws/terraform/production-printing-worker init -backend=false -input=false -lockfile=readonly
+          terraform -chdir=infra/aws/terraform/production-printing-worker validate -no-color
 
       - name: Certify application release graph and fixed B03 registration
         run: node --test scripts/tests/production-release-preexecution.test.mjs scripts/tests/stage-b-worker-runtime-rotation.test.mjs scripts/tests/stage-b-b03-registration.test.mjs scripts/tests/production-b03-registration-policy.test.mjs scripts/tests/production-provider-readonly-policy-reconciliation.test.mjs scripts/tests/production-b03-broker-workflow.test.mjs scripts/tests/production-b03-completion.test.mjs
@@ -625,6 +650,10 @@ jobs:
         with:
           name: frontend-playwright-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            test-results/enterprise-smoke-*/test-failed-*.png
+            test-results/enterprise-smoke-*/video.webm
+            test-results/enterprise-smoke-*/error-context.md
+            test-results/enterprise-smoke-*/trace.zip
             test-results/batch-reissue-recovery-*/test-failed-*.png
             test-results/batch-reissue-recovery-*/error-context.md
             test-results/client-pages.visual-*/client-mfa-setup-light-actual.png

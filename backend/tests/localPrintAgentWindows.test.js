@@ -4,6 +4,9 @@ const {
   listWindowsLocalPrinters,
   parseWindowsPrinterDiscovery,
   parseWindowsPrinters,
+  applyConfirmedZplCapabilities,
+  isVirtualNonLabelPrinter,
+  zplPrinterIdentity,
   resolveSelectedPrinter,
   waitForLocalPrintJobCompletion,
 } = require("../dist/local-print-agent/cups");
@@ -20,6 +23,7 @@ const {
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { mergeCalibrationProfile } = require("../dist/local-print-agent/state");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -71,6 +75,29 @@ const run = async () => {
   assert(printers[1].portNumber === 9100, "TCP/IP port number should be preserved");
   assert(printers[1].stuckJobCount === 1, "Stuck retained MSCQR jobs should be counted");
 
+  const compatible = parseWindowsPrinters(JSON.stringify({ printers: [
+    { Name: "TSC emulation", DriverName: "TSC ZPL 300dpi", PortName: "USB002", PrinterStatus: 3 },
+    { Name: "Zebra ZPL 300dpi", DriverName: "Generic / Text Only", PortName: "USB003", PrinterStatus: 3 },
+    { Name: "Unknown industrial label", DriverName: "Generic Label Driver", PortName: "USB004", PrinterStatus: 3 },
+    { Name: "Other language", DriverName: "TSPL 300dpi", PortName: "USB005", PrinterStatus: 3 },
+  ] }));
+  assert(compatible[0].languages.includes("ZPL") && compatible[0].dpi === 300, "Emulation driver should advertise ZPL and DPI");
+  assert(compatible[1].languages.length === 0 && compatible[1].dpi === null, "Brand and queue name must not assert driver capabilities");
+  const unknown = { printerId: compatible[2].name, printerName: compatible[2].name, model: compatible[2].driverName, connection: "usb", online: true, isDefault: false, protocols: [], languages: compatible[2].languages, mediaSizes: [], dpi: compatible[2].dpi };
+  const confirmation = { zplCompatible: true, dpi: 300, zplPrinterIdentity: zplPrinterIdentity(unknown) };
+  const confirmed = applyConfirmedZplCapabilities(unknown, confirmation);
+  assert(confirmed.languages.includes("ZPL") && confirmed.dpi === 300, "Operator confirmation should enable unknown compatible device");
+  assert(applyConfirmedZplCapabilities(unknown, { ...confirmation, zplCompatible: false }).languages.length === 0, "Unconfirmed mode must remain unknown");
+  assert(applyConfirmedZplCapabilities({ ...unknown, portName: "USB005" }, confirmation).languages.length === 0, "Confirmation must expire if the printer port changes");
+  assert(applyConfirmedZplCapabilities({ ...unknown, languages: compatible[3].languages }, confirmation).languages.every((language) => language !== "ZPL"), "Conflicting driver language must not be overridden");
+  const virtualZpl = { ...unknown, printerId: "Microsoft Print to PDF", printerName: "Microsoft Print to PDF", languages: ["ZPL"], dpi: 300 };
+  assert(isVirtualNonLabelPrinter(virtualZpl), "A virtual queue must remain blocked even if it advertises ZPL");
+  const virtualUnknown = { ...virtualZpl, languages: [] };
+  assert(applyConfirmedZplCapabilities(virtualUnknown, { ...confirmation, zplPrinterIdentity: zplPrinterIdentity(virtualUnknown) }).languages.length === 0,
+    "Operator confirmation must not turn a virtual queue into a physical printer");
+  const calibrated = mergeCalibrationProfile({ calibrationProfiles: { [unknown.printerId]: { zplCompatible: true, dpi: 300, offsetXmm: 2 } } }, unknown.printerId, { darkness: 8 });
+  assert(calibrated.calibrationProfiles[unknown.printerId].zplCompatible === true && calibrated.calibrationProfiles[unknown.printerId].offsetXmm === 2, "Updating calibration must preserve operator confirmation and existing offsets");
+
   const localPrinters = printers.map((printer) => ({
     printerId: printer.name,
     printerName: printer.name,
@@ -79,9 +106,9 @@ const run = async () => {
     online: printer.online,
     isDefault: printer.isDefault,
     protocols: [],
-    languages: [],
+    languages: printer.languages,
     mediaSizes: [],
-    dpi: null,
+    dpi: printer.dpi,
     portName: printer.portName,
     windowsPortName: printer.portName,
     windowsPortHost: printer.portHost,
@@ -514,7 +541,7 @@ const run = async () => {
   assert(mutatedOfficialRejected, "Mutated official wordmark graphic must not reach the RAW spooler");
   let shortZplRejected = false;
   try {
-    validateZplPayloadForRawPrint("^XA\n^FO0,0^BQN,2,7^FDLA,x^FS\n^XZ");
+    validateZplPayloadForRawPrint("^XA\n^FO0,0^BQN,2,7^FDLA,x^FS\n^XZ", { printerLanguages: ["ZPL"], printerDpi: 300 });
   } catch (error) {
     shortZplRejected = true;
     assert(error.errorCode === "invalid_zpl_print_payload", "Short/placeholder ZPL should fail with a precise code");
@@ -523,7 +550,7 @@ const run = async () => {
 
   let blackBlockRejected = false;
   try {
-    validateZplPayloadForRawPrint("^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,390,B,0^FS\n^XZ");
+    validateZplPayloadForRawPrint("^XA\n^PW600\n^LL400\n^FO0,0^GB600,400,390,B,0^FS\n^XZ", { printerLanguages: ["ZPL"], printerDpi: 300 });
   } catch (error) {
     blackBlockRejected = true;
     assert(
@@ -541,6 +568,8 @@ const run = async () => {
       printerName: "HP Also Ready",
       printerId: "HP Also Ready",
       model: "HP Universal Printing",
+      languages: [],
+      dpi: null,
       online: true,
       isDefault: false,
     },

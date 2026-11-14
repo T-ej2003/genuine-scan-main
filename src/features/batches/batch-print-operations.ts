@@ -162,7 +162,7 @@ export const syncProgressFromPrintJob = (
   if (stoppedOrPartial) {
     setPrintProgressPhase(job.status === "PARTIALLY_COMPLETED" ? "Partially completed" : "Print run stopped");
     setPrintProgressError(null);
-    setPrintProgressNotice?.("Unprinted labels remain recoverable through the controlled recovery flow.");
+    setPrintProgressNotice?.("Only items proven unissued are eligible for controlled recovery.");
     return;
   }
   if (job.status === "FAILED") {
@@ -170,7 +170,7 @@ export const syncProgressFromPrintJob = (
       job.failureReason || job.session?.failedReason,
       "This print job needs attention before it can continue."
     );
-    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated zebra zpl looks unsafe|unsafe_zpl_payload/i.test(
+    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated (?:zebra )?zpl looks unsafe|invalid_zpl_print_payload|unsafe_zpl_payload/i.test(
       `${safeError} ${job.failureReason || ""} ${job.session?.failedReason || ""}`
     );
     setPrintProgressPhase(failedBeforePrint ? "Failed before print" : "Print job failed");
@@ -325,7 +325,10 @@ export const printJobCreateFailureMessage = (response: {
     return "Persistent printer session is disconnected. Start MSCQR Connector 2026.6.26 or newer, then retry.";
   }
   if (errorCode === "printer_mapping_missing") {
-    return "The saved printer is not linked to this computer's Zebra printer. Choose the ZDesigner printer again or refresh printer setup.";
+    return "The saved printer is not linked to this computer's selected label printer. Select the registered printer again or refresh printer setup.";
+  }
+  if (errorCode === "zpl_printer_setup_required") {
+    return String(response.message || response.error || "Confirm ZPL mode, 300 dpi, and 40 × 50 mm media in Printer Diagnostics before printing.");
   }
   if (errorCode === "batch_not_printable") {
     return "There are no labels ready to print in this batch.";
@@ -351,14 +354,14 @@ export const printJobCreateFailureMessage = (response: {
     if (/fax|pdf|zdesigner|printer on this computer/i.test(message)) {
       return sanitizePrinterUiError(message, message);
     }
-    return "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
+    return "Choose a ZPL-compatible printer under Printer on this computer, then refresh printer setup.";
   }
   if (errorCode === "invalid_printer" || errorCode === "printer_not_found" || errorCode === "unsupported_printer_route") {
     const message = String(response.message || response.error || "").trim();
     if (/fax|pdf|zdesigner|printer on this computer/i.test(message)) {
       return sanitizePrinterUiError(message, message);
     }
-    return "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup.";
+    return "Choose a ZPL-compatible printer under Printer on this computer, then refresh printer setup.";
   }
   if (errorCode === "invalid_payload") {
     const hasValidationDetails =
@@ -514,7 +517,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       if (!selectedBeforePrint.success) {
         const message = sanitizePrinterUiError(
           selectedBeforePrint.error,
-          "Choose the ZDesigner printer under Printer on this computer, then refresh printer setup."
+          "Choose a ZPL-compatible printer under Printer on this computer, then refresh printer setup."
         );
         toast({ title: "Printer switch failed", description: message, variant: "destructive" });
         setPrintProgressOpen(true);
@@ -669,7 +672,7 @@ export const createPrintJob = async (context: BatchPrintOperationContext) => {
       !raw.includes("invalid_state_transition");
     const responseMessage = String(response.message || response.error || "").trim();
     const safeError = printJobCreateFailureMessage(response);
-    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated zebra zpl looks unsafe|unsafe_zpl_payload/i.test(
+    const failedBeforePrint = /blocked before reaching the printer|payload rejected before print|generated (?:zebra )?zpl looks unsafe|invalid_zpl_print_payload|unsafe_zpl_payload/i.test(
       `${safeError} ${responseMessage} ${raw}`
     );
     toast({

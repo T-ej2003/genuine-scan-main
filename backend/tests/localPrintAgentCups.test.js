@@ -72,6 +72,9 @@ system default destination: Canon_TS4100i_series
   );
   assert(capability.supportsPdf === true, "Capability summary should report PDF support");
   assert(capability.languages.includes("AUTO"), "Capability summary should fall back to AUTO language");
+  assert(capability.dpiOptions.join() === "600", "Capability summary should preserve detected DPI");
+  assert(buildCapabilitySummary([{ ...printers[0], connection: "usb", protocols: [], languages: [], mediaSizes: [], dpi: null }], printers[0].printerId).dpiOptions.length === 0,
+    "Unknown DPI must not be reported as 300 dpi");
 
   console.log("local print agent cups tests passed");
 };
