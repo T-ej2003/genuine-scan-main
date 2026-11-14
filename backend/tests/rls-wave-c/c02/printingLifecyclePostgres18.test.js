@@ -1453,6 +1453,10 @@ async function main() {
   denied(app, executeStopped(), /INVALID_STATE_TRANSITION/);
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
   psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"releasedAt"=NULL WHERE id='${stopBatchId}'`);
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=clock_timestamp()+interval '1 second' WHERE id='${stopQrId}'`);
+  denied(app, `BEGIN; SELECT pg_sleep(2); ${executeStopped()}; ROLLBACK`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()+interval '1 day' WHERE id='${stopQrId}'`);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds'
     WHERE id='${maintainedSession}'`);
   denied(app, executeStopped(), /PRINTER_ATTESTATION_STALE/);

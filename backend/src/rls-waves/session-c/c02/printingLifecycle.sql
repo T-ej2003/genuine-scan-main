@@ -3062,7 +3062,7 @@ BEGIN
         AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
         AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
         AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
-        AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">now_at
+        AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
       ) INTO item_count,safe_item_count FROM public."PrintItem" pi
       JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_row.id;
       IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity
@@ -3167,7 +3167,7 @@ BEGIN
           AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
           AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
           AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
-          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">now_at
+          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
         ) INTO item_count,safe_item_count FROM public."PrintItem" pi
         JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_id;
         IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity

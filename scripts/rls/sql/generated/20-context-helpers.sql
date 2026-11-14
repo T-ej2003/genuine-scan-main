@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7'
+    AND source_contract_sha256='d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11104,7 +11104,7 @@ BEGIN
         AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
         AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
         AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
-        AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">now_at
+        AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
       ) INTO item_count,safe_item_count FROM public."PrintItem" pi
       JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_row.id;
       IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity
@@ -11209,7 +11209,7 @@ BEGIN
           AND q."printJobId"=job_row.id AND q.status='ACTIVATED' AND pi.code=q.code
           AND q."printedAt" IS NULL AND q."scannedAt" IS NULL AND q."scanCount"=0
           AND q."tokenNonce" IS NOT NULL AND q."tokenIssuedAt" IS NOT NULL
-          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">now_at
+          AND q."tokenHash" IS NOT NULL AND q."tokenExpiresAt">clock_timestamp()
         ) INTO item_count,safe_item_count FROM public."PrintItem" pi
         JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi."printSessionId"=original_session_id;
         IF item_count<>job_row.quantity OR safe_item_count<>job_row.quantity
