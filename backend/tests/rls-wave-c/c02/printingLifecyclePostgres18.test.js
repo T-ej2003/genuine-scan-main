@@ -1361,12 +1361,11 @@ async function main() {
   psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${stopBatchId}'`);
   denied(app, stoppedReissue(), /INVALID_STATE_TRANSITION/);
   psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${stopBatchId}'`);
-  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED' WHERE id='${stopBatchId}';
-    UPDATE public."PrintItem" SET "agentAckedAt"=now() WHERE id='${stopItemId}'`);
-  denied(app, stoppedReissue(), /PHYSICAL_OUTCOME_UNCONFIRMED/,
-    "confirmed batches must reach physical-evidence checks when reissue is requested");
-  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED' WHERE id='${stopBatchId}';
-    UPDATE public."PrintItem" SET "agentAckedAt"=NULL WHERE id='${stopItemId}'`);
+  for (const lifecycle of ['FAILED','PRINT_CONFIRMED','SAMPLE_VERIFIED']) {
+    psql(admin, `UPDATE public."Batch" SET "lifecycleState"='${lifecycle}' WHERE id='${stopBatchId}'`);
+    denied(app, stoppedReissue(), /INVALID_STATE_TRANSITION/);
+  }
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED' WHERE id='${stopBatchId}'`);
   const rejectUnsafeStop = (mutate, restore) => {
     psql(admin, mutate);
     denied(app, stoppedReissue(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
@@ -1453,6 +1452,10 @@ async function main() {
   denied(app, executeStopped(), /INVALID_STATE_TRANSITION/);
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
   psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"releasedAt"=NULL WHERE id='${stopBatchId}'`);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='FAILED' WHERE id='${stopBatchId}'`);
+  assert.equal(json(app, stoppedReissue()).idempotent, true);
+  denied(app, executeStopped(), /INVALID_STATE_TRANSITION/);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED' WHERE id='${stopBatchId}'`);
   psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=clock_timestamp()+interval '1 second' WHERE id='${stopQrId}'`);
   denied(app, `BEGIN; SELECT pg_sleep(2); ${executeStopped()}; ROLLBACK`, /PHYSICAL_OUTCOME_UNCONFIRMED/);
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
@@ -1553,6 +1556,12 @@ async function main() {
     '${requestId()}','CONFIRM','${expiredJobId}','${expiredItemId}','${ids.printer}','${hash("late-confirm-retry")}',
     'spool-expired','{"physical":true}'::jsonb
   )`).idempotent, true);
+  const originalRaceLifecycle = psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${ids.raceBatch}'`);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED' WHERE id='${ids.raceBatch}'`);
+  assert.equal(json(app, `BEGIN; SELECT app_rls.printing_reissue_request(
+    '${caps.maker}','printing-reissue','${requestId()}','CREATE',NULL,
+    '${expiredJobId}',1,NULL,NULL,'Confirmed-job reissue stays available before release',NULL); ROLLBACK`).status, 'PENDING');
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='${originalRaceLifecycle}' WHERE id='${ids.raceBatch}'`);
 
   const createExpiredRun = (label, count, unexpired = 0) => {
     const jobId = randomUUID();

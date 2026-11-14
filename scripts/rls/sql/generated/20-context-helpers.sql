@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7'
+    AND source_contract_sha256='70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d11fee9e00454678c09024c4fc3300a87891c684587b79e4217b5819ddf879b7')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:70a38a035e68262e5a4b604e67e194f727a65a498312f45b82cb3f9f032bb47b')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11080,6 +11080,7 @@ BEGIN
     SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
       FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
     IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+       OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
        OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
     THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     IF job_row.status='STOPPED' THEN
@@ -11179,6 +11180,7 @@ BEGIN
       SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
         FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
       IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+         OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
          OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')

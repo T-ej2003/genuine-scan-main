@@ -3038,6 +3038,7 @@ BEGIN
     SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
       FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
     IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+       OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
        OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
     THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     IF job_row.status='STOPPED' THEN
@@ -3137,6 +3138,7 @@ BEGIN
       SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
         FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
       IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+         OR (job_row.status='STOPPED' AND batch_row."lifecycleState" NOT IN ('CODES_GENERATED','PRINT_ACKNOWLEDGED'))
          OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
