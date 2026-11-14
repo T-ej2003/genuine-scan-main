@@ -277,7 +277,6 @@ app.use(
     allowedHeaders: ["Content-Type", "Access-Control-Request-Private-Network"],
   })
 );
-app.use(express.json({ limit: "1mb" }));
 app.use(rateLimit({
   windowMs: 60_000,
   limit: 120,
@@ -287,6 +286,7 @@ app.use(rateLimit({
   keyGenerator: (req) => ipKeyGenerator(req.socket.remoteAddress || "unknown"),
   handler: (_req, res) => res.status(429).set("Retry-After", "60").json({ success: false, error: "Too many connector requests. Retry in one minute." }),
 }));
+app.use(express.json({ limit: "1mb" }));
 app.use((req, res, next) => {
   if (req.method === "POST" && !isAuthorizedConnectorUiOrigin(req.get("origin"))) {
     return res.status(403).json({ success: false, error: "This site is not authorized to change connector settings." });
