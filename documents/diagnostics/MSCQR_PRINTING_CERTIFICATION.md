@@ -126,7 +126,7 @@ FRONTEND_PRINTING_TESTS=PASS for printing Vitest cases, TypeScript and productio
 BACKEND_PRINTING_TESTS=PASS for focused printing, worker and connector suites and PR #841 backend job.
 POSTGRESQL_18_4_TESTS=PASS for disposable hosted clean-room printing application path at source commit `20953398`, run `43606879909`. Incremental migration from the actual deployed catalogue remains unverified.
 REMAINING_HARDWARE_BOUNDARIES=Actual Windows connector installation, selected ZT410 registration, Windows spooler receipt and Zebra output; no physical label was printed.
-RELEASE_CANDIDATE_SHA=`20953398d7ca3da321c954dcd1f5aa503aff3ce6` (focused source commit; PR #841 hosted PostgreSQL 18.4 and application checks passed). Documentation-only commits do not change this source SHA.
+RELEASE_CANDIDATE_SHA=`b300447af0a42a9b0a03bb1ae85bd08eab491668` (brand-neutral ZPL source commit on PR #841; exact-head hosted checks pending at this record update). Prior hosted PostgreSQL 18.4 evidence is bound to `20953398`, not this new source SHA.
 
 PRINTING_SOFTWARE_READY=UNVERIFIED
 PRINTING_WORKER_READY=PASS for local software and validated configuration; production activation remains FAIL as reported separately.
@@ -135,3 +135,25 @@ CONNECTOR_SOFTWARE_READY=UNVERIFIED
 SIGNED_INSTALLER_READY=FAIL
 PHYSICAL_ZEBRA_VERIFIED=UNVERIFIED
 PRODUCTION_DEPLOYMENT_READY=FAIL
+
+## Brand-neutral ZPL connector compatibility — 14 November 2026
+
+ZPL_BRAND_AGNOSTIC=PASS at the software protocol boundary for synthetic 300 dpi ZPL and ZSIM profiles. Compatibility is based on the registered printer's language and DPI, not its vendor or queue name. Actual non-Zebra hardware remains UNVERIFIED.
+
+HARDCODED_VENDOR_RESTRICTIONS=Removed Zebra/ZDesigner name ranking and instructions from the local connector selection and manufacturer setup path. Zebra odometer commands remain confined to direct-network confirmation, where that vendor-specific proof is required; they are not used for Windows RAW ZPL dispatch.
+
+PRINTER_DISCOVERY=Windows printer language and DPI hints come from the installed driver, not a user-editable queue name. Unknown DPI remains unknown. The connector supports explicit operator confirmation of ZPL mode, 300 dpi, 40 × 50 mm media, and at least 472 printable dots; confirmation is bound to the selected queue, driver/model and port, and expires when those change. Driver metadata and operator confirmation are not physical capability tests.
+
+PRINTER_REGISTRATION=Heartbeat preserves each discovered queue's own capability and calibration profile. A selected queue's confirmation is no longer copied to other registrations. The existing signed registration, manufacturer scope and native printer ID checks remain in force.
+
+PRINTER_SELECTION=Explicit missing printer IDs fail rather than silently using another default queue. Virtual Fax/PDF queues are rejected. Registration selection and connector payload language/DPI are checked before job creation, test-label enqueue and RAW dispatch; an unsupported ZPL profile returns a setup-specific error before QR reservation or durable dispatch reservation.
+
+ZPL_COMPATIBILITY=The current MSCQR label contract is 300 dpi, `^PW472`, `^LL591`, nominal 40 × 50 mm media, one bounded `^GFA` graphic and one `^BQN` QR. Payload safety validates the required dimensions and command structure. The printer must implement the subset emitted by `backend/src/printing/printPayloadSafety.ts` and `backend/src/services/printPayloadService.ts`; neither a vendor name nor a Windows driver proves physical support.
+
+RAW_DISPATCH=The persistent and polling connector paths use the registered language/DPI, preflight the approved payload before reserving dispatch, retain the existing journal's no-replay rule, submit RAW data through the existing Windows spooler, and send signed ACKs. A spooler receipt is not proof of physical output. The persistent one-item chunk path was corrected to carry DPI.
+
+VENDOR_SPECIFIC_DIAGNOSTICS=Zebra status/odometer checks remain optional for the Windows connector and are used only by the separate strict direct-network route. Non-Zebra ZPL-compatible Windows queues do not need a Zebra status command.
+
+REGRESSION_TESTS=PASS locally: backend build; synthetic Zebra, TSC/ZPL and ZSIM profiles; unknown/203 dpi rejection; queue-name spoofing rejection; operator confirmation and identity-change invalidation; signed persistent chunk DPI; unsupported profile blocked before reservation and spooler; journal replay protection; backend job-creation preflight; frontend printer setup/diagnostics and failure copy; frontend typecheck, production build and 44 focused Vitest cases. Actual Windows connector and physical printer were not run in this environment.
+
+REMAINING_HARDWARE_VERIFICATION=UNVERIFIED: installed Windows connector, selected physical queue identity, 300 dpi/media/printable width on each intended model, RAW spooler output, ZPL emulation fidelity, printed QR scan quality and physical completion. Signed installer availability and production worker activation remain separate release blockers. No deployment or physical printing occurred.
