@@ -90,7 +90,7 @@ export const createPrintJobRecords = async (params: {
   });
   const printMode = printer.connectionType as PrintDispatchMode;
   const payloadType = payloadTypeFor(printer);
-  params.onStage("print_job_created", "print_job_created", {
+  params.onStage("print_job_creation_started", "print_job_creation_started", {
     batchId: params.batchId,
     printerId: printer.id,
     itemCount: items.length,
