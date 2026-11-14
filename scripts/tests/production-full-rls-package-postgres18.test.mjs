@@ -352,10 +352,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(securityRebaselineCanonical.candidateSourceSha, context.candidateSourceSha);
       assert.equal(securityRebaselineCanonical.appOnlyRequirementsSha256, requirements.requirementsSha256);
       const sevenScope = JSON.parse(fs.readFileSync(path.join(root, "scripts/aws/production-seven-routine-scope.json"), "utf8"));
-      const sevenPackage = buildProductionSevenRoutinePackage({ sourceSha, requirements,
-        securityInventory: securityRebaselineCanonical, repositoryRoot: root,
+      const sevenInputs = { sourceSha, requirements, securityInventory: securityRebaselineCanonical, repositoryRoot: root,
         databaseIdentity: { DBInstanceIdentifier: sevenScope.databaseInstance, DbiResourceId: sevenScope.databaseResourceId,
-          EngineVersion: "18.4", DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
+          EngineVersion: "18.4", DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } };
+      const currentCatalogueDigest = Object.fromEntries(Object.keys(sevenScope.successorCatalogue)
+        .map(collection => [collection, canonicalSha256(requirements.objects[collection])]));
+      const matchesReviewedScope = Object.entries(sevenScope.successorCatalogue)
+        .every(([collection, digest]) => currentCatalogueDigest[collection] === digest);
+      if (matchesReviewedScope) {
+      const sevenPackage = buildProductionSevenRoutinePackage(sevenInputs);
       const oldGeneratedSource = run("git", ["show", `${sevenScope.predecessorSourceSha}:scripts/rls/sql/generated/20-context-helpers.sql`]);
       const oldDefinition = (identity) => {
         const name = identity.slice("app_rls.".length, identity.indexOf("("));
@@ -399,6 +404,14 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(await administratorClient.$transaction(tx => sevenRoutineRuntime.executeProductionSevenRoutineTransaction({
         tx, package: sevenPackage,
       }), { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
+      } else {
+        assert.throws(() => buildProductionSevenRoutinePackage(sevenInputs), error => {
+          assert.equal(error?.code, "ERR_ASSERTION");
+          assert.deepEqual(error.actual, currentCatalogueDigest);
+          assert.deepEqual(error.expected, sevenScope.successorCatalogue);
+          return true;
+        }, "The historical seven-routine release must reject later RLS catalogue changes");
+      }
       const canonicalMemberships = securityRebaselineCanonical.objects.filter(({ collection }) => ["roleMemberships","roleMembers","operatorMemberships"].includes(collection));
       assert.ok(canonicalMemberships.length > 0 && canonicalMemberships.every(({ identity }) => !identity.includes("mscqr_p2_test")));
       assert.ok(canonicalMemberships.some(({ identity }) => identity.includes("rdsadmin")), "canonical PG18 harness grantors map to the production semantic identity");

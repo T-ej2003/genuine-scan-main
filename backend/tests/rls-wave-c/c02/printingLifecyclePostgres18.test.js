@@ -1399,13 +1399,15 @@ async function main() {
     `UPDATE public."QRCode" SET "licenseeId"='${ids.licenseeA}' WHERE id='${stopQrId}'`);
   const stopConflictJobId = "50000000-0000-4000-8000-000000000594";
   const stopConflictSessionId = "50000000-0000-4000-8000-000000000595";
-  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"itemCount","updatedAt")
+  const createStopConflict = `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"itemCount","updatedAt")
     VALUES('${stopConflictJobId}','${stopBatchId}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,1,now());
     INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerId",status,"totalItems","updatedAt")
-    VALUES('${stopConflictSessionId}','${stopConflictJobId}','${stopBatchId}','${ids.maker}','${ids.printer}','ACTIVE',1,now())`);
+    VALUES('${stopConflictSessionId}','${stopConflictJobId}','${stopBatchId}','${ids.maker}','${ids.printer}','ACTIVE',1,now())`;
+  const clearStopConflict = `DELETE FROM public."PrintSession" WHERE id='${stopConflictSessionId}';
+    DELETE FROM public."PrintJob" WHERE id='${stopConflictJobId}'`;
+  psql(admin, createStopConflict);
   denied(app, stoppedReissue(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
-  psql(admin, `DELETE FROM public."PrintSession" WHERE id='${stopConflictSessionId}';
-    DELETE FROM public."PrintJob" WHERE id='${stopConflictJobId}'`);
+  psql(admin, clearStopConflict);
   const concurrentStoppedRequests = await Promise.all([psqlAsync(app, stoppedReissue()), psqlAsync(app, stoppedReissue())]);
   assert(concurrentStoppedRequests.every(result => result.status === 0), concurrentStoppedRequests.map(result => result.output).join("\n"));
   const [stoppedRequest, repeatedStoppedRequest] = concurrentStoppedRequests.map(result => JSON.parse(result.output));
@@ -1413,12 +1415,21 @@ async function main() {
   assert.deepEqual([stoppedRequest.idempotent, repeatedStoppedRequest.idempotent].sort(), [false, true]);
   assert.equal(stoppedRequest.originalPrintJobId, stopJobId);
   assert.equal(stoppedRequest.status, "PENDING");
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()-interval '1 second' WHERE id='${stopQrId}'`);
+  const expiredRetry = json(app, stoppedReissue());
+  assert.equal(expiredRetry.id, stoppedRequest.id);
+  assert.equal(expiredRetry.idempotent, true);
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()+interval '1 day' WHERE id='${stopQrId}'`);
   psql(admin, `UPDATE public."PrintReissueRequest" SET status='APPROVED',"approvedByUserId"='${ids.checker}',
     "approvedAt"=now() WHERE id='${stoppedRequest.id}'`);
   const executeStopped = () => `SELECT app_rls.printing_reissue_request(
     '${caps.maker}','printing-reissue','${requestId()}','EXECUTE','${stoppedRequest.id}',
     NULL,NULL,NULL,NULL,NULL,NULL)`;
   denied(app, executeStopped().replace(`'${caps.maker}'`, `'${caps.outsider}'`), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  psql(admin, createStopConflict);
+  assert.equal(json(app, stoppedReissue()).id, stoppedRequest.id);
+  denied(app, executeStopped(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
+  psql(admin, clearStopConflict);
   psql(admin, `INSERT INTO public."PrintJobChunk"(id,"printJobId","printSessionId","registrationId","idempotencyKey",
     "startSequence","endSequence","itemCount","itemIds","updatedAt") VALUES(
     '50000000-0000-4000-8000-000000000795','${stopJobId}','${stopSessionId}',

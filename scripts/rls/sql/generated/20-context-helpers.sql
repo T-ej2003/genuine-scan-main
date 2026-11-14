@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='25406d147d1929086dbb8bc009f31d63e430cfc8f9b3e90e592783263ad4ebf0'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:25406d147d1929086dbb8bc009f31d63e430cfc8f9b3e90e592783263ad4ebf0'
+    AND source_contract_sha256='c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:25406d147d1929086dbb8bc009f31d63e430cfc8f9b3e90e592783263ad4ebf0')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11063,6 +11063,20 @@ BEGIN
     IF actor.role<>'MANUFACTURER_ADMIN' OR job_row."manufacturerId"<>actor."userId"
        OR job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED')
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
+      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED');
+    IF request_id IS NOT NULL THEN
+      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=request_id
+      ) r);
+    END IF;
     IF job_row.status='STOPPED' THEN
       IF job_row."pipelineState"<>'STOPPED' OR original_session_row.status<>'STOPPED'
          OR job_row."completedAt" IS NULL OR original_session_row."completedAt" IS NULL
@@ -11098,20 +11112,6 @@ BEGIN
            WHERE j."batchId"=job_row."batchId" AND j.id<>job_row.id
              AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))
       THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
-    END IF;
-    SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
-      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED');
-    IF request_id IS NOT NULL THEN
-      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
-        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
-          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
-          request."manufacturerId",request."batchId",request."requestedByRole",
-          request."targetApproverRole",request.quantity,request."affectedRangeStart",
-          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
-          request.status,request.reason,request."rejectionReason",request."approvedAt",
-          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
-        FROM public."PrintReissueRequest" request WHERE request.id=request_id
-      ) r);
     END IF;
     request_id:=gen_random_uuid()::text;
     PERFORM set_config('app.printing_reissue_id',request_id,true);

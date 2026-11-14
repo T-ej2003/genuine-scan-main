@@ -3021,6 +3021,20 @@ BEGIN
     IF actor.role<>'MANUFACTURER_ADMIN' OR job_row."manufacturerId"<>actor."userId"
        OR job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED')
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
+      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED');
+    IF request_id IS NOT NULL THEN
+      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
+        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
+          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
+          request."manufacturerId",request."batchId",request."requestedByRole",
+          request."targetApproverRole",request.quantity,request."affectedRangeStart",
+          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
+          request.status,request.reason,request."rejectionReason",request."approvedAt",
+          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
+        FROM public."PrintReissueRequest" request WHERE request.id=request_id
+      ) r);
+    END IF;
     IF job_row.status='STOPPED' THEN
       IF job_row."pipelineState"<>'STOPPED' OR original_session_row.status<>'STOPPED'
          OR job_row."completedAt" IS NULL OR original_session_row."completedAt" IS NULL
@@ -3056,20 +3070,6 @@ BEGIN
            WHERE j."batchId"=job_row."batchId" AND j.id<>job_row.id
              AND j.status IN ('PENDING','SENT','PAUSED') AND ps.status IN ('ACTIVE','PAUSED','RESUME_PENDING'))
       THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
-    END IF;
-    SELECT r.id INTO request_id FROM public."PrintReissueRequest" r
-      WHERE r."originalPrintJobId"=job_row.id AND r.status IN ('PENDING','APPROVED');
-    IF request_id IS NOT NULL THEN
-      RETURN (SELECT to_jsonb(r)||jsonb_build_object('idempotent',true) FROM (
-        SELECT request.id,request."originalPrintJobId",request."replacementPrintJobId",
-          request."requestedByUserId",request."approvedByUserId",request."licenseeId",
-          request."manufacturerId",request."batchId",request."requestedByRole",
-          request."targetApproverRole",request.quantity,request."affectedRangeStart",
-          request."affectedRangeEnd",request."decisionNote",request."approvalReferenceId",
-          request.status,request.reason,request."rejectionReason",request."approvedAt",
-          request."rejectedAt",request."executedAt",request."createdAt",request."updatedAt"
-        FROM public."PrintReissueRequest" request WHERE request.id=request_id
-      ) r);
     END IF;
     request_id:=gen_random_uuid()::text;
     PERFORM set_config('app.printing_reissue_id',request_id,true);
