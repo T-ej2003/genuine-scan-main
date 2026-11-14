@@ -33,7 +33,7 @@ May–June commits `91be5a46a`, `3da8e9c7c`, `539bbed47`, `bbd44d1c1` and `b8074
 ## Confirmed defects and root causes
 
 1. **Pre-dispatch stop strands an activated QR.** `printing_control_job` cancels an unissued item but ordinary creation requires an unbound `ALLOCATED` QR. The existing reissue path excluded `STOPPED` on CREATE. PR #839 extends that path only for matching, unissued, no-evidence items and keeps the old records. It does not authorize production recovery.
-2. **Reissue could cross batch release.** Review of PR #839 found that an approved request could EXECUTE after a batch became `RELEASED`. The local correction locks and checks the batch at CREATE and EXECUTE, retains idempotent request lookup, and leaves confirmed pre-release reissue eligible. Disposable PostgreSQL 18 certification passed; hosted CI and new review are pending.
+2. **Reissue could cross batch release.** Review of PR #839 found that an approved request could EXECUTE after a batch became `RELEASED`. The merged correction locks and checks the batch at CREATE and EXECUTE, retains idempotent request lookup, and leaves confirmed pre-release reissue eligible. Its hosted PostgreSQL 18.4 certification and exact-head review passed.
 3. **An acknowledged historical item with a null deadline is invisible to the reconciler.** The manufacturer-scoped November 13 readback shows `AGENT_ACKED`, `agentAckedAt` present, `confirmationDeadlineAt` null, parent `SENT`/`ACTIVE`. The previous `printing_worker_reconcile` selected only `confirmationDeadlineAt < now_at`. A PostgreSQL regression returned `0` before correction, then `1` after using `agentAckedAt + 10 minutes` only when the explicit deadline is missing. The item stays acknowledged and bound to its QR, the parent pauses for operator action, a second pass returns `0`, and a valid late confirmation resolves it. A recent acknowledgement with no explicit deadline remains confirmable. The origin of the historical null remains unverified; current SQL and TypeScript ACK writers normally set a deadline.
 4. **The active-job conflict is correctly associated.** The older acknowledged job's batch ID matches the batch on the HTTP 409 create request in the Mac evidence. The active-job guard must remain; this conflict does not authorize an automatic replay or release.
 
@@ -43,8 +43,8 @@ Original records remain outside Git in `~/Desktop/MSCQR-LIVE-DIAGNOSTICS`, `~/De
 
 ## Source changes and tests
 
-- PR #839: stopped-item recovery and batch-release guard. Local PostgreSQL 18.6 application-path certification, rollback checks, RLS package verification, source security check and backend build passed. Hosted PostgreSQL 18.4 CI and fresh Codex review are pending for the latest head.
-- Separate legacy-null-deadline correction: local source change and PostgreSQL 18.6 application-path certification passed, including recent/overdue cases, late confirmation, bounded worker behavior, rollback, RLS package verification and source security. It has not been merged or deployed. PostgreSQL 18.4 hosted CI remains required.
+- PR #839 merged at `cbdcc209`; its hosted PostgreSQL 18.4 certification and exact-head review passed.
+- PR #840 is rebased on that merge. Its legacy-null-deadline correction passed local PostgreSQL 18.6 application-path certification, including recent/overdue cases, late confirmation, bounded worker behavior and rollback. Combined canonical RLS regeneration and full package verification passed. Hosted PostgreSQL 18.4 certification and a reviewed incremental production migration for the new catalogue remain required. The historical seven-routine successor digest must remain unchanged.
 
 ## Performance and remaining acceptance
 
