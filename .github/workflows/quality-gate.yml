@@ -182,7 +182,6 @@ jobs:
         env:
           TZ: UTC
           PGTZ: UTC
-          REDIS_URL: redis://127.0.0.1:6379/0
           MSCQR_FULL_RLS_CERTIFICATION_CONFIRM: MSCQR_RUN_LOCAL_FULL_RLS_CERTIFICATION
           MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL: postgresql://mscqr_rls_cert_admin@127.0.0.1:55434/mscqr_full_rls_admin
         run: |
@@ -190,7 +189,11 @@ jobs:
           for family in manufacturer-scope qr-system printing-lifecycle; do
             export MSCQR_FULL_RLS_CERTIFICATION_FAMILY="$family"
             export MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH="$RUNNER_TEMP/startex-evidence/$family.json"
-            node scripts/rls/certify-clean-room-database.mjs
+            if [ "$family" = printing-lifecycle ]; then
+              REDIS_URL=redis://127.0.0.1:6379/0 node scripts/rls/certify-clean-room-database.mjs
+            else
+              node scripts/rls/certify-clean-room-database.mjs
+            fi
             test "$(psql "$MSCQR_FULL_RLS_CERTIFICATION_ADMIN_URL" -X -qAt -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM pg_stat_activity WHERE datname LIKE 'mscqr_full_rls_cert_%'")" = "0"
           done
           node --test backend/tests/qrAllocationAuditProjection.test.js
