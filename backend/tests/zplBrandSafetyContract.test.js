@@ -6,6 +6,7 @@ const {
   classifyIndustrialZplPrinterProfile,
 } = require("../dist/printing/zplCompatibilityContract");
 const { getZplPayloadSafetyIssues } = require("../dist/printing/printPayloadSafety");
+const { localPrinterCapabilitySummary, localPrinterInventoryWithCapabilities } = require("../dist/services/printerRegistryService");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -73,6 +74,16 @@ const run = () => {
     const profile = classifyIndustrialZplPrinterProfile({ printerName, printerLanguages: ["ZPL"], printerDpi: 300 });
     assert(profile.compatible && profile.profileId === "zpl_300dpi_generic", `${printerName} should use generic 300dpi ZPL`);
   }
+
+  const discovered = localPrinterCapabilitySummary({ languages: ["ZSIM"], dpi: 300, mediaSizes: ["40x50mm"] }, { languages: ["PDF"], dpi: 203 });
+  assert(discovered.languages[0] === "ZSIM" && discovered.dpi === 300, "Selected queue capabilities must override global connector summary");
+  assert(classifyIndustrialZplPrinterProfile({ printerName: "TSC ZPL emulator", languages: discovered.languages, dpi: discovered.dpi }).compatible,
+    "A discovered compatible queue must pass the same print-job ZPL guard");
+  const unknown = localPrinterCapabilitySummary({ printerName: "Unknown queue" }, { languages: ["ZPL"], dpi: 300 });
+  assert(unknown.languages.length === 0 && unknown.dpi === null, "Global connector capability must not certify an unknown queue");
+  const normalized = localPrinterInventoryWithCapabilities([{ printerId: "queue-1", languages: ["ZPL"], dpi: 300 }], { languages: ["PDF"] });
+  assert(normalized[0].capabilitySummary.languages[0] === "ZPL" && normalized[0].capabilitySummary.dpi === 300,
+    "Signed heartbeat inventory must carry queue-specific capabilities into the SQL registration payload");
 
   assert(
     classifyIndustrialZplPrinterProfile({

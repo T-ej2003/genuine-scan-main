@@ -67,6 +67,7 @@ mockModule("services/printerConnectionService.js", {
 });
 
 mockModule("services/printerRegistryService.js", {
+  localPrinterInventoryWithCapabilities: (rows) => rows,
   syncLocalAgentPrintersFromHeartbeat: async () => {
     throw new Error("local sync failed");
   },

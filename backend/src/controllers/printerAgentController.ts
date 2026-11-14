@@ -12,7 +12,7 @@ import {
   emitConnectionEvent,
   upsertPrinterConnectionHeartbeat,
 } from "../services/printerConnectionService";
-import { syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
+import { localPrinterInventoryWithCapabilities, syncLocalAgentPrintersFromHeartbeat } from "../services/printerRegistryService";
 import { hmacSha256Hex } from "../utils/security";
 import { getPrinterSseSignSecret } from "../utils/secretConfig";
 import { boundedJsonSchema } from "../utils/boundedJson";
@@ -447,7 +447,7 @@ export const reportPrinterHeartbeat = async (req: AuthRequest, res: Response) =>
           error: parsed.data.error || null,
           heartbeatIssuedAt,
         },
-        printers: parsed.data.printers || [],
+        printers: localPrinterInventoryWithCapabilities(parsed.data.printers || [], parsed.data.capabilitySummary),
       },
     });
     if (!signatureValid) {

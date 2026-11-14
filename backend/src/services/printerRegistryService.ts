@@ -376,6 +376,28 @@ export const buildPrinterRegistryStatus = async (
   return buildLocalPrinterStatus(printer, connectionStatus);
 };
 
+export const localPrinterCapabilitySummary = (raw: Record<string, unknown>, summary: Record<string, unknown> | null = null) => {
+  const selected = raw.capabilitySummary && typeof raw.capabilitySummary === "object" && !Array.isArray(raw.capabilitySummary)
+    ? raw.capabilitySummary as Record<string, unknown> : {};
+  const dpi = raw.dpi ?? selected.dpi;
+  return {
+    ...(summary || {}),
+    ...selected,
+    protocols: Array.isArray(raw.protocols) ? raw.protocols : Array.isArray(selected.protocols) ? selected.protocols : [],
+    languages: Array.isArray(raw.languages) ? raw.languages : Array.isArray(selected.languages) ? selected.languages : [],
+    mediaSizes: Array.isArray(raw.mediaSizes) ? raw.mediaSizes : Array.isArray(selected.mediaSizes) ? selected.mediaSizes : [],
+    dpi: dpi != null && Number.isFinite(Number(dpi)) ? Number(dpi) : null,
+  };
+};
+
+export const localPrinterInventoryWithCapabilities = (rows: unknown[], summary: unknown) => rows
+  .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+  .map((row) => ({
+    ...row,
+    capabilitySummary: localPrinterCapabilitySummary(row,
+      summary && typeof summary === "object" && !Array.isArray(summary) ? summary as Record<string, unknown> : null),
+  }));
+
 export const syncLocalAgentPrintersFromHeartbeat = async (params: {
   userId: string;
   orgId?: string | null;
@@ -403,13 +425,7 @@ export const syncLocalAgentPrintersFromHeartbeat = async (params: {
     seenIds.add(nativePrinterId);
 
     const model = toNullableString((raw as any).model, 180);
-    const capabilitySummary = {
-      ...(params.capabilitySummary || {}),
-      protocols: Array.isArray((raw as any).protocols) ? (raw as any).protocols : [],
-      languages: Array.isArray((raw as any).languages) ? (raw as any).languages : [],
-      mediaSizes: Array.isArray((raw as any).mediaSizes) ? (raw as any).mediaSizes : [],
-      dpi: (raw as any).dpi != null && Number.isFinite(Number((raw as any).dpi)) ? Number((raw as any).dpi) : null,
-    } as Record<string, unknown>;
+    const capabilitySummary = localPrinterCapabilitySummary(raw, params.capabilitySummary);
     const metadata = {
       connection: toNullableString((raw as any).connection, 80),
       isDefault: Boolean((raw as any).isDefault),

@@ -633,6 +633,10 @@ jobs:
         with:
           name: frontend-playwright-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
+            test-results/enterprise-smoke-*/test-failed-*.png
+            test-results/enterprise-smoke-*/video.webm
+            test-results/enterprise-smoke-*/error-context.md
+            test-results/enterprise-smoke-*/trace.zip
             test-results/batch-reissue-recovery-*/test-failed-*.png
             test-results/batch-reissue-recovery-*/error-context.md
             test-results/client-pages.visual-*/client-mfa-setup-light-actual.png
