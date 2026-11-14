@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "afefdaabde7724a39ad0bdc72a50cca519035f190c76a5a778fd3d552d54be22",
+  "sourceContractSha256": "25406d147d1929086dbb8bc009f31d63e430cfc8f9b3e90e592783263ad4ebf0",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -64,7 +64,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "c4c265d1abd95080f327d5d8b251d2011a7852f522ff5eb51213a8176b487e1e"
+      "sha256": "2f53dd42710233a0765959277e78ee5e48fbd9fdd867c9c8994a3faf560159dc"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "39e40b2d0e92fe8d6945d6c8323d5353503fa6dd661ded9256f8a773a7131ed8"
+      "sha256": "02c8ee5b3d1e43453aef0391da8fc0db6b5a36ef1811e58afd728ffd06fcda9c"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -394,7 +394,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 384,
+    "generatedPolicies": 386,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 57,
     "prismaEnums": 58,
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:afefdaabde7724a39ad0bdc72a50cca519035f190c76a5a778fd3d552d54be22",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:25406d147d1929086dbb8bc009f31d63e430cfc8f9b3e90e592783263ad4ebf0",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

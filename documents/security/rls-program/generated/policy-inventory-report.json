@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 384,
+  "count": 386,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -6545,7 +6545,8 @@
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-readiness:PrintAuditEvent:SELECT",
-        "contract:release-fix-5-record-sample:PrintAuditEvent:SELECT"
+        "contract:release-fix-5-record-sample:PrintAuditEvent:SELECT",
+        "contract:release-fix-5-reissue-request:PrintAuditEvent:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -7082,6 +7083,33 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-item-event",
+      "table": "PrintItemEvent",
+      "policyName": "printing_lifecycle_printitemevent_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND \"printItemId\" IN (SELECT pi.id FROM public.\"PrintItem\" pi WHERE pi.\"printSessionId\"=current_setting('app.printing_original_session_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintItemEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-job",
       "table": "PrintJob",
       "policyName": "full_rls_internal_authowner_printjob_select",
@@ -7210,6 +7238,33 @@
         "contract:release-fix-5-control-job:PrintJob:UPDATE",
         "contract:release-fix-5-gateway-job:PrintJob:UPDATE",
         "contract:release-fix-5-worker-network:PrintJob:UPDATE"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-job-chunk",
+      "table": "PrintJobChunk",
+      "policyName": "printing_lifecycle_printjobchunk_select",
+      "command": "SELECT",
+      "actors": [
+        "platform-admin",
+        "licensee-admin",
+        "manufacturer",
+        "connector",
+        "background-worker"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-5-printing-lifecycle"
+      ],
+      "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-reissue' AND (\"printJobId\"=current_setting('app.printing_job_id',true) OR \"printSessionId\"=current_setting('app.printing_original_session_id',true))",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-5-reissue-request:PrintJobChunk:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
