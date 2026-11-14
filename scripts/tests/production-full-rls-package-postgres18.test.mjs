@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import test from "node:test";
 import { createRequire } from "node:module";
 import { collectAppOnlyDatabaseCatalogue, collectAppOnlyDatabaseCatalogueRows } from "../aws/production-app-only-database-verifier.mjs";
@@ -17,7 +18,7 @@ import { buildPrintingRoutineDeltaCommand, canonicalPrintingRoutineDelta } from 
 import { buildB03DeltaPackage } from "../aws/production-b03-delta-package.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
 import { buildProductionSevenRoutinePackage } from "../aws/production-seven-routine-package.mjs";
-import { buildProductionPrintingRestorationPackage } from "../aws/production-printing-restoration-package.mjs";
+import { buildProductionPrintingRestorationPackage, buildProductionPrintingRestorationTaskDefinition } from "../aws/production-printing-restoration-package.mjs";
 import { PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
 import { buildC02SessionPrerequisitePackage } from "../aws/production-c02-session-package.mjs";
 import { B03_DELTA_OBJECTS } from "../aws/production-b03-catalogue-diagnostic.mjs";
@@ -29,7 +30,7 @@ import {
   canonicalProductionApprovalPayload,
 } from "../../backend/scripts/production-rls-approval.mjs";
 import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
-import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
+import { canonicalJson, canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const enabled = process.env.MSCQR_PRODUCTION_PACKAGE_POSTGRES18_TEST === "true";
 const root = process.cwd();
@@ -359,6 +360,24 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           DbiResourceId: "db-3C27FYJOJ2IY27X7QGQG5YB4IM", EngineVersion: "18.4",
           DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
       assert.equal(restorationPackage.mutations.length, 12);
+      const transport = pkg => {
+        const bytes = Buffer.from(canonicalJson(pkg) + "\n");
+        return [gzipSync(bytes).toString("base64"), crypto.createHash("sha256").update(bytes).digest("hex")];
+      };
+      assert.deepEqual(restorationRuntime.decodeProductionPrintingRestorationPackage(...transport(restorationPackage)), restorationPackage);
+      const broadened = structuredClone(restorationPackage);
+      broadened.mutations[6].sql += " -- unreviewed policy change";
+      broadened.sqlSha256 = crypto.createHash("sha256").update(broadened.mutations
+        .map(row => row.sql.trimEnd().replace(/;$/, "")).join(";\n") + ";\n").digest("hex");
+      delete broadened.packageSha256;
+      broadened.packageSha256 = canonicalSha256(broadened);
+      assert.throws(() => restorationRuntime.decodeProductionPrintingRestorationPackage(...transport(broadened)),
+        /Only reviewed printing-restoration SQL may run/);
+      const restorationTask = buildProductionPrintingRestorationTaskDefinition({ package: restorationPackage,
+        backendImage: `${APP_ONLY.backendRepository}@sha256:${"a".repeat(64)}` });
+      assert.equal(restorationTask.definition.containerDefinitions[0].command[0], "/app/scripts/aws/production-printing-restoration-executor.cjs");
+      assert.ok(fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8")
+        .includes("COPY --chown=node:node scripts/aws/production-printing-restoration-executor.cjs"));
       t.diagnostic(JSON.stringify({ printingRestorationDelta: { predecessor: restorationPackage.predecessorCatalogue,
         successor: restorationPackage.successorCatalogue, sqlSha256: restorationPackage.sqlSha256 } }));
       const deployedPrintingSource = run("git", ["show", "5fec457aad39cf22320e820b071943dec3e96ec0:scripts/rls/sql/generated/20-context-helpers.sql"]);

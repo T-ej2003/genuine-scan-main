@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const { gunzipSync } = require("node:zlib");
 const { canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue } = require("./production-printing-routine-delta-executor.cjs");
 const historical = require("./production-seven-routine-scope.json");
+const reviewed = require("./production-printing-restoration-scope.json");
 const collections = ["routines", "tables", "policies", "schemas", "roles"];
 const database = "mscqr_production_rls_green_phase2";
 const administrator = "mscqr_prod_admin";
@@ -38,8 +39,8 @@ function decodeProductionPrintingRestorationPackage(encoded, expectedSha256) {
   assert.match(pkg.requirementsSha256 ?? "", /^[a-f0-9]{64}$/);
   assert.match(pkg.securityInventorySha256 ?? "", /^[a-f0-9]{64}$/);
   assert.deepEqual(pkg.predecessorCatalogue, historical.successorCatalogue);
-  assert.deepEqual(Object.keys(pkg.successorCatalogue ?? {}).sort(), [...collections].sort());
-  for (const hash of Object.values(pkg.successorCatalogue)) assert.match(hash, /^[a-f0-9]{64}$/);
+  assert.equal(reviewed.kind, "PRODUCTION_PRINTING_RESTORATION_SCOPE");
+  assert.deepEqual(pkg.successorCatalogue, reviewed.successorCatalogue);
   assert.equal(pkg.mutations?.length, 12);
   const names = ["printing_readiness", "printing_reissue_request", "printing_worker_reconcile"];
   for (const [index, row] of pkg.mutations.entries()) {
@@ -58,6 +59,7 @@ function decodeProductionPrintingRestorationPackage(encoded, expectedSha256) {
   ]);
   const sql = pkg.mutations.map(row => row.sql.trimEnd().replace(/;$/, "")).join(";\n") + ";\n";
   assert.equal(pkg.sqlSha256, sha256(sql));
+  assert.equal(pkg.sqlSha256, reviewed.sqlSha256, "Only reviewed printing-restoration SQL may run");
   return pkg;
 }
 

@@ -45,6 +45,8 @@ Original records remain outside Git in `~/Desktop/MSCQR-LIVE-DIAGNOSTICS`, `~/De
 
 - PR #839 merged at `cbdcc209`; its hosted PostgreSQL 18.4 certification and exact-head review passed.
 - PR #840 is rebased on that merge. Its legacy-null-deadline correction passed local PostgreSQL 18.6 application-path certification, including recent/overdue cases, late confirmation, bounded worker behavior and rollback. Combined canonical RLS regeneration and full package verification passed. Hosted PostgreSQL 18.4 certification and a reviewed incremental production migration for the new catalogue remain required. The historical seven-routine successor digest must remain unchanged.
+- The draft incremental migration starts from the authenticated `5fec457a` successor catalogue. Its bounded delta replaces `printing_readiness`, `printing_reissue_request`, and `printing_worker_reconcile`; adds two column-scoped evidence grants and two evidence policies; and replaces only `Batch.printing_lifecycle_batch_update` to permit the governed reissue operation. The package rejects every other predecessor difference and verifies the complete successor catalogue in one transaction. It has not been authorized or run in production.
+- Hosted PostgreSQL 18.4 certification in GitHub run `43593375655` derived the successor catalogue and SQL digest now pinned in `production-printing-restoration-scope.json`. The same disposable test reversed the exact deployed catalogue, demonstrated forced-error rollback, applied all 12 reviewed DDL statements, verified the complete successor catalogue, and confirmed an idempotent second invocation. Historical seven-routine scope and digest files were not modified.
 
 ## Performance and remaining acceptance
 

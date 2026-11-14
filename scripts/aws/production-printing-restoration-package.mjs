@@ -11,6 +11,7 @@ import { PRINTING_ROUTINE_DELTA } from "./apply-production-printing-routine-delt
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 
 const root = fileURLToPath(new URL("../../", import.meta.url));
+const reviewed = JSON.parse(fs.readFileSync(new URL("./production-printing-restoration-scope.json", import.meta.url)));
 const collections = ["routines", "tables", "policies", "schemas", "roles"];
 const predecessorCatalogue = Object.freeze({
   routines: "c6bbc2c99b6ce13261215ee82f14a8b445a584111a877a47fe547770ca7fa3d3",
@@ -93,6 +94,9 @@ export function buildProductionPrintingRestorationPackage({ sourceSha, requireme
   });
   const mutations = [...routines, ...grants.map(sql => ({ owner: "schema", sql })), ...policies.map(sql => ({ owner: "schema", sql }))];
   const sql = mutations.map(row => row.sql.trimEnd().replace(/;$/, "")).join(";\n") + ";\n";
+  assert.equal(reviewed.kind, "PRODUCTION_PRINTING_RESTORATION_SCOPE");
+  assert.deepEqual(digests(requirements.objects), reviewed.successorCatalogue, "Canonical successor differs from reviewed PostgreSQL 18.4 scope");
+  assert.equal(sha256(sql), reviewed.sqlSha256, "Canonical SQL differs from reviewed PostgreSQL 18.4 scope");
   const body = { schemaVersion: 1, kind: "PRODUCTION_PRINTING_RESTORATION_DELTA", sourceSha,
     requirementsSha256: requirements.requirementsSha256, securityInventorySha256: securityInventory.artifactSha256,
     database: "mscqr_production_rls_green_phase2", databaseInstance: databaseIdentity.DBInstanceIdentifier,
