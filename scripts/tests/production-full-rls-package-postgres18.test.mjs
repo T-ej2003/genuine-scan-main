@@ -358,7 +358,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         databaseIdentity: { DBInstanceIdentifier: "mscqr-production-rls-green-phase2",
           DbiResourceId: "db-3C27FYJOJ2IY27X7QGQG5YB4IM", EngineVersion: "18.4",
           DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
-      assert.equal(restorationPackage.mutations.length, 9);
+      assert.equal(restorationPackage.mutations.length, 12);
       t.diagnostic(JSON.stringify({ printingRestorationDelta: { predecessor: restorationPackage.predecessorCatalogue,
         successor: restorationPackage.successorCatalogue, sqlSha256: restorationPackage.sqlSha256 } }));
       const deployedPrintingSource = run("git", ["show", "5fec457aad39cf22320e820b071943dec3e96ec0:scripts/rls/sql/generated/20-context-helpers.sql"]);
@@ -371,10 +371,15 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       };
       await administratorClient.$transaction(async tx => {
         await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
-        for (const row of restorationPackage.mutations.slice(5, 9).filter(row => row.sql.startsWith("CREATE POLICY"))) {
+        for (const row of restorationPackage.mutations.slice(5).filter(row => row.sql.startsWith("CREATE POLICY"))) {
           const [, name, table] = /^CREATE POLICY "([^"]+)" ON public\."([^"]+)" /.exec(row.sql);
           await tx.$executeRawUnsafe(`DROP POLICY "${name}" ON public."${table}"`);
         }
+        const oldPolicies = run("git", ["show", "5fec457aad39cf22320e820b071943dec3e96ec0:scripts/rls/sql/generated/30-policies.sql"]).split("\n");
+        const batchLine = oldPolicies.findIndex(line => line.startsWith('CREATE POLICY "printing_lifecycle_batch_update" ON public."Batch" '));
+        assert.ok(batchLine >= 0);
+        for (const line of oldPolicies.slice(batchLine, batchLine + 2))
+          await tx.$executeRawUnsafe(line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
         for (const row of restorationPackage.mutations.slice(3, 5))
           await tx.$executeRawUnsafe(row.sql.replace(/^GRANT /, "REVOKE ").replace(/ TO /, " FROM "));
         await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
@@ -397,7 +402,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(await restorationDigest(), restorationPackage.predecessorCatalogue);
       assert.deepEqual(await administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
         tx, package: restorationPackage,
-      }), { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 9 });
+      }), { maxWait: 10000, timeout: 180000 }), { status: "APPLIED", writeCount: 12 });
       assert.deepEqual(await restorationDigest(), restorationPackage.successorCatalogue);
       assert.deepEqual(await administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
         tx, package: restorationPackage,

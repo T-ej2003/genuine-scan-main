@@ -28,6 +28,8 @@ const oldTables = Object.freeze({
   PrintItemEvent: "066b6a03b401f329a4c1da214d1c786bc87d54fe0dbb40d0b7b5c50cda16e428",
   PrintJobChunk: "49d0bedb77bd050609dbdbfdd6f7376b17801aa869f955ebca2cc35396ff91a8",
 });
+const oldBatchPolicy = "764a271df741518e5617e1e8160de04ef22e40eb96ac29fc5ec564184e3355fb";
+const batchPolicy = "Batch.printing_lifecycle_batch_update";
 const newPolicies = ["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"];
 const names = ["printing_readiness", "printing_reissue_request", "printing_worker_reconcile"];
 const sha256 = value => crypto.createHash("sha256").update(value).digest("hex");
@@ -54,6 +56,9 @@ export function buildProductionPrintingRestorationPackage({ sourceSha, requireme
   }
   predecessor.policies = predecessor.policies.filter(row => !newPolicies.includes(row.identity));
   assert.equal(requirements.objects.policies.length - predecessor.policies.length, 2);
+  const priorBatch = predecessor.policies.find(row => row.identity === batchPolicy);
+  assert.ok(priorBatch && priorBatch.sha256 !== oldBatchPolicy);
+  priorBatch.sha256 = oldBatchPolicy;
   assert.deepEqual(digests(predecessor), predecessorCatalogue, "Unreviewed production predecessor difference");
 
   const canonical = new Map(securityInventory.objects.map(row => [`${row.collection}:${row.identity}`, row.fields]));
@@ -78,12 +83,13 @@ export function buildProductionPrintingRestorationPackage({ sourceSha, requireme
     'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";',
   ]);
   const lines = generated("scripts/rls/sql/generated/30-policies.sql");
-  const policies = newPolicies.flatMap(identity => {
+  const policies = [batchPolicy, ...newPolicies].flatMap(identity => {
     const [table, name] = identity.split(".");
     const matches = lines.flatMap((line, index) => line.startsWith(`CREATE POLICY "${name}" ON public."${table}" `) ? [index] : []);
     assert.equal(matches.length, 1);
     assert.ok(lines[matches[0] + 1].startsWith(`COMMENT ON POLICY "${name}" ON public."${table}" IS `));
-    return lines.slice(matches[0], matches[0] + 2).map(line => line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
+    return [...(identity === batchPolicy ? [`DROP POLICY "${name}" ON public."${table}"`] : []),
+      ...lines.slice(matches[0], matches[0] + 2)].map(line => line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
   });
   const mutations = [...routines, ...grants.map(sql => ({ owner: "schema", sql })), ...policies.map(sql => ({ owner: "schema", sql }))];
   const sql = mutations.map(row => row.sql.trimEnd().replace(/;$/, "")).join(";\n") + ";\n";

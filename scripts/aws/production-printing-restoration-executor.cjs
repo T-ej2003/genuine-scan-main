@@ -40,7 +40,7 @@ function decodeProductionPrintingRestorationPackage(encoded, expectedSha256) {
   assert.deepEqual(pkg.predecessorCatalogue, historical.successorCatalogue);
   assert.deepEqual(Object.keys(pkg.successorCatalogue ?? {}).sort(), [...collections].sort());
   for (const hash of Object.values(pkg.successorCatalogue)) assert.match(hash, /^[a-f0-9]{64}$/);
-  assert.equal(pkg.mutations?.length, 9);
+  assert.equal(pkg.mutations?.length, 12);
   const names = ["printing_readiness", "printing_reissue_request", "printing_worker_reconcile"];
   for (const [index, row] of pkg.mutations.entries()) {
     assert.ok(typeof row.sql === "string" && row.sql.length > 0 && row.sql.length < 30000);
@@ -49,7 +49,7 @@ function decodeProductionPrintingRestorationPackage(encoded, expectedSha256) {
       assert.ok(row.sql.startsWith(`CREATE OR REPLACE FUNCTION app_rls.${names[index]}(`));
     } else {
       assert.equal(row.owner, "schema");
-      assert.match(row.sql, index < 5 ? /^GRANT SELECT \(/ : /^(?:CREATE POLICY|COMMENT ON POLICY) /);
+      assert.match(row.sql, index < 5 ? /^GRANT SELECT \(/ : /^(?:DROP POLICY|CREATE POLICY|COMMENT ON POLICY) /);
     }
   }
   assert.deepEqual(pkg.mutations.slice(3, 5).map(row => row.sql), [
@@ -92,7 +92,7 @@ async function executeProductionPrintingRestorationTransaction({ tx, package: pk
     }
     await tx.$executeRawUnsafe("RESET ROLE");
   }
-  assert.equal(writeCount, 9);
+  assert.equal(writeCount, 12);
   assert.deepEqual(catalogueDigest(await collect(tx, validateIdentity)), pkg.successorCatalogue,
     "Production successor catalogue differs");
   return { status: "APPLIED", writeCount };
