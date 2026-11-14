@@ -5,6 +5,7 @@ import { reconcilePrintingLifecycle } from "../rls-waves/session-c/c02/printingL
 import { resumePendingNetworkDirectJobs } from "./networkDirectPrintService";
 import { resumePendingNetworkIppJobs } from "./networkIppPrintService";
 import { withDistributedLease } from "./distributedLeaseService";
+import { isRedisConfigured } from "./redisService";
 
 const RECONCILE_INTERVAL_MS = Math.max(
   5_000,
@@ -63,6 +64,7 @@ export const startPrintConfirmationReconciler = () => {
   const tick = async () => {
     if (stopped || isShutdownStarted()) return;
     try {
+      if (!isRedisConfigured()) throw new Error("Printing reconciliation requires configured Redis for distributed leases");
       const startedAt = Date.now();
       const lease = await withDistributedLease(
         "print-confirmation-reconciler",

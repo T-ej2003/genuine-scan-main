@@ -94,6 +94,8 @@ async function main() {
   const app = process.env.MSCQR_PRINTING_APP_URL;
   const worker = process.env.MSCQR_PRINTING_WORKER_URL;
   for (const url of [admin, preauth, app, worker]) connection(url);
+  const redisUrl = new URL(process.env.REDIS_URL || "");
+  assert(["127.0.0.1", "localhost", "redis"].includes(redisUrl.hostname), "Printing worker certification requires disposable Redis");
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int / 10000")), 18);
   const idempotencyKeyHash = hash("printing-idempotency-key");
   const idempotencyRequestHash = hash("printing-idempotency-request");
@@ -1885,7 +1887,7 @@ async function main() {
       env: {
         ...process.env,
         NODE_ENV: "test", DATABASE_URL: worker, MSCQR_C03_WORKER_DATABASE_URL: worker,
-        MSCQR_WORKER_MODE: "printing", REDIS_URL: "", REDIS_HOST: "",
+        MSCQR_WORKER_MODE: "printing", REDIS_URL: redisUrl.toString(), REDIS_HOST: "",
         RUN_PRINT_RECONCILER: "true", RUN_DISTRIBUTED_LEASES: "true",
         INTEGRATION_DISABLE_BACKGROUND_LOOPS: "false", INTEGRATION_WORKER_BOOT_ONLY: "false",
         PRINT_CONFIRMATION_RECONCILE_INTERVAL_MS: "5000", LOG_FORMAT: "json",
@@ -1919,6 +1921,20 @@ async function main() {
     assert.equal(child.exitCode, 0);
   };
   const workerTimings = {};
+  const leaseProbe = spawnSync(process.execPath, [path.resolve(__dirname, "../../printingRedisLease.test.js")], {
+    cwd: path.resolve(__dirname, "../../.."), encoding: "utf8", timeout: 20_000,
+    env: { ...process.env, REDIS_URL: redisUrl.toString(), REDIS_HOST: "", MSCQR_WORKER_MODE: "printing",
+      RUN_DISTRIBUTED_LEASES: "true", INTEGRATION_DISABLE_BACKGROUND_LOOPS: "false" },
+  });
+  assert.equal(leaseProbe.status, 0, `${leaseProbe.stdout || ""}${leaseProbe.stderr || ""}`);
+  await require("../../../dist/services/redisService").closeRedisConnections();
+  const unconfiguredRedisWorker = launchPrintingWorker({ REDIS_URL: "", REDIS_HOST: "" });
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Printing worker did not reject unconfigured Redis")), 10_000);
+    unconfiguredRedisWorker.child.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+  assert.equal(unconfiguredRedisWorker.child.exitCode, 1, unconfiguredRedisWorker.logs());
+  assert.match(unconfiguredRedisWorker.logs(), /Printing worker requires configured Redis for distributed leases/);
   const unavailableRedisWorker = launchPrintingWorker({ REDIS_URL: "redis://127.0.0.1:1" });
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("Printing worker did not reject unavailable Redis")), 10_000);
@@ -1965,9 +1981,12 @@ async function main() {
   const overlap = [launchPrintingWorker(), launchPrintingWorker()];
   const overlapStartedAt = Date.now();
   try {
-    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.every(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap);
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.some(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap);
     assert(overlap.every(({ logs }) => /Printing worker started/.test(logs())), overlap.map(({ logs }) => logs()).join("\n"));
-    assert(overlap.every(({ logs }) => /"redisLease":false/.test(logs())), "overlap proof must run without Redis coordination");
+    assert(overlap.every(({ logs }) => /"redisLease":true/.test(logs())), "overlap proof must run with Redis coordination");
+    const firstHolder = overlap.findIndex(({ logs }) => /Printing reconciliation cycle completed/.test(logs()));
+    await stopWorker(overlap[firstHolder]);
+    await waitForWorker(() => /Printing reconciliation cycle completed/.test(overlap[1 - firstHolder].logs()), [overlap[1 - firstHolder]]);
   } finally {
     await Promise.all(overlap.map(stopWorker));
   }

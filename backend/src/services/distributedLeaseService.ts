@@ -48,7 +48,7 @@ const acquireLocalLease = async (key: string, ttlMs: number) => {
 const acquireRedisLease = async (key: string, ttlMs: number) => {
   if (shuttingDown || leasesDisabled()) return null;
   const redis = await getRedisClient();
-  if (!redis) return acquireLocalLease(key, ttlMs);
+  if (!redis) throw new Error("Configured Redis lease is unavailable");
 
   const namespacedKey = `lease:${key}`;
   const token = randomUUID();
@@ -79,6 +79,9 @@ export const withDistributedLease = async <T>(
   fn: () => Promise<T>
 ): Promise<{ acquired: boolean; result?: T }> => {
   if (shuttingDown || leasesDisabled()) return { acquired: false };
+  if (process.env.MSCQR_WORKER_MODE === "printing" && !isRedisConfigured()) {
+    throw new Error("Printing worker requires configured Redis for distributed leases");
+  }
 
   const release = isRedisConfigured()
     ? await acquireRedisLease(key, ttlMs)

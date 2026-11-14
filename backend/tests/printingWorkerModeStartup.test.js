@@ -19,13 +19,28 @@ const run = (overrides) => spawnSync(process.execPath, [workerPath], {
 for (const overrides of [
   { RUN_PRINT_RECONCILER: "false" },
   { RUN_DISTRIBUTED_LEASES: "false" },
-  { DATABASE_URL: "postgresql://worker@127.0.0.1:1/disposable" },
+  { REDIS_URL: "", REDIS_HOST: "" },
+  { REDIS_URL: "redis://127.0.0.1:1" },
 ]) {
   const result = run(overrides);
   const output = `${result.stdout || ""}${result.stderr || ""}`;
   assert.equal(result.status, 1, output);
   assert.doesNotMatch(output, /Printing worker started/);
-  assert.match(output, overrides.DATABASE_URL ? /Can't reach database server|Connection refused|P1001/ : /Printing worker reconciliation and leases must be enabled/);
+  assert.match(output, overrides.REDIS_URL === "" ? /Printing worker requires configured Redis for distributed leases/ : overrides.REDIS_URL ? /Connection refused|ECONNREFUSED|Printing worker requires healthy Redis/ : /Printing worker reconciliation and leases must be enabled/);
 }
 
-console.log("Printing worker fails closed on disabled scheduling and unavailable PostgreSQL");
+console.log("Printing worker fails closed on disabled scheduling and unavailable Redis");
+
+const unleasedReconciler = spawnSync(process.execPath, ["-e", `
+  const stop = require('./dist/services/printConfirmationReconciler').startPrintConfirmationReconciler();
+  setTimeout(() => { stop(); process.exit(0); }, 100);
+`], {
+  cwd: path.resolve(__dirname, ".."),
+  env: {
+    ...process.env, REDIS_URL: "", REDIS_HOST: "", RUN_PRINT_RECONCILER: "true",
+    INTEGRATION_DISABLE_BACKGROUND_LOOPS: "false",
+  },
+  encoding: "utf8", timeout: 5000,
+});
+assert.equal(unleasedReconciler.status, 0, unleasedReconciler.stderr);
+assert.match(`${unleasedReconciler.stdout}${unleasedReconciler.stderr}`, /Printing reconciliation requires configured Redis for distributed leases/);
