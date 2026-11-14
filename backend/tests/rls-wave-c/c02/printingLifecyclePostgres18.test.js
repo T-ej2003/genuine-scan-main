@@ -1899,8 +1899,8 @@ async function main() {
     child.stderr.on("data", (chunk) => { logs += chunk; });
     return { child, logs: () => logs };
   };
-  const waitForWorker = async (check, workers) => {
-    const until = Date.now() + 20_000;
+  const waitForWorker = async (check, workers, timeoutMs = 20_000) => {
+    const until = Date.now() + timeoutMs;
     while (Date.now() < until) {
       if (check()) return;
       assert(workers.every(({ child }) => child.exitCode === null), workers.map(({ logs }) => logs()).join("\n"));
@@ -1959,7 +1959,7 @@ async function main() {
   const restartedWorker = launchPrintingWorker();
   const tenStartedAt = Date.now();
   try {
-    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${tenItemRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "10", [restartedWorker]);
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${tenItemRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "10" && /Printing reconciliation cycle completed/.test(restartedWorker.logs()), [restartedWorker]);
     assert.match(restartedWorker.logs(), /Printing worker started/);
   } finally {
     await stopWorker(restartedWorker);
@@ -1973,20 +1973,25 @@ async function main() {
     assert.notEqual(psql(admin, `SELECT count(*) FROM pg_stat_activity WHERE usename='${workerRole}' AND datname=current_database()`), "0");
     psql(admin, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename='${workerRole}' AND datname=current_database() AND pid<>pg_backend_pid()`);
     const reconnectRun = createExpiredRun("actual-worker-db-reconnect", 1);
-    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${reconnectRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "1", [interruptedWorker]);
+    const completedBeforeReconnect = (interruptedWorker.logs().match(/Printing reconciliation cycle completed/g) || []).length;
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${reconnectRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "1" && (interruptedWorker.logs().match(/Printing reconciliation cycle completed/g) || []).length > completedBeforeReconnect, [interruptedWorker]);
   } finally {
     await stopWorker(interruptedWorker);
   }
   const concurrentWorkerRun = createExpiredRun("actual-concurrent-workers", 150);
   const overlap = [launchPrintingWorker(), launchPrintingWorker()];
   const overlapStartedAt = Date.now();
+  const completedCycles = ({ logs }) => (logs().match(/Printing reconciliation cycle completed/g) || []).length;
   try {
-    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.some(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap);
+    await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.some(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap, 45_000);
     assert(overlap.every(({ logs }) => /Printing worker started/.test(logs())), overlap.map(({ logs }) => logs()).join("\n"));
     assert(overlap.every(({ logs }) => /"redisLease":true/.test(logs())), "overlap proof must run with Redis coordination");
-    const firstHolder = overlap.findIndex(({ logs }) => /Printing reconciliation cycle completed/.test(logs()));
+    const beforeHandoff = overlap.map(completedCycles);
+    await waitForWorker(() => overlap.some((entry, index) => completedCycles(entry) > beforeHandoff[index]), overlap, 45_000);
+    const firstHolder = overlap.findIndex((entry, index) => completedCycles(entry) > beforeHandoff[index]);
+    const otherBeforeStop = completedCycles(overlap[1 - firstHolder]);
     await stopWorker(overlap[firstHolder]);
-    await waitForWorker(() => /Printing reconciliation cycle completed/.test(overlap[1 - firstHolder].logs()), [overlap[1 - firstHolder]]);
+    await waitForWorker(() => completedCycles(overlap[1 - firstHolder]) > otherBeforeStop, [overlap[1 - firstHolder]], 45_000);
   } finally {
     await Promise.all(overlap.map(stopWorker));
   }
