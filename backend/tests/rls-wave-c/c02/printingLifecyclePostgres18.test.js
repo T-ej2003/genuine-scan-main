@@ -1355,6 +1355,18 @@ async function main() {
     '${caps.maker}','printing-reissue','${requestId()}','CREATE',NULL,
     '${stopJobId}',NULL,NULL,NULL,'Stopped before dispatch',NULL)`;
   denied(app, stoppedReissue().replace(`'${caps.maker}'`, `'${caps.outsider}'`), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='RELEASED',"releasedAt"=now() WHERE id='${stopBatchId}'`);
+  denied(app, stoppedReissue(), /INVALID_STATE_TRANSITION/);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"releasedAt"=NULL WHERE id='${stopBatchId}'`);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${stopBatchId}'`);
+  denied(app, stoppedReissue(), /INVALID_STATE_TRANSITION/);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${stopBatchId}'`);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED' WHERE id='${stopBatchId}';
+    UPDATE public."PrintItem" SET "agentAckedAt"=now() WHERE id='${stopItemId}'`);
+  denied(app, stoppedReissue(), /PHYSICAL_OUTCOME_UNCONFIRMED/,
+    "confirmed batches must reach physical-evidence checks when reissue is requested");
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED' WHERE id='${stopBatchId}';
+    UPDATE public."PrintItem" SET "agentAckedAt"=NULL WHERE id='${stopItemId}'`);
   const rejectUnsafeStop = (mutate, restore) => {
     psql(admin, mutate);
     denied(app, stoppedReissue(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
@@ -1436,6 +1448,11 @@ async function main() {
     '${ids.registration}','synthetic-stopped-conflicting-chunk',1,1,1,'["${stopItemId}"]'::jsonb,now())`);
   denied(app, executeStopped(), /PHYSICAL_OUTCOME_UNCONFIRMED/);
   psql(admin, `DELETE FROM public."PrintJobChunk" WHERE id='50000000-0000-4000-8000-000000000795'`);
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='RELEASED',"releasedAt"=now() WHERE id='${stopBatchId}'`);
+  assert.equal(json(app, stoppedReissue()).idempotent, true, "an existing request remains idempotent after release");
+  denied(app, executeStopped(), /INVALID_STATE_TRANSITION/);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "reprintOfJobId"='${stopJobId}'`), "0");
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"releasedAt"=NULL WHERE id='${stopBatchId}'`);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds'
     WHERE id='${maintainedSession}'`);
   denied(app, executeStopped(), /PRINTER_ATTESTATION_STALE/);
@@ -1737,6 +1754,8 @@ async function main() {
   assert.deepEqual([confirmRace.final.job, confirmRace.final.session, confirmRace.final.item, confirmRace.final.qr],
     ["CONFIRMED", "COMPLETED", "PRINT_CONFIRMED", "PRINTED"]);
 
+  psql(admin, `UPDATE public."Batch" SET "lifecycleState"='CODES_GENERATED',"releasedAt"=NULL,"suspendedAt"=NULL
+    WHERE id='${ids.raceBatch}'`);
   const uncertainJobId = "50000000-0000-4000-8000-000000000593";
   const uncertainSessionId = "50000000-0000-4000-8000-000000000583";
   const uncertainItemId = "50000000-0000-4000-8000-000000000793";

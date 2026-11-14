@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c'
+    AND source_contract_sha256='22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:c5e137d776547c77c18fd3204cefc1c0bfafe7031005cea1272e8c3ebbe6721c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:22228bcf3c87855a949376634bc945dd8a914b57b62debc0ab27a4158ca8f3e7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -11034,7 +11034,7 @@ CREATE OR REPLACE FUNCTION app_rls.printing_reissue_request(
   p_original_job_id text,p_quantity integer,p_range_start text,p_range_end text,p_reason text,p_decision_note text
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; job_row record; original_session_row record; request_row record; request_id text; replacement_job_id text;
+DECLARE actor record; batch_row record; job_row record; original_session_row record; request_row record; request_id text; replacement_job_id text;
   target_batch_id text; target_original_job_id text;
   replacement_session_id text; original_session_id text; moved_count integer;
   item_count integer; safe_item_count integer;
@@ -11077,6 +11077,11 @@ BEGIN
         FROM public."PrintReissueRequest" request WHERE request.id=request_id
       ) r);
     END IF;
+    SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
+      FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
+    IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+       OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
+    THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     IF job_row.status='STOPPED' THEN
       IF job_row."pipelineState"<>'STOPPED' OR original_session_row.status<>'STOPPED'
          OR job_row."completedAt" IS NULL OR original_session_row."completedAt" IS NULL
@@ -11171,6 +11176,11 @@ BEGIN
         FROM public."PrintJob" j JOIN public."PrintSession" ps ON ps."printJobId"=j.id
         WHERE j.id=request_row."originalPrintJobId" FOR UPDATE OF j;
       IF job_row."batchId" IS DISTINCT FROM target_batch_id THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+      SELECT b."lifecycleState",b."releasedAt",b."suspendedAt" INTO STRICT batch_row
+        FROM public."Batch" b WHERE b.id=job_row."batchId" FOR SHARE;
+      IF batch_row."lifecycleState" IS NULL OR batch_row."lifecycleState"='RELEASED'
+         OR batch_row."releasedAt" IS NOT NULL OR batch_row."suspendedAt" IS NOT NULL
+      THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
