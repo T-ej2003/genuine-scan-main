@@ -11,7 +11,10 @@ const { pathToFileURL } = require("node:url");
   const { normalizeWebAppBaseUrl } = await import(pathToFileURL(path.join(packaging, "web-app-origin.mjs")));
   assert.deepEqual(normalizeWebAppBaseUrl("https://staging.mscqr.example/printer-diagnostics/").origin, "https://staging.mscqr.example");
   assert.equal(normalizeWebAppBaseUrl("https://dr.mscqr.example").origin, "https://dr.mscqr.example");
-  for (const value of ["*", "https://*.mscqr.example", "https://user:pass@staging.mscqr.example", "https://staging.mscqr.example?x=1", "https://staging.mscqr.example#x", "https://staging.mscqr.example%0a", "http://staging.mscqr.example", "https://staging.mscqr.example&whoami"]) {
+  const credentialed = new URL("https://staging.mscqr.example");
+  credentialed.username = "fixture";
+  credentialed.password = "invalid";
+  for (const value of ["*", "https://*.mscqr.example", credentialed.href, "https://staging.mscqr.example?x=1", "https://staging.mscqr.example#x", "https://staging.mscqr.example%0a", "http://staging.mscqr.example", "https://staging.mscqr.example&whoami"]) {
     assert.throws(() => normalizeWebAppBaseUrl(value), `${value} must be rejected before packaging`);
   }
 
