@@ -74,15 +74,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
-      redis:
-        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
@@ -133,6 +124,16 @@ jobs:
     name: App-only deployment contract and real PostgreSQL
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      redis:
+        image: docker.io/library/redis@sha256:3811787313eba226a2ef38658c6ccb91cd5e110edc89c37767de373120a0e5a0
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
         with:
