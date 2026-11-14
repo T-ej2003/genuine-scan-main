@@ -3,6 +3,7 @@ import express from "express";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import { z } from "zod";
 import { isZplCompatibleLanguageList } from "../printing/zplCompatibilityContract";
 import { isAuthorizedConnectorUiOrigin } from "./uiOrigin";
@@ -277,6 +278,15 @@ app.use(
   })
 );
 app.use(express.json({ limit: "1mb" }));
+app.use(rateLimit({
+  windowMs: 60_000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method !== "POST",
+  keyGenerator: (req) => ipKeyGenerator(req.socket.remoteAddress || "unknown"),
+  handler: (_req, res) => res.status(429).set("Retry-After", "60").json({ success: false, error: "Too many connector requests. Retry in one minute." }),
+}));
 app.use((req, res, next) => {
   if (req.method === "POST" && !isAuthorizedConnectorUiOrigin(req.get("origin"))) {
     return res.status(403).json({ success: false, error: "This site is not authorized to change connector settings." });
