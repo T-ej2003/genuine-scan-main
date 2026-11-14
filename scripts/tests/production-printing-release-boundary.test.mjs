@@ -9,6 +9,7 @@ import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import fs from "node:fs";
+import path from "node:path";
 import vm from "node:vm";
 const runtime = createRequire(import.meta.url)("../aws/production-c02-combined-executor.cjs");
 const oldSha = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", sourceSha = "a".repeat(40);
@@ -77,6 +78,25 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim(), '{"status":"blocked","reason":"c02-combined-failed-closed"}');
+});
+
+test("combined C02 selects the same narrow grants from production-role generated SQL", () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-c02-grants-"));
+  try {
+    for (const name of ["backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
+      "backend/prisma/migrations/20261028210000_printer_agent_session_sequence/migration.sql",
+      "scripts/rls/sql/generated/20-context-helpers.sql", "scripts/rls/sql/generated/21-runtime-grants.sql",
+      "scripts/rls/sql/generated/30-policies.sql"]) {
+      const target = path.join(temporary, name);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      const source = fs.readFileSync(name, "utf8");
+      fs.writeFileSync(target, name.startsWith("scripts/") ? source.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_") : source);
+    }
+    const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor, repositoryRoot: temporary });
+    assert.deepEqual(pkg.evidenceGrants, buildC02CombinedPackage({ sourceSha, predecessor, successor }).evidenceGrants);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
 });
 
 test("combined C02 refuses contradictory, uncommitted or duplicated Prisma history", async () => {
