@@ -30,15 +30,24 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
     return { name, sql };
   });
   const policies = read("scripts/rls/sql/generated/30-policies.sql").split("\n");
-  const policySql = ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update"]
+  const evidencePolicies = ["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"];
+  const evidenceGrants = read("scripts/rls/sql/generated/21-runtime-grants.sql").split("\n")
+    .filter(line => /^GRANT SELECT \(.+\) ON TABLE public\."(?:PrintItemEvent|PrintJobChunk)" TO "mscqr_rls_cert_auth_owner";$/.test(line))
+    .map(line => line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
+  assert.deepEqual(evidenceGrants, [
+    'GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
+    'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";',
+  ]);
+  const policySql = ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update", ...evidencePolicies]
     .flatMap(identity => {
       const [table, name] = identity.split(".");
       const matches = policies.flatMap((sql, i) => sql.startsWith(`CREATE POLICY "${name}" ON public."${table}" `) ? [i] : []);
       assert.equal(matches.length, 1);
       const index = matches[0];
       assert.ok(policies[index + 1].startsWith(`COMMENT ON POLICY "${name}" ON public."${table}" IS `));
-      assert.ok(predecessor.objects.policies.some(row => row.identity === identity));
-      return [`DROP POLICY "${name}" ON public."${table}"`, policies[index], policies[index + 1]]
+      const existed = predecessor.objects.policies.some(row => row.identity === identity);
+      assert.equal(existed, !evidencePolicies.includes(identity));
+      return [...(existed ? [`DROP POLICY "${name}" ON public."${table}"`] : []), policies[index], policies[index + 1]]
         .map(sql => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
     });
   const migrationSql = read("backend/prisma/migrations/20261028210000_printer_agent_session_sequence/migration.sql").trim();
@@ -47,6 +56,6 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
     sessionPackage: buildC02SessionPrerequisitePackage({ sourceSha, repositoryRoot }),
     predecessorRequirementsSha256: predecessor.requirementsSha256, successorRequirementsSha256: successor.requirementsSha256,
     predecessorCatalogue: digests(predecessor.objects), successorCatalogue: digests(after), finalCatalogue: digests(successor.objects),
-    migrationSql, definitions, policySql };
+    migrationSql, definitions, evidenceGrants, policySql };
   return { ...body, packageSha256: canonicalSha256(body) };
 }

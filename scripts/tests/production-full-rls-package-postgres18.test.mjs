@@ -1451,6 +1451,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(columns.length > 0);
         return `REVOKE ${privilege} (${columns.map(c => `"${c}"`).join(",")}) ON public."PrinterAgentSession" FROM mscqr_prd_rls_phase2_auth_owner`;
       });
+      for (const table of ["PrintItemEvent", "PrintJobChunk"]) {
+        const columns = [...columnRights(currentGrants, table, "SELECT")];
+        assert.ok(columns.length > 0);
+        printingReverseGrants.push(`REVOKE SELECT (${columns.map(c => `"${c}"`).join(",")}) ON public."${table}" FROM mscqr_prd_rls_phase2_auth_owner`);
+      }
       psql(greenUrl, ["-q", "-c", `BEGIN;
         SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
         ${printingPolicyDrops.join(";\n")};
@@ -1490,7 +1495,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
         assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "C02 rollback grant"), "f");
       }
-      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 28 });
+      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 34 });
       const afterC02 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
       assert.deepEqual(Object.fromEntries(Object.entries(afterC02).map(([k,v]) => [k,canonicalSha256(v)])), combinedPackage.successorCatalogue);
       // Commit succeeded but migration-history recording was interrupted: retry

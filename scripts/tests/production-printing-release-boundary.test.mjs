@@ -13,10 +13,12 @@ import vm from "node:vm";
 const runtime = createRequire(import.meta.url)("../aws/production-c02-combined-executor.cjs");
 const oldSha = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", sourceSha = "a".repeat(40);
 const seal = body => { const { requirementsSha256, ...rest } = body; return { ...rest, requirementsSha256: canonicalSha256(rest) }; };
-const requirements = (sha, hash) => seal({ sourceSha: sha, candidateSourceSha: sha,
+const requirements = (sha, hash, historical = false) => seal({ sourceSha: sha, candidateSourceSha: sha,
   objects: Object.fromEntries(Object.keys(B03_DELTA_OBJECTS).map(key => [key,
-    [...B03_DELTA_OBJECTS[key], ...PRINTING_RELEASE_OBJECTS[key]].map(identity => ({ identity, sha256: hash.repeat(64) }))])) });
-const predecessor = requirements(oldSha, "1"), successor = requirements(sourceSha, "2");
+    [...B03_DELTA_OBJECTS[key], ...PRINTING_RELEASE_OBJECTS[key]]
+      .filter(identity => !historical || !["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"].includes(identity))
+      .map(identity => ({ identity, sha256: hash.repeat(64) }))])) });
+const predecessor = requirements(oldSha, "1", true), successor = requirements(sourceSha, "2");
 const after = () => catalogueAfterPrinting({ predecessor, successor, b03Objects: B03_DELTA_OBJECTS });
 
 test("combined boundary advances only reviewed printing identities and preserves original B03 rows", () => {
@@ -24,7 +26,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 13);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 15);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -60,7 +62,12 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 6); assert.equal(pkg.policySql.length, 6);
+  assert.equal(pkg.definitions.length, 6); assert.equal(pkg.policySql.length, 10);
+  assert.deepEqual(pkg.evidenceGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['PrintItemEvent', 'PrintJobChunk']);
+  const broadened = { ...pkg, evidenceGrants: [...pkg.evidenceGrants] };
+  broadened.evidenceGrants[0] = broadened.evidenceGrants[0].replace('SELECT ("printItemId")', 'SELECT ("printItemId", "details")');
+  const { packageSha256: _ignored, ...body } = broadened;
+  assert.throws(() => runtime.validatePackage({ ...body, packageSha256: canonicalSha256(body) }));
   assert.throws(() => runtime.validatePackage({ ...pkg, sourceSha: oldSha }));
   const task = buildC02SessionTask({ sourceSha, hostname: "test.invalid", combinedRequirements: { predecessor, successor } });
   assert.ok(Buffer.byteLength(task.serialized) < 60 * 1024);
