@@ -1879,7 +1879,7 @@ async function main() {
   assert.equal(psql(app, printingSessionPrerequisiteSql("mscqr_rls_cert_")), "t|t|t|t|t",
     "The restricted runtime role must independently verify its installed C02 session prerequisite");
 
-  const launchPrintingWorker = () => {
+  const launchPrintingWorker = (overrides = {}) => {
     const child = spawn(process.execPath, [path.resolve(__dirname, "../../../dist/worker.js")], {
       cwd: path.resolve(__dirname, "../../.."),
       env: {
@@ -1889,6 +1889,7 @@ async function main() {
         RUN_PRINT_RECONCILER: "true", RUN_DISTRIBUTED_LEASES: "true",
         INTEGRATION_DISABLE_BACKGROUND_LOOPS: "false", INTEGRATION_WORKER_BOOT_ONLY: "false",
         PRINT_CONFIRMATION_RECONCILE_INTERVAL_MS: "5000", LOG_FORMAT: "json",
+        ...overrides,
       },
     });
     let logs = "";
@@ -1918,6 +1919,13 @@ async function main() {
     assert.equal(child.exitCode, 0);
   };
   const workerTimings = {};
+  const unavailableRedisWorker = launchPrintingWorker({ REDIS_URL: "redis://127.0.0.1:1" });
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error("Printing worker did not reject unavailable Redis")), 10_000);
+    unavailableRedisWorker.child.once("exit", () => { clearTimeout(timeout); resolve(); });
+  });
+  assert.equal(unavailableRedisWorker.child.exitCode, 1, unavailableRedisWorker.logs());
+  assert.doesNotMatch(unavailableRedisWorker.logs(), /Printing worker started/);
   const workerRun = createExpiredRun("actual-printing-worker", 1);
   psql(admin, `UPDATE public."PrintItem" SET "confirmationDeadlineAt"=NULL WHERE "printSessionId"='${workerRun.sessionId}'`);
   const liveWorker = launchPrintingWorker();
@@ -1959,11 +1967,14 @@ async function main() {
   try {
     await waitForWorker(() => psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`) === "150" && overlap.every(({ logs }) => /Printing reconciliation cycle completed/.test(logs())), overlap);
     assert(overlap.every(({ logs }) => /Printing worker started/.test(logs())), overlap.map(({ logs }) => logs()).join("\n"));
+    assert(overlap.every(({ logs }) => /"redisLease":false/.test(logs())), "overlap proof must run without Redis coordination");
   } finally {
     await Promise.all(overlap.map(stopWorker));
   }
   workerTimings.hundredFiftyItemsMs = Date.now() - overlapStartedAt;
   assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), "0");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND state='AGENT_ACKED'`), "150");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${concurrentWorkerRun.jobId}' AND status='ACTIVATED'`), "150");
 
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),
