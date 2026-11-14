@@ -13,13 +13,14 @@ const productionRole = (sql) => sql.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls
 const functionName = (identity) => /^app_rls\.([a-z0-9_]+)\(/.exec(identity)?.[1];
 const sqlFile = (relativePath, repositoryRoot) => fs.readFileSync(path.join(repositoryRoot, relativePath), "utf8");
 
-// C02 session grants belong to its separately governed installation, never B03.
+// C02 printing grants belong to its separately governed installation, never B03.
 export function selectB03GrantDelta(changedGrants) {
-  const sessionContract = NAMED_SQL_FUNCTION_CONTRACTS.find(({ name }) => name === "printing_connector_session");
-  const sessionGrants = new Set(sessionContract.security.ownerPrivileges
-    .filter(([table]) => table === "PrinterAgentSession")
+  const c02Grants = new Set(NAMED_SQL_FUNCTION_CONTRACTS
+    .filter(({ name }) => ["printing_connector_session", "printing_reissue_request"].includes(name))
+    .flatMap(({ security }) => security.ownerPrivileges)
+    .filter(([table, privilege]) => table === "PrinterAgentSession" || (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)))
     .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
-  return changedGrants.filter((grant) => !sessionGrants.has(grant));
+  return changedGrants.filter((grant) => !c02Grants.has(grant));
 }
 
 function functionStatement(source, name) {
