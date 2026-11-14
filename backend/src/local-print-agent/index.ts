@@ -45,6 +45,9 @@ const app = express();
 
 const PORT = Number(String(process.env.PRINT_AGENT_PORT || "17866").trim()) || 17866;
 const HOST = String(process.env.PRINT_AGENT_HOST || "127.0.0.1").trim() || "127.0.0.1";
+if (!["127.0.0.1", "localhost", "::1"].includes(HOST)) {
+  throw new Error("The connector management listener must bind to loopback.");
+}
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const INVENTORY_TTL_MS = Math.max(1500, Number(String(process.env.PRINT_AGENT_INVENTORY_TTL_MS || "5000").trim()) || 5000);

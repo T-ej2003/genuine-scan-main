@@ -24,9 +24,16 @@ test("local connector limits POST requests by socket address without trusting he
     PRINT_AGENT_LOCK_DIR: path.join(root, "lock"),
     PRINT_AGENT_BACKEND_URL: "",
     PRINT_GATEWAY_BACKEND_URL: "",
+    PRINT_AGENT_WEB_APP_ORIGIN: "https://staging.mscqr.example",
+    PRINT_AGENT_ALLOWED_ORIGINS: "https://dr.mscqr.example",
   };
   let child;
   try {
+    const exposed = spawnSync(process.execPath, [connector, "--validate-state"], {
+      env: { ...env, PRINT_AGENT_HOST: "0.0.0.0" }, encoding: "utf8", timeout: 10_000,
+    });
+    assert.notEqual(exposed.status, 0, "An unauthenticated management listener must never bind beyond loopback");
+    assert.match(exposed.stderr, /must bind to loopback/);
     const initialized = spawnSync(process.execPath, [connector, "--initialize-state"], { env, encoding: "utf8", timeout: 10_000 });
     assert.equal(initialized.status, 0, "Disposable connector identity must initialize");
     child = spawn(process.execPath, [connector], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -43,13 +50,19 @@ test("local connector limits POST requests by socket address without trusting he
       headers: { ...(origin ? { origin } : {}), "x-forwarded-for": forwardedFor, "content-type": "application/json" },
       body: "{}",
     });
+    const allowedGet = await fetch(`http://127.0.0.1:${port}/status`, { headers: { origin: "https://staging.mscqr.example" } });
+    assert.equal(allowedGet.headers.get("access-control-allow-origin"), "https://staging.mscqr.example");
+    const deniedGet = await fetch(`http://127.0.0.1:${port}/status`, { headers: { origin: "https://unconfigured.example" } });
+    assert.equal(deniedGet.headers.get("access-control-allow-origin"), null);
+    assert.equal((await post("https://staging.mscqr.example", "192.0.2.1")).status, 200);
+    assert.equal((await post("https://dr.mscqr.example", "192.0.2.2")).status, 200);
     for (let i = 0; i < 35; i++) {
       assert.equal((await post("https://www.mscqr.com", `198.51.100.${i}`)).status, 200,
         "Ordinary authorized connector traffic must remain available");
     }
     assert.equal((await post(undefined, "192.0.2.3")).status, 200,
       "Native connector requests without a browser Origin must remain available");
-    for (let i = 0; i < 84; i++) {
+    for (let i = 0; i < 82; i++) {
       assert.equal((await post("https://untrusted.example", `203.0.113.${i}`)).status, 403,
         "Unauthorized Origin must be denied before the limit is exhausted");
     }

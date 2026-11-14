@@ -55,6 +55,20 @@ if (-not [string]::IsNullOrWhiteSpace($WebAppBaseUrl)) {
 } else {
   $WebAppBaseUrl = $null
 }
+function Resolve-WebAppOrigin {
+  param([string]$BaseUrl)
+  if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return $null }
+  $parsedWebApp = $null
+  if ($BaseUrl -match '[\\\s*%"^&|<>!()]' -or
+      -not [Uri]::TryCreate($BaseUrl, [UriKind]::Absolute, [ref]$parsedWebApp) -or
+      (($parsedWebApp.Scheme -ne 'https') -and
+        -not (($parsedWebApp.Scheme -eq 'http') -and ($parsedWebApp.Host -in @('localhost', '127.0.0.1')))) -or
+      $parsedWebApp.UserInfo -or $BaseUrl.Contains('?') -or $BaseUrl.Contains('#')) {
+    throw 'MSCQR_WEB_APP_BASE_URL must be a safe HTTPS web-app URL (or loopback HTTP) without credentials, query or fragment.'
+  }
+  return $parsedWebApp.GetLeftPart([UriPartial]::Authority)
+}
+$WebAppOrigin = Resolve-WebAppOrigin $WebAppBaseUrl
 
 function Show-SetupDialog {
   param(
@@ -376,6 +390,7 @@ if "%PRINT_AGENT_HOST%"=="" set PRINT_AGENT_HOST=127.0.0.1
 if "%PRINT_AGENT_PORT%"=="" set PRINT_AGENT_PORT=17866
 if "%PRINT_AGENT_VERSION%"=="" set PRINT_AGENT_VERSION=$AgentVersion
 if "%PRINT_AGENT_SESSION_MODE%"=="" set PRINT_AGENT_SESSION_MODE=websocket
+set "PRINT_AGENT_WEB_APP_ORIGIN=$WebAppOrigin"
 cd /d "$WorkingDirectory"
 $ExecutableCommand >> "$LogDir\agent.log" 2>&1
 "@
