@@ -44,7 +44,7 @@ function decodeProductionPrintingRestorationPackage(encoded, expectedSha256) {
   assert.equal(pkg.mutations?.length, 12);
   const names = ["printing_readiness", "printing_reissue_request", "printing_worker_reconcile"];
   for (const [index, row] of pkg.mutations.entries()) {
-    assert.ok(typeof row.sql === "string" && row.sql.length > 0 && row.sql.length < 30000);
+    assert.ok(typeof row.sql === "string" && Buffer.byteLength(row.sql) > 0 && Buffer.byteLength(row.sql) < 48 * 1024);
     if (index < 3) {
       assert.equal(row.owner, "auth");
       assert.ok(row.sql.startsWith(`CREATE OR REPLACE FUNCTION app_rls.${names[index]}(`));

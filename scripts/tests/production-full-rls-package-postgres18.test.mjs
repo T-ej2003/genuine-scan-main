@@ -360,6 +360,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
           DbiResourceId: "db-3C27FYJOJ2IY27X7QGQG5YB4IM", EngineVersion: "18.4",
           DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
       assert.equal(restorationPackage.mutations.length, 12);
+      assert.ok(Buffer.byteLength(restorationPackage.mutations[0].sql) > 30000);
       const transport = pkg => {
         const bytes = Buffer.from(canonicalJson(pkg) + "\n");
         return [gzipSync(bytes).toString("base64"), crypto.createHash("sha256").update(bytes).digest("hex")];
