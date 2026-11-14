@@ -104,6 +104,9 @@ jobs:
           MSCQR_FULL_RLS_CERTIFICATION_EVIDENCE_PATH: ${{ runner.temp }}/backend-recovery-certification/rls-result.json
         run: |
           mkdir -m 700 "$RUNNER_TEMP/backend-recovery-certification"
+          psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -v ON_ERROR_STOP=1 -c 'ALTER SYSTEM SET autovacuum = off'
+          psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -v ON_ERROR_STOP=1 -c 'SELECT pg_reload_conf()'
+          test "$(psql postgresql://mscqr_rls_cert_admin@127.0.0.1:5432/mscqr_p2_integration_test -X -Atc 'SHOW autovacuum')" = off
           started="$(date +%s)"
           if timeout --kill-after=30s 120m npm run rls:full-certify; then
             echo "Full RLS certification passed in $(( $(date +%s) - started )) seconds."
