@@ -46,3 +46,11 @@ test("stale signer successor authenticates source approval before root MFA and c
   calls.length = 0; deps.authorize = () => { calls.push("authorize"); throw new Error("approval denied"); };
   await assert.rejects(run(["execute", "456", transitionId], deps), /approval denied/); assert.deepEqual(calls, ["authorize"]);
 });
+
+test("current runbook exposes the exact stale-signer generation route", () => {
+  const scripts = JSON.parse(fs.readFileSync("package.json", "utf8")).scripts;
+  assert.equal(scripts["production:component-broker-stale-signer-successor"], "node scripts/aws/component-broker-stale-signer-successor-cli.mjs");
+  const guide = fs.readFileSync("documents/ops/iam/MSCQR_PRODUCTION_SECURITY_REBASELINE_SIGNER_TEMPORARY_CAPABILITY-v1.md", "utf8");
+  assert.match(guide, /successor=stale-signer/);
+  assert.match(guide, /npm run production:component-broker-stale-signer-successor -- execute RUN_ID TRANSITION_ID/);
+});

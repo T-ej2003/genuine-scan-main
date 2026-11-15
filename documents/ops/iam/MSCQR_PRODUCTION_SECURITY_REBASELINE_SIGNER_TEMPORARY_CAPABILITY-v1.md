@@ -95,6 +95,35 @@ and closes the third immutable lineage record. It cannot choose the signer
 managed-policy document. Normal signer operations after this convergence are
 non-root and MFA-backed.
 
+### Current stale signer recovery (November 15)
+
+The `13/14/15` convergence above is complete; do not rerun it. The exact
+historical `INSTALLING` transition was aborted through broker v14. Confirm the
+live ledger is `REVOKED` for source `864b0f349e7f33b6274a44017ea33b625c8c6e0e`
+and transition `c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad`, with steady IAM v24,
+no temporary version, and preserved `INSTALLING` history before proceeding.
+
+From the verified protected-main SHA, dispatch
+`.github/workflows/authorize-component-broker-recovery-successor.yml` with
+`successor=stale-signer`, `source_sha` set to that SHA, and a fresh UUID. After
+the protected environment approves and the run succeeds, review the exact
+v16–18 package and IAM delta with the owner. Then, from the same clean source
+and with the documented MFA-backed root session, run:
+
+```sh
+npm run production:component-broker-stale-signer-successor -- execute RUN_ID TRANSITION_ID
+```
+
+The controller checks the closed signer lineage, retired ledger, release
+policy v24, publisher trust and exact v15 or v18 policy before publishing
+versions `16/17/18`. It changes only the named broker invocation policies,
+the signer publisher's sole invoke target to `18`, and its versioned closure
+journal. Confirm all three versions, the v18 publisher policy, the closure,
+and the still-`REVOKED` historical ledger. Do not run the earlier
+`successor=signer` controller or the initial-activation Terraform convergence
+as the publication step for this generation. The signer transition workflow
+invokes v18 only after this closure is verified.
+
 ## Signer transition
 
 Use the full current protected-main SHA, one transition UUID, and private files:
@@ -111,6 +140,9 @@ Authorize installation through the solo-operator protected environment:
 
 Before the first authorization while the signer ledger is absent, run the
 read-only preparation in [the exact-ledger absence repair](MSCQR_PRODUCTION_SIGNER_LEDGER_ABSENCE_READ-v1.md).
+The November 15 stale-signer recovery has an existing `REVOKED` ledger, so its
+fresh INSTALL uses broker v18 after the closure above; the absence repair does
+not apply to that transition.
 If it reports `EXACT_PREDECESSOR`, complete that fixed, protected bucket-policy
 transition and verify `CONVERGED` before continuing. If it reports
 `EXACT_SUCCESSOR`, continue without another bucket-policy write. The repair
