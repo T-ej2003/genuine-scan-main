@@ -1,14 +1,14 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { canonicalJson } from "./production-green-stage-b-contract.mjs";
 import { INSTALLATION, assertInstallationPlan, assertInstallationPlanConfiguration, assertInstallationStateResources } from "./production-initial-activation-reconciler-installation-contract.mjs";
 import { assertRefreshOnlyResourceChangeActions, assertStateObject } from "./production-initial-activation-reconciler-state-reconciliation.mjs";
 import { PRODUCTION_ENVIRONMENT_APPROVAL, assertProductionEnvironmentActualReviewer, assertProductionEnvironmentApprovalFreshness, assertProductionEnvironmentApprovalIdentity } from "./production-github-environment-approval.mjs";
 
 const sha256 = (value) => crypto.createHash("sha256").update(Buffer.isBuffer(value) ? value : Buffer.from(canonicalJson(value))).digest("hex");
-const sourceRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
-const policy = JSON.parse(fs.readFileSync(path.join(sourceRoot, INSTALLATION.terraformRoot, "signer-policy-installer-permissions-policy.json"), "utf8"));
+// This reconciler attests the captured v15 state, independent of later broker generations.
+const policy = { Version: "2012-10-17", Statement: [{ Sid: "PublishExactSignerTransitionAuthorizationToBroker", Effect: "Allow",
+  Action: "lambda:InvokeFunction", Resource: "arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:15",
+  Condition: { StringEquals: { "aws:RequestedRegion": "eu-west-2" } } }] };
 const address = "aws_iam_role.signer_policy_installer";
 const name = "ProductionSignerPolicyInstaller";
 const roleName = "mscqr-production-signer-policy-installer";
