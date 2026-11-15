@@ -203,7 +203,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
   const migrationUrl = databaseUrl(adminUrl, targetDatabase, "mscqr_prd_rls_phase2_migration");
   let residue = null;
   let verifierCreated = false;
-  let appOnlyRequirements, securityRebaselineCanonical;
+  let appOnlyRequirements, securityRebaselineCanonical, historicalPredecessorRequirements;
   let rdsMembershipsNormalized = false;
   const verifierRole = "mscqr_prod_rls_canary_read";
   let subscriptionObserverProvisionStarted = false;
@@ -1568,6 +1568,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         candidateSourceSha: "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec", objects: beforeB03 };
       delete oldRequirementBody.requirementsSha256;
       const oldRequirements = { ...oldRequirementBody, requirementsSha256: canonicalSha256(oldRequirementBody) };
+      historicalPredecessorRequirements = oldRequirements;
       const c02SuccessorBody = { ...requirements, candidateSourceSha: requirements.sourceSha };
       delete c02SuccessorBody.requirementsSha256;
       const c02Successor = { ...c02SuccessorBody, requirementsSha256: canonicalSha256(c02SuccessorBody) };
@@ -1670,6 +1671,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
     assert.ok(appOnlyRequirements);
     writeStageBPrivateFileExclusive({ filePath: process.env.MSCQR_APP_ONLY_REQUIREMENTS_PATH,
       repositoryRoot: root, bytes: Buffer.from(`${JSON.stringify(appOnlyRequirements)}\n`) });
+  }
+  if (process.env.MSCQR_APP_ONLY_PREDECESSOR_REQUIREMENTS_PATH) {
+    assert.ok(historicalPredecessorRequirements);
+    writeStageBPrivateFileExclusive({ filePath: process.env.MSCQR_APP_ONLY_PREDECESSOR_REQUIREMENTS_PATH,
+      repositoryRoot: root, bytes: Buffer.from(`${JSON.stringify(historicalPredecessorRequirements)}\n`) });
   }
   if (process.env.MSCQR_SECURITY_REBASELINE_CANONICAL_PATH) {
     assert.ok(securityRebaselineCanonical);

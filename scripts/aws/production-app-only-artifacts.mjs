@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { createProductionGithubCommandRunner } from "./production-credential-source-contract.mjs";
 import { writeStageBPrivateFileExclusive, writeStageBPrivateFileAtomicExclusive } from "./stage-b-artifact-contract.mjs";
 import { canonicalSha256 } from "./production-green-stage-b-contract.mjs";
+import { assertAppOnlyRequirements } from "./production-app-only-requirements.mjs";
 
 const repository = "T-ej2003/genuine-scan-main";
 const contracts = Object.freeze({
@@ -16,6 +17,7 @@ const contracts = Object.freeze({
   publication: { workflow: ".github/workflows/production-green-stage-b-images.yml", artifact: "production-green-stage-b-images", file: "stage-b-images.jsonl" },
   imageAuthorization: { workflow: ".github/workflows/produce-production-green-stage-b-state-reconciliation-image-authorization.yml", artifact: "production-green-stage-b-state-reconciliation-image-authorization", file: "image-authorization.json" },
   requirements: { workflow: ".github/workflows/produce-production-app-only-requirements.yml", artifact: "production-app-only-requirements", file: "app-only-requirements.json" },
+  predecessorRequirements: { workflow: ".github/workflows/produce-production-app-only-requirements.yml", artifact: "production-app-only-predecessor-requirements", file: "predecessor-app-only-requirements.json" },
   securityRebaselineRequirements: { workflow: ".github/workflows/prepare-production-security-rebaseline.yml", artifact: "production-security-rebaseline-requirements", file: "app-only-requirements.json" },
   securityRebaselineCanonical: { workflow: [".github/workflows/produce-production-app-only-requirements.yml", ".github/workflows/prepare-production-security-rebaseline.yml"], artifact: "production-security-rebaseline-canonical", file: "security-rebaseline-canonical.json" },
   securityRebaselinePreparation: { workflow: ".github/workflows/prepare-production-security-rebaseline.yml", artifact: "production-security-rebaseline-preparation", file: "preparation-manifest.json" },
@@ -179,6 +181,15 @@ export function downloadAppOnlyArtifact({ kind, reference, repositoryRoot, githu
   fs.chmodSync(directory, 0o700);
   const file = writeStageBPrivateFileExclusive({ filePath: path.join(directory, contracts[kind].file), bytes, repositoryRoot });
   return { ...file, bytes, reference: structuredClone(reference), run, artifact };
+}
+
+export function readCertifiedPrintingPredecessor({ sourceSha, reference, repositoryRoot,
+  githubRun, download = downloadAppOnlyArtifact }) {
+  assert.equal(reference?.sourceSha, sourceSha, "Predecessor proof must come from the current protected-main run");
+  const predecessor = JSON.parse(download({ kind: "predecessorRequirements", reference, repositoryRoot, githubRun }).bytes);
+  const historicalSha = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec";
+  assertAppOnlyRequirements(predecessor, { sourceSha: historicalSha, candidateSourceSha: historicalSha, repositoryRoot });
+  return predecessor;
 }
 
 // The failed protected verifier run can publish two three-entry journals even

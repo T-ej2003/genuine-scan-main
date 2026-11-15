@@ -243,6 +243,11 @@ test("operator scripts contain no secret output or database mutation surface", (
   assert.doesNotMatch(probeSource, /\b(?:ALTER|CREATE|DROP|GRANT|REVOKE|INSERT|UPDATE|DELETE)\b[^\n]*\$executeRawUnsafe/i);
   assert.doesNotMatch(probeSource, /["'](?:dynamodb|lambda)["']|InvokeFunction/);
   assert.doesNotMatch(probeSource, /requirementsPath|--requirements(?:["'])/);
-  assert.match(probeSource, /downloadAppOnlyArtifact\(\{ kind: "requirements"/);
-  assert.match(fs.readFileSync("scripts/aws/production-app-only-artifacts.mjs", "utf8"), /execFileSync\("\/usr\/bin\/python3"/);
+  assert.match(probeSource, /readCertifiedPrintingPredecessor\(\{ sourceSha, reference: b03PredecessorReference/);
+  const artifactSource = fs.readFileSync("scripts/aws/production-app-only-artifacts.mjs", "utf8");
+  assert.match(artifactSource, /predecessorRequirements: \{ workflow: "\.github\/workflows\/produce-production-app-only-requirements\.yml"/);
+  assert.match(artifactSource, /assert\.equal\(reference\?\.sourceSha, sourceSha/);
+  assert.match(artifactSource, /download\(\{ kind: "predecessorRequirements", reference, repositoryRoot, githubRun \}\)/);
+  assert.match(artifactSource, /assertAppOnlyRequirements\(predecessor, \{ sourceSha: historicalSha, candidateSourceSha: historicalSha/);
+  assert.match(artifactSource, /execFileSync\("\/usr\/bin\/python3"/);
 });

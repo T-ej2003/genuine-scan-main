@@ -127,7 +127,9 @@ The canonical issuer accepts B03 input fields `operation`, `sourceSha`,
 `backendImage`, `pkg`, `databaseHostname`, `taskDefinitionArn`, `ticketId`,
 `predecessorRequirementsReference` and `successorRequirementsReference`.
 References use the existing authenticated GitHub requirements-artifact format;
-the predecessor must be `d785aa7f1e154f37c0dc621082e3f6c46d5d5aec`.
+both references name the current protected-main run. The predecessor artifact
+contains the certified reconstruction with historical source
+`d785aa7f1e154f37c0dc621082e3f6c46d5d5aec`.
 The issuer rebuilds the package from those artifacts, verifies the current-source
 signed image authorization, live database identity and fixed task definition,
 and rechecks protected main immediately before signing. Approval lifetime is

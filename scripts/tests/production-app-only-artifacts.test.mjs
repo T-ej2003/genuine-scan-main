@@ -5,8 +5,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { readAppOnlyArtifactArchive, assertAppOnlyArtifactProvenance, downloadAppOnlyArtifact,
+  readCertifiedPrintingPredecessor,
   parseAppOnlyVerifierDiagnosticReference,
   downloadAppOnlyVerifierJournals, createAppOnlyEvidenceWriter } from "../aws/production-app-only-artifacts.mjs";
+import { calculateCleanRoomSourceContract } from "../rls/lib/clean-room-source-contract.mjs";
+import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const file = "app-only-requirements.json", source = "a".repeat(40);
@@ -37,6 +40,28 @@ test("artifact provenance rejects every run, source and artifact substitution", 
       assert.throws(() => assertAppOnlyArtifactProvenance(changed), `${part}.${field}`);
     }
   }
+});
+test("reconstructed predecessor stays bound to current run and historical catalogue identity", () => {
+  const root = path.resolve(import.meta.dirname, "../..");
+  const contract = calculateCleanRoomSourceContract(root);
+  const old = "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec";
+  const body = { schemaVersion: 1, kind: "APP_ONLY_CANONICAL_DATABASE_REQUIREMENTS", sourceSha: old,
+    candidateSourceSha: old, sourceContractSha256: contract.sourceContractSha256,
+    migrationSetDigest: contract.migrationSetDigest, canonicalPackageChecksumsSha256: "a".repeat(64),
+    objects: Object.fromEntries(["routines", "tables", "policies", "schemas", "roles"].map(name => [name,
+      [{ identity: name, sha256: "b".repeat(64) }]])) };
+  const predecessor = { ...body, requirementsSha256: canonicalSha256(body) };
+  const reference = { sourceSha: source };
+  const download = ({ kind }) => { assert.equal(kind, "predecessorRequirements"); return { bytes: Buffer.from(JSON.stringify(predecessor)) }; };
+  assert.deepEqual(readCertifiedPrintingPredecessor({ sourceSha: source, reference, repositoryRoot: root, download }), predecessor);
+  assert.throws(() => readCertifiedPrintingPredecessor({ sourceSha: "c".repeat(40), reference, repositoryRoot: root, download }));
+  assert.throws(() => readCertifiedPrintingPredecessor({ sourceSha: source, reference, repositoryRoot: root,
+    download: () => ({ bytes: Buffer.from(JSON.stringify({ ...predecessor, sourceSha: source })) }) }));
+  const proof = fixture(archive([{ name: "predecessor-app-only-requirements.json" }]));
+  proof.kind = "predecessorRequirements";
+  proof.artifact.name = "production-app-only-predecessor-requirements";
+  assert.equal(assertAppOnlyArtifactProvenance(proof), true);
+  assert.throws(() => readAppOnlyArtifactArchive(archive([{ name: file }]), "predecessorRequirements"));
 });
 test("ZIP closure rejects traversal, absolute, unicode, links, directories, duplicates, extras and oversized members", () => {
   assert.equal(readAppOnlyArtifactArchive(archive([{ name: file }]), "requirements").toString(), "{}");

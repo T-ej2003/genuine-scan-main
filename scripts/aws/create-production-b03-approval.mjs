@@ -4,7 +4,7 @@ import { b03ApprovalMessage, b03TaskDefinitionSha256, authenticateB03BrokerReque
 import { canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
 import { authenticateCanonicalProductionRequirements } from "./probe-production-rls-catalogue.mjs";
-import { downloadAppOnlyArtifact } from "./production-app-only-artifacts.mjs";
+import { readCertifiedPrintingPredecessor } from "./production-app-only-artifacts.mjs";
 import { buildB03DeltaPackage } from "./production-b03-delta-package.mjs";
 import { verifyProductionReleaseImageAuthorization } from "./verify-production-release-image-authorization.mjs";
 import { verifyImageEvidenceSignature } from "./production-green-stage-b-image-evidence.mjs";
@@ -54,9 +54,7 @@ export function createB03SourceAuthenticator({ input, imageAuthorization, runAws
     if (authenticated) { assert.equal(authenticated, fingerprint); return; }
     const successor = authenticateCanonicalProductionRequirements({ sourceSha, requirementsReference: input.successorRequirementsReference, repositoryRoot, githubRun }).requirements;
     const ref = input.predecessorRequirementsReference;
-    assert.equal(ref?.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
-    const predecessor = JSON.parse(downloadAppOnlyArtifact({ kind: "requirements", reference: ref, repositoryRoot, githubRun }).bytes);
-    assert.equal(predecessor.sourceSha, ref.sourceSha); assert.equal(predecessor.candidateSourceSha, ref.sourceSha);
+    const predecessor = readCertifiedPrintingPredecessor({ sourceSha, reference: ref, repositoryRoot, githubRun });
     assert.equal(canonicalSha256(pkg), canonicalSha256(buildB03DeltaPackage({ predecessor, successor, repositoryRoot })));
     const images = verifyProductionReleaseImageAuthorization({ authorization: imageAuthorization, sourceSha, minimumRemainingMs: 30 * 60_000,
       verifyImageEvidence: options => verifyImageEvidenceSignature({ ...options, run: runAws }) });

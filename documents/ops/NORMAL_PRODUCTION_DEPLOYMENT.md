@@ -227,7 +227,12 @@ PR #771 changes thirteen printing catalogue objects in addition to B03's eightee
 The original session-only C02 command cannot replace those existing routines;
 B03 authorization must not absorb C02's grants or accept their old definitions.
 
-Use the existing root-authorized C02 command with both immutable artifact references
+The historical predecessor artifact from October 25 expired. The protected-main
+requirements workflow now publishes a certified reconstruction from the existing
+PostgreSQL 18 disposable test as `production-app-only-predecessor-requirements`.
+Its artifact reference names the **current** protected-main run; its authenticated
+contents retain the exact historical `d785aa7f...` source identity. Use the
+existing root-authorized C02 command with both immutable artifact references
 (compact JSON objects with `sourceSha`, `runId`, `runAttempt`, `artifactId`,
 `fileSha256` and `artifactDigest`, as accepted by the canonical artifact reader):
 
