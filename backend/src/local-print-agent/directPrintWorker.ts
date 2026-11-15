@@ -764,12 +764,19 @@ const failLocalJob = async (payload: {
   printJobId: string;
   printItemId: string;
   reason: string;
+  registrationId?: string;
+  attemptId?: string;
+  payloadHash?: string;
 }) => {
   const signed = await buildSignedBody({
     action: "fail",
     printerId: payload.printerId,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
+    registrationId: payload.registrationId,
+    attemptId: payload.attemptId,
+    payloadHash: payload.payloadHash,
+    reason: payload.attemptId ? payload.reason : null,
   });
 
   await postBackend("/printer-agent/local/fail", {
@@ -893,8 +900,9 @@ export const isPreSpoolAckRejection = (error: unknown) =>
     String(errorInfo(error).errorCode || "") === "agent_timestamp_expired" ||
     String(errorInfo(error).errorCode || "") === "connector_update_required");
 
-export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean) => {
+export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean, attemptId?: string) => {
   if (errorInfo(error).errorCode === "dispatch_reconciliation_required") return false;
+  if (attemptId) return spoolerAttempted;
   if (spoolerAttempted) return false;
   if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
   return true;
@@ -1492,7 +1500,7 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     }
   } catch (error: unknown) {
     let failureReported = false;
-    const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted) && !attemptId;
+    const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted, attemptId);
     if (attemptId && registrationId && !spoolerAttempted && errorInfo(error).errorCode !== "dispatch_reconciliation_required") {
       await recordDispatchEvidence({ action: "abort_unsubmitted", printerId, registrationId,
         printJobId, printItemId, attemptId, payloadHash: validated?.payloadHash || String(payload.payloadHash || ""),
@@ -1504,7 +1512,9 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
         printerId,
         printJobId,
         printItemId,
-        reason: errorInfo(error).message || "Local direct-print pipeline failed.",
+        reason: (errorInfo(error).message || "Local direct-print pipeline failed.").slice(0, 500),
+        ...(attemptId ? { registrationId, attemptId,
+          payloadHash: validated?.payloadHash || String(payload.payloadHash || "") } : {}),
       })
         .then(() => {
           failureReported = true;

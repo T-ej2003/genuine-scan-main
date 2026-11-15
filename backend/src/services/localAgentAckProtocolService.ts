@@ -71,11 +71,12 @@ export const failSchema = agentAuthSchema
     printItemId: z.string().trim().uuid(),
     code: z.string().trim().max(180).optional().nullable(),
     reason: z.string().trim().min(2).max(1000),
+    payloadHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     agentMetadata: metadataSchema,
   })
   .strict().superRefine((value, ctx) => {
     if (Boolean(value.attemptId || value.registrationId || value.dispatchEvidenceVersion)
-      && !(value.attemptId && value.registrationId && value.dispatchEvidenceVersion === 1)) {
+      && !(value.attemptId && value.registrationId && value.dispatchEvidenceVersion === 1 && value.payloadHash)) {
       ctx.addIssue({ code: "custom", path: ["attemptId"], message: "Signed attempt identity is incomplete" });
     }
   });

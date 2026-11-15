@@ -8,7 +8,7 @@ const {
 } = require("../dist/local-print-agent/directPrintWorker");
 const { generateKeyPairSync } = require('node:crypto');
 const { buildPrinterAgentActionPayload, signPrinterAgentPayload, verifyPrinterAgentPayloadSignature } = require('../dist/services/printerAgentSigningService');
-const { dispatchEvidenceSchema } = require('../dist/services/localAgentAckProtocolService');
+const { dispatchEvidenceSchema, failSchema } = require('../dist/services/localAgentAckProtocolService');
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -94,6 +94,12 @@ const run = () => {
     !shouldReportLocalPrintFailureToBackend(preSpoolAckError, true),
     "Connector must preserve uncertainty after spooler work has been attempted"
   );
+  assert(shouldReportLocalPrintFailureToBackend(new Error('spooler rejected'), true, 'signed-attempt'),
+    'post-intent spooler rejection must report a protected failure');
+  assert(shouldReportLocalPrintFailureToBackend(new Error('ack response lost'), true, 'signed-attempt'),
+    'post-intent lost ACK must report a protected failure');
+  assert(!shouldReportLocalPrintFailureToBackend(new Error('intent response lost'), false, 'signed-attempt'),
+    'lost intent response must use abort/worker reconciliation, never a physical failure claim');
 
   const pair = generateKeyPairSync('ed25519');
   const privateKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -128,6 +134,16 @@ const run = () => {
   const { action, ...evidenceBody } = evidence;
   assert(dispatchEvidenceSchema.safeParse({ ...evidenceBody, signature }).success,
     'authenticated pre-submission evidence must have a strict shape');
+  const { journalState: _journalState, ...failed } = { ...evidence, action: 'fail', reason: 'physical_outcome_unconfirmed' };
+  const failureSignature = signPrinterAgentPayload(privateKey, buildPrinterAgentActionPayload(failed));
+  const { action: _failedAction, ...failureBody } = failed;
+  assert(failSchema.safeParse({ ...failureBody, signature: failureSignature }).success,
+    'signed post-intent FAIL must bind the exact attempt and approved payload hash');
+  assert(!failSchema.safeParse({ ...failureBody, payloadHash: undefined, signature: failureSignature }).success,
+    'attempt-bound FAIL must require its signed payload hash');
+  assert(!verifyPrinterAgentPayloadSignature({ publicKeyPem: publicKey,
+    payload: buildPrinterAgentActionPayload({ ...failed, attemptId: '6fc64f36-b7a1-4798-91f3-0b47de5ad73a' }),
+    signature: failureSignature }), 'a stale attempt cannot replay a signed failure');
 
   console.log("local agent ACK protocol tests passed");
 };
