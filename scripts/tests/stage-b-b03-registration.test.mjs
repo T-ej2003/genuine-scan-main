@@ -11,6 +11,7 @@ import { registrationAddressesFromPlan, registrationAddressesFromDefinitions, br
 import { assertStageBBrokerPolicyDocument } from '../aws/stage-b-deployment-contract.mjs';
 import { produceB03ExecutorDefinition } from '../aws/produce-production-b03-executor-definition.mjs';
 import { canonicalSha256, STAGE_B } from '../aws/production-green-stage-b-contract.mjs';
+import { calculateCleanRoomSourceContract } from '../rls/lib/clean-room-source-contract.mjs';
 function registration() {
   const b03 = fixture();
   const plan = { ...b03, complete: false, errored: false, variables: { ...rotationVariables, ...b03.variables },
@@ -48,12 +49,15 @@ test('legacy 12-output receipts remain exact; unknown outputs and wildcard B03 r
 function producer() {
   const plan=fixture();
   const sourceSha=plan.variables.tooling_sha.value;
-  const predecessorBody={sourceSha:'d785aa7f1e154f37c0dc621082e3f6c46d5d5aec',candidateSourceSha:'d785aa7f1e154f37c0dc621082e3f6c46d5d5aec'};
+  const oldSha='d785aa7f1e154f37c0dc621082e3f6c46d5d5aec',contract=calculateCleanRoomSourceContract(process.cwd());
+  const predecessorBody={schemaVersion:1,kind:'APP_ONLY_CANONICAL_DATABASE_REQUIREMENTS',sourceSha:oldSha,candidateSourceSha:oldSha,
+    sourceContractSha256:contract.sourceContractSha256,migrationSetDigest:contract.migrationSetDigest,
+    canonicalPackageChecksumsSha256:'a'.repeat(64),objects:Object.fromEntries(['routines','tables','policies','schemas','roles'].map(name=>[name,[{identity:name,sha256:'b'.repeat(64)}]]))};
   const predecessor={...predecessorBody,requirementsSha256:canonicalSha256(predecessorBody)};
   const successor={sourceSha,candidateSourceSha:sourceSha};
   const reference=sha=>({sourceSha:sha,runId:'1',runAttempt:'1',artifactId:'1',artifactDigest:'sha256:'+'a'.repeat(64),fileSha256:'b'.repeat(64)});
-  return {sourceSha,backendImage:plan.variables.backend_image.value,references:{predecessor:reference(predecessor.sourceSha),successor:reference(sourceSha)},
-    repositoryRoot:process.cwd(),download:({reference})=>({bytes:Buffer.from(JSON.stringify(reference.sourceSha===sourceSha?successor:predecessor))}),
+  return {sourceSha,backendImage:plan.variables.backend_image.value,references:{predecessor:reference(sourceSha),successor:reference(sourceSha)},
+    repositoryRoot:process.cwd(),download:({kind})=>({bytes:Buffer.from(JSON.stringify(kind==='predecessorRequirements'?predecessor:successor))}),
     validateSuccessor:(s,e)=>{assert.equal(s.sourceSha,e.sourceSha);assert.equal(s.candidateSourceSha,e.sourceSha);},
     buildPackage:()=>({schemaVersion:1,kind:'PRODUCTION_B03_INCREMENTAL_PACKAGE',sourceSha,mutations:Array.from({length:44},()=>({owner:'auth',sql:'SELECT 1'}))}),
     run:()=>JSON.stringify({DBInstances:[{DBInstanceIdentifier:STAGE_B.greenDatabaseIdentifier,DBInstanceStatus:'available',Engine:'postgres',Endpoint:{Address:'db.example.internal'}}]})};

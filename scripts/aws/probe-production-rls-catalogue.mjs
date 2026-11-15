@@ -14,7 +14,7 @@ import { assertAppOnlyCandidateAncestor } from "./produce-production-app-only-re
 import { canonicalJson, canonicalSha256, STAGE_B } from "./production-green-stage-b-contract.mjs";
 import { assertEcsTaskDefinitionReadback } from "../../infra/aws/terraform/lambda/production-rls-approval-broker/ecs-task-definition-readback.mjs";
 import { assertProtectedCheckout } from "./prepare-production-initial-activation-reconciler-installation.mjs";
-import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
+import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference, readCertifiedPrintingPredecessor } from "./production-app-only-artifacts.mjs";
 import { createProductionAwsCredentialEnvironment, createProductionGithubCommandRunner, productionAwsExecutable, PRODUCTION_AWS_CREDENTIAL_SOURCE } from "./production-credential-source-contract.mjs";
 import { writeStageBPrivateFileExclusive } from "./stage-b-artifact-contract.mjs";
 import { assertSecurityRebaselineInventory, createLiveSecurityRebaselineInventory, securityRebaselineLogSummary } from "./production-security-rebaseline-inventory.mjs";
@@ -220,12 +220,7 @@ export async function runProductionRlsCatalogueProbe({ sourceSha, requirementsRe
   let b03Predecessor = null;
   if (b03PredecessorReference) {
     assert.equal(preparedManifest, null, "B03 diagnostic uses the bounded public-repository probe only");
-    assert.equal(b03PredecessorReference.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
-    assertAppOnlyCandidateAncestor({ sourceSha, candidateSourceSha: b03PredecessorReference.sourceSha, repositoryRoot });
-    const artifact = downloadAppOnlyArtifact({ kind: "requirements", reference: b03PredecessorReference, repositoryRoot, githubRun });
-    b03Predecessor = JSON.parse(artifact.bytes);
-    assert.equal(b03Predecessor.sourceSha, b03PredecessorReference.sourceSha);
-    assert.equal(b03Predecessor.candidateSourceSha, b03PredecessorReference.sourceSha);
+    b03Predecessor = readCertifiedPrintingPredecessor({ sourceSha, reference: b03PredecessorReference, repositoryRoot, githubRun });
   }
   const securityMode = Boolean(preparedManifest) || [securityRebaselineReference, securityRebaselineCanonicalOut, securityRebaselineLiveOut].some(Boolean);
   assert.equal(Boolean(securityRebaselineCanonicalOut && securityRebaselineLiveOut), securityMode, "Security inventory output paths are all-or-none");

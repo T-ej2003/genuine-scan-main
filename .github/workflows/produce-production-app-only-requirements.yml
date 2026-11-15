@@ -53,6 +53,7 @@ jobs:
           umask 077
           result="$(node scripts/aws/produce-production-app-only-requirements.mjs "$SOURCE_SHA" "$CANDIDATE_SOURCE_SHA")"
           printf 'path=%s\n' "$(jq -r .artifactPath <<<"$result")" >> "$GITHUB_OUTPUT"
+          printf 'predecessor_path=%s\n' "$(jq -r .predecessorPath <<<"$result")" >> "$GITHUB_OUTPUT"
           printf 'security_rebaseline_path=%s\n' "$(jq -r .securityRebaselinePath <<<"$result")" >> "$GITHUB_OUTPUT"
           printf 'Requirements SHA-256: `%s`\n\nSource-only certification; not live compatibility or deployment approval.\n' "$(jq -r .requirementsSha256 <<<"$result")" >> "$GITHUB_STEP_SUMMARY"
           printf '\nCanonical security catalogue SHA-256: `%s`\n' "$(jq -r .canonicalSecurityCatalogueSha256 <<<"$result")" >> "$GITHUB_STEP_SUMMARY"
@@ -60,6 +61,12 @@ jobs:
         with:
           name: production-app-only-requirements
           path: ${{ steps.produce.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-app-only-predecessor-requirements
+          path: ${{ steps.produce.outputs.predecessor_path }}
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4

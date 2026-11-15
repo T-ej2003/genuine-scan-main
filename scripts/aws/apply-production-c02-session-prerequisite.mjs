@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { buildC02CombinedPackage } from "./production-c02-combined-package.mjs";
 import { authenticateCanonicalProductionRequirementsArtifact } from "./probe-production-rls-catalogue.mjs";
-import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference } from "./production-app-only-artifacts.mjs";
+import { downloadAppOnlyArtifact, parseAppOnlyArtifactReference, readCertifiedPrintingPredecessor } from "./production-app-only-artifacts.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -104,9 +104,7 @@ export async function applyProductionC02SessionPrerequisite({ sourceSha, awsProf
   let combinedRequirements;
   if (predecessorReference || requirementsReference) {
     assert.ok(predecessorReference && requirementsReference);
-    assert.equal(predecessorReference.sourceSha, "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec");
-    const predecessor = JSON.parse(downloadAppOnlyArtifact({ kind: "requirements", reference: predecessorReference, repositoryRoot }).bytes);
-    assert.equal(predecessor.sourceSha, predecessorReference.sourceSha);
+    const predecessor = readCertifiedPrintingPredecessor({ sourceSha, reference: predecessorReference, repositoryRoot });
     const { requirements: successor } = authenticateCanonicalProductionRequirementsArtifact({
       sourceSha, candidateSourceSha: sourceSha, requirementsReference, repositoryRoot });
     combinedRequirements = { predecessor, successor };
