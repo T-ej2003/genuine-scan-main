@@ -116,6 +116,7 @@ export type TrustedPrinterAgentSession = {
   agentId: string;
   deviceFingerprint: string;
   connectorVersion: string | null;
+  dispatchEvidenceVersion?: 1 | null;
   publicKeyPem: string;
   publicKeyFingerprint: string;
   manufacturerId: string;

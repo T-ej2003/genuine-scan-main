@@ -14,6 +14,7 @@ export const agentAuthSchema = z
 
 export const claimSchema = agentAuthSchema
   .extend({
+    dispatchEvidenceVersion: z.literal(1).optional(),
     protocolVersion: z.string().trim().max(80).optional().nullable(),
     buildVersion: z.string().trim().max(80).optional().nullable(),
     transportDiagnosticsVersion: z.string().trim().max(80).optional().nullable(),
@@ -36,6 +37,9 @@ const metadataSchema = z.record(z.string(), z.any()).optional().nullable();
 export const confirmSchema = agentAuthSchema
   .extend({
     ...localAgentProtocolFields,
+    dispatchEvidenceVersion: z.literal(1).optional(),
+    registrationId: z.string().uuid().optional(),
+    attemptId: z.string().uuid().optional(),
     printJobId: z.string().trim().uuid(),
     printSessionId: z.string().trim().uuid().optional().nullable(),
     printItemId: z.string().trim().uuid(),
@@ -47,21 +51,46 @@ export const confirmSchema = agentAuthSchema
     agentMetadata: metadataSchema,
     dispatchMetadata: metadataSchema,
   })
-  .strict();
+  .strict().superRefine((value, ctx) => {
+    if (Boolean(value.attemptId || value.registrationId || value.dispatchEvidenceVersion)
+      && !(value.attemptId && value.registrationId && value.dispatchEvidenceVersion === 1)) {
+      ctx.addIssue({ code: "custom", path: ["attemptId"], message: "Signed attempt identity is incomplete" });
+    }
+  });
 
 export const localAgentAckSchema = confirmSchema;
 
 export const failSchema = agentAuthSchema
   .extend({
     ...localAgentProtocolFields,
+    dispatchEvidenceVersion: z.literal(1).optional(),
+    registrationId: z.string().uuid().optional(),
+    attemptId: z.string().uuid().optional(),
     printJobId: z.string().trim().uuid(),
     printSessionId: z.string().trim().uuid().optional().nullable(),
     printItemId: z.string().trim().uuid(),
     code: z.string().trim().max(180).optional().nullable(),
     reason: z.string().trim().min(2).max(1000),
+    payloadHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
     agentMetadata: metadataSchema,
   })
-  .strict();
+  .strict().superRefine((value, ctx) => {
+    if (Boolean(value.attemptId || value.registrationId || value.dispatchEvidenceVersion)
+      && !(value.attemptId && value.registrationId && value.dispatchEvidenceVersion === 1 && value.payloadHash)) {
+      ctx.addIssue({ code: "custom", path: ["attemptId"], message: "Signed attempt identity is incomplete" });
+    }
+  });
+
+export const dispatchEvidenceSchema = agentAuthSchema.extend({
+  dispatchEvidenceVersion: z.literal(1),
+  registrationId: z.string().uuid(),
+  printJobId: z.string().uuid(),
+  printItemId: z.string().uuid(),
+  attemptId: z.string().uuid(),
+  journalState: z.enum(["ATTEMPT_RESERVED", "NOT_RESERVED"]),
+  payloadHash: z.string().regex(/^[a-f0-9]{64}$/),
+  reason: z.string().trim().min(2).max(1000).optional(),
+}).strict();
 
 export const localAgentTestAckSchema = agentAuthSchema
   .extend({
@@ -90,6 +119,7 @@ export type LocalAgentRequestPayload =
   | z.infer<typeof localAgentAckSchema>
   | z.infer<typeof confirmSchema>
   | z.infer<typeof failSchema>
+  | z.infer<typeof dispatchEvidenceSchema>
   | z.infer<typeof localAgentTestAckSchema>
   | z.infer<typeof localAgentTestFailSchema>;
 

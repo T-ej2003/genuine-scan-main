@@ -9,6 +9,7 @@ import {
   buildLocalAgentValidationErrorPayload,
   claimSchema,
   confirmSchema,
+  dispatchEvidenceSchema,
   failSchema,
   getLocalAgentRequestId,
   localAgentAckSchema,
@@ -43,7 +44,7 @@ const connectorEvent = async (
   req: Request,
   data: any,
   registration: any,
-  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL"
+  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL" | "INTENT" | "ABORT"
 ) =>
   recordConnectorEvent({
     registrationId: registration.id,
@@ -64,6 +65,10 @@ const connectorEvent = async (
       dispatchMetadata: data.dispatchMetadata || null,
       agentMetadata: data.agentMetadata || null,
       reason: data.reason || null,
+      dispatchEvidenceVersion: data.dispatchEvidenceVersion || null,
+      attemptId: data.attemptId || null,
+      journalState: data.journalState || null,
+      payloadHash: data.payloadHash || null,
     },
   });
 
@@ -153,6 +158,8 @@ export const claimLocalAgentPrintJob = async (req: Request, res: Response) => {
         printJobId: claimed.printJobId,
         printSessionId: claimed.printSessionId,
         printItemId: claimed.printItemId,
+        attemptId: claimed.attemptId,
+        registrationId: claimed.registrationId,
         code: claimed.code,
         ...payload,
         printer: {
@@ -245,6 +252,26 @@ export const failLocalAgentPrintJob = async (req: Request, res: Response) => {
     return res.json({ success: true, data: { ...result, reason: parsed.data.reason } });
   } catch (error: any) {
     console.error("failLocalAgentPrintJob error:", error);
+    return localAgentErrorResponse(res, error);
+  }
+};
+
+export const recordLocalAgentDispatchEvidence = async (req: Request, res: Response) => {
+  try {
+    const parsed = dispatchEvidenceSchema.safeParse(req.body || {});
+    if (!parsed.success) return res.status(400).json({ success: false, error: parsed.error.issues[0]?.message || "Invalid dispatch evidence" });
+    const operation = req.path.endsWith("/dispatch-intent") ? "INTENT" : "ABORT";
+    if (operation === "INTENT" && parsed.data.journalState !== "ATTEMPT_RESERVED") {
+      return res.status(400).json({ success: false, error: "Durable journal reservation required" });
+    }
+    const registration = await verifyLocalAgentRequest(parsed.data,
+      operation === "INTENT" ? "dispatch_intent" : "abort_unsubmitted",
+      { printJobId: parsed.data.printJobId, printItemId: parsed.data.printItemId });
+    if (registration.id !== parsed.data.registrationId) return res.status(403).json({ success: false, error: "Printer registration mismatch" });
+    const result = await connectorEvent(req, parsed.data, registration, operation);
+    publish(result, operation === "INTENT" ? "local_agent.dispatch_intent" : "local_agent.abort_unsubmitted", "local_agent_dispatch_evidence");
+    return res.json({ success: true, data: result });
+  } catch (error: any) {
     return localAgentErrorResponse(res, error);
   }
 };

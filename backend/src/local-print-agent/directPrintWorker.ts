@@ -23,6 +23,7 @@ interface ConnectorWorkPayload {
   printJobId?: string | null;
   printSessionId?: string | null;
   printItemId?: string | null;
+  attemptId?: string | null;
   testJobId?: string | null;
   code?: string | null;
   scanUrl?: string | null;
@@ -314,10 +315,15 @@ const resolveBackendUrl = async () => {
 };
 
 const buildSignedBody = async (params: {
-  action: "claim" | "ack" | "confirm" | "fail";
+  action: "claim" | "ack" | "confirm" | "fail" | "dispatch_intent" | "abort_unsubmitted";
   printerId: string;
   printJobId?: string | null;
   printItemId?: string | null;
+  registrationId?: string | null;
+  attemptId?: string | null;
+  journalState?: "ATTEMPT_RESERVED" | "NOT_RESERVED";
+  payloadHash?: string | null;
+  reason?: string | null;
 }) => {
   const state = await loadAgentState();
   const issuedAt = new Date().toISOString();
@@ -331,6 +337,12 @@ const buildSignedBody = async (params: {
     printItemId: params.printItemId || null,
     nonce,
     issuedAt,
+    dispatchEvidenceVersion: params.action === "claim" || Boolean(params.attemptId) ? 1 : null,
+    registrationId: params.registrationId,
+    attemptId: params.attemptId,
+    journalState: params.journalState,
+    payloadHash: params.payloadHash,
+    reason: params.reason,
   });
 
   return {
@@ -342,6 +354,11 @@ const buildSignedBody = async (params: {
       issuedAt,
       nonce,
       signature: signPrinterAgentPayload(state.privateKeyPem, signedPayload),
+      ...(params.action === "claim" || params.attemptId ? { dispatchEvidenceVersion: 1 as const } : {}),
+      ...(params.registrationId ? { registrationId: params.registrationId } : {}),
+      ...(params.attemptId ? { attemptId: params.attemptId } : {}),
+      ...(params.journalState ? { journalState: params.journalState } : {}),
+      ...(params.payloadHash ? { payloadHash: params.payloadHash } : {}),
     },
   };
 };
@@ -515,6 +532,7 @@ export const buildSignedSessionMessage = async (params: {
     deviceFingerprint: state.deviceFingerprint,
     selectedPrinterId: params.selectedPrinterId,
     connectorVersion,
+    dispatchEvidenceVersion: params.type === "hello" && params.printerHealth?.dispatchEvidenceVersion === 1 ? 1 : null,
     sessionId: params.session?.sessionId || null,
     chunkId: params.chunkId || null,
     printJobId: params.printJobId || null,
@@ -607,9 +625,28 @@ const claimNextLocalJob = async () => {
   });
 };
 
+const recordDispatchEvidence = async (input: {
+  action: "dispatch_intent" | "abort_unsubmitted";
+  printerId: string; registrationId: string; printJobId: string; printItemId: string;
+  attemptId: string; payloadHash: string; journalState: "ATTEMPT_RESERVED" | "NOT_RESERVED";
+  reason?: string;
+}) => {
+  const signed = await buildSignedBody(input);
+  const response = await postBackend<{ success: boolean; data?: { authorized?: boolean } }>(
+    input.action === "dispatch_intent" ? "/printer-agent/local/dispatch-intent" : "/printer-agent/local/abort-unsubmitted",
+    { ...signed.body, printJobId: input.printJobId, printItemId: input.printItemId,
+      ...(input.reason ? { reason: input.reason } : {}) }
+  );
+  if (!response?.success || (input.action === "dispatch_intent" && response.data?.authorized !== true)) {
+    throw new Error("Backend dispatch authorization was not committed.");
+  }
+};
+
 const ackLocalJob = async (payload: {
   printerId: string;
   printJobId: string;
+  registrationId?: string;
+  attemptId?: string;
   printSessionId?: string | null;
   printItemId: string;
   code?: string | null;
@@ -626,6 +663,9 @@ const ackLocalJob = async (payload: {
     printerId: payload.printerId,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
+    registrationId: payload.registrationId,
+    attemptId: payload.attemptId,
+    payloadHash: payload.attemptId ? payload.payloadHash : null,
   });
 
   const markDispatched = payload.markDispatched !== false;
@@ -678,6 +718,8 @@ const ackLocalJob = async (payload: {
 const confirmLocalJob = async (payload: {
   printerId: string;
   printJobId: string;
+  registrationId?: string;
+  attemptId?: string;
   printItemId: string;
   payloadHash: string;
   printPath: string;
@@ -690,6 +732,9 @@ const confirmLocalJob = async (payload: {
     printerId: payload.printerId,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
+    registrationId: payload.registrationId,
+    attemptId: payload.attemptId,
+    payloadHash: payload.attemptId ? payload.payloadHash : null,
   });
 
   const bytesWritten = Number(payload.bytesWritten || 0);
@@ -719,12 +764,19 @@ const failLocalJob = async (payload: {
   printJobId: string;
   printItemId: string;
   reason: string;
+  registrationId?: string;
+  attemptId?: string;
+  payloadHash?: string;
 }) => {
   const signed = await buildSignedBody({
     action: "fail",
     printerId: payload.printerId,
     printJobId: payload.printJobId,
     printItemId: payload.printItemId,
+    registrationId: payload.registrationId,
+    attemptId: payload.attemptId,
+    payloadHash: payload.payloadHash,
+    reason: payload.attemptId ? payload.reason : null,
   });
 
   await postBackend("/printer-agent/local/fail", {
@@ -848,8 +900,9 @@ export const isPreSpoolAckRejection = (error: unknown) =>
     String(errorInfo(error).errorCode || "") === "agent_timestamp_expired" ||
     String(errorInfo(error).errorCode || "") === "connector_update_required");
 
-export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean) => {
+export const shouldReportLocalPrintFailureToBackend = (error: unknown, spoolerAttempted: boolean, attemptId?: string) => {
   if (errorInfo(error).errorCode === "dispatch_reconciliation_required") return false;
+  if (attemptId) return spoolerAttempted;
   if (spoolerAttempted) return false;
   if (!spoolerAttempted && isPreSpoolAckRejection(error)) return false;
   return true;
@@ -1047,11 +1100,14 @@ export const runPersistentPrintChunk = async (
     send?: typeof sendSessionMessage;
     print?: typeof printLabel;
     wait?: typeof waitForLocalPrintJobCompletion;
+    evidence?: typeof recordDispatchEvidence;
   } = {}
 ) => {
+  try {
   const send = adapters.send || sendSessionMessage;
   const print = adapters.print || printLabel;
   const wait = adapters.wait || waitForLocalPrintJobCompletion;
+  const evidence = adapters.evidence || recordDispatchEvidence;
   const chunkId = String(payload?.chunkId || "").trim();
   const printJobId = String(payload?.printJobId || "").trim();
   const labels = Array.isArray(payload?.labels) ? payload.labels : [];
@@ -1069,18 +1125,13 @@ export const runPersistentPrintChunk = async (
       ? (payload.calibrationProfile as Record<string, unknown>)
       : null;
 
-  await send(ws, session, selectedPrinterId, {
-    type: "chunk_ack",
-    chunkId,
-    printJobId,
-  });
-
   for (const label of labels) {
     const printItemId = String(label?.printItemId || "").trim();
     const code = String(label?.code || "").trim();
     const scanUrl = String(label?.scanUrl || "").trim();
     const payloadContent = typeof label?.payloadContent === "string" ? label.payloadContent : "";
     const payloadHash = String(label?.payloadHash || "").trim();
+    const attemptId = String(label?.attemptId || "").trim();
     if (!printItemId || !code || !scanUrl || !payloadContent || !payloadHash) {
       throw Object.assign(new Error("Persistent chunk label is missing required approved print fields."), {
         errorCode: "chunk_label_payload_missing",
@@ -1098,6 +1149,9 @@ export const runPersistentPrintChunk = async (
       payloadContent,
     });
     validateConnectorZplAttempt(payloadContent, label.payloadType, printer);
+    if (!attemptId || !session.registrationId) throw Object.assign(new Error("Print chunk lacks a durable dispatch attempt."), {
+      errorCode: "dispatch_evidence_missing",
+    });
     console.info("persistent printer session spool start", {
       sessionId: session.sessionId,
       chunkId,
@@ -1105,12 +1159,18 @@ export const runPersistentPrintChunk = async (
       printItemId,
       payloadDiagnostics,
     });
-    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: selectedPrinterId, payloadHash })) {
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId: selectedPrinterId, payloadHash, attemptId })) {
       throw Object.assign(new Error("Previously reserved dispatch requires reconciliation; automatic spool was refused."), {
         errorCode: "dispatch_reconciliation_required",
       });
     }
+    let intentCommitted = false;
     try {
+      await evidence({ action: "dispatch_intent", printerId: selectedPrinterId,
+        registrationId: session.registrationId, printJobId, printItemId, attemptId,
+        payloadHash, journalState: "ATTEMPT_RESERVED" });
+      intentCommitted = true;
+      await send(ws, session, selectedPrinterId, { type: "chunk_ack", chunkId, printJobId });
       const result = await print({
         printerId: selectedPrinterId,
         printerName,
@@ -1163,6 +1223,13 @@ export const runPersistentPrintChunk = async (
         bytesWritten: result.bytesWritten ?? payloadDiagnostics.payloadByteLength,
       });
     } catch (error: unknown) {
+      if (!intentCommitted) {
+        await evidence({ action: "abort_unsubmitted", printerId: selectedPrinterId,
+          registrationId: session.registrationId, printJobId, printItemId, attemptId,
+          payloadHash, journalState: "ATTEMPT_RESERVED",
+          reason: errorInfo(error).errorCode || "pre_submission_failure" }).catch(() => undefined);
+        throw error;
+      }
       // A print call can throw after submitting bytes. Do not turn an
       // ambiguous physical attempt into a failed/retryable backend item.
       console.error("persistent dispatch requires reconciliation", { chunkId, printJobId, printItemId });
@@ -1189,6 +1256,10 @@ export const runPersistentPrintChunk = async (
     printJobId,
     labels: labels.length,
   });
+  } catch (error) {
+    ws.close();
+    throw error;
+  }
 };
 
 type DirectPrintCycleResult = {
@@ -1273,7 +1344,10 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
 
   const printJobId = String(payload.printJobId || "").trim();
   const printItemId = String(payload.printItemId || "").trim();
+  const attemptId = String(payload.attemptId || "").trim();
+  const registrationId = String(payload.registrationId || "").trim();
   let spoolerAttempted = false;
+  let journalReserved = false;
 
   try {
     if (payload.testJobId) {
@@ -1282,6 +1356,7 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     }
 
     validated = validateClaimedLocalPrintJobForAttempt(payload);
+    if (!attemptId || !registrationId) throw Object.assign(new Error("Backend claim lacks dispatch evidence identity."), { errorCode: "dispatch_evidence_missing" });
     validateConnectorZplAttempt(validated.payloadContent, payload.payloadType, payload.printer);
     const payloadDiagnostics = buildPrintPayloadDiagnostics({
       payloadType: payload.payloadType || null,
@@ -1296,25 +1371,6 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       agentVersion: AGENT_VERSION,
       payloadDiagnostics,
     });
-    await ackLocalJob({
-      printerId,
-      printJobId,
-      printSessionId: validated.printSessionId,
-      printItemId,
-      code: validated.code,
-      payloadHash: validated.payloadHash,
-      printPath: "agent-claimed",
-      labelLanguage: payload.commandLanguage || payload.labelLanguage || "AUTO",
-      jobRef: null,
-      markDispatched: false,
-      bytesWritten: payloadDiagnostics.payloadByteLength,
-    });
-    console.info("local direct-print item acknowledged", {
-      printJobId,
-      printItemId,
-      printerId,
-    });
-
     console.info("local direct-print spooler start", {
       printJobId,
       printItemId,
@@ -1322,10 +1378,14 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       payloadType: payload.payloadType || null,
       payloadDiagnostics,
     });
-    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId, payloadHash: validated.payloadHash })) {
+    if (!await reserveAutomaticDispatch({ printJobId, printItemId, printerId, payloadHash: validated.payloadHash, attemptId })) {
       console.error("automatic dispatch refused: prior attempt requires reconciliation", { printJobId, printItemId });
       return { retryAfterMs: clampRetryAfterMs(claimed?.retryAfterMs), noWork: false };
     }
+    journalReserved = true;
+    await recordDispatchEvidence({ action: "dispatch_intent", printerId, registrationId,
+      printJobId, printItemId, attemptId, payloadHash: validated.payloadHash,
+      journalState: "ATTEMPT_RESERVED" });
     spoolerAttempted = true;
     const result = await printLabel({
       printerId,
@@ -1371,6 +1431,8 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     await ackLocalJob({
       printerId,
       printJobId,
+      registrationId,
+      attemptId,
       printSessionId: validated.printSessionId,
       printItemId,
       code: validated.code,
@@ -1388,6 +1450,8 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
       await ackLocalJob({
         printerId,
         printJobId,
+        registrationId,
+        attemptId,
         printSessionId: validated.printSessionId,
         printItemId,
         code: validated.code,
@@ -1410,6 +1474,8 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     await confirmLocalJob({
       printerId,
       printJobId,
+      registrationId,
+      attemptId,
       printItemId,
       payloadHash: validated.payloadHash,
       printPath: result.printPath,
@@ -1434,13 +1500,21 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
     }
   } catch (error: unknown) {
     let failureReported = false;
-    const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted);
+    const shouldReportFailure = shouldReportLocalPrintFailureToBackend(error, spoolerAttempted, attemptId);
+    if (attemptId && registrationId && !spoolerAttempted && errorInfo(error).errorCode !== "dispatch_reconciliation_required") {
+      await recordDispatchEvidence({ action: "abort_unsubmitted", printerId, registrationId,
+        printJobId, printItemId, attemptId, payloadHash: validated?.payloadHash || String(payload.payloadHash || ""),
+        journalState: journalReserved ? "ATTEMPT_RESERVED" : "NOT_RESERVED",
+        reason: errorInfo(error).errorCode || "connector_pre_submission_failure" }).catch(() => undefined);
+    }
     if (printJobId && printItemId && shouldReportFailure) {
       await failLocalJob({
         printerId,
         printJobId,
         printItemId,
-        reason: errorInfo(error).message || "Local direct-print pipeline failed.",
+        reason: (errorInfo(error).message || "Local direct-print pipeline failed.").slice(0, 500),
+        ...(attemptId ? { registrationId, attemptId,
+          payloadHash: validated?.payloadHash || String(payload.payloadHash || "") } : {}),
       })
         .then(() => {
           failureReported = true;
@@ -1621,6 +1695,7 @@ const startPersistentPrintSessionWorker = () => {
             selectedPrinterId: selection.selectedPrinterId,
             selectedPrinterName: selection.selectedPrinterName,
               printerHealth: {
+                dispatchEvidenceVersion: 1,
                 deviceName: os.hostname(),
                 agentVersion: AGENT_VERSION,
                 buildVersion: AGENT_BUILD_VERSION,
@@ -1708,7 +1783,7 @@ const startPersistentPrintSessionWorker = () => {
               });
               return;
             }
-            if (!session || processing) return;
+            if (!session || processing || ws.readyState !== WebSocket.OPEN) return;
             if (payload?.type === "test_label") {
               processing = true;
               try {

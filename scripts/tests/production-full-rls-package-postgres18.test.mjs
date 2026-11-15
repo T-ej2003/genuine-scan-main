@@ -354,11 +354,17 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.equal(securityRebaselineCanonical.protectedMainSha, sourceSha);
       assert.equal(securityRebaselineCanonical.candidateSourceSha, context.candidateSourceSha);
       assert.equal(securityRebaselineCanonical.appOnlyRequirementsSha256, requirements.requirementsSha256);
-      const restorationPackage = buildProductionPrintingRestorationPackage({ sourceSha, requirements,
+      const restorationInputs = { sourceSha, requirements,
         securityInventory: securityRebaselineCanonical, repositoryRoot: root,
         databaseIdentity: { DBInstanceIdentifier: "mscqr-production-rls-green-phase2",
           DbiResourceId: "db-3C27FYJOJ2IY27X7QGQG5YB4IM", EngineVersion: "18.4",
-          DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } });
+          DBInstanceStatus: "available", Endpoint: { Port: 5432, Address: "disposable.rds.amazonaws.com" } } };
+      const historicalPrintingScope = JSON.parse(fs.readFileSync(path.join(root,
+        "scripts/aws/production-printing-restoration-scope.json"), "utf8"));
+      // The frozen PR #839/#840 package must reject later printing SQL; current C02 is certified below.
+      if (["routines", "policies"].every(collection =>
+        canonicalSha256(requirements.objects[collection]) === historicalPrintingScope.successorCatalogue[collection])) {
+      const restorationPackage = buildProductionPrintingRestorationPackage(restorationInputs);
       assert.equal(restorationPackage.mutations.length, 12);
       assert.ok(Buffer.byteLength(restorationPackage.mutations[0].sql) > 30000);
       const transport = pkg => {
@@ -427,6 +433,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(await administratorClient.$transaction(tx => restorationRuntime.executeProductionPrintingRestorationTransaction({
         tx, package: restorationPackage,
       }), { maxWait: 10000, timeout: 180000 }), { status: "ALREADY_CONVERGED", writeCount: 0 });
+      } else {
+        assert.throws(() => buildProductionPrintingRestorationPackage(restorationInputs),
+          /Unreviewed production predecessor difference/,
+          "frozen historical restoration must reject changed current-source printing SQL");
+      }
       const sevenScope = JSON.parse(fs.readFileSync(path.join(root, "scripts/aws/production-seven-routine-scope.json"), "utf8"));
       const sevenInputs = { sourceSha, requirements, securityInventory: securityRebaselineCanonical, repositoryRoot: root,
         databaseIdentity: { DBInstanceIdentifier: sevenScope.databaseInstance, DbiResourceId: sevenScope.databaseResourceId,

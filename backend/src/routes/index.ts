@@ -195,6 +195,7 @@ import {
   confirmLocalAgentPrintJob,
   ackLocalAgentPrintJob,
   failLocalAgentPrintJob,
+  recordLocalAgentDispatchEvidence,
 } from "../controllers/printerAgentJobController";
 import {
   ackLocalAgentPrinterTestJob,
@@ -1777,6 +1778,8 @@ router.post("/printer-agent/local/claim", printLifecycleRouteLimiter, claimLocal
 router.post("/printer-agent/local/ack", printLifecycleRouteLimiter, ackLocalAgentPrintJob);
 router.post("/printer-agent/local/confirm", printLifecycleRouteLimiter, confirmLocalAgentPrintJob);
 router.post("/printer-agent/local/fail", printLifecycleRouteLimiter, failLocalAgentPrintJob);
+router.post("/printer-agent/local/dispatch-intent", printLifecycleRouteLimiter, recordLocalAgentDispatchEvidence);
+router.post("/printer-agent/local/abort-unsubmitted", printLifecycleRouteLimiter, recordLocalAgentDispatchEvidence);
 router.post("/printer-agent/local/test/ack", printLifecycleRouteLimiter, ackLocalAgentPrinterTestJob);
 router.post("/printer-agent/local/test/confirm", printLifecycleRouteLimiter, confirmLocalAgentPrinterTestJob);
 router.post("/printer-agent/local/test/fail", printLifecycleRouteLimiter, failLocalAgentPrinterTestJob);

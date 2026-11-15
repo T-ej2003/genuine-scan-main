@@ -4,7 +4,8 @@ import os from "os";
 import path from "path";
 
 export const dispatchJournalRoot = () => process.env.PRINT_AGENT_DISPATCH_JOURNAL_DIR || path.join(os.homedir(), ".mscqr", "dispatch-journal");
-export const dispatchReservationKey = (job: string, item: string) => createHash('sha256').update(JSON.stringify(['v2',job,item])).digest('hex');
+export const dispatchReservationKey = (job: string, item: string, attemptId?: string) =>
+  createHash('sha256').update(JSON.stringify(attemptId ? ['v3',job,item,attemptId] : ['v2',job,item])).digest('hex');
 export const legacyDispatchKey = (item: string) => createHash('sha256').update(item).digest('hex');
 export const dispatchReconciliationError = () => Object.assign(new Error('Prior dispatch evidence requires reconciliation; automatic replay refused.'),{errorCode:'dispatch_reconciliation_required'});
 const fileErrorCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
@@ -19,9 +20,13 @@ const syncDirectory = async (directory: string) => {
 // allowing that explicit reissue; a redelivery of the same job stays blocked.
 // Older item-only markers are ambiguous and always fail closed. They are never
 // deleted or inferred to authorize a replacement from mutable file contents.
-export const priorDispatchExists = async (input: {printJobId:string;printItemId:string}) => {
+export const priorDispatchExists = async (input: {printJobId:string;printItemId:string;attemptId?:string}) => {
   try {await fs.lstat(path.join(dispatchJournalRoot(),`${dispatchReservationKey(input.printJobId,input.printItemId)}.json`));return true;}
   catch(error:unknown){if(fileErrorCode(error)!=='ENOENT')throw dispatchReconciliationError();}
+  if (input.attemptId) {
+    try {await fs.lstat(path.join(dispatchJournalRoot(),`${dispatchReservationKey(input.printJobId,input.printItemId,input.attemptId)}.json`));return true;}
+    catch(error:unknown){if(fileErrorCode(error)!=='ENOENT')throw dispatchReconciliationError();}
+  }
   try {
     await fs.lstat(path.join(dispatchJournalRoot(),`${legacyDispatchKey(input.printItemId)}.json`));
     return true;
@@ -32,7 +37,7 @@ export const priorDispatchExists = async (input: {printJobId:string;printItemId:
 // the process dies before it can establish whether the printer received bytes.
 // Reissue must use a newly governed job, not delete this evidence.
 export const reserveAutomaticDispatch = async (input: {
-  printJobId: string; printItemId: string; printerId: string; payloadHash: string;
+  printJobId: string; printItemId: string; printerId: string; payloadHash: string; attemptId?: string;
 }): Promise<boolean> => {
   if (!input.printJobId || !input.printItemId || !input.printerId || !input.payloadHash) {
     throw new Error("Automatic dispatch identity is incomplete.");
@@ -54,7 +59,7 @@ export const reserveAutomaticDispatch = async (input: {
     }
   }
   if(await priorDispatchExists(input))return false;
-  const key = dispatchReservationKey(input.printJobId,input.printItemId);
+  const key = dispatchReservationKey(input.printJobId,input.printItemId,input.attemptId);
   let handle;
   try {
     // POSIX synchronizes the new file and its parent directory below. Node 24
@@ -70,7 +75,7 @@ export const reserveAutomaticDispatch = async (input: {
   }
   const durabilityErrors: unknown[] = [];
   try {
-    await handle.writeFile(JSON.stringify({ ...input, journalVersion:2, state: "ATTEMPT_RESERVED", reservedAt: new Date().toISOString() }));
+    await handle.writeFile(JSON.stringify({ ...input, journalVersion:input.attemptId ? 3 : 2, state: "ATTEMPT_RESERVED", reservedAt: new Date().toISOString() }));
     await handle.sync();
     if (process.platform !== 'win32') await syncDirectory(root);
   } catch (error) {

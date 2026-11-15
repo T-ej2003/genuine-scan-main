@@ -102,6 +102,8 @@ test(`connector continuation preserves authenticated selector ${selectedPrinterI
   // Match session_ready handling: retain the connector's original selection.
   const connectorSession = { sessionId: session.id, registrationId: session.registrationId, messageSeq: 0 };
   const chunk = await boundary.buildNextPrintChunkForSession(session);
+  assert.equal(await boundary.buildNextPrintChunkForSession(session), null,
+    "A heartbeat must not claim another label while the connector is still processing one");
   assert.equal(chunk.printer.dpi, 300, "Persistent chunk must carry the registered DPI to the connector");
   assert.deepEqual(chunk.printer.languages, ["ZSIM"], "Persistent chunk must carry the registered language");
   const sign = (type, selector = selectedPrinterId, context = connectorSession) => buildSignedSessionMessage({
@@ -148,6 +150,8 @@ test(`connector continuation preserves authenticated selector ${selectedPrinterI
   });
   for (const type of ["chunk_ack", "label_confirmed", "chunk_confirmed"]) {
     await boundary.handleTrustedSessionProgressMessage(session, await sign(type));
+    if (type === "chunk_ack") assert.equal(await boundary.buildNextPrintChunkForSession(session), null,
+      "An acceptance ACK must not cause a second claim before terminal confirmation");
   }
   assert.deepEqual(operations, ["CLAIM", "ACK", "CONFIRM"]);
   await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
@@ -175,6 +179,16 @@ test("tampered and expired hello messages fail closed", async () => {
   await assert.rejects(boundary.openTrustedPrinterAgentSession(hello({ issuedAt: "2000-01-01T00:00:00.000Z" })), {
     errorCode: "agent_timestamp_expired",
   });
+});
+
+test("dispatch evidence capability is signed in the connector hello", async () => {
+  const wire = await buildSignedSessionMessage({ type: "hello", selectedPrinterId: "native-printer",
+    printerHealth: { capabilities: { supportsPersistentPrintSession: true }, dispatchEvidenceVersion: 1 } });
+  const session = await boundary.openTrustedPrinterAgentSession(wire);
+  assert.equal(session.dispatchEvidenceVersion, 1);
+  await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+  wire.printerHealth.dispatchEvidenceVersion = 0;
+  await assert.rejects(boundary.openTrustedPrinterAgentSession(wire), { errorCode: "bad_session_signature" });
 });
 
 test("a replacement session invalidates the old socket even when it remains in memory", async () => {

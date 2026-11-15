@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44'
+    AND source_contract_sha256='05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10106,8 +10106,9 @@ SET search_path=pg_catalog,public
 AS $fn$
 DECLARE registration record; printer_row record; job_row record; session_row record; item_row record;
   now_at timestamp without time zone:=transaction_timestamp(); remaining integer; audit_actor text;
+  evidence_claim boolean; claim_attempt_id text;
 BEGIN
-  IF p_operation NOT IN ('CLAIM','ACK','CONFIRM','FAIL')
+  IF p_operation NOT IN ('CLAIM','ACK','CONFIRM','FAIL','INTENT','ABORT')
      OR p_request_id !~* '^[0-9a-f-]{36}$' OR p_registration_id !~* '^[0-9a-f-]{36}$'
      OR (p_operation<>'CLAIM' AND p_job_id !~* '^[0-9a-f-]{36}$')
      OR (p_item_id IS NOT NULL AND p_item_id !~* '^[0-9a-f-]{36}$')
@@ -10178,6 +10179,11 @@ BEGIN
       AND pa.metadata->>'source'='PERSISTENT_SESSION' AND NOT (pa.metadata ? 'operation')
     ORDER BY pa."createdAt" DESC,pa.id DESC LIMIT 1
   ),false) THEN RAISE EXCEPTION 'PRINTER_ATTESTATION_STALE' USING ERRCODE='42501'; END IF;
+  evidence_claim:=p_operation='CLAIM' AND p_details->>'dispatchEvidenceVersion'='1';
+  IF evidence_claim AND p_details ? 'sessionId' AND NOT EXISTS (
+    SELECT 1 FROM public."PrinterAgentSession" s WHERE s.id=p_details->>'sessionId'
+      AND s."registrationId"=p_registration_id AND s.metadata->>'dispatchEvidenceVersion'='1'
+  ) THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
   IF p_operation='CLAIM' THEN
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
     IF NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||printer_row.id,0))
@@ -10225,12 +10231,18 @@ BEGIN
      ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('available',false); END IF;
     PERFORM set_config('app.printing_item_id',item_row.id,true);
+    claim_attempt_id:=CASE WHEN evidence_claim THEN gen_random_uuid()::text ELSE NULL END;
     UPDATE public."PrintItem" SET state='ISSUED',"pipelineState"='SENT_TO_PRINTER',
-      "issuedAt"=now_at,"dispatchedAt"=now_at,"issueSequence"=session_row."issuedItems"+1,
+      "issuedAt"=now_at,"dispatchedAt"=CASE WHEN evidence_claim THEN NULL ELSE now_at END,
+      "dispatchMetadata"=CASE WHEN evidence_claim THEN jsonb_build_object(
+        'dispatchEvidenceVersion',1,'attemptId',claim_attempt_id,'registrationId',p_registration_id,
+        'sessionId',p_details->>'sessionId','journalState','NOT_RESERVED',
+        'claimExpiresAt',now_at+interval '2 minutes') ELSE "dispatchMetadata" END,
+      "issueSequence"=coalesce(item_row."issueSequence",session_row."issuedItems"+1),
       "attemptCount"="attemptCount"+1,"updatedAt"=now_at
       WHERE id=item_row.id;
-    item_row."issueSequence":=session_row."issuedItems"+1;
-    UPDATE public."PrintSession" SET status='ACTIVE',"issuedItems"="issuedItems"+1,"updatedAt"=now_at WHERE id=session_row.id;
+    item_row."issueSequence":=coalesce(item_row."issueSequence",session_row."issuedItems"+1);
+    UPDATE public."PrintSession" SET status='ACTIVE',"issuedItems"="issuedItems"+CASE WHEN item_row."issueSequence">session_row."issuedItems" THEN 1 ELSE 0 END,"updatedAt"=now_at WHERE id=session_row.id;
     UPDATE public."PrintJob" SET status='SENT',"pipelineState"='SENT_TO_PRINTER',
       "sentAt"=coalesce("sentAt",now_at),"updatedAt"=now_at WHERE id=job_row.id;
     UPDATE public."Batch" SET "lifecycleState"='PRINT_ACKNOWLEDGED',"updatedAt"=now_at
@@ -10243,6 +10255,7 @@ BEGIN
         'available',true,'printJobId',job_row.id,'printSessionId',session_row.id,
         'printItemId',item_row.id,'qrCodeId',item_row."qrCodeId",'code',item_row.code,
         'issueSequence',item_row."issueSequence",'issuedAt',now_at,
+        'registrationId',p_registration_id,'attemptId',claim_attempt_id,
         'jobNumber',job_row."jobNumber",'manufacturerId',job_row."manufacturerId",
         'reprintOfJobId',job_row."reprintOfJobId",
         'qrCode',jsonb_build_object(
@@ -10272,24 +10285,85 @@ BEGIN
     );
   END IF;
 
-  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state,pi."dispatchedAt",pi."agentAckedAt",pi."dispatchMetadata" INTO STRICT item_row FROM public."PrintItem" pi
    WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
+  IF p_operation IN ('ACK','CONFIRM','FAIL')
+     AND item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+     AND p_details->>'attemptId' IS DISTINCT FROM item_row."dispatchMetadata"->>'attemptId'
+  THEN RAISE EXCEPTION 'CONNECTOR_ATTEMPT_MISMATCH' USING ERRCODE='42501'; END IF;
+  IF p_operation IN ('INTENT','ABORT') THEN
+    IF item_row."dispatchMetadata"->>'dispatchEvidenceVersion'<>'1'
+       OR item_row."dispatchMetadata"->>'attemptId' IS DISTINCT FROM p_details->>'attemptId'
+       OR item_row."dispatchMetadata"->>'registrationId' IS DISTINCT FROM p_registration_id
+       OR p_details->>'dispatchEvidenceVersion' IS DISTINCT FROM '1'
+       OR p_details->>'journalState' IS NULL
+       OR p_details->>'journalState' NOT IN ('NOT_RESERVED','ATTEMPT_RESERVED')
+       OR p_payload_hash !~ '^[a-f0-9]{64}$'
+    THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
+    IF p_operation='INTENT' THEN
+      IF p_details->>'journalState'<>'ATTEMPT_RESERVED' THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
+      -- A lost response is uncertain: never authorize the same physical attempt twice.
+      IF job_row.status NOT IN ('PENDING','SENT') OR session_row.status<>'ACTIVE'
+         OR item_row.state<>'ISSUED' OR item_row."dispatchedAt" IS NOT NULL OR item_row."agentAckedAt" IS NOT NULL
+         OR now_at>(item_row."dispatchMetadata"->>'claimExpiresAt')::timestamp
+      THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_EXPIRED' USING ERRCODE='42501'; END IF;
+      UPDATE public."PrintItem" SET "dispatchedAt"=now_at,
+        "dispatchMetadata"="dispatchMetadata" || jsonb_build_object('intentAt',now_at,
+          'journalState','ATTEMPT_RESERVED','payloadHash',p_payload_hash),"updatedAt"=now_at WHERE id=item_row.id;
+    ELSE
+      IF job_row.status NOT IN ('PENDING','SENT') OR session_row.status<>'ACTIVE'
+         OR item_row.state<>'ISSUED'
+         OR item_row."agentAckedAt" IS NOT NULL
+      THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
+      IF item_row."dispatchedAt" IS NULL THEN
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+          "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',p_details->>'attemptId',
+            'journalState',p_details->>'journalState','reason',left(coalesce(p_details->>'reason','connector_aborted'),500)),
+          "updatedAt"=now_at WHERE id=item_row.id;
+        INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+        VALUES(gen_random_uuid()::text,item_row.id,'RESUMED','ISSUED','RESERVED',p_details,audit_actor,now_at);
+      ELSE
+        IF item_row."dispatchMetadata"->>'intentAt' IS NULL OR p_details->>'journalState'<>'ATTEMPT_RESERVED'
+           OR p_payload_hash IS DISTINCT FROM item_row."dispatchMetadata"->>'payloadHash'
+        THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
+        -- A committed intent may precede Windows submission, but abort alone cannot prove that it did.
+        UPDATE public."PrintItem" SET "pipelineState"='NEEDS_OPERATOR_ACTION',
+          "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=item_row.id;
+        UPDATE public."PrintSession" SET status='PAUSED',"failedReason"='physical_outcome_unconfirmed',
+          "updatedAt"=now_at WHERE id=session_row.id;
+        UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
+          "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=job_row.id;
+        INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+        VALUES(gen_random_uuid()::text,item_row.id,'INCIDENT_RAISED','ISSUED','ISSUED',p_details,audit_actor,now_at);
+      END IF;
+    END IF;
+    INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+    VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",
+      'CONNECTOR_'||p_operation,audit_actor,p_details,now_at);
+    RETURN jsonb_build_object('printJobId',job_row.id,'printItemId',item_row.id,
+      'operation',p_operation,'idempotent',false,'authorized',p_operation='INTENT');
+  END IF;
   IF p_operation='ACK' THEN
     IF item_row.state IN ('AGENT_ACKED','PRINT_CONFIRMED','CLOSED') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'acknowledged',true,'idempotent',true);
     END IF;
     IF item_row.state<>'ISSUED' THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    IF item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1' AND item_row."dispatchMetadata"->>'intentAt' IS NULL
+    THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_INTENT_REQUIRED' USING ERRCODE='42501'; END IF;
     UPDATE public."PrintItem" SET state='AGENT_ACKED',"pipelineState"='PRINTER_ACKNOWLEDGED',
       "agentAckedAt"=now_at,"confirmationDeadlineAt"=now_at+interval '10 minutes',
       "deviceJobRef"=nullif(p_device_job_ref,''),
-      "dispatchMetadata"=p_details,"updatedAt"=now_at WHERE id=item_row.id;
+      "dispatchMetadata"=coalesce("dispatchMetadata",'{}'::jsonb)||p_details,"updatedAt"=now_at WHERE id=item_row.id;
   ELSIF p_operation='CONFIRM' THEN
     IF session_row.status='COMPLETED' AND item_row.state NOT IN ('PRINT_CONFIRMED','CLOSED')
     THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
     IF item_row.state IN ('PRINT_CONFIRMED','CLOSED') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'confirmed',true,'idempotent',true);
     END IF;
-    IF item_row.state<>'AGENT_ACKED' THEN RAISE EXCEPTION 'PRINT_ACK_REQUIRED'; END IF;
+    IF item_row.state<>'AGENT_ACKED' AND NOT (
+      item_row.state='FROZEN' AND item_row."agentAckedAt" IS NOT NULL
+      AND item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+    ) THEN RAISE EXCEPTION 'PRINT_ACK_REQUIRED'; END IF;
     UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details,
       "deviceJobRef"=coalesce(nullif(p_device_job_ref,''),"deviceJobRef"),"failureReason"=NULL,"updatedAt"=now_at
@@ -10326,11 +10400,15 @@ BEGIN
       UPDATE public."PrintJob" SET "pipelineState"='STOPPED',"updatedAt"=now_at WHERE id=job_row.id;
     END IF;
   ELSE
+    IF p_operation='FAIL' AND item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+       AND (item_row."dispatchMetadata"->>'intentAt' IS NULL
+         OR p_payload_hash IS DISTINCT FROM item_row."dispatchMetadata"->>'payloadHash')
+    THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
     IF item_row.state IN ('FAILED','FROZEN') THEN
       RETURN jsonb_build_object('printItemId',item_row.id,'failed',true,'idempotent',true);
     END IF;
     IF item_row.state NOT IN ('ISSUED','AGENT_ACKED') THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
-    IF p_details->>'outcomeIndeterminate'='true' THEN
+    IF p_details->>'outcomeIndeterminate'='true' OR item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1' THEN
       UPDATE public."PrintItem" SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
         "failureReason"='physical_outcome_unconfirmed',"updatedAt"=now_at WHERE id=item_row.id;
       UPDATE public."PrintSession" SET status=CASE WHEN session_row.status='STOPPED' THEN 'STOPPED'::public."PrintSessionStatus" ELSE 'PAUSED'::public."PrintSessionStatus" END,
@@ -10363,9 +10441,9 @@ BEGIN
   END IF;
   INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
   VALUES(gen_random_uuid()::text,item_row.id,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'INCIDENT_RAISED' ELSE 'FAILED' END END::public."PrintItemEventType",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' OR item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1' THEN 'INCIDENT_RAISED' ELSE 'FAILED' END END::public."PrintItemEventType",
     item_row.state,
-    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' THEN 'FROZEN' ELSE 'FAILED' END END::public."PrintItemState",
+    CASE p_operation WHEN 'ACK' THEN 'AGENT_ACKED' WHEN 'CONFIRM' THEN 'PRINT_CONFIRMED' ELSE CASE WHEN p_details->>'outcomeIndeterminate'='true' OR item_row."dispatchMetadata"->>'dispatchEvidenceVersion'='1' THEN 'FROZEN' ELSE 'FAILED' END END::public."PrintItemState",
     p_details,audit_actor,now_at);
   INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
   VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",
@@ -10576,6 +10654,7 @@ BEGIN
       jsonb_build_object('manufacturerId',registration."userId",'orgId',registration."orgId",
         'licenseeId',registration."licenseeId",'printerId',printer_row.id,
         'connectorVersion',left(p_payload->>'connectorVersion',80),
+        'dispatchEvidenceVersion',CASE WHEN p_payload->>'dispatchEvidenceVersion'='1' THEN 1 ELSE 0 END,
         'helloNonce',p_payload->>'helloNonce'),now_at,now_at);
     RETURN jsonb_build_object('sessionId',p_session_id,'state','CONNECTED','lastMessageSeq',0);
   END IF;
@@ -11379,21 +11458,62 @@ CREATE OR REPLACE FUNCTION app_rls.printing_worker_reconcile(
 ) RETURNS integer
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE affected integer:=0; now_at timestamp without time zone:=transaction_timestamp();
-  job_row record; session_row record; item_row record; job_expired boolean;
+  job_row record; session_row record; item_row record; job_expired boolean; job_uncertain boolean;
 BEGIN
-  IF session_user<>'mscqr_rls_cert_worker' OR p_operation NOT IN ('EXPIRE_CONFIRMATIONS','RECONCILE_BATCHES')
+  IF session_user<>'mscqr_rls_cert_worker' OR p_operation NOT IN ('EXPIRE_CONFIRMATIONS','RECONCILE_BATCHES','RECOVER_UNSUBMITTED')
      OR p_request_id !~* '^[0-9a-f-]{36}$' OR p_limit NOT BETWEEN 1 AND 1000
   THEN RAISE EXCEPTION 'PRINTING_WORKER_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.printing_operation','printing-worker-'||lower(p_operation),true),
           set_config('app.printing_request_id',p_request_id,true);
-  IF p_operation='EXPIRE_CONFIRMATIONS' THEN
+  IF p_operation='RECOVER_UNSUBMITTED' THEN
+    FOR job_row IN SELECT DISTINCT j.id,j."printerId" FROM public."PrintJob" j
+      JOIN public."PrintSession" ps ON ps."printJobId"=j.id
+      JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
+      WHERE j."printMode"='LOCAL_AGENT' AND j.status IN ('PENDING','SENT')
+        AND pi.state='ISSUED' AND pi."dispatchedAt" IS NULL AND pi."agentAckedAt" IS NULL
+        AND pi."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+        AND (pi."dispatchMetadata"->>'claimExpiresAt')::timestamp<now_at
+      ORDER BY j.id LIMIT p_limit
+    LOOP
+      IF job_row."printerId" IS NOT NULL AND NOT pg_try_advisory_xact_lock(hashtextextended('printing_printer_'||job_row."printerId",0))
+      THEN CONTINUE; END IF;
+      PERFORM set_config('app.printing_job_id',job_row.id,true);
+      PERFORM 1 FROM public."PrintJob" j WHERE j.id=job_row.id AND j.status IN ('PENDING','SENT') FOR UPDATE SKIP LOCKED;
+      IF NOT FOUND THEN CONTINUE; END IF;
+      FOR item_row IN SELECT pi.id,pi."qrCodeId",pi."dispatchMetadata",pi."printSessionId" FROM public."PrintItem" pi
+        JOIN public."PrintSession" ps ON ps.id=pi."printSessionId"
+        WHERE ps."printJobId"=job_row.id AND pi.state='ISSUED' AND pi."dispatchedAt" IS NULL
+          AND pi."agentAckedAt" IS NULL AND pi."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+          AND (pi."dispatchMetadata"->>'claimExpiresAt')::timestamp<now_at
+        ORDER BY pi.id FOR UPDATE OF pi SKIP LOCKED LIMIT (p_limit-affected)
+      LOOP
+        PERFORM set_config('app.printing_item_id',item_row.id,true);
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
+          "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',item_row."dispatchMetadata"->>'attemptId',
+            'journalState','UNKNOWN','recoveredAt',now_at),"updatedAt"=now_at WHERE id=item_row.id;
+        INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+        VALUES(gen_random_uuid()::text,item_row.id,'RESUMED','ISSUED','RESERVED',
+          jsonb_build_object('attemptId',item_row."dispatchMetadata"->>'attemptId','reason','no_backend_dispatch_intent'),
+          (SELECT j."manufacturerId" FROM public."PrintJob" j WHERE j.id=job_row.id),now_at);
+        INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+        SELECT gen_random_uuid()::text,j."batchId",j.id,item_row."qrCodeId",'WORKER_RECOVER_UNSUBMITTED',
+          j."manufacturerId",jsonb_build_object('attemptId',item_row."dispatchMetadata"->>'attemptId'),now_at
+        FROM public."PrintJob" j WHERE j.id=job_row.id;
+        affected:=affected+1;
+      END LOOP;
+      EXIT WHEN affected>=p_limit;
+    END LOOP;
+  ELSIF p_operation='EXPIRE_CONFIRMATIONS' THEN
     -- Keep the acknowledged item confirmable; timeout alone cannot prove physical failure.
-    FOR job_row IN SELECT j.id,j."printerId" FROM public."PrintJob" j
+    FOR job_row IN SELECT j.id,j."printerId",j."batchId",j."manufacturerId" FROM public."PrintJob" j
       WHERE j.status IN ('PENDING','SENT','PAUSED') AND EXISTS (
         SELECT 1 FROM public."PrintSession" ps JOIN public."PrintItem" pi ON pi."printSessionId"=ps.id
-        WHERE ps."printJobId"=j.id AND pi.state='AGENT_ACKED'
-          AND (pi."confirmationDeadlineAt"<now_at OR
-            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
+        WHERE ps."printJobId"=j.id AND (
+          (pi.state='AGENT_ACKED' AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes')))
+          OR (pi.state='ISSUED' AND pi."dispatchedAt" IS NOT NULL AND pi."agentAckedAt" IS NULL
+            AND pi."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+            AND (pi."dispatchMetadata"->>'claimExpiresAt')::timestamp<now_at))
           AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
       ) ORDER BY j.id LIMIT p_limit
     LOOP
@@ -11402,28 +11522,45 @@ BEGIN
       PERFORM 1 FROM public."PrintJob" j WHERE j.id=job_row.id AND j."printerId" IS NOT DISTINCT FROM job_row."printerId"
         AND j.status IN ('PENDING','SENT','PAUSED') FOR UPDATE SKIP LOCKED;
       IF NOT FOUND THEN CONTINUE; END IF;
+      PERFORM set_config('app.printing_job_id',job_row.id,true);
       SELECT ps.id INTO STRICT session_row FROM public."PrintSession" ps
         WHERE ps."printJobId"=job_row.id FOR UPDATE;
       job_expired:=false;
-      FOR item_row IN SELECT pi.id FROM public."PrintItem" pi
-        WHERE pi."printSessionId"=session_row.id AND pi.state='AGENT_ACKED'
-          AND (pi."confirmationDeadlineAt"<now_at OR
-            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes'))
+      job_uncertain:=false;
+      FOR item_row IN SELECT pi.id,pi.state,pi."qrCodeId",pi."dispatchMetadata" FROM public."PrintItem" pi
+        WHERE pi."printSessionId"=session_row.id AND (
+          (pi.state='AGENT_ACKED' AND (pi."confirmationDeadlineAt"<now_at OR
+            (pi."confirmationDeadlineAt" IS NULL AND pi."agentAckedAt"<now_at-interval '10 minutes')))
+          OR (pi.state='ISSUED' AND pi."dispatchedAt" IS NOT NULL AND pi."agentAckedAt" IS NULL
+            AND pi."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+            AND (pi."dispatchMetadata"->>'claimExpiresAt')::timestamp<now_at))
           AND pi."pipelineState"<>'NEEDS_OPERATOR_ACTION'
-        ORDER BY coalesce(pi."confirmationDeadlineAt",pi."agentAckedAt"+interval '10 minutes'),pi.id
+        ORDER BY coalesce(pi."confirmationDeadlineAt",pi."agentAckedAt"+interval '10 minutes',
+          (pi."dispatchMetadata"->>'claimExpiresAt')::timestamp),pi.id
         FOR UPDATE SKIP LOCKED LIMIT (p_limit-affected)
       LOOP
         UPDATE public."PrintItem" SET "pipelineState"='NEEDS_OPERATOR_ACTION',
-          "failureReason"='confirmation_deadline_expired',"updatedAt"=now_at
+          "failureReason"=CASE WHEN item_row.state='ISSUED' THEN 'physical_outcome_unconfirmed'
+            ELSE 'confirmation_deadline_expired' END,"updatedAt"=now_at
           WHERE id=item_row.id;
+        IF item_row.state='ISSUED' THEN
+          job_uncertain:=true;
+          INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+          VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",
+            'WORKER_DISPATCH_OUTCOME_UNCERTAIN',job_row."manufacturerId",
+            jsonb_build_object('attemptId',item_row."dispatchMetadata"->>'attemptId'),now_at);
+        END IF;
         affected:=affected+1;
         job_expired:=true;
       END LOOP;
       IF job_expired THEN
-        UPDATE public."PrintSession" SET status='PAUSED',"failedReason"=coalesce("failedReason",'confirmation_deadline_expired'),
+        UPDATE public."PrintSession" SET status='PAUSED',"failedReason"=coalesce("failedReason",
+            CASE WHEN job_uncertain THEN 'physical_outcome_unconfirmed' ELSE 'confirmation_deadline_expired' END),
           "updatedAt"=now_at WHERE id=session_row.id;
         UPDATE public."PrintJob" SET status='PAUSED',"pipelineState"='NEEDS_OPERATOR_ACTION',
-          "failureReason"=coalesce("failureReason",'confirmation_deadline_expired'),"updatedAt"=now_at WHERE id=job_row.id;
+          "failureReason"=coalesce("failureReason",
+            CASE WHEN job_uncertain THEN 'physical_outcome_unconfirmed' ELSE 'confirmation_deadline_expired' END),
+          "updatedAt"=now_at WHERE id=job_row.id;
       END IF;
       EXIT WHEN affected>=p_limit;
     END LOOP;

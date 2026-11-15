@@ -43,7 +43,7 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
   const bytes = Buffer.from(canonicalJson(pkg));
   assert.ok(bytes.length < (combinedRequirements ? 192 : 64) * 1024);
   const encoded = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
-  assert.ok(encoded.length <= 32768, "C02 task payload exceeds the reviewed bounded transport");
+  assert.ok(encoded.length <= (combinedRequirements ? 36 * 1024 : 32768), "C02 task payload exceeds the reviewed bounded transport");
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn: PRINTING_ROUTINE_DELTA.executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform,
     volumes: [{ name: "executor-tmp" }], containerDefinitions: [{ name: containerName,

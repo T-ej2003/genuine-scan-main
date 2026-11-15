@@ -18,7 +18,7 @@ const logLocalAgentTrust = (event: string, payload: Record<string, unknown>) => 
 
 export const verifyLocalAgentRequest = async (
   parsed: LocalAgentRequestPayload,
-  action: "claim" | "ack" | "confirm" | "fail",
+  action: "claim" | "ack" | "confirm" | "fail" | "dispatch_intent" | "abort_unsubmitted",
   identifiers?: { printJobId?: string | null; printItemId?: string | null },
   options: { skipReadiness?: boolean } = {}
 ) => {
@@ -80,6 +80,12 @@ export const verifyLocalAgentRequest = async (
     printItemId: identifiers?.printItemId || null,
     nonce: parsed.nonce,
     issuedAt: parsed.issuedAt,
+    dispatchEvidenceVersion: "dispatchEvidenceVersion" in parsed ? parsed.dispatchEvidenceVersion : null,
+    registrationId: "registrationId" in parsed ? parsed.registrationId : null,
+    attemptId: "attemptId" in parsed ? parsed.attemptId : null,
+    journalState: "journalState" in parsed ? parsed.journalState : null,
+    payloadHash: "payloadHash" in parsed ? parsed.payloadHash : null,
+    reason: "reason" in parsed ? parsed.reason : null,
   });
 
   const signatureValid = verifyPrinterAgentPayloadSignature({

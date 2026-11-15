@@ -43,7 +43,7 @@ export const buildPrinterAgentHeartbeatPayload = (input: {
   ].join("|");
 
 export const buildPrinterAgentActionPayload = (input: {
-  action: "claim" | "ack" | "confirm" | "fail";
+  action: "claim" | "ack" | "confirm" | "fail" | "dispatch_intent" | "abort_unsubmitted";
   agentId: string;
   deviceFingerprint: string;
   printerId: string;
@@ -51,7 +51,18 @@ export const buildPrinterAgentActionPayload = (input: {
   issuedAt: string;
   printJobId?: string | null;
   printItemId?: string | null;
-}) =>
+  dispatchEvidenceVersion?: number | null;
+  registrationId?: string | null;
+  attemptId?: string | null;
+  journalState?: string | null;
+  payloadHash?: string | null;
+  reason?: string | null;
+}) => input.dispatchEvidenceVersion === 1 ? JSON.stringify([
+    "v2", input.action, input.agentId, input.deviceFingerprint, input.printerId,
+    input.printJobId || "", input.printItemId || "", "dispatch-evidence-v1",
+    input.registrationId || "", input.attemptId || "", input.journalState || "",
+    input.payloadHash || "", input.reason || "", input.nonce, input.issuedAt,
+  ]) :
   [
     "v1",
     input.action,
@@ -92,6 +103,7 @@ export const buildPrinterAgentSessionPayload = (input: {
   nonce: string;
   issuedAt: string;
   printerHealth?: Record<string, unknown> | null;
+  dispatchEvidenceVersion?: number | null;
 }) =>
   [
     "v1",
@@ -114,6 +126,7 @@ export const buildPrinterAgentSessionPayload = (input: {
       input.printerHealth.selectedPrinterId, input.printerHealth.observedAt,
       input.printerHealth.discovered, input.printerHealth.queueAvailable, input.printerHealth.online,
     ])] : []),
+    ...(input.dispatchEvidenceVersion === 1 ? ["dispatch-evidence-v1"] : []),
   ].join("|");
 
 export const signPrinterAgentPayload = (privateKeyPem: string, payload: string) => {
