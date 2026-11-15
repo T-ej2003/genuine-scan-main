@@ -181,7 +181,7 @@ test("second closure authentication rejects reservation substitution and preserv
   const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerSignerSuccessorClosureMetadata(altered, bindings, reservation, etag, body));
 });
 
-async function staleFixture() {
+async function staleFixture(publisherVersion = "15") {
   const f = fixture(); await f.state.execute(); f.state.writes = [];
   const candidate = packageEvidence("e".repeat(40), "reviewed-v16-package"), transitionId = "55555555-5555-4555-8555-555555555555";
   f.state.nextPackage = candidate;
@@ -194,7 +194,7 @@ async function staleFixture() {
   const operatorProof = { ...f.operatorProof, sourceSha: candidate.manifest.sourceSha, transitionId, authorizationSha256: digest(authorization),
     purpose: "BROKER_STALE_SIGNER_SUCCESSOR", principal: `arn:aws:sts::${identityBootstrap.account}:assumed-role/mscqr-production-release-deployer/component-${transitionId}` };
   f.policies.set("mscqr-production-signer-policy-installer", { ...staleSignerPublisherPolicy,
-    Statement: [{ ...staleSignerPublisherPolicy.Statement[0], Resource: `${componentBrokerArn}:15` }] });
+    Statement: [{ ...staleSignerPublisherPolicy.Statement[0], Resource: `${componentBrokerArn}:${publisherVersion}` }] });
   f.state.objects.set(`${identityBootstrap.prefix}signer-policy-transition.json`, { state: "REVOKED", authorization: {
     sourceSha: "864b0f349e7f33b6274a44017ea33b625c8c6e0e", transitionId: "c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad", operation: "REVOKE" },
     steadyVersionId: "v24", temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null,
@@ -217,6 +217,13 @@ test("stale signer successor publishes 16-18 and moves only the exact publisher 
   const writes = f.state.writes.length;
   await assert.rejects(run());
   assert.equal(f.state.writes.length, writes);
+});
+
+test("stale signer successor accepts an exact pre-applied v18 publisher without repeating its IAM write", async () => {
+  const { f, run } = await staleFixture("18");
+  assert.equal((await run()).brokerStaleSignerSuccessor.state, "BROKER_STALE_SIGNER_SUCCESSOR_CLOSED");
+  assert.equal(digest(f.policies.get("mscqr-production-signer-policy-installer")), digest(staleSignerPublisherPolicy));
+  assert.equal(f.state.writes.filter(value => value === "PutRolePolicy").length, 5);
 });
 
 test("stale signer successor rejects wrong ledger, publisher drift, stale proof and extra versions before mutation", async () => {
