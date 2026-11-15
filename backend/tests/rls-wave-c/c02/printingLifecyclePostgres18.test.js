@@ -1662,6 +1662,55 @@ async function main() {
     '${requestId()}','CONFIRM','${expiredJobId}','${expiredItemId}','${ids.printer}','${hash("late-confirm-retry")}',
     'spool-expired','{"physical":true}'::jsonb
   )`).idempotent, true);
+
+  const retiredJobId = '197d65b3-cbea-4ff4-8a2f-258e4dcf5493', retiredSessionId = randomUUID();
+  const retiredQrId = randomUUID(), retiredItemId = '15ed142e-0e30-4270-8bd0-3bcc304875f0';
+  const boundaryHash = 'd506fb1403ea5a1367e6d76eb1a580530cadaadb12e565ae5b55e1e06c93c421';
+  const retireReason = `sha256:${boundaryHash} Owner authorized irreversible QR retirement after device boundary`;
+  psql(admin, `
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+      VALUES('${retiredJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PAUSED','LOCAL_AGENT','NEEDS_OPERATOR_ACTION',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+      VALUES('${retiredQrId}','retired-unknown-code','${ids.licenseeA}','${ids.raceBatch}','${retiredJobId}','ACTIVATED',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+      VALUES('${retiredSessionId}','${retiredJobId}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','PAUSED',1,1,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","issuedAt","dispatchedAt","agentAckedAt","updatedAt")
+      VALUES('${retiredItemId}','${retiredSessionId}','${retiredQrId}','retired-unknown-code','AGENT_ACKED','NEEDS_OPERATOR_ACTION',now(),now(),now(),now());
+  `);
+  const retire = (capability, reason = retireReason) => `SELECT app_rls.printing_control_job(
+    '${capability}','printing-job-control','${requestId()}','${retiredJobId}','RETIRE_UNCERTAIN','${reason}')`;
+  denied(app, retire(caps.outsider), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}',
+    '${retiredJobId}','RETIRE_UNCERTAIN',NULL)`, /PRINTING_INVALID_INPUT/);
+  denied(app, retire(caps.maker, 'No device boundary evidence'), /PRINTING_INVALID_INPUT/);
+  denied(app, retire(caps.maker, `sha256:${hash('unverified boundary')} Different boundary record`), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `UPDATE public."QRCode" SET status='BLOCKED' WHERE id='${retiredQrId}'`, /permission denied/);
+  denied(app, `BEGIN; ${retire(caps.maker)}; SELECT 1/0; COMMIT`, /division by zero/);
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retiredQrId}'`), 'ACTIVATED');
+  const retireRace = await Promise.all([psqlAsync(app, retire(caps.maker)), psqlAsync(app, retire(caps.maker))]);
+  assert(retireRace.every(result => result.status === 0), retireRace.map(result => result.output).join('\n'));
+  assert.deepEqual(retireRace.map(result => JSON.parse(result.output).idempotent).sort(), [false, true]);
+  assert.equal(json(app, retire(caps.maker)).idempotent, true);
+  denied(app, retire(caps.maker, `sha256:${hash('different evidence')} Different boundary record`), /PRINTING_BOUNDARY_DENIED/);
+  assert.equal(psql(admin, `SELECT status||':'||("blockedAt" IS NOT NULL) FROM public."QRCode" WHERE id='${retiredQrId}'`), 'BLOCKED:true');
+  assert.equal(psql(admin, `SELECT state||':'||"pipelineState" FROM public."PrintItem" WHERE id='${retiredItemId}'`), 'CANCELLED:STOPPED');
+  assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${retiredJobId}'`), 'STOPPED:STOPPED');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "printJobId"='${retiredJobId}' AND "eventType"='QR_RETIRED_UNCERTAIN'`), '1');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."AuditLog" WHERE "entityId"='${retiredJobId}' AND action='PRINT_JOB_RETIRE_UNCERTAIN'`), '1');
+  const retiredClaim = json(app, `BEGIN; SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','retired_claim_${requestId()}',now()::timestamp,
+    '${requestId()}','CLAIM','${retiredJobId}',NULL,'${ids.printer}','${hash('retired-claim')}',NULL,'{}'::jsonb); ROLLBACK`);
+  assert.notEqual(retiredClaim.printItemId, retiredItemId, 'retired item must not be claimed again');
+  denied(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','retired_ack_${requestId()}',now()::timestamp,
+    '${requestId()}','ACK','${retiredJobId}','${retiredItemId}','${ids.printer}','${hash('retired-ack')}',
+    'unknown-spool','{}'::jsonb)`, /PRINT_ACK_REQUIRED|INVALID_STATE_TRANSITION/);
+  denied(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','retired_late_${requestId()}',now()::timestamp,
+    '${requestId()}','CONFIRM','${retiredJobId}','${retiredItemId}','${ids.printer}','${hash('retired-late')}',
+    'unknown-spool','{"physical":true}'::jsonb)`, /PRINT_ACK_REQUIRED|INVALID_STATE_TRANSITION/);
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${retiredQrId}'`), 'BLOCKED');
+
   const originalRaceLifecycle = psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${ids.raceBatch}'`);
   psql(admin, `UPDATE public."Batch" SET "lifecycleState"='PRINT_CONFIRMED' WHERE id='${ids.raceBatch}'`);
   assert.equal(json(app, `BEGIN; SELECT app_rls.printing_reissue_request(

@@ -14,16 +14,26 @@ test("B03 excludes only exact separately governed C02 printing grants", () => {
   const previous = new Set(normalize(execFileSync("git", ["show", "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec:scripts/rls/sql/generated/21-runtime-grants.sql"], { encoding: "utf8" })).split(/\r?\n/));
   const changed = normalize(fs.readFileSync("scripts/rls/sql/generated/21-runtime-grants.sql", "utf8"))
     .split(/\r?\n/).filter((line) => line.startsWith("GRANT ") && !previous.has(line));
-  assert.equal(changed.length, 10);
+  assert.equal(changed.length, 12);
+  const qrGrants = changed.filter(line => line.includes('ON TABLE public."QRCode"'));
+  assert.deepEqual(qrGrants.map(line => /^GRANT (SELECT|UPDATE)/.exec(line)?.[1]), ["SELECT", "UPDATE"]);
+  assert(qrGrants.every(line => line.endsWith('TO "mscqr_prd_rls_phase2_auth_owner";')));
+  assert.match(qrGrants[0], /"customerVerifiableAt"/);
+  assert.match(qrGrants[1], /"blockedAt"/);
+  assert.match([...previous].filter(line => line.startsWith('GRANT SELECT') && line.includes('ON TABLE public."QRCode"')).join('\n'), /"customerVerifiableAt"/);
+  assert.doesNotMatch([...previous].filter(line => line.startsWith('GRANT UPDATE') && line.includes('ON TABLE public."QRCode"')).join('\n'), /"blockedAt"/);
+  assert.match(fs.readFileSync('scripts/rls/sql/generated/30-policies.sql', 'utf8'), /ALTER TABLE public\."QRCode" FORCE ROW LEVEL SECURITY;/);
   const b03 = selectB03GrantDelta(changed);
   assert.equal(b03.length, 5);
-  assert.ok(b03.every((line) => !/public\."(?:PrinterAgentSession|PrintItemEvent|PrintJobChunk)"/.test(line)));
+  assert.ok(b03.every((line) => !/public\."(?:PrinterAgentSession|PrintItemEvent|PrintJobChunk|QRCode)"/.test(line)));
   const escalation = 'GRANT DELETE ON TABLE public."PrinterAgentSession" TO "mscqr_prd_rls_phase2_auth_owner";';
   assert.ok(selectB03GrantDelta([...changed, escalation]).includes(escalation));
   const eventEscalation = 'GRANT DELETE ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";';
   assert.ok(selectB03GrantDelta([...changed, eventEscalation]).includes(eventEscalation));
   const widenedRead = 'GRANT SELECT ("printItemId", "details") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";';
   assert.ok(selectB03GrantDelta([...changed, widenedRead]).includes(widenedRead));
+  const widenedQrUpdate = 'GRANT UPDATE ("status", "blockedAt", "code") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";';
+  assert.ok(selectB03GrantDelta([...changed, widenedQrUpdate]).includes(widenedQrUpdate));
 });
 const hash = (bytes) => crypto.createHash("sha256").update(bytes).digest("hex");
 const empty = () => ({ routines: [], tables: [], policies: [], schemas: [], roles: [] });

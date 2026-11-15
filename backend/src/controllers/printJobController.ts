@@ -15,6 +15,7 @@ export {
   printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
+  retireUncertainManufacturerPrintJob,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
   resumeManufacturerPrintJob,

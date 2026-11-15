@@ -4,7 +4,7 @@ import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
 import { catalogueAfterPrinting, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
 import { B03_DELTA_OBJECTS, classifyB03Catalogue } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
-import { buildC02SessionTask } from "../aws/apply-production-c02-session-prerequisite.mjs";
+import { authenticateC02SessionResult, buildC02SessionTask } from "../aws/apply-production-c02-session-prerequisite.mjs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
@@ -27,7 +27,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 17);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 20);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -63,10 +63,10 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 6); assert.equal(pkg.policySql.length, 10);
-  assert.deepEqual(pkg.evidenceGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['PrintItemEvent', 'PrintJobChunk']);
+  assert.equal(pkg.definitions.length, 7); assert.equal(pkg.policySql.length, 13);
+  assert.deepEqual(pkg.evidenceGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['QRCode', 'QRCode', 'PrintItemEvent', 'PrintJobChunk']);
   const broadened = { ...pkg, evidenceGrants: [...pkg.evidenceGrants] };
-  broadened.evidenceGrants[0] = broadened.evidenceGrants[0].replace('SELECT ("printItemId")', 'SELECT ("printItemId", "details")');
+  broadened.evidenceGrants[2] = broadened.evidenceGrants[2].replace('SELECT ("printItemId")', 'SELECT ("printItemId", "details")');
   const { packageSha256: _ignored, ...body } = broadened;
   assert.throws(() => runtime.validatePackage({ ...body, packageSha256: canonicalSha256(body) }));
   assert.throws(() => runtime.validatePackage({ ...pkg, sourceSha: oldSha }));
@@ -74,6 +74,11 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.ok(Buffer.byteLength(task.serialized) < 60 * 1024);
   assert.equal(task.definition.taskRoleArn, undefined);
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
+  const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
+    packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
+    status: "APPLIED", writeCount: 40 };
+  assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 40);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);

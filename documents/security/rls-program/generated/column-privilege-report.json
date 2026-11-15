@@ -8044,7 +8044,8 @@
         "tokenHash",
         "printedAt",
         "scannedAt",
-        "scanCount"
+        "scanCount",
+        "customerVerifiableAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
@@ -8082,6 +8083,7 @@
         "printedAt",
         "printedByUserId",
         "customerVerifiableAt",
+        "blockedAt",
         "updatedAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",

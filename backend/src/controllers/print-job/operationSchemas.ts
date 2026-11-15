@@ -4,6 +4,10 @@ export const printOperationReasonSchema = z.object({
   reason: z.string().trim().min(8, "A clear reason is required.").max(500),
 }).strict();
 
+export const retireUncertainPrintJobSchema = printOperationReasonSchema.extend({
+  evidenceSha256: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+
 export const createReissueRequestSchema = z.object({
   reason: z.string().trim().min(8, "A clear reason is required.").max(500),
   quantity: z.number().int().positive().max(200000).optional(),

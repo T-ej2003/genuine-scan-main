@@ -1950,11 +1950,11 @@ CREATE OR REPLACE FUNCTION app_rls.printing_control_job(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $fn$
-DECLARE actor record; job_row record; session_row record; now_at timestamp without time zone:=transaction_timestamp();
+DECLARE actor record; job_row record; session_row record; item_row record; qr_row record; now_at timestamp without time zone:=transaction_timestamp();
   printer_id text;
   target_job_status public."PrintJobStatus"; target_pipeline public."PrintPipelineState"; target_session public."PrintSessionStatus";
 BEGIN
-  IF p_purpose<>'printing-job-control' OR p_operation NOT IN ('PAUSE','RESUME','STOP','ABANDON')
+  IF p_purpose<>'printing-job-control' OR p_operation NOT IN ('PAUSE','RESUME','STOP','ABANDON','RETIRE_UNCERTAIN')
      OR p_job_id !~* '^[0-9a-f-]{36}$' OR length(coalesce(p_reason,''))>500
   THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
   SELECT * INTO STRICT actor FROM app_rls.printing_bind_actor(
@@ -1980,6 +1980,55 @@ BEGIN
     FROM public."PrintSession" ps WHERE ps."printJobId"=p_job_id FOR UPDATE;
   PERFORM set_config('app.printing_job_id',p_job_id,true),
           set_config('app.printing_session_row_id',session_row.id,true);
+
+  IF p_operation='RETIRE_UNCERTAIN' THEN
+    IF p_reason IS NULL OR p_reason !~ '^sha256:[a-f0-9]{64} .{8,}$' THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
+    IF p_job_id<>'197d65b3-cbea-4ff4-8a2f-258e4dcf5493'
+       OR substring(p_reason from 8 for 64)<>'d506fb1403ea5a1367e6d76eb1a580530cadaadb12e565ae5b55e1e06c93c421'
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    IF (SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"=session_row.id)<>1
+    THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    SELECT pi.id,pi."qrCodeId",pi.state,pi."issuedAt",pi."dispatchedAt",pi."agentAckedAt",pi."printConfirmedAt",pi."confirmationEvidence"
+      INTO STRICT item_row FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id FOR UPDATE;
+    IF item_row.id<>'15ed142e-0e30-4270-8bd0-3bcc304875f0'
+    THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
+    SELECT q.id,q.status,q."printJobId",q."printedAt",q."customerVerifiableAt"
+      INTO STRICT qr_row FROM public."QRCode" q WHERE q.id=item_row."qrCodeId" FOR UPDATE;
+    IF job_row.status='STOPPED' AND session_row.status='STOPPED'
+       AND item_row.state='CANCELLED' AND qr_row.status='BLOCKED'
+       AND item_row."printConfirmedAt" IS NULL
+       AND coalesce(item_row."confirmationEvidence",'null'::jsonb) IN ('null'::jsonb,'{}'::jsonb)
+       AND qr_row."printedAt" IS NULL AND qr_row."customerVerifiableAt" IS NULL
+       AND EXISTS (SELECT 1 FROM public."PrintAuditEvent" e WHERE e."printJobId"=p_job_id
+         AND e."qrCodeId"=qr_row.id AND e."eventType"='QR_RETIRED_UNCERTAIN'
+         AND e.metadata->>'evidenceSha256'=substring(p_reason from 8 for 64))
+    THEN RETURN jsonb_build_object('jobId',p_job_id,'status','STOPPED','qrCodeId',qr_row.id,'idempotent',true); END IF;
+    IF job_row.status<>'PAUSED' OR job_row."pipelineState"<>'NEEDS_OPERATOR_ACTION'
+       OR session_row.status<>'PAUSED' OR item_row.state<>'AGENT_ACKED'
+       OR item_row."issuedAt" IS NULL OR item_row."dispatchedAt" IS NULL
+       OR item_row."agentAckedAt" IS NULL OR item_row."printConfirmedAt" IS NOT NULL
+       OR coalesce(item_row."confirmationEvidence",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)
+       OR qr_row."printJobId" IS DISTINCT FROM p_job_id
+       OR qr_row.status NOT IN ('ACTIVATED','BLOCKED') OR qr_row."printedAt" IS NOT NULL
+       OR qr_row."customerVerifiableAt" IS NOT NULL
+    THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
+    UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=coalesce("blockedAt",now_at),"updatedAt"=now_at WHERE id=qr_row.id;
+    UPDATE public."PrintItem" SET state='CANCELLED',"pipelineState"='STOPPED',
+      "failureReason"='historical_physical_outcome_unknown_qr_retired',"updatedAt"=now_at WHERE id=item_row.id;
+    UPDATE public."PrintSession" SET status='STOPPED',"failedReason"='historical_physical_outcome_unknown_qr_retired',
+      "completedAt"=now_at,"updatedAt"=now_at WHERE id=session_row.id;
+    UPDATE public."PrintJob" SET status='STOPPED',"pipelineState"='STOPPED',
+      "failureReason"='historical_physical_outcome_unknown_qr_retired',"completedAt"=now_at,"updatedAt"=now_at WHERE id=p_job_id;
+    INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+    VALUES(gen_random_uuid()::text,job_row."batchId",p_job_id,qr_row.id,'QR_RETIRED_UNCERTAIN',actor."userId",
+      jsonb_build_object('printItemId',item_row.id,'evidenceSha256',substring(p_reason from 8 for 64),
+        'reason',substring(p_reason from 73),'historicalPhysicalOutcome','UNKNOWN','noReplay',true),now_at);
+    PERFORM app_rls.printing_write_audit(actor."userId",actor.role,actor."organizationId",actor."batchLicenseeId",
+      'PRINT_JOB_RETIRE_UNCERTAIN','PrintJob',p_job_id,
+      jsonb_build_object('printItemId',item_row.id,'qrCodeId',qr_row.id,'evidenceSha256',substring(p_reason from 8 for 64),
+        'historicalPhysicalOutcome','UNKNOWN','noReplay',true));
+    RETURN jsonb_build_object('jobId',p_job_id,'status','STOPPED','qrCodeId',qr_row.id,'idempotent',false);
+  END IF;
 
   IF p_operation='PAUSE' THEN
     IF job_row.status NOT IN ('PENDING','SENT') OR session_row.status<>'ACTIVE' THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
