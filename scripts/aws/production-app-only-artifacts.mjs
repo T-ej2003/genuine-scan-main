@@ -140,7 +140,7 @@ export function assertAppOnlyArtifactProvenance({ kind, reference, run, artifact
   assert.equal(String(run.id), String(reference.runId));
   assert.equal(String(run.run_attempt), String(reference.runAttempt));
   assert.equal(run.repository?.full_name, repository); assert.equal(run.head_repository?.full_name, repository);
-  if (["securityRebaselineRequirements", "securityRebaselineCanonical", "securityRebaselinePreparation", "securityRebaselineImagePublication"].includes(kind)) { assert.equal(run.repository.private, true, "Security catalogue artifacts require a private repository"); assert.equal(run.head_repository.private, true, "Security catalogue artifacts require a private source repository"); }
+  if (["securityRebaselineRequirements", "securityRebaselineCanonical", "securityRebaselinePreparation", "securityRebaselineImagePublication"].includes(kind)) assert.equal(run.repository.id, 1145608538, "Security catalogue artifacts require the exact repository identity");
   assert.ok(Number.isSafeInteger(run.repository.id) && run.repository.id > 0);
   assert.equal(run.head_repository.id, run.repository.id);
   assert.equal(run.head_sha, reference.sourceSha); assert.equal(run.head_branch, "main");

@@ -59,8 +59,8 @@ export function assertPreparationWorkflowArtifacts({ run, artifacts, sourceSha, 
   assert.equal(String(run?.id), String(runId)); assert.equal(String(run?.run_attempt), String(runAttempt));
   assert.equal(run?.head_sha, sourceSha); assert.equal(run?.head_branch, "main"); assert.equal(run?.event, "workflow_dispatch");
   assert.equal(run?.path, SECURITY_REBASELINE_SIGNER_WORKFLOW); assert.equal(run?.repository?.full_name, "T-ej2003/genuine-scan-main");
-  assert.equal(run?.repository?.private, true); assert.equal(run?.repository?.id, 1145608538);
-  assert.equal(run?.head_repository?.full_name, "T-ej2003/genuine-scan-main"); assert.equal(run?.head_repository?.private, true);
+  assert.equal(run?.repository?.id, 1145608538);
+  assert.equal(run?.head_repository?.full_name, "T-ej2003/genuine-scan-main");
   assert.equal(run?.head_repository?.id, 1145608538); assert.ok(Array.isArray(artifacts));
   const expected = [
     [requirementsReference, "production-security-rebaseline-requirements"],

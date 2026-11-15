@@ -77,13 +77,16 @@ test("canonical security inventory supports the bounded private 8 MiB contract",
   const canonical = "x".repeat(1048577);
   assert.equal(readAppOnlyArtifactArchive(archive([{ name: "security-rebaseline-canonical.json", value: canonical }]), "securityRebaselineCanonical").length, canonical.length);
 });
-test("canonical security inventory provenance requires private repository access", () => {
+test("canonical security inventory accepts the public repository only with its exact identity", () => {
   const input = fixture(archive([{ name: file }])); input.kind = "securityRebaselineCanonical"; input.reference.fileSha256 = hash(Buffer.from("{}"));
   input.run.path = ".github/workflows/produce-production-app-only-requirements.yml"; input.artifact.name = "production-security-rebaseline-canonical";
-  assert.throws(() => assertAppOnlyArtifactProvenance(input)); input.run.repository.private = true; input.run.head_repository.private = true;
+  input.run.repository.id = input.run.head_repository.id = input.artifact.workflow_run.repository_id = input.artifact.workflow_run.head_repository_id = 1145608538;
+  input.run.repository.private = input.run.head_repository.private = false;
   assert.equal(assertAppOnlyArtifactProvenance(input), true);
+  input.run.repository.id = 9;
+  assert.throws(() => assertAppOnlyArtifactProvenance(input), /exact repository identity/);
 });
-test("preparation artifacts have exact filenames and private source-bound workflow provenance", () => {
+test("preparation artifacts retain exact source-bound workflow provenance in a public repository", () => {
   const cases = [
     ["securityRebaselineRequirements", "production-security-rebaseline-requirements", "app-only-requirements.json"],
     ["securityRebaselineCanonical", "production-security-rebaseline-canonical", "security-rebaseline-canonical.json"],
@@ -95,12 +98,13 @@ test("preparation artifacts have exact filenames and private source-bound workfl
     assert.equal(readAppOnlyArtifactArchive(bytes, kind).toString(), "{}");
     const input = fixture(bytes);
     input.kind = kind; input.run.path = ".github/workflows/prepare-production-security-rebaseline.yml";
-    input.run.repository.private = true; input.run.head_repository.private = true;
+    input.run.repository.id = input.run.head_repository.id = input.artifact.workflow_run.repository_id = input.artifact.workflow_run.head_repository_id = 1145608538;
+    input.run.repository.private = input.run.head_repository.private = false;
     input.artifact.name = name; input.artifact.digest = `sha256:${hash(bytes)}`;
     input.reference.artifactDigest = input.artifact.digest;
     assert.equal(assertAppOnlyArtifactProvenance(input), true, kind);
-    input.run.repository.private = false;
-    assert.throws(() => assertAppOnlyArtifactProvenance(input), `${kind} must remain private`);
+    input.run.head_repository.id = 9;
+    assert.throws(() => assertAppOnlyArtifactProvenance(input), `${kind} must retain the original source repository`);
   }
 });
 test("download authenticates and consumes the same immutable bytes in private storage", () => {
