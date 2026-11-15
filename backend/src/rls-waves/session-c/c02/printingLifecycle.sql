@@ -1982,7 +1982,7 @@ BEGIN
           set_config('app.printing_session_row_id',session_row.id,true);
 
   IF p_operation='RETIRE_UNCERTAIN' THEN
-    IF p_reason !~ '^sha256:[a-f0-9]{64} .{8,}$' THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
+    IF p_reason IS NULL OR p_reason !~ '^sha256:[a-f0-9]{64} .{8,}$' THEN RAISE EXCEPTION 'PRINTING_INVALID_INPUT'; END IF;
     IF p_job_id<>'197d65b3-cbea-4ff4-8a2f-258e4dcf5493'
        OR substring(p_reason from 8 for 64)<>'d506fb1403ea5a1367e6d76eb1a580530cadaadb12e565ae5b55e1e06c93c421'
     THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;

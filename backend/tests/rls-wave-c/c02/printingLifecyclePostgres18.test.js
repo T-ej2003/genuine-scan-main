@@ -1680,6 +1680,8 @@ async function main() {
   const retire = (capability, reason = retireReason) => `SELECT app_rls.printing_control_job(
     '${capability}','printing-job-control','${requestId()}','${retiredJobId}','RETIRE_UNCERTAIN','${reason}')`;
   denied(app, retire(caps.outsider), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, `SELECT app_rls.printing_control_job('${caps.maker}','printing-job-control','${requestId()}',
+    '${retiredJobId}','RETIRE_UNCERTAIN',NULL)`, /PRINTING_INVALID_INPUT/);
   denied(app, retire(caps.maker, 'No device boundary evidence'), /PRINTING_INVALID_INPUT/);
   denied(app, retire(caps.maker, `sha256:${hash('unverified boundary')} Different boundary record`), /PRINTING_BOUNDARY_DENIED/);
   denied(app, `UPDATE public."QRCode" SET status='BLOCKED' WHERE id='${retiredQrId}'`, /permission denied/);
