@@ -23,10 +23,41 @@ const {
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { mergeCalibrationProfile } = require("../dist/local-print-agent/state");
+const { getZplPayloadSafetyIssues } = require("../dist/printing/printPayloadSafety");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
+};
+
+const assertProductionSpoolContract = (zpl, scanUrl) => {
+  const contract = ZPL_300DPI_COMPATIBILITY_CONTRACT;
+  assert(zpl.startsWith("^XA\n") && zpl.endsWith("^XZ") && (zpl.match(/\^XZ/g) || []).length === 1,
+    "RAW spool input must contain one complete ZPL label");
+  assert(zpl.includes(`^PW${contract.labelWidthDots}\n^LL${contract.labelHeightDots}\n^LH0,0\n^CI28\n`),
+    "RAW spool input must use the certified 300dpi label dimensions and origin");
+  assert(["PW", "LL", "LH", "CI"].every((command) => (zpl.match(new RegExp(`\\^${command}`, "g")) || []).length === 1) &&
+    !/\^(?:LS|LT|LR|PO|FW)/.test(zpl), "RAW spool input must not override the certified geometry");
+  const qrFields = [...zpl.matchAll(/\^FO(\d+),(\d+)\^BQN,2,(\d+)\^FDLA,([^\^~]+)\^FS/g)];
+  assert(qrFields.length === 1 && (zpl.match(/\^BQ/g) || []).length === 1 && qrFields[0][4] === scanUrl,
+    "RAW spool input must encode the approved URL in exactly one native QR field");
+  const [, x, y, magnification] = qrFields[0];
+  assert(Number(x) >= contract.qrBox.xMin && Number(x) <= contract.qrBox.xMax &&
+    Number(y) >= contract.qrBox.yMin && Number(y) <= contract.qrBox.yMax &&
+    Number(magnification) >= 2 && Number(magnification) <= 10,
+    "Native QR must fit the certified 300dpi printer profile");
+  const beforeQr = zpl.slice(0, qrFields[0].index);
+  assert(/^\^XA\n\^PW472\n\^LL591\n\^LH0,0\n\^CI28\n\^FO\d+,16\^GFA,[^^~]+\^FS\n\^FO0,82\^FB472,1,0,C,0\^A0N,22,22\^FDAUTHENTICITY CHECK\^FS\n\^FO\d+,112\^GB\d+,2,2,B,0\^FS\n$/.test(beforeQr),
+    "Only the certified wordmark, header, and thin separator may precede the QR");
+  const afterQr = zpl.slice(qrFields[0].index + qrFields[0][0].length);
+  const footer = afterQr.match(/^\n\^FO0,(\d+)\^FB472,1,0,C,0\^A0N,20,20\^FDscan\.mscqr\.com\^FS\n\^FO0,(\d+)\^FB472,1,0,C,0\^A0N,18,18\^FDSerial: [^\^~]+\^FS\n\^XZ$/);
+  assert(footer && Number(footer[1]) >= contract.qrBox.yMax + contract.qrBox.quietZoneDots &&
+    Number(footer[2]) === Number(footer[1]) + 28 && Number(footer[2]) >= contract.serialTextBox.yMin &&
+    Number(footer[2]) + 18 <= contract.serialTextBox.yMax,
+    "Only footer text outside the QR may follow the native QR field");
+  assert(getZplPayloadSafetyIssues({ payloadContent: zpl }).issues.length === 0,
+    "RAW spool input must pass the production ZPL safety contract");
 };
 
 const run = async () => {
@@ -406,16 +437,13 @@ const run = async () => {
     }
   }
 
-  const validZpl = [
-    "^XA",
-    `^PW${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots}`,
-    `^LL${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelHeightDots}`,
-    "^LH0,0",
-    "^CI28",
-    `^FO102,16${buildOfficialMscqrWordmarkGfaCommand()}^FS`,
-    "^FO90,150^BQN,2,5^FDLA,https://mscqr.example.test/scan/c_connector_contract^FS",
-    "^XZ",
-  ].join("\n");
+  const productionPayload = JSON.parse(execFileSync(process.execPath,
+    [path.join(__dirname, "fixtures/productionWindowsZplPayload.js")], { encoding: "utf8" }));
+  const validZpl = productionPayload.payloadContent;
+  assert(productionPayload.payloadType === "ZPL" && isRawWindowsZplPayload({
+    payloadType: productionPayload.payloadType, labelLanguage: productionPayload.commandLanguage,
+    payloadContent: validZpl,
+  }), "AUTO ZPL-capable printer must select RAW ZPL, not bitmap fallback");
   if (process.platform !== "win32") {
     const fakeTools = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-windows-raw-capture-"));
     const capturePath = path.join(fakeTools, "captured.zpl");
@@ -439,18 +467,50 @@ const run = async () => {
         printerLanguages: ["ZPL"],
         printerDpi: 300,
         request: {
-          code: "synthetic-qr",
-          scanUrl: "https://mscqr.example.test/synthetic",
-          payloadType: "ZPL",
+          code: productionPayload.publicVerifyCode,
+          scanUrl: productionPayload.scanUrl,
+          payloadType: productionPayload.payloadType,
           payloadContent: validZpl,
+          payloadHash: productionPayload.payloadHash,
           copies: 1,
           printPath: "auto",
-          labelLanguage: "AUTO",
+          labelLanguage: productionPayload.commandLanguage,
         },
       });
       assert(result.printPath === "windows-raw-zpl", "Production ZPL must select the Windows RAW spooler");
-      assert(fs.readFileSync(capturePath).equals(Buffer.from(validZpl, "utf8")),
+      const approvedBytes = Buffer.from(validZpl, "utf8");
+      const assertApprovedBytes = (bytes) => assert(bytes.equals(approvedBytes),
         "The final spooler input must contain the exact approved ZPL bytes");
+      const capturedBytes = fs.readFileSync(capturePath);
+      assertApprovedBytes(capturedBytes);
+      const capturedZpl = capturedBytes.toString("utf8");
+      assertProductionSpoolContract(capturedZpl, productionPayload.scanUrl);
+      const qrField = capturedZpl.match(/\^FO\d+,\d+\^BQN,2,\d+\^FDLA,[^\^~]+\^FS/)[0];
+      const corruptions = [
+        capturedZpl.replace(qrField, "^FO90,150^GFA,4,4,1,FFFFFFFF^FS"),
+        capturedZpl.replace("^BQN,2,", "^BQN,3,"),
+        capturedZpl.replace("^FDLA,", "^FDXX,"),
+        capturedZpl.replace(productionPayload.scanUrl, "https://mscqr.example.test/wrong"),
+        capturedZpl.slice(0, -3),
+        capturedZpl.replace(`^PW${ZPL_300DPI_COMPATIBILITY_CONTRACT.labelWidthDots}`, "^PW999"),
+        capturedZpl.replace("^LH0,0", "^LH100,100"),
+        capturedZpl.replace("^XZ", "^FO90,150^GB350,350,350,B,0^FS\n^XZ"),
+        capturedZpl.replace(qrField, `^FO90,150^GB300,300,300,B,0^FS\n${qrField}`),
+        capturedZpl.replace("^XZ", "^FO90,150^A0N,200,200^FDOBSCURED^FS\n^XZ"),
+        capturedZpl.replace("^XZ", "^FO90,150^BCN,200,Y,N,N^FDOBSCURED^FS\n^XZ"),
+        capturedZpl.replace("^FO0,82", "^FO0,180"),
+        capturedZpl.replace(qrField, `^FO90,150^FDOBSCURED^FS\n${qrField}`),
+      ];
+      for (const corrupted of corruptions) {
+        let rejected = false;
+        try { assertProductionSpoolContract(corrupted, productionPayload.scanUrl); } catch { rejected = true; }
+        assert(rejected, "Each corrupted production ZPL payload must fail the spool contract");
+      }
+      let corruptedBytesRejected = false;
+      try { assertApprovedBytes(Buffer.from(`${capturedZpl}^XA`, "utf8")); } catch { corruptedBytesRejected = true; }
+      assert(corruptedBytesRejected, "A corrupted RAW spool file must not match the approved payload");
+      assert(!isRawWindowsZplPayload({ payloadType: "JSON", labelLanguage: "AUTO", payloadContent: "{}" }),
+        "A bitmap fallback must not be classified as Windows RAW ZPL");
     } finally {
       Object.defineProperty(process, "platform", originalPlatform);
       process.env.PATH = originalPath;
