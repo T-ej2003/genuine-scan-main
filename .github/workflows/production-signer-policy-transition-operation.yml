@@ -63,6 +63,10 @@ jobs:
               git diff --quiet "$TRANSITION_SOURCE_SHA..$SOURCE_SHA" -- \
                 .github/workflows/production-signer-policy-transition-operation.yml \
                 scripts/aws/production-github-environment-approval.mjs
+            else
+              expected_workflow_sha256=13a8a8596f3fc3db3c16092a2d06a10e5b84d8081d6635c033e6379a98ca25f6
+              test "$(sed '/^              expected_workflow_sha256=/d' .github/workflows/production-signer-policy-transition-operation.yml | sha256sum | cut -d' ' -f1)" = "$expected_workflow_sha256"
+              test "$(sha256sum scripts/aws/production-github-environment-approval.mjs | cut -d' ' -f1)" = 14cef7eae2e6e32f5566279dab848a10175fbefa3c1d93429e40a176cfd2e433
             fi
           fi
       - run: npm ci --ignore-scripts --no-audit --no-fund
