@@ -19,6 +19,8 @@ import { assertBrokerRecoverySuccessorAuthorization } from "./component-broker-r
 import { brokerRecoverySuccessor } from "./component-broker-recovery-successor-contract.mjs";
 import { assertBrokerSignerSuccessorAuthorization } from "./component-broker-signer-successor-authorization.mjs";
 import { brokerSignerSuccessor } from "./component-broker-signer-successor-contract.mjs";
+import { assertStaleSignerSuccessorAuthorization } from "./component-broker-stale-signer-successor-authorization.mjs";
+import { staleSignerSuccessor } from "./component-broker-stale-signer-successor-contract.mjs";
 import { assertPartialActivationRecoveryAuthorization } from "./component-infrastructure-partial-activation-recovery-authorization.mjs";
 import { partialActivationRecovery } from "./component-infrastructure-partial-activation-recovery-contract.mjs";
 
@@ -150,6 +152,11 @@ export function authenticateBrokerSignerSuccessorPublication(input, packageEvide
   return authenticatePublication(input, dependencies, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, packageEvidence);
 }
 
+export function authenticateBrokerStaleSignerSuccessorPublication(input, packageEvidence, dependencies = {}) {
+  assert(packageEvidence, "Clean-source stale-signer successor package required");
+  return authenticatePublication(input, dependencies, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, packageEvidence);
+}
+
 export function authenticateTerraformActivationAuthorization(input, dependencies = {}) {
   assert.deepEqual(Object.keys(input).sort(), ["planSha256", "preparationSha256", "runId", "sourceSha", "transitionId"]);
   const { planSha256, preparationSha256, ...coordinates } = input;
@@ -199,9 +206,9 @@ export function readPartialActivationRecoveryEnvironment(sourceSha, { execute, e
   return { config, branches };
 }
 
-function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage, terraformBinding, recoveryPackage, brokerChangePackage, partialActivationPackage, historicalTerraformPackage, brokerPolicySuccessorPackage, brokerRecoverySuccessorPackage, brokerSignerSuccessorPackage) {
-  const targetEnvironment = brokerSignerSuccessorPackage ? brokerSignerSuccessor.environment : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.environment : brokerPolicySuccessorPackage ? brokerPolicySuccessor.environment : partialActivationPackage ? partialActivationRecovery.environment : brokerChangePackage ? brokerChange.environment : recoveryPackage ? bootstrapRecovery.environment : terraformBinding || historicalTerraformPackage ? "production-component-infrastructure-activation" : bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
-  const targetWorkflow = brokerSignerSuccessorPackage ? brokerSignerSuccessor.workflow : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.workflow : brokerPolicySuccessorPackage ? brokerPolicySuccessor.workflow : partialActivationPackage ? partialActivationRecovery.workflow : brokerChangePackage ? brokerChange.workflow : recoveryPackage ? bootstrapRecovery.workflow : terraformBinding || historicalTerraformPackage ? ".github/workflows/authorize-component-infrastructure-activation.yml" : bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
+function authenticatePublication(input, { execute, env = process.env, now = Date.now }, bootstrapPackage, terraformBinding, recoveryPackage, brokerChangePackage, partialActivationPackage, historicalTerraformPackage, brokerPolicySuccessorPackage, brokerRecoverySuccessorPackage, brokerSignerSuccessorPackage, staleSignerPackage) {
+  const targetEnvironment = staleSignerPackage ? staleSignerSuccessor.environment : brokerSignerSuccessorPackage ? brokerSignerSuccessor.environment : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.environment : brokerPolicySuccessorPackage ? brokerPolicySuccessor.environment : partialActivationPackage ? partialActivationRecovery.environment : brokerChangePackage ? brokerChange.environment : recoveryPackage ? bootstrapRecovery.environment : terraformBinding || historicalTerraformPackage ? "production-component-infrastructure-activation" : bootstrapPackage ? "production-component-installation-identity-bootstrap" : environment;
+  const targetWorkflow = staleSignerPackage ? staleSignerSuccessor.workflow : brokerSignerSuccessorPackage ? brokerSignerSuccessor.workflow : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.workflow : brokerPolicySuccessorPackage ? brokerPolicySuccessor.workflow : partialActivationPackage ? partialActivationRecovery.workflow : brokerChangePackage ? brokerChange.workflow : recoveryPackage ? bootstrapRecovery.workflow : terraformBinding || historicalTerraformPackage ? ".github/workflows/authorize-component-infrastructure-activation.yml" : bootstrapPackage ? bootstrapAuthorizationContract.workflow : workflow;
   assert.deepEqual(Object.keys(input).sort(), ["runId", "sourceSha", "transitionId"]);
   coordinates(input);
   const { runId, sourceSha, transitionId } = input;
@@ -240,7 +247,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
   const artifacts = pages.flatMap(page => page.artifacts);
   assert.equal(artifacts.length, 1);
   const artifact = artifacts[0];
-  assert.equal(artifact.name, brokerSignerSuccessorPackage ? brokerSignerSuccessor.artifact : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.artifact : brokerPolicySuccessorPackage ? brokerPolicySuccessor.artifact : partialActivationPackage ? partialActivationRecovery.artifact : brokerChangePackage ? brokerChange.artifact : recoveryPackage ? bootstrapRecovery.artifact : terraformBinding || historicalTerraformPackage ? "component-infrastructure-authorization" : bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
+  assert.equal(artifact.name, staleSignerPackage ? staleSignerSuccessor.artifact : brokerSignerSuccessorPackage ? brokerSignerSuccessor.artifact : brokerRecoverySuccessorPackage ? brokerRecoverySuccessor.artifact : brokerPolicySuccessorPackage ? brokerPolicySuccessor.artifact : partialActivationPackage ? partialActivationRecovery.artifact : brokerChangePackage ? brokerChange.artifact : recoveryPackage ? bootstrapRecovery.artifact : terraformBinding || historicalTerraformPackage ? "component-infrastructure-authorization" : bootstrapPackage ? bootstrapAuthorizationContract.artifact : "component-installation-authorization-audit");
   assert.equal(artifact.expired, false);
   assert(Number.isSafeInteger(artifact.id) && artifact.id > 0);
   assert(Number.isSafeInteger(artifact.size_in_bytes) && artifact.size_in_bytes > 0 && artifact.size_in_bytes <= 1024 * 1024);
@@ -257,7 +264,7 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     const zip = path.join(directory, "audit.zip");
     fs.writeFileSync(zip, bytes, { mode: 0o600, flag: "wx" });
     const unzip = (...args) => execFileSync("/usr/bin/unzip", args, { env: { PATH: "/usr/bin:/bin", LANG: "C" }, encoding: "utf8", timeout: 10000, maxBuffer: 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
-    const names = brokerSignerSuccessorPackage ? [brokerSignerSuccessor.file] : brokerRecoverySuccessorPackage ? [brokerRecoverySuccessor.file] : brokerPolicySuccessorPackage ? [brokerPolicySuccessor.file] : partialActivationPackage ? [partialActivationRecovery.file] : brokerChangePackage ? [brokerChange.file] : recoveryPackage ? [bootstrapRecovery.file] : terraformBinding || historicalTerraformPackage ? ["authorization.json"] : bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
+    const names = staleSignerPackage ? [staleSignerSuccessor.file] : brokerSignerSuccessorPackage ? [brokerSignerSuccessor.file] : brokerRecoverySuccessorPackage ? [brokerRecoverySuccessor.file] : brokerPolicySuccessorPackage ? [brokerPolicySuccessor.file] : partialActivationPackage ? [partialActivationRecovery.file] : brokerChangePackage ? [brokerChange.file] : recoveryPackage ? [bootstrapRecovery.file] : terraformBinding || historicalTerraformPackage ? ["authorization.json"] : bootstrapPackage ? [bootstrapAuthorizationContract.file] : ["invocation", "request", "result"].map(name => `component-installation-${name}.json`);
     assert.deepEqual(unzip("-Z1", zip).trim().split("\n").sort(), names);
     const listing = unzip("-Z", "-l", zip).split("\n");
     for (const name of names) {
@@ -268,7 +275,8 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     audit = Object.fromEntries(names.map(name => [name, JSON.parse(unzip("-p", zip, name))]));
   } finally { fs.rmSync(directory, { recursive: true }); }
   let authorization;
-  if (brokerSignerSuccessorPackage) authorization = audit[brokerSignerSuccessor.file];
+  if (staleSignerPackage) authorization = audit[staleSignerSuccessor.file];
+  else if (brokerSignerSuccessorPackage) authorization = audit[brokerSignerSuccessor.file];
   else if (brokerRecoverySuccessorPackage) authorization = audit[brokerRecoverySuccessor.file];
   else if (brokerPolicySuccessorPackage) authorization = audit[brokerPolicySuccessor.file];
   else if (partialActivationPackage) authorization = audit[partialActivationRecovery.file];
@@ -281,6 +289,12 @@ function authenticatePublication(input, { execute, env = process.env, now = Date
     assert.deepEqual(Object.keys(request).sort(), ["authorization", "operation"]);
     assert.equal(request.operation, "AUTHORIZE");
     authorization = request.authorization;
+  }
+  if (staleSignerPackage) {
+    const authorizationSha256 = assertStaleSignerSuccessorAuthorization(authorization, staleSignerPackage, null, now());
+    protectedMain(api("branches/main"), sourceSha);
+    const finalRun = api(`actions/runs/${runId}`); verifyRun(finalRun); assert.equal(finalRun.created_at, run.created_at); assert.equal(finalRun.updated_at, run.updated_at);
+    return Object.freeze({ ...authorization, authorizationSha256 });
   }
   if (brokerSignerSuccessorPackage) {
     const authorizationSha256 = assertBrokerSignerSuccessorAuthorization(authorization, brokerSignerSuccessorPackage, authorization.secondClosure, now());

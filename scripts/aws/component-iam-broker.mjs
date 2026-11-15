@@ -4,7 +4,7 @@ import fs from "node:fs";
 import { createBrokerAuthorizationArchive } from "./component-broker-authorization.mjs";
 import { assertBrokerEntryPoint, assertBrokerConfiguration, brokerConfiguration } from "./component-broker-configuration.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "./component-bootstrap-trust-anchor.mjs";
-import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities, inspectBrokerPolicySuccessorIdentities, inspectBrokerRecoverySuccessorIdentities, inspectBrokerSignerSuccessorIdentities } from "./component-installation-identity-contract.mjs";
+import { componentBrokerArn, inspectBootstrapIdentities, inspectBrokerChangeIdentities, inspectBrokerPolicySuccessorIdentities, inspectBrokerRecoverySuccessorIdentities, inspectBrokerSignerSuccessorIdentities, inspectBrokerStaleSignerSuccessorIdentities } from "./component-installation-identity-contract.mjs";
 import { authenticateComponentSession, claimComponentSession } from "./component-session-proof.mjs";
 import { createSignerPolicyBroker } from "./component-signer-policy-transition.mjs";
 
@@ -23,8 +23,8 @@ const account = "368992683803";
 const bucket = "mscqr-production-terraform-state-368992683803-eu-west-2";
 const key = "mscqr/production/component-deployment-state/iam-installation.json";
 
-export async function executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now = Date.now }) {
-  const signer = createSignerPolicyBroker({ iam, s3, currentMain, now });
+export async function executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now = Date.now, allowStaleSupersession = false }) {
+  const signer = createSignerPolicyBroker({ iam, s3, currentMain, now, allowStaleSupersession });
   if (event.operation === "SIGNER_AUTHORIZE") return signer(event);
   const { proof, ...request } = event;
   assert(proof, "Signer broker mutation requires MFA session proof");
@@ -241,6 +241,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
   let firstReservation = null;
   let secondReservation = null;
   let thirdReservation = null;
+  let fourthReservation = null;
   const pendingSigner = ["13", "14", "15"].includes(context.functionVersion) && !Object.hasOwn(bootstrapObject.Metadata || {}, "broker-signer-successor");
   if (Object.hasOwn(bootstrapObject.Metadata || {}, "broker-recovery-successor") || pendingSigner) {
     const historical = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-policy-successor.json" });
@@ -252,10 +253,14 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     const current = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-signer-successor.json" });
     thirdReservation = { value: JSON.parse(await current.Body.transformToString()), etag: current.ETag };
   }
-  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, bootstrapObject.Metadata || {}, firstReservation, secondReservation, thirdReservation, pendingSigner);
+  if (Object.hasOwn(bootstrapObject.Metadata || {}, "broker-stale-signer-successor")) {
+    const current = await s3("GetObject", { Bucket: bucket, Key: "mscqr/production/component-deployment-state/broker-stale-signer-successor.json" });
+    fourthReservation = { value: JSON.parse(await current.Body.transformToString()), etag: current.ETag };
+  }
+  const anchor = assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, bootstrapObject.Metadata || {}, firstReservation, secondReservation, thirdReservation, pendingSigner, fourthReservation);
   assert(!anchor.pendingSignerClosure, "Signer runtime authenticated the pending lineage; operations require completed closure");
   const version = assertBrokerEntryPoint(context, event?.operation, anchor.entryPoints);
-  const identities = await (anchor.signerSuccessor ? inspectBrokerSignerSuccessorIdentities(iam) : anchor.recoverySuccessor ? inspectBrokerRecoverySuccessorIdentities(iam) : anchor.policySuccessor ? inspectBrokerPolicySuccessorIdentities(iam) : anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
+  const identities = await (anchor.staleSignerSuccessor ? inspectBrokerStaleSignerSuccessorIdentities(iam) : anchor.signerSuccessor ? inspectBrokerSignerSuccessorIdentities(iam) : anchor.recoverySuccessor ? inspectBrokerRecoverySuccessorIdentities(iam) : anchor.policySuccessor ? inspectBrokerPolicySuccessorIdentities(iam) : anchor.changed ? inspectBrokerChangeIdentities(iam) : inspectBootstrapIdentities(iam));
   assert(identities.every(({ role, policy }) => role === "EXPECTED" && policy === "EXPECTED"), "Bootstrap execution authority is incomplete");
   const [concurrency, signing, runtime] = await Promise.all([
     lambda("GetFunctionConcurrency", { FunctionName: functionName }),
@@ -278,7 +283,7 @@ export async function executeFixedBroker(event, context, { manifest, iam, s3, la
     assert(missingPolicy, "Unexpected broker resource-based invocation policy");
   }
   if (event?.operation?.startsWith("SIGNER_")) {
-    return executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now });
+    return executeSignerBrokerOperation(event, { iam, s3, currentMain, sts, issuanceEvents, now, allowStaleSupersession: anchor.staleSignerSuccessor && version === anchor.entryPoints.AUTHORIZE });
   }
   const bind = (authorization) => ({ ...manifest, ...authorization.authorization, authorizationSha256: authorization.authorizationSha256,
     authorizedPredecessors: authorization.history.map(({ authorization: prior, authorizationSha256 }) => ({ authorizationSha256,

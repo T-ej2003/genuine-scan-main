@@ -56,12 +56,12 @@ export async function establishComponentRecoveryTerraformSession(binding, depend
 
 export async function establishSignerInstallSession(binding, dependencies = {}) {
   sessionProofBinding({ ...binding, purpose: "SIGNER_INSTALL" });
-  return establish({ ...binding, purpose: "SIGNER_INSTALL" }, dependencies, null, ["13"], ["SIGNER_INSTALL", "SIGNER_ADVANCE", "SIGNER_RECOVERY"]);
+  return establish({ ...binding, purpose: "SIGNER_INSTALL" }, dependencies, null, ["16"], ["SIGNER_INSTALL", "SIGNER_ADVANCE", "SIGNER_RECOVERY"]);
 }
 
 export async function establishSignerRevokeSession(binding, dependencies = {}) {
   sessionProofBinding({ ...binding, purpose: "SIGNER_REVOKE" });
-  return establish({ ...binding, purpose: "SIGNER_REVOKE" }, dependencies, null, ["14"], ["SIGNER_REVOKE"]);
+  return establish({ ...binding, purpose: "SIGNER_REVOKE" }, dependencies, null, ["17"], ["SIGNER_REVOKE"]);
 }
 
 async function establish(binding, { loadUser = loadOperator, sts = stsTransport, mfa = () => promptProductionMfaCode({ prompt: "Component installation operator MFA code: " }), invoke, isolated = executeIsolatedTerraform, state = createTerraformStateBoundary, now = Date.now, sleep = delay } = {}, discovery = null, requiredVersions = null, sessionOperations = null) {

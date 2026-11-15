@@ -33,8 +33,9 @@ const changedEntryPoints = Object.freeze({ INSTALL: "4", CLEANUP: "5", AUTHORIZE
 const successorEntryPoints = Object.freeze({ INSTALL: "7", CLEANUP: "8", AUTHORIZE: "9" });
 const recoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
 const signerSuccessorEntryPoints = Object.freeze({ INSTALL: "13", CLEANUP: "14", AUTHORIZE: "15" });
+const staleSignerSuccessorEntryPoints = Object.freeze({ INSTALL: "16", CLEANUP: "17", AUTHORIZE: "18" });
 const assertEntryPoints = (entryPoints) => {
-  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints, recoverySuccessorEntryPoints, signerSuccessorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
+  assert([bootstrapEntryPoints, changedEntryPoints, successorEntryPoints, recoverySuccessorEntryPoints, signerSuccessorEntryPoints, staleSignerSuccessorEntryPoints].includes(entryPoints), "Identity entry-point override forbidden");
   return entryPoints;
 };
 
@@ -114,7 +115,7 @@ function managedIdentities(entryPoints) {
   // The successor broker still rejects a resource-policy bypass on every
   // retained immutable version, but it has no mutation capability for any of
   // them. Fresh bootstrap keeps the original three-version read surface.
-  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints !== changedEntryPoints ? Object.values(successorEntryPoints) : []), ...([recoverySuccessorEntryPoints, signerSuccessorEntryPoints].includes(entryPoints) ? Object.values(recoverySuccessorEntryPoints) : []), ...(entryPoints === signerSuccessorEntryPoints ? Object.values(signerSuccessorEntryPoints) : [])];
+  const brokerVersions = entryPoints === bootstrapEntryPoints ? Object.values(entryPoints) : [...Object.values(bootstrapEntryPoints), ...Object.values(changedEntryPoints), ...(entryPoints !== changedEntryPoints ? Object.values(successorEntryPoints) : []), ...([recoverySuccessorEntryPoints, signerSuccessorEntryPoints, staleSignerSuccessorEntryPoints].includes(entryPoints) ? Object.values(recoverySuccessorEntryPoints) : []), ...([signerSuccessorEntryPoints, staleSignerSuccessorEntryPoints].includes(entryPoints) ? Object.values(signerSuccessorEntryPoints) : []), ...(entryPoints === staleSignerSuccessorEntryPoints ? Object.values(staleSignerSuccessorEntryPoints) : [])];
   const objects = ["installation-authorization.json", "iam-installation.json", "permission-installation.json", "installation-session.json"].map((name) => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`);
   const brokerPolicy = provisionerTargetPolicy();
   brokerPolicy.Statement.push(
@@ -176,6 +177,21 @@ export function brokerSignerSuccessorManagedIdentities() {
   broker.policySha256 = digest(broker.policy);
   const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
   terraform.policy = terraformExecutorPolicyGeneration("13", true);
+  terraform.policySha256 = digest(terraform.policy);
+  return identities;
+}
+
+export function brokerStaleSignerSuccessorManagedIdentities() {
+  const identities = managedIdentities(staleSignerSuccessorEntryPoints);
+  const broker = identities.find(({ role }) => role === installationIdentity.provisionerRole);
+  const read = broker.policy.Statement.find(({ Action }) => Action === "s3:GetObject");
+  read.Resource.push(...["broker-policy-successor.json", "broker-recovery-successor.json", "broker-signer-successor.json", "broker-stale-signer-successor.json", "signer-policy-transition.json"]
+    .map(name => `arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}${name}`));
+  broker.policy.Statement.find(({ Action }) => Action === "s3:PutObject").Resource.push(`arn:aws:s3:::${identityBootstrap.bucket}/${identityBootstrap.prefix}signer-policy-transition.json`);
+  broker.policy.Statement.push({ Effect: "Allow", Action: ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions", "iam:ListEntitiesForPolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion"], Resource: "arn:aws:iam::368992683803:policy/MSCQRProductionGreenStageARelease", Condition: { ArnEquals: { "lambda:SourceFunctionArn": componentBrokerArn } } });
+  broker.policySha256 = digest(broker.policy);
+  const terraform = identities.find(({ role }) => role === installationIdentity.terraformRole);
+  terraform.policy = terraformExecutorPolicyGeneration("16", true);
   terraform.policySha256 = digest(terraform.policy);
   return identities;
 }
@@ -261,6 +277,11 @@ export async function inspectBrokerRecoverySuccessorIdentities(iam) {
 export async function inspectBrokerSignerSuccessorIdentities(iam) {
   assert.equal(arguments.length, 1, "Identity overrides are forbidden");
   return inspectManagedIdentities(iam, brokerSignerSuccessorManagedIdentities());
+}
+
+export async function inspectBrokerStaleSignerSuccessorIdentities(iam) {
+  assert.equal(arguments.length, 1, "Identity overrides are forbidden");
+  return inspectManagedIdentities(iam, brokerStaleSignerSuccessorManagedIdentities());
 }
 
 // This is the source-owned mutation envelope for the exceptional first bootstrap,

@@ -7,10 +7,10 @@ production estate. It does not bootstrap production.
 The immutable component IAM broker is the only identity that can create or
 delete managed-policy versions for `MSCQRProductionGreenStageARelease`. The
 bootstrap operator, release deployer, and GitHub OIDC signer publisher have no
-direct policy-version mutation permission. The publisher can invoke only
-immutable broker version `15`, which accepts a fixed source-owned authorization
-document. Versions `13` and `14` perform the fixed install and revoke operations
-through MFA-backed component sessions.
+direct policy-version mutation permission. After the stale-signer successor
+closes, the publisher invokes only immutable broker version `18`, which accepts
+a fixed source-owned authorization document. Versions `16` and `17` perform
+the fixed install and revoke operations through MFA-backed component sessions.
 
 The broker binds repository, protected source SHA, account, region, purpose,
 transition ID, exact policy ARN, canonical predecessor and successor documents,
@@ -95,6 +95,35 @@ and closes the third immutable lineage record. It cannot choose the signer
 managed-policy document. Normal signer operations after this convergence are
 non-root and MFA-backed.
 
+### Current stale signer recovery (November 15)
+
+The `13/14/15` convergence above is complete; do not rerun it. The exact
+historical `INSTALLING` transition was aborted through broker v14. Confirm the
+live ledger is `REVOKED` for source `864b0f349e7f33b6274a44017ea33b625c8c6e0e`
+and transition `c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad`, with steady IAM v24,
+no temporary version, and preserved `INSTALLING` history before proceeding.
+
+From the verified protected-main SHA, dispatch
+`.github/workflows/authorize-component-broker-recovery-successor.yml` with
+`successor=stale-signer`, `source_sha` set to that SHA, and a fresh UUID. After
+the protected environment approves and the run succeeds, review the exact
+v16–18 package and IAM delta with the owner. Then, from the same clean source
+and with the documented MFA-backed root session, run:
+
+```sh
+npm run production:component-broker-stale-signer-successor -- execute RUN_ID TRANSITION_ID
+```
+
+The controller checks the closed signer lineage, retired ledger, release
+policy v24, publisher trust and exact v15 or v18 policy before publishing
+versions `16/17/18`. It changes only the named broker invocation policies,
+the signer publisher's sole invoke target to `18`, and its versioned closure
+journal. Confirm all three versions, the v18 publisher policy, the closure,
+and the still-`REVOKED` historical ledger. Do not run the earlier
+`successor=signer` controller or the initial-activation Terraform convergence
+as the publication step for this generation. The signer transition workflow
+invokes v18 only after this closure is verified.
+
 ## Signer transition
 
 Use the full current protected-main SHA, one transition UUID, and private files:
@@ -111,6 +140,10 @@ Authorize installation through the solo-operator protected environment:
 
 Before the first authorization while the signer ledger is absent, run the
 read-only preparation in [the exact-ledger absence repair](MSCQR_PRODUCTION_SIGNER_LEDGER_ABSENCE_READ-v1.md).
+The November 15 stale-signer recovery has an existing `REVOKED` ledger, so its
+fresh INSTALL authorization uses broker v18 and installation uses v16 after
+the closure above; the absence repair does
+not apply to that transition.
 If it reports `EXACT_PREDECESSOR`, complete that fixed, protected bucket-policy
 transition and verify `CONVERGED` before continuing. If it reports
 `EXACT_SUCCESSOR`, continue without another bucket-policy write. The repair
@@ -126,7 +159,7 @@ gh workflow run production-signer-policy-transition.yml \
 Download `production-signer-policy-transition-evidence` as
 `/private/tmp/signer-convergence/broker-state.json`. The workflow only archives
 the canonical broker authorization. The local controller then uses the MFA
-bootstrap operator to invoke broker version `13` and recover exact installation
+bootstrap operator to invoke broker version `16` and recover exact installation
 evidence:
 
 ```sh
@@ -265,13 +298,14 @@ without another `sts:AssumeRole` allow in the user policy; the user has no
 permissions boundary. The normal release-deployer assumption remains separately
 listed in the bootstrap policy. See the [AWS AssumeRole API authorization rules](https://docs.aws.amazon.com/STS/latest/APIReference/API_AssumeRole.html).
 
-The protected workflow publishes `SIGNER_AUTHORIZE` to broker version 15. The
+The protected workflow publishes `SIGNER_AUTHORIZE` to broker version 18. The
 broker persists that authorization in the signer policy transition ledger.
 Before dispatch, the signer successor broker reads the exact policy, recovery,
-and signer successor reservation objects to authenticate its immutable lineage;
-its execution policy grants those three object reads and the signer ledger read.
+signer successor, and stale-signer successor reservation objects to authenticate
+its immutable lineage; its execution policy grants those four object reads and
+the signer ledger read.
 `production-signer-broker-transition-cli.mjs` obtains an MFA-backed bootstrap
-session and asks version 13 or 14 for `SIGNER_PROVE_INSTALL_SESSION` or
+session and asks version 16 or 17 for `SIGNER_PROVE_INSTALL_SESSION` or
 `SIGNER_PROVE_REVOKE_SESSION`. Those read-only operations authenticate against
 the same signer ledger and validate the signer-specific session binding before
 `SIGNER_INSTALL`, `SIGNER_ADVANCE`, `SIGNER_RECOVERY`, or `SIGNER_REVOKE` can run.

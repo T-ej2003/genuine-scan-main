@@ -3,12 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildSignerBrokerRequest } from "../aws/publish-production-signer-policy-transition-authorization.mjs";
 import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, completeInstallingSignerAbort } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import { brokerSignerSuccessorManagedIdentities, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
+import { staleSignerPublisherPolicy } from "../aws/component-broker-stale-signer-successor-contract.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
   assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
@@ -51,7 +51,7 @@ test("normal production identities cannot mutate policy versions and the OIDC ro
   assert.equal(grants(bootstrap, "iam:CreatePolicyVersion", target), false);
   assert.equal(grants(steady, "iam:CreatePolicyVersion", target), false);
   const oidc = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-permissions-policy.json", "utf8"));
-  assert.deepEqual(oidc, { Version: "2012-10-17", Statement: [{ Sid: "PublishExactSignerTransitionAuthorizationToBroker", Effect: "Allow", Action: "lambda:InvokeFunction", Resource: `${componentBrokerArn}:15`, Condition: { StringEquals: { "aws:RequestedRegion": C.region } } }] });
+  assert.deepEqual(oidc, staleSignerPublisherPolicy);
   assert.equal(oidc.Statement.some(({ Action }) => [].concat(Action).includes("iam:CreatePolicyVersion")), false);
 
   const broker = brokerSignerSuccessorManagedIdentities().find(({ role }) => role === "mscqr-production-component-iam-provisioner").policy;
@@ -67,7 +67,8 @@ test("solo-operator workflow archives only a fixed broker authorization request"
   assert.match(caller, /permissions:[\s\S]*?contents: read[\s\S]*?actions: read[\s\S]*?id-token: write/);
   assert.match(operation, /permissions:[\s\S]*?contents: read[\s\S]*?actions: read[\s\S]*?id-token: write/);
   assert.match(operation, /mkdir -p -m 700 "\$approval_dir"[\s\S]*?chmod 700 "\$approval_dir"[\s\S]*?production-github-environment-approval\.mjs/);
-  assert.match(operation, /--function-name arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:15/);
+  assert.match(operation, /--function-name arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:18/);
+  assert.match(operation, /ExecutedVersion, '18'/);
   assert.doesNotMatch(caller + operation, /policy-document|policy-arn|policy-file|admin-profile|create-policy-version/);
   assert.match(operation, /role-to-assume: arn:aws:iam::368992683803:role\/mscqr-production-signer-policy-installer/);
   assert.match(operation, /SIGNER_AUTHORIZE|publish-production-signer-policy-transition-authorization/);
@@ -179,14 +180,10 @@ test("signer environment-approval API permission and private evidence path reach
   const authenticate = steps.find(({ name }) => name === "Authenticate exact protected source and fixed operation");
   assert.match(authenticate.run, /git merge-base --is-ancestor "\$TRANSITION_SOURCE_SHA" "\$SOURCE_SHA"/);
   assert.match(authenticate.run, /git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/);
-  assert.equal((authenticate.run.match(/git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/g) || []).length, 2);
-  assert.match(authenticate.run, /if \[\[ "\$PHASE" != policy-revoke \|\| "\$TRANSITION_SOURCE_SHA" != 864b0f349e7f33b6274a44017ea33b625c8c6e0e \|\| "\$TRANSITION_ID" != c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad \]\]; then/);
-  assert.match(authenticate.run, /scripts\/aws\/component-signer-policy-transition\.mjs[\s\S]*?scripts\/aws\/production-signer-temporary-capability\.mjs\n\s*if \[\[/);
-  assert.match(authenticate.run, /if \[\[[\s\S]*?\.github\/workflows\/production-signer-policy-transition-operation\.yml[\s\S]*?scripts\/aws\/production-github-environment-approval\.mjs/);
-  const workflow = fs.readFileSync(".github/workflows/production-signer-policy-transition-operation.yml", "utf8");
-  const digest = value => createHash("sha256").update(value).digest("hex");
-  assert.equal(digest(workflow.replace(/^              expected_workflow_sha256=.*\n/m, "")), authenticate.run.match(/expected_workflow_sha256=([a-f0-9]{64})/)[1]);
-  assert.equal(digest(fs.readFileSync("scripts/aws/production-github-environment-approval.mjs")), authenticate.run.match(/sha256sum scripts\/aws\/production-github-environment-approval\.mjs[^\n]*= ([a-f0-9]{64})/)[1]);
+  assert.equal((authenticate.run.match(/git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/g) || []).length, 1);
+  assert.match(authenticate.run, /\.github\/workflows\/production-signer-policy-transition-operation\.yml/);
+  assert.match(authenticate.run, /scripts\/aws\/production-github-environment-approval\.mjs/);
+  assert.doesNotMatch(authenticate.run, /c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad/);
   const request = steps.find(({ name }) => name === "Build canonical broker request");
   assert.match(request.run, /--transition-source-sha "\$TRANSITION_SOURCE_SHA"/);
 })

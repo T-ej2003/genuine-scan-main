@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "./component-bootstrap-partial-recovery-contract.mjs";
 import { brokerChangeConfigurationSha256, brokerChangeOperations, brokerChangePredecessor } from "./component-broker-change-contract.mjs";
-import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
+import { brokerChangeEntryPoints, brokerEntryPoints, brokerPolicySuccessorEntryPoints, brokerRecoverySuccessorEntryPoints, brokerSignerSuccessorEntryPoints, brokerStaleSignerSuccessorEntryPoints } from "./component-broker-configuration.mjs";
 import { assertBrokerPolicySuccessorClosureMetadata, brokerPolicySuccessorBindings, brokerPolicySuccessorMetadataKey } from "./component-broker-policy-successor-contract.mjs";
 import { assertBrokerRecoverySuccessorClosureMetadata, assertCompatibleSignerCreation, assertVerifiedRecoveryClosurePredecessor, authenticateFirstSuccessorReservation, authenticateSecondSuccessorReservation, brokerRecoverySuccessor, brokerRecoverySuccessorBindings, compactClosureMetadata } from "./component-broker-recovery-successor-contract.mjs";
 import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings } from "./component-broker-signer-successor-contract.mjs";
+import { assertStaleSignerSuccessorClosure, staleSignerSuccessor, staleSignerSuccessorBindings } from "./component-broker-stale-signer-successor-contract.mjs";
 import { digest } from "./component-iam-installation-contract.mjs";
 import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerPolicySuccessorManagedIdentities, componentBrokerArn } from "./component-installation-identity-contract.mjs";
 import { assertComponentSessionRecord } from "./component-session-proof.mjs";
@@ -26,9 +27,9 @@ function assertHistoricalLineage(bootstrap) {
 }
 
 function assertRecoveredClosure(bootstrap, manifest, packageSha256, metadata = {}) {
-  const expectedKeys = ["authorization", "authorizationSha256", "broker", ...(Object.hasOwn(bootstrap, "brokerChange") ? ["brokerChange"] : []), ...(Object.hasOwn(bootstrap, "brokerRecoverySuccessorClosure") ? ["brokerRecoverySuccessorClosure"] : []), ...(Object.hasOwn(bootstrap, "brokerSignerSuccessorClosure") ? ["brokerSignerSuccessorClosure"] : []), "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
+  const expectedKeys = ["authorization", "authorizationSha256", "broker", ...(Object.hasOwn(bootstrap, "brokerChange") ? ["brokerChange"] : []), ...(Object.hasOwn(bootstrap, "brokerRecoverySuccessorClosure") ? ["brokerRecoverySuccessorClosure"] : []), ...(Object.hasOwn(bootstrap, "brokerSignerSuccessorClosure") ? ["brokerSignerSuccessorClosure"] : []), ...(Object.hasOwn(bootstrap, "brokerStaleSignerSuccessorClosure") ? ["brokerStaleSignerSuccessorClosure"] : []), "closedAt", "identities", "identityReadbackSha256", "identitySetSha256", "manifestSha256", "operatorProof", "owner", "packageSha256", "recovery", "runtimeVersions", "schemaVersion", "sourceSha", "state", "transitionId"];
   assert.deepEqual(Object.keys(bootstrap).sort(), expectedKeys.sort(), "Malformed recovered bootstrap closure");
-  for (const [field, key] of [["brokerRecoverySuccessorClosure", "broker-recovery-successor"], ["brokerSignerSuccessorClosure", "broker-signer-successor"]]) {
+  for (const [field, key] of [["brokerRecoverySuccessorClosure", "broker-recovery-successor"], ["brokerSignerSuccessorClosure", "broker-signer-successor"], ["brokerStaleSignerSuccessorClosure", staleSignerSuccessor.metadataKey]]) {
     if (/^sha256:[a-f0-9]{64}$/.test(metadata[key] || "")) {
       assert(Object.hasOwn(bootstrap, field), `Missing ${field} body`);
       assert.equal(metadata[key], compactClosureMetadata(bootstrap[field]), `Invalid ${field} metadata binding`);
@@ -149,6 +150,29 @@ function assertBrokerSignerSuccessorClosure(bootstrap, manifest, packageSha256, 
     entryPoints: brokerSignerSuccessorEntryPoints, allVersions: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"], runtimeVersions: { ...predecessor.runtimeVersions, ...closure.runtimeVersions }, predecessor };
 }
 
+function assertBrokerStaleSignerSuccessorClosure(bootstrap, manifest, packageSha256, metadata, firstReservation, secondReservation, thirdReservation, fourthReservation) {
+  assert(firstReservation && secondReservation && thirdReservation && fourthReservation, "Immutable stale-signer lineage reservations required");
+  const historical = Object.fromEntries(Object.entries(metadata).filter(([name]) => name !== staleSignerSuccessor.metadataKey));
+  assertHistoricalBrokerChangeClosure(bootstrap, metadata);
+  const firstClosure = JSON.parse(Buffer.from(historical[brokerPolicySuccessorMetadataKey], "base64url").toString("utf8"));
+  const firstBindings = authenticateFirstSuccessorReservation(firstReservation.value, firstClosure, firstReservation.etag);
+  const secondEncoded = historical[brokerRecoverySuccessor.metadataKey];
+  const secondClosure = /^sha256:[a-f0-9]{64}$/.test(secondEncoded || "") ? bootstrap.brokerRecoverySuccessorClosure : JSON.parse(Buffer.from(secondEncoded, "base64url").toString("utf8"));
+  const secondBindings = authenticateSecondSuccessorReservation(secondReservation.value, secondClosure, secondReservation.etag);
+  assert.equal(digest(secondBindings.firstClosure), digest(firstClosure));
+  assert.equal(digest(firstBindings), firstClosure.bindingsSha256);
+  assertBrokerRecoverySuccessorClosureMetadata({ [brokerPolicySuccessorMetadataKey]: historical[brokerPolicySuccessorMetadataKey], [brokerRecoverySuccessor.metadataKey]: secondEncoded }, secondBindings, secondReservation.value, secondReservation.etag, bootstrap);
+  const thirdBindings = thirdReservation.value.bindings;
+  assert.equal(digest(thirdBindings.secondClosure), digest(secondClosure));
+  const thirdClosure = assertBrokerSignerSuccessorClosureMetadata(historical, thirdBindings, thirdReservation.value, thirdReservation.etag, bootstrap);
+  const bindings = staleSignerSuccessorBindings({ manifest, manifestSha256: digest(manifest), packageSha256 }, thirdClosure, thirdReservation.value, thirdReservation.etag, historical, bootstrap);
+  const closure = assertStaleSignerSuccessorClosure(metadata, bindings, fourthReservation.value, fourthReservation.etag, bootstrap);
+  return { sourceSha: manifest.sourceSha, packageSha256, manifestSha256: digest(manifest), recovered: true, changed: true, policySuccessor: true, recoverySuccessor: true, signerSuccessor: true, staleSignerSuccessor: true,
+    entryPoints: brokerStaleSignerSuccessorEntryPoints, allVersions: Array.from({ length: 18 }, (_, i) => String(i + 1)),
+    runtimeVersions: { ...firstClosure.runtimeVersions, ...secondClosure.runtimeVersions, ...thirdClosure.runtimeVersions, ...closure.runtimeVersions },
+    predecessor: { sourceSha: thirdBindings.successor.sourceSha, packageSha256: thirdBindings.successor.packageSha256, manifestSha256: thirdBindings.successor.manifestSha256 } };
+}
+
 // The BROKER_CHANGE controller authenticates this immutable predecessor before
 // it can reserve a successor transition. It deliberately refuses any existing
 // change metadata; resumption is handled by that controller's exact CAS record.
@@ -201,10 +225,14 @@ function assertBrokerChangeClosure(bootstrap, manifest, packageSha256) {
 
 // The original record is immutable incident lineage. A completed recovery adds
 // a second, fully-bound effective lineage; malformed recovery never falls back.
-export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, metadata = {}, firstReservation = null, secondReservation = null, thirdReservation = null, allowPendingSigner = false) {
+export function assertEffectiveBootstrapTrustAnchor(bootstrap, manifest, packageSha256, metadata = {}, firstReservation = null, secondReservation = null, thirdReservation = null, allowPendingSigner = false, fourthReservation = null) {
   assert(bootstrap && typeof bootstrap === "object" && !Array.isArray(bootstrap));
   assert.equal(bootstrap.schemaVersion, 1); assert.equal(bootstrap.state, "BOOTSTRAP_CLOSED", "Trust anchor bootstrap is incomplete");
   sha256(packageSha256);
+  if (Object.hasOwn(metadata, staleSignerSuccessor.metadataKey)) {
+    assert(Object.hasOwn(metadata, brokerSignerSuccessor.metadataKey), "Stale-signer successor lacks signer predecessor");
+    return assertBrokerStaleSignerSuccessorClosure(bootstrap, manifest, packageSha256, metadata, firstReservation, secondReservation, thirdReservation, fourthReservation);
+  }
   if (Object.hasOwn(metadata, brokerSignerSuccessor.metadataKey)) {
     assert(Object.hasOwn(metadata, brokerRecoverySuccessor.metadataKey), "Signer successor lacks recovery predecessor");
     return assertBrokerSignerSuccessorClosure(bootstrap, manifest, packageSha256, metadata, firstReservation, secondReservation, thirdReservation);
