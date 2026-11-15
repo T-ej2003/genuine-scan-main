@@ -179,6 +179,7 @@ import {
   printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
+  retireUncertainManufacturerPrintJob,
   reportDirectPrintFailure,
   resolveDirectPrintToken,
   resumeManufacturerPrintJob,
@@ -1970,6 +1971,18 @@ protectedMutationRouter.post(
   printMutationActorLimiter,
   requireCsrf,
   stopManufacturerPrintJob
+);
+protectedMutationRouter.post(
+  "/manufacturer/print-jobs/:id/retire-uncertain",
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationActorLimiter,
+  requireCsrf,
+  retireUncertainManufacturerPrintJob
 );
 protectedMutationRouter.post(
   "/manufacturer/print-jobs/:id/abandon",

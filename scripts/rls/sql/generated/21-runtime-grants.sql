@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
+    AND source_contract_sha256='fb2c81a3e14c87ad4f8d6003a287609a2c59d04041f6ef5c5d1e79487a8fbfb7'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:fb2c81a3e14c87ad4f8d6003a287609a2c59d04041f6ef5c5d1e79487a8fbfb7'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:fb2c81a3e14c87ad4f8d6003a287609a2c59d04041f6ef5c5d1e79487a8fbfb7')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -250,8 +250,8 @@ GRANT INSERT ("key", "value", "createdAt", "updatedAt") ON TABLE public."SystemC
 GRANT UPDATE ("value", "updatedAt") ON TABLE public."SystemCheckpoint" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "name", "licenseeId", "manufacturerId", "startCode", "lifecycleState", "sampleScanPolicy", "metadata", "totalCodes", "printedAt", "releasedAt", "releasedByUserId", "suspendedAt", "updatedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("lifecycleState", "printedAt", "releasedAt", "releasedByUserId", "updatedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "code", "displayCode", "licenseeId", "batchId", "status", "printJobId", "replayEpoch", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "printedAt", "scannedAt", "scanCount") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("status", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "issuanceMode", "printedAt", "printedByUserId", "customerVerifiableAt", "updatedAt") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "code", "displayCode", "licenseeId", "batchId", "status", "printJobId", "replayEpoch", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "printedAt", "scannedAt", "scanCount", "customerVerifiableAt") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "issuanceMode", "printedAt", "printedByUserId", "customerVerifiableAt", "blockedAt", "updatedAt") ON TABLE public."QRCode" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "jobNumber", "batchId", "manufacturerId", "printerId", "status", "printMode", "pipelineState", "payloadType", "payloadHash", "quantity", "itemCount", "rangeStart", "rangeEnd", "sentAt", "completedAt", "failureReason", "reprintOfJobId", "approvedByUserId", "reprintReason", "printLockTokenHash", "confirmedAt", "createdAt", "updatedAt") ON TABLE public."PrintJob" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "jobNumber", "batchId", "manufacturerId", "printerId", "status", "printMode", "pipelineState", "payloadType", "quantity", "itemCount", "rangeStart", "rangeEnd", "printLockTokenHash", "reprintOfJobId", "approvedByUserId", "reprintReason", "createdAt", "updatedAt") ON TABLE public."PrintJob" TO "mscqr_rls_cert_auth_owner";
 GRANT UPDATE ("status", "pipelineState", "sentAt", "completedAt", "failureReason", "confirmedAt", "updatedAt") ON TABLE public."PrintJob" TO "mscqr_rls_cert_auth_owner";

@@ -451,6 +451,18 @@ describe("dialog recovery states", () => {
           onRefreshHistory={noop}
           recentPrintJobs={[
             {
+              id: "job-retired-unknown",
+              jobNumber: "PJ-RETIRED",
+              status: "STOPPED",
+              pipelineState: "STOPPED",
+              failureReason: "historical_physical_outcome_unknown_qr_retired",
+              printMode: "LOCAL_AGENT",
+              quantity: 1,
+              itemCount: 1,
+              createdAt: "2026-06-18T10:00:00.000Z",
+              session: { status: "STOPPED", confirmedItems: 0, remainingToPrint: 1, recoveryNeeded: true },
+            } as any,
+            {
               id: "job-range",
               jobNumber: "PJ-RANGE",
               status: "CONFIRMED",
@@ -494,6 +506,11 @@ describe("dialog recovery states", () => {
     expect(screen.getByRole("button", { name: /Stopped prints/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Replacement labels/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Pending re-issue requests/i })).toBeInTheDocument();
+    expect(screen.queryByText("Recovery required before next range")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Stopped prints/i }));
+    expect(screen.getByText("QR retired; output unknown")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Request re-issue" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Back to operations/i }));
 
     fireEvent.click(screen.getByRole("button", { name: /Confirmed prints/i }));
     expect(screen.getByText("QR-000065 to QR-000074")).toBeInTheDocument();

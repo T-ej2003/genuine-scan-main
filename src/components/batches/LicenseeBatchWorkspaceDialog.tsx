@@ -159,6 +159,7 @@ const getPrintJobStatusBadgeVariant = (job: PrintJobRow): "default" | "secondary
 };
 
 const getPrintJobStageLabel = (job: PrintJobRow) => {
+  if (isRetiredUncertainJob(job)) return "QR retired; output unknown";
   if (job.pipelineState === "LOCKED" || job.pipelineState === "PRINT_CONFIRMED" || job.status === "CONFIRMED") {
     return "Print confirmed";
   }
@@ -179,6 +180,9 @@ const getPrintRunCounts = (job: PrintJobRow) => {
   return { requested, confirmed, failed, pending, remaining };
 };
 
+const isRetiredUncertainJob = (job: PrintJobRow) =>
+  job.failureReason === "historical_physical_outcome_unknown_qr_retired";
+
 const formatCodeRange = (range?: { startCode?: string | null; endCode?: string | null } | null) => {
   const start = String(range?.startCode || "").trim();
   const end = String(range?.endCode || "").trim();
@@ -187,6 +191,7 @@ const formatCodeRange = (range?: { startCode?: string | null; endCode?: string |
 };
 
 const needsRecovery = (job: PrintJobRow) => {
+  if (isRetiredUncertainJob(job)) return false;
   const counts = getPrintRunCounts(job);
   return Boolean(
     job.session?.recoveryNeeded ||
@@ -283,7 +288,8 @@ const isStoppedPrintRun = (job: PrintJobRow) =>
   job.pipelineState === "FAILED" ||
   job.pipelineState === "NEEDS_OPERATOR_ACTION";
 
-const canRequestReissueForJob = (job: PrintJobRow) => isEligibleForReissue(job) || isStoppedPrintRun(job);
+const canRequestReissueForJob = (job: PrintJobRow) =>
+  !isRetiredUncertainJob(job) && (isEligibleForReissue(job) || isStoppedPrintRun(job));
 
 const workspacePrimaryRange = (workspace: StableBatchOverviewRow) => {
   const allocation = workspace.allocations[0] || null;
@@ -684,7 +690,7 @@ export function LicenseeBatchWorkspaceDialog({
                                           <div>{getRecoveryInstruction(job).secondLine}</div>
                                         </div>
                                       ) : null}
-                                      {job.failureReason ? <div className="text-xs text-destructive">Failure: {job.failureReason}</div> : null}
+                                      {job.failureReason ? <div className="text-xs text-destructive">{isRetiredUncertainJob(job) ? "QR retired; historical physical output unknown." : `Failure: ${job.failureReason}`}</div> : null}
                                     </div>
                                     <div className="flex flex-wrap justify-end gap-2">
                                       <Button size="sm" variant="outline" onClick={() => setSelectedPrintJobDetail(job)}>View details</Button>
@@ -1450,7 +1456,7 @@ export function LicenseeBatchWorkspaceDialog({
                                         </div>
                                       ) : null}
                                       {job.failureReason ? (
-                                        <div className="text-xs text-destructive">Failure: {job.failureReason}</div>
+                                        <div className="text-xs text-destructive">{isRetiredUncertainJob(job) ? "QR retired; historical physical output unknown." : `Failure: ${job.failureReason}`}</div>
                                       ) : null}
                                     </div>
                                     <div className="flex items-center gap-2">

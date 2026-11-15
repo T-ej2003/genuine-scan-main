@@ -175,7 +175,7 @@ export const controlPrintingJob = (input: {
   capability: string;
   requestId: string;
   jobId: string;
-  operation: "PAUSE" | "RESUME" | "STOP" | "ABANDON";
+  operation: "PAUSE" | "RESUME" | "STOP" | "ABANDON" | "RETIRE_UNCERTAIN";
   reason?: string | null;
   client?: SqlClient;
 }) =>

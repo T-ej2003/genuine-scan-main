@@ -3,7 +3,7 @@ const assert = require('node:assert/strict'), crypto = require('node:crypto'), {
 const session = require('./production-c02-session-executor.cjs');
 const { canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue } = require('./production-printing-routine-delta-executor.cjs');
 const hash = x => crypto.createHash('sha256').update(typeof x === 'string' ? x : canonicalJson(x)).digest('hex');
-const names = ['printing_connector_event', 'printing_connector_identity', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job'];
+const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job'];
 function validatePackage(pkg) {
     const { packageSha256, ...body } = pkg;
     assert.equal(packageSha256, hash(body));
@@ -18,8 +18,10 @@ function validatePackage(pkg) {
     for (const definition of pkg.definitions) {
         assert.ok(definition.sql.startsWith(`CREATE OR REPLACE FUNCTION app_rls.${definition.name}(`));
     }
-    assert.equal(pkg.policySql.length, 10);
+    assert.equal(pkg.policySql.length, 13);
     assert.deepEqual(pkg.evidenceGrants, [
+        'GRANT SELECT ("id", "code", "displayCode", "licenseeId", "batchId", "status", "printJobId", "replayEpoch", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "printedAt", "scannedAt", "scanCount", "customerVerifiableAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT UPDATE ("status", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "issuanceMode", "printedAt", "printedByUserId", "customerVerifiableAt", "blockedAt", "updatedAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";'
     ]);
@@ -124,7 +126,7 @@ async function executeC02CombinedTransaction({ tx, pkg, checkpoint = async () =>
     await tx.$executeRawUnsafe('RESET ROLE');
     await checkpoint('before-combined-verification');
     assert.equal(canonicalJson(await digest()), canonicalJson(pkg.successorCatalogue), 'Combined C02 successor mismatch');
-    return { status: 'APPLIED', writeCount: base.writeCount + 19 };
+    return { status: 'APPLIED', writeCount: base.writeCount + 25 };
 }
 async function main() {
     let client;

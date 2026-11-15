@@ -237,8 +237,9 @@ npm run production:apply-c02-session-prerequisite -- --source-sha <current-main>
 
 This explicit combined mode authenticates the complete predecessor catalogue,
 then transactionally applies only the reviewed additive session-column migration,
-the existing C02 session package, six reviewed printing function replacements and
-two printing policy replacements. It preserves table OIDs, data, FORCE RLS and
+the existing C02 session package, seven reviewed printing function replacements,
+the targeted QR column grants, and the reviewed printing policy replacements,
+including the QR update policy. It preserves table OIDs, data, FORCE RLS and
 existing grants; unknown or partially installed catalogues fail closed. Package
 checksums bind both original requirements artifacts and the exact SQL. No IAM,
 Terraform, broker or normal release-role privilege expansion is required.

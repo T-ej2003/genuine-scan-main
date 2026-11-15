@@ -20,7 +20,7 @@ const control = async (params: {
   printJobId: string;
   scope: PrintJobScope;
   boundary: Boundary;
-  operation: "PAUSE" | "RESUME" | "STOP";
+  operation: "PAUSE" | "RESUME" | "STOP" | "RETIRE_UNCERTAIN";
   reason?: string;
 }) => {
   const result = await controlPrintingJob({
@@ -57,3 +57,12 @@ export const stopPrintJob = (params: {
   boundary: Boundary;
   reason: string;
 }) => control({ ...params, operation: "STOP", reason: validatePrintOperationReason(params.reason) });
+
+export const retireUncertainPrintJob = (params: {
+  printJobId: string;
+  scope: PrintJobScope;
+  boundary: Boundary;
+  reason: string;
+  evidenceSha256: string;
+}) => control({ ...params, operation: "RETIRE_UNCERTAIN",
+  reason: `sha256:${params.evidenceSha256} ${validatePrintOperationReason(params.reason).slice(0, 428)}` });

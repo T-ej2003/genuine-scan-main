@@ -32,13 +32,17 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
   const policies = read("scripts/rls/sql/generated/30-policies.sql").split("\n");
   const evidencePolicies = ["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"];
   const evidenceGrants = read("scripts/rls/sql/generated/21-runtime-grants.sql").split("\n")
-    .filter(line => /^GRANT SELECT \(.+\) ON TABLE public\."(?:PrintItemEvent|PrintJobChunk)" TO "(?:mscqr_rls_cert_|mscqr_prd_rls_phase2_)auth_owner";$/.test(line))
+    .filter(line => /^GRANT (?:SELECT|UPDATE) \(.+\) ON TABLE public\."(?:PrintItemEvent|PrintJobChunk|QRCode)" TO "(?:mscqr_rls_cert_|mscqr_prd_rls_phase2_)auth_owner";$/.test(line)
+      && (!line.includes('public."QRCode"') || line.startsWith('GRANT SELECT') && line.includes('"customerVerifiableAt"') && line.includes('"printJobId"')
+        || line.startsWith('GRANT UPDATE') && line.includes('"blockedAt"')))
     .map(line => line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
   assert.deepEqual(evidenceGrants, [
+    'GRANT SELECT ("id", "code", "displayCode", "licenseeId", "batchId", "status", "printJobId", "replayEpoch", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "printedAt", "scannedAt", "scanCount", "customerVerifiableAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
+    'GRANT UPDATE ("status", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "issuanceMode", "printedAt", "printedByUserId", "customerVerifiableAt", "blockedAt", "updatedAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
     'GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
     'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";',
   ]);
-  const policySql = ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update", ...evidencePolicies]
+  const policySql = ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update", ...evidencePolicies, "QRCode.printing_lifecycle_qrcode_update"]
     .flatMap(identity => {
       const [table, name] = identity.split(".");
       const matches = policies.flatMap((sql, i) => sql.startsWith(`CREATE POLICY "${name}" ON public."${table}" `) ? [i] : []);

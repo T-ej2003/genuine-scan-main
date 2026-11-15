@@ -19,6 +19,7 @@ export {
   printApprovedManufacturerPrintReissueRequest,
   rejectManufacturerPrintReissueRequest,
   reissueManufacturerPrintJob,
+  retireUncertainManufacturerPrintJob,
   resumeManufacturerPrintJob,
   stopManufacturerPrintJob,
 } from "./queryHandlers";

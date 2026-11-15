@@ -3,7 +3,7 @@ import { UserRole } from "@prisma/client";
 
 import { AuthRequest } from "../../middleware/auth";
 import { getEffectiveLicenseeId } from "../../middleware/tenantIsolation";
-import { pausePrintJob, resumePrintJob, stopPrintJob } from "../../services/printOperationControlService";
+import { pausePrintJob, resumePrintJob, stopPrintJob, retireUncertainPrintJob } from "../../services/printOperationControlService";
 import { controlPrintingJob, readPrintingProjection } from "../../rls-waves/session-c/c02/printingLifecycleRepository";
 import {
   createScopedPrintReissueRequest,
@@ -22,6 +22,7 @@ import {
   createReissueRequestSchema,
   listReissueRequestsQuerySchema,
   printOperationReasonSchema,
+  retireUncertainPrintJobSchema,
   reissueRequestDecisionSchema,
   reissueRequestIdParamSchema,
 } from "./operationSchemas";
@@ -189,6 +190,32 @@ export const stopManufacturerPrintJob = async (req: AuthRequest, res: Response) 
   } catch (error: any) {
     console.error("stopManufacturerPrintJob error:", error);
     return handleUserSafeError(res, error, "Print run could not be stopped.");
+  }
+};
+
+export const retireUncertainManufacturerPrintJob = async (req: AuthRequest, res: Response) => {
+  try {
+    const user = ensurePrintOperationsUser(req, res);
+    if (!user) return;
+    const params = printJobIdParamSchema.safeParse(req.params || {});
+    const body = retireUncertainPrintJobSchema.safeParse(req.body || {});
+    if (!params.success || !body.success) return res.status(400).json({ success: false, error: "Job ID, reason and boundary evidence SHA-256 are required." });
+    if (params.data.id !== "197d65b3-cbea-4ff4-8a2f-258e4dcf5493" ||
+        body.data.evidenceSha256 !== "d506fb1403ea5a1367e6d76eb1a580530cadaadb12e565ae5b55e1e06c93c421") {
+      return res.status(403).json({ success: false, error: "This retirement is limited to the verified November 10 job and cancellation record." });
+    }
+    const result = await retireUncertainPrintJob({
+      printJobId: params.data.id, scope: printControlScope(req, user), boundary: printBoundary(req),
+      reason: body.data.reason, evidenceSha256: body.data.evidenceSha256,
+    });
+    return res.json({ success: true, data: result.view, meta: { idempotent: result.idempotent } });
+  } catch (error: any) {
+    console.error("retireUncertainManufacturerPrintJob error:", error);
+    if (isPhysicalOutcomeUnconfirmed(error)) {
+      return res.status(409).json({ success: false, code: "PHYSICAL_OUTCOME_UNCONFIRMED",
+        error: "This print run has confirmation evidence or its state changed. Keep the printer fenced and review the job." });
+    }
+    return handleUserSafeError(res, error, "Uncertain print job could not be retired.");
   }
 };
 
