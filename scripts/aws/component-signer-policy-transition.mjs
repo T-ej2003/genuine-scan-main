@@ -190,7 +190,7 @@ async function createDefaultVersion(iam, document) {
   return error;
 }
 
-export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now } = {}) {
+export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now, allowStaleSupersession = false } = {}) {
   assert.equal(typeof iam, "function"); assert.equal(typeof s3, "function"); assert.equal(typeof currentMain, "function");
   const authenticate = async (authorization, expected) => {
     assertSignerBrokerAuthorization(authorization, { ...expected, now: now() });
@@ -213,6 +213,29 @@ export function createSignerPolicyBroker({ iam, s3, currentMain, now = Date.now 
         return (await writeLedger(s3, ledger, null)).value;
       }
       const ledger = assertLedger(prior.value);
+      if (allowStaleSupersession && authorization.operation === "INSTALL" && ledger.state === "REVOKED" && authorization.transitionId !== ledger.authorization.transitionId) {
+        assert.equal(authorization.sourceSha, authorization.protectedMainSha, "Successor must bind current protected main");
+        assert.equal(ledger.authorization.sourceSha, "864b0f349e7f33b6274a44017ea33b625c8c6e0e", "Unexpected stale signer source");
+        assert.equal(ledger.authorization.transitionId, "c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad", "Unexpected stale signer transition");
+        assert.equal(ledger.authorization.operation, "REVOKE", "Stale signer transition was not revoked");
+        assert.equal(ledger.steadyVersionId, "v24", "Steady policy version changed");
+        assert.equal(live.active.VersionId, ledger.steadyVersionId, "Active steady policy version changed");
+        assert(canonical(live.active.document) === canonical(steadyPolicy), "Successor requires canonical steady policy");
+        assert.equal(ledger.temporaryVersionId, null, "Temporary signer permissions were installed");
+        assert.equal(ledger.planSha256, null, "Stale signer plan exists");
+        assert.equal(ledger.approvalReference, null, "Stale signer apply approval exists");
+        assert.equal(ledger.signerReadbackSha256, null, "Stale signer apply readback exists");
+        assert.equal(ledger.recovery, null, "Stale signer recovery exists");
+        assert.deepEqual(ledger.recoveryPlanHistory, []);
+        assert.deepEqual(ledger.history.map(({ state }) => state), ["INSTALLING"], "Stale signer lifecycle is not the expected abort");
+        assert(ledger.authorizationHistory.every(value => value.sourceSha === ledger.authorization.sourceSha && value.transitionId === ledger.authorization.transitionId), "Stale signer authorization history differs");
+        assert(ledger.authorizationHistory.length < 32, "Stale signer authorization history is full");
+        // S3 versioning preserves the retired lifecycle; this new transition starts its own monotonic history.
+        const next = { schemaVersion: 1, kind: "MSCQR_SIGNER_POLICY_BROKER_LEDGER", authorization,
+          authorizationHistory: [...ledger.authorizationHistory, ledger.authorization], state: "INSTALLING", steadyVersionId: live.active.VersionId,
+          temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null, recovery: null, recoveryPlanHistory: [], history: [], updatedAt: new Date(now()).toISOString() };
+        return (await writeLedger(s3, next, prior)).value;
+      }
       assert.equal(authorization.sourceSha, ledger.authorization.sourceSha); assert.equal(authorization.transitionId, ledger.authorization.transitionId);
       assert.notEqual(authorization.authorizationSha256, ledger.authorization.authorizationSha256, "Signer authorization replay rejected");
       assert(!ledger.authorizationHistory.some(value => value.authorizationSha256 === authorization.authorizationSha256), "Consumed signer authorization replay rejected");

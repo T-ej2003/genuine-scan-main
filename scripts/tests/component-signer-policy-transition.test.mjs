@@ -18,7 +18,7 @@ const steady = JSON.parse(fs.readFileSync(new URL("../../documents/ops/iam/MSCQR
 const temporary = buildSignerTemporaryPolicy(steady, { sourceSha, transitionId });
 const authorization = (operation, offset = -1000, workflowRunId = "42", protectedMainSha = sourceSha, authorizedAt = now) => buildSignerBrokerAuthorization({ sourceSha, protectedMainSha, transitionId, operation, workflowRunId, approvedAt: new Date(authorizedAt + offset).toISOString(), expiresAt: new Date(authorizedAt + offset + 30 * 60 * 1000).toISOString() });
 
-function fixture({ main = { sha: sourceSha }, clock = { value: now }, steadyVersion = "v1", entityPages = [{ PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) {
+function fixture({ main = { sha: sourceSha }, clock = { value: now }, allowStaleSupersession = false, steadyVersion = "v1", entityPages = [{ PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) {
   let object, etag = 0, versions = [{ VersionId: steadyVersion, IsDefaultVersion: true, CreateDate: "2026-09-01T00:00:00Z", document: steady }];
   const calls = [];
   const iam = async (operation, input) => {
@@ -40,7 +40,7 @@ function fixture({ main = { sha: sourceSha }, clock = { value: now }, steadyVers
     if (operation === "PutObject") { if (input.IfNoneMatch && object) { const error = new Error(); error.name = "PreconditionFailed"; throw error; } assert(!input.IfMatch || input.IfMatch === `"${etag}"`); object = input.Body; etag += 1; return { ETag: `"${etag}"` }; }
     throw new Error(`unexpected S3 ${operation}`);
   };
-  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value }), iam, s3, main, clock, calls, ledger: () => object && JSON.parse(object), versions: () => versions };
+  return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value, allowStaleSupersession }), iam, s3, main, clock, calls, ledger: () => object && JSON.parse(object), versions: () => versions };
 }
 
 test("historical INSTALLING abort retains steady v24 without an IAM write", async () => {
@@ -65,6 +65,51 @@ test("historical INSTALLING abort retains steady v24 without an IAM write", asyn
   await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: buildSignerBrokerAuthorization({ sourceSha: currentMain,
     transitionId: "123e4567-e89b-42d3-a456-426614174002", operation: "INSTALL", workflowRunId: "42",
     approvedAt: new Date(clock.value - 500).toISOString(), expiresAt: new Date(clock.value + 1799500).toISOString() }) }));
+});
+
+async function abortedStaleFixture(options = {}) {
+  const oldSource = "864b0f349e7f33b6274a44017ea33b625c8c6e0e", oldId = "c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad";
+  const currentSource = "d".repeat(40), newId = "123e4567-e89b-42d3-a456-426614174002";
+  const f = fixture({ main: { sha: oldSource }, allowStaleSupersession: true, steadyVersion: "v24", ...options });
+  const auth = (source, id, operation, run, protectedMain = source) => buildSignerBrokerAuthorization({ sourceSha: source, protectedMainSha: protectedMain,
+    transitionId: id, operation, workflowRunId: run, approvedAt: new Date(f.clock.value - 1000).toISOString(), expiresAt: new Date(f.clock.value - 1000 + 1800000).toISOString() });
+  const first = auth(oldSource, oldId, "INSTALL", "40");
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: first });
+  f.main.sha = currentSource; f.clock.value += 31 * 60 * 1000;
+  const revoke = auth(oldSource, oldId, "REVOKE", "41", currentSource);
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: revoke });
+  await f.broker({ operation: "SIGNER_REVOKE", sourceSha: oldSource, transitionId: oldId, authorizationSha256: revoke.authorizationSha256,
+    evidenceState: "INSTALLING", evidenceSha256: signerLifecycleEvidenceBinding({ state: "INSTALLING", sourceSha: oldSource, transitionId: oldId, authorizationSha256: revoke.authorizationSha256 }), abort: true });
+  assert.equal(f.ledger().state, "REVOKED");
+  const fresh = auth(currentSource, newId, "INSTALL", "42");
+  return { f, fresh, first, revoke, oldSource, oldId, currentSource, newId, auth };
+}
+
+test("stale signer abort can be superseded once without installing permissions", async () => {
+  const { f, fresh, first, revoke, oldSource, oldId, currentSource } = await abortedStaleFixture();
+  const [winner, loser] = await Promise.allSettled([f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh }), f.broker({ operation: "SIGNER_AUTHORIZE", authorization: fresh })]);
+  assert.equal(winner.status, "fulfilled"); assert.equal(loser.status, "rejected");
+  assert.equal(f.ledger().state, "INSTALLING"); assert.equal(f.ledger().authorization.sourceSha, currentSource);
+  assert.deepEqual(f.ledger().authorizationHistory, [first, revoke]);
+  assert.equal(f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, 0);
+  await assert.rejects(f.broker({ operation: "SIGNER_PROVE_REVOKE_SESSION", sourceSha: oldSource, transitionId: oldId,
+    authorizationSha256: revoke.authorizationSha256 }), /differs/);
+});
+
+test("stale successor rejects moved main, expired approval, repeated transition, and IAM drift", async () => {
+  for (const defect of ["moved-main", "expired", "same-id", "version-drift", "policy-drift", "temporary-version"]) {
+    const { f, fresh, oldId } = await abortedStaleFixture();
+    if (defect === "moved-main") f.main.sha = "e".repeat(40);
+    if (defect === "expired") f.clock.value += 31 * 60 * 1000;
+    if (defect === "version-drift") f.versions()[0].VersionId = "v25";
+    if (defect === "policy-drift") f.versions()[0].document = { ...steady, Statement: [] };
+    if (defect === "temporary-version") f.versions()[0].document = buildSignerTemporaryPolicy(steady, { sourceSha: fresh.sourceSha, transitionId: fresh.transitionId });
+    const candidate = defect === "same-id" ? buildSignerBrokerAuthorization({ sourceSha: fresh.sourceSha, protectedMainSha: fresh.protectedMainSha,
+      transitionId: oldId, operation: "INSTALL", workflowRunId: "42", approvedAt: fresh.approvedAt, expiresAt: fresh.expiresAt }) : fresh;
+    await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: candidate }), undefined, defect);
+    assert.equal(f.ledger().state, "REVOKED", `${defect}: rejected before ledger write`);
+    assert.equal(f.calls.filter(({ operation }) => operation === "CreatePolicyVersion").length, 0, `${defect}: rejected before IAM write`);
+  }
 });
 
 function composedFixture(options) {

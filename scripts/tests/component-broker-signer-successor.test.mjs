@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import fs from "node:fs";
 import { executeBrokerSignerSuccessor } from "../aws/component-broker-signer-successor.mjs";
+import { executeStaleSignerSuccessor } from "../aws/component-broker-stale-signer-successor.mjs";
+import { approveStaleSignerSuccessor } from "../aws/component-broker-stale-signer-successor-authorization.mjs";
+import { staleSignerPublisherPolicy, staleSignerSuccessor, staleSignerSuccessorConfigurations } from "../aws/component-broker-stale-signer-successor-contract.mjs";
 import { assertEffectiveBootstrapTrustAnchor } from "../aws/component-bootstrap-trust-anchor.mjs";
 import { brokerSignerSuccessorSourceBindings } from "../aws/component-broker-signer-successor-authorization.mjs";
 import { assertBrokerSignerSuccessorClosureMetadata, brokerSignerSuccessor, brokerSignerSuccessorBindings, brokerSignerSuccessorConfigurations, signerSuccessorExecutorPolicy } from "../aws/component-broker-signer-successor-contract.mjs";
@@ -11,7 +15,7 @@ import { assertS3UserMetadataSize, brokerRecoverySuccessor, brokerRecoverySucces
 import { brokerChangeOperations, brokerChangePredecessor } from "../aws/component-broker-change-contract.mjs";
 import { bootstrapPartialStateDigest, bootstrapRecoveryOperations, completedBootstrapRecovery, historicalBootstrapAuthorization, historicalBootstrapIncident } from "../aws/component-bootstrap-partial-recovery-contract.mjs";
 import { componentBrokerPackageManifest } from "../aws/component-broker-package.mjs";
-import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
+import { bootstrapManagedIdentities, brokerChangeManagedIdentities, brokerRecoverySuccessorManagedIdentities, brokerSignerSuccessorManagedIdentities, brokerStaleSignerSuccessorManagedIdentities, componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { canonical, digest, installationIdentity } from "../aws/component-iam-installation-contract.mjs";
 
 const fault = name => Object.assign(new Error(name), { name });
@@ -53,13 +57,23 @@ function fixture(prepublished = false, sourceAdvance = false) {
     if (operation === "GetFunctionConcurrency") return { ReservedConcurrentExecutions: 1 };
     if (operation === "GetFunctionCodeSigningConfig") return {};
     if (operation === "GetRuntimeManagementConfig") return { UpdateRuntimeOn: "FunctionUpdate", RuntimeVersionArn: null };
-    if (operation === "UpdateFunctionCode") Object.assign(state.versions.$LATEST, { CodeSha256: Buffer.from(candidate.packageSha256, "hex").toString("base64"), RevisionId: "code" });
+    if (operation === "UpdateFunctionCode") Object.assign(state.versions.$LATEST, { CodeSha256: Buffer.from((state.nextPackage || candidate).packageSha256, "hex").toString("base64"), RevisionId: "code" });
     else if (operation === "UpdateFunctionConfiguration") Object.assign(state.versions.$LATEST, { Description: input.Description, RevisionId: `description-${state.writes.length}` });
     else if (operation === "PublishVersion") { const version = String(Math.max(...Object.keys(state.versions).filter(v => v !== "$LATEST").map(Number)) + 1); state.versions[version] = { ...structuredClone(state.versions.$LATEST), FunctionArn: `${componentBrokerArn}:${version}`, Version: version, RevisionId: `v${version}` }; }
     else assert.fail(operation);
     state.writes.push(operation); return {};
   };
   const iam = async (operation, input) => {
+    if (operation === "GetPolicy") return { Policy: { DefaultVersionId: state.releaseVersion || "v24" } };
+    if (operation === "GetPolicyVersion") return { PolicyVersion: { Document: state.releaseDocument || JSON.parse(fs.readFileSync("documents/ops/iam/MSCQRProductionGreenStageAReleaseS3Contract-v1.json", "utf8")) } };
+    if (input.RoleName === "mscqr-production-signer-policy-installer") {
+      if (operation === "GetRole") return { Role: { Arn: `arn:aws:iam::${identityBootstrap.account}:role/${input.RoleName}`, AssumeRolePolicyDocument: state.publisherTrust || JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-trust-policy.json", "utf8")) } };
+      if (operation === "ListRolePolicies") return { PolicyNames: ["ProductionSignerPolicyInstaller"], IsTruncated: state.publisherPoliciesTruncated || false };
+      if (operation === "ListAttachedRolePolicies") return { AttachedPolicies: [], IsTruncated: false };
+      assert.equal(input.PolicyName, "ProductionSignerPolicyInstaller");
+      if (operation === "GetRolePolicy") return { PolicyDocument: policies.get(input.RoleName) };
+      assert.equal(operation, "PutRolePolicy"); policies.set(input.RoleName, JSON.parse(input.PolicyDocument)); state.writes.push(operation); return {};
+    }
     const target = predecessor.find(value => value.role === input.RoleName); assert(target); assert.equal(input.PolicyName, target.policyName);
     if (operation === "GetRolePolicy") return { RoleName: input.RoleName, PolicyName: input.PolicyName, PolicyDocument: policies.get(input.RoleName) };
     assert.equal(operation, "PutRolePolicy"); policies.set(input.RoleName, JSON.parse(input.PolicyDocument)); state.writes.push(operation); return {};
@@ -76,7 +90,7 @@ function fixture(prepublished = false, sourceAdvance = false) {
     for (const [entryPoint, version] of Object.entries(brokerSignerSuccessorEntryPoints)) state.versions[version] = { ...config(configurations[entryPoint]), FunctionArn: `${componentBrokerArn}:${version}`, Version: version, RevisionId: `v${version}` };
     for (const identity of successor) policies.set(identity.role, identity.policy);
   }
-  return { state, candidate, original, firstRecord, secondRecord, secondClosure, authorization, operatorProof, policies, successor };
+  return { state, candidate, original, firstRecord, secondRecord, secondClosure, authorization, operatorProof, policies, successor, adapters: { iam, lambda, s3 } };
 }
 
 test("signer successor accepts current authorization with authenticated original immutable package", async () => {
@@ -165,4 +179,91 @@ test("second closure authentication rejects reservation substitution and preserv
   assert.throws(() => assertBrokerSignerSuccessorClosureMetadata(metadata, bindings, { ...reservation, transitionId: "55555555-5555-4555-8555-555555555555" }, etag, body));
   assert.throws(() => assertBrokerSignerSuccessorClosureMetadata(metadata, bindings, reservation, '"substituted"', body));
   const altered = structuredClone(metadata); altered["broker-policy-successor"] = "changed"; assert.throws(() => assertBrokerSignerSuccessorClosureMetadata(altered, bindings, reservation, etag, body));
+});
+
+async function staleFixture() {
+  const f = fixture(); await f.state.execute(); f.state.writes = [];
+  const candidate = packageEvidence("e".repeat(40), "reviewed-v16-package"), transitionId = "55555555-5555-4555-8555-555555555555";
+  f.state.nextPackage = candidate;
+  const predecessorClosure = f.state.objects.get(`${identityBootstrap.prefix}identity-bootstrap.json`).brokerSignerSuccessorClosure;
+  const actor = { type: "User", login: "T-ej2003", id: 183396573 };
+  const authorization = { schemaVersion: 1, transitionType: staleSignerSuccessor.transitionType, account: identityBootstrap.account, region: identityBootstrap.region,
+    sourceSha: candidate.manifest.sourceSha, transitionId, runId: "789", environment: staleSignerSuccessor.environment, operator: actor, reviewer: actor,
+    packageSha256: candidate.packageSha256, manifestSha256: candidate.manifestSha256, predecessorClosureSha256: digest(predecessorClosure),
+    approvalObservedAt: new Date(f.state.now).toISOString(), expiresAt: new Date(f.state.now + staleSignerSuccessor.maxAgeMs).toISOString() };
+  const operatorProof = { ...f.operatorProof, sourceSha: candidate.manifest.sourceSha, transitionId, authorizationSha256: digest(authorization),
+    purpose: "BROKER_STALE_SIGNER_SUCCESSOR", principal: `arn:aws:sts::${identityBootstrap.account}:assumed-role/mscqr-production-release-deployer/component-${transitionId}` };
+  f.policies.set("mscqr-production-signer-policy-installer", { ...staleSignerPublisherPolicy,
+    Statement: [{ ...staleSignerPublisherPolicy.Statement[0], Resource: `${componentBrokerArn}:15` }] });
+  f.state.objects.set(`${identityBootstrap.prefix}signer-policy-transition.json`, { state: "REVOKED", authorization: {
+    sourceSha: "864b0f349e7f33b6274a44017ea33b625c8c6e0e", transitionId: "c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad", operation: "REVOKE" },
+    steadyVersionId: "v24", temporaryVersionId: null, planSha256: null, approvalReference: null, signerReadbackSha256: null,
+    recovery: null, recoveryPlanHistory: [], history: [{ state: "INSTALLING" }] });
+  f.state.etags.set(`${identityBootstrap.prefix}signer-policy-transition.json`, '"retired-etag"');
+  const next = brokerStaleSignerSuccessorManagedIdentities();
+  const run = () => executeStaleSignerSuccessor({ authorization, packageEvidence: candidate, operatorProof }, { ...f.adapters,
+    authenticate: async () => {}, now: () => f.state.now, sleep: async () => {}, verifyEffective: assertEffectiveBootstrapTrustAnchor,
+    inspectPredecessor: async () => [{ role: "EXPECTED", policy: "EXPECTED" }],
+    inspectSuccessor: async () => [{ role: "EXPECTED", policy: next.every(identity => digest(f.policies.get(identity.role)) === identity.policySha256) ? "EXPECTED" : "DRIFT" }] });
+  return { f, candidate, authorization, operatorProof, run };
+}
+
+test("stale signer successor publishes 16-18 and moves only the exact publisher invoke policy", async () => {
+  const { f, run } = await staleFixture(), result = await run();
+  assert.equal(result.brokerStaleSignerSuccessor.state, "BROKER_STALE_SIGNER_SUCCESSOR_CLOSED");
+  assert.deepEqual(Object.keys(f.state.versions).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)), Array.from({ length: 18 }, (_, i) => String(i + 1)));
+  assert.equal(digest(f.policies.get("mscqr-production-signer-policy-installer")), digest(staleSignerPublisherPolicy));
+  assert(f.state.metadata.get(`${identityBootstrap.prefix}identity-bootstrap.json`)[staleSignerSuccessor.metadataKey]);
+  const writes = f.state.writes.length;
+  await assert.rejects(run());
+  assert.equal(f.state.writes.length, writes);
+});
+
+test("stale signer successor rejects wrong ledger, publisher drift, stale proof and extra versions before mutation", async () => {
+  for (const mutate of [
+    ({ f }) => { f.state.objects.get(`${identityBootstrap.prefix}signer-policy-transition.json`).state = "INSTALLING"; },
+    ({ f }) => { f.state.objects.get(`${identityBootstrap.prefix}signer-policy-transition.json`).steadyVersionId = "v25"; },
+    ({ f }) => { f.state.objects.get(`${identityBootstrap.prefix}signer-policy-transition.json`).planSha256 = "a".repeat(64); },
+    ({ f }) => { f.policies.set("mscqr-production-signer-policy-installer", { Version: "2012-10-17", Statement: [] }); },
+    ({ f }) => { f.state.releaseVersion = "v25"; },
+    ({ f }) => { f.state.releaseDocument = { Version: "2012-10-17", Statement: [] }; },
+    ({ f }) => { f.state.publisherTrust = { Version: "2012-10-17", Statement: [] }; },
+    ({ f }) => { f.state.publisherPoliciesTruncated = true; },
+    ({ f }) => { f.state.versions["16"] = structuredClone(f.state.versions["15"]); },
+    ({ f, authorization }) => { authorization.sourceSha = "f".repeat(40); },
+    ({ operatorProof }) => { operatorProof.mfaAuthenticated = false; },
+  ]) {
+    const context = await staleFixture(); mutate(context);
+    await assert.rejects(context.run());
+    assert.deepEqual(context.f.state.writes, []);
+    assert.equal(context.f.state.objects.has(staleSignerSuccessor.reservationKey), false);
+  }
+});
+
+test("stale signer successor reservation has one winner under concurrency", async () => {
+  const { f, run } = await staleFixture();
+  const results = await Promise.allSettled([run(), run()]);
+  assert.equal(results.filter(value => value.status === "fulfilled").length, 1);
+  assert.equal(results.filter(value => value.status === "rejected").length, 1);
+  assert.equal(f.state.writes.filter(value => value === "PublishVersion").length, 3);
+});
+
+test("stale successor approval binds protected main and completed signer closure", async () => {
+  const { f, candidate, authorization } = await staleFixture();
+  const actor = { type: "User", login: "T-ej2003", id: 183396573 }, repository = { id: 1145608538, full_name: "T-ej2003/genuine-scan-main" };
+  const journalKey = `${identityBootstrap.prefix}identity-bootstrap.json`;
+  const bootstrap = { value: f.state.objects.get(journalKey), metadata: f.state.metadata.get(journalKey) };
+  const args = { sourceSha: candidate.manifest.sourceSha, transitionId: authorization.transitionId, runId: authorization.runId,
+    main: { name: "main", protected: true, commit: { sha: candidate.manifest.sourceSha } },
+    run: { id: Number(authorization.runId), head_sha: candidate.manifest.sourceSha, head_branch: "main", path: staleSignerSuccessor.workflow,
+      event: "workflow_dispatch", status: "in_progress", run_attempt: 1, repository, head_repository: repository, actor, triggering_actor: actor },
+    environment: { id: 8, name: staleSignerSuccessor.environment, can_admins_bypass: false,
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+      protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: actor }] }] },
+    branches: { total_count: 1, branch_policies: [{ name: "main", type: "branch" }] },
+    approvals: [{ state: "approved", user: actor, environments: [{ id: 8, name: staleSignerSuccessor.environment }] }],
+    packageEvidence: candidate, bootstrap, now: f.state.now };
+  assert.equal(approveStaleSignerSuccessor(args).predecessorClosureSha256, authorization.predecessorClosureSha256);
+  assert.throws(() => approveStaleSignerSuccessor({ ...args, main: { ...args.main, commit: { sha: "f".repeat(40) } } }));
+  assert.throws(() => approveStaleSignerSuccessor({ ...args, approvals: [] }));
 });

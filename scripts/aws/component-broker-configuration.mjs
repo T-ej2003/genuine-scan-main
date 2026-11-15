@@ -11,8 +11,9 @@ export const brokerPolicySuccessorEntryPoints = Object.freeze({ INSTALL: "7", CL
 // caller-selected or extensible version map.
 export const brokerRecoverySuccessorEntryPoints = Object.freeze({ INSTALL: "10", CLEANUP: "11", AUTHORIZE: "12" });
 export const brokerSignerSuccessorEntryPoints = Object.freeze({ INSTALL: "13", CLEANUP: "14", AUTHORIZE: "15" });
+export const brokerStaleSignerSuccessorEntryPoints = Object.freeze({ INSTALL: "16", CLEANUP: "17", AUTHORIZE: "18" });
 function assertEntryPoints(value) {
-  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints || value === brokerRecoverySuccessorEntryPoints || value === brokerSignerSuccessorEntryPoints, "Unreviewed broker entry-point set");
+  assert(value === brokerEntryPoints || value === brokerChangeEntryPoints || value === brokerPolicySuccessorEntryPoints || value === brokerRecoverySuccessorEntryPoints || value === brokerSignerSuccessorEntryPoints || value === brokerStaleSignerSuccessorEntryPoints, "Unreviewed broker entry-point set");
   return value;
 }
 
@@ -21,7 +22,7 @@ function assertEntryPoints(value) {
 // first and may reach the successor only after AWS denies that exact version.
 export function brokerEntryPointCandidates(entryPoint) {
   assert(["INSTALL", "CLEANUP", "AUTHORIZE"].includes(entryPoint), "Unsupported broker entry point");
-  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint], brokerRecoverySuccessorEntryPoints[entryPoint], brokerSignerSuccessorEntryPoints[entryPoint]])];
+  return [...new Set([brokerEntryPoints[entryPoint], brokerChangeEntryPoints[entryPoint], brokerPolicySuccessorEntryPoints[entryPoint], brokerRecoverySuccessorEntryPoints[entryPoint], brokerSignerSuccessorEntryPoints[entryPoint], brokerStaleSignerSuccessorEntryPoints[entryPoint]])];
 }
 export function brokerConfiguration({ packageSha256, manifestSha256, entryPoint, entryPoints = brokerEntryPoints }) {
   assert.match(packageSha256 || "", /^[a-f0-9]{64}$/);

@@ -9,6 +9,7 @@ import { createProductionEnvironmentApprovalEvidence } from "../aws/production-g
 import { buildSignerBrokerRequest } from "../aws/publish-production-signer-policy-transition-authorization.mjs";
 import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, completeInstallingSignerAbort } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import { brokerSignerSuccessorManagedIdentities, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
+import { staleSignerPublisherPolicy } from "../aws/component-broker-stale-signer-successor-contract.mjs";
 import {
   SIGNER_TEMPORARY_CAPABILITY as C, assertSignerCapabilityEvidence, assertSignerCreationPlan, assertSignerRevocation,
   assertSignerInitializedBackendMetadata, assertSignerPolicySoleConsumer, assertSignerTemporaryPolicy, buildSignerCapabilityEvidence, buildSignerTemporaryPolicy,
@@ -51,7 +52,7 @@ test("normal production identities cannot mutate policy versions and the OIDC ro
   assert.equal(grants(bootstrap, "iam:CreatePolicyVersion", target), false);
   assert.equal(grants(steady, "iam:CreatePolicyVersion", target), false);
   const oidc = JSON.parse(fs.readFileSync("infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-permissions-policy.json", "utf8"));
-  assert.deepEqual(oidc, { Version: "2012-10-17", Statement: [{ Sid: "PublishExactSignerTransitionAuthorizationToBroker", Effect: "Allow", Action: "lambda:InvokeFunction", Resource: `${componentBrokerArn}:15`, Condition: { StringEquals: { "aws:RequestedRegion": C.region } } }] });
+  assert.deepEqual(oidc, staleSignerPublisherPolicy);
   assert.equal(oidc.Statement.some(({ Action }) => [].concat(Action).includes("iam:CreatePolicyVersion")), false);
 
   const broker = brokerSignerSuccessorManagedIdentities().find(({ role }) => role === "mscqr-production-component-iam-provisioner").policy;
