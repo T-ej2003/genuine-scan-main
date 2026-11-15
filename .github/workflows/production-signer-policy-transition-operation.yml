@@ -54,20 +54,13 @@ jobs:
               infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-trust-policy.json \
               infra/aws/terraform/production-initial-activation-policy-reconciler/signer-policy-installer-permissions-policy.json \
               .github/workflows/production-signer-policy-transition.yml \
+              .github/workflows/production-signer-policy-transition-operation.yml \
               scripts/aws/component-signer-policy-transition.mjs \
               scripts/aws/publish-production-signer-policy-transition-authorization.mjs \
+              scripts/aws/production-github-environment-approval.mjs \
               scripts/aws/reconcile-production-signer-temporary-capability.mjs \
               scripts/aws/verify-production-security-rebaseline-signer.mjs \
               scripts/aws/production-signer-temporary-capability.mjs
-            if [[ "$PHASE" != policy-revoke || "$TRANSITION_SOURCE_SHA" != 864b0f349e7f33b6274a44017ea33b625c8c6e0e || "$TRANSITION_ID" != c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad ]]; then
-              git diff --quiet "$TRANSITION_SOURCE_SHA..$SOURCE_SHA" -- \
-                .github/workflows/production-signer-policy-transition-operation.yml \
-                scripts/aws/production-github-environment-approval.mjs
-            else
-              expected_workflow_sha256=13a8a8596f3fc3db3c16092a2d06a10e5b84d8081d6635c033e6379a98ca25f6
-              test "$(sed '/^              expected_workflow_sha256=/d' .github/workflows/production-signer-policy-transition-operation.yml | sha256sum | cut -d' ' -f1)" = "$expected_workflow_sha256"
-              test "$(sha256sum scripts/aws/production-github-environment-approval.mjs | cut -d' ' -f1)" = 14cef7eae2e6e32f5566279dab848a10175fbefa3c1d93429e40a176cfd2e433
-            fi
           fi
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Authenticate solo-operator protected-environment approval
@@ -127,13 +120,13 @@ jobs:
           response="$RUNNER_TEMP/signer-policy-transition-request/response.json"
           invocation="$RUNNER_TEMP/signer-policy-transition-request/invocation.json"
           aws lambda invoke --region eu-west-2 \
-            --function-name arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:15 \
+            --function-name arn:aws:lambda:eu-west-2:368992683803:function:mscqr-production-component-iam-installer:18 \
             --cli-binary-format raw-in-base64-out --payload "fileb://$request" "$response" > "$invocation"
           node --input-type=module <<'JS'
           import assert from 'node:assert/strict'; import fs from 'node:fs';
           const root = process.env.RUNNER_TEMP + '/signer-policy-transition-request/';
           const invocation = JSON.parse(fs.readFileSync(root + 'invocation.json'));
-          assert.equal(invocation.StatusCode, 200); assert.equal(invocation.FunctionError, undefined); assert.equal(invocation.ExecutedVersion, '15');
+          assert.equal(invocation.StatusCode, 200); assert.equal(invocation.FunctionError, undefined); assert.equal(invocation.ExecutedVersion, '18');
           const response = JSON.parse(fs.readFileSync(root + 'response.json'));
           assert.equal(response.kind, 'MSCQR_SIGNER_POLICY_BROKER_LEDGER');
           JS
