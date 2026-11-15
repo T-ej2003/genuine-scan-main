@@ -16,9 +16,11 @@ const sqlFile = (relativePath, repositoryRoot) => fs.readFileSync(path.join(repo
 // C02 printing grants belong to its separately governed installation, never B03.
 export function selectB03GrantDelta(changedGrants) {
   const c02Grants = new Set(NAMED_SQL_FUNCTION_CONTRACTS
-    .filter(({ name }) => ["printing_connector_session", "printing_reissue_request"].includes(name))
+    .filter(({ name }) => ["printing_connector_session", "printing_control_job", "printing_reissue_request"].includes(name))
     .flatMap(({ security }) => security.ownerPrivileges)
-    .filter(([table, privilege]) => table === "PrinterAgentSession" || (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)))
+    .filter(([table, privilege]) => table === "PrinterAgentSession" ||
+      (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)) ||
+      (table === "QRCode" && ["SELECT", "UPDATE"].includes(privilege)))
     .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
   return changedGrants.filter((grant) => !c02Grants.has(grant));
 }
