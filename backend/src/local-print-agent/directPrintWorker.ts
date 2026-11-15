@@ -1095,6 +1095,7 @@ export const runPersistentPrintChunk = async (
     evidence?: typeof recordDispatchEvidence;
   } = {}
 ) => {
+  try {
   const send = adapters.send || sendSessionMessage;
   const print = adapters.print || printLabel;
   const wait = adapters.wait || waitForLocalPrintJobCompletion;
@@ -1247,6 +1248,10 @@ export const runPersistentPrintChunk = async (
     printJobId,
     labels: labels.length,
   });
+  } catch (error) {
+    ws.close();
+    throw error;
+  }
 };
 
 type DirectPrintCycleResult = {
@@ -1768,7 +1773,7 @@ const startPersistentPrintSessionWorker = () => {
               });
               return;
             }
-            if (!session || processing) return;
+            if (!session || processing || ws.readyState !== WebSocket.OPEN) return;
             if (payload?.type === "test_label") {
               processing = true;
               try {

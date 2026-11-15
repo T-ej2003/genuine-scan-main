@@ -10,6 +10,7 @@ import prismaPackage from "../backend/node_modules/@prisma/client/index.js";
 import { assertSafeTestDatabaseUrl } from "../backend/tests/helpers/testDbSafetyGuard.js";
 
 const {
+  buildPrinterAgentActionPayload,
   buildPrinterAgentHeartbeatPayload,
   buildPrinterAgentSessionPayload,
   signPrinterAgentPayload,
@@ -440,10 +441,10 @@ const startE2ESignedConnectorSession = async (registrationId: string, backendUrl
     deviceFingerprint: e2ePrinterIdentity.deviceFingerprint, selectedPrinterId: "e2e-local-printer",
     connectorVersion: E2E_LOCAL_AGENT_BUILD_VERSION };
   const hello = { type: "hello", ...common, nonce: randomUUID(), issuedAt: new Date().toISOString(),
-    printerHealth: { capabilities: { supportsPersistentPrintSession: true } } };
+    printerHealth: { capabilities: { supportsPersistentPrintSession: true }, dispatchEvidenceVersion: 1 } };
   const sessionReady = receive("session_ready");
   socket.send(JSON.stringify({ ...hello, signature: signPrinterAgentPayload(e2ePrinterIdentity.privateKeyPem,
-    buildPrinterAgentSessionPayload({ ...hello, messageType: "hello" })) }));
+    buildPrinterAgentSessionPayload({ ...hello, messageType: "hello", dispatchEvidenceVersion: 1 })) }));
   const sessionId = String((await sessionReady.catch((error) => { socket.close(); throw error; })).sessionId);
   let messageSeq = 0;
   let outbound = Promise.resolve();
@@ -464,6 +465,26 @@ const startE2ESignedConnectorSession = async (registrationId: string, backendUrl
   };
   const heartbeat = () => sendSigned("heartbeat");
   await heartbeat().catch((error) => { socket.close(); throw error; });
+  const recordEvidence = async (entry: { action: "dispatch_intent" | "abort_unsubmitted";
+    printerId: string; registrationId: string; printJobId: string; printItemId: string;
+    attemptId: string; journalState: "ATTEMPT_RESERVED" | "NOT_RESERVED"; payloadHash: string; reason?: string }) => {
+    const body = { agentId: common.agentId, deviceFingerprint: common.deviceFingerprint,
+      printerId: entry.printerId, registrationId: entry.registrationId, printJobId: entry.printJobId,
+      printItemId: entry.printItemId, attemptId: entry.attemptId, journalState: entry.journalState,
+      payloadHash: entry.payloadHash, ...(entry.reason ? { reason: entry.reason } : {}),
+      dispatchEvidenceVersion: 1, nonce: randomUUID(), issuedAt: new Date().toISOString() };
+    const signature = signPrinterAgentPayload(e2ePrinterIdentity.privateKeyPem,
+      buildPrinterAgentActionPayload({ ...body, action: entry.action }));
+    const endpoint = entry.action === "dispatch_intent" ? "dispatch-intent" : "abort-unsubmitted";
+    const response = await fetch(new URL(`/api/printer-agent/local/${endpoint}`, backendUrl ||
+      process.env.VITE_API_PROXY_TARGET || process.env.E2E_BACKEND_HEALTH_URL || "http://127.0.0.1:4000"), {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, signature }),
+    });
+    const result = await response.json() as { success?: boolean; data?: { authorized?: boolean } };
+    if (!response.ok || !result.success || (entry.action === "dispatch_intent" && result.data?.authorized !== true)) {
+      throw new Error(`Signed connector ${entry.action} rejected: HTTP ${response.status}`);
+    }
+  };
   const spooledJobs: string[] = [];
   let spoolFailure: Error | null = null;
   socket.addEventListener("message", (event) => {
@@ -472,11 +493,12 @@ const startE2ESignedConnectorSession = async (registrationId: string, backendUrl
     void (async () => {
       const labels = Array.isArray(chunk.labels) ? chunk.labels as Record<string, unknown>[] : [];
       expect(labels.length).toBeGreaterThan(0);
-      await directPrintWorker.runPersistentPrintChunk(null, {
+      await directPrintWorker.runPersistentPrintChunk(socket, {
         sessionId, registrationId, selectedPrinterId: common.selectedPrinterId,
         connectorVersion: common.connectorVersion, messageSeq,
       }, chunk, common.selectedPrinterId, {
         send: async (_socket, _session, _printer, event) => { await sendSigned(event.type, event); },
+        evidence: recordEvidence,
         print: async ({ request }) => {
           const zpl = String(request.payloadContent || "");
           expect(zpl).toMatch(/^\^XA/);

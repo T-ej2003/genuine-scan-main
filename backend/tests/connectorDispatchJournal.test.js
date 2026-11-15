@@ -117,21 +117,25 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
       wait: async () => { throw new Error('unexpected confirmation'); },
     };
     const session = () => ({ sessionId: 'synthetic', registrationId: 'synthetic', selectedPrinterId: 'simulator', messageSeq: 0 });
+    let closed = 0;
+    const socket = { close: () => { closed++; } };
     const beforeUnsupported = (await fs.readdir(root)).length;
-    await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'unsupported-chunk', printer: { languages: [], dpi: null } }, 'simulator', adapters),
+    await assert.rejects(runPersistentPrintChunk(socket, session(), { ...payload, chunkId: 'unsupported-chunk', printer: { languages: [], dpi: null } }, 'simulator', adapters),
       { errorCode: 'unsupported_printer_language' });
+    assert.equal(closed, 1, 'a rejected chunk must close the session so the pending server chunk can be recovered');
     assert.equal((await fs.readdir(root)).length, beforeUnsupported, 'unsupported printer must fail before durable dispatch reservation');
     assert.equal(spools, 0, 'unsupported printer must not reach the spooler');
-    await assert.rejects(runPersistentPrintChunk({}, session(), payload, 'simulator', adapters), /injected lost receipt/);
-    await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'reconnected-chunk' }, 'simulator', adapters),
+    await assert.rejects(runPersistentPrintChunk(socket, session(), payload, 'simulator', adapters), /injected lost receipt/);
+    await assert.rejects(runPersistentPrintChunk(socket, session(), { ...payload, chunkId: 'reconnected-chunk' }, 'simulator', adapters),
       { errorCode: 'dispatch_reconciliation_required' });
     assert.equal(spools, 1, 'reconnect must not submit a second automatic physical attempt');
     assert(events.indexOf('dispatch_intent') < events.indexOf('chunk_ack'), 'durable backend intent must precede acceptance ACK');
     assert(events.indexOf('chunk_ack') < events.indexOf('label_spooled'), 'acceptance ACK must precede spool receipt');
-    await assert.rejects(runPersistentPrintChunk({}, session(), { ...payload, chunkId: 'no-intent-chunk', labels: [{ ...payload.labels[0], attemptId: 'second-attempt' }] }, 'simulator', {
+    await assert.rejects(runPersistentPrintChunk(socket, session(), { ...payload, chunkId: 'no-intent-chunk', labels: [{ ...payload.labels[0], attemptId: 'second-attempt' }] }, 'simulator', {
       ...adapters, evidence: async (entry) => { if (entry.action === 'dispatch_intent') throw Error('injected backend outage'); },
     }), /injected backend outage/);
     assert.equal(spools, 1, 'backend intent outage must never reach Windows');
+    assert.equal(closed, 4, 'each failed chunk must close its persistent session');
     assert.deepEqual(uncertainOutcomes, ['physical_outcome_unconfirmed'],
       'the attempted spool reports uncertainty; a competing reservation must not report a false terminal state');
     assert(!events.includes('chunk_failed'), 'a failed receipt must not confirm physical failure');
@@ -152,14 +156,14 @@ const modulePath = require.resolve('../dist/local-print-agent/dispatchJournal');
         print: async () => { windowsCalls++; if (stage === 'during-windows') throw Error('injected ambiguous Windows submission'); return { printPath: 'USB_RAW', labelLanguage: 'ZPL', jobRef: 'simulated' }; },
         wait: async () => ({ confirmed: true }),
       };
-      await assert.rejects(runPersistentPrintChunk({}, session(), crashPayload, 'simulator', crashAdapters));
+      await assert.rejects(runPersistentPrintChunk(socket, session(), crashPayload, 'simulator', crashAdapters));
       assert.equal(windowsCalls, stage === 'during-windows' ? 1 : 0);
       assert(sequence.includes('dispatch_intent'));
       assert.equal(sequence.includes('abort_unsubmitted'), stage === 'before-intent',
         'only a provably uncommitted intent may be aborted');
       assert.equal(sequence.includes('label_failed'), stage !== 'before-intent',
         'accepted or ambiguous attempts must retain the backend fence');
-      await assert.rejects(runPersistentPrintChunk({}, session(), crashPayload, 'simulator', crashAdapters),
+      await assert.rejects(runPersistentPrintChunk(socket, session(), crashPayload, 'simulator', crashAdapters),
         { errorCode: 'dispatch_reconciliation_required' });
       assert.equal(windowsCalls, stage === 'during-windows' ? 1 : 0,
         'restart must not repeat a possibly submitted physical attempt');
