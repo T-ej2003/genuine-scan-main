@@ -1816,6 +1816,13 @@ BEGIN
   IF printer_row."connectionType"::text<>p_print_mode AND NOT (
     printer_row."connectionType"='LOCAL_AGENT'::public."PrinterConnectionType" AND p_print_mode='LOCAL_AGENT'
   ) THEN RAISE EXCEPTION 'PRINTER_NOT_READY'; END IF;
+  PERFORM set_config('app.printing_printer_id',printer_row.id,true);
+  IF p_print_mode='LOCAL_AGENT' AND EXISTS (
+    SELECT 1 FROM public."PrintJob" prior_job
+    WHERE prior_job."printerId"=printer_row.id
+      AND prior_job.status IN ('PAUSED','STOPPED')
+      AND prior_job."pipelineState"='NEEDS_OPERATOR_ACTION'
+  ) THEN RAISE EXCEPTION 'PRINTER_RECONCILIATION_REQUIRED'; END IF;
   IF (
     printer_row."connectionType"='NETWORK_IPP'::public."PrinterConnectionType"
     AND p_payload_type<>'PDF'
@@ -1874,8 +1881,7 @@ BEGIN
   END IF;
 
   PERFORM set_config('app.printing_job_id',job_id,true),
-          set_config('app.printing_session_row_id',session_id,true),
-          set_config('app.printing_printer_id',p_printer_id,true);
+          set_config('app.printing_session_row_id',session_id,true);
   INSERT INTO public."PrintJob"(
     id,"jobNumber","batchId","manufacturerId","printerId",status,"printMode","pipelineState",
     "payloadType",quantity,"itemCount","rangeStart","rangeEnd","printLockTokenHash","createdAt","updatedAt"

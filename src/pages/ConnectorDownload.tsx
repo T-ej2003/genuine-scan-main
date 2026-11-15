@@ -66,7 +66,7 @@ type LatestConnectorRelease = {
   setupGuidePath: string;
   release: {
     version: string;
-    publishedAt: string;
+    publishedAt: string | null;
     requiredProtocolVersion?: string | null;
     minimumBuildVersion?: string | null;
     summary: string;
@@ -522,7 +522,7 @@ export default function ConnectorDownload() {
                   <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
                     {recommendedBadgeLabel}
                   </Badge>
-                  {release ? <Badge variant="outline">Published {formatPublishedDate(release.release.publishedAt)}</Badge> : null}
+                  {release ? <Badge variant="outline">{release.release.publishedAt ? `Published ${formatPublishedDate(release.release.publishedAt)}` : "Not published"}</Badge> : null}
                 </div>
                 <div className="mt-5 space-y-4">
                   <h2 className="text-3xl font-semibold tracking-tight text-slate-950">

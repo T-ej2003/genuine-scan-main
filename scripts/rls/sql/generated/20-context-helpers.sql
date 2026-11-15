@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44'
+    AND source_contract_sha256='545536a267c3d426e6a0f9e189608c7bfbb9f38d67d22ad49a3d84d9a16c989f'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:545536a267c3d426e6a0f9e189608c7bfbb9f38d67d22ad49a3d84d9a16c989f'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:5be565ed3bafcdbc50d3f2687263eca30e7ba9bfbcf5c21f6046fe503d67ec44')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:545536a267c3d426e6a0f9e189608c7bfbb9f38d67d22ad49a3d84d9a16c989f')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -9858,6 +9858,13 @@ BEGIN
   IF printer_row."connectionType"::text<>p_print_mode AND NOT (
     printer_row."connectionType"='LOCAL_AGENT'::public."PrinterConnectionType" AND p_print_mode='LOCAL_AGENT'
   ) THEN RAISE EXCEPTION 'PRINTER_NOT_READY'; END IF;
+  PERFORM set_config('app.printing_printer_id',printer_row.id,true);
+  IF p_print_mode='LOCAL_AGENT' AND EXISTS (
+    SELECT 1 FROM public."PrintJob" prior_job
+    WHERE prior_job."printerId"=printer_row.id
+      AND prior_job.status IN ('PAUSED','STOPPED')
+      AND prior_job."pipelineState"='NEEDS_OPERATOR_ACTION'
+  ) THEN RAISE EXCEPTION 'PRINTER_RECONCILIATION_REQUIRED'; END IF;
   IF (
     printer_row."connectionType"='NETWORK_IPP'::public."PrinterConnectionType"
     AND p_payload_type<>'PDF'
@@ -9916,8 +9923,7 @@ BEGIN
   END IF;
 
   PERFORM set_config('app.printing_job_id',job_id,true),
-          set_config('app.printing_session_row_id',session_id,true),
-          set_config('app.printing_printer_id',p_printer_id,true);
+          set_config('app.printing_session_row_id',session_id,true);
   INSERT INTO public."PrintJob"(
     id,"jobNumber","batchId","manufacturerId","printerId",status,"printMode","pipelineState",
     "payloadType",quantity,"itemCount","rangeStart","rangeEnd","printLockTokenHash","createdAt","updatedAt"

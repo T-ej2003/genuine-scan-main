@@ -74,6 +74,17 @@ assert.strictEqual(activeJobFailure.payload.code, "active_print_job_exists");
 assert.strictEqual(activeJobFailure.payload.requestId, "req-active");
 assert.doesNotMatch(JSON.stringify(activeJobFailure.payload), /P2010|P0001|Prisma|queryRaw|printJobId|printSessionId/i);
 
+const unresolvedPrinterFailure = describePrintJobCreateFailure(
+  Object.assign(new Error("Prisma raw query failed"), {
+    code: "P2010",
+    meta: { code: "P0001", message: "ERROR: PRINTER_RECONCILIATION_REQUIRED" },
+  })
+);
+assert.strictEqual(unresolvedPrinterFailure.status, 409);
+assert.strictEqual(unresolvedPrinterFailure.payload.code, "PRINTER_RECONCILIATION_REQUIRED");
+assert.match(unresolvedPrinterFailure.payload.message, /earlier print run/);
+assert.doesNotMatch(JSON.stringify(unresolvedPrinterFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
+
 for (const error of [
   Object.assign(new Error("unknown raw query failure"), {
     code: "P2010",

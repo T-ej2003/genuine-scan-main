@@ -98,6 +98,16 @@ describe("ConnectorDownload", () => {
     } as any);
   });
 
+  it("does not show an epoch date for an unpublished Windows release", async () => {
+    const response = await apiClient.getLatestConnectorRelease();
+    (response.data as any).release.publishedAt = null;
+    vi.mocked(apiClient.getLatestConnectorRelease).mockResolvedValue(response as any);
+
+    render(<MemoryRouter><ConnectorDownload /></MemoryRouter>);
+    expect(await screen.findByText("Not published")).toBeInTheDocument();
+    expect(screen.queryByText(/1970/)).not.toBeInTheDocument();
+  });
+
   it("shows the latest installer choices and onboarding copy", async () => {
     vi.mocked(apiClient.getInvitePreview).mockResolvedValue({
       success: true,

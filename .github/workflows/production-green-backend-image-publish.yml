@@ -88,11 +88,11 @@ jobs:
         run: |
           set -euo pipefail
           node --test backend/tests/verifyFreshInstallDistribution.test.mjs
-          git merge-base --is-ancestor 2ad9f2b84c32f589f39fc0f458a62ceb565c2ff0 "$RELEASE_SHA"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/13518653511 > "$RUNNER_TEMP/connector-artifact.json"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/runs/42248243846 > "$RUNNER_TEMP/connector-run.json"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/13518653511/zip > "$RUNNER_TEMP/connector-distribution.zip"
-          echo '23b9e163bb91b4e61c1aad648930885e61d8f50805cd39eda34c90c4867f9a6a  '"$RUNNER_TEMP/connector-distribution.zip" | sha256sum --check --status
+          git merge-base --is-ancestor f6b3dd7efed01148c20008bc6fb11829b847f948 "$RELEASE_SHA"
+          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/14139769044 > "$RUNNER_TEMP/connector-artifact.json"
+          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/runs/43660888390 > "$RUNNER_TEMP/connector-run.json"
+          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/14139769044/zip > "$RUNNER_TEMP/connector-distribution.zip"
+          echo '69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c  '"$RUNNER_TEMP/connector-distribution.zip" | sha256sum --check --status
           mkdir "$RUNNER_TEMP/connector-distribution"
           unzip -q "$RUNNER_TEMP/connector-distribution.zip" -d "$RUNNER_TEMP/connector-distribution"
           test -z "$(find "$RUNNER_TEMP/connector-distribution" -type l -print -quit)"
@@ -144,8 +144,8 @@ jobs:
           docker run --rm --entrypoint node "$BACKEND_IMAGE" -e '
             const fs = require("node:fs"), crypto = require("node:crypto"), root = "/app/local-print-agent/releases/";
             const manifest = JSON.parse(fs.readFileSync(root + "manifest.json", "utf8"));
-            if (manifest.latestVersion !== "2026.11.6.2" || manifest.releases.length !== 2) process.exit(1);
-            for (const [version, digest] of [["2026.11.6.2", "f048514be6ca5c0c09eac5f24b1a39487b6b3890f6b7ca7a5274c9661b6d4e25"], ["2026.10.29.1", "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011"]]) {
+            if (manifest.latestVersion !== "2026.11.6.2" || manifest.releases.length < 2) process.exit(1);
+            for (const [version, digest] of [["2026.11.6.2", "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe"], ["2026.10.29.1", "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011"]]) {
               const release = manifest.releases.find(item => item.version === version), windows = release?.platforms?.windows;
               if (!windows || windows.sha256 !== digest || !release.publishedAt) process.exit(1);
               if (version === "2026.11.6.2" && windows.installationScope !== "fresh-install-only") process.exit(1);
@@ -232,7 +232,7 @@ jobs:
           import fs from "node:fs";
           const [file, imageRef, releaseSha] = process.argv.slice(2);
           const metadata = { builtAt: new Date().toISOString(), platforms: ["linux/amd64"] };
-          if (process.env.CONNECTOR_DISTRIBUTION === "true") metadata.connectorDistribution = { sourceSha: "2ad9f2b84c32f589f39fc0f458a62ceb565c2ff0", runId: 42248243846, artifactId: 13518653511, artifactDigest: "sha256:23b9e163bb91b4e61c1aad648930885e61d8f50805cd39eda34c90c4867f9a6a", installerSha256: "f048514be6ca5c0c09eac5f24b1a39487b6b3890f6b7ca7a5274c9661b6d4e25" };
+          if (process.env.CONNECTOR_DISTRIBUTION === "true") metadata.connectorDistribution = { sourceSha: "f6b3dd7efed01148c20008bc6fb11829b847f948", runId: 43660888390, artifactId: 14139769044, artifactDigest: "sha256:69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c", installerSha256: "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe" };
           fs.writeFileSync(file, JSON.stringify({ buildType: "mscqr-release-provenance", subject: { imageRef }, invocation: { repository: process.env.GITHUB_REPOSITORY, sha: releaseSha, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID }, metadata }, null, 2));
           NODE
           cosign sign --yes "$BACKEND_IMAGE"

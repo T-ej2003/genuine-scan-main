@@ -5,13 +5,13 @@ import path from "node:path";
 
 const expected = Object.freeze({
   repository: "T-ej2003/genuine-scan-main",
-  sourceSha: "2ad9f2b84c32f589f39fc0f458a62ceb565c2ff0",
-  runId: 42248243846,
+  sourceSha: "f6b3dd7efed01148c20008bc6fb11829b847f948",
+  runId: 43660888390,
   workflowId: 273963817,
-  artifactId: 13518653511,
-  artifactDigest: "sha256:23b9e163bb91b4e61c1aad648930885e61d8f50805cd39eda34c90c4867f9a6a",
+  artifactId: 14139769044,
+  artifactDigest: "sha256:69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c",
   version: "2026.11.6.2",
-  installerSha256: "f048514be6ca5c0c09eac5f24b1a39487b6b3890f6b7ca7a5274c9661b6d4e25",
+  installerSha256: "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe",
   previousVersion: "2026.10.29.1",
   previousSha256: "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011",
 });
