@@ -208,6 +208,12 @@ export function completeInstallingSignerAbort({ phase, abort, evidence, brokerLe
   return result;
 }
 
+export function signerSteadyPredecessor(ledger, evidence, canonicalVersions) {
+  if (ledger.state !== "INSTALLED" || (evidence?.steadyVersionId && evidence.steadyVersionId !== ledger.steadyVersionId) ||
+      !canonicalVersions.some(({ VersionId }) => VersionId === ledger.steadyVersionId)) fail("canonical pre-install policy version cannot be identified uniquely");
+  return ledger.steadyVersionId;
+}
+
 export function runSignerTemporaryCapability(argv = process.argv.slice(2), { write = (s) => process.stdout.write(s), now = () => new Date().toISOString() } = {}) {
   const phase = opt(argv, "--phase"), sourceSha = opt(argv, "--source-sha"), transitionId = opt(argv, "--transition-id"), stateFile = path.resolve(opt(argv, "--state-file")), brokerStateFile = path.resolve(opt(argv, "--broker-state-file"));
   assertSignerCliArguments(argv, phase);
@@ -222,14 +228,13 @@ export function runSignerTemporaryCapability(argv = process.argv.slice(2), { wri
     brokerLedger, current, identity, bootstrap, brokerStateFile, stateFile, now, write });
   if (installingAbort) return installingAbort;
   if (phase === "recover-install" && (!evidence || evidence.state === "INSTALLING")) {
-    if (brokerLedger.state === "INSTALLING") { brokerTransition(brokerStateFile, "install"); current = policyState(bootstrap); }
-    else if (brokerLedger.state !== "INSTALLED") fail("authoritative broker lifecycle is not ready for install recovery");
+    if (!["INSTALLING", "INSTALLED"].includes(brokerLedger.state)) fail("authoritative broker lifecycle is not ready for install recovery");
+    brokerTransition(brokerStateFile, "install"); current = policyState(bootstrap);
     assertCanonicalPolicyHistory(current, identity, true);
     const active = current.active;
     if (!exactSignerTemporaryVersion(active.document, identity)) fail("there is no exact active signer capability to recover");
     const base = current.versions.filter(({ document }) => canonical(document) === canonical(steadyPolicy));
-    const steadyVersionId = evidence?.steadyVersionId || (base.length === 1 ? base[0].VersionId : null);
-    if (!base.some(({ VersionId }) => VersionId === steadyVersionId)) fail("canonical pre-install policy version cannot be identified uniquely");
+    const steadyVersionId = signerSteadyPredecessor(readBrokerLedger(brokerStateFile, identity), evidence, base);
     const session = signerSession(bootstrap, transitionId);
     verifySignerResourceCensus(undefined, session);
     const result = buildSignerCapabilityEvidence({ state: "INSTALLED", ...identity, steadyVersionId, temporaryVersionId: active.VersionId, observedAt: now() });
