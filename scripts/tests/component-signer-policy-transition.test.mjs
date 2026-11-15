@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { executeSignerBrokerOperation } from "../aws/component-iam-broker.mjs";
 import { establishSignerInstallSession, establishSignerRevokeSession } from "../aws/component-installation-session.mjs";
-import { assertBrokerEntryPoint, brokerSignerSuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
+import { assertBrokerEntryPoint, brokerSignerSuccessorEntryPoints, brokerStaleSignerSuccessorEntryPoints } from "../aws/component-broker-configuration.mjs";
 import { componentBrokerArn, identityBootstrap } from "../aws/component-installation-identity-contract.mjs";
 import { sessionProofBinding } from "../aws/component-session-proof.mjs";
 import { run as runSignerCli } from "../aws/production-signer-broker-transition-cli.mjs";
@@ -131,7 +131,7 @@ function composedFixture(options) {
   };
   const dispatch = async (event, version) => {
     operations.push(event.operation); payloads.push(event);
-    assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, event.operation, brokerSignerSuccessorEntryPoints);
+    assertBrokerEntryPoint({ functionVersion: version, invokedFunctionArn: `${componentBrokerArn}:${version}` }, event.operation, Number(version) >= 16 ? brokerStaleSignerSuccessorEntryPoints : brokerSignerSuccessorEntryPoints);
     if (!event.operation.startsWith("SIGNER_")) { ordinaryArchive.push(event.operation); throw new Error("Ordinary component archive reached"); }
     const purpose = ["SIGNER_REVOKE", "SIGNER_PROVE_REVOKE_SESSION"].includes(event.operation) ? "SIGNER_REVOKE" : "SIGNER_INSTALL";
     const current = session(purpose);
@@ -156,7 +156,7 @@ function composedFixture(options) {
   };
   const binding = () => ({ sourceSha, transitionId, authorizationSha256: f.ledger().authorization.authorizationSha256 });
   return { ...f, operations, payloads, ordinaryArchive, dispatch, binding, setIssuanceOffset: value => { f.issuanceOffset = value; },
-    authorize: operation => dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization(operation, operation === "INSTALL" ? -1000 : -500, operation === "INSTALL" ? "42" : "43") }, "15"),
+    authorize: operation => dispatch({ operation: "SIGNER_AUTHORIZE", authorization: authorization(operation, operation === "INSTALL" ? -1000 : -500, operation === "INSTALL" ? "42" : "43") }, "18"),
     installSession: (selected = binding()) => establishSignerInstallSession(selected, deps("SIGNER_INSTALL")),
     revokeSession: (selected = binding()) => establishSignerRevokeSession(selected, deps("SIGNER_REVOKE")) };
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { establishComponentSession, establishComponentCleanupSession, establishComponentRecoveryTerraformSession, establishComponentTerraformSession, establishSignerInstallSession } from "../aws/component-installation-session.mjs";
+import { establishComponentSession, establishComponentCleanupSession, establishComponentRecoveryTerraformSession, establishComponentTerraformSession, establishSignerInstallSession, establishSignerRevokeSession } from "../aws/component-installation-session.mjs";
 import { authenticateComponentSession } from "../aws/component-session-proof.mjs";
 import { identityBootstrap, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 
@@ -138,19 +138,34 @@ test("partial-activation recovery invokes only authenticated successor INSTALL v
   assert.deepEqual(invoked, [`${componentBrokerArn}:10`, `${componentBrokerArn}:10`]);
 });
 
-test("signer partial-apply recovery uses only immutable signer INSTALL version 13", async () => {
+test("signer partial-apply recovery uses only immutable successor INSTALL version 16", async () => {
   const f = fixture("INSTALL"), invoked = [];
   f.dependencies.invoke = async input => {
-    invoked.push(input.FunctionName); assert.equal(input.FunctionName, `${componentBrokerArn}:13`);
+    invoked.push(input.FunctionName); assert.equal(input.FunctionName, `${componentBrokerArn}:16`);
     const payload = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
     const result = payload.operation === "SIGNER_PROVE_INSTALL_SESSION"
-      ? { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId, authorizationSha256: f.binding.authorizationSha256 }
+      ? { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId, authorizationSha256: payload.authorizationSha256 }
       : { state: "APPLY_STARTED", recovery: { state: "PLAN_GENERATED" } };
-    return { StatusCode: 200, ExecutedVersion: "13", Payload: Buffer.from(JSON.stringify(result)) };
+    return { StatusCode: 200, ExecutedVersion: "16", Payload: Buffer.from(JSON.stringify(result)) };
   };
   const client = await establishSignerInstallSession(f.binding, f.dependencies);
   assert.equal((await client.invoke("SIGNER_RECOVERY", { state: "PLAN_GENERATED", planSha256: "d".repeat(64), approvalReference: null })).recovery.state, "PLAN_GENERATED");
-  assert.deepEqual(invoked, [`${componentBrokerArn}:13`, `${componentBrokerArn}:13`]);
+  assert.deepEqual(invoked, [`${componentBrokerArn}:16`, `${componentBrokerArn}:16`]);
+});
+
+test("signer revocation uses only immutable successor CLEANUP version 17", async () => {
+  const f = fixture("CLEANUP"), invoked = [];
+  f.dependencies.invoke = async input => {
+    invoked.push(input.FunctionName); assert.equal(input.FunctionName, `${componentBrokerArn}:17`);
+    const payload = JSON.parse(Buffer.from(input.Payload).toString("utf8"));
+    const result = payload.operation === "SIGNER_PROVE_REVOKE_SESSION"
+      ? { state: "SESSION_VERIFIED", principal: f.principal, expiresAt: f.scoped.Expiration.toISOString(), sourceSha: f.binding.sourceSha, transitionId: f.binding.transitionId, authorizationSha256: payload.authorizationSha256 }
+      : { state: "REVOKED" };
+    return { StatusCode: 200, ExecutedVersion: "17", Payload: Buffer.from(JSON.stringify(result)) };
+  };
+  const client = await establishSignerRevokeSession(f.binding, f.dependencies);
+  assert.equal((await client.invoke("SIGNER_REVOKE")).state, "REVOKED");
+  assert.deepEqual(invoked, [`${componentBrokerArn}:17`, `${componentBrokerArn}:17`]);
 });
 
 test("Terraform operator authenticates broker MFA proof and sends only its scoped session to the isolated runner once", async () => {
