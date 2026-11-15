@@ -365,8 +365,8 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /publish-ecs-images\.sh backend/);
   assert.match(text, /BACKEND_IMAGE_TAG/);
   assert.match(text, /\$\{RELEASE_SHA\}-connector-2026\.11\.6\.2/);
-  assert.match(text, /13518653511/);
-  assert.match(text, /f048514be6ca5c0c09eac5f24b1a39487b6b3890f6b7ca7a5274c9661b6d4e25/);
+  assert.match(text, /14139769044/);
+  assert.match(text, /5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe/);
   assert.match(text, /backend-only/);
   assert.match(text, /SOURCE_RELEASE_SHA/);
   assert.doesNotMatch(text, /IMAGE_TAG=\"\$RELEASE_SHA\"/);
