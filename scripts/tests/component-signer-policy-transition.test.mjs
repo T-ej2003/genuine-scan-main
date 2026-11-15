@@ -18,8 +18,8 @@ const steady = JSON.parse(fs.readFileSync(new URL("../../documents/ops/iam/MSCQR
 const temporary = buildSignerTemporaryPolicy(steady, { sourceSha, transitionId });
 const authorization = (operation, offset = -1000, workflowRunId = "42", protectedMainSha = sourceSha, authorizedAt = now) => buildSignerBrokerAuthorization({ sourceSha, protectedMainSha, transitionId, operation, workflowRunId, approvedAt: new Date(authorizedAt + offset).toISOString(), expiresAt: new Date(authorizedAt + offset + 30 * 60 * 1000).toISOString() });
 
-function fixture({ main = { sha: sourceSha }, clock = { value: now }, entityPages = [{ PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) {
-  let object, etag = 0, versions = [{ VersionId: "v1", IsDefaultVersion: true, CreateDate: "2026-09-01T00:00:00Z", document: steady }];
+function fixture({ main = { sha: sourceSha }, clock = { value: now }, steadyVersion = "v1", entityPages = [{ PolicyRoles: [{ RoleName: "mscqr-production-release-deployer" }], PolicyUsers: [], PolicyGroups: [], IsTruncated: false }] } = {}) {
+  let object, etag = 0, versions = [{ VersionId: steadyVersion, IsDefaultVersion: true, CreateDate: "2026-09-01T00:00:00Z", document: steady }];
   const calls = [];
   const iam = async (operation, input) => {
     calls.push({ operation, input });
@@ -42,6 +42,30 @@ function fixture({ main = { sha: sourceSha }, clock = { value: now }, entityPage
   };
   return { broker: createSignerPolicyBroker({ iam, s3, currentMain: async () => main.sha, now: () => clock.value }), iam, s3, main, clock, calls, ledger: () => object && JSON.parse(object), versions: () => versions };
 }
+
+test("historical INSTALLING abort retains steady v24 without an IAM write", async () => {
+  const oldSource = "864b0f349e7f33b6274a44017ea33b625c8c6e0e", currentMain = "d9337b5d4de67817f1e940ec2a47201b855e96ef";
+  const id = "c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad", clock = { value: Date.parse("2026-11-15T20:00:00.000Z") };
+  const main = { sha: oldSource }, f = fixture({ main, clock, steadyVersion: "v24" });
+  const approvedAt = new Date(clock.value - 1000).toISOString(), expiresAt = new Date(clock.value + 1799000).toISOString();
+  const install = buildSignerBrokerAuthorization({ sourceSha: oldSource, transitionId: id, operation: "INSTALL", workflowRunId: "40", approvedAt, expiresAt });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: install });
+  main.sha = currentMain; clock.value += 31 * 60 * 1000;
+  const revoke = buildSignerBrokerAuthorization({ sourceSha: oldSource, protectedMainSha: currentMain, transitionId: id, operation: "REVOKE", workflowRunId: "41",
+    approvedAt: new Date(clock.value - 1000).toISOString(), expiresAt: new Date(clock.value + 1799000).toISOString() });
+  await f.broker({ operation: "SIGNER_AUTHORIZE", authorization: revoke });
+  const binding = { state: "INSTALLING", sourceSha: oldSource, transitionId: id, authorizationSha256: revoke.authorizationSha256 };
+  const request = { operation: "SIGNER_REVOKE", sourceSha: oldSource, transitionId: id, authorizationSha256: revoke.authorizationSha256,
+    evidenceState: "INSTALLING", evidenceSha256: signerLifecycleEvidenceBinding(binding), abort: true };
+  const closed = await f.broker(request);
+  assert.equal(closed.state, "REVOKED"); assert.equal(closed.steadyVersionId, "v24"); assert.equal(closed.temporaryVersionId, null);
+  assert.deepEqual(closed.history.map(({ state }) => state), ["INSTALLING"]); assert.deepEqual(closed.authorizationHistory, [install]);
+  assert.equal(f.calls.filter(({ operation }) => ["CreatePolicyVersion", "DeletePolicyVersion"].includes(operation)).length, 0);
+  assert.equal((await f.broker(request)).state, "REVOKED");
+  await assert.rejects(f.broker({ operation: "SIGNER_AUTHORIZE", authorization: buildSignerBrokerAuthorization({ sourceSha: currentMain,
+    transitionId: "123e4567-e89b-42d3-a456-426614174002", operation: "INSTALL", workflowRunId: "42",
+    approvedAt: new Date(clock.value - 500).toISOString(), expiresAt: new Date(clock.value + 1799500).toISOString() }) }));
+});
 
 function composedFixture(options) {
   const f = fixture(options), operations = [], payloads = [], ordinaryArchive = [];

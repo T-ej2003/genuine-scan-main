@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildSignerBrokerRequest } from "../aws/publish-production-signer-policy-transition-authorization.mjs";
@@ -178,6 +179,14 @@ test("signer environment-approval API permission and private evidence path reach
   const authenticate = steps.find(({ name }) => name === "Authenticate exact protected source and fixed operation");
   assert.match(authenticate.run, /git merge-base --is-ancestor "\$TRANSITION_SOURCE_SHA" "\$SOURCE_SHA"/);
   assert.match(authenticate.run, /git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/);
+  assert.equal((authenticate.run.match(/git diff --quiet "\$TRANSITION_SOURCE_SHA\.\.\$SOURCE_SHA"/g) || []).length, 2);
+  assert.match(authenticate.run, /if \[\[ "\$PHASE" != policy-revoke \|\| "\$TRANSITION_SOURCE_SHA" != 864b0f349e7f33b6274a44017ea33b625c8c6e0e \|\| "\$TRANSITION_ID" != c0f3a7b9-2ed7-4c2b-98a6-1482a6ee93ad \]\]; then/);
+  assert.match(authenticate.run, /scripts\/aws\/component-signer-policy-transition\.mjs[\s\S]*?scripts\/aws\/production-signer-temporary-capability\.mjs\n\s*if \[\[/);
+  assert.match(authenticate.run, /if \[\[[\s\S]*?\.github\/workflows\/production-signer-policy-transition-operation\.yml[\s\S]*?scripts\/aws\/production-github-environment-approval\.mjs/);
+  const workflow = fs.readFileSync(".github/workflows/production-signer-policy-transition-operation.yml", "utf8");
+  const digest = value => createHash("sha256").update(value).digest("hex");
+  assert.equal(digest(workflow.replace(/^              expected_workflow_sha256=.*\n/m, "")), authenticate.run.match(/expected_workflow_sha256=([a-f0-9]{64})/)[1]);
+  assert.equal(digest(fs.readFileSync("scripts/aws/production-github-environment-approval.mjs")), authenticate.run.match(/sha256sum scripts\/aws\/production-github-environment-approval\.mjs[^\n]*= ([a-f0-9]{64})/)[1]);
   const request = steps.find(({ name }) => name === "Build canonical broker request");
   assert.match(request.run, /--transition-source-sha "\$TRANSITION_SOURCE_SHA"/);
 })
