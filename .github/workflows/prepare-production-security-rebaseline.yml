@@ -111,6 +111,7 @@ jobs:
       release_sha: ${{ inputs.source_sha }}
     permissions:
       contents: read
+      actions: read
       id-token: write
 
   sign-and-manifest:

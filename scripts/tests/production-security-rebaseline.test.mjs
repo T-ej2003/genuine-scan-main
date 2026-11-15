@@ -248,6 +248,7 @@ test("signing environment and purpose-specific OIDC/KMS source contracts fail cl
   assert.match(signingWorkflow, /gh api .*\/environments\/production-security-rebaseline-signing/);
   assert.match(signingWorkflow, /actions\/runs\/\$GITHUB_RUN_ID\/approvals/);
   assert.match(signingWorkflow, /permissions:\s*\n\s*contents: read\n\s*actions: read/);
+  assert.match(preparationWorkflow, /publish-image:[\s\S]*?permissions:\s*\n\s*contents: read\n\s*actions: read\n\s*id-token: write/);
   assert.match(preparationWorkflow, /sign-and-manifest:[\s\S]*?permissions:\s*\n\s*contents: read\n\s*actions: read\n\s*id-token: write/);
   assert.match(signingWorkflow, /role-to-assume: \$\{\{ vars\.PRODUCTION_SECURITY_REBASELINE_SIGNER_ROLE_ARN \}\}/);
   const trust = JSON.parse(fs.readFileSync("infra/aws/terraform/production-security-rebaseline-signer/trust-policy.json", "utf8"));
