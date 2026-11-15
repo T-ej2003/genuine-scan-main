@@ -6,7 +6,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { createProductionEnvironmentApprovalEvidence } from "../aws/production-github-environment-approval.mjs";
 import { buildSignerBrokerRequest } from "../aws/publish-production-signer-policy-transition-authorization.mjs";
-import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, completeInstallingSignerAbort } from "../aws/reconcile-production-signer-temporary-capability.mjs";
+import { assertCanonicalPolicyHistory, assertSignerBootstrapIdentity, assertSignerCliArguments, completeInstallingSignerAbort, signerSteadyPredecessor } from "../aws/reconcile-production-signer-temporary-capability.mjs";
 import { brokerSignerSuccessorManagedIdentities, componentBrokerArn } from "../aws/component-installation-identity-contract.mjs";
 import { staleSignerPublisherPolicy } from "../aws/component-broker-stale-signer-successor-contract.mjs";
 import {
@@ -128,6 +128,16 @@ test("INSTALLING recovery delegates policy mutation to the authoritative broker"
   assert.match(broker, /event\.evidenceState, ledger\.state/);
   assert.match(broker, /Submitted evidence is stale/);
 })
+
+test("install recovery uses the authenticated broker predecessor when canonical steady versions repeat", () => {
+  const versions = ["v24", "v22", "v20", "v18"].map(VersionId => ({ VersionId, document: steady }));
+  const ledger = { state: "INSTALLED", steadyVersionId: "v24" };
+  assert.equal(signerSteadyPredecessor(ledger, null, versions), "v24");
+  assert.equal(signerSteadyPredecessor(ledger, { steadyVersionId: "v24" }, versions), "v24");
+  assert.throws(() => signerSteadyPredecessor(ledger, { steadyVersionId: "v22" }, versions), /cannot be identified uniquely/);
+  assert.throws(() => signerSteadyPredecessor({ ...ledger, steadyVersionId: "v25" }, null, versions), /cannot be identified uniquely/);
+  assert.throws(() => signerSteadyPredecessor({ ...ledger, state: "INSTALLING" }, null, versions), /cannot be identified uniquely/);
+});
 
 test("no-write INSTALLING abort reaches the broker before local evidence or a temporary policy exists", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "signer-no-write-abort-"));
