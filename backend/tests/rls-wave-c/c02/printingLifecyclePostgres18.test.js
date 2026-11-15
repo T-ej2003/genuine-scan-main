@@ -1006,16 +1006,6 @@ async function main() {
     'LBL-0002','LBL-0002','LOCAL_AGENT','ZPL','${hash(`race-lock-${suffix}`)}',
     '[{"qrCodeId":"${ids.raceQr}","tokenNonce":"${suffix.repeat(64)}","tokenHash":"${hash(`race-token-${suffix}`)}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`;
-  const priorHoldId = randomUUID(), priorHoldSessionId = randomUUID();
-  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"createdAt","updatedAt")
-    VALUES('${priorHoldId}','${ids.batch}','${ids.maker}','${ids.printer}','PAUSED','LOCAL_AGENT','NEEDS_OPERATOR_ACTION',1,now(),now());
-    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","updatedAt")
-    VALUES('${priorHoldSessionId}','${priorHoldId}','${ids.batch}','${ids.maker}','${ids.registration}','${ids.printer}','PAUSED',1,now());`);
-  denied(app, raceSql("d"), /PRINTER_RECONCILIATION_REQUIRED/);
-  assert.equal(psql(admin, `SELECT status||':'||coalesce("printJobId",'') FROM public."QRCode" WHERE id='${ids.raceQr}'`), 'ALLOCATED:',
-    'an unresolved run on this printer must prevent a new QR reservation');
-  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintJob" WHERE "batchId"='${ids.raceBatch}'`), '0');
-  psql(admin, `DELETE FROM public."PrintSession" WHERE id='${priorHoldSessionId}'; DELETE FROM public."PrintJob" WHERE id='${priorHoldId}';`);
   const race = await Promise.all([psqlAsync(app, raceSql("b")), psqlAsync(app, raceSql("c"))]);
   assert.equal(race.filter((entry) => entry.status === 0).length, 1, "one concurrent print-job creation must win");
   assert.equal(race.filter((entry) => entry.status !== 0).length, 1, "the conflicting print-job creation must fail closed");

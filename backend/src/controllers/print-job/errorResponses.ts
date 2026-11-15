@@ -23,7 +23,6 @@ type PrintJobErrorCode =
   | "printer_selection_mismatch"
   | "printer_status_unavailable"
   | "PRINTER_TEST_LABEL_REQUIRED" | "PRINTER_ATTESTATION_STALE"
-  | "PRINTER_RECONCILIATION_REQUIRED"
   | "PRINT_QUANTITY_EXCEEDS_RUN_LIMIT"
   | "CONNECTOR_UPDATE_REQUIRED" | "PRINTER_SESSION_REQUIRED" | "PRINTER_SESSION_DISCONNECTED"
   | "RECOVERY_REQUIRED_BEFORE_NEW_PRINT"
@@ -138,7 +137,6 @@ const reviewedSqlLifecycleErrors = {
   QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
   PRINTER_ATTESTATION_STALE: "The printer connection is no longer ready. Refresh the connector and printer status before starting the print run.",
   ACTIVE_PRINT_JOB_EXISTS: "An active print run already exists for this batch. Review its status before starting another.",
-  PRINTER_RECONCILIATION_REQUIRED: "This printer has an earlier print run with an unconfirmed physical outcome. Reconcile that run before starting another.",
 } as const satisfies Partial<Record<PrintJobErrorCode, string>>;
 const extractReviewedSqlLifecycleError = (error: any): keyof typeof reviewedSqlLifecycleErrors | null => {
   if (error?.code !== "P2010" || error?.meta?.code !== "P0001") return null;
