@@ -6,6 +6,9 @@ const {
 const {
   shouldReportLocalPrintFailureToBackend,
 } = require("../dist/local-print-agent/directPrintWorker");
+const { generateKeyPairSync } = require('node:crypto');
+const { buildPrinterAgentActionPayload, signPrinterAgentPayload, verifyPrinterAgentPayloadSignature } = require('../dist/services/printerAgentSigningService');
+const { dispatchEvidenceSchema } = require('../dist/services/localAgentAckProtocolService');
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -91,6 +94,40 @@ const run = () => {
     !shouldReportLocalPrintFailureToBackend(preSpoolAckError, true),
     "Connector must preserve uncertainty after spooler work has been attempted"
   );
+
+  const pair = generateKeyPairSync('ed25519');
+  const privateKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  const publicKey = pair.publicKey.export({ type: 'spki', format: 'pem' }).toString();
+  const evidence = {
+    action: 'abort_unsubmitted', agentId: baseAck.agentId,
+    deviceFingerprint: baseAck.deviceFingerprint, printerId: baseAck.printerId,
+    printJobId: baseAck.printJobId, printItemId: baseAck.printItemId,
+    registrationId: 'a547ce15-c15a-42db-af0d-1d62cd3b57e8',
+    attemptId: '9b3fe1cd-158c-4725-9da0-f45dd9782e46',
+    journalState: 'ATTEMPT_RESERVED', payloadHash: 'a'.repeat(64),
+    reason: 'deterministic_validation_failure', dispatchEvidenceVersion: 1,
+    nonce: baseAck.nonce, issuedAt: baseAck.issuedAt,
+  };
+  const signature = signPrinterAgentPayload(privateKey, buildPrinterAgentActionPayload(evidence));
+  assert(verifyPrinterAgentPayloadSignature({ publicKeyPem: publicKey,
+    payload: buildPrinterAgentActionPayload(evidence), signature }), 'signed evidence must verify');
+  for (const [field, value] of [
+    ['printJobId', '6fc64f36-b7a1-4798-91f3-0b47de5ad73a'],
+    ['printItemId', '6fc64f36-b7a1-4798-91f3-0b47de5ad73a'],
+    ['registrationId', '6fc64f36-b7a1-4798-91f3-0b47de5ad73a'],
+    ['attemptId', '6fc64f36-b7a1-4798-91f3-0b47de5ad73a'],
+    ['journalState', 'NOT_RESERVED'], ['payloadHash', 'b'.repeat(64)],
+    ['reason', 'different_failure'], ['dispatchEvidenceVersion', null],
+  ]) {
+    assert(!verifyPrinterAgentPayloadSignature({ publicKeyPem: publicKey,
+      payload: buildPrinterAgentActionPayload({ ...evidence, [field]: value }), signature }),
+      `tampered ${field} must invalidate the signature`);
+  }
+  assert(!localAgentAckSchema.safeParse({ ...baseAck, attemptId: evidence.attemptId }).success,
+    'an old ACK signature cannot append an unsigned attempt ID');
+  const { action, ...evidenceBody } = evidence;
+  assert(dispatchEvidenceSchema.safeParse({ ...evidenceBody, signature }).success,
+    'authenticated pre-submission evidence must have a strict shape');
 
   console.log("local agent ACK protocol tests passed");
 };

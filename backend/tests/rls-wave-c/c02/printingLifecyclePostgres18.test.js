@@ -916,6 +916,62 @@ async function main() {
     '${caps.maker}','printing-sample-scan','${requestId()}','${created.job.id}','${immutableCode}','{"scanner":"focused-proof"}'::jsonb
   )`);
   assert.equal(sample.satisfied, true);
+  const evidenceJobId = randomUUID(), evidenceSessionId = randomUUID();
+  const evidenceQrId = randomUUID(), evidenceItemId = randomUUID();
+  psql(admin, `INSERT INTO public."PrintJob"(id,"batchId","manufacturerId","printerId",status,"printMode","pipelineState",quantity,"updatedAt")
+    VALUES('${evidenceJobId}','${ids.raceBatch}','${ids.maker}','${ids.printer}','PENDING','LOCAL_AGENT','QUEUED',1,now());
+    INSERT INTO public."QRCode"(id,code,"licenseeId","batchId","printJobId",status,"updatedAt")
+    VALUES('${evidenceQrId}','synthetic-evidence-${evidenceQrId}','${ids.licenseeA}','${ids.raceBatch}','${evidenceJobId}','ALLOCATED',now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId","printerRegistrationId","printerId",status,"totalItems","issuedItems","updatedAt")
+    VALUES('${evidenceSessionId}','${evidenceJobId}','${ids.raceBatch}','${ids.maker}','${ids.registration}','${ids.printer}','ACTIVE',1,0,now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"pipelineState","updatedAt")
+    VALUES('${evidenceItemId}','${evidenceSessionId}','${evidenceQrId}','synthetic-evidence','RESERVED','QUEUED',now());`);
+  const evidenceReceipt = (operation, attemptId, nonce, details = {}) => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','${nonce}',now()::timestamp,
+    '${requestId()}','${operation}','${evidenceJobId}','${evidenceItemId}','${ids.printer}',
+    '${hash('evidence-payload')}',NULL,'${JSON.stringify({ dispatchEvidenceVersion: 1, attemptId,
+      journalState: 'ATTEMPT_RESERVED', payloadHash: hash('evidence-payload'), ...details })}'::jsonb)`;
+  const evidenceClaim = nonce => json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','${nonce}',now()::timestamp,
+    '${requestId()}','CLAIM',NULL,NULL,'${ids.printer}','${hash(nonce)}',NULL,
+    '{"dispatchEvidenceVersion":1}'::jsonb)`);
+  const firstEvidenceClaim = evidenceClaim('evidence_claim_nonce_0001');
+  assert.equal(firstEvidenceClaim.printItemId, evidenceItemId);
+  assert.match(firstEvidenceClaim.attemptId, /^[0-9a-f-]{36}$/);
+  assert.equal(psql(admin, `SELECT state||':'||("dispatchedAt" IS NULL) FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'ISSUED:true');
+  denied(app, evidenceReceipt('ACK', firstEvidenceClaim.attemptId, 'evidence_ack_early_001'), /CONNECTOR_DISPATCH_INTENT_REQUIRED/);
+  denied(app, evidenceReceipt('INTENT', randomUUID(), 'evidence_wrong_attempt_1'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
+  assert.equal(json(app, evidenceReceipt('ABORT', firstEvidenceClaim.attemptId, 'evidence_abort_nonce_1', { journalState: 'NOT_RESERVED' })).operation, 'ABORT');
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'RESERVED');
+  const secondEvidenceClaim = evidenceClaim('evidence_claim_nonce_0002');
+  assert.notEqual(secondEvidenceClaim.attemptId, firstEvidenceClaim.attemptId);
+  assert.equal(psql(admin, `SELECT "issuedItems" FROM public."PrintSession" WHERE id='${evidenceSessionId}'`), '1');
+  psql(admin, `UPDATE public."PrintItem" SET "dispatchMetadata"=jsonb_set("dispatchMetadata",'{claimExpiresAt}',to_jsonb(now()-interval '1 minute')) WHERE id='${evidenceItemId}'`);
+  const recovery = () => psqlAsync(worker, `SELECT app_rls.printing_worker_reconcile('RECOVER_UNSUBMITTED','${requestId()}',1)`);
+  const recoveryResults = await Promise.all([recovery(), recovery()]);
+  assert.deepEqual(recoveryResults.map(result => result.output).sort(), ['0','1']);
+  assert.equal(psql(admin, `SELECT state||':'||("dispatchedAt" IS NULL) FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'RESERVED:true');
+  denied(app, evidenceReceipt('INTENT', secondEvidenceClaim.attemptId, 'evidence_stale_intent_1'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
+  const thirdEvidenceClaim = evidenceClaim('evidence_claim_nonce_0003');
+  psql(admin, `UPDATE public."PrintJob" SET status='STOPPED' WHERE id='${evidenceJobId}'`);
+  denied(app, evidenceReceipt('INTENT', thirdEvidenceClaim.attemptId, 'evidence_stopped_intent_1'), /CONNECTOR_DISPATCH_EVIDENCE_EXPIRED/);
+  psql(admin, `UPDATE public."PrintJob" SET status='SENT' WHERE id='${evidenceJobId}'`);
+  assert.equal(json(app, evidenceReceipt('INTENT', thirdEvidenceClaim.attemptId, 'evidence_intent_nonce_1')).authorized, true);
+  denied(app, evidenceReceipt('INTENT', thirdEvidenceClaim.attemptId, 'evidence_intent_nonce_2'), /CONNECTOR_DISPATCH_EVIDENCE_EXPIRED/);
+  psql(admin, `UPDATE public."PrintItem" SET "dispatchMetadata"=jsonb_set("dispatchMetadata",'{claimExpiresAt}',to_jsonb(now()-interval '1 minute')) WHERE id='${evidenceItemId}'`);
+  assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('RECOVER_UNSUBMITTED','${requestId()}',1)`), '0');
+  denied(app, evidenceReceipt('ABORT', thirdEvidenceClaim.attemptId, 'evidence_late_abort_1'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
+  assert.equal(json(app, evidenceReceipt('ACK', thirdEvidenceClaim.attemptId, 'evidence_ack_nonce_0001')).operation, 'ACK');
+  denied(app, evidenceReceipt('CONFIRM', secondEvidenceClaim.attemptId, 'evidence_stale_confirm_1'), /CONNECTOR_ATTEMPT_MISMATCH/);
+  assert.equal(json(app, evidenceReceipt('FAIL', thirdEvidenceClaim.attemptId, 'evidence_fail_nonce_001', { reason: 'spool_failed' })).operation, 'FAIL');
+  assert.equal(psql(admin, `SELECT state||':'||"pipelineState" FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'FROZEN:NEEDS_OPERATOR_ACTION');
+  assert.equal(psql(admin, `SELECT status FROM public."QRCode" WHERE id='${evidenceQrId}'`), 'ALLOCATED');
+  psql(admin, `DELETE FROM public."PrintItemEvent" WHERE "printItemId"='${evidenceItemId}';
+    DELETE FROM public."PrintAuditEvent" WHERE "printJobId"='${evidenceJobId}';
+    DELETE FROM public."PrintItem" WHERE id='${evidenceItemId}';
+    DELETE FROM public."QRCode" WHERE id='${evidenceQrId}';
+    DELETE FROM public."PrintSession" WHERE id='${evidenceSessionId}';
+    DELETE FROM public."PrintJob" WHERE id='${evidenceJobId}';`);
   const serializedOld='00000000-0000-4000-8000-000000000901',serializedNew='00000000-0000-4000-8000-000000000902';
   const serializedOldSession=randomUUID(),serializedNewSession=randomUUID(),serializedOldQr=randomUUID(),serializedNewQr=randomUUID();
   const serializedOldItem=randomUUID(),serializedNewItem=randomUUID();

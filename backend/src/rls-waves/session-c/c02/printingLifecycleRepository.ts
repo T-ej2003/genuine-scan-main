@@ -193,7 +193,7 @@ export const recordConnectorEvent = async (input: {
   nonce: string;
   issuedAt: Date | string;
   requestId: string;
-  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL";
+  operation: "CLAIM" | "ACK" | "CONFIRM" | "FAIL" | "INTENT" | "ABORT";
   jobId: string;
   itemId?: string | null;
   printerId: string;
@@ -325,7 +325,7 @@ export const mutatePrintingReissueRequest = (input: {
   `);
 
 export const reconcilePrintingLifecycle = async (input: {
-  operation: "EXPIRE_CONFIRMATIONS" | "RECONCILE_BATCHES";
+  operation: "EXPIRE_CONFIRMATIONS" | "RECONCILE_BATCHES" | "RECOVER_UNSUBMITTED";
   requestId: string;
   limit: number;
   client?: SqlClient;

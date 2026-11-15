@@ -39,7 +39,7 @@ export type { TrustedPrinterAgentSession };
 
 type SessionState = {
   session: TrustedPrinterAgentSession;
-  chunks: Map<string, { jobId: string; itemId: string; licenseeId: string; batchId: string; payloadHash: string | null; acknowledged: boolean; terminal?: "CONFIRM" | "FAIL" }>;
+  chunks: Map<string, { jobId: string; itemId: string; attemptId: string | null; licenseeId: string; batchId: string; payloadHash: string | null; acknowledged: boolean; terminal?: "CONFIRM" | "FAIL" }>;
 };
 
 type ConnectorIdentityProjection = {
@@ -58,6 +58,7 @@ type ClaimedChunkProjection = {
   printJobId: string;
   printSessionId: string;
   printItemId: string;
+  attemptId?: string | null;
   jobNumber: string | null;
   reprintOfJobId: string | null;
   issueSequence: number;
@@ -115,6 +116,7 @@ const verifyMessage = (
     deviceFingerprint: session.deviceFingerprint,
     selectedPrinterId: message.type === "hello" ? message.selectedPrinterId : session.selectedPrinterId,
     connectorVersion: session.connectorVersion,
+    dispatchEvidenceVersion: message.type === "hello" && message.printerHealth?.dispatchEvidenceVersion === 1 ? 1 : null,
     sessionId: "sessionId" in message ? message.sessionId : null,
     chunkId: "chunkId" in message ? message.chunkId : null,
     printJobId: "printJobId" in message ? message.printJobId : null,
@@ -203,6 +205,7 @@ export const openTrustedPrinterAgentSession = async (
     publicKeyPem: registration.publicKeyPem,
     publicKeyFingerprint: hash(registration.publicKeyPem),
     manufacturerId: registration.userId,
+    dispatchEvidenceVersion: hello.printerHealth?.dispatchEvidenceVersion === 1 ? 1 : null,
   };
   verifyMessage(session, hello);
   await sessionMutation({
@@ -213,6 +216,7 @@ export const openTrustedPrinterAgentSession = async (
       agentId: session.agentId, deviceFingerprint: session.deviceFingerprint,
       publicKeyFingerprint: session.publicKeyFingerprint, connectorVersion: session.connectorVersion,
       helloNonce: hello.nonce,
+      dispatchEvidenceVersion: session.dispatchEvidenceVersion,
       expirySeconds: PRINT_AGENT_SESSION_EXPIRY_SECONDS,
     },
   });
@@ -301,6 +305,7 @@ export const buildNextPrintChunkForSession = async (
   session: TrustedPrinterAgentSession
 ) => {
   const state = active(session);
+  if ([...state.chunks.values()].some((chunk) => !chunk.terminal)) return null;
   try {
     await mutateActiveSession(session, "CHECK");
   } catch (error) {
@@ -333,7 +338,8 @@ export const buildNextPrintChunkForSession = async (
     operation: "CLAIM",
     jobId: randomUUID(),
     printerId: session.printerId,
-    details: { sessionId: session.id, deliveryMode: "PERSISTENT_SESSION" },
+    details: { sessionId: session.id, deliveryMode: "PERSISTENT_SESSION",
+      ...(session.dispatchEvidenceVersion === 1 ? { dispatchEvidenceVersion: 1 } : {}) },
   }) as ClaimedChunkProjection;
   if (!claimed?.available) return null;
 
@@ -358,6 +364,7 @@ export const buildNextPrintChunkForSession = async (
   state.chunks.set(chunkId, {
     jobId: claimed.printJobId,
     itemId: claimed.printItemId,
+    attemptId: claimed.attemptId || null,
     licenseeId: claimed.batch.licenseeId,
     batchId: claimed.batch.id,
     payloadHash: payload.payloadHash,
@@ -388,6 +395,7 @@ export const buildNextPrintChunkForSession = async (
     calibrationProfile: claimed.printer.calibrationProfile || null,
     labels: [{
       printItemId: claimed.printItemId,
+      attemptId: claimed.attemptId,
       issueSequence: claimed.issueSequence,
       code: claimed.code,
       payloadType: payload.payloadType,
@@ -480,6 +488,7 @@ export const handleTrustedSessionProgressMessage = async (
       messageSeq: message.messageSeq,
       bytesWritten: message.bytesWritten || null,
       reason: message.error || null,
+      attemptId: chunk.attemptId,
       outcomeIndeterminate: message.type === "label_failed" && message.error === "physical_outcome_unconfirmed",
     },
   });

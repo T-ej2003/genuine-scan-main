@@ -32,6 +32,11 @@ const isShutdownStarted = () => {
 export const reconcileExpiredAcknowledgedItems = async () => {
   if (isShutdownStarted()) return;
   await reconcilePrintingLifecycle({
+    operation: "RECOVER_UNSUBMITTED",
+    requestId: randomUUID(),
+    limit: 50,
+  });
+  await reconcilePrintingLifecycle({
     operation: "EXPIRE_CONFIRMATIONS",
     requestId: randomUUID(),
     limit: 50,
