@@ -209,11 +209,17 @@ async function staleFixture(publisherVersion = "15") {
 }
 
 test("stale signer successor publishes 16-18 and moves only the exact publisher invoke policy", async () => {
-  const { f, run } = await staleFixture(), result = await run();
+  const { f, candidate, run } = await staleFixture(), result = await run();
   assert.equal(result.brokerStaleSignerSuccessor.state, "BROKER_STALE_SIGNER_SUCCESSOR_CLOSED");
   assert.deepEqual(Object.keys(f.state.versions).filter(value => value !== "$LATEST").sort((a, b) => Number(a) - Number(b)), Array.from({ length: 18 }, (_, i) => String(i + 1)));
   assert.equal(digest(f.policies.get("mscqr-production-signer-policy-installer")), digest(staleSignerPublisherPolicy));
   assert(f.state.metadata.get(`${identityBootstrap.prefix}identity-bootstrap.json`)[staleSignerSuccessor.metadataKey]);
+  const journalKey = `${identityBootstrap.prefix}identity-bootstrap.json`;
+  const reservation = key => ({ value: f.state.objects.get(key), etag: f.state.etags.get(key) });
+  const anchor = assertEffectiveBootstrapTrustAnchor(f.state.objects.get(journalKey), candidate.manifest, candidate.packageSha256, f.state.metadata.get(journalKey),
+    reservation(`${identityBootstrap.prefix}broker-policy-successor.json`), reservation(brokerRecoverySuccessor.reservationKey),
+    reservation(brokerSignerSuccessor.reservationKey), false, reservation(staleSignerSuccessor.reservationKey));
+  assert.deepEqual(anchor.predecessor, { sourceSha: f.candidate.manifest.sourceSha, packageSha256: f.candidate.packageSha256, manifestSha256: f.candidate.manifestSha256 });
   const writes = f.state.writes.length;
   await assert.rejects(run());
   assert.equal(f.state.writes.length, writes);

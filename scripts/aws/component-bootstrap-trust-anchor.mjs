@@ -169,7 +169,8 @@ function assertBrokerStaleSignerSuccessorClosure(bootstrap, manifest, packageSha
   const closure = assertStaleSignerSuccessorClosure(metadata, bindings, fourthReservation.value, fourthReservation.etag, bootstrap);
   return { sourceSha: manifest.sourceSha, packageSha256, manifestSha256: digest(manifest), recovered: true, changed: true, policySuccessor: true, recoverySuccessor: true, signerSuccessor: true, staleSignerSuccessor: true,
     entryPoints: brokerStaleSignerSuccessorEntryPoints, allVersions: Array.from({ length: 18 }, (_, i) => String(i + 1)),
-    runtimeVersions: { ...firstClosure.runtimeVersions, ...secondClosure.runtimeVersions, ...thirdClosure.runtimeVersions, ...closure.runtimeVersions } };
+    runtimeVersions: { ...firstClosure.runtimeVersions, ...secondClosure.runtimeVersions, ...thirdClosure.runtimeVersions, ...closure.runtimeVersions },
+    predecessor: { sourceSha: thirdBindings.successor.sourceSha, packageSha256: thirdBindings.successor.packageSha256, manifestSha256: thirdBindings.successor.manifestSha256 } };
 }
 
 // The BROKER_CHANGE controller authenticates this immutable predecessor before
