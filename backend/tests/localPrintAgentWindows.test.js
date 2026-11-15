@@ -1,7 +1,3 @@
-if (!process.env.QR_SIGN_HMAC_SECRET && !process.env.QR_SIGN_PRIVATE_KEY) {
-  process.env.QR_SIGN_HMAC_SECRET = "windows-raw-print-test-secret";
-}
-
 const {
   buildSetupVerification,
   extractWindowsJobId,
@@ -27,8 +23,9 @@ const {
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { mergeCalibrationProfile } = require("../dist/local-print-agent/state");
-const { buildApprovedPrintPayload, getZplPayloadSafetyIssues } = require("../dist/services/printPayloadService");
+const { getZplPayloadSafetyIssues } = require("../dist/printing/printPayloadSafety");
 
 const assert = (condition, message) => {
   if (!condition) throw new Error(message);
@@ -437,20 +434,8 @@ const run = async () => {
     }
   }
 
-  const productionPayload = buildApprovedPrintPayload({
-    printer: {
-      id: "printer-synthetic", name: "ZDesigner ZT410-300dpi ZPL", connectionType: "LOCAL_AGENT",
-      commandLanguage: "AUTO", calibrationProfile: null, metadata: null,
-      capabilitySummary: { languages: ["ZPL"], dpi: 300 },
-    },
-    qr: {
-      id: "qr-synthetic", code: "c_windowsrawtest000000000000000001", batchId: "batch-synthetic",
-      licenseeId: "licensee-synthetic", tokenNonce: "nonce-synthetic",
-      tokenIssuedAt: new Date("2026-11-15T00:00:00Z"), tokenExpiresAt: new Date("2027-11-15T00:00:00Z"),
-      tokenHash: null,
-    },
-    manufacturerId: "manufacturer-synthetic", printJobId: "job-synthetic", printItemId: "item-synthetic",
-  });
+  const productionPayload = JSON.parse(execFileSync(process.execPath,
+    [path.join(__dirname, "fixtures/productionWindowsZplPayload.js")], { encoding: "utf8" }));
   const validZpl = productionPayload.payloadContent;
   assert(productionPayload.payloadType === "ZPL" && isRawWindowsZplPayload({
     payloadType: productionPayload.payloadType, labelLanguage: productionPayload.commandLanguage,
