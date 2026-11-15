@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='39bb1836069de34c7f16481519eb9d2ad40311f7ceb4009149e5477f67826296'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:39bb1836069de34c7f16481519eb9d2ad40311f7ceb4009149e5477f67826296'
+    AND source_contract_sha256='05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:39bb1836069de34c7f16481519eb9d2ad40311f7ceb4009149e5477f67826296')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:05ae908d7fb2d965b51b35ff9ff0551c256725d85270b9e779a8b42f0b7c2b4c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10316,7 +10316,7 @@ BEGIN
          OR item_row."agentAckedAt" IS NOT NULL
       THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
       IF item_row."dispatchedAt" IS NULL THEN
-        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
           "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',p_details->>'attemptId',
             'journalState',p_details->>'journalState','reason',left(coalesce(p_details->>'reason','connector_aborted'),500)),
           "updatedAt"=now_at WHERE id=item_row.id;
@@ -11488,7 +11488,7 @@ BEGIN
         ORDER BY pi.id FOR UPDATE OF pi SKIP LOCKED LIMIT (p_limit-affected)
       LOOP
         PERFORM set_config('app.printing_item_id',item_row.id,true);
-        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
           "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',item_row."dispatchMetadata"->>'attemptId',
             'journalState','UNKNOWN','recoveredAt',now_at),"updatedAt"=now_at WHERE id=item_row.id;
         INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")

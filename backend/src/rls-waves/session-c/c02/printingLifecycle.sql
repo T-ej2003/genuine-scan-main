@@ -2274,7 +2274,7 @@ BEGIN
          OR item_row."agentAckedAt" IS NOT NULL
       THEN RAISE EXCEPTION 'CONNECTOR_DISPATCH_EVIDENCE_DENIED' USING ERRCODE='42501'; END IF;
       IF item_row."dispatchedAt" IS NULL THEN
-        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
           "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',p_details->>'attemptId',
             'journalState',p_details->>'journalState','reason',left(coalesce(p_details->>'reason','connector_aborted'),500)),
           "updatedAt"=now_at WHERE id=item_row.id;
@@ -3446,7 +3446,7 @@ BEGIN
         ORDER BY pi.id FOR UPDATE OF pi SKIP LOCKED LIMIT (p_limit-affected)
       LOOP
         PERFORM set_config('app.printing_item_id',item_row.id,true);
-        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',
+        UPDATE public."PrintItem" SET state='RESERVED',"pipelineState"='QUEUED',"issuedAt"=NULL,
           "dispatchMetadata"=jsonb_build_object('lastUnsubmittedAttemptId',item_row."dispatchMetadata"->>'attemptId',
             'journalState','UNKNOWN','recoveredAt',now_at),"updatedAt"=now_at WHERE id=item_row.id;
         INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")

@@ -943,6 +943,8 @@ async function main() {
   denied(app, evidenceReceipt('INTENT', randomUUID(), 'evidence_wrong_attempt_1'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
   assert.equal(json(app, evidenceReceipt('ABORT', firstEvidenceClaim.attemptId, 'evidence_abort_nonce_1', { journalState: 'NOT_RESERVED' })).operation, 'ABORT');
   assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'RESERVED');
+  assert.equal(psql(admin, `SELECT "issuedAt" IS NULL FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 't',
+    'proven pre-intent ABORT must not make a later Stop look physically uncertain');
   const secondEvidenceClaim = evidenceClaim('evidence_claim_nonce_0002');
   assert.notEqual(secondEvidenceClaim.attemptId, firstEvidenceClaim.attemptId);
   denied(app, evidenceReceipt('ABORT', firstEvidenceClaim.attemptId, 'evidence_stale_abort_001'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
@@ -952,6 +954,8 @@ async function main() {
   const recoveryResults = await Promise.all([recovery(), recovery()]);
   assert.deepEqual(recoveryResults.map(result => result.output).sort(), ['0','1']);
   assert.equal(psql(admin, `SELECT state||':'||("dispatchedAt" IS NULL) FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 'RESERVED:true');
+  assert.equal(psql(admin, `SELECT "issuedAt" IS NULL FROM public."PrintItem" WHERE id='${evidenceItemId}'`), 't',
+    'worker recovery must clear the obsolete issuance marker');
   denied(app, evidenceReceipt('INTENT', secondEvidenceClaim.attemptId, 'evidence_stale_intent_1'), /CONNECTOR_DISPATCH_EVIDENCE_DENIED/);
   const thirdEvidenceClaim = evidenceClaim('evidence_claim_nonce_0003');
   psql(admin, `UPDATE public."PrintJob" SET status='STOPPED' WHERE id='${evidenceJobId}'`);
