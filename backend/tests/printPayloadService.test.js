@@ -2,6 +2,7 @@ if (!process.env.QR_SIGN_HMAC_SECRET && !process.env.QR_SIGN_PRIVATE_KEY) {
   process.env.QR_SIGN_HMAC_SECRET = "print-payload-test-secret";
 }
 
+const QRCode = require("qrcode");
 const {
   buildPrintPayloadDiagnostics,
   buildKnownGoodDiagnosticZplPayload,
@@ -233,6 +234,15 @@ const run = () => {
   });
   assert(Buffer.from(rawSpoolContent, "utf8").equals(Buffer.from(autoZplPayload.payloadContent.trim(), "utf8")),
     "Windows RAW spool bytes must equal the validated production ZPL bytes");
+  const productionQrField = rawSpoolContent.match(/\^BQN,2,(\d+)\^FDLA,([^^]+)\^FS/);
+  assert(productionQrField && productionQrField[2] === autoZplPayload.scanUrl,
+    "Production RAW ZPL must encode the approved scan URL in one native QR field");
+  const productionQrModules = QRCode.create(productionQrField[2], { errorCorrectionLevel: "L" }).modules;
+  const darkModules = Array.from(productionQrModules.data).filter(Boolean).length;
+  assert(darkModules > productionQrModules.data.length * 0.25 && darkModules < productionQrModules.data.length * 0.75,
+    "The production QR field must encode a varied QR symbol, not a solid black block");
+  assert(productionQrModules.get(0, 0) && !productionQrModules.get(7, 0) && productionQrModules.get(6, 0),
+    "The production QR field must contain the QR finder and separator pattern");
   assert(governedPayload.scanToken === governedToken, "Claim-time payload generation must preserve replay epoch");
   const diagnostics = buildPrintPayloadDiagnostics({
     payloadType: governedPayload.payloadType,
