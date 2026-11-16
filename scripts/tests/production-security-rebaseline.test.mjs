@@ -343,23 +343,42 @@ test("signer readback detects trust, permission, key, alias and grant drift", ()
     { aliases: [{ AliasName: keyAlias, TargetKeyId: "substituted" }] },
     { grants: [{ GranteePrincipal: "arn:aws:iam::368992683803:role/other", Operations: ["Sign"] }] },
   ]) assert.throws(() => assertProductionSecurityRebaselineSignerReadback({ ...fixture, ...changed }));
+  for (const [claim, value] of [
+    ["token.actions.githubusercontent.com:aud", "other"],
+    ["token.actions.githubusercontent.com:sub", "repo:other/repo:environment:production-security-rebaseline-signing"],
+    ["token.actions.githubusercontent.com:repository_id", "9"],
+    ["token.actions.githubusercontent.com:ref", "refs/heads/untrusted"],
+  ]) {
+    const invalidTrust = structuredClone(trust);
+    invalidTrust.Statement[0].Condition.StringEquals[claim] = value;
+    assert.throws(() => assertProductionSecurityRebaselineSignerReadback({ ...fixture,
+      role: { ...fixture.role, AssumeRolePolicyDocument: invalidTrust } }), `Invalid OIDC ${claim} must fail`);
+  }
 });
 
-test("preparation artifact IDs, archive digests, repository privacy, run, and source are authenticated before signing", () => {
+test("public preparation artifacts require protected approval, exact repository identity, run, source and digests", () => {
   const reference = (artifactId) => ({ sourceSha, runId: "77", runAttempt: "1", artifactId, artifactDigest: `sha256:${digest}`, fileSha256: digest });
   const requirementsReference = reference("101"), canonicalReference = reference("102"), publicationReference = { workflowFile: SECURITY_REBASELINE_IMAGE_PUBLISHER_WORKFLOW, ...reference("103") };
   const run = { id: 77, run_attempt: 1, head_sha: sourceSha, head_branch: "main", event: "workflow_dispatch", path: SECURITY_REBASELINE_SIGNER_WORKFLOW,
-    repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: true },
-    head_repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: true } };
+    repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: false },
+    head_repository: { id: 1145608538, full_name: "T-ej2003/genuine-scan-main", private: false } };
   const artifact = (id, name) => ({ id, name, digest: `sha256:${digest}`, expired: false,
     workflow_run: { id: 77, head_sha: sourceSha, repository_id: 1145608538, head_repository_id: 1145608538 } });
   const artifacts = [artifact(101, "production-security-rebaseline-requirements"), artifact(102, "production-security-rebaseline-canonical"), artifact(103, "production-security-rebaseline-image-publication")];
   const expected = { run, artifacts, sourceSha, runId: "77", runAttempt: "1", requirementsReference, canonicalReference, publicationReference };
+  const environment = { id: 42, name: SECURITY_REBASELINE_SIGNER_ENVIRONMENT, can_admins_bypass: false,
+    protection_rules: [{ type: "required_reviewers", prevent_self_review: false, reviewers: [{ type: "User", reviewer: { id: 183396573, login: "T-ej2003" } }] }],
+    deployment_branch_policy: { protected_branches: true, custom_branch_policies: false } };
+  const approval = { state: "approved", user: { id: 183396573, login: "T-ej2003" }, environments: [{ id: 42, name: environment.name }] };
+  assert.equal(assertSecurityRebaselineSigningEnvironment(environment, [approval], "T-ej2003"), true);
+  assert.throws(() => assertSecurityRebaselineSigningEnvironment(environment, [], "T-ej2003"), /actual authorized environment approval/);
   assert.equal(assertPreparationWorkflowArtifacts(expected), true);
   for (const attack of [
     { run: { ...run, head_sha: "f".repeat(40) } },
+    { run: { ...run, head_branch: "untrusted" } },
     { run: { ...run, path: ".github/workflows/other.yml" } },
-    { run: { ...run, repository: { ...run.repository, private: false } } },
+    { run: { ...run, repository: { ...run.repository, id: 9 } } },
+    { run: { ...run, head_repository: { ...run.head_repository, full_name: "other/repo" } } },
     { artifacts: artifacts.map((value) => value.id === 103 ? { ...value, digest: `sha256:${"f".repeat(64)}` } : value) },
     { artifacts: artifacts.map((value) => value.id === 103 ? { ...value, expired: true } : value) },
     { artifacts: [...artifacts, artifacts[0]] },
