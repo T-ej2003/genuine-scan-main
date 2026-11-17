@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { randomUUID } from "crypto";
+import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger";
 import { isValidRequestId } from "../utils/requestId";
 import { AuthenticatedSessionClaims } from "../types";
@@ -96,23 +97,56 @@ export async function hydrateTenantIfNeeded(
     payload,
     { capability: databaseSessionCapability, requestId, purpose: "auth-session-hydration" },
     async (tx, context) => {
-      const user = await loadAuthenticatedActor(tx);
-      if (user.id !== context.userId || user.role !== context.role) throw new Error("Authenticated actor changed");
-      const scope = user && isManufacturerRole(user.role)
-        ? await resolveManufacturerSessionScope({
-            manufacturerId: user.id,
-            legacyLicenseeId: user.licenseeId,
-            legacyOrgId: user.orgId,
-            requestedLicenseeId: context.licenseeId,
-            requestedOrgId: context.organizationId,
-            requestedScopeVersion: payload.scopeVersion,
-          }, tx)
-        : null;
-      return {
-        user,
-        manufacturerScope: scope,
-        canonicalAssurance: context.authAssurance,
-      };
+      const hydrationStartedAt = performance.now();
+      let actorLoadMs: number | null = null;
+      let manufacturerScopeMs: number | null = null;
+      try {
+        const actorStartedAt = performance.now();
+        let user;
+        try {
+          user = await loadAuthenticatedActor(tx);
+        } finally {
+          actorLoadMs = performance.now() - actorStartedAt;
+        }
+        if (user.id !== context.userId || user.role !== context.role) throw new Error("Authenticated actor changed");
+        let scope = null;
+        if (isManufacturerRole(user.role)) {
+          const scopeStartedAt = performance.now();
+          try {
+            scope = await resolveManufacturerSessionScope({
+              manufacturerId: user.id,
+              legacyLicenseeId: user.licenseeId,
+              legacyOrgId: user.orgId,
+              requestedLicenseeId: context.licenseeId,
+              requestedOrgId: context.organizationId,
+              requestedScopeVersion: payload.scopeVersion,
+            }, tx);
+          } finally {
+            manufacturerScopeMs = performance.now() - scopeStartedAt;
+          }
+        }
+        return {
+          user,
+          manufacturerScope: scope,
+          canonicalAssurance: context.authAssurance,
+        };
+      } finally {
+        const hydrationMs = performance.now() - hydrationStartedAt;
+        if (isValidRequestId(requestId) && hydrationMs >= 250) {
+          const rounded = (value: number | null) => value === null ? null : Math.round(value * 10) / 10;
+          try {
+            logger.info(JSON.stringify({
+              event: "auth_hydration_timing",
+              requestId,
+              hydrationMs: rounded(hydrationMs),
+              actorLoadMs: rounded(actorLoadMs),
+              manufacturerScopeMs: rounded(manufacturerScopeMs),
+            }));
+          } catch {
+            // Diagnostics must not change authentication outcomes.
+          }
+        }
+      }
     }
   );
 
