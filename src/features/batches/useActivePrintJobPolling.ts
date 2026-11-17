@@ -27,6 +27,14 @@ type ActivePrintJobPollingParams = {
   onBatchesChanged?: () => Promise<void> | void;
 };
 
+const markSettledRefresh = (seen: Map<string, "SETTLED" | "CONFIRMED">, job: PrintJobRow) => {
+  const previous = seen.get(job.id);
+  const next = job.status === "CONFIRMED" ? "CONFIRMED" : "SETTLED";
+  if (previous === "CONFIRMED" || (previous === "SETTLED" && next === "SETTLED")) return false;
+  seen.set(job.id, next);
+  return true;
+};
+
 export function useActivePrintJobPolling({
   printJobId,
   printProgressOpen,
@@ -39,7 +47,7 @@ export function useActivePrintJobPolling({
   loadRecentPrintJobs,
   onBatchesChanged,
 }: ActivePrintJobPollingParams) {
-  const completedRefreshJobIdsRef = useRef(new Set<string>());
+  const refreshedSettledJobsRef = useRef(new Map<string, "SETTLED" | "CONFIRMED">());
   const realtime = usePrintJobRealtime(printJobId);
   const realtimeJob = realtime.job as PrintJobRow | null;
   const realtimeJobRef = useRef(realtimeJob);
@@ -64,8 +72,7 @@ export function useActivePrintJobPolling({
     if (!printJobId || !realtime.job) return;
     const job = realtime.job as PrintJobRow;
     syncPrintJobProgress(job, progressStateSetters);
-    if (isPrintJobServerSettled(job) && !completedRefreshJobIdsRef.current.has(printJobId)) {
-      completedRefreshJobIdsRef.current.add(printJobId);
+    if (isPrintJobServerSettled(job) && markSettledRefresh(refreshedSettledJobsRef.current, job)) {
       updateActivePrintSession({
         active: false,
         jobId: printJobId,
@@ -125,8 +132,7 @@ export function useActivePrintJobPolling({
         callbacksRef.current.setPrintProgressNotice(null);
         syncPrintJobProgress(job, callbacksRef.current.progressStateSetters);
         const settled = isPrintJobServerSettled(job);
-        if (settled && !completedRefreshJobIdsRef.current.has(polledJobId)) {
-          completedRefreshJobIdsRef.current.add(polledJobId);
+        if (settled && markSettledRefresh(refreshedSettledJobsRef.current, job)) {
           updateActivePrintSession({
             active: false,
             jobId: polledJobId,

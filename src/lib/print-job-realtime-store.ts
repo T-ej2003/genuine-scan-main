@@ -49,6 +49,10 @@ const extractPrintJobView = (payload: any) => {
 const isTerminal = (job: any) =>
   ["CONFIRMED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED", "STOPPED"].includes(String(job?.status || "").toUpperCase());
 
+// A stopped session can still accept signed confirmations for acknowledged items.
+const isFinalForReconciliation = (job: any) =>
+  ["CONFIRMED", "PARTIALLY_COMPLETED", "FAILED", "CANCELLED"].includes(String(job?.status || "").toUpperCase());
+
 const isValidJobView = (jobId: string, job: any) =>
   job && typeof job === "object" && job.id === jobId && typeof job.status === "string" &&
   Number.isFinite(Date.parse(String(job.updatedAt || job.createdAt || "")));
@@ -58,6 +62,7 @@ const acceptJobView = (jobId: string, view: any) => {
   if (!isValidJobView(jobId, job)) return false;
   const current = getSnapshot(jobId).job;
   if (current) {
+    if (String(current.status).toUpperCase() === "CONFIRMED" && String(job.status).toUpperCase() !== "CONFIRMED") return false;
     if (isTerminal(current) && !isTerminal(job)) return false;
     const previousAt = Date.parse(String(current.updatedAt || current.createdAt || ""));
     const incomingAt = Date.parse(String(job.updatedAt || job.createdAt || ""));
@@ -71,13 +76,13 @@ const acceptJobView = (jobId: string, view: any) => {
 const reconcileJob = (jobId: string) => {
   const state = reconciliations.get(jobId) || { timer: null, inFlight: false, pending: false, lastFetchAt: 0 };
   reconciliations.set(jobId, state);
-  if (isTerminal(getSnapshot(jobId).job)) return;
+  if (isFinalForReconciliation(getSnapshot(jobId).job)) return;
   if (state.inFlight) { state.pending = true; return; }
   if (state.timer) return;
   const delay = Math.max(0, state.lastFetchAt + RECONCILE_MIN_INTERVAL_MS - Date.now());
   state.timer = setTimeout(async () => {
     state.timer = null;
-    if (state.inFlight || isTerminal(getSnapshot(jobId).job)) return;
+    if (state.inFlight || isFinalForReconciliation(getSnapshot(jobId).job)) return;
     state.inFlight = true;
     state.lastFetchAt = Date.now();
     try {

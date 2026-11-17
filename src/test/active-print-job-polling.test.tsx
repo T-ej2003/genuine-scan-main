@@ -12,6 +12,8 @@ vi.mock("@/lib/api-client", () => ({
   default: {
     getPrintJobStatus: vi.fn(),
     streamPrintJobStatus: vi.fn(),
+    createPrintJob: vi.fn(),
+    resumePrintJob: vi.fn(),
   },
 }));
 
@@ -27,7 +29,9 @@ const baseJob = {
   session: { status: "ACTIVE", totalItems: 10, confirmedItems: 4, remainingToPrint: 6 },
 };
 
-function PollingProbe({ job, open = true, showDialog = false }: { job: Record<string, unknown>; open?: boolean; showDialog?: boolean }) {
+function PollingProbe({ job, open = true, showDialog = false, onRecentJobsRefresh }: {
+  job: Record<string, unknown>; open?: boolean; showDialog?: boolean; onRecentJobsRefresh?: () => Promise<void>;
+}) {
   const liveJob = useActivePrintJobPolling({
     printJobId: "job-live",
     printProgressOpen: open,
@@ -49,7 +53,7 @@ function PollingProbe({ job, open = true, showDialog = false }: { job: Record<st
       setDirectRemainingToPrint: vi.fn(),
     },
     setPrintProgressNotice: vi.fn(),
-    loadRecentPrintJobs: vi.fn(),
+    loadRecentPrintJobs: onRecentJobsRefresh || vi.fn(),
     onBatchesChanged: vi.fn(),
   });
   return <div>
@@ -71,6 +75,22 @@ const confirmedBackendProjection = () => ({
     id: `item-${index + 1}`, printSessionId: "session-live", state: "PRINT_CONFIRMED", printConfirmedAt: new Date().toISOString(),
   })),
 });
+
+const stoppedBackendProjection = () => ({
+  job: { ...baseJob, status: "STOPPED", pipelineState: "STOPPED", updatedAt: new Date().toISOString() },
+  session: { ...baseJob.session, status: "STOPPED", confirmedItems: 4 },
+  items: [],
+});
+
+const stoppedStatusView = () => {
+  const { job, session, items } = stoppedBackendProjection();
+  return { ...job, session, items };
+};
+
+const confirmedStatusView = () => {
+  const { job, session, items } = confirmedBackendProjection();
+  return { ...job, session, items };
+};
 
 describe("active print job polling", () => {
   afterEach(() => {
@@ -259,6 +279,126 @@ describe("active print job polling", () => {
     expect(screen.getByTestId("live-job-items")).toHaveTextContent("10");
     expect(screen.getByText("Print completed")).toBeInTheDocument();
     expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
+  });
+
+  it("reconciles STOPPED to CONFIRMED from an identity-only SSE event without printing again", async () => {
+    vi.useFakeTimers();
+    let onMessage: ((payload: any) => void) | undefined;
+    const refreshRecentJobs = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId, message) => {
+      onMessage = message;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: true, data: stoppedStatusView() } as any)
+      .mockResolvedValue({ success: true, data: confirmedBackendProjection() } as any);
+    render(<PollingProbe job={baseJob} showDialog onRecentJobsRefresh={refreshRecentJobs} />);
+    await flush();
+    expect(refreshRecentJobs).not.toHaveBeenCalled();
+
+    await act(async () => {
+      onMessage?.({ envelope: "MSCQR_SSE_V1", type: "label_confirmed",
+        payload: { printJobId: "job-live", view: null } });
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(refreshRecentJobs).toHaveBeenCalledTimes(1);
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    expect(apiClient.resumePrintJob).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a stopped job after SSE reconnect and displays committed success", async () => {
+    vi.useFakeTimers();
+    let onOpen: (() => void) | undefined;
+    let onError: (() => void) | undefined;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId, _message, options) => {
+      onOpen = options?.onOpen;
+      onError = options?.onError;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: true, data: stoppedStatusView() } as any)
+      .mockResolvedValue({ success: true, data: confirmedStatusView() } as any);
+    render(<PollingProbe job={baseJob} showDialog />);
+    await flush();
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("STOPPED");
+
+    await act(async () => {
+      onError?.();
+      onOpen?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+    expect(apiClient.getPrintJobStatus).toHaveBeenLastCalledWith("job-live", expect.objectContaining({ force: true }));
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
+    expect(screen.getByTestId("live-job-confirmed")).toHaveTextContent("10");
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(apiClient.createPrintJob).not.toHaveBeenCalled();
+    expect(apiClient.resumePrintJob).not.toHaveBeenCalled();
+  });
+
+  it("coalesces duplicate reconnects and does not poll a stopped job forever", async () => {
+    vi.useFakeTimers();
+    let onOpen: (() => void) | undefined;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId, _message, options) => {
+      onOpen = options?.onOpen;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: stoppedStatusView() } as any);
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    await act(async () => {
+      onOpen?.(); onOpen?.(); onOpen?.();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("STOPPED");
+  });
+
+  it("cannot regress a newer CONFIRMED view with a delayed STOPPED response", async () => {
+    vi.useFakeTimers();
+    let onOpen: (() => void) | undefined;
+    let onMessage: ((payload: any) => void) | undefined;
+    let resolveDelayed: ((value: any) => void) | undefined;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId, message, options) => {
+      onMessage = message;
+      onOpen = options?.onOpen;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: true, data: stoppedStatusView() } as any)
+      .mockImplementationOnce(() => new Promise(resolve => { resolveDelayed = resolve; }));
+    render(<PollingProbe job={baseJob} showDialog />);
+    await flush();
+    await act(async () => { onOpen?.(); vi.runOnlyPendingTimers(); });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      onMessage?.({ envelope: "MSCQR_SSE_V1", type: "label_confirmed",
+        payload: { printJobId: "job-live", view: confirmedBackendProjection() } });
+      resolveDelayed?.({ success: true, data: { ...stoppedBackendProjection(),
+        job: { ...stoppedBackendProjection().job, updatedAt: new Date(Date.now() + 5_000).toISOString() } } });
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+  });
+
+  it("does not reconcile or continuously poll an already confirmed job on reconnect", async () => {
+    vi.useFakeTimers();
+    let onOpen: (() => void) | undefined;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId, _message, options) => {
+      onOpen = options?.onOpen;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: confirmedStatusView() } as any);
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    await act(async () => { onOpen?.(); onOpen?.(); await vi.advanceTimersByTimeAsync(120_000); });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
   });
 
   it("refetches authoritative status for a production notification without a view", async () => {
