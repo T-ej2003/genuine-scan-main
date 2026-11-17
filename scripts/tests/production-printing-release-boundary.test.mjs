@@ -27,7 +27,7 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 26);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 27);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
 });
 
@@ -63,10 +63,13 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 10); assert.equal(pkg.policySql.length, 19);
-  assert.deepEqual(pkg.definitions.slice(-3).map(({ schema, name }) => `${schema}.${name}`), [
-    "app_rls.printing_worker_network_job", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
+  assert.equal(pkg.definitions.length, 11); assert.equal(pkg.policySql.length, 19);
+  assert.deepEqual(pkg.definitions.slice(-4).map(({ schema, name }) => `${schema}.${name}`), [
+    "app_rls.printing_worker_network_job", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
   ]);
+  const publicExecutor = pkg.definitions.find(({ name }) => name === "public_verify_execute");
+  assert.match(publicExecutor.sql, /activation\."eventType"='AUTOMATIC_ACTIVATION'/);
+  assert.match(publicExecutor.sql, /auto_activated AND qr\."issuanceMode"='GOVERNED_PRINT'/);
   for (const identity of PUBLIC_VERIFICATION_RELEASE_POLICIES) {
     const [table, name] = identity.split(".");
     assert.ok(pkg.policySql.some(sql => sql.startsWith(`CREATE POLICY "${name}" ON public."${table}" `)));
@@ -88,9 +91,9 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
   const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
     packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
-    status: "APPLIED", writeCount: 53 };
+    status: "APPLIED", writeCount: 54 };
   assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
-    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 53);
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 54);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);

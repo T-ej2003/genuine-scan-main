@@ -3,7 +3,7 @@ const assert = require('node:assert/strict'), crypto = require('node:crypto'), {
 const session = require('./production-c02-session-executor.cjs');
 const { canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue } = require('./production-printing-routine-delta-executor.cjs');
 const hash = x => crypto.createHash('sha256').update(typeof x === 'string' ? x : canonicalJson(x)).digest('hex');
-const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job', 'printing_worker_network_job', 'verify_signed_qr', 'claim_customer_ownership'];
+const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job', 'printing_worker_network_job', 'public_verify_execute', 'verify_signed_qr', 'claim_customer_ownership'];
 function validatePackage(pkg) {
     const { packageSha256, ...body } = pkg;
     assert.equal(packageSha256, hash(body));
@@ -16,7 +16,7 @@ function validatePackage(pkg) {
     session.decodePackage(gzipSync(sessionBytes).toString('base64'), hash(sessionBytes.toString()));
     assert.deepEqual(pkg.definitions.map(definition => definition.name), names);
     for (const definition of pkg.definitions) {
-        const schema = ['verify_signed_qr', 'claim_customer_ownership'].includes(definition.name) ? 'app_public' : 'app_rls';
+        const schema = ['public_verify_execute', 'verify_signed_qr', 'claim_customer_ownership'].includes(definition.name) ? 'app_public' : 'app_rls';
         assert.equal(definition.schema, schema);
         assert.ok(definition.sql.startsWith(`CREATE OR REPLACE FUNCTION ${schema}.${definition.name}(`));
     }
@@ -134,7 +134,7 @@ async function executeC02CombinedTransaction({ tx, pkg, checkpoint = async () =>
     await tx.$executeRawUnsafe('RESET ROLE');
     await checkpoint('before-combined-verification');
     assert.equal(canonicalJson(await digest()), canonicalJson(pkg.successorCatalogue), 'Combined C02 successor mismatch');
-    return { status: 'APPLIED', writeCount: base.writeCount + 38 };
+    return { status: 'APPLIED', writeCount: base.writeCount + 39 };
 }
 async function main() {
     let client;
@@ -143,7 +143,7 @@ async function main() {
         const [encoded, expected, host] = process.argv.slice(1);
         assert.match(host, /^[a-z0-9.-]+$/);
         assert.match(encoded, /^[A-Za-z0-9+/=]+$/);
-        assert.ok(encoded.length <= 37 * 1024);
+        assert.ok(encoded.length <= 38 * 1024);
         const bytes = brotliDecompressSync(Buffer.from(encoded, 'base64'), { maxOutputLength: 256 * 1024 });
         assert.equal(hash(bytes.toString()), expected);
         assert.equal(canonicalJson(JSON.parse(bytes)), bytes.toString());

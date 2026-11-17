@@ -4,13 +4,15 @@ import { NAMED_SQL_FUNCTION_CONTRACTS } from "../rls/lib/named-sql-function-cont
 
 export const PRINTING_RELEASE_NAMES = Object.freeze(["printing_connector_event", "printing_connector_identity",
   "printing_connector_session", "printing_control_job", "printing_create_job", "printing_readiness", "printing_reissue_request", "printing_test_label_job", "printing_worker_network_job"]);
-export const PUBLIC_VERIFICATION_RELEASE_NAMES = Object.freeze(["verify_signed_qr", "claim_customer_ownership"]);
+export const PUBLIC_VERIFICATION_RELEASE_NAMES = Object.freeze(["public_verify_execute", "verify_signed_qr", "claim_customer_ownership"]);
+const PUBLIC_VERIFY_EXECUTE_IDENTITY = "app_public.public_verify_execute(p_qr_id text, p_proof_source text, p_checked_at timestamp without time zone, p_request_id text, p_actor_ip_hash text, p_actor_device_hash text, p_session_start_token_hash text, p_signed_token_digest text)";
 export const PUBLIC_VERIFICATION_RELEASE_POLICIES = Object.freeze([
   "PrintItem.public_verification_printitem_select", "PrintSession.public_verification_printsession_select",
   "PrintAuditEvent.public_verification_printauditevent_select",
 ]);
 export const PRINTING_RELEASE_OBJECTS = Object.freeze({
   routines: [...PRINTING_RELEASE_NAMES, ...PUBLIC_VERIFICATION_RELEASE_NAMES].map(name => {
+    if (name === "public_verify_execute") return PUBLIC_VERIFY_EXECUTE_IDENTITY;
     const contract = NAMED_SQL_FUNCTION_CONTRACTS.find(c => c.name === name);
     assert.equal(contract.definitionStatus, "production-reviewed");
     return `${contract.schema}.${name}(${contract.identityArguments})`;
