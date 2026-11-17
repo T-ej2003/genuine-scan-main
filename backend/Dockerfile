@@ -59,7 +59,7 @@ LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install --global npm@11.18.0 --no-audit --no-fund \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && rm -rf /root/.npm
 
 COPY --chown=node:node backend/package*.json ./
@@ -123,7 +123,7 @@ LABEL org.opencontainers.image.revision=${RELEASE_GIT_SHA} \
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install --global npm@11.18.0 --no-audit --no-fund \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && rm -rf /root/.npm
 COPY --chown=node:node backend/package*.json ./
 COPY --chown=node:node backend/prisma ./prisma
