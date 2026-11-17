@@ -96,6 +96,8 @@ export function assertRuntimePackaging(root) {
   }
   assert.match(readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8"), /backend\|worker\) printf 'runtime'/);
   const compose = readFileSync(path.join(root, "docker-compose.yml"), "utf8");
+  const backendService = compose.split(/^  backend:\s*$/m)[1]?.split(/^  [a-z][^\n]*:\s*$/m)[0] || "";
+  assert.match(backendService, /^      target: runtime$/m, "Compose backend must build the production runtime stage");
   assert.match(compose, /^  worker:[\s\S]*?^    command: \["node", "dist\/worker\.js"\]/m, "Compose worker must use the runtime's direct Node entry point");
 }
 

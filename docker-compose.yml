@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      target: runtime
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
         RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
