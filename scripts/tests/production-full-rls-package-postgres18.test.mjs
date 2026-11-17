@@ -66,10 +66,11 @@ const run = (command, args, options = {}) => {
     cwd: options.cwd || root,
     env: { ...(options.cleanEnv ? {} : process.env), ...(options.env || {}) },
     encoding: "utf8",
+    input: options.input,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`${options.label || command} failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+    throw new Error(`${options.label || command} failed: ${`${result.error?.message || ""}\n${result.stdout || ""}${result.stderr || ""}`.trim()}`);
   }
   return String(result.stdout || "").trim();
 };
@@ -93,7 +94,15 @@ const databaseUrl = (base, database, user) => {
   return url.toString();
 };
 
-const psql = (url, args, label) => run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { label });
+const psql = (url, args, label) => {
+  const commandIndex = args.indexOf("-c");
+  const largeSql = commandIndex >= 0 && String(args[commandIndex + 1] || "").length > 64 * 1024;
+  const safeArgs = largeSql ? [...args.slice(0, commandIndex), "-f", "-", ...args.slice(commandIndex + 2)] : args;
+  return run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...safeArgs], {
+    label,
+    input: largeSql ? args[commandIndex + 1] : undefined,
+  });
+};
 const scalar = (url, sql, label) => psql(url, ["-q", "-t", "-A", "-c", sql], label).split("\n").at(-1);
 
 const b01PolicyFixtureSql = (installSource, dropSource) => {
