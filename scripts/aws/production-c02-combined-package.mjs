@@ -33,7 +33,7 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
   const evidencePolicies = ["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"];
   const evidenceGrants = read("scripts/rls/sql/generated/21-runtime-grants.sql").split("\n")
     .filter(line => /^GRANT (?:SELECT|UPDATE) \(.+\) ON TABLE public\."(?:PrintItemEvent|PrintJobChunk|QRCode)" TO "(?:mscqr_rls_cert_|mscqr_prd_rls_phase2_)auth_owner";$/.test(line)
-      && (!line.includes('public."QRCode"') || line.startsWith('GRANT SELECT') && line.includes('"customerVerifiableAt"') && line.includes('"printJobId"')
+      && (!line.includes('public."QRCode"') || line.startsWith('GRANT SELECT') && line.includes('"displayCode"') && line.includes('"customerVerifiableAt"') && line.includes('"printJobId"')
         || line.startsWith('GRANT UPDATE') && line.includes('"blockedAt"')))
     .map(line => line.replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
   assert.deepEqual(evidenceGrants, [

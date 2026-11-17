@@ -135,7 +135,7 @@ async function main() {
         const [encoded, expected, host] = process.argv.slice(1);
         assert.match(host, /^[a-z0-9.-]+$/);
         assert.match(encoded, /^[A-Za-z0-9+/=]+$/);
-        assert.ok(encoded.length <= 36 * 1024);
+        assert.ok(encoded.length <= 37 * 1024);
         const bytes = gunzipSync(Buffer.from(encoded, 'base64'), { maxOutputLength: 192 * 1024 });
         assert.equal(hash(bytes.toString()), expected);
         assert.equal(canonicalJson(JSON.parse(bytes)), bytes.toString());
