@@ -23,7 +23,7 @@ require_command aws
 source_region="${SOURCE_REGION:-eu-west-2}"
 target_standby="${TARGET_STANDBY:-}"
 target_region="${TARGET_REGION:-}"
-source_db="${SOURCE_DB_IDENTIFIER:-mscqr-prod-db}"
+source_db="${SOURCE_DB_IDENTIFIER:-mscqr-production-rls-green-phase2}"
 
 if [ -z "$target_region" ]; then
   target_region="$(infer_target_region "$target_standby")"
