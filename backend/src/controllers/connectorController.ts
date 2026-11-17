@@ -13,7 +13,12 @@ const downloadParamsSchema = z.object({
   platform: z.enum(["macos", "windows", "windowsUnsignedTest"]),
 }).strict();
 
-const normalizeBaseUrl = (value?: string | null) => String(value || "").trim().replace(/\/+$/, "");
+const normalizeBaseUrl = (value?: string | null) => {
+  const url = String(value || "").trim();
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end--;
+  return url.slice(0, end);
+};
 
 export const resolveConnectorBaseUrl = (req: Request) => {
   const explicitApi = normalizeBaseUrl(process.env.PUBLIC_API_BASE_URL);

@@ -33,6 +33,8 @@ try {
   assert.equal(resolveConnectorBaseUrl(asgRequest()), "https://mscqr.example");
   process.env.CLIENT_IP_TRUST_MODE = "nginx";
   assert.equal(resolveConnectorBaseUrl(request({ forwardedProto: "https", origin: "https://origin.example" })), "https://origin.example");
+  assert.equal(resolveConnectorBaseUrl(request({ origin: `https://origin.example${"/".repeat(20_000)}x` })), `https://origin.example${"/".repeat(20_000)}x`);
+  assert.equal(resolveConnectorBaseUrl(request({ origin: `https://origin.example${"/".repeat(20_000)}` })), "https://origin.example");
   process.env.PUBLIC_API_BASE_URL = "https://api.example/";
   assert.equal(resolveConnectorBaseUrl(request()), "https://api.example");
   delete process.env.PUBLIC_API_BASE_URL;
