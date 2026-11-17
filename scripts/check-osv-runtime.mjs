@@ -95,6 +95,8 @@ export function assertRuntimePackaging(root) {
     assert.deepEqual(runtime.match(/^COPY --from=.*$/gm), ["COPY --from=builder /app/dist /usr/share/nginx/html"]);
   }
   assert.match(readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8"), /backend\|worker\) printf 'runtime'/);
+  const compose = readFileSync(path.join(root, "docker-compose.yml"), "utf8");
+  assert.match(compose, /^  worker:[\s\S]*?^    command: \["node", "dist\/worker\.js"\]/m, "Compose worker must use the runtime's direct Node entry point");
 }
 
 export function enforceRuntimeFindings(report, browser, root, { acceptance = { schemaVersion: 1, entries: [] }, today = new Date().toISOString().slice(0, 10), browserProof, imageProof } = {}) {
