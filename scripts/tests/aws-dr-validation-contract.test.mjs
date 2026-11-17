@@ -4,8 +4,10 @@ import { extractGuardrailRunBlock, guardrailRunBlockIsCanonical, isDrRelevantCha
 
 const workflow = readFileSync(new URL("../../.github/workflows/aws-dr-operations.yml", import.meta.url), "utf8");
 const topology = readFileSync(new URL("../dr/aws-dr-topology-inventory.sh", import.meta.url), "utf8");
+const runbook = readFileSync(new URL("../../documents/ops/aws-dr-automation.md", import.meta.url), "utf8");
 assert.match(workflow, /SOURCE_DB_IDENTIFIER="\$\{SOURCE_DB_IDENTIFIER:-mscqr-production-rls-green-phase2\}"/);
 assert.match(topology, /source_db="\$\{SOURCE_DB_IDENTIFIER:-mscqr-production-rls-green-phase2\}"/);
+assert.doesNotMatch(runbook, /SOURCE_DB_IDENTIFIER=mscqr-prod-db|SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-prod-db-/);
 
 assert.equal(isDrRelevantChange({ filename: "ops/deploy/a.yml", previous_filename: "ops/deploy/b.yml" }), true);
 assert.equal(isDrRelevantChange({ filename: "docs/a.md", previous_filename: "ops/deploy/b.yml" }), true);

@@ -273,9 +273,9 @@ The command is read-only and may also use `DB_CLUSTER_IDENTIFIER` for Aurora-sty
 ## DB Restore Plan
 
 ```bash
-SOURCE_DB_IDENTIFIER=mscqr-prod \
+SOURCE_DB_IDENTIFIER=mscqr-production-rls-green-phase2 \
 TARGET_REGION=ap-south-1 \
-SNAPSHOT_IDENTIFIER=rds:mscqr-prod-2026-05-11 \
+SNAPSHOT_IDENTIFIER=rds:mscqr-production-rls-green-phase2-YYYY-MM-DD-HH-MM \
 TARGET_DB_IDENTIFIER=mscqr-dr-recovery-20260511 \
 scripts/dr/generate-db-restore-plan.sh
 ```
@@ -315,9 +315,9 @@ Exact Mumbai sequence:
 Local commands:
 
 ```bash
-SOURCE_REGION=eu-west-2 TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 SOURCE_DB_IDENTIFIER=mscqr-prod-db scripts/dr/aws-dr-topology-inventory.sh
-SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-prod-db-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD TARGET_STANDBY=mumbai scripts/dr/generate-cross-region-snapshot-copy-plan.sh
-CONFIRM_SNAPSHOT_COPY=I_APPROVE_CROSS_REGION_SNAPSHOT_COPY SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-prod-db-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD scripts/dr/apply-cross-region-snapshot-copy-approved.sh
+SOURCE_REGION=eu-west-2 TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 SOURCE_DB_IDENTIFIER=mscqr-production-rls-green-phase2 scripts/dr/aws-dr-topology-inventory.sh
+SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-production-rls-green-phase2-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD TARGET_STANDBY=mumbai scripts/dr/generate-cross-region-snapshot-copy-plan.sh
+CONFIRM_SNAPSHOT_COPY=I_APPROVE_CROSS_REGION_SNAPSHOT_COPY SOURCE_REGION=eu-west-2 TARGET_REGION=ap-south-1 SOURCE_SNAPSHOT_IDENTIFIER=rds:mscqr-production-rls-green-phase2-YYYY-MM-DD-HH-MM TARGET_SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD scripts/dr/apply-cross-region-snapshot-copy-approved.sh
 CONFIRM_REGION_LOCAL_DB_RESTORE=I_APPROVE_REGION_LOCAL_DB_RESTORE TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 SNAPSHOT_IDENTIFIER=mscqr-dr-mumbai-copy-YYYYMMDD TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD DB_SUBNET_GROUP_NAME=<approved-mumbai-db-subnet-group> DB_VPC_SECURITY_GROUP_IDS=<approved-mumbai-db-security-group> scripts/dr/apply-region-local-db-restore-approved.sh
 TARGET_STANDBY=mumbai TARGET_REGION=ap-south-1 TARGET_DB_IDENTIFIER=mscqr-dr-mumbai-restore-test-YYYYMMDD scripts/dr/target-region-db-readiness.sh
 DB_HOST=<region-local-rds-endpoint> DB_PORT=5432 scripts/dr/diagnose-standby-db-network.sh mumbai
