@@ -264,7 +264,7 @@ scripts/dr/apply-route53-rollback.sh
 ```bash
 AWS_PROFILE=dr-operator \
 AWS_REGION=eu-west-2 \
-DB_IDENTIFIER=mscqr-prod \
+DB_IDENTIFIER=mscqr-production-rls-green-phase2 \
 scripts/dr/db-readiness.sh
 ```
 
@@ -284,7 +284,7 @@ scripts/dr/generate-db-restore-plan.sh
 
 ```bash
 TARGET_REGION=ap-south-1 \
-SNAPSHOT_IDENTIFIER=rds:mscqr-prod-2026-05-11 \
+SNAPSHOT_IDENTIFIER=rds:mscqr-production-rls-green-phase2-YYYY-MM-DD-HH-MM \
 TARGET_DB_IDENTIFIER=mscqr-dr-recovery-20260511 \
 DB_SUBNET_GROUP_NAME=rds-ec2-db-subnet-group-1 \
 DB_VPC_SECURITY_GROUP_IDS=sg-07db1a9130c6df8d5 \
