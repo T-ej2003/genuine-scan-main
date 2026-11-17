@@ -212,6 +212,26 @@ describe("dialog recovery states", () => {
     expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
+  it("keeps supply chain release available separately from customer QR eligibility", () => {
+    const onReleaseBatch = vi.fn();
+    const onVerifySampleScan = vi.fn();
+    renderPrintDialog({
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+      onReleaseBatch,
+      onVerifySampleScan,
+    });
+    expect(screen.getByText("Supply chain batch release")).toBeInTheDocument();
+    expect(screen.getByText(/separate from customer verification/i)).toBeInTheDocument();
+    const release = screen.getByRole("button", { name: "Release batch" });
+    expect(release).toBeEnabled();
+    fireEvent.click(release);
+    expect(onReleaseBatch).toHaveBeenCalledTimes(1);
+    expect(onVerifySampleScan).not.toHaveBeenCalled();
+  });
+
   it("shows pause, resume, stop, cooldown, and reissue controls for print operations", () => {
     const onOpenControl = vi.fn();
     const onResume = vi.fn();

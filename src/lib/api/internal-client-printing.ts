@@ -2,6 +2,7 @@ import { BASE_URL, type ApiClientCore } from "@/lib/api/internal-client-core";
 import { createLocalAgentPrintingApi } from "@/lib/api/internal-client-local-agent";
 import { createPrintingOperationsApi } from "@/lib/api/internal-client-printing-operations";
 import { subscribeManagedEventSource } from "@/lib/api/managed-event-source";
+import { normalizePrintJobView } from "@/lib/print-job-view";
 import {
   controlledPrinterMutation,
   controlledPrinterGet,
@@ -217,12 +218,15 @@ export const createPrintingApi = (core: ApiClientCore) => ({
   },
 
   async getPrintJobStatus(jobId: string, options?: ControlledPrinterGetOptions) {
-    return controlledPrinterGet<any>(
+    const response = await controlledPrinterGet<any>(
       `manufacturer-print-job-status:${jobId}`,
       options?.minIntervalMs ?? 30_000,
       () => core.request<any>(`/manufacturer/print-jobs/${encodeURIComponent(jobId)}`),
       options
     );
+    return response.success && response.data
+      ? { ...response, data: normalizePrintJobView(response.data) }
+      : response;
   },
 
   streamPrintJobStatus(

@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import apiClient from "@/lib/api-client";
+import { normalizePrintJobView } from "@/lib/print-job-view";
 
 type PrintJobSnapshot = {
   job: any | null;
@@ -52,7 +53,8 @@ const isValidJobView = (jobId: string, job: any) =>
   job && typeof job === "object" && job.id === jobId && typeof job.status === "string" &&
   Number.isFinite(Date.parse(String(job.updatedAt || job.createdAt || "")));
 
-const acceptJobView = (jobId: string, job: any) => {
+const acceptJobView = (jobId: string, view: any) => {
+  const job = normalizePrintJobView(view);
   if (!isValidJobView(jobId, job)) return false;
   const current = getSnapshot(jobId).job;
   if (current) {

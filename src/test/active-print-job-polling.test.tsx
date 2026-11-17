@@ -1,8 +1,9 @@
 import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, render } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 
 import apiClient from "@/lib/api-client";
+import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
 import { clearActivePrintSession, getActivePrintSessionSnapshot } from "@/lib/active-print-session";
 import { useActivePrintJobPolling } from "@/features/batches/useActivePrintJobPolling";
 import { getPrintJobRealtimeDebugState, resetPrintJobRealtimeStoreForTests } from "@/lib/print-job-realtime-store";
@@ -26,8 +27,8 @@ const baseJob = {
   session: { status: "ACTIVE", totalItems: 10, confirmedItems: 4, remainingToPrint: 6 },
 };
 
-function PollingProbe({ job, open = true }: { job: Record<string, unknown>; open?: boolean }) {
-  useActivePrintJobPolling({
+function PollingProbe({ job, open = true, showDialog = false }: { job: Record<string, unknown>; open?: boolean; showDialog?: boolean }) {
+  const liveJob = useActivePrintJobPolling({
     printJobId: "job-live",
     printProgressOpen: open,
     printProgressPhase: "Local print session active",
@@ -51,8 +52,23 @@ function PollingProbe({ job, open = true }: { job: Record<string, unknown>; open
     loadRecentPrintJobs: vi.fn(),
     onBatchesChanged: vi.fn(),
   });
-  return <div>{String(job.id)}</div>;
+  return <div>
+    {String(job.id)}<span data-testid="live-job-status">{liveJob?.status || ""}</span>
+    <span data-testid="live-job-confirmed">{liveJob?.session?.confirmedItems ?? ""}</span>
+    <span data-testid="live-job-items">{liveJob?.items?.length ?? ""}</span>
+    {showDialog ? <PrintProgressDialog open phase="Waiting for printer confirmation" total={10} printed={4} remaining={6} confirmedJob={liveJob} /> : null}
+  </div>;
 }
+
+const confirmedBackendProjection = () => ({
+  job: {
+    id: "job-live", status: "CONFIRMED", pipelineState: "PRINT_CONFIRMED", printMode: "LOCAL_AGENT",
+    quantity: 10, itemCount: 10, createdAt: baseJob.createdAt,
+    updatedAt: new Date(Date.now() + 1_000).toISOString(),
+  },
+  session: { id: "session-live", printJobId: "job-live", status: "COMPLETED", totalItems: 10, confirmedItems: 10, remainingToPrint: 0 },
+  items: [{ id: "item-1", printSessionId: "session-live", state: "CONFIRMED", printConfirmedAt: new Date().toISOString() }],
+});
 
 describe("active print job polling", () => {
   afterEach(() => {
@@ -196,6 +212,51 @@ describe("active print job polling", () => {
     second.unmount();
     expect(streamStop).toHaveBeenCalledTimes(1);
     expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([]);
+  });
+
+  it("accepts a committed JOB projection from the production SSE snapshot", async () => {
+    vi.useFakeTimers();
+    let realtimeMessage: ((payload: any) => void) | null = null;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId: string, onMessage: (payload: any) => void) => {
+      realtimeMessage = onMessage;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+    render(<PollingProbe job={baseJob} showDialog />);
+    await flush();
+    await act(async () => {
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", channel: "printJob", type: "snapshot",
+        payload: { printJobId: "job-live", view: confirmedBackendProjection() } });
+    });
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
+    expect(screen.getByTestId("live-job-confirmed")).toHaveTextContent("10");
+    expect(screen.getByTestId("live-job-items")).toHaveTextContent("1");
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
+  });
+
+  it("recovers a committed JOB projection through authoritative status reconciliation", async () => {
+    vi.useFakeTimers();
+    let realtimeMessage: ((payload: any) => void) | null = null;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId: string, onMessage: (payload: any) => void) => {
+      realtimeMessage = onMessage;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: true, data: baseJob } as any)
+      .mockResolvedValue({ success: true, data: confirmedBackendProjection() } as any);
+    render(<PollingProbe job={baseJob} showDialog />);
+    await flush();
+    await act(async () => {
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", channel: "printJob", type: "label_confirmed",
+        payload: { printJobId: "job-live", reason: "printer_session_progress" } });
+      await vi.advanceTimersByTimeAsync(10_001);
+    });
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
+    expect(screen.getByTestId("live-job-confirmed")).toHaveTextContent("10");
+    expect(screen.getByTestId("live-job-items")).toHaveTextContent("1");
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
   });
 
   it("refetches authoritative status for a production notification without a view", async () => {

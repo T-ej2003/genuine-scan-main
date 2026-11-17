@@ -328,6 +328,7 @@ export function BatchPrintJobDialog({
   sampleScanCodeByJobId = {},
   onSampleScanCodeChange = () => undefined,
   onVerifySampleScan = () => undefined,
+  onReleaseBatch = () => undefined,
   onClose,
 }: PrintJobDialogProps) {
   const workflow = printBatch
@@ -1001,35 +1002,62 @@ export function BatchPrintJobDialog({
                         </div>
                       ) : null}
                       {job.status === "CONFIRMED" ? (
-                        <div className="mt-3 rounded-md border bg-background p-3">
-                          <div className="text-xs font-medium">Optional quality scan</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {job.sampleScanPolicy
-                              ? `${job.sampleScanPolicy.passed} quality scans recorded for this print run.`
-                              : "You can scan a printed label to check its QR. This is not required for customer verification."}
+                        <div className="mt-3 space-y-3">
+                          <div className="rounded-md border bg-background p-3">
+                            <div className="text-xs font-medium">Optional quality scan</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {job.sampleScanPolicy
+                                ? `${job.sampleScanPolicy.passed} quality scans recorded for this print run.`
+                                : "You can scan a printed label to check its QR. This is not required for customer verification."}
+                            </div>
+                            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                              <Input
+                                value={sampleScanCodeByJobId[job.id] || ""}
+                                onChange={(event) => onSampleScanCodeChange(job.id, event.target.value)}
+                                placeholder="Scan MSCQR code or verify URL"
+                                maxLength={1024}
+                              />
+                              <ActionButton
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onVerifySampleScan(job.id)}
+                                state={
+                                  printing
+                                    ? createUiActionState("pending", "Verifying the sample scan.")
+                                    : !String(sampleScanCodeByJobId[job.id] || "").trim()
+                                      ? createUiActionState("disabled", "Enter a printed QR to run this optional check.")
+                                      : createUiActionState("enabled")
+                                }
+                                idleLabel="Verify sample"
+                                pendingLabel="Verifying..."
+                                showReasonBelow
+                              />
+                            </div>
                           </div>
-                          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                            <Input
-                              value={sampleScanCodeByJobId[job.id] || ""}
-                              onChange={(event) => onSampleScanCodeChange(job.id, event.target.value)}
-                              placeholder="Scan MSCQR code or verify URL"
-                              maxLength={1024}
-                            />
-                            <ActionButton
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onVerifySampleScan(job.id)}
-                              state={
-                                printing
-                                  ? createUiActionState("pending", "Verifying the sample scan.")
-                                  : !String(sampleScanCodeByJobId[job.id] || "").trim()
-                                    ? createUiActionState("disabled", "Enter a printed QR to run this optional check.")
-                                    : createUiActionState("enabled")
-                              }
-                              idleLabel="Verify sample"
-                              pendingLabel="Verifying..."
-                              showReasonBelow
-                            />
+                          <div className="rounded-md border bg-background p-3">
+                            <div className="text-xs font-medium">Supply chain batch release</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              This is separate from customer verification. MSCQR checks batch readiness and any release approval when you request it.
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              <ActionButton
+                                variant="outline"
+                                size="sm"
+                                onClick={onReleaseBatch}
+                                state={
+                                  printing
+                                    ? createUiActionState("pending", "Requesting supply chain release.")
+                                    : printBatch?.lifecycleState === "RELEASED"
+                                      ? createUiActionState("disabled", "Batch has already been released.")
+                                      : releaseApprovalState?.approvalRequired
+                                        ? createUiActionState("disabled", "A different authorized checker must approve this release.")
+                                        : createUiActionState("enabled")
+                                }
+                                idleLabel={printBatch?.lifecycleState === "RELEASED" ? "Batch released" : releaseApprovalState?.approvalRequired ? "Approval pending" : "Release batch"}
+                                pendingLabel="Requesting..."
+                                showReasonBelow
+                              />
+                            </div>
                           </div>
                         </div>
                       ) : null}
