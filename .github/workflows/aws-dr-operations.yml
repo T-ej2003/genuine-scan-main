@@ -498,7 +498,7 @@ jobs:
               SOURCE_REGION="$SOURCE_REGION" \
               TARGET_REGION="$topology_target_region" \
               TARGET_STANDBY="$TARGET_REGION_GROUP" \
-              SOURCE_DB_IDENTIFIER="${SOURCE_DB_IDENTIFIER:-mscqr-prod-db}" \
+              SOURCE_DB_IDENTIFIER="${SOURCE_DB_IDENTIFIER:-mscqr-production-rls-green-phase2}" \
               scripts/dr/aws-dr-topology-inventory.sh
               ;;
             generate-cross-region-snapshot-copy-plan)
