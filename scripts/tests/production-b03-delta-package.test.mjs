@@ -14,9 +14,9 @@ test("B03 excludes only exact separately governed C02 printing grants", () => {
   const previous = new Set(normalize(execFileSync("git", ["show", "d785aa7f1e154f37c0dc621082e3f6c46d5d5aec:scripts/rls/sql/generated/21-runtime-grants.sql"], { encoding: "utf8" })).split(/\r?\n/));
   const changed = normalize(fs.readFileSync("scripts/rls/sql/generated/21-runtime-grants.sql", "utf8"))
     .split(/\r?\n/).filter((line) => line.startsWith("GRANT ") && !previous.has(line));
-  assert.equal(changed.length, 12);
+  assert.equal(changed.length, 16);
   const qrGrants = changed.filter(line => line.includes('ON TABLE public."QRCode"'));
-  assert.deepEqual(qrGrants.map(line => /^GRANT (SELECT|UPDATE)/.exec(line)?.[1]), ["SELECT", "UPDATE"]);
+  assert.deepEqual(qrGrants.map(line => /^GRANT (SELECT|UPDATE)/.exec(line)?.[1]), ["SELECT", "UPDATE", "SELECT"]);
   assert(qrGrants.every(line => line.endsWith('TO "mscqr_prd_rls_phase2_auth_owner";')));
   assert.match(qrGrants[0], /"customerVerifiableAt"/);
   assert.match(qrGrants[1], /"blockedAt"/);
@@ -25,7 +25,9 @@ test("B03 excludes only exact separately governed C02 printing grants", () => {
   assert.match(fs.readFileSync('scripts/rls/sql/generated/30-policies.sql', 'utf8'), /ALTER TABLE public\."QRCode" FORCE ROW LEVEL SECURITY;/);
   const b03 = selectB03GrantDelta(changed);
   assert.equal(b03.length, 5);
-  assert.ok(b03.every((line) => !/public\."(?:PrinterAgentSession|PrintItemEvent|PrintJobChunk|QRCode)"/.test(line)));
+  assert.ok(b03.every((line) => !/public\."(?:PrinterAgentSession|PrintItemEvent|PrintJobChunk|QRCode|PrintItem|PrintSession|PrintAuditEvent)"/.test(line)));
+  const widenedVerificationRead = 'GRANT SELECT ("id", "qrCodeId", "details") ON TABLE public."PrintAuditEvent" TO "mscqr_prd_rls_phase2_auth_owner";';
+  assert.ok(selectB03GrantDelta([...changed, widenedVerificationRead]).includes(widenedVerificationRead));
   const escalation = 'GRANT DELETE ON TABLE public."PrinterAgentSession" TO "mscqr_prd_rls_phase2_auth_owner";';
   assert.ok(selectB03GrantDelta([...changed, escalation]).includes(escalation));
   const eventEscalation = 'GRANT DELETE ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";';

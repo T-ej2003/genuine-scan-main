@@ -22,7 +22,13 @@ export function selectB03GrantDelta(changedGrants) {
       (privilege === "SELECT" && ["PrintItemEvent", "PrintJobChunk"].includes(table)) ||
       (table === "QRCode" && ["SELECT", "UPDATE"].includes(privilege)))
     .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
-  return changedGrants.filter((grant) => !c02Grants.has(grant));
+  const publicVerification = NAMED_SQL_FUNCTION_CONTRACTS.find(({ name }) => name === "verify_signed_qr");
+  assert.ok(publicVerification?.security?.ownerPrivileges);
+  const b02Grants = new Set(publicVerification.security.ownerPrivileges
+    .filter(([table, privilege]) => privilege === "SELECT" && ["QRCode", "PrintItem", "PrintSession", "PrintAuditEvent"].includes(table))
+    .map(([table, privilege, columns]) => `GRANT ${privilege} (${columns.map((column) => `"${column}"`).join(", ")}) ON TABLE public."${table}" TO "mscqr_prd_rls_phase2_auth_owner";`));
+  assert.equal(b02Grants.size, 4);
+  return changedGrants.filter((grant) => !c02Grants.has(grant) && !b02Grants.has(grant));
 }
 
 function functionStatement(source, name) {

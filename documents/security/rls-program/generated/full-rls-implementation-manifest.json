@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126",
+  "sourceContractSha256": "960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -64,7 +64,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "d70600e87028810be0268d29f8b6d1f15fc0f351a1475fe1a73df6a695f5236b"
+      "sha256": "60dde8129e6d2d8100f765f7bea24eaf1a2c8de882cab314e07cddac3f1c9e7d"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -108,7 +108,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "cfad2c965f5cb98f6669c55a6a4d64d2fd3908a87e30bcbd61270e131744bc87"
+      "sha256": "136a340735f2395a4f2447553fc1d6e1c7f4d30812a17d9703f5512987997b45"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -116,7 +116,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "8b663f8b6a08b44753f1de82dcb15fe34782217629126ae24f5f77b3fb1738f2"
+      "sha256": "0ef5eb445656b3cd5e17b32041cc92982166a1b56a012a20e9a6cd02223342c2"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -328,11 +328,11 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql",
-      "sha256": "c9fd1968da552f014e9e05b9c293ca5ecacc6622c0c8326767f387c1e4e161db"
+      "sha256": "97de1dcb955559b53b302542a8498804868969fcce90eb222a9347451c463985"
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql",
-      "sha256": "f06f802fb7031e07eefec864bf775a4995c8e63f13ed608c4446b8b421ba815a"
+      "sha256": "a7345666f631524d3ed54c1b5226d90a2976e0d35866f009317c708867cef2d7"
     },
     {
       "path": "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
@@ -394,7 +394,7 @@
     "migrationOnly": 2,
     "certificationCandidateWorkflows": 14,
     "directPolicySlices": 18,
-    "generatedPolicies": 386,
+    "generatedPolicies": 389,
     "columnPrivilegeCells": 60,
     "prismaMigrations": 57,
     "prismaEnums": 58,
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

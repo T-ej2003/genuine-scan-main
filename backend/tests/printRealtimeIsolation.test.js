@@ -30,6 +30,8 @@ test("committed progress invalidation crosses instances without crossing tenant 
   assert.equal(local.length, 1);
   assert.equal(remote.length, 1);
   const event = remote[0];
+  assert.equal(event.printJobId, "job");
+  assert.equal(event.view, undefined, "identity-only events require an authorized status refetch");
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "LICENSEE_ADMIN", licenseeId: "tenant-b" } }, event), false);
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_ADMIN", userId: "maker-b" } }, event), false);
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_ADMIN", userId: "maker-a" } }, event), true);

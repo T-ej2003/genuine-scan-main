@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126",
+  "sourceContractSha256": "960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -50,7 +50,7 @@
     },
     {
       "path": "backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
-      "sha256": "d70600e87028810be0268d29f8b6d1f15fc0f351a1475fe1a73df6a695f5236b"
+      "sha256": "60dde8129e6d2d8100f765f7bea24eaf1a2c8de882cab314e07cddac3f1c9e7d"
     },
     {
       "path": "scripts/rls/lib/rotation-inventory-contract.mjs",
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "cfad2c965f5cb98f6669c55a6a4d64d2fd3908a87e30bcbd61270e131744bc87"
+      "sha256": "136a340735f2395a4f2447553fc1d6e1c7f4d30812a17d9703f5512987997b45"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -102,7 +102,7 @@
     },
     {
       "path": "backend/Dockerfile",
-      "sha256": "8b663f8b6a08b44753f1de82dcb15fe34782217629126ae24f5f77b3fb1738f2"
+      "sha256": "0ef5eb445656b3cd5e17b32041cc92982166a1b56a012a20e9a6cd02223342c2"
     },
     {
       "path": "backend/scripts/full-rls-green-executor-core.mjs",
@@ -314,11 +314,11 @@
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql",
-      "sha256": "c9fd1968da552f014e9e05b9c293ca5ecacc6622c0c8326767f387c1e4e161db"
+      "sha256": "97de1dcb955559b53b302542a8498804868969fcce90eb222a9347451c463985"
     },
     {
       "path": "backend/src/rls-waves/session-b/b02/publicVerificationRollback.sql",
-      "sha256": "f06f802fb7031e07eefec864bf775a4995c8e63f13ed608c4446b8b421ba815a"
+      "sha256": "a7345666f631524d3ed54c1b5226d90a2976e0d35866f009317c708867cef2d7"
     },
     {
       "path": "backend/src/rls-waves/session-a/operationalReadBoundaries.sql",
@@ -7919,6 +7919,31 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-audit-event",
+      "table": "PrintAuditEvent",
+      "policyName": "public_verification_printauditevent_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND \"printJobId\"=current_setting('app.public_verification_print_job_id',true) AND \"eventType\"='AUTOMATIC_ACTIVATION'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintAuditEvent:SELECT",
+        "contract:release-fix-6-verify-raw:PrintAuditEvent:SELECT",
+        "contract:release-fix-6-verify-signed:PrintAuditEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-printer",
       "table": "Printer",
       "policyName": "printing_lifecycle_printer_delete",
@@ -8420,6 +8445,31 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "public_verification_printitem_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintItem:SELECT",
+        "contract:release-fix-6-verify-raw:PrintItem:SELECT",
+        "contract:release-fix-6-verify-signed:PrintItem:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-item-event",
       "table": "PrintItemEvent",
       "policyName": "printing_lifecycle_printitemevent_insert",
@@ -8850,6 +8900,31 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "public_verification_printsession_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND id=current_setting('app.public_verification_print_session_id',true) AND \"printJobId\"=current_setting('app.public_verification_print_job_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintSession:SELECT",
+        "contract:release-fix-6-verify-raw:PrintSession:SELECT",
+        "contract:release-fix-6-verify-signed:PrintSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },
@@ -12877,55 +12952,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126"
+      "marker": "mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6"
     }
   ]
 }

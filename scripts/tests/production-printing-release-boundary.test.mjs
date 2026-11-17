@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { catalogueAfterPrinting, PRINTING_RELEASE_OBJECTS } from "../aws/production-printing-release-boundary.mjs";
+import { catalogueAfterPrinting, PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS, PUBLIC_VERIFICATION_RELEASE_NAMES, PUBLIC_VERIFICATION_RELEASE_POLICIES } from "../aws/production-printing-release-boundary.mjs";
 import { B03_DELTA_OBJECTS, classifyB03Catalogue } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
 import { authenticateC02SessionResult, buildC02SessionTask } from "../aws/apply-production-c02-session-prerequisite.mjs";
@@ -17,7 +17,7 @@ const seal = body => { const { requirementsSha256, ...rest } = body; return { ..
 const requirements = (sha, hash, historical = false) => seal({ sourceSha: sha, candidateSourceSha: sha,
   objects: Object.fromEntries(Object.keys(B03_DELTA_OBJECTS).map(key => [key,
     [...B03_DELTA_OBJECTS[key], ...PRINTING_RELEASE_OBJECTS[key]]
-      .filter(identity => !historical || !["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select"].includes(identity))
+      .filter(identity => !historical || !["PrintItemEvent.printing_lifecycle_printitemevent_select", "PrintJobChunk.printing_lifecycle_printjobchunk_select", ...PUBLIC_VERIFICATION_RELEASE_POLICIES].includes(identity))
       .map(identity => ({ identity, sha256: hash.repeat(64) }))])) });
 const predecessor = requirements(oldSha, "1", true), successor = requirements(sourceSha, "2");
 const after = () => catalogueAfterPrinting({ predecessor, successor, b03Objects: B03_DELTA_OBJECTS });
@@ -27,8 +27,25 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 20);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 28);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
+});
+
+test("every printing and public routine changed by this PR has a governed installer entry", () => {
+  const base = "892cea9cc590b4a01bfd64bc9ea82f73a4321612";
+  for (const [file, schema, delimiter, allowed] of [
+    ["backend/src/rls-waves/session-c/c02/printingLifecycle.sql", "app_rls", "$fn$;", PRINTING_RELEASE_NAMES],
+    ["backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql", "app_public", "$$;", PUBLIC_VERIFICATION_RELEASE_NAMES],
+  ]) {
+    const old = spawnSync("git", ["show", `${base}:${file}`], { encoding: "utf8" });
+    assert.equal(old.status, 0, old.stderr);
+    const definitions = source => new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
+      .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    const before = definitions(old.stdout), after = definitions(fs.readFileSync(file, "utf8"));
+    const changed = [...after].filter(([name, sql]) => before.get(name) !== sql).map(([name]) => name);
+    assert.ok(changed.length > 0);
+    assert.deepEqual(changed.filter(name => !allowed.includes(name)), [], `${file} changed functions missing from governed release`);
+  }
 });
 
 test("combined boundary rejects unknown changes, removals, duplicate rows, tampering and source mismatch", () => {
@@ -63,12 +80,28 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 7); assert.equal(pkg.policySql.length, 13);
+  assert.equal(pkg.definitions.length, 12); assert.equal(pkg.policySql.length, 19);
+  assert.ok(pkg.definitions.some(({ schema, name }) => schema === "app_rls" && name === "printing_gateway_job"));
+  assert.deepEqual(pkg.definitions.slice(-4).map(({ schema, name }) => `${schema}.${name}`), [
+    "app_rls.printing_worker_network_job", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
+  ]);
+  const publicExecutor = pkg.definitions.find(({ name }) => name === "public_verify_execute");
+  assert.match(publicExecutor.sql, /activation\."eventType"='AUTOMATIC_ACTIVATION'/);
+  assert.match(publicExecutor.sql, /auto_activated AND qr\."issuanceMode"='GOVERNED_PRINT'/);
+  for (const identity of PUBLIC_VERIFICATION_RELEASE_POLICIES) {
+    const [table, name] = identity.split(".");
+    assert.ok(pkg.policySql.some(sql => sql.startsWith(`CREATE POLICY "${name}" ON public."${table}" `)));
+  }
   assert.deepEqual(pkg.evidenceGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['QRCode', 'QRCode', 'PrintItemEvent', 'PrintJobChunk']);
+  assert.deepEqual(pkg.publicGrants.map(sql => /ON TABLE public\."([^"]+)"/.exec(sql)?.[1]), ['QRCode', 'PrintItem', 'PrintSession', 'PrintAuditEvent']);
   const broadened = { ...pkg, evidenceGrants: [...pkg.evidenceGrants] };
   broadened.evidenceGrants[2] = broadened.evidenceGrants[2].replace('SELECT ("printItemId")', 'SELECT ("printItemId", "details")');
   const { packageSha256: _ignored, ...body } = broadened;
   assert.throws(() => runtime.validatePackage({ ...body, packageSha256: canonicalSha256(body) }));
+  const broadenedPublic = { ...pkg, publicGrants: [...pkg.publicGrants] };
+  broadenedPublic.publicGrants[1] = broadenedPublic.publicGrants[1].replace('"confirmationEvidence"', '"confirmationEvidence", "code"');
+  const { packageSha256: _ignoredPublic, ...publicBody } = broadenedPublic;
+  assert.throws(() => runtime.validatePackage({ ...publicBody, packageSha256: canonicalSha256(publicBody) }));
   assert.throws(() => runtime.validatePackage({ ...pkg, sourceSha: oldSha }));
   const task = buildC02SessionTask({ sourceSha, hostname: "test.invalid", combinedRequirements: { predecessor, successor } });
   assert.ok(Buffer.byteLength(task.serialized) < 60 * 1024);
@@ -76,9 +109,9 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
   const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
     packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
-    status: "APPLIED", writeCount: 40 };
+    status: "APPLIED", writeCount: 55 };
   assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
-    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 40);
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 55);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
@@ -89,6 +122,7 @@ test("combined C02 selects the same narrow grants from production-role generated
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-c02-grants-"));
   try {
     for (const name of ["backend/src/rls-waves/session-c/c02/printingLifecycle.sql",
+      "backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql",
       "backend/prisma/migrations/20261028210000_printer_agent_session_sequence/migration.sql",
       "scripts/rls/sql/generated/20-context-helpers.sql", "scripts/rls/sql/generated/21-runtime-grants.sql",
       "scripts/rls/sql/generated/30-policies.sql"]) {

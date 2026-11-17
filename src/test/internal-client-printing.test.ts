@@ -31,6 +31,18 @@ describe("printing api request control", () => {
     vi.unstubAllEnvs();
   });
 
+  it("unwraps the backend JOB projection while retaining session and items", async () => {
+    const view = {
+      job: { id: "job-1", status: "CONFIRMED", createdAt: "2026-11-17T10:00:00.000Z" },
+      session: { id: "session-1", printJobId: "job-1", confirmedItems: 1 },
+      items: [{ id: "item-1", printSessionId: "session-1", state: "CONFIRMED" }],
+    };
+    const request = vi.fn(async () => ({ success: true, data: view }));
+    const result = await createPrintingApi(createCore(request)).getPrintJobStatus("job-1");
+    expect(request).toHaveBeenCalledWith("/manufacturer/print-jobs/job-1", undefined);
+    expect(result.data).toMatchObject({ id: "job-1", status: "CONFIRMED", session: view.session, items: view.items });
+  });
+
   it("sends the print job creation payload with the saved printer profile UUID only", async () => {
     const request = vi.fn(async () => ({ success: true, data: { printJobId: "job-1" } }));
     const api = createPrintingApi(createCore(request));

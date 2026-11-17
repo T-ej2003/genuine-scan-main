@@ -297,6 +297,13 @@ export type PrintJobRow = {
     failedRange?: { startCode?: string | null; endCode?: string | null; count?: number } | null;
     counts?: Record<string, number>;
   } | null;
+  items?: Array<{
+    id: string;
+    printSessionId: string;
+    qrCodeId?: string;
+    state?: string;
+    printConfirmedAt?: string | null;
+  }>;
   latestDecision?: LatestDecision | null;
   sampleScanPolicy?: {
     satisfied: boolean;

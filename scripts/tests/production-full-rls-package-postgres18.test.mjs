@@ -66,10 +66,11 @@ const run = (command, args, options = {}) => {
     cwd: options.cwd || root,
     env: { ...(options.cleanEnv ? {} : process.env), ...(options.env || {}) },
     encoding: "utf8",
+    input: options.input,
     maxBuffer: 64 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`${options.label || command} failed: ${`${result.stdout || ""}${result.stderr || ""}`.trim()}`);
+    throw new Error(`${options.label || command} failed: ${`${result.error?.message || ""}\n${result.stdout || ""}${result.stderr || ""}`.trim()}`);
   }
   return String(result.stdout || "").trim();
 };
@@ -93,7 +94,15 @@ const databaseUrl = (base, database, user) => {
   return url.toString();
 };
 
-const psql = (url, args, label) => run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...args], { label });
+const psql = (url, args, label) => {
+  const commandIndex = args.indexOf("-c");
+  const largeSql = commandIndex >= 0 && String(args[commandIndex + 1] || "").length > 64 * 1024;
+  const safeArgs = largeSql ? [...args.slice(0, commandIndex), "-f", "-", ...args.slice(commandIndex + 2)] : args;
+  return run("psql", [url, "-X", "-v", "ON_ERROR_STOP=1", ...safeArgs], {
+    label,
+    input: largeSql ? args[commandIndex + 1] : undefined,
+  });
+};
 const scalar = (url, sql, label) => psql(url, ["-q", "-t", "-A", "-c", sql], label).split("\n").at(-1);
 
 const b01PolicyFixtureSql = (installSource, dropSource) => {
@@ -1483,6 +1492,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(start >= 0 && end > start);
         return productionRole(oldFunctions.slice(start, end + 6));
       };
+      const oldPublicFunction = (name) => {
+        const marker = `CREATE OR REPLACE FUNCTION app_public.${name}(`, start = oldFunctions.indexOf(marker), end = oldFunctions.indexOf("\n$$;", start);
+        assert.ok(start >= 0 && end > start);
+        return productionRole(oldFunctions.slice(start, end + 4));
+      };
       const selectedOldPolicy = (identity) => {
         const [table, name] = identity.split(".");
         const lines = oldPolicies.split("\n"), line = lines.findIndex((value) => value.startsWith(`CREATE POLICY "${name}" ON public."${table}" `));
@@ -1543,6 +1557,11 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.ok(columns.length > 0);
         printingReverseGrants.push(`REVOKE SELECT (${columns.map(c => `"${c}"`).join(",")}) ON public."${table}" FROM mscqr_prd_rls_phase2_auth_owner`);
       }
+      for (const table of ["PrintItem", "PrintSession", "PrintAuditEvent"]) {
+        const old = columnRights(oldGrants, table, "SELECT"), current = columnRights(currentGrants, table, "SELECT");
+        const extra = [...current].filter(column => !old.has(column));
+        if (extra.length) printingReverseGrants.push(`REVOKE SELECT (${extra.map(column => `"${column}"`).join(",")}) ON public."${table}" FROM mscqr_prd_rls_phase2_auth_owner`);
+      }
       for (const privilege of ["SELECT", "UPDATE"]) {
         const old = columnRights(oldGrants, "QRCode", privilege), current = columnRights(currentGrants, "QRCode", privilege);
         const extra = [...current].filter(column => !old.has(column));
@@ -1557,6 +1576,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
         DROP FUNCTION app_rls.printing_connector_session(text,text,text,jsonb);
         ${PRINTING_RELEASE_NAMES.filter(n => n !== "printing_connector_session").map(oldFunction).join("\n")}
+        ${["public_verify_execute", "verify_signed_qr", "claim_customer_ownership"].map(oldPublicFunction).join("\n")}
         RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
         REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
         ALTER TABLE public."PrinterAgentSession" DROP COLUMN "lastMessageSeq";
@@ -1588,7 +1608,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
         assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "C02 rollback grant"), "f");
       }
-      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 40 });
+      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 55 });
       const afterC02 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
       assert.deepEqual(Object.fromEntries(Object.entries(afterC02).map(([k,v]) => [k,canonicalSha256(v)])), combinedPackage.successorCatalogue);
       // Commit succeeded but migration-history recording was interrupted: retry

@@ -724,10 +724,15 @@ export function useBatchPrintWorkflow({
       toast({
         title: "Sample scan verified",
         description: response.data?.sampleScanPolicy?.satisfied
-          ? "MSCQR recorded the scan and the print run has enough sample proof for release."
+          ? "MSCQR recorded this optional quality scan. Customer verification does not depend on it."
           : "MSCQR recorded that the scanned label belongs to this confirmed print run.",
       });
       setSampleScanCodeByJobId((previous) => ({ ...previous, [trimmedJobId]: "" }));
+      if (response.data?.sampleScanPolicy?.satisfied) {
+        setPrintBatch((current) => current && current.id === printBatch?.id && current.lifecycleState === "PRINT_CONFIRMED"
+          ? { ...current, lifecycleState: "SAMPLE_VERIFIED" }
+          : current);
+      }
       await loadRecentPrintJobs();
       await onBatchesChanged?.();
     } finally {
@@ -820,7 +825,7 @@ export function useBatchPrintWorkflow({
     []
   );
 
-  useActivePrintJobPolling({
+  const authoritativeProgressJob = useActivePrintJobPolling({
     printJobId,
     printProgressOpen,
     printProgressPhase,
@@ -973,8 +978,10 @@ export function useBatchPrintWorkflow({
     onClose: () => setPrintOpen(false),
   };
 
+  const recentProgressJob = printJobId ? recentPrintJobs.find((job) => job.id === printJobId) || null : null;
   const activeProgressJob =
-    (printJobId ? recentPrintJobs.find((job) => job.id === printJobId) : null) ||
+    (authoritativeProgressJob?.id === printJobId ? authoritativeProgressJob : null) ||
+    recentProgressJob ||
     (printJobId
       ? ({
           id: printJobId,
@@ -1009,6 +1016,7 @@ export function useBatchPrintWorkflow({
     notice: printProgressNotice,
     printJobId,
     activeJob: activeProgressJob,
+    confirmedJob: authoritativeProgressJob || recentProgressJob,
     onStop: (job: PrintJobRow) => openPrintControlDialog("stop", job),
     onRefresh: livePrintStatusRefresh.refresh,
     printControlBusyJobId,

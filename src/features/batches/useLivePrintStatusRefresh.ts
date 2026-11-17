@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
 import { updateActivePrintSession } from "@/lib/active-print-session";
+import { primePrintJobRealtimeSnapshot } from "@/lib/print-job-realtime-store";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 
 import { isPrintJobServerSettled, syncProgressFromPrintJob as syncPrintJobProgress } from "./batch-print-operations";
@@ -60,7 +61,13 @@ export function useLivePrintStatusRefresh({
     setNowTick(timestamp);
     setCooldownUntil(timestamp + LIVE_PRINT_STATUS_REFRESH_MIN_MS);
     inFlightRef.current = (async () => {
-      const response = await apiClient.getPrintJobStatus(currentJobId);
+      let response: Awaited<ReturnType<typeof apiClient.getPrintJobStatus>>;
+      try {
+        response = await apiClient.getPrintJobStatus(currentJobId, { force: true });
+      } catch {
+        setPrintProgressNotice("Status refresh is temporarily unavailable. The print result remains uncertain.");
+        return;
+      }
       if (!response.success || !response.data) {
         if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
           const retryAfterMs = getLivePrintStatusRetryAfterMs(response.retryAfterSec);
@@ -77,6 +84,7 @@ export function useLivePrintStatusRefresh({
       }
 
       const job = response.data as PrintJobRow;
+      if (!primePrintJobRealtimeSnapshot(currentJobId, job)) return;
       syncPrintJobProgress(job, progressStateSetters);
       replaceRecentPrintJob(job);
       if (isPrintJobServerSettled(job)) {
