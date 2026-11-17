@@ -66,8 +66,10 @@ const confirmedBackendProjection = () => ({
     quantity: 10, itemCount: 10, createdAt: baseJob.createdAt,
     updatedAt: new Date(Date.now() + 1_000).toISOString(),
   },
-  session: { id: "session-live", printJobId: "job-live", status: "COMPLETED", totalItems: 10, confirmedItems: 10, remainingToPrint: 0 },
-  items: [{ id: "item-1", printSessionId: "session-live", state: "CONFIRMED", printConfirmedAt: new Date().toISOString() }],
+  session: { id: "session-live", printJobId: "job-live", status: "COMPLETED", totalItems: 10, confirmedItems: 10 },
+  items: Array.from({ length: 10 }, (_, index) => ({
+    id: `item-${index + 1}`, printSessionId: "session-live", state: "PRINT_CONFIRMED", printConfirmedAt: new Date().toISOString(),
+  })),
 });
 
 describe("active print job polling", () => {
@@ -230,7 +232,7 @@ describe("active print job polling", () => {
     });
     expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
     expect(screen.getByTestId("live-job-confirmed")).toHaveTextContent("10");
-    expect(screen.getByTestId("live-job-items")).toHaveTextContent("1");
+    expect(screen.getByTestId("live-job-items")).toHaveTextContent("10");
     expect(screen.getByText("Print completed")).toBeInTheDocument();
     expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
   });
@@ -254,7 +256,7 @@ describe("active print job polling", () => {
     });
     expect(screen.getByTestId("live-job-status")).toHaveTextContent("CONFIRMED");
     expect(screen.getByTestId("live-job-confirmed")).toHaveTextContent("10");
-    expect(screen.getByTestId("live-job-items")).toHaveTextContent("1");
+    expect(screen.getByTestId("live-job-items")).toHaveTextContent("10");
     expect(screen.getByText("Print completed")).toBeInTheDocument();
     expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
   });
