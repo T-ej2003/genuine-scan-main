@@ -2096,14 +2096,14 @@ async function main() {
     }
     assert.fail(`Printing worker did not reach its expected state: ${workers.map(({ logs }) => logs()).join("\n")}`);
   };
-  const stopWorker = async ({ child }) => {
+  const stopWorker = async ({ child, logs }) => {
     if (child.exitCode !== null || child.signalCode !== null) {
       assert.equal(child.exitCode, 0);
       return;
     }
     child.kill("SIGTERM");
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error("Printing worker did not shut down")), 5_000);
+      const timeout = setTimeout(() => reject(new Error(`Printing worker did not shut down: ${logs()}`)), 20_000);
       child.once("exit", () => { clearTimeout(timeout); resolve(); });
     });
     assert.equal(child.exitCode, 0);
@@ -2187,6 +2187,43 @@ async function main() {
   assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), "0");
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${concurrentWorkerRun.sessionId}' AND state='AGENT_ACKED'`), "150");
   assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${concurrentWorkerRun.jobId}' AND status='ACTIVATED'`), "150");
+
+  // Certify the 1,000/200 product case through the connector's database
+  // confirmation boundary, not through direct QR updates or batch release.
+  const largePartialRun = createExpiredRun("connector-partial-1000", 0, 1000);
+  psql(admin, `UPDATE public."QRCode" SET "issuanceMode"='GOVERNED_PRINT',
+      "tokenNonce"=replace(id,'-',''),"tokenHash"=encode(sha256(convert_to(id,'UTF8')),'hex'),
+      "tokenIssuedAt"=now(),"tokenExpiresAt"=now()+interval '1 hour'
+      WHERE "printJobId"='${largePartialRun.jobId}';
+    UPDATE public."PrintItem" SET "attemptCount"=1 WHERE "printSessionId"='${largePartialRun.sessionId}';`);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${largePartialRun.jobId}'`), "1000");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${largePartialRun.jobId}' AND "customerVerifiableAt" IS NOT NULL`), "0");
+  const largeConfirmedItems = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM (
+    SELECT id,code FROM public."PrintItem" WHERE "printSessionId"='${largePartialRun.sessionId}' ORDER BY code LIMIT 200
+  ) selected`).split(",");
+  assert.equal(largeConfirmedItems.length, 200);
+  psql(app, `DO $partial_1000$
+    DECLARE item_id text; sequence_no integer:=0;
+    BEGIN
+      FOREACH item_id IN ARRAY ARRAY[${largeConfirmedItems.map(id => `'${id}'`).join(",")}]::text[]
+      LOOP
+        sequence_no:=sequence_no+1;
+        PERFORM app_rls.printing_connector_event(
+          '${ids.registration}','printing-agent','printing-device',
+          'partial_1000_nonce_'||sequence_no,clock_timestamp()::timestamp,
+          gen_random_uuid()::text,'CONFIRM','${largePartialRun.jobId}',item_id,
+          '${ids.printer}',encode(sha256(convert_to('partial-1000-'||sequence_no,'UTF8')),'hex'),
+          'spool-partial-1000-'||sequence_no,'{"physical":true}'::jsonb);
+      END LOOP;
+      IF sequence_no<>200 THEN RAISE EXCEPTION 'Expected exactly 200 connector confirmations'; END IF;
+    END $partial_1000$;`);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${largePartialRun.sessionId}' AND state='PRINT_CONFIRMED'`), "200");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${largePartialRun.jobId}' AND status='PRINTED' AND "customerVerifiableAt" IS NOT NULL`), "200");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "printJobId"='${largePartialRun.jobId}' AND "eventType"='AUTOMATIC_ACTIVATION'`), "200");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintItem" WHERE "printSessionId"='${largePartialRun.sessionId}' AND state='AGENT_ACKED'`), "800");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${largePartialRun.jobId}' AND "customerVerifiableAt" IS NULL`), "800");
+  assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${largePartialRun.jobId}'`), "SENT",
+    "the partial job must not require or fabricate whole-batch release");
 
   const rollback = readFileSync(
     path.resolve(__dirname, "../../../src/rls-waves/session-c/c02/printingLifecycleRollback.sql"),

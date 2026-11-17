@@ -127,6 +127,10 @@ module.exports=async function certifyGatewayClaims({admin,worker,app,capability,
       const command=(operation,jobId,itemId,details)=>`SELECT app_rls.printing_gateway_job('isolated-maintenance-gateway','${hash(secret)}',
         '${randomUUID()}','${operation}','${mode}',${jobId?`'${jobId}'`:'NULL'},${itemId?`'${itemId}'`:'NULL'},'${JSON.stringify(details)}'::jsonb)`;
       assert.equal(JSON.parse(psql(app,command('CONFIRM',job,item,{physical:true}))).remainingToPrint,1);
+      assert.equal(psql(admin,`SELECT status FROM public."QRCode" WHERE id='${qr.id}'`),'PRINTED',
+        'existing gateway confirmation still records the linked QR as printed');
+      assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${item}'`),'PRINT_CONFIRMED',
+        'existing gateway item confirmation remains committed');
       assert.equal(psql(admin,`SELECT "customerVerifiableAt" IS NULL FROM public."QRCode" WHERE id='${qr.id}'`),'t',
         'shared-secret gateway confirmation must not activate customer verification without signed completion evidence');
       assert.equal(psql(admin,`SELECT count(*) FROM public."PrintAuditEvent" WHERE "qrCodeId"='${qr.id}' AND "eventType"='AUTOMATIC_ACTIVATION'`),'0',

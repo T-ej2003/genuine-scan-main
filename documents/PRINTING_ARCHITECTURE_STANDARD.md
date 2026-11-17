@@ -9,6 +9,12 @@ This document defines the production printing standard for MSCQR. The goal is si
 - no insecure exposure of printer ports to the public internet
 - one secure print workflow across workstation, LAN, and private-site printers
 
+## Current manufacturer printing and customer verification contract
+
+As of 17 November 2026, the supported manufacturer integration is the MSCQR web application, the signed Windows Workstation Connector, and a USB or LAN printer. A signed per-item confirmation must commit in the backend before that exact QR becomes customer-verifiable. A sample scan, separate batch release, and independent post-print approval are not required for this customer-verification path.
+
+`SITE_GATEWAY` remains available for existing installations while its consumers and retirement path are assessed. It is a legacy compatibility integration and a retirement candidate, not part of the new automatic customer-activation contract. Gateway confirmation uses a shared secret and caller-supplied details; it cannot create the signed per-item activation evidence required for customer verification. Do not infer that no installations use it or remove it without a separate compatibility review.
+
 ## Why pure browser local-printer printing is intentionally not supported
 
 Browsers do not expose a production-safe, silent, printer-aware local printing API for this use case.
@@ -70,16 +76,18 @@ Operational standard:
 - submit standards-based PDF jobs over IPP/IPPS
 - do not downgrade AirPrint printers to raw port `9100`
 
-## Private-LAN site gateway standard
+## Legacy private-LAN site gateway compatibility
 
-When the backend cannot directly reach a manufacturer-site printer, MSCQR uses a site gateway pattern:
+Existing private-LAN installations may use a site gateway pattern:
 
-- the installed workstation connector keeps an outbound authenticated connection to MSCQR
+- the installed legacy gateway process keeps an outbound authenticated connection to MSCQR
 - MSCQR never requires inbound firewall holes to reach the site
 - the gateway claims approved print jobs and dispatches them locally
 - gateway credentials are provisioned once through the printer profile bootstrap flow
 
-This is the approved pattern for private manufacturer networks.
+This path remains for compatibility. It is excluded from automatic customer activation, and new manufacturer printing should use the signed Windows connector.
+
+PR #854 retains gateway claim, acknowledgement, confirmation, failure, and print-job state handling. A gateway confirmation still commits its `PrintItem` and marks the matching QR `PRINTED` when the QR belongs to that job and batch and is in an allowed pre-print state. The added QR linkage and state guard means an inconsistent or blocked legacy QR record is no longer marked `PRINTED` by gateway confirmation; it requires operator reconciliation. This is a compatibility impact of the security guard, not evidence of customer activation.
 
 ## Connector distribution standard
 
@@ -120,5 +128,5 @@ MSCQR routes printers by capability:
 - Fleet rollout should use signed installers or MDM, not terminal instructions for operators.
 - For workstation printing, the OS must already see the printer before MSCQR can use it.
 - For `NETWORK_IPP`, validate PDF support and URI reachability before the first live job.
-- For private-LAN sites, prefer `NETWORK_IPP` with site gateway over ad hoc workstation browser flows.
+- For private-LAN manufacturer sites, use the signed Windows connector for the supported customer-activation flow. Existing `SITE_GATEWAY` integrations require a separate retirement and migration review.
 - For Docker deployments on AWS Lightsail, standard operations are `docker compose build`, `docker compose run --rm backend npx prisma migrate deploy`, and `docker compose --profile worker up -d --force-recreate` when that host intentionally owns the singleton worker, not ad hoc `systemctl` restarts.
