@@ -1037,7 +1037,7 @@ export function BatchPrintJobDialog({
                           <div className="rounded-md border bg-background p-3">
                             <div className="text-xs font-medium">Supply chain batch release</div>
                             <div className="mt-1 text-xs text-muted-foreground">
-                              This is separate from customer verification. MSCQR checks batch readiness and any release approval when you request it.
+                              This is separate from customer verification. Supply chain release requires completed sample scan proof and may require a different authorized checker. Customer QR verification does not require either step.
                             </div>
                             <div className="mt-3 flex justify-end">
                               <ActionButton
@@ -1049,6 +1049,8 @@ export function BatchPrintJobDialog({
                                     ? createUiActionState("pending", "Requesting supply chain release.")
                                     : printBatch?.lifecycleState === "RELEASED"
                                       ? createUiActionState("disabled", "Batch has already been released.")
+                                      : printBatch?.lifecycleState !== "SAMPLE_VERIFIED"
+                                        ? createUiActionState("disabled", "Complete the sample scan policy before supply chain release. Customer verification is already independent of this step.")
                                       : releaseApprovalState?.approvalRequired
                                         ? createUiActionState("disabled", "A different authorized checker must approve this release.")
                                         : createUiActionState("enabled")

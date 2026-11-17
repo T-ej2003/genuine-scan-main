@@ -216,6 +216,7 @@ describe("dialog recovery states", () => {
     const onReleaseBatch = vi.fn();
     const onVerifySampleScan = vi.fn();
     renderPrintDialog({
+      printBatch: { ...readyBatch, lifecycleState: "SAMPLE_VERIFIED" } as any,
       recentPrintJobs: [{
         id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
         createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
@@ -230,6 +231,21 @@ describe("dialog recovery states", () => {
     fireEvent.click(release);
     expect(onReleaseBatch).toHaveBeenCalledTimes(1);
     expect(onVerifySampleScan).not.toHaveBeenCalled();
+  });
+
+  it("explains why supply chain release awaits sample proof while customer verification stays independent", () => {
+    const onReleaseBatch = vi.fn();
+    renderPrintDialog({
+      printBatch: { ...readyBatch, lifecycleState: "PRINT_CONFIRMED" } as any,
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+      onReleaseBatch,
+    });
+    expect(screen.getByText(/Supply chain release requires completed sample scan proof/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release batch" })).toBeDisabled();
+    expect(onReleaseBatch).not.toHaveBeenCalled();
   });
 
   it("shows pause, resume, stop, cooldown, and reissue controls for print operations", () => {

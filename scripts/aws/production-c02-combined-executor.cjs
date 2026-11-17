@@ -1,9 +1,9 @@
 'use strict';
-const assert = require('node:assert/strict'), crypto = require('node:crypto'), { gunzipSync, gzipSync } = require('node:zlib');
+const assert = require('node:assert/strict'), crypto = require('node:crypto'), { brotliDecompressSync, gzipSync } = require('node:zlib');
 const session = require('./production-c02-session-executor.cjs');
 const { canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue } = require('./production-printing-routine-delta-executor.cjs');
 const hash = x => crypto.createHash('sha256').update(typeof x === 'string' ? x : canonicalJson(x)).digest('hex');
-const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job'];
+const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job', 'printing_worker_network_job', 'verify_signed_qr', 'claim_customer_ownership'];
 function validatePackage(pkg) {
     const { packageSha256, ...body } = pkg;
     assert.equal(packageSha256, hash(body));
@@ -16,14 +16,22 @@ function validatePackage(pkg) {
     session.decodePackage(gzipSync(sessionBytes).toString('base64'), hash(sessionBytes.toString()));
     assert.deepEqual(pkg.definitions.map(definition => definition.name), names);
     for (const definition of pkg.definitions) {
-        assert.ok(definition.sql.startsWith(`CREATE OR REPLACE FUNCTION app_rls.${definition.name}(`));
+        const schema = ['verify_signed_qr', 'claim_customer_ownership'].includes(definition.name) ? 'app_public' : 'app_rls';
+        assert.equal(definition.schema, schema);
+        assert.ok(definition.sql.startsWith(`CREATE OR REPLACE FUNCTION ${schema}.${definition.name}(`));
     }
-    assert.equal(pkg.policySql.length, 13);
+    assert.equal(pkg.policySql.length, 19);
     assert.deepEqual(pkg.evidenceGrants, [
         'GRANT SELECT ("id", "code", "displayCode", "licenseeId", "batchId", "status", "printJobId", "replayEpoch", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "printedAt", "scannedAt", "scanCount", "customerVerifiableAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT UPDATE ("status", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "issuanceMode", "printedAt", "printedByUserId", "customerVerifiableAt", "blockedAt", "updatedAt") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_prd_rls_phase2_auth_owner";'
+    ]);
+    assert.deepEqual(pkg.publicGrants, [
+        'GRANT SELECT ("id", "code", "licenseeId", "batchId", "status", "scanCount", "scannedAt", "printedAt", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "replayEpoch", "issuanceMode", "customerVerifiableAt", "signedFirstSeenAt", "lastSignedVerificationAt", "lastSignedVerificationIpHash", "lastSignedVerificationDeviceHash") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT SELECT ("id", "printSessionId", "qrCodeId", "state", "attemptCount", "printConfirmedAt", "confirmationEvidence") ON TABLE public."PrintItem" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT SELECT ("id", "printJobId", "batchId", "manufacturerId") ON TABLE public."PrintSession" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT SELECT ("batchId", "printJobId", "qrCodeId", "eventType", "metadata", "createdAt") ON TABLE public."PrintAuditEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
     ]);
     assert.equal(pkg.migrationSql, 'ALTER TABLE "PrinterAgentSession"\n  ADD COLUMN "lastMessageSeq" INTEGER NOT NULL DEFAULT 0;');
     assert.equal(hash(pkg.migrationSql + '\n'), pkg.sessionPackage.migrationSha256);
@@ -121,12 +129,12 @@ async function executeC02CombinedTransaction({ tx, pkg, checkpoint = async () =>
     await tx.$executeRawUnsafe('RESET ROLE');
     await tx.$executeRawUnsafe('SET LOCAL ROLE mscqr_prd_rls_phase2_owner');
     await tx.$executeRawUnsafe('REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner');
-    for (const sql of [...pkg.evidenceGrants, ...pkg.policySql])
+    for (const sql of [...pkg.evidenceGrants, ...pkg.publicGrants, ...pkg.policySql])
         await tx.$executeRawUnsafe(sql);
     await tx.$executeRawUnsafe('RESET ROLE');
     await checkpoint('before-combined-verification');
     assert.equal(canonicalJson(await digest()), canonicalJson(pkg.successorCatalogue), 'Combined C02 successor mismatch');
-    return { status: 'APPLIED', writeCount: base.writeCount + 25 };
+    return { status: 'APPLIED', writeCount: base.writeCount + 38 };
 }
 async function main() {
     let client;
@@ -136,7 +144,7 @@ async function main() {
         assert.match(host, /^[a-z0-9.-]+$/);
         assert.match(encoded, /^[A-Za-z0-9+/=]+$/);
         assert.ok(encoded.length <= 37 * 1024);
-        const bytes = gunzipSync(Buffer.from(encoded, 'base64'), { maxOutputLength: 192 * 1024 });
+        const bytes = brotliDecompressSync(Buffer.from(encoded, 'base64'), { maxOutputLength: 256 * 1024 });
         assert.equal(hash(bytes.toString()), expected);
         assert.equal(canonicalJson(JSON.parse(bytes)), bytes.toString());
         const pkg = validatePackage(JSON.parse(bytes));

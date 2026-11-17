@@ -728,6 +728,11 @@ export function useBatchPrintWorkflow({
           : "MSCQR recorded that the scanned label belongs to this confirmed print run.",
       });
       setSampleScanCodeByJobId((previous) => ({ ...previous, [trimmedJobId]: "" }));
+      if (response.data?.sampleScanPolicy?.satisfied) {
+        setPrintBatch((current) => current && current.id === printBatch?.id && current.lifecycleState === "PRINT_CONFIRMED"
+          ? { ...current, lifecycleState: "SAMPLE_VERIFIED" }
+          : current);
+      }
       await loadRecentPrintJobs();
       await onBatchesChanged?.();
     } finally {
