@@ -122,6 +122,66 @@ async function main() {
     '${hash("signed-session")}'
   ) v`);
   assert.equal(signedNotReady.result, "NOT_READY");
+  const autoQr = "60000000-0000-4000-8000-000000000502";
+  const autoJob = "60000000-0000-4000-8000-000000000701";
+  const autoSession = "60000000-0000-4000-8000-000000000801";
+  const autoItem = "60000000-0000-4000-8000-000000000901";
+  psql(admin, `
+    INSERT INTO public."PrintJob"(id,"batchId","manufacturerId",status,"printMode",quantity,"itemCount","updatedAt")
+      VALUES('${autoJob}','${ids.batch}','${ids.manufacturer}','CONFIRMED','LOCAL_AGENT',1,1,now());
+    INSERT INTO public."PrintSession"(id,"printJobId","batchId","manufacturerId",status,"totalItems","confirmedItems","updatedAt")
+      VALUES('${autoSession}','${autoJob}','${ids.batch}','${ids.manufacturer}','COMPLETED',1,1,now());
+    INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId","printJobId",status,
+      "issuanceMode","customerVerifiableAt","tokenNonce","tokenHash","tokenIssuedAt","tokenExpiresAt",
+      "replayEpoch","printedAt","updatedAt")
+      VALUES('${autoQr}','AUTOCODE01','AUTO-0001','${ids.licensee}','${ids.batch}','${autoJob}','PRINTED',
+        'GOVERNED_PRINT',now(),'auto_nonce_1234','${hash("auto-signed-token")}',
+        '${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,1,now(),now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"attemptCount",
+      "printConfirmedAt","confirmationEvidence","updatedAt")
+      SELECT '${autoItem}','${autoSession}','${autoQr}','AUTOCODE01','PRINT_CONFIRMED',1,
+        q."customerVerifiableAt",'{"physical":true}'::jsonb,now()
+      FROM public."QRCode" q WHERE q.id='${autoQr}';
+  `);
+  const autoSigned = (request) => `SELECT row_to_json(v) FROM app_public.verify_signed_qr(
+    '${hash("auto-signed-token")}','${autoQr}','${ids.licensee}','${ids.batch}','${ids.manufacturer}',
+    'auto_nonce_1234',1,'test-v1','${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,
+    now()::timestamp,'${request}','${hash("auto-ip")}','${hash("auto-device")}',
+    '${hash("auto-session")}'
+  ) v`;
+  assert.equal(json(preauth, autoSigned("forged-timestamp")).result, "NOT_READY",
+    "a timestamp and confirmed item without activation audit must not release the QR");
+  const foreignBatch = "60000000-0000-4000-8000-000000000402";
+  psql(admin, `INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","lifecycleState","updatedAt")
+    VALUES('${foreignBatch}','Other Tenant Batch','${ids.otherLicensee}','${ids.manufacturer}',
+      'OTHER01','OTHER01',1,'DRAFT',now());
+    INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType",metadata,"createdAt")
+    SELECT gen_random_uuid()::text,'${foreignBatch}','${autoJob}','${autoQr}',
+      'AUTOMATIC_ACTIVATION',jsonb_build_object('printItemId','${autoItem}',
+        'printSessionId','${autoSession}'),pi."printConfirmedAt"
+    FROM public."PrintItem" pi WHERE pi.id='${autoItem}'`);
+  assert.equal(json(preauth, autoSigned("foreign-tenant-audit")).result, "NOT_READY",
+    "evidence from another tenant cannot authorize this QR");
+  psql(admin, `DELETE FROM public."PrintAuditEvent" WHERE "batchId"='${foreignBatch}'`);
+  psql(admin, `INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId",
+    "eventType",metadata,"createdAt")
+    SELECT gen_random_uuid()::text,'${ids.batch}','${autoJob}','${autoQr}',
+      'AUTOMATIC_ACTIVATION',jsonb_build_object('printItemId','${autoItem}',
+        'printSessionId','${autoSession}'),pi."printConfirmedAt"
+    FROM public."PrintItem" pi WHERE pi.id='${autoItem}'`);
+  assert.equal(json(preauth, autoSigned("automatic-confirmed")).result, "AUTHENTIC",
+    "exact confirmed item and activation audit allow verification without sample or batch release");
+  assert.equal(json(preauth, verifySql("AUTOCODE01", "unsigned-auto", "auto-ip", "auto-device", "auto-start")).result,
+    "NOT_READY", "automatic eligibility still requires signed QR proof");
+  denied(preauth, `SELECT * FROM public."PrintItem" WHERE "qrCodeId"='${autoQr}'`);
+  denied(preauth, `SELECT * FROM public."PrintAuditEvent" WHERE "qrCodeId"='${autoQr}'`);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${ids.batch}'`);
+  assert.equal(json(preauth, autoSigned("automatic-suspended")).result, "NOT_READY");
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${ids.batch}'`);
+  const autoStatus = psql(admin, `SELECT status::text FROM public."QRCode" WHERE id='${autoQr}'`);
+  psql(admin, `UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=now() WHERE id='${autoQr}'`);
+  assert.equal(json(preauth, autoSigned("automatic-revoked")).result, "BLOCKED");
+  psql(admin, `UPDATE public."QRCode" SET status='${autoStatus}',"blockedAt"=NULL WHERE id='${autoQr}'`);
   const notReadySession = json(preauth, `SELECT row_to_json(s) FROM app_public.start_verification_session(
     '${hash("session-not-ready")}','MANUAL_CODE',NULL,now()::timestamp,
     'not-ready-session-start','${hash("proof-not-ready")}'

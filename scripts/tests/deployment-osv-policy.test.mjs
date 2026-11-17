@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { realpathSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { buildBrowserClosure, enforceRuntimeFindings, assertRuntimePackaging } from "../check-osv-runtime.mjs";
+import { proveBrowserPackageNotEmitted } from "../lib/osv-executable-provenance.mjs";
+import { reachabilityInputsSha256 } from "../lib/osv-non-runtime-acceptance.mjs";
 
-const root = path.resolve(new URL("../..", import.meta.url).pathname);
+const root = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const packageName = "unsafe-runtime-fixture";
 const report = (dir, { dev = true, source = "package-lock.json", ecosystem = "npm" } = {}) => ({ results: [{
   source: { path: path.join(dir, source), type: "lockfile" },
@@ -19,7 +22,7 @@ function fixture() {
   writeFileSync(path.join(dir, "node_modules", packageName, "index.js"), 'export default () => "runtime";');
   writeFileSync(path.join(dir, "package.json"), JSON.stringify({ type: "module", devDependencies: { [packageName]: "1.0.0" } }));
   writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages: {
-    "": { devDependencies: { [packageName]: "1.0.0" } }, [`node_modules/${packageName}`]: { version: "1.0.0", dev: true },
+    "": { devDependencies: { [packageName]: "1.0.0" } }, [`node_modules/${packageName}`]: { version: "1.0.0", dev: true, integrity: "sha512-fixture" },
   } }));
   writeFileSync(path.join(dir, "index.html"), '<script type="module" src="/main.js"></script>');
   return dir;
@@ -49,6 +52,60 @@ for (const [name, source] of [
 });
 test("absence from browser graph is not proof of build-only execution", async () => {
   await withBuild(idle, (dir, browser) => assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir), /UNKNOWN/));
+});
+test("verified dev-only package absence passes with image and emission evidence", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const browserProof = proveBrowserPackageNotEmitted(dir, [{ name: packageName, version: "1.0.0" }],
+      () => ({ outputSha256: "b".repeat(64), fileCount: 1 }));
+    const imageProof = { completed: true, inputsSha256: browserProof.inputsSha256, images: ["backend-and-worker", "database-executor", "frontend"]
+      .map(role => ({ role, imageId: `sha256:${"a".repeat(64)}`, excludedPackages: [packageName] })) };
+    const accepted = enforceRuntimeFindings(report(dir), { ...browser, canonicalBuild: true }, dir, { browserProof, imageProof });
+    assert.equal(accepted[0].disposition, "PROVEN_ABSENT_FROM_PRODUCTION_IMAGES");
+  });
+});
+test("package source copied into browser output fails the emission probe", () => {
+  const dir = fixture();
+  try {
+    const source = path.join(dir, "node_modules", packageName, "index.js");
+    const original = readFileSync(source);
+    assert.throws(() => proveBrowserPackageNotEmitted(dir, [{ name: packageName, version: "1.0.0" }],
+      () => ({ outputSha256: readFileSync(source, "utf8"), fileCount: 1 })), /may be present/);
+    assert.deepEqual(readFileSync(source), original, "probe must restore installed source");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("production graph fails even when supplied with non-runtime evidence", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const inputsSha256 = reachabilityInputsSha256(dir);
+    const browserProof = { completed: true, inputsSha256, outputSha256: "b".repeat(64), packages: [`${packageName}@1.0.0`] };
+    const imageProof = { completed: true, inputsSha256, images: ["backend-and-worker", "database-executor", "frontend"]
+      .map(role => ({ role, imageId: `sha256:${"a".repeat(64)}`, excludedPackages: [packageName] })) };
+    assert.throws(() => enforceRuntimeFindings(report(dir, { dev: false }), { ...browser, canonicalBuild: true }, dir, { browserProof, imageProof }), /Production runtime/);
+    const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json")));
+    delete lock.packages[`node_modules/${packageName}`].dev;
+    writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
+    const changedSha256 = reachabilityInputsSha256(dir);
+    assert.throws(() => enforceRuntimeFindings(report(dir), { ...browser, canonicalBuild: true, inputsSha256: changedSha256 }, dir,
+      { browserProof: { ...browserProof, inputsSha256: changedSha256 }, imageProof: { ...imageProof, inputsSha256: changedSha256 } }), /Runtime dependency/);
+  });
+});
+test("missing image, browser, or lockfile provenance remains unknown", async () => {
+  await withBuild(idle, (dir, browser) => {
+    const inputsSha256 = reachabilityInputsSha256(dir);
+    const browserProof = { completed: true, inputsSha256, outputSha256: "b".repeat(64), packages: [`${packageName}@1.0.0`] };
+    const images = ["backend-and-worker", "database-executor", "frontend"]
+      .map(role => ({ role, imageId: `sha256:${"a".repeat(64)}`, excludedPackages: [packageName] }));
+    const imageProof = { completed: true, inputsSha256, images };
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir, { browserProof }), /UNKNOWN/);
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir, { imageProof }), /UNKNOWN/);
+    assert.throws(() => enforceRuntimeFindings(report(dir), browser, dir,
+      { browserProof, imageProof: { completed: true, images: images.slice(0, 2) } }), /UNKNOWN/);
+    const lock = JSON.parse(readFileSync(path.join(dir, "package-lock.json")));
+    delete lock.packages[`node_modules/${packageName}`].integrity;
+    writeFileSync(path.join(dir, "package-lock.json"), JSON.stringify(lock));
+    const changedSha256 = reachabilityInputsSha256(dir);
+    assert.throws(() => enforceRuntimeFindings(report(dir), { ...browser, canonicalBuild: true, inputsSha256: changedSha256 }, dir,
+      { browserProof: { ...browserProof, inputsSha256: changedSha256 }, imageProof: { ...imageProof, inputsSha256: changedSha256 } }), /Missing package integrity/);
+  });
 });
 test("browser worker dependency is included in the census", async () => {
   const dir = fixture();
@@ -193,7 +250,7 @@ for (const hook of ["transform", "virtual", "renderChunk", "generateBundle"]) te
     const code = readFileSync(path.join(dir, `node_modules/${packageName}/browser.js`), "utf8");
     let artifact = "";
     const plugin = { name: "fixture-code-copy", writeBundle(_opts, bundle) { artifact = Object.values(bundle).filter(v => v.type === "chunk").map(v => v.code).join("\n"); } };
-    if (hook === "transform") plugin.transform = (original, id) => id === path.join(realpathSync(dir), "main.js") ? { code: original + code, map: null } : null;
+    if (hook === "transform") plugin.transform = (original, id) => id.replaceAll("\\", "/") === path.join(realpathSync(dir), "main.js").replaceAll("\\", "/") ? { code: original + code, map: null } : null;
     if (hook === "virtual") { plugin.resolveId = id => id === "virtual:unsafe" ? "\0injected" : null; plugin.load = id => id === "\0injected" ? code : null; }
     if (hook === "renderChunk") plugin.renderChunk = original => ({ code: original + code, map: null });
     if (hook === "generateBundle") plugin.generateBundle = (_opts, bundle) => { for (const item of Object.values(bundle)) if (item.type === "chunk") item.code += code; };

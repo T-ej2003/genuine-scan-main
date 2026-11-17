@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "count": 386,
+  "count": 389,
   "rows": [
     {
       "tableId": "table-action-idempotency-key",
@@ -6558,6 +6558,31 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-audit-event",
+      "table": "PrintAuditEvent",
+      "policyName": "public_verification_printauditevent_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true) AND \"printJobId\"=current_setting('app.public_verification_print_job_id',true) AND \"eventType\"='AUTOMATIC_ACTIVATION'",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintAuditEvent:SELECT",
+        "contract:release-fix-6-verify-raw:PrintAuditEvent:SELECT",
+        "contract:release-fix-6-verify-signed:PrintAuditEvent:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-printer",
       "table": "Printer",
       "policyName": "printing_lifecycle_printer_delete",
@@ -7059,6 +7084,31 @@
       "internalHelperOnly": true
     },
     {
+      "tableId": "table-print-item",
+      "table": "PrintItem",
+      "policyName": "public_verification_printitem_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND \"qrCodeId\"=current_setting('app.public_verification_qr_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintItem:SELECT",
+        "contract:release-fix-6-verify-raw:PrintItem:SELECT",
+        "contract:release-fix-6-verify-signed:PrintItem:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
       "tableId": "table-print-item-event",
       "table": "PrintItemEvent",
       "policyName": "printing_lifecycle_printitemevent_insert",
@@ -7489,6 +7539,31 @@
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
+      "certificationStatus": "pending",
+      "internalHelperOnly": true
+    },
+    {
+      "tableId": "table-print-session",
+      "table": "PrintSession",
+      "policyName": "public_verification_printsession_select",
+      "command": "SELECT",
+      "actors": [
+        "anonymous"
+      ],
+      "assurance": "source-rule-specific",
+      "purpose": [
+        "release-fix-6-public-verification"
+      ],
+      "scopeType": "security-definer-owner-and-row-local-public-verification-target",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND id=current_setting('app.public_verification_print_session_id',true) AND \"printJobId\"=current_setting('app.public_verification_print_job_id',true)",
+      "columns": [],
+      "sourceCommandRuleIds": [
+        "contract:release-fix-6-ownership-claim:PrintSession:SELECT",
+        "contract:release-fix-6-verify-raw:PrintSession:SELECT",
+        "contract:release-fix-6-verify-signed:PrintSession:SELECT"
+      ],
+      "workflowId": null,
+      "route": "Release Fix 6 exact public verification boundary",
       "certificationStatus": "pending",
       "internalHelperOnly": true
     },

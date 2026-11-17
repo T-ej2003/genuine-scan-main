@@ -1,5 +1,6 @@
 import { assertPinnedImageInputs } from "./lib/container-image-identity.mjs";
 import { reachabilityInputsSha256, validateNonRuntimeAcceptance } from "./lib/osv-non-runtime-acceptance.mjs";
+import { installedDevCopies, proveBrowserPackageNotEmitted, proveProductionImagesExclude } from "./lib/osv-executable-provenance.mjs";
 import assert from "node:assert/strict";
 import { realpathSync, readFileSync, mkdtempSync, rmSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { build } from "vite";
 import { parse } from "parse5";
 
-const repository = path.resolve(new URL("..", import.meta.url).pathname);
+const repository = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const readJson = file => JSON.parse(readFileSync(file, "utf8"));
 
 export async function buildBrowserClosure(root, options = {}) {
@@ -46,7 +47,7 @@ export async function buildBrowserClosure(root, options = {}) {
       build: { ...options.build, outDir, emptyOutDir: true, write: true },
     });
     assert.ok(completed && chunks.size && modules.size, "Missing completed browser runtime evidence");
-    const outputFiles = readdirSync(outDir, { recursive: true });
+    const outputFiles = readdirSync(outDir, { recursive: true }).map(file => file.replaceAll(path.sep, "/"));
     const inspectHtml = node => {
       if (node.tagName === "script") {
         const attrs = Object.fromEntries(node.attrs.map(({ name, value }) => [name, value]));
@@ -94,9 +95,13 @@ export function assertRuntimePackaging(root) {
     assert.deepEqual(runtime.match(/^COPY --from=.*$/gm), ["COPY --from=builder /app/dist /usr/share/nginx/html"]);
   }
   assert.match(readFileSync(path.join(root, "scripts/aws/publish-ecs-images.sh"), "utf8"), /backend\|worker\) printf 'runtime'/);
+  const compose = readFileSync(path.join(root, "docker-compose.yml"), "utf8");
+  const backendService = compose.split(/^  backend:\s*$/m)[1]?.split(/^  [a-z][^\n]*:\s*$/m)[0] || "";
+  assert.match(backendService, /^      target: runtime$/m, "Compose backend must build the production runtime stage");
+  assert.match(compose, /^  worker:[\s\S]*?^    command: \["node", "dist\/worker\.js"\]/m, "Compose worker must use the runtime's direct Node entry point");
 }
 
-export function enforceRuntimeFindings(report, browser, root, { acceptance = { schemaVersion: 1, entries: [] }, today = new Date().toISOString().slice(0, 10) } = {}) {
+export function enforceRuntimeFindings(report, browser, root, { acceptance = { schemaVersion: 1, entries: [] }, today = new Date().toISOString().slice(0, 10), browserProof, imageProof } = {}) {
   assert.ok(browser?.completed && Array.isArray(browser.packages) && browser.chunks?.length && browser.moduleCount > 0, "Missing browser runtime evidence");
   assert.ok(Array.isArray(report?.results), "Invalid unfiltered OSV report");
   assert.equal(acceptance.schemaVersion, 1);
@@ -124,9 +129,28 @@ export function enforceRuntimeFindings(report, browser, root, { acceptance = { s
         const ids = [vulnerability.id, ...(vulnerability.aliases || [])];
         assert.ok(ids.every(id => typeof id === "string" && id), "Malformed OSV alias identity");
         const entry = acceptance.entries.find(entry => entry.package === name && entry.affectedVersion === version && ids.some(id => id.toUpperCase() === entry.advisory.toUpperCase()) && ids.some(id => id.toUpperCase() === entry.cve.toUpperCase()));
-        const buildScope = source === path.join(root, "package-lock.json") && finding.package.ecosystem === "npm" && finding.dependency_groups?.length === 1 && finding.dependency_groups[0] === "dev";
+        const rootLock = source === path.join(root, "package-lock.json");
+        const backendLock = source === path.join(root, "backend/package-lock.json");
+        const buildScope = (rootLock || backendLock) && finding.package.ecosystem === "npm" && finding.dependency_groups?.length === 1 && finding.dependency_groups[0] === "dev";
         const patchAvailable = vulnerability.affected?.some(affected => affected.ranges?.some(range => range.events?.some(event => event.fixed)));
-        if (entry && buildScope && !patchAvailable) {
+        const inputsSha256 = imageProof?.inputsSha256;
+        const provenAbsent = buildScope && !patchAvailable && browser.canonicalBuild === true &&
+          /^[a-f0-9]{64}$/.test(inputsSha256 || "") &&
+          browser.inputsSha256 === inputsSha256 && reachabilityInputsSha256(root) === inputsSha256 &&
+          imageProof?.completed === true &&
+          imageProof.images?.length === 3 &&
+          ["backend-and-worker", "database-executor", "frontend"].every(role => imageProof.images.some(image =>
+            image.role === role && /^sha256:[a-f0-9]{64}$/.test(image.imageId) && image.excludedPackages?.includes(name))) &&
+          !browser.packages.includes(`${name}@${version}`) &&
+          (!rootLock || (browserProof?.completed === true && browserProof.inputsSha256 === inputsSha256 &&
+            /^[a-f0-9]{64}$/.test(browserProof.outputSha256 || "") &&
+            browserProof.packages?.includes(`${name}@${version}`)));
+        if (provenAbsent) {
+          installedDevCopies(rootLock ? root : path.join(root, "backend"), name, version);
+          accepted.push({ package: name, version, advisory: vulnerability.id, aliases: ids,
+            severity: vulnerability.database_specific?.severity || "UNSPECIFIED", patched: false,
+            disposition: "PROVEN_ABSENT_FROM_PRODUCTION_IMAGES", imageIds: imageProof.images.map(image => image.imageId) });
+        } else if (entry && rootLock && buildScope && !patchAvailable) {
           used.add(entry);
           accepted.push({ package: name, version, advisory: vulnerability.id, aliases: ids, severity: vulnerability.database_specific?.severity || "UNSPECIFIED", patched: false, disposition: "TIME_BOUNDED_NON_RUNTIME_ACCEPTANCE", owner: entry.owner, expiresOn: entry.expiresOn });
         } else failures.push(`${source}: ${name}@${version} (${browser.packages.includes(`${name}@${version}`) ? "YES: browser module present" : "UNKNOWN: executable provenance incomplete"})`);
@@ -144,8 +168,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const browser = await buildBrowserClosure(repository);
   const report = readJson(path.resolve(process.argv[2]));
   const acceptance = readJson(path.join(repository, "documents/security/osv-non-runtime-acceptance.json"));
-  const buildOnly = enforceRuntimeFindings(report, browser, repository, { acceptance });
+  const findings = report.results?.flatMap(result => result.packages?.filter(item => item.vulnerabilities?.length)
+    .map(item => ({ name: item.package?.name, version: item.package?.version,
+      source: path.resolve(result.source?.path || "") })) || []) || [];
+  const rootFindings = findings.filter(item => item.source === path.join(repository, "package-lock.json"));
+  const browserProof = proveBrowserPackageNotEmitted(repository, rootFindings);
+  const imageProof = findings.length ? proveProductionImagesExclude(repository, findings) : { completed: true, images: [] };
+  const buildOnly = enforceRuntimeFindings(report, browser, repository, { acceptance, browserProof, imageProof });
   for (const entry of buildOnly) console.log(JSON.stringify(entry));
-  writeFileSync(path.join(path.dirname(path.resolve(process.argv[2])), "browser-runtime-closure.json"), JSON.stringify({ browser, buildOnly }, null, 2));
-  console.log(`OSV runtime gate passed; ${buildOnly.length} visible time-bounded accepted finding(s), ${browser.packages.length} browser packages.`);
+  writeFileSync(path.join(path.dirname(path.resolve(process.argv[2])), "browser-runtime-closure.json"), JSON.stringify({ browser, browserProof, imageProof, buildOnly }, null, 2));
+  console.log(`OSV runtime gate passed; ${buildOnly.length} visible classified finding(s), ${browser.packages.length} browser packages.`);
 }

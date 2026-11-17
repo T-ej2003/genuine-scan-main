@@ -55,8 +55,8 @@ export const printJobEvents = async (req: AuthRequest, res: Response) => {
         payload: {
           reason: event.reason,
           printJobId,
-          view: event.view || null,
-          patch: event.patch || null,
+          ...(event.view ? { view: event.view } : {}),
+          ...(event.patch ? { patch: event.patch } : {}),
           serverTime: event.occurredAt,
         },
         occurredAt: event.occurredAt,

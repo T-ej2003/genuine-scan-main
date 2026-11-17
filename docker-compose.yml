@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
+      target: runtime
       args:
         GIT_SHA: ${GIT_SHA:-unknown}
         RELEASE_GIT_SHA: ${RELEASE_GIT_SHA:-unknown}
@@ -111,7 +112,7 @@ services:
         condition: service_healthy
       backend:
         condition: service_healthy
-    command: ["sh", "-c", "npm run worker"]
+    command: ["node", "dist/worker.js"]
     stop_grace_period: 20s
     logging:
       driver: json-file

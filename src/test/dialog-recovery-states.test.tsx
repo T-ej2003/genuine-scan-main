@@ -212,6 +212,56 @@ describe("dialog recovery states", () => {
     expect(onAbandon).toHaveBeenCalledWith("job-failed");
   });
 
+  it("keeps supply chain release available separately from customer QR eligibility", () => {
+    const onReleaseBatch = vi.fn();
+    const onVerifySampleScan = vi.fn();
+    renderPrintDialog({
+      printBatch: { ...readyBatch, lifecycleState: "SAMPLE_VERIFIED" } as any,
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+      onReleaseBatch,
+      onVerifySampleScan,
+    });
+    expect(screen.getByText("Supply chain batch release")).toBeInTheDocument();
+    expect(screen.getByText(/separate from customer verification/i)).toBeInTheDocument();
+    const release = screen.getByRole("button", { name: "Release batch" });
+    expect(release).toBeEnabled();
+    fireEvent.click(release);
+    expect(onReleaseBatch).toHaveBeenCalledTimes(1);
+    expect(onVerifySampleScan).not.toHaveBeenCalled();
+  });
+
+  it("explains why supply chain release awaits sample proof while customer verification stays independent", () => {
+    const onReleaseBatch = vi.fn();
+    renderPrintDialog({
+      printBatch: { ...readyBatch, lifecycleState: "PRINT_CONFIRMED" } as any,
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+      onReleaseBatch,
+    });
+    expect(screen.getByText(/Supply chain release requires completed sample scan proof/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Release batch" })).toBeDisabled();
+    expect(onReleaseBatch).not.toHaveBeenCalled();
+  });
+
+  it("keeps legacy batch release out of the ordinary manufacturer print flow", () => {
+    renderPrintDialog({
+      isManufacturerMode: true,
+      printBatch: { ...readyBatch, lifecycleState: "PRINT_CONFIRMED" } as any,
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+    });
+    expect(screen.getByText("Optional quality scan")).toBeInTheDocument();
+    expect(screen.queryByText("Supply chain batch release")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release batch" })).not.toBeInTheDocument();
+  });
+
   it("shows pause, resume, stop, cooldown, and reissue controls for print operations", () => {
     const onOpenControl = vi.fn();
     const onResume = vi.fn();
@@ -736,6 +786,26 @@ describe("dialog recovery states", () => {
     expect(screen.queryByRole("button", { name: "Resume print run" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop print run" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
+  });
+
+  it("shows committed confirmation and lets the user close the dialog", () => {
+    const onOpenChange = vi.fn();
+    render(
+      <PrintProgressDialog
+        open phase="Print job completed" total={10} printed={10} remaining={0}
+        confirmedJob={{
+          id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 10,
+          createdAt: new Date().toISOString(), printer: { name: "Zebra ZT410" },
+          session: { status: "COMPLETED", totalItems: 10, confirmedItems: 10, remainingToPrint: 0 },
+        } as any}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(screen.getByText(/Job job-confirmed · CONFIRMED · 10 confirmed/)).toBeInTheDocument();
+    expect(screen.getByText(/Customer eligibility: confirmed QR labels are checked individually/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it("shows payload rejection as a failed-before-print state with recoverable labels", () => {

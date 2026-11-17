@@ -219,6 +219,7 @@ AS $$
 DECLARE
   qr record;
   batch record;
+  confirmed_item record;
   brand record;
   organization record;
   manufacturer record;
@@ -238,6 +239,7 @@ DECLARE
   next_scan_count integer;
   first_at timestamp without time zone;
   ready boolean;
+  auto_activated boolean := false;
   same_context boolean;
   claim_available boolean;
   scan_history_eligible boolean;
@@ -263,7 +265,7 @@ BEGIN
   PERFORM set_config('app.public_verification_audit_id',audit_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
-    q."issuanceMode",q."customerVerifiableAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
+    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
   INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
@@ -314,11 +316,42 @@ BEGIN
   ORDER BY rc."createdAt" DESC LIMIT 1;
   replacement_status:=coalesce(replacement_status,'NONE');
 
+  -- Only the verified QR identity may select printing evidence. The public
+  -- function returns its existing result shape, never these internal rows.
+  IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
+    PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
+    SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
+      pi."confirmationEvidence" INTO confirmed_item
+    FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
+    IF confirmed_item.id IS NOT NULL THEN
+      PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
+      SELECT EXISTS (
+        SELECT 1 FROM public."PrintSession" ps
+        JOIN public."PrintAuditEvent" activation ON activation."qrCodeId"=qr.id
+        WHERE ps.id=confirmed_item."printSessionId" AND ps."printJobId"=qr."printJobId"
+          AND ps."batchId"=qr."batchId" AND ps."manufacturerId"=batch."manufacturerId"
+          AND confirmed_item.state IN ('PRINT_CONFIRMED','CLOSED')
+          AND confirmed_item."attemptCount">0
+          AND confirmed_item."confirmationEvidence" IS NOT NULL
+          AND confirmed_item."printConfirmedAt"=qr."customerVerifiableAt"
+          AND activation."batchId"=qr."batchId"
+          AND activation."printJobId"=qr."printJobId"
+          AND activation."eventType"='AUTOMATIC_ACTIVATION'
+          AND activation.metadata->>'printItemId'=confirmed_item.id
+          AND activation.metadata->>'printSessionId'=ps.id
+          AND activation."createdAt"=confirmed_item."printConfirmedAt"
+      ) INTO auto_activated;
+    END IF;
+  END IF;
+
   ready := qr.status IN ('PRINTED','SCANNED','REDEEMED')
     AND batch.id IS NOT NULL
-    AND batch."lifecycleState"::text='RELEASED'
     AND batch."suspendedAt" IS NULL
-    AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL);
+    AND ((batch."lifecycleState"::text='RELEASED'
+      AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
+      OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
+        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')
+        AND p_proof_source='SIGNED_LABEL'));
   same_context := previous_scan.id IS NOT NULL
     AND p_actor_device_hash IS NOT NULL
     AND p_actor_ip_hash IS NOT NULL
@@ -853,7 +886,8 @@ CREATE OR REPLACE FUNCTION app_public.claim_customer_ownership(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE customer record; session_row record;
-  qr record; batch_state text; ownership record; claim_available boolean;
+  qr record; batch_row record; confirmed_item record; ownership record; claim_available boolean;
+  auto_activated boolean:=false;
   ownership_id text:=gen_random_uuid()::text; action text; result text;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -893,18 +927,47 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
-  SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt"
+  SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt",q."printJobId"
   INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   IF qr."batchId" IS NOT NULL THEN
     PERFORM set_config('app.public_verification_batch_id',qr."batchId",true);
-    SELECT b."lifecycleState"::text INTO batch_state FROM public."Batch" b WHERE b.id=qr."batchId";
+  END IF;
+  SELECT b.id,b."lifecycleState",b."suspendedAt",b."manufacturerId",b."licenseeId"
+    INTO batch_row FROM public."Batch" b WHERE b.id=qr."batchId";
+  IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
+    PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
+    SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
+      pi."confirmationEvidence" INTO confirmed_item
+    FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
+    IF confirmed_item.id IS NOT NULL THEN
+      PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
+      SELECT EXISTS (
+        SELECT 1 FROM public."PrintSession" ps
+        JOIN public."PrintAuditEvent" activation ON activation."qrCodeId"=qr.id
+        WHERE ps.id=confirmed_item."printSessionId" AND ps."printJobId"=qr."printJobId"
+          AND ps."batchId"=qr."batchId" AND ps."manufacturerId"=batch_row."manufacturerId"
+          AND confirmed_item.state IN ('PRINT_CONFIRMED','CLOSED')
+          AND confirmed_item."attemptCount">0
+          AND confirmed_item."confirmationEvidence" IS NOT NULL
+          AND confirmed_item."printConfirmedAt"=qr."customerVerifiableAt"
+          AND activation."batchId"=qr."batchId" AND activation."printJobId"=qr."printJobId"
+          AND activation."eventType"='AUTOMATIC_ACTIVATION'
+          AND activation.metadata->>'printItemId'=confirmed_item.id
+          AND activation.metadata->>'printSessionId'=ps.id
+          AND activation."createdAt"=confirmed_item."printConfirmedAt"
+      ) INTO auto_activated;
+    END IF;
   END IF;
   IF qr.status NOT IN ('PRINTED','SCANNED','REDEEMED')
-     OR coalesce(batch_state,'RELEASED')<>'RELEASED'
-     OR (qr."issuanceMode"='GOVERNED_PRINT' AND qr."customerVerifiableAt" IS NULL) THEN
+     OR batch_row.id IS NULL OR batch_row."licenseeId"<>qr."licenseeId"
+     OR batch_row."suspendedAt" IS NOT NULL
+     OR NOT ((batch_row."lifecycleState"='RELEASED'
+       AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
+       OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
+         AND batch_row."lifecycleState"::text NOT IN ('VOIDED','FAILED'))) THEN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
   SELECT o.id,o."userId",o."deviceTokenHash",o."claimedAt" INTO ownership

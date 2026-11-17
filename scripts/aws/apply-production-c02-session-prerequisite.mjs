@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { gzipSync } from "node:zlib";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { parseArgs } from "node:util";
 import { setTimeout as sleep } from "node:timers/promises";
 import { APP_ONLY } from "./production-app-only-contract.mjs";
@@ -36,14 +36,15 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
     const sources=Object.fromEntries(["production-c02-session-executor.cjs","production-printing-routine-delta-executor.cjs","production-c02-combined-executor.cjs"].map(name=>["./"+name,fs.readFileSync(path.join(repositoryRoot,"scripts/aws",name),"utf8")]));
     const runtime=`const sources=${JSON.stringify(sources)};const cache=Object.create(null);function load(n){if(cache[n])return cache[n].exports;if(!Object.hasOwn(sources,n))return require(n);const module={exports:{}};cache[n]=module;new Function('module','require',sources[n])(module,load);return module.exports;}load('./production-c02-combined-executor.cjs').main();`;
     assert.ok(Buffer.byteLength(runtime)<96*1024);
-    runtimeArgument=gzipSync(Buffer.from(runtime),{level:9,mtime:0}).toString("base64");
-    executor="const z=require('node:zlib');const src=z.gunzipSync(Buffer.from(process.argv.splice(1,1)[0],'base64'),{maxOutputLength:98304}).toString('utf8');require('node:vm').runInThisContext(src);";
+    runtimeArgument=brotliCompressSync(Buffer.from(runtime),{params:{[constants.BROTLI_PARAM_QUALITY]:11}}).toString("base64");
+    executor="const z=require('node:zlib');const src=z.brotliDecompressSync(Buffer.from(process.argv.splice(1,1)[0],'base64'),{maxOutputLength:98304}).toString('utf8');require('node:vm').runInThisContext(src);";
   }
   assert.ok(Buffer.byteLength(executor) < 64 * 1024);
   const bytes = Buffer.from(canonicalJson(pkg));
-  assert.ok(bytes.length < (combinedRequirements ? 192 : 64) * 1024);
-  const encoded = gzipSync(bytes, { level: 9, mtime: 0 }).toString("base64");
-  assert.ok(encoded.length <= (combinedRequirements ? 36 * 1024 : 32768), "C02 task payload exceeds the reviewed bounded transport");
+  assert.ok(bytes.length < (combinedRequirements ? 256 : 64) * 1024);
+  const encoded = (combinedRequirements ? brotliCompressSync(bytes, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } })
+    : gzipSync(bytes, { level: 9, mtime: 0 })).toString("base64");
+  assert.ok(encoded.length <= (combinedRequirements ? 38 * 1024 : 32768), `C02 task payload exceeds the reviewed bounded transport (${encoded.length} bytes)`);
   const definition = { family, networkMode: "awsvpc", requiresCompatibilities: ["FARGATE"], cpu: "1024", memory: "2048",
     executionRoleArn: PRINTING_ROUTINE_DELTA.executionRoleArn, runtimePlatform: STAGE_B.taskRuntimePlatform,
     volumes: [{ name: "executor-tmp" }], containerDefinitions: [{ name: containerName,
@@ -57,7 +58,7 @@ export function buildC02SessionTask({ sourceSha, hostname, combinedRequirements,
         "awslogs-group": PRINTING_ROUTINE_DELTA.logGroup, "awslogs-stream-prefix": "c02-session-prerequisite" } },
     }] };
   const serialized = JSON.stringify(definition);
-  assert.ok(Buffer.byteLength(serialized) < 60 * 1024, "C02 task definition exceeds the safe ECS budget");
+  assert.ok(Buffer.byteLength(serialized) < 60 * 1024, `C02 task definition exceeds the safe ECS budget (${Buffer.byteLength(serialized)} bytes)`);
   return Object.freeze({ pkg, definition, serialized });
 }
 
@@ -73,7 +74,7 @@ export function authenticateC02SessionResult(message, { sourceSha, packageSha256
   assert.equal(result.sourceSha, sourceSha); assert.equal(result.packageSha256, packageSha256);
   assert.equal(result.database, "mscqr_production_rls_green_phase2");
   assert.equal(result.databaseRole, PRINTING_ROUTINE_DELTA.administrator);
-  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 40 : 15) ||
+  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 55 : 15) ||
     result.status === "ALREADY_CONVERGED" && result.writeCount === 0);
   return result;
 }
