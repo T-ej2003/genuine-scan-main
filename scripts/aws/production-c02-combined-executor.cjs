@@ -3,7 +3,7 @@ const assert = require('node:assert/strict'), crypto = require('node:crypto'), {
 const session = require('./production-c02-session-executor.cjs');
 const { canonicalJson, collectAppOnlyDatabaseCatalogueRows, hashProductionRlsCatalogue } = require('./production-printing-routine-delta-executor.cjs');
 const hash = x => crypto.createHash('sha256').update(typeof x === 'string' ? x : canonicalJson(x)).digest('hex');
-const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job', 'printing_worker_network_job', 'public_verify_execute', 'verify_signed_qr', 'claim_customer_ownership'];
+const names = ['printing_connector_event', 'printing_connector_identity', 'printing_control_job', 'printing_create_job', 'printing_gateway_job', 'printing_readiness', 'printing_reissue_request', 'printing_test_label_job', 'printing_worker_network_job', 'public_verify_execute', 'verify_signed_qr', 'claim_customer_ownership'];
 function validatePackage(pkg) {
     const { packageSha256, ...body } = pkg;
     assert.equal(packageSha256, hash(body));
@@ -134,7 +134,7 @@ async function executeC02CombinedTransaction({ tx, pkg, checkpoint = async () =>
     await tx.$executeRawUnsafe('RESET ROLE');
     await checkpoint('before-combined-verification');
     assert.equal(canonicalJson(await digest()), canonicalJson(pkg.successorCatalogue), 'Combined C02 successor mismatch');
-    return { status: 'APPLIED', writeCount: base.writeCount + 39 };
+    return { status: 'APPLIED', writeCount: base.writeCount + 40 };
 }
 async function main() {
     let client;

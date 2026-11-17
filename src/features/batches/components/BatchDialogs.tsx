@@ -1034,7 +1034,7 @@ export function BatchPrintJobDialog({
                               />
                             </div>
                           </div>
-                          <div className="rounded-md border bg-background p-3">
+                          {!isManufacturerMode ? <div className="rounded-md border bg-background p-3">
                             <div className="text-xs font-medium">Supply chain batch release</div>
                             <div className="mt-1 text-xs text-muted-foreground">
                               This is separate from customer verification. Supply chain release requires completed sample scan proof and may require a different authorized checker. Customer QR verification does not require either step.
@@ -1060,7 +1060,7 @@ export function BatchPrintJobDialog({
                                 showReasonBelow
                               />
                             </div>
-                          </div>
+                          </div> : null}
                         </div>
                       ) : null}
                     </div>

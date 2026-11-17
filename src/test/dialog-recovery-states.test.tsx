@@ -248,6 +248,20 @@ describe("dialog recovery states", () => {
     expect(onReleaseBatch).not.toHaveBeenCalled();
   });
 
+  it("keeps legacy batch release out of the ordinary manufacturer print flow", () => {
+    renderPrintDialog({
+      isManufacturerMode: true,
+      printBatch: { ...readyBatch, lifecycleState: "PRINT_CONFIRMED" } as any,
+      recentPrintJobs: [{
+        id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 1,
+        createdAt: new Date().toISOString(), session: { status: "COMPLETED", confirmedItems: 1, remainingToPrint: 0 },
+      } as any],
+    });
+    expect(screen.getByText("Optional quality scan")).toBeInTheDocument();
+    expect(screen.queryByText("Supply chain batch release")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Release batch" })).not.toBeInTheDocument();
+  });
+
   it("shows pause, resume, stop, cooldown, and reissue controls for print operations", () => {
     const onOpenControl = vi.fn();
     const onResume = vi.fn();

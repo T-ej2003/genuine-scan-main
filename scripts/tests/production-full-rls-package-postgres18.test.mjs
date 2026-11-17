@@ -1599,7 +1599,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
         assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), beforeB03);
         assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "C02 rollback grant"), "f");
       }
-      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 54 });
+      assert.deepEqual(await c02Transaction(), { status: "APPLIED", writeCount: 55 });
       const afterC02 = hashProductionRlsCatalogue(await collectCatalogueRows(verifier));
       assert.deepEqual(Object.fromEntries(Object.entries(afterC02).map(([k,v]) => [k,canonicalSha256(v)])), combinedPackage.successorCatalogue);
       // Commit succeeded but migration-history recording was interrupted: retry

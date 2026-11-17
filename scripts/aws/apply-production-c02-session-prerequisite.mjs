@@ -74,7 +74,7 @@ export function authenticateC02SessionResult(message, { sourceSha, packageSha256
   assert.equal(result.sourceSha, sourceSha); assert.equal(result.packageSha256, packageSha256);
   assert.equal(result.database, "mscqr_production_rls_green_phase2");
   assert.equal(result.databaseRole, PRINTING_ROUTINE_DELTA.administrator);
-  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 54 : 15) ||
+  assert.ok(result.status === "APPLIED" && result.writeCount === (combined ? 55 : 15) ||
     result.status === "ALREADY_CONVERGED" && result.writeCount === 0);
   return result;
 }

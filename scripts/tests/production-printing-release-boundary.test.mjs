@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalSha256 } from "../aws/production-green-stage-b-contract.mjs";
-import { catalogueAfterPrinting, PRINTING_RELEASE_OBJECTS, PUBLIC_VERIFICATION_RELEASE_POLICIES } from "../aws/production-printing-release-boundary.mjs";
+import { catalogueAfterPrinting, PRINTING_RELEASE_NAMES, PRINTING_RELEASE_OBJECTS, PUBLIC_VERIFICATION_RELEASE_NAMES, PUBLIC_VERIFICATION_RELEASE_POLICIES } from "../aws/production-printing-release-boundary.mjs";
 import { B03_DELTA_OBJECTS, classifyB03Catalogue } from "../aws/production-b03-catalogue-diagnostic.mjs";
 import { buildC02CombinedPackage } from "../aws/production-c02-combined-package.mjs";
 import { authenticateC02SessionResult, buildC02SessionTask } from "../aws/apply-production-c02-session-prerequisite.mjs";
@@ -27,8 +27,25 @@ test("combined boundary advances only reviewed printing identities and preserves
   for (const key of Object.keys(rows)) for (const row of rows[key]) {
     assert.equal(row.sha256, (PRINTING_RELEASE_OBJECTS[key].includes(row.identity) ? "2" : "1").repeat(64));
   }
-  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 27);
+  assert.equal(PRINTING_RELEASE_OBJECTS.routines.length + PRINTING_RELEASE_OBJECTS.tables.length + PRINTING_RELEASE_OBJECTS.policies.length, 28);
   assert.equal(predecessor.objects.routines[0].sha256, "1".repeat(64));
+});
+
+test("every printing and public routine changed by this PR has a governed installer entry", () => {
+  const base = "892cea9cc590b4a01bfd64bc9ea82f73a4321612";
+  for (const [file, schema, delimiter, allowed] of [
+    ["backend/src/rls-waves/session-c/c02/printingLifecycle.sql", "app_rls", "$fn$;", PRINTING_RELEASE_NAMES],
+    ["backend/src/rls-waves/session-b/b02/publicVerificationFunctions.sql", "app_public", "$$;", PUBLIC_VERIFICATION_RELEASE_NAMES],
+  ]) {
+    const old = spawnSync("git", ["show", `${base}:${file}`], { encoding: "utf8" });
+    assert.equal(old.status, 0, old.stderr);
+    const definitions = source => new Map([...source.matchAll(new RegExp(`CREATE OR REPLACE FUNCTION ${schema}\\.([a-z0-9_]+)\\(`, "g"))]
+      .map(match => [match[1], source.slice(match.index, source.indexOf(`\n${delimiter}`, match.index) + delimiter.length + 1)]));
+    const before = definitions(old.stdout), after = definitions(fs.readFileSync(file, "utf8"));
+    const changed = [...after].filter(([name, sql]) => before.get(name) !== sql).map(([name]) => name);
+    assert.ok(changed.length > 0);
+    assert.deepEqual(changed.filter(name => !allowed.includes(name)), [], `${file} changed functions missing from governed release`);
+  }
 });
 
 test("combined boundary rejects unknown changes, removals, duplicate rows, tampering and source mismatch", () => {
@@ -63,7 +80,8 @@ test("B03 diagnostic requires all printing deltas at exact successor, never mere
 test("combined C02 task keeps root executor bindings and bounded source-authenticated transport", () => {
   const pkg = buildC02CombinedPackage({ sourceSha, predecessor, successor });
   assert.deepEqual(runtime.validatePackage(pkg), pkg);
-  assert.equal(pkg.definitions.length, 11); assert.equal(pkg.policySql.length, 19);
+  assert.equal(pkg.definitions.length, 12); assert.equal(pkg.policySql.length, 19);
+  assert.ok(pkg.definitions.some(({ schema, name }) => schema === "app_rls" && name === "printing_gateway_job"));
   assert.deepEqual(pkg.definitions.slice(-4).map(({ schema, name }) => `${schema}.${name}`), [
     "app_rls.printing_worker_network_job", "app_public.public_verify_execute", "app_public.verify_signed_qr", "app_public.claim_customer_ownership",
   ]);
@@ -91,9 +109,9 @@ test("combined C02 task keeps root executor bindings and bounded source-authenti
   assert.equal(task.definition.containerDefinitions[0].secrets.length, 1);
   const resultBody = { schemaVersion: 2, kind: "PRODUCTION_C02_COMBINED_INSTALL_RESULT", sourceSha,
     packageSha256: pkg.packageSha256, database: "mscqr_production_rls_green_phase2", databaseRole: "mscqr_prod_admin",
-    status: "APPLIED", writeCount: 54 };
+    status: "APPLIED", writeCount: 55 };
   assert.equal(authenticateC02SessionResult(JSON.stringify({ ...resultBody, evidenceSha256: canonicalSha256(resultBody) }),
-    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 54);
+    { sourceSha, packageSha256: pkg.packageSha256, combined: true }).writeCount, 55);
   const result = spawnSync(process.execPath, task.definition.containerDefinitions[0].command,
     { cwd: os.tmpdir(), encoding: "utf8", env: { PATH: process.env.PATH } });
   assert.equal(result.status, 1);
