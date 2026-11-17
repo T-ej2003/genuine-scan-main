@@ -4016,6 +4016,7 @@
         "scanCount",
         "scannedAt",
         "printedAt",
+        "printJobId",
         "tokenNonce",
         "tokenIssuedAt",
         "tokenExpiresAt",
@@ -4086,6 +4087,47 @@
         "lifecycleState",
         "printedAt",
         "suspendedAt"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PrintItem",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "printSessionId",
+        "qrCodeId",
+        "state",
+        "attemptCount",
+        "printConfirmedAt",
+        "confirmationEvidence"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PrintSession",
+      "command": "SELECT",
+      "columns": [
+        "id",
+        "printJobId",
+        "batchId",
+        "manufacturerId"
+      ],
+      "grantee": "mscqr_rls_cert_auth_owner",
+      "ownerIdentity": "identity-auth-function-owner"
+    },
+    {
+      "table": "PrintAuditEvent",
+      "command": "SELECT",
+      "columns": [
+        "batchId",
+        "printJobId",
+        "qrCodeId",
+        "eventType",
+        "metadata",
+        "createdAt"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner"

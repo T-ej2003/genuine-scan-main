@@ -738,6 +738,26 @@ describe("dialog recovery states", () => {
     expect(screen.getByRole("button", { name: "Refresh status" })).toBeInTheDocument();
   });
 
+  it("shows committed confirmation and lets the user close the dialog", () => {
+    const onOpenChange = vi.fn();
+    render(
+      <PrintProgressDialog
+        open phase="Print job completed" total={10} printed={10} remaining={0}
+        confirmedJob={{
+          id: "job-confirmed", status: "CONFIRMED", printMode: "LOCAL_AGENT", quantity: 10,
+          createdAt: new Date().toISOString(), printer: { name: "Zebra ZT410" },
+          session: { status: "COMPLETED", totalItems: 10, confirmedItems: 10, remainingToPrint: 0 },
+        } as any}
+        onOpenChange={onOpenChange}
+      />,
+    );
+    expect(screen.getByText("Print completed")).toBeInTheDocument();
+    expect(screen.getByText(/Job job-confirmed · CONFIRMED · 10 confirmed/)).toBeInTheDocument();
+    expect(screen.getByText(/Customer eligibility: confirmed QR labels are checked individually/)).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Close" })[0]);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("shows payload rejection as a failed-before-print state with recoverable labels", () => {
     render(
       <PrintProgressDialog

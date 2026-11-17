@@ -198,6 +198,70 @@ describe("active print job polling", () => {
     expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([]);
   });
 
+  it("refetches authoritative status for a production notification without a view", async () => {
+    vi.useFakeTimers();
+    let realtimeMessage: ((payload: any) => void) | null = null;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId: string, onMessage: (payload: any) => void) => {
+      realtimeMessage = onMessage;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockResolvedValueOnce({ success: true, data: baseJob } as any)
+      .mockResolvedValue({ success: true, data: {
+        ...baseJob, status: "CONFIRMED", updatedAt: new Date(Date.now() + 1_000).toISOString(),
+        session: { ...baseJob.session, status: "COMPLETED", confirmedItems: 10, remainingToPrint: 0 },
+      } } as any);
+
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    await act(async () => {
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", channel: "printJob", type: "label_confirmed",
+        payload: { printJobId: "job-live", view: null, reason: "printer_session_progress" } });
+      await vi.advanceTimersByTimeAsync(10_001);
+    });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledWith("job-live", expect.objectContaining({ force: true }));
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
+  });
+
+  it("contains a failed status request and retries without false success", async () => {
+    vi.useFakeTimers();
+    vi.mocked(apiClient.getPrintJobStatus)
+      .mockRejectedValueOnce(new Error("temporary network failure"))
+      .mockResolvedValue({ success: true, data: baseJob } as any);
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: true, terminal: false });
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_001); });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(2);
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: true, terminal: false });
+  });
+
+  it("does not regress committed success on delayed or cross-job events", async () => {
+    vi.useFakeTimers();
+    let realtimeMessage: ((payload: any) => void) | null = null;
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation((_jobId: string, onMessage: (payload: any) => void) => {
+      realtimeMessage = onMessage;
+      return vi.fn();
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    const confirmed = {
+      ...baseJob, status: "CONFIRMED", updatedAt: new Date(Date.now() + 2_000).toISOString(),
+      session: { ...baseJob.session, status: "COMPLETED", confirmedItems: 10, remainingToPrint: 0 },
+    };
+    await act(async () => {
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", type: "label_confirmed",
+        payload: { printJobId: "job-live", view: confirmed } });
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", type: "label_acknowledged",
+        payload: { printJobId: "job-live", view: baseJob } });
+      realtimeMessage?.({ envelope: "MSCQR_SSE_V1", type: "label_confirmed",
+        payload: { printJobId: "other-job", view: baseJob } });
+    });
+    expect(getActivePrintSessionSnapshot()).toMatchObject({ active: false, terminal: true });
+    expect(apiClient.getPrintJobStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("clears fallback timers and realtime subscriptions after unmount", async () => {
     vi.useFakeTimers();
     const streamStop = vi.fn();

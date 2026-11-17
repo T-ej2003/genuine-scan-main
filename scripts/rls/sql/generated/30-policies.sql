@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126'
+    AND source_contract_sha256='b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3'
     AND administrator_role='certification-administrator'
 
     AND phase='runtime-grants-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -842,6 +842,12 @@ CREATE POLICY "public_verification_licensee_select" ON public."Licensee" AS PERM
 COMMENT ON POLICY "public_verification_licensee_select" ON public."Licensee" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
 CREATE POLICY "public_verification_batch_select" ON public."Batch" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_batch_id',true));
 COMMENT ON POLICY "public_verification_batch_select" ON public."Batch" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
+CREATE POLICY "public_verification_printitem_select" ON public."PrintItem" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND "qrCodeId"=current_setting('app.public_verification_qr_id',true));
+COMMENT ON POLICY "public_verification_printitem_select" ON public."PrintItem" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
+CREATE POLICY "public_verification_printsession_select" ON public."PrintSession" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND id=current_setting('app.public_verification_print_session_id',true) AND "printJobId"=current_setting('app.public_verification_print_job_id',true));
+COMMENT ON POLICY "public_verification_printsession_select" ON public."PrintSession" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
+CREATE POLICY "public_verification_printauditevent_select" ON public."PrintAuditEvent" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND current_setting('app.public_verification_operation',true) IN ('public-verification-execute','public-verification-ownership-claim') AND "qrCodeId"=current_setting('app.public_verification_qr_id',true) AND "printJobId"=current_setting('app.public_verification_print_job_id',true) AND "eventType"='AUTOMATIC_ACTIVATION');
+COMMENT ON POLICY "public_verification_printauditevent_select" ON public."PrintAuditEvent" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
 CREATE POLICY "public_verification_user_select" ON public."User" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND id=current_setting('app.public_verification_manufacturer_id',true));
 COMMENT ON POLICY "public_verification_user_select" ON public."User" IS '{"boundary":"release-fix-6-public-verification","ownerIdentity":"identity-auth-function-owner","scope":"exact pre-auth function plus row-local verification target"}';
 CREATE POLICY "public_verification_replacementchain_select" ON public."ReplacementChain" AS PERMISSIVE FOR SELECT TO "mscqr_rls_cert_auth_owner" USING (current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_preauth' AND current_setting('app.public_verification_operation',true) LIKE 'public-verification-%' AND ("originalQrCodeId"=current_setting('app.public_verification_qr_id',true) OR "replacementQrCodeId"=current_setting('app.public_verification_qr_id',true)));

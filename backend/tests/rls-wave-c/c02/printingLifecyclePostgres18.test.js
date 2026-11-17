@@ -893,6 +893,8 @@ async function main() {
     '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("ack")}','spool-1','{}'::jsonb
   )`);
   assert.equal(ack.operation, "ACK");
+  assert.equal(psql(admin, `SELECT "customerVerifiableAt" IS NULL FROM public."QRCode" WHERE id='${ids.qr}'`), "t",
+    "ACK alone cannot activate customer verification");
   denied(app, `SELECT app_rls.printing_control_job(
     '${caps.outsider}','printing-job-control','${requestId()}','${created.job.id}','ABANDON','Other tenant'
   )`, /PRINTING_BOUNDARY_DENIED/);
@@ -907,11 +909,33 @@ async function main() {
     '${requestId()}','ACK','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("ack-replay")}','spool-1','{}'::jsonb
   )`);
   assert.equal(replayAck.idempotent, true);
+  psql(app, `BEGIN; SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','rollback_confirm_01',now()::timestamp,
+    '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}',
+    '${hash('rollback-confirm')}','spool-1','{"physical":true}'::jsonb
+  ); ROLLBACK;`);
+  assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${claim.printItemId}'`), 'AGENT_ACKED');
+  assert.equal(psql(admin, `SELECT "customerVerifiableAt" IS NULL FROM public."QRCode" WHERE id='${ids.qr}'`), 't');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "qrCodeId"='${ids.qr}' AND "eventType"='AUTOMATIC_ACTIVATION'`), '0');
   const confirmation = json(app, `SELECT app_rls.printing_connector_event(
     '${ids.registration}','printing-agent','printing-device','confirm_nonce_001',now()::timestamp,
     '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("confirm")}','spool-1','{"physical":true}'::jsonb
   )`);
   assert.equal(confirmation.remainingToPrint, 0);
+  assert.equal(psql(admin, `SELECT "customerVerifiableAt" IS NOT NULL FROM public."QRCode" WHERE id='${ids.qr}'`), "t",
+    "the exact confirmed QR becomes eligible without a sample scan");
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent"
+    WHERE "qrCodeId"='${ids.qr}' AND "printJobId"='${created.job.id}'
+      AND "eventType"='AUTOMATIC_ACTIVATION' AND metadata->>'printItemId'='${claim.printItemId}'`), "1",
+    "automatic activation is distinct from a human approval");
+  assert.equal(psql(admin, `SELECT "lifecycleState" FROM public."Batch" WHERE id='${ids.batch}'`), "PRINT_CONFIRMED",
+    "confirmation must not manufacture a whole-batch release");
+  assert.equal(json(app, `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','duplicate_confirm_1',now()::timestamp,
+    '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}',
+    '${hash('duplicate-confirm')}','spool-1','{"physical":true}'::jsonb
+  )`).idempotent, true);
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "qrCodeId"='${ids.qr}' AND "eventType"='AUTOMATIC_ACTIVATION'`), '1');
   const sample = json(app, `SELECT app_rls.printing_record_sample(
     '${caps.maker}','printing-sample-scan','${requestId()}','${created.job.id}','${immutableCode}','{"scanner":"focused-proof"}'::jsonb
   )`);
@@ -1805,11 +1829,20 @@ async function main() {
   assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',50)`), '1');
   assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${alreadyPaused.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION');
   const partial = createExpiredRun('partial', 2);
+  psql(admin, `UPDATE public."QRCode" SET "issuanceMode"='GOVERNED_PRINT',
+      "tokenNonce"=replace(id,'-',''),"tokenHash"=encode(sha256(convert_to(id,'UTF8')),'hex'),
+      "tokenIssuedAt"=now(),"tokenExpiresAt"=now()+interval '1 hour'
+      WHERE "printJobId"='${partial.jobId}';
+    UPDATE public."PrintItem" SET "attemptCount"=1 WHERE "printSessionId"='${partial.sessionId}';`);
   const partialItems = psql(admin, `SELECT string_agg(id,',' ORDER BY code) FROM public."PrintItem" WHERE "printSessionId"='${partial.sessionId}'`).split(',');
   assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',1)`), '1');
   const firstPartial = psql(admin, `SELECT id FROM public."PrintItem" WHERE "printSessionId"='${partial.sessionId}' AND "pipelineState"='NEEDS_OPERATOR_ACTION'`);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${ids.raceBatch}'`);
   assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_confirm_nonce_1',now()::timestamp,
     '${requestId()}','CONFIRM','${partial.jobId}','${firstPartial}','${ids.printer}','${hash('partial-confirm-1')}','spool-partial','{"physical":true}'::jsonb)`).operation, 'CONFIRM');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${partial.jobId}' AND "customerVerifiableAt" IS NOT NULL`), '1',
+    'a partial confirmation activates only its exact QR');
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${ids.raceBatch}'`);
   assert.equal(psql(admin, `SELECT status||':'||"pipelineState" FROM public."PrintJob" WHERE id='${partial.jobId}'`), 'PAUSED:NEEDS_OPERATOR_ACTION',
     'unmarked overdue work must keep the parent paused');
   assert.equal(psql(worker, `SELECT app_rls.printing_worker_reconcile('EXPIRE_CONFIRMATIONS','${requestId()}',1)`), '1');
@@ -1817,6 +1850,8 @@ async function main() {
   assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_confirm_nonce_2',now()::timestamp,
     '${requestId()}','CONFIRM','${partial.jobId}','${secondPartial}','${ids.printer}','${hash('partial-confirm-2')}','spool-partial','{"physical":true}'::jsonb)`).remainingToPrint, 0);
   assert.equal(psql(admin, `SELECT status FROM public."PrintJob" WHERE id='${partial.jobId}'`), 'CONFIRMED');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."QRCode" WHERE "printJobId"='${partial.jobId}' AND "customerVerifiableAt" IS NOT NULL`), '2');
+  assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "printJobId"='${partial.jobId}' AND "eventType"='AUTOMATIC_ACTIVATION'`), '2');
   assert.equal(json(app, `SELECT app_rls.printing_connector_event('${ids.registration}','printing-agent','printing-device','partial_ack_retry_nonce_1',now()::timestamp,
     '${requestId()}','ACK','${partial.jobId}','${firstPartial}','${ids.printer}','${hash('partial-ack-retry')}','spool-partial','{}'::jsonb)`).idempotent, true);
   const concurrentRun = createExpiredRun('concurrent', 100);

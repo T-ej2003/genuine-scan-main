@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126'
+    AND source_contract_sha256='b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:163de30dd7f8c5691fc2818b726d6d1fe76ef1c4ea8c24c8c17d45529f797126')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:b8192390b71d285f80562c56c35a382bcb1ed56fb6490d4b08e472f87224e3d3')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -10154,7 +10154,7 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path=pg_catalog,public
 AS $fn$
 DECLARE registration record; printer_row record; job_row record; session_row record; item_row record;
-  now_at timestamp without time zone:=transaction_timestamp(); remaining integer; audit_actor text;
+  now_at timestamp without time zone:=transaction_timestamp(); remaining integer; audit_actor text; activated_count integer;
   evidence_claim boolean; claim_attempt_id text;
 BEGIN
   IF p_operation NOT IN ('CLAIM','ACK','CONFIRM','FAIL','INTENT','ABORT')
@@ -10274,7 +10274,7 @@ BEGIN
 
   IF p_operation='CLAIM' THEN
     PERFORM app_rls.printing_maintenance_gate(jsonb_build_array('local',p_registration_id)::text,'CHECK',NULL,jsonb_build_object('printerId',printer_row.id));
-    SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence"
+  SELECT pi.id,pi."qrCodeId",pi.code,pi.state,pi."issueSequence",pi."dispatchMetadata"
       INTO item_row FROM public."PrintItem" pi
      WHERE pi."printSessionId"=session_row.id AND pi.state='RESERVED'
      ORDER BY pi."issueSequence" NULLS LAST,pi.id FOR UPDATE SKIP LOCKED LIMIT 1;
@@ -10417,8 +10417,26 @@ BEGIN
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details,
       "deviceJobRef"=coalesce(nullif(p_device_job_ref,''),"deviceJobRef"),"failureReason"=NULL,"updatedAt"=now_at
       WHERE id=item_row.id;
-    UPDATE public."QRCode" SET status='PRINTED',"printedAt"=now_at,"printedByUserId"=audit_actor,
-      "updatedAt"=now_at WHERE id=item_row."qrCodeId" AND "printJobId"=job_row.id;
+    UPDATE public."QRCode" q SET "customerVerifiableAt"=now_at,"updatedAt"=now_at
+      WHERE q.id=item_row."qrCodeId" AND q."printJobId"=job_row.id
+        AND q."batchId"=job_row."batchId" AND q.status='ACTIVATED'
+        AND q."customerVerifiableAt" IS NULL AND q."issuanceMode"='GOVERNED_PRINT'
+        AND q."tokenHash" IS NOT NULL AND q."tokenNonce" IS NOT NULL
+        AND q."tokenExpiresAt">now_at AND EXISTS (SELECT 1 FROM public."Batch" b
+        WHERE b.id=job_row."batchId" AND b."manufacturerId"=job_row."manufacturerId"
+          AND b."licenseeId"=q."licenseeId"
+          AND b."lifecycleState" NOT IN ('VOIDED','FAILED'));
+    GET DIAGNOSTICS activated_count=ROW_COUNT;
+    UPDATE public."QRCode" q SET status='PRINTED',"printedAt"=now_at,"printedByUserId"=audit_actor,
+      "updatedAt"=now_at WHERE q.id=item_row."qrCodeId" AND q."printJobId"=job_row.id
+        AND q."batchId"=job_row."batchId" AND q.status IN ('ACTIVATED','ALLOCATED','PRINTED');
+    IF activated_count=1 THEN
+      INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+      VALUES(gen_random_uuid()::text,job_row."batchId",job_row.id,item_row."qrCodeId",
+        'AUTOMATIC_ACTIVATION',NULL,jsonb_build_object('printItemId',item_row.id,
+          'printSessionId',session_row.id,'confirmedAt',now_at,'source','SIGNED_CONNECTOR_CONFIRM',
+          'attemptId',item_row."dispatchMetadata"->>'attemptId'),now_at);
+    END IF;
     UPDATE public."PrintSession" SET "confirmedItems"="confirmedItems"+1,"updatedAt"=now_at
       WHERE id=session_row.id;
     SELECT count(*) INTO remaining FROM public."PrintItem" pi
@@ -10945,7 +10963,7 @@ BEGIN
         'tokenHash',q."tokenHash",'replayEpoch',q."replayEpoch"
       ) FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId" WHERE pi.id=item_row.id));
   END IF;
-  SELECT pi.id,pi."qrCodeId",pi.state INTO STRICT item_row FROM public."PrintItem" pi
+  SELECT pi.id,pi."qrCodeId",pi.state,pi."dispatchMetadata" INTO STRICT item_row FROM public."PrintItem" pi
     WHERE pi.id=p_item_id AND pi."printSessionId"=session_row.id FOR UPDATE;
   PERFORM set_config('app.printing_item_id',item_row.id,true);
   IF p_operation='ACK' THEN
@@ -10960,8 +10978,10 @@ BEGIN
     IF item_row.state<>'AGENT_ACKED' THEN RAISE EXCEPTION 'PRINT_ACK_REQUIRED'; END IF;
     UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
       "printConfirmedAt"=now_at,"confirmationEvidence"=p_details,"updatedAt"=now_at WHERE id=item_row.id;
-    UPDATE public."QRCode" SET status='PRINTED',"printedAt"=coalesce("printedAt",now_at),
-      "printedByUserId"=job_row."manufacturerId","updatedAt"=now_at WHERE id=item_row."qrCodeId";
+    UPDATE public."QRCode" q SET status='PRINTED',"printedAt"=coalesce(q."printedAt",now_at),
+      "printedByUserId"=job_row."manufacturerId",
+      "updatedAt"=now_at WHERE q.id=item_row."qrCodeId" AND q."printJobId"=job_row.id
+        AND q."batchId"=job_row."batchId" AND q.status IN ('ACTIVATED','ALLOCATED','PRINTED');
     UPDATE public."PrintSession" SET "confirmedItems"="confirmedItems"+1,"updatedAt"=now_at WHERE id=session_row.id;
     SELECT count(*) INTO remaining FROM public."PrintItem" pi
       WHERE pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED');
@@ -11643,7 +11663,8 @@ CREATE OR REPLACE FUNCTION app_rls.printing_worker_network_job(
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE maintenance_printer record; job_row record; session_row record; now_at timestamp without time zone:=transaction_timestamp();
-  mode_value public."PrintDispatchMode"; item_ids text[]; remaining integer; page_limit integer;
+  mode_value public."PrintDispatchMode"; item_ids text[]; newly_confirmed_ids text[];
+  activated_ids text[]; remaining integer; page_limit integer;
 BEGIN
   IF session_user<>'mscqr_rls_cert_worker'
      OR p_operation NOT IN ('CLAIM_DIRECT','CLAIM_IPP','RESERVE_DISPATCH','ACK','CONFIRM','FAIL')
@@ -11806,19 +11827,48 @@ BEGIN
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       RETURN jsonb_build_object('printJobId',job_row.id,'operation',p_operation,'itemCount',cardinality(item_ids),'idempotent',true);
     END IF;
-    UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
-      "printConfirmedAt"=now_at,"confirmationEvidence"=p_details->'confirmationEvidence'||jsonb_build_object(
-        'runtimeIdentity','identity-background-worker','transport',job_row."printMode",
-        'transportReference',p_details->>'transportReference'
-      ),"updatedAt"=now_at
-      WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id AND state='AGENT_ACKED';
-    IF NOT FOUND AND EXISTS (
+    WITH confirmed AS (
+      UPDATE public."PrintItem" SET state='PRINT_CONFIRMED',"pipelineState"='PRINT_CONFIRMED',
+        "printConfirmedAt"=now_at,"confirmationEvidence"=p_details->'confirmationEvidence'||jsonb_build_object(
+          'runtimeIdentity','identity-background-worker','transport',job_row."printMode",
+          'transportReference',p_details->>'transportReference'
+        ),"updatedAt"=now_at
+        WHERE id=ANY(item_ids) AND "printSessionId"=session_row.id AND state='AGENT_ACKED'
+        RETURNING id
+    ) SELECT coalesce(array_agg(id),'{}'::text[]) INTO newly_confirmed_ids FROM confirmed;
+    IF cardinality(newly_confirmed_ids)=0 AND EXISTS (
       SELECT 1 FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids)
         AND pi."printSessionId"=session_row.id AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED')
     ) THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
+    WITH activated AS (
+      UPDATE public."QRCode" q SET "customerVerifiableAt"=now_at,"updatedAt"=now_at
+      WHERE q.id IN (SELECT pi."qrCodeId" FROM public."PrintItem" pi WHERE pi.id=ANY(newly_confirmed_ids)
+        AND pi."printSessionId"=session_row.id AND pi.state='PRINT_CONFIRMED')
+        AND q."printJobId"=job_row.id AND q."batchId"=job_row."batchId"
+        AND q.status='ACTIVATED' AND q."customerVerifiableAt" IS NULL
+        AND q."issuanceMode"='GOVERNED_PRINT' AND q."tokenHash" IS NOT NULL
+        AND q."tokenNonce" IS NOT NULL AND q."tokenExpiresAt">now_at
+        AND EXISTS (SELECT 1 FROM public."Batch" b
+          WHERE b.id=job_row."batchId" AND b."manufacturerId"=job_row."manufacturerId"
+            AND b."licenseeId"=q."licenseeId"
+            AND b."lifecycleState" NOT IN ('VOIDED','FAILED'))
+      RETURNING q.id
+    ) SELECT coalesce(array_agg(id),'{}'::text[]) INTO activated_ids FROM activated;
     UPDATE public."QRCode" q SET status='PRINTED',"printedAt"=coalesce(q."printedAt",now_at),
       "printedByUserId"=job_row."manufacturerId","updatedAt"=now_at
-      WHERE q.id IN (SELECT pi."qrCodeId" FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids));
+      WHERE q.id IN (SELECT pi."qrCodeId" FROM public."PrintItem" pi WHERE pi.id=ANY(item_ids)
+        AND pi."printSessionId"=session_row.id AND pi.state='PRINT_CONFIRMED')
+        AND q."printJobId"=job_row.id AND q."batchId"=job_row."batchId"
+        AND q.status IN ('ACTIVATED','ALLOCATED','PRINTED');
+    INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType","actorId",metadata,"createdAt")
+    SELECT gen_random_uuid()::text,job_row."batchId",job_row.id,q.id,
+      'AUTOMATIC_ACTIVATION',NULL,jsonb_build_object('printItemId',pi.id,
+        'printSessionId',session_row.id,'confirmedAt',now_at,'source','NETWORK_WORKER_CONFIRM',
+        'transportReference',p_details->>'transportReference'),now_at
+    FROM public."PrintItem" pi JOIN public."QRCode" q ON q.id=pi."qrCodeId"
+    WHERE pi.id=ANY(item_ids) AND pi."printSessionId"=session_row.id
+      AND pi.state='PRINT_CONFIRMED' AND q.id=ANY(activated_ids)
+      AND q."printJobId"=job_row.id;
     UPDATE public."PrintSession" SET "confirmedItems"=(
       SELECT count(*) FROM public."PrintItem" pi WHERE pi."printSessionId"=session_row.id
         AND pi.state IN ('PRINT_CONFIRMED','CLOSED')
@@ -12120,6 +12170,7 @@ AS $$
 DECLARE
   qr record;
   batch record;
+  confirmed_item record;
   brand record;
   organization record;
   manufacturer record;
@@ -12139,6 +12190,7 @@ DECLARE
   next_scan_count integer;
   first_at timestamp without time zone;
   ready boolean;
+  auto_activated boolean := false;
   same_context boolean;
   claim_available boolean;
   scan_history_eligible boolean;
@@ -12164,7 +12216,7 @@ BEGIN
   PERFORM set_config('app.public_verification_audit_id',audit_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
-    q."issuanceMode",q."customerVerifiableAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
+    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
   INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
@@ -12215,11 +12267,42 @@ BEGIN
   ORDER BY rc."createdAt" DESC LIMIT 1;
   replacement_status:=coalesce(replacement_status,'NONE');
 
+  -- Only the verified QR identity may select printing evidence. The public
+  -- function returns its existing result shape, never these internal rows.
+  IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
+    PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
+    SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
+      pi."confirmationEvidence" INTO confirmed_item
+    FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
+    IF confirmed_item.id IS NOT NULL THEN
+      PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
+      SELECT EXISTS (
+        SELECT 1 FROM public."PrintSession" ps
+        JOIN public."PrintAuditEvent" activation ON activation."qrCodeId"=qr.id
+        WHERE ps.id=confirmed_item."printSessionId" AND ps."printJobId"=qr."printJobId"
+          AND ps."batchId"=qr."batchId" AND ps."manufacturerId"=batch."manufacturerId"
+          AND confirmed_item.state IN ('PRINT_CONFIRMED','CLOSED')
+          AND confirmed_item."attemptCount">0
+          AND confirmed_item."confirmationEvidence" IS NOT NULL
+          AND confirmed_item."printConfirmedAt"=qr."customerVerifiableAt"
+          AND activation."batchId"=qr."batchId"
+          AND activation."printJobId"=qr."printJobId"
+          AND activation."eventType"='AUTOMATIC_ACTIVATION'
+          AND activation.metadata->>'printItemId'=confirmed_item.id
+          AND activation.metadata->>'printSessionId'=ps.id
+          AND activation."createdAt"=confirmed_item."printConfirmedAt"
+      ) INTO auto_activated;
+    END IF;
+  END IF;
+
   ready := qr.status IN ('PRINTED','SCANNED','REDEEMED')
     AND batch.id IS NOT NULL
-    AND batch."lifecycleState"::text='RELEASED'
     AND batch."suspendedAt" IS NULL
-    AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL);
+    AND ((batch."lifecycleState"::text='RELEASED'
+      AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
+      OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
+        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')
+        AND p_proof_source='SIGNED_LABEL'));
   same_context := previous_scan.id IS NOT NULL
     AND p_actor_device_hash IS NOT NULL
     AND p_actor_ip_hash IS NOT NULL
@@ -12754,7 +12837,8 @@ CREATE OR REPLACE FUNCTION app_public.claim_customer_ownership(
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
 AS $$
 DECLARE customer record; session_row record;
-  qr record; batch_state text; ownership record; claim_available boolean;
+  qr record; batch_row record; confirmed_item record; ownership record; claim_available boolean;
+  auto_activated boolean:=false;
   ownership_id text:=gen_random_uuid()::text; action text; result text;
 BEGIN
   SELECT NULL::text AS "customerUserId",NULL::text AS "customerEmail" INTO customer;
@@ -12794,18 +12878,47 @@ BEGIN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
   PERFORM set_config('app.public_verification_qr_id',session_row."qrCodeId",true);
-  SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt"
+  SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."issuanceMode",q."customerVerifiableAt",q."printJobId"
   INTO qr
   FROM public."QRCode" q WHERE q.id=session_row."qrCodeId";
   IF qr.id IS NULL THEN RAISE EXCEPTION 'PUBLIC_OWNERSHIP_TARGET_DENIED' USING ERRCODE='42501'; END IF;
   PERFORM set_config('app.public_verification_licensee_id',qr."licenseeId",true);
   IF qr."batchId" IS NOT NULL THEN
     PERFORM set_config('app.public_verification_batch_id',qr."batchId",true);
-    SELECT b."lifecycleState"::text INTO batch_state FROM public."Batch" b WHERE b.id=qr."batchId";
+  END IF;
+  SELECT b.id,b."lifecycleState",b."suspendedAt",b."manufacturerId",b."licenseeId"
+    INTO batch_row FROM public."Batch" b WHERE b.id=qr."batchId";
+  IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
+    PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
+    SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
+      pi."confirmationEvidence" INTO confirmed_item
+    FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
+    IF confirmed_item.id IS NOT NULL THEN
+      PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
+      SELECT EXISTS (
+        SELECT 1 FROM public."PrintSession" ps
+        JOIN public."PrintAuditEvent" activation ON activation."qrCodeId"=qr.id
+        WHERE ps.id=confirmed_item."printSessionId" AND ps."printJobId"=qr."printJobId"
+          AND ps."batchId"=qr."batchId" AND ps."manufacturerId"=batch_row."manufacturerId"
+          AND confirmed_item.state IN ('PRINT_CONFIRMED','CLOSED')
+          AND confirmed_item."attemptCount">0
+          AND confirmed_item."confirmationEvidence" IS NOT NULL
+          AND confirmed_item."printConfirmedAt"=qr."customerVerifiableAt"
+          AND activation."batchId"=qr."batchId" AND activation."printJobId"=qr."printJobId"
+          AND activation."eventType"='AUTOMATIC_ACTIVATION'
+          AND activation.metadata->>'printItemId'=confirmed_item.id
+          AND activation.metadata->>'printSessionId'=ps.id
+          AND activation."createdAt"=confirmed_item."printConfirmedAt"
+      ) INTO auto_activated;
+    END IF;
   END IF;
   IF qr.status NOT IN ('PRINTED','SCANNED','REDEEMED')
-     OR coalesce(batch_state,'RELEASED')<>'RELEASED'
-     OR (qr."issuanceMode"='GOVERNED_PRINT' AND qr."customerVerifiableAt" IS NULL) THEN
+     OR batch_row.id IS NULL OR batch_row."licenseeId"<>qr."licenseeId"
+     OR batch_row."suspendedAt" IS NOT NULL
+     OR NOT ((batch_row."lifecycleState"='RELEASED'
+       AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
+       OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
+         AND batch_row."lifecycleState"::text NOT IN ('VOIDED','FAILED'))) THEN
     RAISE EXCEPTION 'PUBLIC_OWNERSHIP_NOT_READY' USING ERRCODE='55000';
   END IF;
   SELECT o.id,o."userId",o."deviceTokenHash",o."claimedAt" INTO ownership
@@ -15984,7 +16097,8 @@ BEGIN
   ELSIF identity_class = 'breakglass' AND login_role !~ '^mscqr_prod_breakglass_[a-z0-9_]+$'
      AND login_role <> 'mscqr_rls_wave_c_breakglass' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
-  ELSIF identity_class = 'migration' AND login_role <> 'mscqr_rls_cert_migration' THEN
+  ELSIF identity_class = 'migration' AND login_role !~ '^mscqr_(dev|staging|prod)_migration$'
+     AND login_role <> 'mscqr_rls_wave_c_migration' THEN
     RAISE EXCEPTION 'SESSION_C04_WRONG_RUNTIME_IDENTITY';
   END IF;
   IF (login_role ~ '^mscqr_dev_(operator|migration)$' AND environment <> 'development')

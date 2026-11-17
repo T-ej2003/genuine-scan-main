@@ -20,6 +20,7 @@ type PrintProgressDialogProps = {
   notice?: string | null;
   printJobId?: string;
   activeJob?: PrintJobRow | null;
+  confirmedJob?: PrintJobRow | null;
   onStop?: (job: PrintJobRow) => void;
   onRefresh?: () => void;
   printControlBusyJobId?: string | null;
@@ -30,9 +31,12 @@ type PrintProgressDialogProps = {
 };
 
 export function PrintProgressDialog(props: PrintProgressDialogProps) {
-  const safeTotal = Math.max(0, Number(props.total || 0));
-  const safePrinted = Math.max(0, Number(props.printed || 0));
-  const safeRemaining = Math.max(0, Number(props.remaining || Math.max(0, safeTotal - safePrinted)));
+  const confirmedJob = props.confirmedJob || null;
+  const safeTotal = Math.max(0, Number(confirmedJob?.session?.totalItems ?? confirmedJob?.itemCount ?? confirmedJob?.quantity ?? props.total ?? 0));
+  const safePrinted = Math.max(0, Number(confirmedJob?.session?.confirmedItems ?? props.printed ?? 0));
+  const safeRemaining = confirmedJob
+    ? Math.max(0, Number(confirmedJob.session?.remainingToPrint ?? safeTotal - safePrinted))
+    : Math.max(0, Number(props.remaining ?? safeTotal - safePrinted));
   const progressValue = safeTotal > 0 ? Math.max(0, Math.min(100, Math.round((safePrinted / safeTotal) * 100))) : 0;
   const normalizedPhase = String(props.phase || "").trim().toLowerCase();
   const normalizedError = String(props.error || "").trim().toLowerCase();
@@ -42,7 +46,10 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
       normalizedError.includes("blocked before reaching the printer") ||
       normalizedError.includes("payload rejected before print") ||
       normalizedError.includes("generated zebra zpl looks unsafe"));
-  const isCompleted = !props.error && ["completed", "print job completed", "print run completed", "print session completed"].includes(normalizedPhase);
+  const isCompleted = !props.error && Boolean(confirmedJob) && (
+    confirmedJob?.status === "CONFIRMED" ||
+    (confirmedJob?.session?.status === "COMPLETED" && safeTotal > 0 && safePrinted >= safeTotal)
+  );
   const activeJob = props.activeJob || null;
   const activeSessionStatus = String(activeJob?.session?.status || "").toUpperCase();
   const activePipelineState = String(activeJob?.pipelineState || "").toUpperCase();
@@ -111,12 +118,14 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
           <div className="min-h-[92px] rounded-md border p-3">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">{props.modeLabel || "Auto path"}</Badge>
-              <Badge variant="outline">{props.printerName || "Default printer"}</Badge>
+              <Badge variant="outline">{confirmedJob?.printer?.name || props.printerName || "Default printer"}</Badge>
               <Badge variant={props.error ? "destructive" : "default"}>{failedBeforePrint ? "Failed before print" : props.phase}</Badge>
             </div>
             {props.currentCode ? <div className="mt-2 text-xs text-muted-foreground">Processing the next approved label.</div> : null}
             {props.error ? <div className="mt-2 text-xs text-destructive">{props.error}</div> : null}
             {!props.error && props.notice ? <div className="mt-2 text-xs text-amber-700">{props.notice}</div> : null}
+            {confirmedJob ? <div className="mt-2 text-xs text-muted-foreground">Job {confirmedJob.jobNumber || confirmedJob.id} · {confirmedJob.status} · {safePrinted.toLocaleString()} confirmed</div> : null}
+            {isCompleted ? <div className="mt-1 text-xs text-muted-foreground">Customer eligibility: confirmed QR labels are checked individually for batch and security restrictions.</div> : null}
           </div>
 
           <div className="min-h-[62px] space-y-2">
@@ -183,6 +192,11 @@ export function PrintProgressDialog(props: PrintProgressDialogProps) {
               >
                 {props.refreshBusy ? "Refreshing..." : "Refresh status"}
               </Button>
+            </div>
+          ) : null}
+          {activeTerminal && props.onOpenChange ? (
+            <div className="flex justify-end border-t pt-3">
+              <Button type="button" size="sm" onClick={() => props.onOpenChange?.(false)}>Close</Button>
             </div>
           ) : null}
         </div>

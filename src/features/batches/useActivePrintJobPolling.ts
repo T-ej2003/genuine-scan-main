@@ -2,7 +2,7 @@ import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
 import { updateActivePrintSession } from "@/lib/active-print-session";
-import { usePrintJobRealtime } from "@/lib/print-job-realtime-store";
+import { primePrintJobRealtimeSnapshot, usePrintJobRealtime } from "@/lib/print-job-realtime-store";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
 
 import {
@@ -41,6 +41,11 @@ export function useActivePrintJobPolling({
 }: ActivePrintJobPollingParams) {
   const completedRefreshJobIdsRef = useRef(new Set<string>());
   const realtime = usePrintJobRealtime(printJobId);
+  const realtimeJob = realtime.job as PrintJobRow | null;
+  const realtimeJobRef = useRef(realtimeJob);
+  realtimeJobRef.current = realtimeJob;
+  const callbacksRef = useRef({ loadRecentPrintJobs, onBatchesChanged, progressStateSetters, setPrintProgressNotice });
+  callbacksRef.current = { loadRecentPrintJobs, onBatchesChanged, progressStateSetters, setPrintProgressNotice };
 
   useEffect(() => {
     if (!printJobId) return;
@@ -75,18 +80,20 @@ export function useActivePrintJobPolling({
     if (printing) return;
     if (!printJobId) return;
     if (isTerminalPrintProgressPhase(printProgressPhase)) return;
+    if (isPrintJobServerSettled(realtimeJobRef.current)) return;
 
     let cancelled = false;
     let inFlight = false;
     const polledJobId = printJobId;
     const startedAt = Date.now();
     let nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
+    let failedAttempts = 0;
 
     const syncLatest = async () => {
       if (cancelled || inFlight) return false;
       if (!canPollVisibleDocument()) return false;
       if (Date.now() - startedAt > pollingPolicy.activePrintJobTimeoutMs) {
-        setPrintProgressNotice("Realtime status remains active. Slow fallback polling is paused for this long-running print run.");
+        callbacksRef.current.setPrintProgressNotice("Realtime status remains active. Slow fallback polling is paused for this long-running print run.");
         updateActivePrintSession({
           active: true,
           jobId: polledJobId,
@@ -105,15 +112,18 @@ export function useActivePrintJobPolling({
           if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
             const seconds = Math.max(1, Math.ceil(Number(response.retryAfterSec || 10)));
             nextDelayMs = Math.max(seconds * 1000, pollingPolicy.activePrintJobMs);
-            setPrintProgressNotice(`Status refresh paused for ${seconds} seconds. The print run remains active.`);
+            callbacksRef.current.setPrintProgressNotice(`Status refresh paused for ${seconds} seconds. The print run remains active.`);
           }
           return false;
         }
 
         const job = response.data as PrintJobRow;
+        if (job.id !== polledJobId) return false;
+        if (!primePrintJobRealtimeSnapshot(polledJobId, job)) return isPrintJobServerSettled(realtimeJobRef.current);
+        failedAttempts = 0;
         nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
-        setPrintProgressNotice(null);
-        syncPrintJobProgress(job, progressStateSetters);
+        callbacksRef.current.setPrintProgressNotice(null);
+        syncPrintJobProgress(job, callbacksRef.current.progressStateSetters);
         const settled = isPrintJobServerSettled(job);
         if (settled && !completedRefreshJobIdsRef.current.has(polledJobId)) {
           completedRefreshJobIdsRef.current.add(polledJobId);
@@ -131,10 +141,16 @@ export function useActivePrintJobPolling({
             Boolean(job.confirmedAt) ||
             (total > 0 && confirmed >= total);
           if (completed) {
-            void Promise.allSettled([loadRecentPrintJobs(), onBatchesChanged?.()]);
+            void Promise.allSettled([callbacksRef.current.loadRecentPrintJobs(), callbacksRef.current.onBatchesChanged?.()]);
           }
         }
         return settled;
+      } catch {
+        if (cancelled) return false;
+        failedAttempts += 1;
+        nextDelayMs = Math.min(5 * 60_000, pollingPolicy.activePrintJobMs * 2 ** Math.min(failedAttempts, 3));
+        callbacksRef.current.setPrintProgressNotice("Status is temporarily unavailable. The print result is uncertain; use Refresh status to check again.");
+        return false;
       } finally {
         inFlight = false;
       }
@@ -158,13 +174,10 @@ export function useActivePrintJobPolling({
       if (timer) window.clearTimeout(timer);
     };
   }, [
-    loadRecentPrintJobs,
-    onBatchesChanged,
     printJobId,
     printProgressOpen,
     printProgressPhase,
-    progressStateSetters,
     printing,
-    setPrintProgressNotice,
   ]);
+  return realtimeJob;
 }
