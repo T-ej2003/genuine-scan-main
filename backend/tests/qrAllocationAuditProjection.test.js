@@ -4,9 +4,20 @@ const crypto = require('node:crypto');
 const originalFunctions = require('../dist/rls-waves/session-b/b03/repositoryFunctions');
 const digest = originalFunctions.b03PayloadDigest;
 let claims = [], delivered = [], invalidations = [], completed = 0, skipped = 0, failed = 0, uncertain = false, unavailable = false, cacheFailure = false, subscriber;
+const projected = new Set();
 const stub = (name, exports) => { const id = require.resolve('../dist/' + name); require.cache[id] = { id, filename: id, loaded: true, exports }; };
 stub('config/database', { default: {} });
 stub('services/redisService', { getRedisInstanceId: () => 'fixture', subscribeRedisJson: async (_, cb) => { subscriber = cb; },
+  getRedisClient: async () => unavailable ? null : { eval: async (_script, count, key, ...args) => {
+    assert.equal(count, 5);
+    if (cacheFailure) throw new Error('CACHE_UNAVAILABLE');
+    if (projected.has(key)) return 0;
+    projected.add(key);
+    for (const versionKey of args.slice(0, 4)) invalidations.push(versionKey.split(':')[1]);
+    subscriber?.({ ...JSON.parse(args.at(-1)), origin: 'other-instance' });
+    if (uncertain) { uncertain = false; throw new Error('UNCERTAIN_REDIS_RESPONSE'); }
+    return 1;
+  } },
   publishRedisJson: async (_, value) => { if (unavailable) return false; subscriber?.({ ...value, origin: 'other-instance' }); if (uncertain) { uncertain = false; throw new Error('UNCERTAIN_REDIS_RESPONSE'); } return true; } });
 stub('services/versionedCacheService', { bumpCacheNamespaceVersion: async name => { if (cacheFailure) throw new Error('CACHE_UNAVAILABLE'); invalidations.push(name); } });
 stub('rls-waves/session-b/b03/repositoryFunctions', { ...originalFunctions,
@@ -67,6 +78,7 @@ test('other committed QR audit rows reach the scoped live dashboard only after a
     await flushSecurityEventOutbox();
     assert.equal(delivered.length, before + 1);
     assert.equal(delivered.at(-1).id, row.eventPayload.id);
+    assert.equal(claims[0].projectionCompleted, undefined, 'generic projection uses Redis atomic deduplication, not an unsupported B03 marker');
     assert.equal(claims[0].terminal, true);
 
     const forged = claim('DELETE_BATCH');
@@ -123,7 +135,7 @@ test('optional SIEM delivery does not gate internal projections or claim disable
       claims = [claim(action)];
       const before = delivered.length, bumps = invalidations.length, sent = completed;
       await flushSecurityEventOutbox();
-      assert.equal(claims[0].projectionCompleted, true); assert.equal(completed, sent);
+      assert.equal(claims[0].projectionCompleted, action === 'BATCH_UPDATED' ? undefined : true); assert.equal(completed, sent);
       await flushSecurityEventOutbox(); await flushSecurityEventOutbox();
       assert.equal(attempts, 2); assert.equal(completed, sent + 1);
       assert.equal(delivered.length, before + 1); assert.equal(invalidations.length, bumps + 4);

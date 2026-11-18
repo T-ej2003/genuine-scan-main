@@ -149,13 +149,7 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
               || log.licenseeId !== claim.licenseeId || (log.orgId || null) !== (claim.organizationId || null)) {
             throw new Error("AUDIT_PROJECTION_AUTHORITY_MISMATCH");
           }
-          if (!claim.projectionCompleted) {
-            await publishCommittedQrAuditEvent(log);
-            await withB03SiemWorkerContext(context, (tx) => completeSecurityEventOutbox(tx, {
-              jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt,
-              sinkEventId: `projection:${claim.id}`,
-            }));
-          }
+          await publishCommittedQrAuditEvent(log);
         }
         const delivered = await sendToWebhook({
           id: claim.id,

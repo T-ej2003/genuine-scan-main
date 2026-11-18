@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { format } from "date-fns";
 import { Activity, AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronUp, Mail, PackageCheck, Printer, RefreshCw, Search, ShieldAlert, UserCheck, Wrench } from "lucide-react";
-
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import apiClient from "@/lib/api-client";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { useAuth } from "@/contexts/AuthContext";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { useToast } from "@/hooks/use-toast";
@@ -25,10 +25,8 @@ import {
   getManufacturerActivityToneClass,
   type ManufacturerActivityCategory,
 } from "@/lib/manufacturer-activity-display";
-
 type FraudStatus = "OPEN" | "REVIEWED" | "RESOLVED" | "DISMISSED";
 type FraudResponseStatus = Exclude<FraudStatus, "OPEN">;
-
 type FraudReportQueueItem = {
   id: string;
   createdAt: string;
@@ -54,30 +52,25 @@ type FraudReportQueueItem = {
     actorUserId?: string | null;
   } | null;
 };
-
 const ACTION_TONES: Array<{ test: RegExp; className: string; icon: React.ReactNode }> = [
   { test: /BLOCK|FRAUD|VERIFY_FAILED|REJECT/i, className: "border-red-200 bg-red-50 text-red-700", icon: <Ban className="mr-1 h-3 w-3" /> },
   { test: /WARNING|SUSPICIOUS|REDEEMED|ALLOCATE|DELETE/i, className: "border-amber-200 bg-amber-50 text-amber-700", icon: <AlertTriangle className="mr-1 h-3 w-3" /> },
   { test: /CREATE|APPROVE|LOGIN|VERIFY_SUCCESS|PRINT|RESTORE|UPDATE/i, className: "border-emerald-200 bg-emerald-50 text-emerald-700", icon: <CheckCircle2 className="mr-1 h-3 w-3" /> },
 ];
-
 const FRAUD_STATUS_TONE: Record<FraudStatus, string> = {
   OPEN: "border-red-200 bg-red-50 text-red-700",
   REVIEWED: "border-amber-200 bg-amber-50 text-amber-700",
   RESOLVED: "border-emerald-200 bg-emerald-50 text-emerald-700",
   DISMISSED: "border-slate-300 bg-slate-100 text-slate-700",
 };
-
 const actionTone = (action: string) => {
   const hit = ACTION_TONES.find((t) => t.test.test(action));
   return hit || { className: "border-slate-300 bg-slate-100 text-slate-700", icon: <Activity className="mr-1 h-3 w-3" /> };
 };
-
 const asObject = (value: unknown): Record<string, any> => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, any>;
 };
-
 const humanKey = (key: string) =>
   key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
@@ -85,19 +78,16 @@ const humanKey = (key: string) =>
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\b\w/g, (c) => c.toUpperCase());
-
 const toLabel = (value: string) =>
   String(value || "")
     .toLowerCase()
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
-
 const PRINTER_AUDIT_ACTION_LABELS: Record<string, string> = {
   PRINTER_CONNECTION_COMPAT_MODE_ONLINE: "Printer connected in recovery mode",
   PRINTER_CONNECTION_TRUSTED_ONLINE: "Printer connected",
   PRINTER_CONNECTION_UNTRUSTED_OR_OFFLINE: "Printer connection needs attention",
 };
-
 const MANUFACTURER_ACTIVITY_FILTERS: Array<{ value: "all" | ManufacturerActivityCategory; label: string }> = [
   { value: "all", label: "All activity" },
   { value: "printing", label: "Printing" },
@@ -106,7 +96,6 @@ const MANUFACTURER_ACTIVITY_FILTERS: Array<{ value: "all" | ManufacturerActivity
   { value: "printer_setup", label: "Printer setup" },
   { value: "issues", label: "Issues" },
 ];
-
 const PRINT_STATUS_FILTERS = [
   { value: "all", label: "All print runs" },
   { value: "completed", label: "Completed" },
@@ -175,6 +164,9 @@ const readableDetailEntries = (log: any, details: Record<string, any>) => {
 
 export default function AuditLogs() {
   const { user } = useAuth();
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
+  const currentSecurityScope = useRef(securityScope);
+  currentSecurityScope.current = securityScope;
   const { toast } = useToast();
 
   const [logs, setLogs] = useState<any[]>([]);
@@ -285,6 +277,7 @@ export default function AuditLogs() {
   };
 
   const load = async (opts?: { silent?: boolean }) => {
+    const requestScope = securityScope;
     if (isSuperAdmin && licenseeFilter === "all") {
       setLogs([]); setActivityLoading(false); setHistoryError("Select a brand to review its audit history.");
       return;
@@ -297,7 +290,7 @@ export default function AuditLogs() {
         purpose: "operator-audit-history-review",
         licenseeId: isSuperAdmin && licenseeFilter !== "all" ? licenseeFilter : undefined,
       });
-      if (currentLicenseeFilter.current !== licenseeFilter) return;
+      if (currentLicenseeFilter.current !== licenseeFilter || currentSecurityScope.current !== requestScope) return;
       if (!res.success) {
         setLogs([]);
         setHistoryError(friendlyLoadError(res, "History could not be loaded right now. Refresh when you are ready."));
@@ -313,19 +306,21 @@ export default function AuditLogs() {
         : [];
       setLogs(list);
     } catch {
-      if (currentLicenseeFilter.current !== licenseeFilter) return;
+      if (currentLicenseeFilter.current !== licenseeFilter || currentSecurityScope.current !== requestScope) return;
       setLogs([]);
       setHistoryError("History could not be loaded right now. Refresh when you are ready.");
     } finally {
-      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter) setActivityLoading(false);
+      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter && currentSecurityScope.current === requestScope) setActivityLoading(false);
     }
   };
   const loadPrintHistory = async (opts?: { silent?: boolean }) => {
+    const requestScope = securityScope;
     if (!isManufacturer) return;
     if (!opts?.silent) setPrintHistoryLoading(true);
     setPrintHistoryError(null);
     try {
       const res = await apiClient.listPrintJobs({ limit: 100 });
+      if (currentSecurityScope.current !== requestScope) return;
       if (!res.success) {
         setPrintJobs([]);
         setPrintHistoryError(friendlyLoadError(res, "Print history could not be loaded right now. Refresh when you are ready."));
@@ -333,13 +328,15 @@ export default function AuditLogs() {
       }
       setPrintJobs(Array.isArray(res.data) ? res.data : []);
     } catch {
+      if (currentSecurityScope.current !== requestScope) return;
       setPrintJobs([]);
       setPrintHistoryError("Print history could not be loaded right now. Refresh when you are ready.");
     } finally {
-      if (!opts?.silent) setPrintHistoryLoading(false);
+      if (!opts?.silent && currentSecurityScope.current === requestScope) setPrintHistoryLoading(false);
     }
   };
   const loadFraudReports = async (opts?: { silent?: boolean }) => {
+    const requestScope = securityScope;
     if (!isSuperAdmin) return;
     if (licenseeFilter === "all") { setFraudReports([]); return; }
     if (!opts?.silent) setFraudLoading(true);
@@ -351,7 +348,7 @@ export default function AuditLogs() {
         licenseeId: licenseeFilter !== "all" ? licenseeFilter : undefined,
         limit: 100,
       });
-      if (currentLicenseeFilter.current !== licenseeFilter) return;
+      if (currentLicenseeFilter.current !== licenseeFilter || currentSecurityScope.current !== requestScope) return;
       if (!res.success) {
         setFraudReports([]);
         return;
@@ -360,28 +357,29 @@ export default function AuditLogs() {
       const list = Array.isArray(payload) ? payload : Array.isArray(payload?.reports) ? payload.reports : [];
       setFraudReports(list);
     } finally {
-      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter) setFraudLoading(false);
+      if (!opts?.silent && currentLicenseeFilter.current === licenseeFilter && currentSecurityScope.current === requestScope) setFraudLoading(false);
     }
   };
 
   const refreshAll = async (opts?: { silent?: boolean }) => {
-    const scope = `${licenseeFilter}:${fraudStatusFilter}`;
+    const scope = `${securityScope}:${licenseeFilter}:${fraudStatusFilter}`;
     if (refreshAllInFlightRef.current?.scope === scope) return refreshAllInFlightRef.current.promise;
     if (!opts?.silent) setRefreshing(true);
     const promise = Promise.all([load(opts), loadFraudReports(opts), loadPrintHistory(opts)])
       .then(() => undefined)
       .finally(() => {
         if (refreshAllInFlightRef.current?.promise === promise) refreshAllInFlightRef.current = null;
-        if (!opts?.silent) setRefreshing(false);
+        if (!opts?.silent && currentSecurityScope.current === securityScope) setRefreshing(false);
       });
     refreshAllInFlightRef.current = { scope, promise };
     return promise;
   };
 
   useEffect(() => {
-    setLogs([]); refreshAll();
+    setLogs([]); setPrintJobs([]); setFraudReports([]); refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin]);
+  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin, securityScope]);
+  useEffect(() => { setLicensees([]); setSelectedFraudReport(null); setRespondDialogOpen(false); }, [securityScope]);
 
   useEffect(() => {
     const off = onMutationEvent(() => {
@@ -393,16 +391,18 @@ export default function AuditLogs() {
 
   useEffect(() => {
     if (!isSuperAdmin) return;
+    const requestScope = securityScope;
     apiClient.getLicensees().then((res) => {
-      if (res.success) setLicensees((res.data as any[]) || []);
+      if (requestScope === getAuthenticatedStreamScope() && res.success) setLicensees((res.data as any[]) || []);
     });
-  }, [isSuperAdmin]);
+  }, [isSuperAdmin, securityScope]);
   useEffect(() => {
     if (!live || (isSuperAdmin && licenseeFilter === "all")) return;
+    const streamScope = securityScope;
     let active = true;
     const stop = apiClient.streamAuditLogs(
       (log) => {
-        if (!active || currentLicenseeFilter.current !== licenseeFilter || (isSuperAdmin && log.licenseeId !== licenseeFilter)) return;
+        if (!active || currentSecurityScope.current !== streamScope || currentLicenseeFilter.current !== licenseeFilter || (isSuperAdmin && log.licenseeId !== licenseeFilter)) return;
         setLogs((prev) => [log, ...prev.filter((entry) => entry.id !== log.id)].slice(0, 200));
         if (isSuperAdmin && (log.action === "CUSTOMER_FRAUD_REPORT" || log.action === "CUSTOMER_FRAUD_REPORT_RESPONSE")) {
           loadFraudReports({ silent: true });
@@ -412,7 +412,7 @@ export default function AuditLogs() {
         }
       },
       () => {
-        if (!active || currentLicenseeFilter.current !== licenseeFilter) return;
+        if (!active || currentSecurityScope.current !== streamScope || currentLicenseeFilter.current !== licenseeFilter) return;
         setLive(false);
         toast({
           title: "Live history updates unavailable",
@@ -422,7 +422,7 @@ export default function AuditLogs() {
       }, isSuperAdmin ? licenseeFilter : undefined);
     return () => { active = false; stop(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter]);
+  }, [live, licenseeFilter, isSuperAdmin, fraudStatusFilter, securityScope]);
 
   const adminActivityCategories = [
     { value: "all", label: "All activity", test: () => true },

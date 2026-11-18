@@ -1,6 +1,7 @@
 import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
+import { getAuthenticatedStreamScope } from "@/lib/api/request-coordinator";
 import { updateActivePrintSession } from "@/lib/active-print-session";
 import { primePrintJobRealtimeSnapshot, usePrintJobRealtime } from "@/lib/print-job-realtime-store";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
@@ -92,12 +93,14 @@ export function useActivePrintJobPolling({
     let cancelled = false;
     let inFlight = false;
     const polledJobId = printJobId;
+    const polledScope = getAuthenticatedStreamScope();
     const startedAt = Date.now();
     let nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
     let failedAttempts = 0;
 
     const syncLatest = async () => {
-      if (cancelled || inFlight) return false;
+      if (cancelled || polledScope !== getAuthenticatedStreamScope()) return true;
+      if (inFlight) return false;
       if (!canPollVisibleDocument()) return false;
       if (Date.now() - startedAt > pollingPolicy.activePrintJobTimeoutMs) {
         callbacksRef.current.setPrintProgressNotice("Realtime status remains active. Slow fallback polling is paused for this long-running print run.");
@@ -114,7 +117,7 @@ export function useActivePrintJobPolling({
         const response = await apiClient.getPrintJobStatus(polledJobId, {
           minIntervalMs: pollingPolicy.activePrintJobStatusMinRefreshMs,
         });
-        if (cancelled) return false;
+        if (cancelled || polledScope !== getAuthenticatedStreamScope()) return true;
         if (!response.success || !response.data) {
           if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
             const seconds = Math.max(1, Math.ceil(Number(response.retryAfterSec || 10)));
@@ -126,7 +129,7 @@ export function useActivePrintJobPolling({
 
         const job = response.data as PrintJobRow;
         if (job.id !== polledJobId) return false;
-        if (!primePrintJobRealtimeSnapshot(polledJobId, job)) return isPrintJobServerSettled(realtimeJobRef.current);
+        if (!primePrintJobRealtimeSnapshot(polledJobId, job, polledScope)) return isPrintJobServerSettled(realtimeJobRef.current);
         failedAttempts = 0;
         nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
         callbacksRef.current.setPrintProgressNotice(null);

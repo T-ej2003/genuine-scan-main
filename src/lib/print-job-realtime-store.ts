@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 
 import apiClient from "@/lib/api-client";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { normalizePrintJobView } from "@/lib/print-job-view";
 
 type PrintJobSnapshot = {
@@ -153,8 +154,8 @@ const subscribeJob = (jobId: string) => {
   };
 };
 
-export const primePrintJobRealtimeSnapshot = (jobId: string, job: any) => {
-  if (!jobId || !job) return false;
+export const primePrintJobRealtimeSnapshot = (jobId: string, job: any, requestScope = getAuthenticatedStreamScope()) => {
+  if (!jobId || !job || requestScope !== getAuthenticatedStreamScope()) return false;
   return acceptJobView(jobId, job);
 };
 
@@ -178,13 +179,25 @@ export const resetPrintJobRealtimeStoreForTests = () => {
   snapshots.clear();
 };
 
+let activeSecurityScope = getAuthenticatedStreamScope();
+onRequestCoordinatorScopeChange(() => {
+  const nextScope = getAuthenticatedStreamScope();
+  if (nextScope === activeSecurityScope) return;
+  activeSecurityScope = nextScope;
+  for (const subscription of subscriptions.values()) subscription.stop();
+  subscriptions.clear();
+  snapshots.clear();
+  for (const jobId of listeners.keys()) emit(jobId);
+});
+
 export const usePrintJobRealtime = (jobId: string | null | undefined) => {
   const normalizedJobId = String(jobId || "").trim();
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
 
   useEffect(() => {
     if (!normalizedJobId) return undefined;
     return subscribeJob(normalizedJobId);
-  }, [normalizedJobId]);
+  }, [normalizedJobId, securityScope]);
 
   return useSyncExternalStore(
     (listener) => {

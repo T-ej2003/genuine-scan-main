@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import apiClient from "@/lib/api-client";
+import { getAuthenticatedStreamScope } from "@/lib/api/request-coordinator";
 import { updateActivePrintSession } from "@/lib/active-print-session";
 import { primePrintJobRealtimeSnapshot } from "@/lib/print-job-realtime-store";
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
@@ -43,6 +44,7 @@ export function useLivePrintStatusRefresh({
   const cooldownRemainingSeconds = Math.max(0, Math.ceil((cooldownUntil - nowTick) / 1000));
 
   const refresh = async () => {
+    const requestScope = getAuthenticatedStreamScope();
     const currentJobId = String(printJobId || "").trim();
     if (!currentJobId) return;
     if (inFlightRef.current) return inFlightRef.current;
@@ -65,9 +67,11 @@ export function useLivePrintStatusRefresh({
       try {
         response = await apiClient.getPrintJobStatus(currentJobId, { force: true });
       } catch {
+        if (requestScope !== getAuthenticatedStreamScope()) return;
         setPrintProgressNotice("Status refresh is temporarily unavailable. The print result remains uncertain.");
         return;
       }
+      if (requestScope !== getAuthenticatedStreamScope()) return;
       if (!response.success || !response.data) {
         if (response.status === 429 || String(response.code || "").toUpperCase() === "RATE_LIMITED") {
           const retryAfterMs = getLivePrintStatusRetryAfterMs(response.retryAfterSec);
@@ -84,7 +88,7 @@ export function useLivePrintStatusRefresh({
       }
 
       const job = response.data as PrintJobRow;
-      if (!primePrintJobRealtimeSnapshot(currentJobId, job)) return;
+      if (!primePrintJobRealtimeSnapshot(currentJobId, job, requestScope)) return;
       syncPrintJobProgress(job, progressStateSetters);
       replaceRecentPrintJob(job);
       if (isPrintJobServerSettled(job)) {
