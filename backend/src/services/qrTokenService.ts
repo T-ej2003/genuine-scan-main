@@ -221,7 +221,15 @@ const readRetainedPublicKeys = (): Array<{ version: string; publicKey: KeyObject
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must be a JSON object");
   }
-  const entries = Object.entries(parsed);
+  // The production rotation secret also carries the previous slot. Its archive
+  // survives when that slot is retired; direct registries remain supported.
+  const registry = Object.hasOwn(parsed, "family") && Object.hasOwn(parsed, "value")
+    ? (Object.hasOwn(parsed, "retainedPublicKeys") ? (parsed as Record<string, unknown>).retainedPublicKeys : {})
+    : parsed;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    throw new Error("QR_SIGN_PUBLIC_KEYS_JSON contains an invalid retained key registry");
+  }
+  const entries = Object.entries(registry);
   if (entries.length > 64) throw new Error("QR_SIGN_PUBLIC_KEYS_JSON exceeds 64 key versions");
   return entries.map(([version, pem]) => {
     if (!isKeyVersion(version) || typeof pem !== "string" || !pem.trim()) {

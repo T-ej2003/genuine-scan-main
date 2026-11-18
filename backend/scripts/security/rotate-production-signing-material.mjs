@@ -250,6 +250,17 @@ const putMaterial = async (sm, id, material, metadata, token) => {
   }));
 };
 
+const retainedQrPublicKeys = (material) => {
+  const registry = material?.metadata?.retainedPublicKeys ?? {};
+  if (!registry || typeof registry !== "object" || Array.isArray(registry) || Object.keys(registry).length > 64) throw new Error("retained QR public-key registry is malformed");
+  for (const [version, pem] of Object.entries(registry)) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(version) || typeof pem !== "string" || /PRIVATE KEY/i.test(pem)) throw new Error("retained QR public-key registry contains invalid material");
+    try { if (createPublicKey(pem).asymmetricKeyType !== "ed25519") throw new Error("not Ed25519"); }
+    catch { throw new Error("retained QR public-key registry contains invalid material"); }
+  }
+  return { ...registry };
+};
+
 const readState = (file) => (existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null);
 const writeState = (file, state) => {
   const temporary = `${file}.tmp-${process.pid}`;
@@ -287,7 +298,9 @@ const slots = async (sm, config) => {
     ["qrPublicCurrent", config.qr.publicCurrentSecretId], ["qrPublicPrevious", config.qr.publicPreviousSecretId], ["qrPublicPending", config.qr.publicPendingSecretId],
     ["qrCurrentVersion", config.qr.currentKeyVersionSecretId], ["qrPreviousVersion", config.qr.previousKeyVersionSecretId],
   ].map(async ([name, id]) => [name, { id, raw: await secretValue(sm, id) }]));
-  return Object.fromEntries(records.map(([name, record]) => [name, { ...record, material: storedMaterial(record.raw) }]));
+  const current = Object.fromEntries(records.map(([name, record]) => [name, { ...record, material: storedMaterial(record.raw) }]));
+  retainedQrPublicKeys(current.qrPublicPrevious.material);
+  return current;
 };
 
 const validQrVersion = (value) => /^[A-Za-z0-9._:-]{1,128}$/.test(String(value || ""));
@@ -611,7 +624,7 @@ const prepare = async (context) => {
       if (!isInitialEmptySlot(previousQrPublic) || previousQrPublic.metadata.sourceSha !== initialMigrationSourceSha(state)) throw new Error("unrecoverable legacy QR state cannot trust a previous public key");
     } else if (previousQrPublic.value && fingerprint(previousQrPublic.value) !== state.qr.oldPublicFingerprint) throw new Error("QR previous slot is owned by another value");
     if (!previousJwt.value || isRetired(previousJwt)) await putMaterial(sm, config.jwt.previousSecretId, currentJwt.value, { rotationId: config.rotationId, family: "jwt_secrets", slot: "previous", materialFingerprint: state.jwt.oldFingerprint }, `${config.rotationId}:jwt:previous`);
-    if (historicalContinuity === QR_CONTINUITY_VERIFIED && (!previousQrPublic.value || isRetired(previousQrPublic))) await putMaterial(sm, config.qr.publicPreviousSecretId, currentQrPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "previous", keyVersion: state.qr.oldKeyVersion, materialFingerprint: state.qr.oldPublicFingerprint }, `${config.rotationId}:qr:previous`);
+    if (historicalContinuity === QR_CONTINUITY_VERIFIED && (!previousQrPublic.value || isRetired(previousQrPublic))) await putMaterial(sm, config.qr.publicPreviousSecretId, currentQrPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "previous", keyVersion: state.qr.oldKeyVersion, materialFingerprint: state.qr.oldPublicFingerprint, retainedPublicKeys: retainedQrPublicKeys(previousQrPublic) }, `${config.rotationId}:qr:previous`);
     if (fingerprint(currentJwt.value) !== state.jwt.newFingerprint) await putMaterial(sm, config.jwt.currentSecretId, pendingJwt.value, { rotationId: config.rotationId, family: "jwt_secrets", slot: "current", materialFingerprint: state.jwt.newFingerprint }, `${config.rotationId}:jwt:current`);
     if (fingerprint(current.qrPrivateCurrent.material.value) !== fingerprint(pendingPrivate.value)) await putMaterial(sm, config.qr.privateCurrentSecretId, pendingPrivate.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "current-private", keyVersion: state.qr.newKeyVersion, materialFingerprint: fingerprint(pendingPrivate.value) }, `${config.rotationId}:qr:current-private`);
     if (fingerprint(currentQrPublic.value) !== state.qr.newPublicFingerprint) await putMaterial(sm, config.qr.publicCurrentSecretId, pendingPublic.value, { rotationId: config.rotationId, family: "qr_signing_keys", slot: "current-public", keyVersion: state.qr.newKeyVersion, materialFingerprint: state.qr.newPublicFingerprint }, `${config.rotationId}:qr:current-public`);
@@ -682,6 +695,16 @@ const retireSlot = async (sm, record, config, family, slot, retirementTimestamp,
   const authenticatedInitialEmpty = (isInitialEmptySlot(record.material) && record.material.metadata.sourceSha === markerSourceSha)
     || (family === "qr_key_versions" && isInitialVersionSlot(record.material, markerSourceSha, "previous-empty"));
   if (!record.material.value && Object.keys(record.material.metadata || {}).length && !authenticatedInitialEmpty) throw new Error(`${slot} contains non-retired metadata`);
+  if (family === "qr_signing_keys" && slot === "previous") {
+    const retained = retainedQrPublicKeys(record.material);
+    if (record.material.value) {
+      const version = record.material.metadata.keyVersion;
+      if (!/^[A-Za-z0-9._-]{1,64}$/.test(version || "") || (retained[version] && retained[version] !== record.material.value)) throw new Error("previous QR key conflicts with retained verification history");
+      retained[version] = record.material.value;
+    }
+    if (Object.keys(retained).length > 64) throw new Error("retained QR public-key registry exceeds 64 versions");
+    expected.retainedPublicKeys = retained;
+  }
   const result = await putMaterial(sm, record.id, "", expected, `${config.rotationId}:${family}:${slot}:retired`);
   return String(result.VersionId || "");
 };

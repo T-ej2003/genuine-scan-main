@@ -43,6 +43,7 @@ variable "production_rotation_secret_value_from" {
     qr_current_version        = string
     qr_public_previous        = string
     qr_previous_version       = string
+    qr_public_keys_json       = string
     artifact_private_current  = string
     artifact_public_current   = string
     artifact_active_version   = string
@@ -56,6 +57,7 @@ variable "production_rotation_secret_value_from" {
     qr_current_version        = ""
     qr_public_previous        = ""
     qr_previous_version       = ""
+    qr_public_keys_json       = ""
     artifact_private_current  = ""
     artifact_public_current   = ""
     artifact_active_version   = ""
@@ -63,9 +65,13 @@ variable "production_rotation_secret_value_from" {
   }
   validation {
     condition = !var.production_rotation_enabled || alltrue([
-      for key, value in var.production_rotation_secret_value_from : contains(["artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"], key) ? can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", value)) : can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+:[A-Za-z0-9_-]+::$", value))
+      for key, value in var.production_rotation_secret_value_from : contains(["qr_public_keys_json", "artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"], key) ? can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+$", value)) : can(regex("^arn:aws:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+:[A-Za-z0-9_-]+::$", value))
     ])
     error_message = "Production rotation task definitions require exact Secrets Manager JSON-key valueFrom references when enabled."
+  }
+  validation {
+    condition     = !var.production_rotation_enabled || var.production_rotation_secret_value_from.qr_public_keys_json == trimsuffix(var.production_rotation_secret_value_from.qr_public_previous, ":value::")
+    error_message = "Retained QR public keys must use the existing previous-public-key secret."
   }
 }
 variable "stage_b_recovery_alias_target_version" {

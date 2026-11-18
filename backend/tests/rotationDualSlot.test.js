@@ -63,6 +63,27 @@ try {
   process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": old.publicKey });
   assert.equal(verifyQrToken(oldToken).signing.keyVersion, "old-v1",
     "retained public keys keep old physical labels verifiable without retaining signing authority");
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ family: "qr_signing_keys", slot: "previous-retired", value: "", retainedPublicKeys: { "old-v1": old.publicKey } });
+  assert.equal(verifyQrToken(oldToken).signing.keyVersion, "old-v1", "the existing previous-key secret carries the durable public archive after retirement");
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ family: "qr_signing_keys", slot: "previous-retired", value: "", retainedPublicKeys: {} });
+  assert.throws(() => verifyQrToken(oldToken), /could not be verified/, "revoking an archived key blocks its labels");
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ family: "qr_signing_keys", slot: "previous-retired", value: "", retainedPublicKeys: { "old-v1": old.privateKey } });
+  assert.throws(() => verifyQrToken(oldToken), /must not contain private keys/);
+  const newest = keys();
+  process.env.QR_SIGN_PRIVATE_KEY_CURRENT = newest.privateKey;
+  process.env.QR_SIGN_PUBLIC_KEY_CURRENT = newest.publicKey;
+  process.env.QR_SIGN_ACTIVE_KEY_VERSION = "newest-v3";
+  process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = current.publicKey;
+  process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "current-v2";
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ family: "qr_signing_keys", slot: "previous", value: current.publicKey, retainedPublicKeys: { "old-v1": old.publicKey } });
+  assert.equal(verifyQrToken(oldToken).signing.keyVersion, "old-v1", "two rotations preserve signed historical labels");
+  assert.equal(verifyQrToken(currentToken).signing.keyVersion, "current-v2");
+  process.env.QR_SIGN_PRIVATE_KEY_CURRENT = current.privateKey;
+  process.env.QR_SIGN_PUBLIC_KEY_CURRENT = current.publicKey;
+  process.env.QR_SIGN_ACTIVE_KEY_VERSION = "current-v2";
+  delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
+  delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": old.publicKey });
   assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
   process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": current.publicKey });
   assert.throws(() => verifyQrToken(oldToken), /must not alias an existing public key/);

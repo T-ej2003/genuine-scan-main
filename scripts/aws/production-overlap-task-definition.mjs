@@ -27,8 +27,9 @@ const ROTATION_BINDING_SHAPES = Object.freeze({
   QR_SIGN_ACTIVE_KEY_VERSION: ECS_VALUE_REF,
   QR_SIGN_PUBLIC_KEY_PREVIOUS: ECS_VALUE_REF,
   QR_SIGN_PREVIOUS_KEY_VERSION: ECS_VALUE_REF,
+  QR_SIGN_PUBLIC_KEYS_JSON: BASE_SECRET_REF,
 });
-const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ROTATION_INVENTORY_OPERATION"]);
+const REQUIRED_BINDINGS = Object.freeze(["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON", "ROTATION_INVENTORY_OPERATION"]);
 export const OVERLAP_TASK_MARKER = Object.freeze({ key: "MSCQRExecTarget", value: "production-backend" });
 export const OVERLAP_OPERATION_TAG = "MSCQROverlapOperation";
 export const OVERLAP_TASK_TEMPLATE_PATH = "infra/aws/terraform/production-green-stage-b/task-definitions/green-backend-rotation-candidate.json";
@@ -60,6 +61,7 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
     else if (!SECRET_REF.test(secretBindings[name] || "")) throw new Error(`Overlap task secret binding is not an exact production reference: ${name}.`);
     else if (ROTATION_BINDING_SHAPES[name] && !((postPrepare && ["JWT_SECRET_CURRENT", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT"].includes(name) ? ECS_VALUE_REF : ROTATION_BINDING_SHAPES[name]).test(secretBindings[name]))) throw new Error(`Overlap task secret binding has the wrong SDK/ECS reference shape: ${name}.`);
   }
+  if (secretBindings.QR_SIGN_PUBLIC_KEYS_JSON !== secretBindings.QR_SIGN_PUBLIC_KEY_PREVIOUS.replace(/:value::$|:value::.*/, "")) throw new Error("Retained QR verifier keys must use the existing previous-public-key secret.");
   const definition = { ...replace(JSON.parse(fs.readFileSync(TEMPLATE_PATH, "utf8")), {
     BACKEND_IMAGE: backendImage,
     RELEASE_SHA: imageReleaseSha,
@@ -75,7 +77,7 @@ export function buildOverlapTaskDefinition({ backendImage, imageReleaseSha, back
     || backend.image !== backendImage || backend.environment?.find(({ name }) => name === "RELEASE_GIT_SHA")?.value !== imageReleaseSha
     || backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_APPROVED")?.value !== "true"
     || backend.environment?.find(({ name }) => name === "ROTATION_INVENTORY_OPERATION")?.value !== STAGE_B.inventoryOperation
-    || !["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].every((name) => backend.secrets?.some((secret) => secret.name === name && typeof secret.valueFrom === "string" && secret.valueFrom))) {
+    || !["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"].every((name) => backend.secrets?.some((secret) => secret.name === name && typeof secret.valueFrom === "string" && secret.valueFrom))) {
     throw new Error("Overlap task definition is missing a required rotation or artifact binding.");
   }
   return { taskDefinition: definition, tags: [OVERLAP_TASK_MARKER] };
