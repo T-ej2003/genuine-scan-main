@@ -532,7 +532,7 @@ describe("DashboardLayout printer connection dialog", () => {
     expect(screen.getAllByText("Recovery mode").length).toBeGreaterThan(0);
   });
 
-  it("preserves last-known ready state and keeps helper closed when status refresh is rate-limited", async () => {
+  it("retains printer identity but blocks readiness when status refresh is rate-limited", async () => {
     localStorageState.set(onboardingKey, "dismissed");
     vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({
       success: true,
@@ -662,7 +662,7 @@ describe("DashboardLayout printer connection dialog", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /refresh status/i })[0]);
 
     await waitFor(() => {
-      expect(screen.getAllByText(/printer status refresh is temporarily paused\. last trusted status is retained/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/Current connector status is unavailable\. Printing is blocked until verification recovers/i).length).toBeGreaterThan(0);
     });
     expect(screen.queryByText("Recovery mode")).not.toBeInTheDocument();
   });
