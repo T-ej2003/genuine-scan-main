@@ -337,6 +337,22 @@ test("canonical retired previous JWT is reusable but never becomes the old secre
   }
 });
 
+test("rotation rejects private material in the retained public registry before secret writes", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-private-archive-"));
+  try {
+    const { initial } = initialSecrets();
+    initial[baseConfig.qr.publicPreviousSecretId] = material("", {
+      rotationId: "prior-rotation", family: "qr_signing_keys", slot: "previous-retired", retiredAt: "2026-08-09T00:00:00.000Z",
+      retainedPublicKeys: { "old-v1": makeKeys().privateKey },
+    });
+    const sm = fakeSecrets(initial);
+    await assert.rejects(prepare(contextFor(directory, baseConfig, sm)), /retained QR public-key registry contains invalid material/);
+    assert.equal(sm.putCount, 0);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 for (const [name, legacy] of [
   ["malformed private", { legacyPrivate: "not-a-private-key" }],
   ["malformed public", { legacyPublic: "not-a-public-key" }],
@@ -728,14 +744,21 @@ test("full rotation enforces grace, retires every slot, deploys after retirement
       assert.match(record.slot, /-retired$/);
       assert.equal(record.retiredAt, retirementTimestamp);
     }
+    const archivedAfterCleanup = JSON.parse(sm.values.get(baseConfig.qr.publicPreviousSecretId)).retainedPublicKeys;
+    assert.equal(archivedAfterCleanup[state.qr.oldKeyVersion], JSON.parse(initial[baseConfig.qr.publicCurrentSecretId]).value);
+    assert.doesNotMatch(JSON.stringify(archivedAfterCleanup), /PRIVATE KEY/);
 
     const nextConfig = structuredClone(baseConfig);
     nextConfig.rotationId = "rotation-test-next";
     nextConfig.sourceSha = "d".repeat(40);
     nextConfig.qr.previousKeyVersion = state.qr.newKeyVersion;
+    const currentBeforeNext = JSON.parse(sm.values.get(baseConfig.qr.publicCurrentSecretId)).value;
     const nextDirectory = mkdtempSync(path.join(os.tmpdir(), "mscqr-rotation-next-"));
     try {
       await prepare(contextFor(nextDirectory, nextConfig, sm, () => currentTime));
+      const nextPrevious = JSON.parse(sm.values.get(baseConfig.qr.publicPreviousSecretId));
+      assert.equal(nextPrevious.retainedPublicKeys[state.qr.oldKeyVersion], archivedAfterCleanup[state.qr.oldKeyVersion]);
+      assert.equal(nextPrevious.value, currentBeforeNext);
     } finally {
       rmSync(nextDirectory, { recursive: true, force: true });
     }

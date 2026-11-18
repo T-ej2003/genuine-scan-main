@@ -14,8 +14,7 @@ import { resolvePrinterLanguageRenderer } from "../printing/renderers";
 import { getZebraQrConfig, resolveConfiguredZebraDpi, resolveConfiguredZebraQrTargetMm } from "../printing/zebraQrSizing";
 import { buildOfficialMscqrWordmarkGfaCommand, classifyIndustrialZplPrinterProfile } from "../printing/zplCompatibilityContract";
 import { generateHumanLabelSerial, type LabelSerialContext } from "./labelSerialService";
-import { buildVerifyUrl } from "./qrService";
-import { hashToken, signQrPayload } from "./qrTokenService";
+import { buildScanUrl, hashToken, signQrPayload } from "./qrTokenService";
 
 export type PrinterPayloadProfile = {
   id: string;
@@ -190,6 +189,9 @@ const toQrToken = (params: {
 }) => {
   if (!params.qr.tokenNonce || !params.qr.tokenIssuedAt || !params.qr.tokenExpiresAt) {
     throw new Error("QR token metadata missing for print payload generation");
+  }
+  if (params.qr.tokenExpiresAt.getTime() <= Date.now()) {
+    throw new Error("QR token expired before print payload generation");
   }
 
   const payload = {
@@ -431,7 +433,7 @@ export const buildApprovedPrintContext = (params: {
   serialContext?: Omit<LabelSerialContext, "qrId"> | null;
 }): ApprovedPrintContext => {
   const scanToken = toQrToken({ qr: params.qr, manufacturerId: params.manufacturerId });
-  const scanUrl = buildVerifyUrl(params.qr.code);
+  const scanUrl = buildScanUrl(scanToken);
   const serial = generateHumanLabelSerial({
     ...(params.serialContext || {}),
     qrId: params.qr.id,

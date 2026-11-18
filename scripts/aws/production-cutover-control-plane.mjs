@@ -24,7 +24,7 @@ const SHA256 = /^[a-f0-9]{64}$/;
 export const PRODUCTION_CUTOVER_MODE = Object.freeze({ FULL: "FULL", PREPARE_OVERLAP: "PREPARE_OVERLAP" });
 const OVERLAP_SECRET_KEYS = Object.freeze([
   "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT",
-  "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION",
+  "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEYS_JSON",
   "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON",
 ]);
 
@@ -72,14 +72,15 @@ export function buildRotationTerraformInputs({ secretBindings, sourceSha, rotati
     if (typeof value !== "string" || !/^arn:aws:secretsmanager:eu-west-2:368992683803:secret:[A-Za-z0-9/_+=.@-]+(?::value::)?$/.test(value) || value.includes(":value:::value::")) throw new Error(`Rotation Terraform binding is invalid: ${name}.`);
     return [name, value];
   }));
-  if (new Set(Object.values(values).map(baseSecretArn)).size !== OVERLAP_SECRET_KEYS.length) throw new Error("Rotation Terraform bindings must identify distinct Secrets Manager resources.");
+  if (values.QR_SIGN_PUBLIC_KEYS_JSON !== baseSecretArn(values.QR_SIGN_PUBLIC_KEY_PREVIOUS)) throw new Error("Retained QR verifier keys must use the existing previous-public-key secret.");
+  if (new Set(Object.values(values).map(baseSecretArn)).size !== OVERLAP_SECRET_KEYS.length - 1) throw new Error("Rotation Terraform bindings must identify distinct Secrets Manager resources.");
   return {
     production_rotation_enabled: true,
     production_rotation_secret_value_from: {
       jwt_current: values.JWT_SECRET_CURRENT, jwt_previous: values.JWT_SECRET_PREVIOUS,
       qr_private_current: values.QR_SIGN_PRIVATE_KEY_CURRENT, qr_public_current: values.QR_SIGN_PUBLIC_KEY_CURRENT,
       qr_current_version: values.QR_SIGN_ACTIVE_KEY_VERSION, qr_public_previous: values.QR_SIGN_PUBLIC_KEY_PREVIOUS,
-      qr_previous_version: values.QR_SIGN_PREVIOUS_KEY_VERSION, artifact_private_current: values.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT,
+      qr_previous_version: values.QR_SIGN_PREVIOUS_KEY_VERSION, qr_public_keys_json: values.QR_SIGN_PUBLIC_KEYS_JSON, artifact_private_current: values.ARTIFACT_SIGN_PRIVATE_KEY_CURRENT,
       artifact_public_current: values.ARTIFACT_SIGN_PUBLIC_KEY_CURRENT, artifact_active_version: values.ARTIFACT_SIGN_ACTIVE_KEY_VERSION,
       artifact_public_keys_json: values.ARTIFACT_SIGN_PUBLIC_KEYS_JSON,
     }, sourceSha, rotationId,

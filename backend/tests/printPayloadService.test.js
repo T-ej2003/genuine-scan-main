@@ -151,8 +151,8 @@ const run = () => {
       batchId: "batch-1",
       licenseeId: "licensee-1",
       tokenNonce: "nonce-1",
-      tokenIssuedAt: new Date("2026-03-11T10:00:00.000Z"),
-      tokenExpiresAt: new Date("2026-03-12T10:00:00.000Z"),
+      tokenIssuedAt: new Date(Date.now() - 60_000),
+      tokenExpiresAt: new Date(Date.now() + 86_400_000),
       tokenHash: null,
     },
     manufacturerId: "manufacturer-1",
@@ -166,8 +166,8 @@ const run = () => {
     "Approved print payload should no longer print auxiliary server-control text"
   );
   assert(
-    builtPayload.scanUrl.includes("/verify/c_payloadtestpubliccode000000000001"),
-    "Approved print payload should encode the public QR code in the verify URL"
+    new URL(builtPayload.scanUrl).searchParams.get("t") === builtPayload.scanToken,
+    "Approved print payload should encode its signed proof in the scan URL"
   );
   assert(/^UK-ABR-KRT-L01-26-000042-[A-Z0-9]{3}$/.test(builtPayload.humanSerial), "Payload should expose a generated human serial");
   assert(builtPayload.payloadContent.includes(`Serial: ${builtPayload.humanSerial}`), "ZPL should print the generated human serial");
@@ -179,8 +179,8 @@ const run = () => {
     "Preview label should use MSCQR branding"
   );
 
-  const tokenIssuedAt = new Date("2026-03-11T10:00:00.000Z");
-  const tokenExpiresAt = new Date("2026-03-12T10:00:00.000Z");
+  const tokenIssuedAt = new Date(Date.now() - 60_000);
+  const tokenExpiresAt = new Date(Date.now() + 86_400_000);
   const governedToken = signQrPayload({
     qr_id: "qr-governed-1",
     batch_id: "batch-1",
@@ -219,6 +219,14 @@ const run = () => {
     serialContext: ukSerialContext,
   };
   const governedPayload = buildApprovedPrintPayload(governedInput);
+  let expiredDispatchRejected = false;
+  try {
+    buildApprovedPrintPayload({ ...governedInput, qr: { ...governedInput.qr,
+      tokenExpiresAt: new Date(Date.now() - 1_000), tokenHash: null } });
+  } catch (error) {
+    expiredDispatchRejected = /expired before print payload generation/.test(String(error));
+  }
+  assert(expiredDispatchRejected, "A paused dispatch must not print an already expired label token");
   const autoZplPayload = buildApprovedPrintPayload({
     ...governedInput,
     printer: { ...governedInput.printer, name: "ZDesigner ZT410-300dpi ZPL", commandLanguage: "AUTO", capabilitySummary: { languages: ["ZPL"], dpi: 300 } },
@@ -253,19 +261,25 @@ const run = () => {
   assert(governedBqnMatch, "ZPL payload should include computed Zebra QR magnification");
   const governedMagnification = Number(governedBqnMatch[1]);
   const governedQrConfig = getZebraQrConfig({ targetMm: 25, dpi: 300, payload: governedPayload.scanUrl });
+  assert(governedQrConfig.estimatedSizeMm <= 35 && governedQrConfig.magnification >= 2,
+    "The signed URL must remain within the Zebra label QR area at 300 dpi");
   assert(
     governedMagnification === governedQrConfig.magnification,
     "Production ZPL should use centralized data-aware Zebra QR sizing"
   );
   assert(!diagnostics.unresolvedPlaceholderPresent, "ZPL payload should not contain unresolved placeholders");
   assert(diagnostics.payloadByteLength > 120, "ZPL payload should be a complete label, not a tiny placeholder");
-  assert(governedPayload.scanUrl.includes("/verify/c_governedpubliccode0000000000002"), "ZPL scan URL should use /verify/:code");
+  assert(governedPayload.scanUrl.includes("/scan?t="), "ZPL scan URL should use signed scan route");
   assert(!governedPayload.scanUrl.includes("TBD0000000002"), "ZPL scan URL must not use displayCode");
   assert(!governedPayload.payloadContent.includes("TBD0000000002"), "ZPL label must never print TBD placeholder serials");
   assert(governedPayload.payloadContent.includes("AUTHENTICITY CHECK"), "ZPL label should carry production authenticity copy");
   const governedScanUrl = new URL(governedPayload.scanUrl);
   assert(["https:", "http:"].includes(governedScanUrl.protocol), "ZPL scan URL should use an HTTP(S) verify URL");
-  assert(governedScanUrl.pathname === "/verify/c_governedpubliccode0000000000002", "ZPL scan URL should use the exact verify route");
+  assert(governedScanUrl.pathname === "/scan", "ZPL scan URL should use the signed scan route");
+  assert(governedScanUrl.searchParams.get("t") === governedToken,
+    "The printed QR must carry the exact signed token bound to the governed QR identity");
+  assert(governedPayload.payloadContent.includes(governedPayload.scanUrl),
+    "The Zebra QR command must encode the signed URL, not only return it in JSON metadata");
   const governedZplTextFields = Array.from(governedPayload.payloadContent.matchAll(/\^FD([^^]*)\^FS/g), (match) => match[1]);
   const governedShortScanHost = "scan.mscqr.com";
   assert(
@@ -343,7 +357,8 @@ const run = () => {
     reprintOfJobId: "job-original-1",
     serialContext: { ...ukSerialContext, sequence: 43, printer: { metadata: { lineCode: "L02" } } },
   });
-  assert(reissuePayload.scanUrl.includes("/verify/c_replacementpubliccode000000001"), "Controlled reissue must print replacement QRCode.code");
+  assert(new URL(reissuePayload.scanUrl).searchParams.get("t") === reissuePayload.scanToken,
+    "Controlled reissue must print the replacement identity's signed token");
   assert(!reissuePayload.scanUrl.includes("c_original"), "Controlled reissue payload must not print the old QR token");
   assert(!reissuePayload.payloadContent.includes("UK-ABR-KRT-L02-26-000043-OLD"), "Controlled reissue must not use visible serial as QR identity");
 

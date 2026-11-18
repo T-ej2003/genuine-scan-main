@@ -135,8 +135,11 @@ const verifyInitialBindingOrigin = ({ bindings: candidate }) => ({ kind: "PRODUC
 
 test("prepared successors retain the canonical live-origin proof for schemas 2, 4, and AWS-legal 5", () => {
   const base = { ...bindings, legacy: { jwtCurrent: bindings.jwt.currentSecretId, qrPrivateCurrent: bindings.qr.privateCurrentSecretId, qrPublicCurrent: bindings.qr.publicCurrentSecretId, qrCurrentVersion: bindings.qr.previousKeyVersion }, qr: { ...bindings.qr, pendingKeyVersion: "qr-v2" }, ecs: rotationBindingsToTaskBindings(bindings) };
+  const { QR_SIGN_PUBLIC_KEYS_JSON: retainedArchiveBinding, ...historicalEcs } = base.ecs;
+  assert.equal(retainedArchiveBinding, bindings.qr.publicPreviousSecretId);
+  const historical = { ...base, ecs: historicalEcs };
   const retained = { ...base, schemaVersion: 4, retainedHistory: MIXED_DUAL_SLOT_RETAINED_HISTORY, retainedHistoryCanonicalId: MIXED_DUAL_SLOT_RETAINED_HISTORY_CANONICAL_ID };
-  for (const candidate of [base, retained, { ...retained, schemaVersion: 5, recoveryHandoff: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, recoveryHandoffCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID }]) {
+  for (const candidate of [base, historical, retained, { ...retained, schemaVersion: 5, recoveryHandoff: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR, recoveryHandoffCanonicalId: MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID }]) {
     assertInitialBindingSchemaClosed(candidate);
     assertInitialDualSlotBindings(candidate);
     const configPath = "/private/predecessor/rotation-config.json", statePath = "/private/predecessor/rotation-state.json", fixturePath = "/private/predecessor/rotation-fixture.json";
@@ -1406,6 +1409,7 @@ test("QR secret identifiers remain bindings and are never logical key versions",
   assert.match(result.QR_SIGN_ACTIVE_KEY_VERSION, /:value::$/);
   assert.match(result.QR_SIGN_PREVIOUS_KEY_VERSION, /:value::$/);
   assert.notEqual(result.QR_SIGN_PREVIOUS_KEY_VERSION, bindings.qr.previousKeyVersion);
+  assert.equal(result.QR_SIGN_PUBLIC_KEYS_JSON, bindings.qr.publicPreviousSecretId);
 });
 
 test("rotation task bindings preserve SDK base ARNs and derive ECS JSON-key references", () => {
@@ -1790,7 +1794,7 @@ test("rebaseline registration requires a fresh read-only prepared-rotation statu
 
 test("rotation task bindings never include secret values or pending-only fields", () => {
   const result = rotationBindingsToTaskBindings(bindings);
-  assert.equal(Object.keys(result).sort().join(","), ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_PREVIOUS"].sort().join(","));
+  assert.equal(Object.keys(result).sort().join(","), ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PUBLIC_KEYS_JSON"].sort().join(","));
   assert.doesNotMatch(JSON.stringify(result), /PRIVATE KEY|SecretString/);
 });
 

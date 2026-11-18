@@ -20,6 +20,18 @@ const connectorCalls = [];
 const published = [];
 const persisted = new Map();
 let legacyHeartbeatFails = false;
+let failConfirmation = false;
+mock("config/database", {
+  $transaction: async (work) => {
+    const before = new Map([...persisted].map(([id, row]) => [id, { ...row }]));
+    try { return await work({ $queryRaw: async () => { throw new Error("unexpected raw query"); } }); }
+    catch (error) {
+      persisted.clear();
+      for (const [id, row] of before) persisted.set(id, row);
+      throw error;
+    }
+  },
+});
 const claim = { available: true, printJobId: "job-fixture", printItemId: "item-fixture",
   manufacturerId: registration.userId, batch: { id: "batch-fixture", licenseeId: "tenant-fixture" },
   printer: { id: "printer-db-id", capabilitySummary: { languages: ["ZSIM"], dpi: 300 } }, qrCode: {},
@@ -29,7 +41,11 @@ mock("rls-waves/session-c/c02/printingLifecycleRepository", {
     if (legacyHeartbeatFails && input.operation === "HEARTBEAT") throw new Error("fixture legacy projection failed");
     return { registration, printer: { id: "printer-db-id", nativePrinterId: "native-printer" } };
   },
-  recordConnectorEvent: async (input) => { operations.push(input.operation); connectorCalls.push(input); return input.operation === "CLAIM" ? claim : {}; },
+  recordConnectorEvent: async (input) => {
+    operations.push(input.operation); connectorCalls.push(input);
+    if (input.operation === "CONFIRM" && failConfirmation) throw new Error("fixture-confirmation-failure");
+    return input.operation === "CLAIM" ? claim : {};
+  },
 });
 mock("rls-waves/session-c/c02/printingConnectorSessionRepository", {
   mutatePrintingConnectorSession: async ({ operation, sessionId, registrationId, payload }) => {
@@ -309,6 +325,35 @@ test("label/chunk terminal receipts are deduplicated and conflicting identities 
   await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, message("chunk_confirmed", { printJobId: "foreign-job" })), { errorCode: "chunk_item_mismatch" });
   await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, message("chunk_confirmed", { sessionId: randomUUID() })), { errorCode: "session_identity_mismatch" });
   assert.deepEqual(operations, ["CLAIM", "ACK", "CONFIRM"]);
+  await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
+});
+
+test("a failed connector confirmation rolls back its signed sequence and can be retried", async () => {
+  const session = await boundary.openTrustedPrinterAgentSession(hello());
+  const chunk = await boundary.buildNextPrintChunkForSession(session);
+  let seq = 0;
+  const signed = (type) => {
+    const message = { type, sessionId: session.id, chunkId: chunk.chunkId,
+      printJobId: claim.printJobId, printItemId: claim.printItemId,
+      issuedAt: new Date().toISOString(), nonce: randomUUID(), messageSeq: ++seq };
+    message.signature = signing.signPrinterAgentPayload(privateKey, signing.buildPrinterAgentSessionPayload({
+      ...message, messageType: type, registrationId: registration.id, agentId: registration.agentId,
+      deviceFingerprint: registration.deviceFingerprint, selectedPrinterId: session.selectedPrinterId,
+      connectorVersion: version,
+    }));
+    return message;
+  };
+  await boundary.handleTrustedSessionProgressMessage(session, signed("label_spooled"));
+  const receipt = signed("label_confirmed");
+  const acknowledgedSeq = persisted.get(session.id).seq;
+  failConfirmation = true;
+  try {
+    await assert.rejects(boundary.handleTrustedSessionProgressMessage(session, receipt), /fixture-confirmation-failure/);
+  } finally { failConfirmation = false; }
+  assert.equal(persisted.get(session.id).seq, acknowledgedSeq,
+    "a failed item transaction must not consume the signed connector receipt");
+  await boundary.handleTrustedSessionProgressMessage(session, receipt);
+  assert.equal(persisted.get(session.id).seq, receipt.messageSeq);
   await boundary.closeTrustedPrinterAgentSession(session.id, "test complete");
 });
 

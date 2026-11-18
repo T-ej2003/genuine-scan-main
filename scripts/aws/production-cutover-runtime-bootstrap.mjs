@@ -139,7 +139,10 @@ function assertBindings(bindings = {}, { rebaselineAuthorization, recoveryEnvelo
   if ((initialOrigin ? 1 : 0) + (rebaselineOrigin ? 1 : 0) !== 1) throw new Error("Rotation binding origin is ambiguous or unauthenticated.");
   const origin = rebaselineOrigin || initialOrigin;
   const ecs = rotationBindingsToTaskBindings(checked);
-  if (bindings.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(ecs)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
+  if (bindings.ecs) {
+    const historical = Object.fromEntries(Object.entries(ecs).filter(([name]) => name !== "QR_SIGN_PUBLIC_KEYS_JSON"));
+    if (JSON.stringify(bindings.ecs) !== JSON.stringify(ecs) && JSON.stringify(bindings.ecs) !== JSON.stringify(historical)) throw new Error("ECS rotation bindings do not match the canonical base-ARN bindings.");
+  }
   const supersessionEvidence = bindings.supersessionEvidence === undefined ? undefined : assertProductionSupersessionEvidence(bindings.supersessionEvidence);
   const supersessionPredecessor = bindings.supersessionPredecessor === undefined ? undefined : assertProductionStaleSupersessionPredecessor(bindings.supersessionPredecessor, { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, supersessionEvidence });
   return Object.freeze({ ...checked, kind: origin.kind, producer: origin.producer, schemaVersion: bindings.schemaVersion, bindingOrigin: origin, ...(origin.kind === REBASELINE_ROTATION_BINDINGS_KIND ? { operation: bindings.operation, sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, historicalRotationId: bindings.historicalRotationId, abandonmentEvidenceSha256: bindings.abandonmentEvidenceSha256, abandonmentEvidence: bindings.abandonmentEvidence, baselineCompletionSha256: bindings.baselineCompletionSha256, baselineCompletion: bindings.baselineCompletion, authorizationSha256: bindings.authorizationSha256, ...(livePostWrite ? { livePostWrite } : {}) } : { sourceSha: bindings.sourceSha, rotationId: bindings.rotationId, legacy: bindings.legacy, ...(supersessionPredecessor ? { supersessionEvidence, supersessionPredecessor } : {}), ...(bindings.retainedHistory ? { retainedHistory: bindings.retainedHistory, retainedHistoryCanonicalId: bindings.retainedHistoryCanonicalId } : {}), ...(bindings.recoveryHandoff ? { recoveryHandoff: bindings.recoveryHandoff, recoveryHandoffCanonicalId: bindings.recoveryHandoffCanonicalId } : {}) }), ecs: Object.freeze(ecs) });
@@ -723,6 +726,7 @@ function rotationBindingsToTaskBindings(bindings) {
     QR_SIGN_ACTIVE_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.currentKeyVersionSecretId, "QR current key version"),
     QR_SIGN_PUBLIC_KEY_PREVIOUS: envelopeEcsValueFrom(bindings.qr.publicPreviousSecretId, "QR previous public key"),
     QR_SIGN_PREVIOUS_KEY_VERSION: envelopeEcsValueFrom(bindings.qr.previousKeyVersionSecretId, "QR previous key version"),
+    QR_SIGN_PUBLIC_KEYS_JSON: bindings.qr.publicPreviousSecretId,
   };
 }
 

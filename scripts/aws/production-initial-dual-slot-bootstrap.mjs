@@ -259,7 +259,11 @@ export function assertInitialDualSlotBindings(bindings) {
   if (bindings.schemaVersion === 5) {
     if (canonical(bindings.recoveryHandoff) !== canonical(MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR) || bindings.recoveryHandoffCanonicalId !== MIXED_DUAL_SLOT_RECOVERY_SUCCESSOR_CANONICAL_ID) throw new Error("Initial dual-slot AWS-legal recovery handoff is invalid.");
   } else if (bindings.recoveryHandoff !== undefined || bindings.recoveryHandoffCanonicalId !== undefined) throw new Error("Only AWS-legal recovery bindings may carry a recovery handoff.");
-  if (bindings?.ecs && JSON.stringify(bindings.ecs) !== JSON.stringify(rotationBindingsToTaskBindings(bindings))) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
+  if (bindings?.ecs) {
+    const current = rotationBindingsToTaskBindings(bindings);
+    const historical = Object.fromEntries(Object.entries(current).filter(([name]) => name !== "QR_SIGN_PUBLIC_KEYS_JSON"));
+    if (JSON.stringify(bindings.ecs) !== JSON.stringify(current) && JSON.stringify(bindings.ecs) !== JSON.stringify(historical)) throw new Error("Initial dual-slot ECS bindings do not match the canonical SDK bindings.");
+  }
   return true;
 }
 
@@ -269,7 +273,7 @@ export function assertInitialBindingSchemaClosed(bindings) {
   exact(bindings.legacy, ["jwtCurrent", "qrPrivateCurrent", "qrPublicCurrent", "qrCurrentVersion"], "Initial dual-slot legacy bindings");
   exact(bindings.jwt, ["currentSecretId", "previousSecretId", "pendingSecretId"], "Initial dual-slot JWT bindings");
   exact(bindings.qr, ["privateCurrentSecretId", "privatePendingSecretId", "publicCurrentSecretId", "publicPreviousSecretId", "publicPendingSecretId", "currentKeyVersionSecretId", "previousKeyVersionSecretId", "previousKeyVersion", "pendingKeyVersion"], "Initial dual-slot QR bindings");
-  exact(bindings.ecs, ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"], "Initial dual-slot ECS bindings");
+  exact(bindings.ecs, ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", ...(Object.hasOwn(bindings.ecs, "QR_SIGN_PUBLIC_KEYS_JSON") ? ["QR_SIGN_PUBLIC_KEYS_JSON"] : [])], "Initial dual-slot ECS bindings");
 }
 
 function runnerJson(run, args, label) {

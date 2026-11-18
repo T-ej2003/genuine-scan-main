@@ -153,6 +153,7 @@ export function fixtureInput(overrides = {}) {
     const base = `arn:aws:secretsmanager:eu-west-2:368992683803:secret:rehearsal-${name}`;
     return [name, ecsJsonKeyBindings.has(name) ? `${base}:value::` : base];
   }));
+  secretBindings.QR_SIGN_PUBLIC_KEYS_JSON = secretBindings.QR_SIGN_PUBLIC_KEY_PREVIOUS.replace(/:value::$|:value::.*/, "");
   return {
     sourceSha, rotationId, rotationStateSha256, rotationFixtureSha256,
     imageAuthorization: structuredClone(imageAuthorizationFixture.authorization),

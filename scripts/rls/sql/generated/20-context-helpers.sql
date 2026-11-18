@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6'
+    AND source_contract_sha256='79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12138,6 +12138,8 @@ BEGIN
 END
 $$;
 
+-- Printing evidence is selected for the exact verified QR identity only;
+-- the public result never exposes internal print rows.
 CREATE OR REPLACE FUNCTION app_public.public_verify_execute(
   p_qr_id text,
   p_proof_source text,
@@ -12216,7 +12218,7 @@ BEGIN
   PERFORM set_config('app.public_verification_audit_id',audit_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
-    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."signedFirstSeenAt",q."lastSignedVerificationAt",
+    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."tokenExpiresAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
   INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
@@ -12267,12 +12269,10 @@ BEGIN
   ORDER BY rc."createdAt" DESC LIMIT 1;
   replacement_status:=coalesce(replacement_status,'NONE');
 
-  -- Only the verified QR identity may select printing evidence. The public
-  -- function returns its existing result shape, never these internal rows.
   IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
     PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
     SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
-      pi."confirmationEvidence" INTO confirmed_item
+      pi."confirmationEvidence",pi."dispatchMetadata" INTO confirmed_item
     FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
     IF confirmed_item.id IS NOT NULL THEN
       PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
@@ -12291,8 +12291,19 @@ BEGIN
           AND activation.metadata->>'printItemId'=confirmed_item.id
           AND activation.metadata->>'printSessionId'=ps.id
           AND activation."createdAt"=confirmed_item."printConfirmedAt"
+          AND activation.metadata->>'source' IN ('SIGNED_CONNECTOR_CONFIRM','NETWORK_WORKER_CONFIRM')
+          AND (p_proof_source='SIGNED_LABEL' OR (qr.code ~ '^c_[a-f0-9]{64}$'
+            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM'
+            AND confirmed_item."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+            AND confirmed_item."confirmationEvidence"->>'sessionId'=ps.id AND confirmed_item."confirmationEvidence"->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'
+            AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
       ) INTO auto_activated;
     END IF;
+  END IF;
+
+  IF p_proof_source='SIGNED_LABEL' AND qr."tokenExpiresAt"<=p_checked_at
+     AND NOT (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT') THEN
+    RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
 
   ready := qr.status IN ('PRINTED','SCANNED','REDEEMED')
@@ -12301,8 +12312,7 @@ BEGIN
     AND ((batch."lifecycleState"::text='RELEASED'
       AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
       OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
-        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')
-        AND p_proof_source='SIGNED_LABEL'));
+        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')));
   same_context := previous_scan.id IS NOT NULL
     AND p_actor_device_hash IS NOT NULL
     AND p_actor_ip_hash IS NOT NULL
@@ -12517,7 +12527,7 @@ BEGIN
      OR length(coalesce(p_nonce,'')) NOT BETWEEN 8 AND 256
      OR p_nonce !~ '^[A-Za-z0-9_-]+$'
      OR p_replay_epoch<1 OR p_key_version !~ '^[A-Za-z0-9._-]{1,64}$'
-     OR p_issued_at>p_checked_at OR p_checked_at>=p_expires_at THEN
+     OR p_issued_at>p_checked_at OR coalesce(p_expires_at<=p_issued_at,true) THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='22023';
   END IF;
   PERFORM app_public.public_verify_bind(
@@ -12535,8 +12545,7 @@ BEGIN
      OR qr."tokenIssuedAt" IS NULL
      OR abs(extract(epoch FROM (qr."tokenIssuedAt"-p_issued_at)))>1
      OR qr."tokenExpiresAt" IS NULL
-     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1
-     OR qr."tokenExpiresAt"<=p_checked_at THEN
+     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1 THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);

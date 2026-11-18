@@ -35,6 +35,7 @@ test("rotation task template is dual-slot and Ed25519-only", () => {
     "{{QR_SIGN_ACTIVE_KEY_VERSION}}",
     "{{QR_SIGN_PUBLIC_KEY_PREVIOUS}}",
     "{{QR_SIGN_PREVIOUS_KEY_VERSION}}",
+    "{{QR_SIGN_PUBLIC_KEYS_JSON}}",
     "{{ARTIFACT_SIGN_PRIVATE_KEY_CURRENT}}",
     "{{ARTIFACT_SIGN_PUBLIC_KEY_CURRENT}}",
     "{{ARTIFACT_SIGN_ACTIVE_KEY_VERSION}}",
@@ -59,11 +60,12 @@ test("cleanup task mode removes every retired previous binding while overlap kee
   assert.deepEqual(secrets.filter((name) => !retiredPrevious.includes(name)).filter((name) => current.includes(name)), current);
 });
 
-test("runtime contracts issue current and verify only current plus one previous slot", () => {
+test("runtime contracts issue current and verify retained public label keys", () => {
   assert.match(jwt, /currentKeys: \["JWT_SECRET_CURRENT"\]/);
   assert.match(jwt, /previousKeys: \["JWT_SECRET_PREVIOUS"\]/);
   assert.match(qr, /readPreviousPublicKey/);
   assert.match(qr, /keys\.push\(\{ version: previousVersion/);
+  assert.match(qr, /readRetainedPublicKeys/);
   assert.match(qr, /if \(!matchedKey\) throw new QrTokenVerificationError/);
   assert.match(qr, /requestedKeyVersion !== signingProfile\.keyVersion/);
   assert.match(qr, /QR_SIGN_PRIVATE_KEY_PREVIOUS/);
@@ -73,6 +75,7 @@ test("Terraform rotation mode is opt-in and references exact Secrets Manager JSO
   assert.match(terraform, /production_rotation_enabled/);
   assert.match(terraform, /production_rotation_secret_value_from/);
   assert.match(variables, /Production rotation task definitions require exact Secrets Manager JSON-key valueFrom references/);
+  assert.match(variables, /qr_public_keys_json == trimsuffix\(var\.production_rotation_secret_value_from\.qr_public_previous, ":value::"\)/);
   assert.match(variables, /current and previous secret references\/version references must be distinct/);
 });
 
@@ -91,12 +94,13 @@ test("rotation task secret entries remain ECS valueFrom objects", () => {
 });
 
 test("overlap secret set is bounded into the backend execution role", () => {
-  const overlapSecrets = ["jwt_current", "jwt_previous", "qr_private_current", "qr_public_current", "qr_current_version", "qr_public_previous", "qr_previous_version", "artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"];
+  const overlapSecrets = ["jwt_current", "jwt_previous", "qr_private_current", "qr_public_current", "qr_current_version", "qr_public_previous", "qr_previous_version", "qr_public_keys_json", "artifact_private_current", "artifact_public_current", "artifact_active_version", "artifact_public_keys_json"];
   const templateNames = new Set(JSON.parse(template).containerDefinitions[0].secrets.map(({ name }) => name));
-  for (const name of ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"]) assert.equal(templateNames.has(name), true, name);
+  for (const name of ["JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEYS_JSON", "QR_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON"]) assert.equal(templateNames.has(name), true, name);
   assert.match(terraform, /overlap_rotation_secret_arns = var\.production_rotation_enabled/);
   assert.match(terraform, /backend_execution_secret_arns = var\.production_rotation_enabled/);
   assert.match(terraform, /trimsuffix\(value, ":value::"\)/);
+  assert.match(terraform, /"\{\{QR_SIGN_PUBLIC_KEYS_JSON\}\}", var\.production_rotation_secret_value_from\.qr_public_keys_json/);
   assert.match(terraform, /alltrue\(\[for arn in local\.overlap_rotation_secret_arns : contains\(local\.backend_execution_secret_arns, arn\) && !strcontains\(arn, "\*"\)\]\)/);
   const executionPolicy = terraform.match(/resource "aws_iam_role_policy" "execution"[\s\S]*?(?=\nresource )/)?.[0] || "";
   assert.match(executionPolicy, /secretsmanager:GetSecretValue/);

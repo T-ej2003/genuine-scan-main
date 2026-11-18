@@ -250,7 +250,7 @@ export function createProductionRotationInfrastructureAdapter({ run = execFileSy
         document = normalizeIamPolicyDocument(policy.PolicyVersion?.Document || policy.PolicyDocument);
         if (canonicalJson(document) !== canonicalJson(expectedPolicy)) throw new Error("Live backend execution-role policy differs from the applied plan.");
       }
-      const overlapSecretSet = Object.values(rotationInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$/, ""));
+      const overlapSecretSet = [...new Set(Object.values(rotationInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$/, "")))];
       const authorizedSecretSet = [...new Set((document.Statement || []).filter((statement) => statement?.Effect === "Allow" && (Array.isArray(statement.Action) ? statement.Action : [statement.Action]).includes("secretsmanager:GetSecretValue")).flatMap((statement) => Array.isArray(statement.Resource) ? statement.Resource : [statement.Resource]).filter(Boolean))];
       const authorizedOverlapSecretSet = overlapSecretSet.filter((arn) => authorizedSecretSet.includes(arn));
       if (authorizedOverlapSecretSet.length !== overlapSecretSet.length) throw new Error("Backend execution role is missing a required rotation secret permission.");

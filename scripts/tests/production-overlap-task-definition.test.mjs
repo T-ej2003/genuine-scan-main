@@ -1,15 +1,32 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildOverlapTaskDefinition, OVERLAP_TASK_MARKER, registerOverlapTaskDefinition } from "../aws/production-overlap-task-definition.mjs";
+import { buildRotationTerraformInputs } from "../aws/production-cutover-control-plane.mjs";
 
 const sourceSha = "a".repeat(40);
 const backendImage = `368992683803.dkr.ecr.eu-west-2.amazonaws.com/mscqr-backend@sha256:${"b".repeat(64)}`;
 const taskDefinitionArn = "arn:aws:ecs:eu-west-2:368992683803:task-definition/mscqr-production-rls-green-backend-candidate:9";
 const valueReferenceBindings = new Set(["JWT_SECRET_PREVIOUS", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION"]);
 const secretBindings = Object.fromEntries([
-  "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON",
+  "JWT_SECRET_CURRENT", "JWT_SECRET_PREVIOUS", "QR_SIGN_PRIVATE_KEY_CURRENT", "QR_SIGN_PUBLIC_KEY_CURRENT", "QR_SIGN_ACTIVE_KEY_VERSION", "QR_SIGN_PUBLIC_KEY_PREVIOUS", "QR_SIGN_PREVIOUS_KEY_VERSION", "QR_SIGN_PUBLIC_KEYS_JSON", "ARTIFACT_SIGN_PRIVATE_KEY_CURRENT", "ARTIFACT_SIGN_PUBLIC_KEY_CURRENT", "ARTIFACT_SIGN_ACTIVE_KEY_VERSION", "ARTIFACT_SIGN_PUBLIC_KEYS_JSON",
 ].map((name) => [name, `arn:aws:secretsmanager:eu-west-2:368992683803:secret:fixture/${name}${valueReferenceBindings.has(name) ? ":value::" : ""}`]).concat([["ROTATION_INVENTORY_OPERATION", "rotation-inventory-v1"]]));
+secretBindings.QR_SIGN_PUBLIC_KEYS_JSON = secretBindings.QR_SIGN_PUBLIC_KEY_PREVIOUS.replace(/:value::$|:value::.*/, "");
 const input = { backendImage, imageReleaseSha: sourceSha, backendLogGroup: "/ecs/mscqr-production/rls-green-backend", secretBindings };
+
+test("retained QR verifier archive reuses the exact existing previous-key secret", () => {
+  const definition = buildOverlapTaskDefinition(input).taskDefinition;
+  assert.equal(definition.containerDefinitions[0].secrets.find(({ name }) => name === "QR_SIGN_PUBLIC_KEYS_JSON")?.valueFrom, secretBindings.QR_SIGN_PUBLIC_KEYS_JSON);
+  assert.equal(secretBindings.QR_SIGN_PUBLIC_KEYS_JSON, secretBindings.QR_SIGN_PUBLIC_KEY_PREVIOUS.replace(/:value::$|:value::.*/, ""));
+  const terraformInputs = buildRotationTerraformInputs({ secretBindings, sourceSha, rotationId: "rotation-test-1234" });
+  assert.equal(terraformInputs.production_rotation_secret_value_from.qr_public_keys_json, secretBindings.QR_SIGN_PUBLIC_KEYS_JSON);
+  assert.equal(new Set(Object.values(terraformInputs.production_rotation_secret_value_from).map((value) => value.replace(/:value::$|:value::.*/, ""))).size, Object.keys(terraformInputs.production_rotation_secret_value_from).length - 1);
+  const { QR_SIGN_PUBLIC_KEYS_JSON: omitted, ...withoutArchive } = secretBindings;
+  assert.rejects(async () => buildOverlapTaskDefinition({ ...input, secretBindings: withoutArchive }), /incomplete/);
+  assert.rejects(async () => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, QR_SIGN_PUBLIC_KEYS_JSON: "not-an-arn" } }), /exact production reference/);
+  assert.rejects(async () => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, QR_SIGN_PUBLIC_KEYS_JSON: `${secretBindings.QR_SIGN_PUBLIC_KEYS_JSON}:value::` } }), /wrong SDK\/ECS reference shape/);
+  assert.rejects(async () => buildOverlapTaskDefinition({ ...input, secretBindings: { ...secretBindings, QR_SIGN_PUBLIC_KEYS_JSON: secretBindings.ARTIFACT_SIGN_PUBLIC_KEYS_JSON } }), /existing previous-public-key secret/);
+  assert.throws(() => buildRotationTerraformInputs({ secretBindings: { ...secretBindings, QR_SIGN_PUBLIC_KEYS_JSON: secretBindings.ARTIFACT_SIGN_PUBLIC_KEYS_JSON }, sourceSha, rotationId: "rotation-test-1234" }), /existing previous-public-key secret/);
+});
 const awsReadback = (definition) => ({
   ...structuredClone(definition), taskDefinitionArn, revision: 9, status: "ACTIVE", enableFaultInjection: false,
   containerDefinitions: definition.containerDefinitions.map((container) => ({ ...structuredClone(container), cpu: 0, environmentFiles: [], systemControls: [], ulimits: [], volumesFrom: [], logConfiguration: { ...container.logConfiguration, secretOptions: [] } })),

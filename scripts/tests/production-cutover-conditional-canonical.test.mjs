@@ -141,6 +141,9 @@ try{
     assert.equal(image.authorization.imageEvidence.images.find(x=>x.service==='backend').digest,fresh.d.backendImageDigest);
     const result=await runProductionCutoverControlPlane(input);
     assert.equal(result.readyForOverlapDeployment,true);assert.equal(registrations,1);assert.equal(forbidden,0);assert.equal(await journal.status('PREPARE_OVERLAP','ROTATION_LOCAL_STATE'),'COMPLETED_CONFIRMED');
+    const authorizedSecrets=result.results.rotationInfrastructure.overlapSecretSet;
+    assert.equal(authorizedSecrets.length,new Set(authorizedSecrets).size,'the two QR public-key selectors must count as one existing secret resource');
+    assert.equal(authorizedSecrets.filter(arn=>arn===strip(fresh.d.postPrepareTaskInput.secretBindings.QR_SIGN_PUBLIC_KEY_PREVIOUS)).length,1);
     await assert.rejects(runProductionCutoverControlPlane({...input,mode:'FULL'}),/mode differs/);
     await assert.rejects(prepareCanonicalConditionalOverlap({conditionalContext:context,composition:{constructAdapters:()=>{forbidden++;}}}),/Canonical production composition/);
     assert.equal(isProductionCutoverRuntimeComposition(createProductionCutoverRuntimeComposition({releaseRun:()=>{throw Error('unexpected external read');}})),true);

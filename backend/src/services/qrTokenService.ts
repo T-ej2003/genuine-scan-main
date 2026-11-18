@@ -210,6 +210,43 @@ const readCurrentKeyVersion = () => String(process.env.QR_SIGN_ACTIVE_KEY_VERSIO
 const readPreviousKeyVersion = () => String(process.env.QR_SIGN_PREVIOUS_KEY_VERSION || "").trim();
 const isKeyVersion = (value: string) => /^[A-Za-z0-9._-]{1,64}$/.test(value);
 
+// Public verification keys for labels printed before multiple signing-key rotations.
+// Private keys are never retained here; removing a public key intentionally revokes
+// verification of labels signed by that version.
+const readRetainedPublicKeys = (): Array<{ version: string; publicKey: KeyObject }> => {
+  const raw = String(process.env.QR_SIGN_PUBLIC_KEYS_JSON || "").trim();
+  if (!raw) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must be a JSON object"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must be a JSON object");
+  }
+  // The production rotation secret also carries the previous slot. Its archive
+  // survives when that slot is retired; direct registries remain supported.
+  const registry = Object.hasOwn(parsed, "family") && Object.hasOwn(parsed, "value")
+    ? (Object.hasOwn(parsed, "retainedPublicKeys") ? (parsed as Record<string, unknown>).retainedPublicKeys : {})
+    : parsed;
+  if (!registry || typeof registry !== "object" || Array.isArray(registry)) {
+    throw new Error("QR_SIGN_PUBLIC_KEYS_JSON contains an invalid retained key registry");
+  }
+  const entries = Object.entries(registry);
+  if (entries.length > 64) throw new Error("QR_SIGN_PUBLIC_KEYS_JSON exceeds 64 key versions");
+  return entries.map(([version, pem]) => {
+    if (!isKeyVersion(version) || typeof pem !== "string" || !pem.trim()) {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON contains an invalid key entry");
+    }
+    const normalizedPem = normalizePem(pem);
+    if (/PRIVATE KEY/i.test(normalizedPem)) {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must not contain private keys");
+    }
+    const publicKey = createPublicKey(normalizedPem);
+    if (publicKey.asymmetricKeyType !== "ed25519") {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must contain Ed25519 public keys");
+    }
+    return { version, publicKey };
+  });
+};
+
 export const hasEd25519QrSigningKeys = () => Boolean(readCurrentPrivateKey() && readCurrentPublicKey());
 export const isManagedQrSignerRequested = () => managedQrSignerRequested();
 export const hasManagedQrSignerRefs = () => kmsBackedSigningConfigured();
@@ -376,21 +413,30 @@ const loadEd25519VerificationKeys = () => {
   const previousVersion = readPreviousKeyVersion();
   if (!previousRaw) {
     if (previousVersion) throw new Error("QR_SIGN_PREVIOUS_KEY_VERSION requires QR_SIGN_PUBLIC_KEY_PREVIOUS");
-    return keys;
-  }
+  } else {
+    if (!isKeyVersion(previousVersion) || previousVersion === currentVersion) {
+      throw new Error("QR previous public-key slot requires a distinct valid version");
+    }
 
-  if (!isKeyVersion(previousVersion) || previousVersion === currentVersion) {
-    throw new Error("QR previous public-key slot requires a distinct valid version");
+    const previousPublicKey = createPublicKey(normalizePem(previousRaw));
+    if (previousPublicKey.asymmetricKeyType !== "ed25519") {
+      throw new Error("QR_SIGN_PUBLIC_KEY_PREVIOUS must be an Ed25519 public key");
+    }
+    const currentDer = currentPublicKey.export({ format: "der", type: "spki" });
+    const previousDer = previousPublicKey.export({ format: "der", type: "spki" });
+    if (currentDer.equals(previousDer)) throw new Error("QR current and previous public keys must be different");
+    keys.push({ version: previousVersion, publicKey: previousPublicKey });
   }
-
-  const previousPublicKey = createPublicKey(normalizePem(previousRaw));
-  if (previousPublicKey.asymmetricKeyType !== "ed25519") {
-    throw new Error("QR_SIGN_PUBLIC_KEY_PREVIOUS must be an Ed25519 public key");
+  for (const retained of readRetainedPublicKeys()) {
+    if (keys.some((key) => key.version === retained.version)) {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must not duplicate active or previous versions");
+    }
+    const retainedDer = retained.publicKey.export({ format: "der", type: "spki" });
+    if (keys.some((key) => key.publicKey.export({ format: "der", type: "spki" }).equals(retainedDer))) {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must not alias an existing public key");
+    }
+    keys.push(retained);
   }
-  const currentDer = currentPublicKey.export({ format: "der", type: "spki" });
-  const previousDer = previousPublicKey.export({ format: "der", type: "spki" });
-  if (currentDer.equals(previousDer)) throw new Error("QR current and previous public keys must be different");
-  keys.push({ version: previousVersion, publicKey: previousPublicKey });
   return keys;
 };
 
