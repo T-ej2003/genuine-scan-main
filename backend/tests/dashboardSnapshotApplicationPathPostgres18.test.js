@@ -386,16 +386,16 @@ const main = async () => {
 
     const sseReq = Object.assign(new EventEmitter(), request(tenantClaims(), success("dashboard-pg-sse-initial"), {}, "/api/events/dashboard"));
     const writes = [];
-    const sseRes = {
+    const sseRes = Object.assign(new EventEmitter(), {
       setHeader() {},
       flushHeaders() {},
       write(chunk) { writes.push(String(chunk)); return true; },
       end() {},
       status() { return this; },
       json() { return this; },
-    };
+    });
     await dashboardEvents(sseReq, sseRes);
-    sseReq.emit("close");
+    sseRes.emit("close");
     const sseOutput = writes.join("");
     assert.match(sseOutput, /"type":"snapshot"/);
     assert.match(sseOutput, /"byStatus":\{"ACTIVE":1\}/);

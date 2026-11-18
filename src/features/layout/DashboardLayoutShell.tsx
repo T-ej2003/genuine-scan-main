@@ -61,7 +61,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const breadcrumbs = getAppBreadcrumbs(location.pathname, user?.role);
   const contextualHelpRoute = getContextualHelpRoute(location.pathname, user?.role);
   const notificationCenter = useDashboardNotificationCenter(user?.id, NOTIFICATION_FETCH_LIMIT);
-  const attentionQueue = useOperationalAttentionQueue(Boolean(user?.id));
+  const attentionQueue = useOperationalAttentionQueue(Boolean(user?.id), notificationCenter.notificationsLive);
   const printerConnection = useManufacturerPrinterConnection({
     user,
     contextualHelpRoute,

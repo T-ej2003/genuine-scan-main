@@ -56,6 +56,41 @@ test('CREATE/REJECT durable audit projections retry safely without inserting aud
   } finally { stop(); claims = []; }
 });
 
+test('other committed QR audit rows reach the scoped live dashboard only after attribution checks', async () => {
+  const stop = onAuditLog(log => delivered.push(log));
+  try {
+    const row = claim('ALLOCATED');
+    row.eventPayload.entityType = 'Batch';
+    row.payloadDigest = digest(row.eventPayload);
+    claims = [row];
+    const before = delivered.length;
+    await flushSecurityEventOutbox();
+    assert.equal(delivered.length, before + 1);
+    assert.equal(delivered.at(-1).id, row.eventPayload.id);
+    assert.equal(claims[0].terminal, true);
+
+    const forged = claim('DELETE_BATCH');
+    forged.eventPayload.entityType = 'Batch';
+    forged.payloadDigest = digest(forged.eventPayload);
+    forged.licenseeId = crypto.randomUUID();
+    claims = [forged];
+    const failedBefore = failed;
+    await flushSecurityEventOutbox();
+    assert.equal(failed, failedBefore + 1);
+    assert.equal(delivered.length, before + 1, 'a mismatched tenant must never reach the stream');
+
+    const exportRow = claim('EXPORT_QR_CODES');
+    exportRow.eventPayload.entityType = 'QRCode';
+    exportRow.eventPayload.licenseeId = null;
+    exportRow.licenseeId = null;
+    exportRow.payloadDigest = digest(exportRow.eventPayload);
+    claims = [exportRow];
+    await flushSecurityEventOutbox();
+    assert.equal(exportRow.terminal, true, 'unscoped exports must keep their existing SIEM path');
+    assert.equal(delivered.length, before + 1);
+  } finally { stop(); claims = []; }
+});
+
 
 test('optional SIEM delivery does not gate internal projections or claim disabled delivery succeeded', async () => {
   const stop = onAuditLog(log => delivered.push(log));

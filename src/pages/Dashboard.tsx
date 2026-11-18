@@ -26,8 +26,9 @@ import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
 import { ApiResponseError } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
-import { getRequestCoordinatorScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { canPollVisibleDocument, pollingPolicy } from "@/lib/query-polling-policy";
+import { queryKeys } from "@/lib/query-keys";
 
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../shared/contracts/runtime/dashboard.ts";
 
@@ -41,10 +42,12 @@ type QrStatsDashboardExtras = QrStatsDTO & {
 };
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, refresh } = useAuth();
+  const refreshAuthRef = useRef(refresh);
+  refreshAuthRef.current = refresh;
   const queryClient = useQueryClient();
   const activePrintSuppressed = useActivePrintSessionSuppression();
-  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getRequestCoordinatorScope, getRequestCoordinatorScope);
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const scopedLicenseeId = user?.role === "manufacturer" ? undefined : user?.licenseeId;
   const canReadAuditFeed = Boolean(scopedLicenseeId) && (user?.role === "super_admin" || user?.role === "licensee_admin");
   const dashboardQuery = useDashboardStats(scopedLicenseeId);
@@ -64,12 +67,15 @@ export default function Dashboard() {
   const pollRef = useRef<number | null>(null);
   const stopSseRef = useRef<(() => void) | null>(null);
   const sseConnectedRef = useRef(false);
+  const sseOpenedRef = useRef(false);
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
   const latestAuditLogsScopeRef = useRef<string | null>(null);
   const liveSummaryScopeRef = useRef<string | null>(null);
   const liveLogsScopeRef = useRef<string | null>(null);
+
+  useEffect(() => { sseOpenedRef.current = false; }, [securityScope]);
 
   useEffect(() => {
     latestAuditLogsRef.current = (auditLogsQuery.data?.logs || []) as AuditLogDTO[];
@@ -127,20 +133,46 @@ export default function Dashboard() {
       void refreshDashboard();
     }, STATS_POLL_MS);
 
-    const scheduleSummaryRefresh = () => {
+    let pendingBatchRefresh = false;
+    let pendingPrintRefresh = false;
+    const scheduleSummaryRefresh = (entityType?: string, reason?: string, action?: string) => {
+      if (action === "EXPORT_QR_CODES") return;
+      const affectsStats = reason === "print_job" || reason === "initial_race" ||
+        ["QRCode", "QRRange", "Batch", "PrintJob", "PrintItem", "QrAllocationRequest", "Licensee", "Manufacturer"].includes(entityType || "");
+      if (!affectsStats) {
+        return;
+      }
+      pendingBatchRefresh ||= reason === "print_job" || ["QRCode", "QRRange", "Batch", "QrAllocationRequest"].includes(entityType || "");
+      pendingPrintRefresh ||= reason === "print_job" || ["PrintJob", "PrintItem"].includes(entityType || "");
       if (refreshTimerRef.current) return;
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
-        void refreshDashboard();
-      }, 30_000);
+        const refreshBatches = pendingBatchRefresh;
+        const refreshPrinting = pendingPrintRefresh;
+        pendingBatchRefresh = false;
+        pendingPrintRefresh = false;
+        clearDashboardReadCache(["dashboard:stats", "qr:stats"]);
+        void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats(scopedLicenseeId) });
+        if (refreshPrinting) {
+          void queryClient.invalidateQueries({ queryKey: ["printing"] });
+        }
+        if (refreshBatches) {
+          void queryClient.invalidateQueries({ queryKey: ["batches"] });
+        }
+        if (refreshBatches || refreshPrinting) void queryClient.invalidateQueries({ queryKey: queryKeys.layout.attentionQueue() });
+      }, 250);
     };
 
     const streamScope = securityScope;
     stopSseRef.current = apiClient.streamDashboardEvents(
       (envelope) => {
-        if (streamScope !== getRequestCoordinatorScope()) return;
+        if (streamScope !== getAuthenticatedStreamScope()) return;
+        if (envelope?.type === "session.expired") {
+          void refreshAuthRef.current();
+          return;
+        }
         if (envelope?.type === "snapshot") {
-          liveSummaryScopeRef.current = getRequestCoordinatorScope();
+          liveSummaryScopeRef.current = getAuthenticatedStreamScope();
           const payload = envelope?.payload || {};
           const { summary, qrStats } = applyDashboardSnapshotToCache(queryClient, scopedLicenseeId, payload);
           setLiveSummary(summary);
@@ -165,7 +197,8 @@ export default function Dashboard() {
           return;
         }
         if (envelope?.type === "summary.refresh") {
-          scheduleSummaryRefresh();
+          const payload = envelope?.payload || {};
+          scheduleSummaryRefresh(String(payload.entityType || ""), String(payload.reason || ""), String(payload.action || ""));
         }
       },
       () => {
@@ -173,6 +206,11 @@ export default function Dashboard() {
         setSseConnected(false);
       },
       () => {
+        if (sseOpenedRef.current && canReadAuditFeed) {
+          clearDashboardReadCache(["audit:logs"]);
+          void auditLogsRefetch();
+        }
+        sseOpenedRef.current = true;
         sseConnectedRef.current = true;
         setSseConnected(true);
       }
@@ -181,7 +219,7 @@ export default function Dashboard() {
     return () => {
       closeRealtime();
     };
-  }, [activePrintSuppressed, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, securityScope, user?.role]);
+  }, [activePrintSuppressed, auditLogsRefetch, canReadAuditFeed, liveUpdates, queryClient, refreshDashboard, scopedLicenseeId, securityScope, user?.role]);
 
   useEffect(() => {
     if (dashboardQuery.dataUpdatedAt) {
@@ -189,7 +227,7 @@ export default function Dashboard() {
     }
   }, [dashboardQuery.dataUpdatedAt]);
 
-  const currentScope = getRequestCoordinatorScope();
+  const currentScope = getAuthenticatedStreamScope();
   const currentLiveSummary = liveSummaryScopeRef.current === currentScope ? liveSummary : null;
   const currentLiveQrStats = liveSummaryScopeRef.current === currentScope ? liveQrStats : null;
   const summary = currentLiveSummary ?? dashboardQuery.data?.summary ?? null;

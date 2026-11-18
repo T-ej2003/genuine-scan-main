@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import { APP_PATHS } from "@/app/route-metadata";
 import apiClient from "@/lib/api-client";
@@ -21,6 +21,7 @@ import {
 import { sanitizePrinterUiError } from "@/lib/printer-user-facing";
 import { buildSecurePrintReadiness } from "@/lib/secure-printer-readiness";
 import { canPollVisibleDocument } from "@/lib/query-polling-policy";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { buildSupportDiagnosticsPayload, captureSupportScreenshot } from "@/lib/support-diagnostics";
 import { normalizeLocalPrinterRows } from "@/features/printing/hooks";
 import {
@@ -79,7 +80,9 @@ export function useManufacturerPrinterConnection({
   const syncRunIdRef = useRef(0);
   const statusRevisionRef = useRef(0);
   const lastEventServerTimeMsRef = useRef(0);
+  const streamSecurityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const printerScope = JSON.stringify([
+    streamSecurityScope,
     user?.id, user?.role, user?.licenseeId, user?.orgId, user?.scopeVersion,
     user?.linkedLicensees?.map((link) => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
   ]);

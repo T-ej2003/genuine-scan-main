@@ -38,6 +38,7 @@ export interface AuthRequest extends Request {
   authMode?: "bearer" | "cookie";
   databaseSessionCapability?: string | null;
   diagnosticRequestId?: string;
+  sseTokenExpiresAtMs?: number;
 }
 
 export const DATABASE_SESSION_CAPABILITY_HEADER = "x-database-session-capability";
@@ -319,6 +320,9 @@ export const authenticateSSE = async (req: AuthRequest, res: Response, next: Nex
   try {
     const decoded = verifyAccessToken(token);
     stage = "session";
+    const expiresAt = Number((decoded as typeof decoded & { exp?: number }).exp) * 1000;
+    if (!Number.isSafeInteger(expiresAt) || expiresAt <= Date.now()) throw new Error("INVALID_SSE_TOKEN_EXPIRY");
+    req.sseTokenExpiresAtMs = expiresAt;
     req.databaseSessionCapability = getDatabaseSessionCapability(req, headerToken || queryToken || null);
     req.user = await hydrateTenantIfNeeded(decoded, req.databaseSessionCapability, requestIdFor(req));
     req.authMode = queryToken ? "bearer" : headerToken ? "bearer" : "cookie";

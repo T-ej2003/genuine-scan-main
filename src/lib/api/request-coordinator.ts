@@ -50,6 +50,7 @@ export const clientSecurityScope = (user: Partial<User> | null | undefined) => J
   user.linkedLicensees?.map(link => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
 ] : null);
 export const getRequestCoordinatorScope = () => JSON.stringify([securityScope, scopeGeneration, scopeReady]);
+export const getAuthenticatedStreamScope = () => JSON.stringify([securityScope, scopeReady]);
 export const getRequestCoordinatorActorId = () => {
   if (!scopeReady) return null;
   try {

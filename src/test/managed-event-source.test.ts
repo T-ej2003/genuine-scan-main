@@ -5,6 +5,7 @@ import {
   getManagedEventSourceState,
   subscribeManagedEventSource,
 } from "@/lib/api/managed-event-source";
+import { clearRequestCoordinator, setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 class MockEventSource {
   static instances: MockEventSource[] = [];
@@ -51,6 +52,7 @@ describe("managed EventSource", () => {
 
   afterEach(() => {
     closeManagedEventSources();
+    clearRequestCoordinator();
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
@@ -97,5 +99,44 @@ describe("managed EventSource", () => {
 
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[1].url).toBe("/api/events/notifications?limit=24");
+  });
+
+  it("keeps different URLs and authenticated identities separate", () => {
+    const oldMessage = vi.fn();
+    const stopOld = subscribeManagedEventSource("dashboard", "/api/events/dashboard", oldMessage, { eventName: "realtime" });
+    const stopOther = subscribeManagedEventSource("dashboard", "/api/events/notifications", vi.fn(), { eventName: "realtime" });
+    expect(MockEventSource.instances).toHaveLength(2);
+    setRequestCoordinatorScope({ id: "second-user" });
+    expect(MockEventSource.instances.every((source) => source.closed)).toBe(true);
+    MockEventSource.instances[0].emit("realtime", { channel: "dashboard" });
+    expect(oldMessage).not.toHaveBeenCalled();
+    subscribeManagedEventSource("dashboard", "/api/events/dashboard", vi.fn(), { eventName: "realtime" });
+    expect(MockEventSource.instances).toHaveLength(3);
+    stopOld();
+    stopOther();
+    expect(getManagedEventSourceState()).toHaveLength(1);
+  });
+
+  it("does not recreate an authenticated connection for cache-only invalidation", () => {
+    subscribeManagedEventSource("dashboard", "/api/events/dashboard", vi.fn(), { eventName: "realtime" });
+    clearRequestCoordinator();
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0].closed).toBe(false);
+  });
+
+  it("shares a live source with late subscribers and attaches new event names", () => {
+    const onOpen = vi.fn();
+    const lateMessage = vi.fn();
+    const stopFirst = subscribeManagedEventSource("dashboard", "/api/events/dashboard", vi.fn(), { eventName: "realtime" });
+    MockEventSource.instances[0].onopen?.();
+    const stopSecond = subscribeManagedEventSource("dashboard", "/api/events/dashboard", lateMessage, { eventName: "snapshot", onOpen });
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(onOpen).toHaveBeenCalledOnce();
+    MockEventSource.instances[0].emit("snapshot", { channel: "dashboard" });
+    expect(lateMessage).toHaveBeenCalledOnce();
+    stopFirst();
+    expect(MockEventSource.instances[0].closed).toBe(false);
+    stopSecond();
+    expect(MockEventSource.instances[0].closed).toBe(true);
   });
 });

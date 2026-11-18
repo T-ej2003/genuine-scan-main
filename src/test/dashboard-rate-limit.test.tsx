@@ -133,4 +133,25 @@ describe("Dashboard rate-limit partial state", () => {
     act(() => onEvent?.({ type: "audit.delta", payload: { log: { id: "new-row" } } }));
     expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("new-row,loaded-row");
   });
+
+  it("coalesces relevant committed events without refreshing for unrelated audit activity", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback as (envelope: unknown) => void;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await screen.findByText("Unassigned QR labels");
+    expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(1);
+    expect(apiClient.getQRStats).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "SupportIssueReport" } });
+      onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "QRCode" } });
+      onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "QRRange" } });
+      onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "QRCode", action: "EXPORT_QR_CODES" } });
+    });
+    await waitFor(() => expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(2));
+    expect(apiClient.getQRStats).toHaveBeenCalledTimes(2);
+  });
 });

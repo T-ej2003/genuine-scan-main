@@ -5,6 +5,7 @@ import { ApiResponseError } from "@/lib/api/query-utils";
 import { isActivePrintSessionSuppressed } from "@/lib/active-print-session";
 import { onMutationEvent } from "@/lib/mutation-events";
 import { queryKeys } from "@/lib/query-keys";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -23,6 +24,14 @@ export const queryClient = new QueryClient({
       retry: 0,
     },
   },
+});
+
+let activeScope = getAuthenticatedStreamScope();
+onRequestCoordinatorScopeChange(() => {
+  const nextScope = getAuthenticatedStreamScope();
+  if (nextScope === activeScope) return;
+  activeScope = nextScope;
+  queryClient.clear();
 });
 
 export function MutationEventBridge(): null {

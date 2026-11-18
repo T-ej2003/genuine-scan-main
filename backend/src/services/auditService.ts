@@ -76,6 +76,17 @@ export const publishAuditedEventProjection = async (log: any) => {
   emitAuditLog(log);
 };
 
+export const publishCommittedQrAuditEvent = async (log: any) => {
+  if (!log.id || !log.userId || !log.licenseeId || !["QRRange", "QRCode", "Batch", "QrAllocationRequest"].includes(log.entityType)) {
+    throw new Error("QR_AUDIT_PROJECTION_INVALID");
+  }
+  await Promise.all(["dashboard-snapshot", "attention-queue", "qr-batches", "print-jobs"].map(bumpCacheNamespaceVersion));
+  if (!await publishRedisJson(AUDIT_LOG_CHANNEL, { origin: getRedisInstanceId(), log })) {
+    throw new Error("QR_AUDIT_PROJECTION_REDIS_UNAVAILABLE");
+  }
+  emitAuditLog(log);
+};
+
 const resolveOrgId = async (input: { orgId?: string; licenseeId?: string }) => {
   const explicitOrgId = String(input.orgId || "").trim();
   if (explicitOrgId) return explicitOrgId;

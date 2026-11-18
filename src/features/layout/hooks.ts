@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 
 import apiClient from "@/lib/api-client";
+import { useAuth } from "@/contexts/AuthContext";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
-import { ApiResponseError, parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { clearDashboardReadCache } from "@/lib/api/internal-client-dashboard-request-control";
 import { canPollVisibleDocument, pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryKeys } from "@/lib/query-keys";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 
 import {
   dashboardNotificationArraySchema,
@@ -59,10 +61,11 @@ const notificationsResponseSchema = z
   .passthrough();
 
 export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOnly?: boolean) {
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
-    queryKey: queryKeys.layout.notifications(limit, unreadOnly),
+    queryKey: [...queryKeys.layout.notifications(limit, unreadOnly), securityScope],
     enabled: queryEnabled,
     staleTime: pollingPolicy.notificationsMs,
     refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.notificationsMs) : false,
@@ -83,6 +86,10 @@ export function useDashboardNotifications(enabled: boolean, limit = 24, unreadOn
 }
 
 export function useDashboardNotificationCenter(userId?: string | null, limit = 24) {
+  const { refresh } = useAuth();
+  const refreshAuthRef = useRef(refresh);
+  refreshAuthRef.current = refresh;
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const queryClient = useQueryClient();
   const notificationsQuery = useDashboardNotifications(false, limit);
@@ -97,11 +104,26 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const loadNotificationsInFlightRef = useRef<Promise<void> | null>(null);
   const lastNotificationsLoadAtRef = useRef(0);
   const notificationsLiveRef = useRef(false);
+  const snapshotScopeRef = useRef<string | null>(null);
+  const loadScopeRef = useRef<string | null>(null);
+  const snapshotSignatureRef = useRef<string | null>(null);
+  const snapshotRevisionRef = useRef(0);
+  const latestSnapshotRef = useRef<NotificationsSnapshot | null>(null);
+  const lastServerTimeRef = useRef(0);
+  const streamOpenedRef = useRef(false);
+  const resyncAttentionRef = useRef(false);
 
-  const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number) => {
+  const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number, scope = securityScope) => {
+    if (scope !== getAuthenticatedStreamScope()) return;
+    const signature = JSON.stringify([unread, rows]);
+    if (snapshotScopeRef.current === scope && snapshotSignatureRef.current === signature) return;
+    snapshotScopeRef.current = scope;
+    snapshotSignatureRef.current = signature;
+    snapshotRevisionRef.current += 1;
+    latestSnapshotRef.current = { notifications: rows, unread };
     setNotifications(rows);
     setUnreadNotifications(Number.isFinite(unread) ? unread : 0);
-    queryClient.setQueryData(queryKeys.layout.notifications(limit, false), {
+    queryClient.setQueryData([...queryKeys.layout.notifications(limit, false), scope], {
       notifications: rows,
       unread: Number.isFinite(unread) ? unread : 0,
     });
@@ -113,49 +135,58 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const loadNotifications = async (options?: { force?: boolean }) => {
     if (!userId) return;
     if (activePrintSuppressed && !options?.force) return;
-    if (loadNotificationsInFlightRef.current) return loadNotificationsInFlightRef.current;
+    if (loadNotificationsInFlightRef.current && loadScopeRef.current === securityScope) return loadNotificationsInFlightRef.current;
     const elapsed = Date.now() - lastNotificationsLoadAtRef.current;
     if (!options?.force && elapsed < NOTIFICATION_MIN_REFRESH_MS) return;
 
     setNotificationsLoading(true);
-    loadNotificationsInFlightRef.current = (async () => {
+    const requestScope = securityScope;
+    const requestRevision = snapshotRevisionRef.current;
+    loadScopeRef.current = requestScope;
+    const load = (async () => {
       try {
         lastNotificationsLoadAtRef.current = Date.now();
         const response = await notificationsQuery.refetch();
-        if (!response.data) {
-          setNotifications([]);
-          setUnreadNotifications(0);
-          return;
+        if (response.isSuccess && response.data) {
+          if (requestRevision === snapshotRevisionRef.current) {
+            applyNotificationSnapshot(response.data.notifications, Number(response.data.unread || 0), requestScope);
+          } else if (latestSnapshotRef.current && requestScope === getAuthenticatedStreamScope()) {
+            queryClient.setQueryData([...queryKeys.layout.notifications(limit, false), requestScope], latestSnapshotRef.current);
+          }
         }
-        applyNotificationSnapshot(response.data.notifications, Number(response.data.unread || 0));
       } catch (error) {
-        const rateLimited =
-          error instanceof ApiResponseError && String(error.code || "").toUpperCase() === "RATE_LIMITED";
-        if (!rateLimited) {
-          setNotifications([]);
-          setUnreadNotifications(0);
-        }
+        // Preserve the last authenticated snapshot during transient failures.
       } finally {
-        setNotificationsLoading(false);
-        loadNotificationsInFlightRef.current = null;
+        if (requestScope === getAuthenticatedStreamScope()) setNotificationsLoading(false);
       }
     })();
-
-    return loadNotificationsInFlightRef.current;
+    loadNotificationsInFlightRef.current = load;
+    void load.finally(() => {
+      if (loadNotificationsInFlightRef.current === load) loadNotificationsInFlightRef.current = null;
+    });
+    return load;
   };
+
+  useEffect(() => {
+    snapshotScopeRef.current = null;
+    snapshotSignatureRef.current = null;
+    snapshotRevisionRef.current = 0;
+    latestSnapshotRef.current = null;
+    lastServerTimeRef.current = 0;
+    streamOpenedRef.current = false;
+    resyncAttentionRef.current = false;
+    lastNotificationsLoadAtRef.current = 0;
+    setNotifications([]);
+    setUnreadNotifications(0);
+    setNotificationsLive(false);
+  }, [securityScope]);
 
   useEffect(() => {
     if (!userId) return;
     if (activePrintSuppressed) return;
     void loadNotifications({ force: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, activePrintSuppressed]);
-
-  useEffect(() => {
-    if (notificationsQuery.data) {
-      applyNotificationSnapshot(notificationsQuery.data.notifications, notificationsQuery.data.unread);
-    }
-  }, [notificationsQuery.data]);
+  }, [userId, activePrintSuppressed, securityScope]);
 
   useEffect(() => {
     notificationsLiveRef.current = notificationsLive;
@@ -171,7 +202,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     }, pollingPolicy.notificationsMs);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, activePrintSuppressed]);
+  }, [userId, activePrintSuppressed, securityScope]);
 
   useEffect(() => {
     if (!userId) return;
@@ -183,17 +214,33 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
     const stop = apiClient.streamNotifications(
       (payload) => {
+        if (securityScope !== getAuthenticatedStreamScope()) return;
+        if (payload.kind === "auth_expired") {
+          void refreshAuthRef.current();
+          return;
+        }
         if (payload.kind === "version") {
-          if (!notificationsLiveRef.current) void loadNotifications();
+          void loadNotifications({ force: true });
           return;
         }
         const parsed = parseWithSchema(notificationsResponseSchema, payload, "Failed to stream notifications");
-        applyNotificationSnapshot(parsed.notifications || [], Number(parsed.unread || 0));
+        const serverTime = Date.parse(String(parsed.serverTime || ""));
+        if (Number.isFinite(serverTime) && serverTime < lastServerTimeRef.current) return;
+        if (Number.isFinite(serverTime)) lastServerTimeRef.current = serverTime;
+        const priorSignature = snapshotSignatureRef.current;
+        applyNotificationSnapshot(parsed.notifications || [], Number(parsed.unread || 0), securityScope);
+        if (snapshotSignatureRef.current !== priorSignature || resyncAttentionRef.current) {
+          resyncAttentionRef.current = false;
+          void queryClient.invalidateQueries({ queryKey: queryKeys.layout.attentionQueue() });
+        }
       },
       () => {
         setNotificationsLive(false);
       },
       () => {
+        resyncAttentionRef.current = streamOpenedRef.current;
+        streamOpenedRef.current = true;
+        lastServerTimeRef.current = 0;
         setNotificationsLive(true);
       },
       { limit }
@@ -204,7 +251,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
       stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, limit, activePrintSuppressed]);
+  }, [userId, limit, activePrintSuppressed, securityScope]);
 
   useEffect(() => {
     return () => {
@@ -217,9 +264,14 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   const dismissedNotificationIdSet = useMemo(() => new Set(dismissedNotificationIds), [dismissedNotificationIds]);
   const clearingNotificationIdSet = useMemo(() => new Set(clearingNotificationIds), [clearingNotificationIds]);
 
+  const scopedNotifications = useMemo(
+    () => snapshotScopeRef.current === securityScope ? notifications : [],
+    [notifications, securityScope]
+  );
+  const scopedUnread = snapshotScopeRef.current === securityScope ? unreadNotifications : 0;
   const visibleNotifications = useMemo(
-    () => notifications.filter((item) => item?.id && !dismissedNotificationIdSet.has(String(item.id))),
-    [notifications, dismissedNotificationIdSet]
+    () => scopedNotifications.filter((item) => item?.id && !dismissedNotificationIdSet.has(String(item.id))),
+    [scopedNotifications, dismissedNotificationIdSet]
   );
 
   const markNotificationRead = async (id: string) => {
@@ -230,7 +282,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   };
 
   const markAllNotificationsRead = async () => {
-    if (notifications.length === 0 && unreadNotifications === 0) return;
+    if (scopedNotifications.length === 0 && scopedUnread === 0) return;
 
     const readAt = new Date().toISOString();
     setNotifications((prev) => prev.map((item) => ({ ...item, readAt: item.readAt || readAt })));
@@ -280,8 +332,8 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   };
 
   return {
-    notifications,
-    unreadNotifications,
+    notifications: scopedNotifications,
+    unreadNotifications: scopedUnread,
     notificationsLoading,
     notificationsLive,
     clearingNotificationIdSet,
@@ -297,14 +349,15 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   };
 }
 
-export function useOperationalAttentionQueue(enabled: boolean) {
+export function useOperationalAttentionQueue(enabled: boolean, notificationsLive = false) {
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
-    queryKey: queryKeys.layout.attentionQueue(),
+    queryKey: [...queryKeys.layout.attentionQueue(), securityScope],
     enabled: queryEnabled,
     staleTime: pollingPolicy.attentionQueueMs,
-    refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.attentionQueueMs) : false,
+    refetchInterval: queryEnabled ? visibleRefetchInterval(notificationsLive ? 600_000 : pollingPolicy.attentionQueueMs) : false,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<OperationalAttentionQueue> =>
       unwrapParsedApiResponse(

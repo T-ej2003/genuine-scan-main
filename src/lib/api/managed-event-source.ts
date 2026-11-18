@@ -1,3 +1,5 @@
+import { getAuthenticatedStreamScope, isRequestCoordinatorScopeReady, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
+
 type EventSourceFactory = typeof EventSource;
 
 type StreamSubscriber = {
@@ -8,9 +10,13 @@ type StreamSubscriber = {
 };
 
 type StreamState = {
+  id: string;
   key: string;
   url: string;
+  scope: string;
   source: EventSource | null;
+  open: boolean;
+  listening: Set<string>;
   subscribers: Map<number, StreamSubscriber>;
   reconnectTimer: number | null;
   reconnectAttempt: number;
@@ -45,11 +51,14 @@ const closeSource = (state: StreamState) => {
     state.source.close();
     state.source = null;
   }
+  state.open = false;
+  state.listening.clear();
 };
 
 const isDocumentHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
 const dispatchOpen = (state: StreamState) => {
+  state.open = true;
   state.reconnectAttempt = 0;
   for (const subscriber of state.subscribers.values()) {
     subscriber.onOpen?.();
@@ -62,8 +71,20 @@ const dispatchError = (state: StreamState) => {
   }
 };
 
+const listen = (state: StreamState, source: EventSource, eventName: string) => {
+  if (state.listening.has(eventName)) return;
+  source.addEventListener(eventName, (event) => {
+    if (state.source !== source || state.scope !== getAuthenticatedStreamScope()) return;
+    for (const subscriber of state.subscribers.values()) {
+      if (subscriber.eventName === event.type) subscriber.onMessage(event as MessageEvent);
+    }
+  });
+  state.listening.add(eventName);
+};
+
 const connect = (state: StreamState) => {
   if (state.source || state.subscribers.size === 0) return;
+  if (!isRequestCoordinatorScopeReady()) return;
   if (state.pauseWhenHidden && isDocumentHidden()) return;
 
   const EventSourceCtor = getEventSourceCtor();
@@ -80,21 +101,16 @@ const connect = (state: StreamState) => {
   }
 
   state.source = source;
-  const dispatchMessage = (event: MessageEvent) => {
-    for (const subscriber of state.subscribers.values()) {
-      if (subscriber.eventName === event.type) {
-        subscriber.onMessage(event);
-      }
-    }
-  };
-
   const eventNames = new Set(Array.from(state.subscribers.values()).map((subscriber) => subscriber.eventName));
   for (const eventName of eventNames) {
-    source.addEventListener(eventName, dispatchMessage as EventListener);
+    listen(state, source, eventName);
   }
 
-  source.onopen = () => dispatchOpen(state);
+  source.onopen = () => {
+    if (state.source === source && state.scope === getAuthenticatedStreamScope()) dispatchOpen(state);
+  };
   source.onerror = () => {
+    if (state.source !== source) return;
     closeSource(state);
     dispatchError(state);
     scheduleReconnect(state);
@@ -118,6 +134,7 @@ const ensureVisibilityHandler = (state: StreamState) => {
   if (!state.pauseWhenHidden || state.visibilityHandler || typeof document === "undefined") return;
 
   state.visibilityHandler = () => {
+    if (!state.pauseWhenHidden) return;
     if (isDocumentHidden()) {
       clearReconnectTimer(state);
       closeSource(state);
@@ -134,7 +151,7 @@ const removeStream = (state: StreamState) => {
   if (state.visibilityHandler && typeof document !== "undefined") {
     document.removeEventListener("visibilitychange", state.visibilityHandler);
   }
-  streams.delete(state.key);
+  streams.delete(state.id);
 };
 
 export const subscribeManagedEventSource = (
@@ -144,23 +161,29 @@ export const subscribeManagedEventSource = (
   options: SubscribeOptions = {}
 ) => {
   const eventName = options.eventName || "message";
-  let state = streams.get(key);
+  const scope = getAuthenticatedStreamScope();
+  const streamId = JSON.stringify([key, url, scope]);
+  let state = streams.get(streamId);
   if (!state) {
     state = {
+      id: streamId,
       key,
       url,
+      scope,
       source: null,
+      open: false,
+      listening: new Set(),
       subscribers: new Map(),
       reconnectTimer: null,
       reconnectAttempt: 0,
       visibilityHandler: null,
       pauseWhenHidden: options.pauseWhenHidden !== false,
     };
-    streams.set(key, state);
+    streams.set(streamId, state);
   }
 
-  const id = ++subscriberId;
-  state.subscribers.set(id, {
+  const subscriptionId = ++subscriberId;
+  state.subscribers.set(subscriptionId, {
     eventName,
     onMessage,
     onError: options.onError,
@@ -170,11 +193,13 @@ export const subscribeManagedEventSource = (
 
   ensureVisibilityHandler(state);
   connect(state);
+  if (state.source) listen(state, state.source, eventName);
+  if (state.open) options.onOpen?.();
 
   return () => {
-    const current = streams.get(key);
-    if (!current) return;
-    current.subscribers.delete(id);
+    const current = streams.get(streamId);
+    if (current !== state) return;
+    current.subscribers.delete(subscriptionId);
     if (current.subscribers.size === 0) {
       removeStream(current);
     }
@@ -196,6 +221,10 @@ export const getManagedEventSourceState = () =>
     reconnecting: state.reconnectTimer != null,
   }));
 
-if (typeof window !== "undefined") {
-  window.addEventListener("auth:logout", closeManagedEventSources);
-}
+let activeScope = getAuthenticatedStreamScope();
+onRequestCoordinatorScopeChange(() => {
+  const nextScope = getAuthenticatedStreamScope();
+  if (nextScope === activeScope) return;
+  activeScope = nextScope;
+  closeManagedEventSources();
+});
