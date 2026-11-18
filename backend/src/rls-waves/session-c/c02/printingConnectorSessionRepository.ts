@@ -13,8 +13,9 @@ export const mutatePrintingConnectorSession = async (input: {
   sessionId: string;
   registrationId: string;
   payload: Record<string, unknown>;
+  client?: Pick<typeof prisma, "$queryRaw">;
 }): Promise<ConnectorSessionMutationResult> => {
-  const rows = await prisma.$queryRaw<Array<{ result: ConnectorSessionMutationResult }>>(Prisma.sql`
+  const rows = await (input.client || prisma).$queryRaw<Array<{ result: ConnectorSessionMutationResult }>>(Prisma.sql`
     SELECT app_rls.printing_connector_session(
       ${input.operation}::text,${input.sessionId}::text,${input.registrationId}::text,
       ${input.payload}::jsonb

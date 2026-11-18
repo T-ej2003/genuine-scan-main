@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import { PrintPayloadType } from "@prisma/client";
+import prisma from "../config/database";
 
 import {
   recordConnectorEvent,
@@ -260,9 +261,10 @@ const mutateActiveSession = (
   session: TrustedPrinterAgentSession,
   operation: "ADVANCE" | "CHECK",
   message?: SessionClientMessage,
-  signedPayload?: string
+  signedPayload?: string,
+  client?: Parameters<typeof mutatePrintingConnectorSession>[0]["client"]
 ) => sessionMutation({
-  operation, sessionId: session.id, registrationId: session.registrationId,
+  operation, sessionId: session.id, registrationId: session.registrationId, client,
   payload: sessionPayload(session, message ? {
     messageSeq: message.messageSeq, messageType: message.type,
     ...(message.type === "heartbeat" && signedPayload ? {
@@ -418,9 +420,9 @@ export const handleTrustedSessionProgressMessage = async (
   }
   const state = active(session);
   const signedPayload = verifyMessage(session, message);
-  await mutateActiveSession(session, "ADVANCE", message, signedPayload);
 
   if (message.type.startsWith("test_")) {
+    await mutateActiveSession(session, "ADVANCE", message, signedPayload);
     const connectorBoundary = {
       sessionId: session.id,
       registrationId: session.registrationId,
@@ -469,28 +471,32 @@ export const handleTrustedSessionProgressMessage = async (
       statusCode: 409, errorCode: "terminal_receipt_conflict",
     });
   }
-  const call = (operation: "ACK" | "CONFIRM" | "FAIL") => recordConnectorEvent({
-    registrationId: session.registrationId,
-    agentId: session.agentId,
-    deviceFingerprint: session.deviceFingerprint,
-    nonce: nonce(message.nonce),
-    issuedAt: message.issuedAt,
-    requestId: randomUUID(),
-    operation,
-    jobId: chunk.jobId,
-    itemId: chunk.itemId,
-    printerId: session.printerId,
-    payloadHash: message.payloadHash || chunk.payloadHash,
-    deviceJobRef: message.deviceJobRef || null,
-    details: {
-      sessionId: session.id,
-      chunkId: message.chunkId,
-      messageSeq: message.messageSeq,
-      bytesWritten: message.bytesWritten || null,
-      reason: message.error || null,
-      attemptId: chunk.attemptId,
-      outcomeIndeterminate: message.type === "label_failed" && message.error === "physical_outcome_unconfirmed",
-    },
+  const call = (operation: "ACK" | "CONFIRM" | "FAIL") => prisma.$transaction(async (client) => {
+    await mutateActiveSession(session, "ADVANCE", message, signedPayload, client);
+    return recordConnectorEvent({
+      registrationId: session.registrationId,
+      agentId: session.agentId,
+      deviceFingerprint: session.deviceFingerprint,
+      nonce: nonce(message.nonce),
+      issuedAt: message.issuedAt,
+      requestId: randomUUID(),
+      operation,
+      jobId: chunk.jobId,
+      itemId: chunk.itemId,
+      printerId: session.printerId,
+      payloadHash: message.payloadHash || chunk.payloadHash,
+      deviceJobRef: message.deviceJobRef || null,
+      details: {
+        sessionId: session.id,
+        chunkId: message.chunkId,
+        messageSeq: message.messageSeq,
+        bytesWritten: message.bytesWritten || null,
+        reason: message.error || null,
+        attemptId: chunk.attemptId,
+        outcomeIndeterminate: message.type === "label_failed" && message.error === "physical_outcome_unconfirmed",
+      },
+      client,
+    });
   });
   if (["chunk_ack","chunk_spooled","label_spooled"].includes(message.type)) {
     await call("ACK");

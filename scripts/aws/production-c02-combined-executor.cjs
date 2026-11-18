@@ -29,7 +29,7 @@ function validatePackage(pkg) {
     ]);
     assert.deepEqual(pkg.publicGrants, [
         'GRANT SELECT ("id", "code", "licenseeId", "batchId", "status", "scanCount", "scannedAt", "printedAt", "printJobId", "tokenNonce", "tokenIssuedAt", "tokenExpiresAt", "tokenHash", "replayEpoch", "issuanceMode", "customerVerifiableAt", "signedFirstSeenAt", "lastSignedVerificationAt", "lastSignedVerificationIpHash", "lastSignedVerificationDeviceHash") ON TABLE public."QRCode" TO "mscqr_prd_rls_phase2_auth_owner";',
-        'GRANT SELECT ("id", "printSessionId", "qrCodeId", "state", "attemptCount", "printConfirmedAt", "confirmationEvidence") ON TABLE public."PrintItem" TO "mscqr_prd_rls_phase2_auth_owner";',
+        'GRANT SELECT ("id", "printSessionId", "qrCodeId", "state", "attemptCount", "printConfirmedAt", "confirmationEvidence", "dispatchMetadata") ON TABLE public."PrintItem" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("id", "printJobId", "batchId", "manufacturerId") ON TABLE public."PrintSession" TO "mscqr_prd_rls_phase2_auth_owner";',
         'GRANT SELECT ("batchId", "printJobId", "qrCodeId", "eventType", "metadata", "createdAt") ON TABLE public."PrintAuditEvent" TO "mscqr_prd_rls_phase2_auth_owner";',
     ]);

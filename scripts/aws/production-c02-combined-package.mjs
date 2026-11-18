@@ -61,7 +61,8 @@ export function buildC02CombinedPackage({ sourceSha, predecessor, successor, rep
   assert.ok(publicGrants.every(grant => generatedGrants.has(grant)));
   assert.deepEqual(publicGrants.map(line => /ON TABLE public\."([^"]+)"/.exec(line)?.[1]),
     ["QRCode", "PrintItem", "PrintSession", "PrintAuditEvent"]);
-  assert.ok(publicGrants[0].includes('"printJobId"') && publicGrants[1].includes('"confirmationEvidence"'));
+  assert.ok(publicGrants[0].includes('"printJobId"') && publicGrants[1].includes('"confirmationEvidence"')
+    && publicGrants[1].includes('"dispatchMetadata"'));
   const policySql = ["Printer.printing_lifecycle_printer_update", "PrinterRegistration.printing_lifecycle_printerregistration_update", ...evidencePolicies, "QRCode.printing_lifecycle_qrcode_update", ...PUBLIC_VERIFICATION_RELEASE_POLICIES]
     .flatMap(identity => {
       const [table, name] = identity.split(".");

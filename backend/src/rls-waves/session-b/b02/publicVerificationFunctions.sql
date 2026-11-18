@@ -187,6 +187,8 @@ BEGIN
 END
 $$;
 
+-- Printing evidence is selected for the exact verified QR identity only;
+-- the public result never exposes internal print rows.
 CREATE OR REPLACE FUNCTION app_public.public_verify_execute(
   p_qr_id text,
   p_proof_source text,
@@ -265,7 +267,7 @@ BEGIN
   PERFORM set_config('app.public_verification_audit_id',audit_id,true);
   PERFORM set_config('app.public_verification_outbox_id',outbox_id,true);
   SELECT q.id,q.code,q."licenseeId",q."batchId",q.status,q."scanCount",q."scannedAt",q."printedAt",
-    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."signedFirstSeenAt",q."lastSignedVerificationAt",
+    q."issuanceMode",q."customerVerifiableAt",q."printJobId",q."tokenExpiresAt",q."signedFirstSeenAt",q."lastSignedVerificationAt",
     q."lastSignedVerificationIpHash",q."lastSignedVerificationDeviceHash"
   INTO STRICT qr
   FROM public."QRCode" q WHERE q.id=p_qr_id FOR UPDATE;
@@ -316,12 +318,10 @@ BEGIN
   ORDER BY rc."createdAt" DESC LIMIT 1;
   replacement_status:=coalesce(replacement_status,'NONE');
 
-  -- Only the verified QR identity may select printing evidence. The public
-  -- function returns its existing result shape, never these internal rows.
   IF qr."printJobId" IS NOT NULL AND qr."customerVerifiableAt" IS NOT NULL THEN
     PERFORM set_config('app.public_verification_print_job_id',qr."printJobId",true);
     SELECT pi.id,pi."printSessionId",pi.state,pi."attemptCount",pi."printConfirmedAt",
-      pi."confirmationEvidence" INTO confirmed_item
+      pi."confirmationEvidence",pi."dispatchMetadata" INTO confirmed_item
     FROM public."PrintItem" pi WHERE pi."qrCodeId"=qr.id;
     IF confirmed_item.id IS NOT NULL THEN
       PERFORM set_config('app.public_verification_print_session_id',confirmed_item."printSessionId",true);
@@ -340,6 +340,11 @@ BEGIN
           AND activation.metadata->>'printItemId'=confirmed_item.id
           AND activation.metadata->>'printSessionId'=ps.id
           AND activation."createdAt"=confirmed_item."printConfirmedAt"
+          AND (p_proof_source='SIGNED_LABEL' OR (qr.code ~ '^c_[a-f0-9]{64}$'
+            AND qr."tokenExpiresAt">p_checked_at
+            AND confirmed_item."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
+            AND confirmed_item."confirmationEvidence"->>'sessionId'=ps.id AND confirmed_item."confirmationEvidence"->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'
+            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM' AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
       ) INTO auto_activated;
     END IF;
   END IF;
@@ -350,8 +355,7 @@ BEGIN
     AND ((batch."lifecycleState"::text='RELEASED'
       AND (qr."issuanceMode"<>'GOVERNED_PRINT' OR qr."customerVerifiableAt" IS NOT NULL))
       OR (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT'
-        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')
-        AND p_proof_source='SIGNED_LABEL'));
+        AND batch."lifecycleState"::text NOT IN ('VOIDED','FAILED')));
   same_context := previous_scan.id IS NOT NULL
     AND p_actor_device_hash IS NOT NULL
     AND p_actor_ip_hash IS NOT NULL

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6'
+    AND source_contract_sha256='02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:960b5b4e89d87212121de237a2250d41d5433cc6a78fc0fb3247dc729f8de2d6')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -298,7 +298,7 @@ GRANT UPDATE ("scanCount", "scannedAt", "lastScanIp", "lastScanUserAgent", "last
 GRANT SELECT ("id", "isActive") ON TABLE public."Organization" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "orgId", "name", "brandName", "website", "supportEmail", "supportPhone", "isActive", "suspendedAt") ON TABLE public."Licensee" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "licenseeId", "manufacturerId", "lifecycleState", "printedAt", "suspendedAt") ON TABLE public."Batch" TO "mscqr_rls_cert_auth_owner";
-GRANT SELECT ("id", "printSessionId", "qrCodeId", "state", "attemptCount", "printConfirmedAt", "confirmationEvidence") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
+GRANT SELECT ("id", "printSessionId", "qrCodeId", "state", "attemptCount", "printConfirmedAt", "confirmationEvidence", "dispatchMetadata") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "printJobId", "batchId", "manufacturerId") ON TABLE public."PrintSession" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("batchId", "printJobId", "qrCodeId", "eventType", "metadata", "createdAt") ON TABLE public."PrintAuditEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "name", "website") ON TABLE public."User" TO "mscqr_rls_cert_auth_owner";

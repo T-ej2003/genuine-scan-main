@@ -1043,7 +1043,7 @@ const publicVerificationSecurity = Object.freeze({
     ["Organization","SELECT",["id","isActive"]],
     ["Licensee","SELECT",["id","orgId","name","brandName","website","supportEmail","supportPhone","isActive","suspendedAt"]],
     ["Batch","SELECT",["id","licenseeId","manufacturerId","lifecycleState","printedAt","suspendedAt"]],
-    ["PrintItem","SELECT",["id","printSessionId","qrCodeId","state","attemptCount","printConfirmedAt","confirmationEvidence"]],
+    ["PrintItem","SELECT",["id","printSessionId","qrCodeId","state","attemptCount","printConfirmedAt","confirmationEvidence","dispatchMetadata"]],
     ["PrintSession","SELECT",["id","printJobId","batchId","manufacturerId"]],
     ["PrintAuditEvent","SELECT",["batchId","printJobId","qrCodeId","eventType","metadata","createdAt"]],
     ["User","SELECT",["id","name","website"]],

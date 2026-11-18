@@ -173,6 +173,46 @@ async function main() {
     "exact confirmed item and activation audit allow verification without sample or batch release");
   assert.equal(json(preauth, verifySql("AUTOCODE01", "unsigned-auto", "auto-ip", "auto-device", "auto-start")).result,
     "NOT_READY", "automatic eligibility still requires signed QR proof");
+  const legacyQr = "60000000-0000-4000-8000-000000000503";
+  const legacyItem = "60000000-0000-4000-8000-000000000903";
+  const legacyCode = `c_${"a".repeat(64)}`;
+  psql(admin, `
+    INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId","printJobId",status,
+      "issuanceMode","customerVerifiableAt","tokenNonce","tokenHash","tokenIssuedAt","tokenExpiresAt",
+      "replayEpoch","printedAt","updatedAt")
+      VALUES('${legacyQr}','${legacyCode}','LEGACY-0001','${ids.licensee}','${ids.batch}','${autoJob}','PRINTED',
+        'GOVERNED_PRINT',now(),'legacy_nonce_1234','${hash("legacy-signed-token")}',
+        '${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,1,now(),now());
+    INSERT INTO public."PrintItem"(id,"printSessionId","qrCodeId",code,state,"attemptCount",
+      "printConfirmedAt","confirmationEvidence","dispatchMetadata","updatedAt")
+      SELECT '${legacyItem}','${autoSession}','${legacyQr}','${legacyCode}','PRINT_CONFIRMED',1,
+        q."customerVerifiableAt",
+        jsonb_build_object('sessionId','${autoSession}','attemptId','legacy-attempt-1'),
+        jsonb_build_object('dispatchEvidenceVersion','1','attemptId','legacy-attempt-1'),now()
+      FROM public."QRCode" q WHERE q.id='${legacyQr}';
+  `);
+  assert.equal(json(preauth, verifySql(legacyCode, "legacy-no-audit", "legacy-ip", "legacy-device", "legacy-start")).result,
+    "NOT_READY", "a code-only label cannot become ready from PRINTED state and confirmation metadata alone");
+  psql(admin, `INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId",
+    "eventType",metadata,"createdAt") SELECT gen_random_uuid()::text,'${ids.batch}','${autoJob}','${legacyQr}',
+      'AUTOMATIC_ACTIVATION',jsonb_build_object('printItemId','${legacyItem}',
+        'printSessionId','${autoSession}','source','SIGNED_CONNECTOR_CONFIRM',
+        'attemptId','wrong-attempt'),pi."printConfirmedAt"
+      FROM public."PrintItem" pi WHERE pi.id='${legacyItem}'`);
+  assert.equal(json(preauth, verifySql(legacyCode, "legacy-wrong-attempt", "legacy-ip", "legacy-device", "legacy-start")).result,
+    "NOT_READY", "a mismatched activation attempt cannot authenticate a code-only label");
+  psql(admin, `UPDATE public."PrintAuditEvent" SET metadata=jsonb_set(metadata,'{attemptId}',
+    '"legacy-attempt-1"'::jsonb) WHERE "qrCodeId"='${legacyQr}' AND "eventType"='AUTOMATIC_ACTIVATION'`);
+  assert.equal(json(preauth, verifySql(legacyCode, "legacy-exact-evidence", "legacy-ip", "legacy-device", "legacy-start")).result,
+    "AUTHENTIC", "an exact signed-connector activation record supports a physically printed code-only label");
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()-interval '1 second' WHERE id='${legacyQr}'`);
+  assert.equal(json(preauth, verifySql(legacyCode, "legacy-expired", "legacy-ip", "legacy-device", "legacy-start")).result,
+    "NOT_READY", "a code-only compatibility lookup cannot bypass token expiry");
+  psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"='${tokenExpiresAt}'::timestamp WHERE id='${legacyQr}'`);
+  psql(admin, `UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=now() WHERE id='${legacyQr}'`);
+  assert.equal(json(preauth, verifySql(legacyCode, "legacy-revoked", "legacy-ip", "legacy-device", "legacy-start")).result,
+    "BLOCKED", "a revoked code-only label must remain blocked");
+  psql(admin, `UPDATE public."QRCode" SET status='PRINTED',"blockedAt"=NULL WHERE id='${legacyQr}'`);
   denied(preauth, `SELECT * FROM public."PrintItem" WHERE "qrCodeId"='${autoQr}'`);
   denied(preauth, `SELECT * FROM public."PrintAuditEvent" WHERE "qrCodeId"='${autoQr}'`);
   psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${ids.batch}'`);

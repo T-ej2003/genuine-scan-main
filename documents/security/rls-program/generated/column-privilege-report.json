@@ -9945,7 +9945,8 @@
         "state",
         "attemptCount",
         "printConfirmedAt",
-        "confirmationEvidence"
+        "confirmationEvidence",
+        "dispatchMetadata"
       ],
       "grantee": "mscqr_rls_cert_auth_owner",
       "ownerIdentity": "identity-auth-function-owner",
