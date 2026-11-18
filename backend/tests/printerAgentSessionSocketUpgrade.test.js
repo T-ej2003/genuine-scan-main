@@ -85,7 +85,25 @@ const expectUnexpectedResponse = (url) =>
   try {
     const ws = await openWebSocket(`ws://127.0.0.1:${port}/api/printer-agent/session`);
     assert.equal(ws.readyState, WebSocket.OPEN, "standard session WebSocket upgrade should be accepted before hello");
+    const firstClose = new Promise((resolve) => ws.once("close", resolve));
+    const serverClose = new Promise((resolve) => [...wss.clients][0].once("close", resolve));
     ws.close();
+    await Promise.all([firstClose, serverClose]);
+    const closed = logs.find((entry) => entry.event === "printer_session_socket_closed");
+    assert(closed, "socket closure must be logged without session payloads");
+    assert.equal(closed.details.code, 1005);
+    assert.equal(closed.details.serverInitiated, false);
+    assert.equal(closed.details.sessionId, null);
+
+    const rejected = await openWebSocket(`ws://127.0.0.1:${port}/api/printer-agent/session`);
+    const rejectedServerClose = new Promise((resolve) => [...wss.clients][0].once("close", resolve));
+    const rejectedClientClose = new Promise((resolve) => rejected.once("close", resolve));
+    rejected.send("{}");
+    assert.equal(await rejectedClientClose, 4003, "rejected hello must retain the server rejection code");
+    await rejectedServerClose;
+    const rejectedLog = logs.filter((entry) => entry.event === "printer_session_socket_closed").at(-1);
+    assert.equal(rejectedLog.details.code, 4003);
+    assert.equal(rejectedLog.details.serverInitiated, true);
 
     const upgradeSeen = logs.find((entry) => entry.event === "printer_session_upgrade_seen");
     assert(upgradeSeen, "session upgrade should be logged before hello processing");

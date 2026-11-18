@@ -1,5 +1,6 @@
 const { createHash } = require("crypto");
 const { PassThrough } = require("stream");
+const net = require("node:net");
 const { mock } = require("node:test");
 const {
   buildPersistentSessionConnectDiagnostics,
@@ -16,6 +17,7 @@ const {
   resolveSessionUrl,
   validateClaimedLocalPrintJobForAttempt,
   startPersistentHeartbeatLoop,
+  createPersistentSessionSocket,
   runPersistentSelectionHeartbeat,
   buildSelectedPrinterHealth,
   observeSelectedPrinterHealth,
@@ -42,6 +44,27 @@ const assert = (condition, message) => {
 const sha256Hex = (value) => createHash("sha256").update(value).digest("hex");
 
 const run = async () => {
+  const sockets = new Set();
+  const stalledUpgrade = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  });
+  await new Promise((resolve) => stalledUpgrade.listen(0, "127.0.0.1", resolve));
+  try {
+    const ws = createPersistentSessionSocket(`ws://127.0.0.1:${stalledUpgrade.address().port}`, 80);
+    const started = Date.now();
+    const events = [];
+    ws.on("error", () => events.push("error"));
+    await new Promise((resolve) => ws.once("close", (code) => {
+      events.push(`close:${code}`);
+      resolve();
+    }));
+    assert(Date.now() - started < 1_000, "Stalled upgrade must end within its handshake timeout");
+    assert(events.join(",") === "error,close:1006", "Stalled upgrade must close without an authenticated session");
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await new Promise((resolve) => stalledUpgrade.close(resolve));
+  }
   mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-29T12:00:00.000Z") });
   try {
     const printer = { printerId: "queue-a", online: true, queueHasErrors: false, queueStatus: "normal" };

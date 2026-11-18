@@ -139,6 +139,8 @@ export const runPersistentSelectionHeartbeat = async (
   return true;
 };
 const PRINT_AGENT_SESSION_RECONNECT_MAX_MS = Math.max(15_000, Number(process.env.PRINT_AGENT_SESSION_RECONNECT_MAX_MS || 60_000) || 60_000);
+export const createPersistentSessionSocket = (url: string, handshakeTimeout = 30_000) =>
+  new WebSocket(url, { handshakeTimeout });
 const AGENT_VERSION = resolveLocalPrintAgentVersion(process.env.PRINT_AGENT_VERSION);
 const AGENT_BUILD_VERSION = resolveLocalPrintAgentBuildVersion(process.env.PRINT_AGENT_VERSION, process.env.PRINT_AGENT_BUILD_VERSION);
 const sha256Hex = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -1661,7 +1663,7 @@ const startPersistentPrintSessionWorker = () => {
           deviceFingerprint: selection.state.deviceFingerprint,
         })
       );
-      const ws = new WebSocket(sessionUrl);
+      const ws = createPersistentSessionSocket(sessionUrl);
       activeSocket = ws;
 
       const closeSession = () => {
@@ -1681,6 +1683,7 @@ const startPersistentPrintSessionWorker = () => {
 
       await new Promise<void>((resolve) => {
         let finished = false;
+        let upgradeRejected = false;
         const finish = () => {
           if (finished) return;
           finished = true;
@@ -1815,8 +1818,16 @@ const startPersistentPrintSessionWorker = () => {
           })();
         });
 
-        ws.on("close", finish);
+        ws.on("close", (code) => {
+          console.info("persistent printer session socket closed", {
+            sessionId: session?.sessionId || null,
+            code,
+            stopOrSelectionChangeRequested: stopped || selectionReconnect,
+          });
+          finish();
+        });
         ws.on("unexpected-response", (_request, response) => {
+          upgradeRejected = true;
           const statusCode = Number(response?.statusCode || 0) || null;
           const safeHeaders = buildSafePersistentSessionRejectHeaders(response?.headers || {});
           const reasonCode = buildPersistentSessionRejectReasonCode(statusCode, response?.headers || {});
@@ -1838,10 +1849,12 @@ const startPersistentPrintSessionWorker = () => {
               lastError: message,
               lastRejectReasonCode: reasonCode,
             });
-            finish();
+            response.destroy();
+            ws.terminate();
           });
         });
         ws.on("error", (error) => {
+          if (upgradeRejected) return;
           console.error("persistent printer session socket error", { path: sessionPath, error: errorInfo(error).message || error });
           updatePersistentSessionStatus({ lastError: errorInfo(error).message || "Persistent session socket error." });
           finish();

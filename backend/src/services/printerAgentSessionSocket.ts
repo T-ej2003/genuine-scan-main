@@ -98,8 +98,10 @@ const sendJson = (ws: WebSocket, payload: Record<string, unknown>) => {
   ws.send(JSON.stringify(payload));
 };
 
+const serverInitiatedCloses = new WeakSet<WebSocket>();
 const closeWithReason = (ws: WebSocket, code: number, reason: string) => {
   if (ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) return;
+  serverInitiatedCloses.add(ws);
   ws.close(code, reason.slice(0, 120));
 };
 
@@ -237,6 +239,7 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
             console.info("printer_session_socket_ready", {
               sessionId: trusted.id,
               registrationIdHashOrShortId: trusted.registrationId ? trusted.registrationId.slice(0, 8) : null,
+              connectorVersion: trusted.connectorVersion,
               requestPath: url.pathname,
             });
             sendJson(ws, {
@@ -308,9 +311,14 @@ export const attachPrinterAgentSessionWebSocket = (server: Server) => {
       }).finally(() => { queuedMessages -= 1; });
     });
 
-    ws.on("close", () => {
+    ws.on("close", (code) => {
       state.closed = true;
       clearInterval(keepAlive);
+      console.info("printer_session_socket_closed", {
+        sessionId: state.trusted?.id || null,
+        code,
+        serverInitiated: serverInitiatedCloses.has(ws),
+      });
       if (state.trusted) void closeTrustedPrinterAgentSession(state.trusted.id, "websocket_closed").catch(() => undefined);
     });
 
