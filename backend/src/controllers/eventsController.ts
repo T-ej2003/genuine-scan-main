@@ -59,7 +59,7 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
       offAudit();
       offPrintJob();
     };
-    res.on("close", cleanup);
+    (typeof res.on === "function" ? res : req).on("close", cleanup);
 
     // Send initial payload
     const initial = await getDashboardSnapshot(req);

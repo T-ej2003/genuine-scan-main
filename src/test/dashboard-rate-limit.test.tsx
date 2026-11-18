@@ -154,4 +154,16 @@ describe("Dashboard rate-limit partial state", () => {
     await waitFor(() => expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(2));
     expect(apiClient.getQRStats).toHaveBeenCalledTimes(2);
   });
+
+  it("does not resubscribe the dashboard stream on an ordinary rerender", async () => {
+    function Parent() {
+      const [, rerender] = React.useState(0);
+      return <><button onClick={() => rerender((value) => value + 1)}>Rerender</button><Dashboard /></>;
+    }
+    renderWithQueryClient(<MemoryRouter><Parent /></MemoryRouter>);
+    await screen.findByText("Unassigned QR labels");
+    expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Rerender" }));
+    expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1);
+  });
 });

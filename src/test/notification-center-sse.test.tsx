@@ -50,6 +50,7 @@ describe("notification SSE recovery and scope", () => {
     });
     expect(result.current.notifications.map((row) => row.id)).toEqual(["first"]);
     expect(result.current.unreadNotifications).toBe(1);
+    expect(apiClient.getNotifications).toHaveBeenCalledTimes(1);
 
     vi.mocked(apiClient.getNotifications).mockResolvedValueOnce({ success: false, status: 503 } as never);
     await act(async () => { onError?.(); await result.current.loadNotifications({ force: true }); });

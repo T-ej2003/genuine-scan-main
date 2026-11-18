@@ -62,7 +62,6 @@ type UseManufacturerPrinterConnectionParams = {
   navigate: (to: string) => void;
   toast: ToastLike;
 };
-
 export function useManufacturerPrinterConnection({
   user,
   contextualHelpRoute,
@@ -81,15 +80,13 @@ export function useManufacturerPrinterConnection({
   const statusRevisionRef = useRef(0);
   const lastEventServerTimeMsRef = useRef(0);
   const streamSecurityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
-  const printerScope = JSON.stringify([
-    streamSecurityScope,
+  const printerScope = JSON.stringify([streamSecurityScope,
     user?.id, user?.role, user?.licenseeId, user?.orgId, user?.scopeVersion,
     user?.linkedLicensees?.map((link) => [link.id, link.orgId, link.scopeVersion, Boolean(link.isPrimary)]),
   ]);
   const activePrinterScopeRef = useRef(printerScope);
   activePrinterScopeRef.current = printerScope;
   const appliedPrinterScopeRef = useRef(printerScope);
-
   const [printerStatus, setPrinterStatus] = useState<PrinterConnectionStatusDTO>(defaultPrinterStatus);
   const [printerDialogOpen, setPrinterDialogOpen] = useState(false);
   const [printerOnboardingOpen, setPrinterOnboardingOpen] = useState(false);
