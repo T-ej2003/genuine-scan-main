@@ -49,5 +49,32 @@ const batch = {
   rollupCount = 129;
   await enrichBatchSummaries([batch], db, boundary);
   assert.equal(fallbackCalls, 2, "a true mismatch still checks live QR status");
+
+  const parent = { ...batch, _count: { qrCodes: 140 } };
+  const childId = "40000000-0000-4000-8000-000000000704";
+  const child = { ...batch, id: childId, manufacturerId: "40000000-0000-4000-8000-000000000705", totalCodes: 1, _count: { qrCodes: 1 } };
+  const calls = [];
+  const mixedDb = { async $queryRaw(strings, ...values) {
+    const sql = strings.join("?");
+    if (sql.includes("batch_inventory_rollups")) return [batchId, childId].map((id) => ({
+      batch_id: id, dormant: id === batchId ? 140 : 0, active: 0, allocated: id === childId ? 1 : 0,
+      activated: 0, printed: 0, redeemed: 0, blocked: 0, scanned: 0,
+    }));
+    if (sql.includes("batch_unassigned_ranges")) {
+      calls.push(["parent", values]);
+      return [{ batch_id: batchId, start_code: "L0011", end_code: "L0150" }];
+    }
+    if (sql.includes("batch_reservable_qr_summaries")) {
+      calls.push(["child", values]);
+      return [{ batch_id: childId, count: 1, start_code: "L0151", end_code: "L0151" }];
+    }
+    throw new Error(`Unexpected summary query: ${sql}`);
+  } };
+  const [parentSummary, childSummary] = await enrichBatchSummaries([parent, child], mixedDb, boundary);
+  assert.equal(parentSummary.unassignedRemainingCodes, 140);
+  assert.equal(childSummary.printableCodes, 1);
+  assert.equal(calls.length, 2);
+  assert(JSON.stringify(calls[0][1]).includes(batchId) && !JSON.stringify(calls[0][1]).includes(childId));
+  assert(JSON.stringify(calls[1][1]).includes(childId) && !JSON.stringify(calls[1][1]).includes(batchId));
   console.log("Stale batch rollup fallback passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

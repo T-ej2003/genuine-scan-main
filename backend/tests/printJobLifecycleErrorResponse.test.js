@@ -50,6 +50,18 @@ assert.strictEqual(
 );
 assert.doesNotMatch(JSON.stringify(wrappedQrMembershipFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
 
+const invalidLifecycleFailure = describePrintJobCreateFailure(
+  Object.assign(new Error("Prisma raw query failed"), {
+    code: "P2010",
+    meta: { code: "P0001", message: "ERROR: INVALID_STATE_TRANSITION" },
+  }),
+  { requestId: "req-lifecycle", failureStage: "transaction_started" }
+);
+assert.strictEqual(invalidLifecycleFailure.status, 409);
+assert.strictEqual(invalidLifecycleFailure.payload.code, "INVALID_STATE_TRANSITION");
+assert.strictEqual(invalidLifecycleFailure.payload.requestId, "req-lifecycle");
+assert.doesNotMatch(JSON.stringify(invalidLifecycleFailure.payload), /P2010|P0001|Prisma|queryRaw/i);
+
 const staleAttestationFailure = describePrintJobCreateFailure(
   Object.assign(new Error("Prisma raw query failed"), {
     code: "P2010",

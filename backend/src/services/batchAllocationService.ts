@@ -345,14 +345,19 @@ const buildCountMaps = async (
   const chunks = Array.from({ length: Math.ceil(batchIds.length / 500) }, (_, index) =>
     batchIds.slice(index * 500, (index + 1) * 500)
   );
+  const manufacturerBatchIds = new Set(batches.filter((batch) => batch.manufacturerId).map((batch) => batch.id));
   const rollups = [] as Awaited<ReturnType<typeof readRollups>>;
   const unassignedRanges = [] as Awaited<ReturnType<typeof readUnassignedRanges>>;
   const reservableSummaryMap = new Map<string, { count: number; startCode: string | null; endCode: string | null }>();
   for (const ids of chunks) {
     rollups.push(...await readRollups(ids));
-    unassignedRanges.push(...await readUnassignedRanges(ids));
-    for (const [batchId, summary] of await readReservableSummaries(ids)) {
-      reservableSummaryMap.set(batchId, summary);
+    const parentIds = ids.filter((id) => !manufacturerBatchIds.has(id));
+    const childIds = ids.filter((id) => manufacturerBatchIds.has(id));
+    if (parentIds.length) unassignedRanges.push(...await readUnassignedRanges(parentIds));
+    if (childIds.length) {
+      for (const [batchId, summary] of await readReservableSummaries(childIds)) {
+        reservableSummaryMap.set(batchId, summary);
+      }
     }
   }
 

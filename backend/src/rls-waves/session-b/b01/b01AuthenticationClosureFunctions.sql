@@ -98,7 +98,8 @@ CREATE OR REPLACE FUNCTION app_rls.load_authenticated_manufacturer_scope(
   p_purpose text,p_write_audit boolean
 ) RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
-DECLARE actor record; selected record; link_count integer; primary_count integer; links jsonb; audit_id text;
+DECLARE actor record; selected record; scope_link record; selected_found boolean:=false;
+  link_count integer:=0; primary_count integer:=0; links jsonb:='[]'::jsonb; audit_id text;
 BEGIN
   SELECT * INTO actor FROM app_rls.b01_authenticated_actor(
     current_setting('app.user_id',true),
@@ -114,36 +115,31 @@ BEGIN
 
   PERFORM set_config('app.auth_closure_operation','manufacturer-scope-read',true),
           set_config('app.auth_closure_user_id',actor."userId",true);
-  SELECT count(*) INTO link_count
-  FROM public."ManufacturerLicenseeLink" ml
-  JOIN public."Licensee" l ON l.id=ml."licenseeId"
-  JOIN public."Organization" o ON o.id=l."orgId"
-  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
-    AND l."suspendedAt" IS NULL AND o."isActive";
+  FOR scope_link IN
+    SELECT ml."licenseeId",ml."isPrimary",ml."updatedAt",l.id,l.name,l.prefix,l."brandName",l."orgId"
+    FROM public."ManufacturerLicenseeLink" ml
+    JOIN public."Licensee" l ON l.id=ml."licenseeId"
+    JOIN public."Organization" o ON o.id=l."orgId"
+    WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
+      AND l."suspendedAt" IS NULL AND o."isActive"
+    ORDER BY ml."isPrimary" DESC,ml."createdAt",ml."licenseeId"
+  LOOP
+    link_count:=link_count+1;
+    IF link_count>100 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_SET_TOO_LARGE' USING ERRCODE='54000'; END IF;
+    IF scope_link."isPrimary" THEN primary_count:=primary_count+1; END IF;
+    IF NOT selected_found
+       AND (p_requested_licensee_id IS NULL OR scope_link."licenseeId"=p_requested_licensee_id)
+       AND (p_requested_org_id IS NULL OR scope_link."orgId"=p_requested_org_id)
+    THEN selected:=scope_link; selected_found:=true; END IF;
+    links:=links||jsonb_build_array(jsonb_build_object(
+      'id',scope_link.id,'name',scope_link.name,'prefix',scope_link.prefix,'brandName',scope_link."brandName",
+      'orgId',scope_link."orgId",'isPrimary',scope_link."isPrimary",
+      'scopeVersion',to_char(scope_link."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
+    ));
+  END LOOP;
   IF link_count=0 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_REQUIRED' USING ERRCODE='42501'; END IF;
-  IF link_count>100 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_SET_TOO_LARGE' USING ERRCODE='54000'; END IF;
-  SELECT count(*) INTO primary_count
-  FROM public."ManufacturerLicenseeLink" ml
-  JOIN public."Licensee" l ON l.id=ml."licenseeId"
-  JOIN public."Organization" o ON o.id=l."orgId"
-  WHERE ml."manufacturerId"=actor."userId" AND ml."isPrimary"
-    AND l."isActive" AND l."suspendedAt" IS NULL AND o."isActive";
   IF primary_count>1 THEN RAISE EXCEPTION 'MANUFACTURER_MEMBERSHIP_AMBIGUOUS' USING ERRCODE='42501'; END IF;
-
-  SELECT ml."licenseeId",ml."isPrimary",ml."updatedAt",l.id,l.name,l.prefix,l."brandName",l."orgId"
-  INTO selected
-  FROM public."ManufacturerLicenseeLink" ml
-  JOIN public."Licensee" l ON l.id=ml."licenseeId"
-  JOIN public."Organization" o ON o.id=l."orgId"
-  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
-    AND l."suspendedAt" IS NULL AND o."isActive"
-    AND (p_requested_licensee_id IS NULL OR ml."licenseeId"=p_requested_licensee_id)
-    AND (p_requested_org_id IS NULL OR l."orgId"=p_requested_org_id)
-  ORDER BY
-    CASE WHEN p_requested_licensee_id IS NOT NULL OR p_requested_org_id IS NOT NULL THEN 0 ELSE 1 END,
-    ml."isPrimary" DESC,ml."createdAt",ml."licenseeId"
-  LIMIT 1;
-  IF NOT FOUND AND (p_requested_licensee_id IS NOT NULL OR p_requested_org_id IS NOT NULL) THEN
+  IF NOT selected_found AND (p_requested_licensee_id IS NOT NULL OR p_requested_org_id IS NOT NULL) THEN
     RAISE EXCEPTION 'MANUFACTURER_SCOPE_DENIED' USING ERRCODE='42501';
   END IF;
   IF p_requested_scope_version IS NOT NULL
@@ -156,18 +152,6 @@ BEGIN
        WHERE ml."manufacturerId"=actor."userId" AND ml."isPrimary"
      )
   THEN selected:=NULL; END IF;
-
-  SELECT coalesce(jsonb_agg(jsonb_build_object(
-    'id',l.id,'name',l.name,'prefix',l.prefix,'brandName',l."brandName",
-    'orgId',l."orgId",'isPrimary',ml."isPrimary",
-    'scopeVersion',to_char(ml."updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')
-  ) ORDER BY ml."isPrimary" DESC,ml."createdAt",ml."licenseeId"),'[]'::jsonb)
-  INTO links
-  FROM public."ManufacturerLicenseeLink" ml
-  JOIN public."Licensee" l ON l.id=ml."licenseeId"
-  JOIN public."Organization" o ON o.id=l."orgId"
-  WHERE ml."manufacturerId"=actor."userId" AND l."isActive"
-    AND l."suspendedAt" IS NULL AND o."isActive";
 
   IF p_write_audit THEN
     audit_id:=gen_random_uuid()::text;

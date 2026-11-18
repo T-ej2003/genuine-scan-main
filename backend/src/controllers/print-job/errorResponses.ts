@@ -119,7 +119,6 @@ const hasVirtualSelectedPrinter = (printerStatus: PrinterStatusLike | null | und
       .toLowerCase(),
     VIRTUAL_PRINTER_TERMS
   );
-
 const batchStateErrorCodes = new Set<PrintJobErrorCode>([
   "QR_CODES_REQUIRED",
   "PRINT_ACK_REQUIRED",
@@ -135,6 +134,7 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
 ]);
 const reviewedSqlLifecycleErrors = {
   QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
+  INVALID_STATE_TRANSITION: "This batch is not ready for a new print run. Review its lifecycle status before trying again.",
   PRINTER_ATTESTATION_STALE: "The printer connection is no longer ready. Refresh the connector and printer status before starting the print run.",
   ACTIVE_PRINT_JOB_EXISTS: "An active print run already exists for this batch. Review its status before starting another.",
 } as const satisfies Partial<Record<PrintJobErrorCode, string>>;
