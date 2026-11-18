@@ -56,6 +56,19 @@ try {
   process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = old.publicKey;
   process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "old-v1";
   assert.equal(verifyQrToken(oldToken).signing.keyVersion, "old-v1");
+  delete process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS;
+  delete process.env.QR_SIGN_PREVIOUS_KEY_VERSION;
+  assert.throws(() => verifyQrToken(oldToken), /could not be verified/,
+    "retired label keys must fail closed when their public key is unavailable");
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": old.publicKey });
+  assert.equal(verifyQrToken(oldToken).signing.keyVersion, "old-v1",
+    "retained public keys keep old physical labels verifiable without retaining signing authority");
+  assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": current.publicKey });
+  assert.throws(() => verifyQrToken(oldToken), /must not alias an existing public key/);
+  delete process.env.QR_SIGN_PUBLIC_KEYS_JSON;
+  process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = old.publicKey;
+  process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "old-v1";
   assert.throws(() => signQrPayload(payload("old-v1")), /active key version/);
   assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
   assert.throws(() => verifyQrToken(signQrPayload(payload("unknown"))), /active key version/);

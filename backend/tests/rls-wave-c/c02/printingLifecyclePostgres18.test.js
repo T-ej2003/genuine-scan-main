@@ -917,11 +917,19 @@ async function main() {
   assert.equal(psql(admin, `SELECT state FROM public."PrintItem" WHERE id='${claim.printItemId}'`), 'AGENT_ACKED');
   assert.equal(psql(admin, `SELECT "customerVerifiableAt" IS NULL FROM public."QRCode" WHERE id='${ids.qr}'`), 't');
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent" WHERE "qrCodeId"='${ids.qr}' AND "eventType"='AUTOMATIC_ACTIVATION'`), '0');
-  const confirmation = json(app, `SELECT app_rls.printing_connector_event(
-    '${ids.registration}','printing-agent','printing-device','confirm_nonce_001',now()::timestamp,
-    '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash("confirm")}','spool-1','{"physical":true}'::jsonb
-  )`);
-  assert.equal(confirmation.remainingToPrint, 0);
+  const confirmSql = (nonce) => `SELECT app_rls.printing_connector_event(
+    '${ids.registration}','printing-agent','printing-device','${nonce}',now()::timestamp,
+    '${requestId()}','CONFIRM','${created.job.id}','${claim.printItemId}','${ids.printer}','${hash(nonce)}','spool-1','{"physical":true}'::jsonb
+  )`;
+  const concurrentConfirms = await Promise.all([
+    psqlAsync(app, confirmSql('confirm_nonce_001')),
+    psqlAsync(app, confirmSql('confirm_nonce_002')),
+  ]);
+  assert(concurrentConfirms.every((result) => result.status === 0),
+    `concurrent confirmations must complete consistently: ${concurrentConfirms.map((result) => result.output).join(' | ')}`);
+  const confirmationResults = concurrentConfirms.map((result) => JSON.parse(result.output));
+  assert.deepEqual(confirmationResults.map((result) => result.idempotent === true).sort(), [false, true]);
+  assert.equal(confirmationResults.find((result) => !result.idempotent).remainingToPrint, 0);
   assert.equal(psql(admin, `SELECT "customerVerifiableAt" IS NOT NULL FROM public."QRCode" WHERE id='${ids.qr}'`), "t",
     "the exact confirmed QR becomes eligible without a sample scan");
   assert.equal(psql(admin, `SELECT count(*) FROM public."PrintAuditEvent"

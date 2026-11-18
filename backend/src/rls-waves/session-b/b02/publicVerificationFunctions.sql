@@ -340,13 +340,19 @@ BEGIN
           AND activation.metadata->>'printItemId'=confirmed_item.id
           AND activation.metadata->>'printSessionId'=ps.id
           AND activation."createdAt"=confirmed_item."printConfirmedAt"
+          AND activation.metadata->>'source' IN ('SIGNED_CONNECTOR_CONFIRM','NETWORK_WORKER_CONFIRM')
           AND (p_proof_source='SIGNED_LABEL' OR (qr.code ~ '^c_[a-f0-9]{64}$'
-            AND qr."tokenExpiresAt">p_checked_at
+            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM'
             AND confirmed_item."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
             AND confirmed_item."confirmationEvidence"->>'sessionId'=ps.id AND confirmed_item."confirmationEvidence"->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'
-            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM' AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
+            AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
       ) INTO auto_activated;
     END IF;
+  END IF;
+
+  IF p_proof_source='SIGNED_LABEL' AND qr."tokenExpiresAt"<=p_checked_at
+     AND NOT (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT') THEN
+    RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
 
   ready := qr.status IN ('PRINTED','SCANNED','REDEEMED')
@@ -570,7 +576,7 @@ BEGIN
      OR length(coalesce(p_nonce,'')) NOT BETWEEN 8 AND 256
      OR p_nonce !~ '^[A-Za-z0-9_-]+$'
      OR p_replay_epoch<1 OR p_key_version !~ '^[A-Za-z0-9._-]{1,64}$'
-     OR p_issued_at>p_checked_at OR p_checked_at>=p_expires_at THEN
+     OR p_issued_at>p_checked_at OR coalesce(p_expires_at<=p_issued_at,true) THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='22023';
   END IF;
   PERFORM app_public.public_verify_bind(
@@ -588,8 +594,7 @@ BEGIN
      OR qr."tokenIssuedAt" IS NULL
      OR abs(extract(epoch FROM (qr."tokenIssuedAt"-p_issued_at)))>1
      OR qr."tokenExpiresAt" IS NULL
-     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1
-     OR qr."tokenExpiresAt"<=p_checked_at THEN
+     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1 THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);

@@ -59,11 +59,12 @@ test("cleanup task mode removes every retired previous binding while overlap kee
   assert.deepEqual(secrets.filter((name) => !retiredPrevious.includes(name)).filter((name) => current.includes(name)), current);
 });
 
-test("runtime contracts issue current and verify only current plus one previous slot", () => {
+test("runtime contracts issue current and verify retained public label keys", () => {
   assert.match(jwt, /currentKeys: \["JWT_SECRET_CURRENT"\]/);
   assert.match(jwt, /previousKeys: \["JWT_SECRET_PREVIOUS"\]/);
   assert.match(qr, /readPreviousPublicKey/);
   assert.match(qr, /keys\.push\(\{ version: previousVersion/);
+  assert.match(qr, /readRetainedPublicKeys/);
   assert.match(qr, /if \(!matchedKey\) throw new QrTokenVerificationError/);
   assert.match(qr, /requestedKeyVersion !== signingProfile\.keyVersion/);
   assert.match(qr, /QR_SIGN_PRIVATE_KEY_PREVIOUS/);

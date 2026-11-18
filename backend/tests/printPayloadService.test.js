@@ -151,8 +151,8 @@ const run = () => {
       batchId: "batch-1",
       licenseeId: "licensee-1",
       tokenNonce: "nonce-1",
-      tokenIssuedAt: new Date("2026-03-11T10:00:00.000Z"),
-      tokenExpiresAt: new Date("2026-03-12T10:00:00.000Z"),
+      tokenIssuedAt: new Date(Date.now() - 60_000),
+      tokenExpiresAt: new Date(Date.now() + 86_400_000),
       tokenHash: null,
     },
     manufacturerId: "manufacturer-1",
@@ -179,8 +179,8 @@ const run = () => {
     "Preview label should use MSCQR branding"
   );
 
-  const tokenIssuedAt = new Date("2026-03-11T10:00:00.000Z");
-  const tokenExpiresAt = new Date("2026-03-12T10:00:00.000Z");
+  const tokenIssuedAt = new Date(Date.now() - 60_000);
+  const tokenExpiresAt = new Date(Date.now() + 86_400_000);
   const governedToken = signQrPayload({
     qr_id: "qr-governed-1",
     batch_id: "batch-1",
@@ -219,6 +219,14 @@ const run = () => {
     serialContext: ukSerialContext,
   };
   const governedPayload = buildApprovedPrintPayload(governedInput);
+  let expiredDispatchRejected = false;
+  try {
+    buildApprovedPrintPayload({ ...governedInput, qr: { ...governedInput.qr,
+      tokenExpiresAt: new Date(Date.now() - 1_000), tokenHash: null } });
+  } catch (error) {
+    expiredDispatchRejected = /expired before print payload generation/.test(String(error));
+  }
+  assert(expiredDispatchRejected, "A paused dispatch must not print an already expired label token");
   const autoZplPayload = buildApprovedPrintPayload({
     ...governedInput,
     printer: { ...governedInput.printer, name: "ZDesigner ZT410-300dpi ZPL", commandLanguage: "AUTO", capabilitySummary: { languages: ["ZPL"], dpi: 300 } },

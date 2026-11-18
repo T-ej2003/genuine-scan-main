@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e'
+    AND source_contract_sha256='79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:02aad434e1d21ba365f80986f57069d3b69258cd18a9213cf6bafbc0abae5d7e')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -12291,13 +12291,19 @@ BEGIN
           AND activation.metadata->>'printItemId'=confirmed_item.id
           AND activation.metadata->>'printSessionId'=ps.id
           AND activation."createdAt"=confirmed_item."printConfirmedAt"
+          AND activation.metadata->>'source' IN ('SIGNED_CONNECTOR_CONFIRM','NETWORK_WORKER_CONFIRM')
           AND (p_proof_source='SIGNED_LABEL' OR (qr.code ~ '^c_[a-f0-9]{64}$'
-            AND qr."tokenExpiresAt">p_checked_at
+            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM'
             AND confirmed_item."dispatchMetadata"->>'dispatchEvidenceVersion'='1'
             AND confirmed_item."confirmationEvidence"->>'sessionId'=ps.id AND confirmed_item."confirmationEvidence"->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'
-            AND activation.metadata->>'source'='SIGNED_CONNECTOR_CONFIRM' AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
+            AND activation.metadata->>'attemptId'=confirmed_item."dispatchMetadata"->>'attemptId'))
       ) INTO auto_activated;
     END IF;
+  END IF;
+
+  IF p_proof_source='SIGNED_LABEL' AND qr."tokenExpiresAt"<=p_checked_at
+     AND NOT (auto_activated AND qr."issuanceMode"='GOVERNED_PRINT') THEN
+    RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
 
   ready := qr.status IN ('PRINTED','SCANNED','REDEEMED')
@@ -12521,7 +12527,7 @@ BEGIN
      OR length(coalesce(p_nonce,'')) NOT BETWEEN 8 AND 256
      OR p_nonce !~ '^[A-Za-z0-9_-]+$'
      OR p_replay_epoch<1 OR p_key_version !~ '^[A-Za-z0-9._-]{1,64}$'
-     OR p_issued_at>p_checked_at OR p_checked_at>=p_expires_at THEN
+     OR p_issued_at>p_checked_at OR coalesce(p_expires_at<=p_issued_at,true) THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='22023';
   END IF;
   PERFORM app_public.public_verify_bind(
@@ -12539,8 +12545,7 @@ BEGIN
      OR qr."tokenIssuedAt" IS NULL
      OR abs(extract(epoch FROM (qr."tokenIssuedAt"-p_issued_at)))>1
      OR qr."tokenExpiresAt" IS NULL
-     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1
-     OR qr."tokenExpiresAt"<=p_checked_at THEN
+     OR abs(extract(epoch FROM (qr."tokenExpiresAt"-p_expires_at)))>1 THEN
     RAISE EXCEPTION 'PUBLIC_SIGNED_TOKEN_INVALID' USING ERRCODE='42501';
   END IF;
   PERFORM set_config('app.public_verification_batch_id',coalesce(qr."batchId",''),true);

@@ -143,14 +143,16 @@ async function main() {
         q."customerVerifiableAt",'{"physical":true}'::jsonb,now()
       FROM public."QRCode" q WHERE q.id='${autoQr}';
   `);
-  const autoSigned = (request) => `SELECT row_to_json(v) FROM app_public.verify_signed_qr(
+  const autoSigned = (request, checkedAt = "now()::timestamp", ip = "auto-ip", device = "auto-device") => `SELECT row_to_json(v) FROM app_public.verify_signed_qr(
     '${hash("auto-signed-token")}','${autoQr}','${ids.licensee}','${ids.batch}','${ids.manufacturer}',
     'auto_nonce_1234',1,'test-v1','${tokenIssuedAt}'::timestamp,'${tokenExpiresAt}'::timestamp,
-    now()::timestamp,'${request}','${hash("auto-ip")}','${hash("auto-device")}',
+    ${checkedAt},'${request}','${hash(ip)}','${hash(device)}',
     '${hash("auto-session")}'
   ) v`;
   assert.equal(json(preauth, autoSigned("forged-timestamp")).result, "NOT_READY",
     "a timestamp and confirmed item without activation audit must not release the QR");
+  denied(preauth, autoSigned("expired-unconfirmed", "(now()+interval '366 days')::timestamp"),
+    /PUBLIC_SIGNED_TOKEN_INVALID/);
   const foreignBatch = "60000000-0000-4000-8000-000000000402";
   psql(admin, `INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","lifecycleState","updatedAt")
     VALUES('${foreignBatch}','Other Tenant Batch','${ids.otherLicensee}','${ids.manufacturer}',
@@ -158,7 +160,7 @@ async function main() {
     INSERT INTO public."PrintAuditEvent"(id,"batchId","printJobId","qrCodeId","eventType",metadata,"createdAt")
     SELECT gen_random_uuid()::text,'${foreignBatch}','${autoJob}','${autoQr}',
       'AUTOMATIC_ACTIVATION',jsonb_build_object('printItemId','${autoItem}',
-        'printSessionId','${autoSession}'),pi."printConfirmedAt"
+        'printSessionId','${autoSession}','source','SIGNED_CONNECTOR_CONFIRM','attemptId','auto-attempt-1'),pi."printConfirmedAt"
     FROM public."PrintItem" pi WHERE pi.id='${autoItem}'`);
   assert.equal(json(preauth, autoSigned("foreign-tenant-audit")).result, "NOT_READY",
     "evidence from another tenant cannot authorize this QR");
@@ -167,10 +169,36 @@ async function main() {
     "eventType",metadata,"createdAt")
     SELECT gen_random_uuid()::text,'${ids.batch}','${autoJob}','${autoQr}',
       'AUTOMATIC_ACTIVATION',jsonb_build_object('printItemId','${autoItem}',
-        'printSessionId','${autoSession}'),pi."printConfirmedAt"
+        'printSessionId','${autoSession}','source','SIGNED_CONNECTOR_CONFIRM','attemptId','auto-attempt-1'),pi."printConfirmedAt"
     FROM public."PrintItem" pi WHERE pi.id='${autoItem}'`);
+  psql(admin, `UPDATE public."PrintItem" SET
+    "confirmationEvidence"=jsonb_build_object('sessionId','${autoSession}','attemptId','auto-attempt-1'),
+    "dispatchMetadata"=jsonb_build_object('dispatchEvidenceVersion','1','attemptId','auto-attempt-1')
+    WHERE id='${autoItem}'`);
   assert.equal(json(preauth, autoSigned("automatic-confirmed")).result, "AUTHENTIC",
     "exact confirmed item and activation audit allow verification without sample or batch release");
+  denied(preauth, autoSigned("wrong-stored-token-hash").replace(hash("auto-signed-token"), hash("forged-token")),
+    /PUBLIC_SIGNED_TOKEN_INVALID/);
+  denied(preauth, autoSigned("wrong-tenant-token").replace(`'${ids.licensee}','${ids.batch}'`,
+    `'${ids.otherLicensee}','${ids.batch}'`), /PUBLIC_SIGNED_TOKEN_INVALID/);
+  assert.match(json(preauth, autoSigned("automatic-after-365-days", "(now()+interval '366 days')::timestamp")).result,
+    /^(AUTHENTIC|AUTHENTIC_REPEAT|REVIEW)$/,
+    "a signed, confirmed physical label remains verifiable beyond its original token lifetime");
+  assert.equal(json(preauth, autoSigned("clone-after-365-days", "(now()+interval '366 days')::timestamp",
+    "different-ip", "different-device")).result, "REVIEW",
+    "a changed scan context still triggers clone review after the credential lifetime");
+  psql(admin, `UPDATE public."PrintAuditEvent" SET metadata=jsonb_set(metadata,'{source}',
+    '"NETWORK_WORKER_CONFIRM"'::jsonb) WHERE "qrCodeId"='${autoQr}' AND "eventType"='AUTOMATIC_ACTIVATION'`);
+  assert.match(json(preauth, autoSigned("network-after-365-days", "(now()+interval '366 days')::timestamp")).result,
+    /^(AUTHENTIC|AUTHENTIC_REPEAT|REVIEW)$/,
+    "the network worker activation source follows the same durable signed-label rule");
+  psql(admin, `UPDATE public."PrintAuditEvent" SET metadata=jsonb_set(metadata,'{source}',
+    '"SIGNED_CONNECTOR_CONFIRM"'::jsonb) WHERE "qrCodeId"='${autoQr}' AND "eventType"='AUTOMATIC_ACTIVATION'`);
+  psql(admin, `INSERT INTO public."ReplacementChain"(id,status,"originalQrCodeId","replacementQrCodeId","createdAt")
+    VALUES('60000000-0000-4000-8000-000000000603','ACTIVE','${autoQr}','${ids.qr}',now())`);
+  assert.equal(json(preauth, autoSigned("replaced-after-365-days", "(now()+interval '366 days')::timestamp")).result,
+    "BLOCKED", "a replaced printed label remains blocked after its original token lifetime");
+  psql(admin, `DELETE FROM public."ReplacementChain" WHERE id='60000000-0000-4000-8000-000000000603'`);
   assert.equal(json(preauth, verifySql("AUTOCODE01", "unsigned-auto", "auto-ip", "auto-device", "auto-start")).result,
     "NOT_READY", "automatic eligibility still requires signed QR proof");
   const legacyQr = "60000000-0000-4000-8000-000000000503";
@@ -206,8 +234,12 @@ async function main() {
   assert.equal(json(preauth, verifySql(legacyCode, "legacy-exact-evidence", "legacy-ip", "legacy-device", "legacy-start")).result,
     "AUTHENTIC", "an exact signed-connector activation record supports a physically printed code-only label");
   psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"=now()-interval '1 second' WHERE id='${legacyQr}'`);
-  assert.equal(json(preauth, verifySql(legacyCode, "legacy-expired", "legacy-ip", "legacy-device", "legacy-start")).result,
-    "NOT_READY", "a code-only compatibility lookup cannot bypass token expiry");
+  assert.match(json(preauth, verifySql(legacyCode, "legacy-expired", "legacy-ip", "legacy-device", "legacy-start")).result,
+    /^(AUTHENTIC|AUTHENTIC_REPEAT|REVIEW)$/,
+    "exact signed print lineage keeps a high-entropy historical code-only label available after token expiry");
+  assert.equal(psql(admin, `SELECT "proofTier"::text FROM public."VerificationDecision"
+    WHERE "qrCodeId"='${legacyQr}' ORDER BY "createdAt" DESC LIMIT 1`), "MANUAL_REGISTRY_LOOKUP",
+    "code-only compatibility must never claim signed-label proof");
   psql(admin, `UPDATE public."QRCode" SET "tokenExpiresAt"='${tokenExpiresAt}'::timestamp WHERE id='${legacyQr}'`);
   psql(admin, `UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=now() WHERE id='${legacyQr}'`);
   assert.equal(json(preauth, verifySql(legacyCode, "legacy-revoked", "legacy-ip", "legacy-device", "legacy-start")).result,
@@ -221,6 +253,8 @@ async function main() {
   const autoStatus = psql(admin, `SELECT status::text FROM public."QRCode" WHERE id='${autoQr}'`);
   psql(admin, `UPDATE public."QRCode" SET status='BLOCKED',"blockedAt"=now() WHERE id='${autoQr}'`);
   assert.equal(json(preauth, autoSigned("automatic-revoked")).result, "BLOCKED");
+  assert.equal(json(preauth, autoSigned("automatic-revoked-after-expiry",
+    "(now()+interval '366 days')::timestamp")).result, "BLOCKED");
   psql(admin, `UPDATE public."QRCode" SET status='${autoStatus}',"blockedAt"=NULL WHERE id='${autoQr}'`);
   const notReadySession = json(preauth, `SELECT row_to_json(s) FROM app_public.start_verification_session(
     '${hash("session-not-ready")}','MANUAL_CODE',NULL,now()::timestamp,

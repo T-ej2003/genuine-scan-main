@@ -190,6 +190,9 @@ const toQrToken = (params: {
   if (!params.qr.tokenNonce || !params.qr.tokenIssuedAt || !params.qr.tokenExpiresAt) {
     throw new Error("QR token metadata missing for print payload generation");
   }
+  if (params.qr.tokenExpiresAt.getTime() <= Date.now()) {
+    throw new Error("QR token expired before print payload generation");
+  }
 
   const payload = {
     qr_id: params.qr.id,
