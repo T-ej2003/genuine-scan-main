@@ -135,6 +135,7 @@ const batchStateErrorCodes = new Set<PrintJobErrorCode>([
 ]);
 const reviewedSqlLifecycleErrors = {
   QR_NOT_IN_PRINT_JOB: "This sample QR does not belong to this print job.",
+  INVALID_STATE_TRANSITION: "This batch is not ready for a new print run. Review its lifecycle status before trying again.",
   PRINTER_ATTESTATION_STALE: "The printer connection is no longer ready. Refresh the connector and printer status before starting the print run.",
   ACTIVE_PRINT_JOB_EXISTS: "An active print run already exists for this batch. Review its status before starting another.",
 } as const satisfies Partial<Record<PrintJobErrorCode, string>>;

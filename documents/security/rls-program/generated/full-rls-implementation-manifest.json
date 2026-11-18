@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc",
+  "sourceContractSha256": "cf7c015dfa4e078b20d8c462d290a281bd9f285654c84c09725942c41fe10b9b",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -372,7 +372,7 @@
     },
     {
       "path": "backend/tests/rls-wave-b/b01/authenticationClosurePostgres18.test.js",
-      "sha256": "673a7e9b1b9c7e3d6b4e70ef90a15356b2c4937746f8bc181b606083ee6b7724"
+      "sha256": "3e74434510979686274c1af7df99c1663002d2570ae442e177706378f92e30ba"
     },
     {
       "path": "backend/tests/riskAnalyticsApplicationPathPostgres18.test.js",
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:79a9b8746362890a96b0c0166b6de8d724f19901769c80f1e296b34bdc9359fc",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:cf7c015dfa4e078b20d8c462d290a281bd9f285654c84c09725942c41fe10b9b",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,

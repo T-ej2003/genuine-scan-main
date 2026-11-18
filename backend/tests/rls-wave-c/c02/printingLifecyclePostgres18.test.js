@@ -1135,12 +1135,20 @@ async function main() {
   denied(app, `SELECT app_rls.printing_release_batch(
     '${caps.checker}','printing-release','${requestId()}','${ids.batch}','APPROVE',NULL
   )`, /BATCH_ALREADY_RELEASED/);
+  denied(app, `SELECT app_rls.printing_create_job(
+    '${caps.maker}','printing-create-job','${requestId()}','${ids.batch}','${ids.printer}',1,
+    'LBL-0001','LBL-0001','LOCAL_AGENT','ZPL',NULL,
+    '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("released-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
+  )`, /INVALID_STATE_TRANSITION/);
 
   const raceSql = (suffix) => `SELECT app_rls.printing_create_job(
     '${caps.maker}','printing-create-job','${requestId()}','${ids.raceBatch}','${ids.printer}',1,
     'LBL-0002','LBL-0002','LOCAL_AGENT','ZPL','${hash(`race-lock-${suffix}`)}',
     '[{"qrCodeId":"${ids.raceQr}","tokenNonce":"${suffix.repeat(64)}","tokenHash":"${hash(`race-token-${suffix}`)}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`;
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${ids.raceBatch}'`);
+  denied(app, raceSql("d"), /INVALID_STATE_TRANSITION/);
+  psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${ids.raceBatch}'`);
   const race = await Promise.all([psqlAsync(app, raceSql("b")), psqlAsync(app, raceSql("c"))]);
   assert.equal(race.filter((entry) => entry.status === 0).length, 1,
     `one concurrent print-job creation must win: ${JSON.stringify(race)}`);
