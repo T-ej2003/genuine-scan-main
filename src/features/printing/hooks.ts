@@ -1,11 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import apiClient from "@/lib/api-client";
 import { useActivePrintSessionSuppression } from "@/lib/active-print-session";
-import { parseWithSchema, unwrapParsedApiResponse } from "@/lib/api/query-utils";
+import { unwrapParsedApiResponse } from "@/lib/api/query-utils";
 import { pollingPolicy, visibleRefetchInterval } from "@/lib/query-polling-policy";
 import { queryClient } from "@/lib/query-client";
 import { queryKeys } from "@/lib/query-keys";
+import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 import { chooseStablePrinterSelection, type LocalPrinterAgentSnapshot } from "@/lib/printer-diagnostics";
 
 import {
@@ -29,7 +30,10 @@ export type ManufacturerPrinterRuntime = {
 
 type PrinterRuntimeLoadOptions = {
   force?: boolean;
+  previous?: ManufacturerPrinterRuntime;
 };
+
+let runtimeRefreshRevision = 0;
 
 export function normalizeLocalPrinterRows(rows: unknown): LocalPrinterDTO[] {
   if (!Array.isArray(rows)) return [];
@@ -61,12 +65,13 @@ export function normalizeLocalPrinterRows(rows: unknown): LocalPrinterDTO[] {
   return result;
 }
 
-function buildFallbackPrinterStatus(printers: LocalPrinterDTO[], error?: string | null): PrinterConnectionStatusDTO {
+function buildFallbackPrinterStatus(printers: LocalPrinterDTO[], error?: string | null, previous?: PrinterConnectionStatusDTO): PrinterConnectionStatusDTO {
   return {
+    ...previous,
     connected: false,
     trusted: false,
     compatibilityMode: false,
-    degraded: false,
+    degraded: true,
     compatibilityReason: null,
     eligibleForPrinting: false,
     connectionClass: "BLOCKED",
@@ -80,23 +85,24 @@ function buildFallbackPrinterStatus(printers: LocalPrinterDTO[], error?: string 
     recoveryAction: "refresh_printer_status",
     stale: true,
     requiredForPrinting: true,
-    trustStatus: "UNREGISTERED",
+    trustStatus: "UNAVAILABLE",
     trustReason: "Printer verification is unavailable. Refresh printer status and try again.",
-    lastHeartbeatAt: null,
+    lastHeartbeatAt: previous?.lastHeartbeatAt || null,
     ageSeconds: null,
-    registrationId: null,
-    agentId: null,
-    deviceFingerprint: null,
-    mtlsFingerprint: null,
-    printerName: null,
-    printerId: null,
-    selectedPrinterId: null,
-    selectedPrinterName: null,
-    deviceName: null,
-    agentVersion: null,
-    capabilitySummary: null,
-    printers,
-    calibrationProfile: null,
+    registrationId: previous?.registrationId || null,
+    agentId: previous?.agentId || null,
+    deviceFingerprint: previous?.deviceFingerprint || null,
+    mtlsFingerprint: previous?.mtlsFingerprint || null,
+    printerName: previous?.printerName || null,
+    printerId: previous?.printerId || null,
+    selectedPrinterId: previous?.selectedPrinterId || null,
+    selectedPrinterName: previous?.selectedPrinterName || null,
+    deviceName: previous?.deviceName || null,
+    agentVersion: previous?.agentVersion || null,
+    capabilitySummary: previous?.capabilitySummary || null,
+    printers: previous?.printers?.length ? previous.printers : printers,
+    calibrationProfile: previous?.calibrationProfile || null,
+    refreshPaused: true,
     error: error || "Printer status unavailable",
   };
 }
@@ -120,9 +126,9 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
 ): Promise<ManufacturerPrinterRuntime> {
   const printerRequestOptions = options.force ? { force: true, minIntervalMs: 0 } : undefined;
   const [remoteResponse, localResponse, registeredPrinterResponse] = await Promise.all([
-    apiClient.getPrinterConnectionStatus(printerRequestOptions),
-    apiClient.getLocalPrintAgentStatus(),
-    apiClient.listRegisteredPrinters(includeInactive, printerRequestOptions),
+    apiClient.getPrinterConnectionStatus(printerRequestOptions).catch(() => ({ success: false, data: undefined, error: "Printer verification unavailable", status: 0, degraded: false, code: undefined, errorCode: undefined })),
+    apiClient.getLocalPrintAgentStatus().catch(() => ({ success: false, data: undefined, error: "Local print agent is unavailable" })),
+    apiClient.listRegisteredPrinters(includeInactive, printerRequestOptions).catch(() => ({ success: false, data: undefined, error: "Printer roster unavailable", status: 0 })),
   ]);
 
   const localPrinters = normalizeLocalPrinterRows((localResponse.data as { printers?: unknown[] } | undefined)?.printers || []);
@@ -132,20 +138,21 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
     (remoteResponse.data as { refreshPaused?: boolean; rateLimited?: boolean } | undefined)?.refreshPaused ||
     (remoteResponse.data as { refreshPaused?: boolean; rateLimited?: boolean } | undefined)?.rateLimited
   );
-  const parsedRemoteStatus =
-    remoteResponse.success && remoteResponse.data && !verificationUnavailable
-      ? unwrapParsedApiResponse(remoteResponse, printerConnectionStatusSchema, "Printer status unavailable")
-      : null;
+  const parsedRemoteStatus = remoteResponse.success && remoteResponse.data && !verificationUnavailable
+    ? printerConnectionStatusSchema.safeParse(remoteResponse.data)
+    : null;
+  const authorizationRejected = [401, 403].includes(Number(remoteResponse.status || 0));
+  const previous = authorizationRejected ? undefined : options.previous;
   const remoteStatus =
-    parsedRemoteStatus
+    parsedRemoteStatus?.success
       ? ({
-          ...parsedRemoteStatus,
+          ...parsedRemoteStatus.data,
           printers:
-            normalizeLocalPrinterRows(parsedRemoteStatus.printers || []).length > 0
-              ? normalizeLocalPrinterRows(parsedRemoteStatus.printers || [])
+            normalizeLocalPrinterRows(parsedRemoteStatus.data.printers || []).length > 0
+              ? normalizeLocalPrinterRows(parsedRemoteStatus.data.printers || [])
               : localPrinters,
         } satisfies PrinterConnectionStatusDTO)
-      : buildFallbackPrinterStatus(localPrinters, remoteResponse.error || remoteResponse.message || "Printer verification unavailable");
+      : buildFallbackPrinterStatus(localPrinters, "Printer verification unavailable", previous?.remoteStatus);
 
   const detectedPrinters = remoteStatus.printers && remoteStatus.printers.length > 0 ? remoteStatus.printers : localPrinters;
   const preferredPrinterId =
@@ -170,34 +177,37 @@ export async function loadManufacturerPrinterRuntimeSnapshot(
     },
     remoteStatus,
     detectedPrinters,
-    registeredPrinters: registeredPrinterResponse.success
-      ? parseWithSchema(
-          registeredPrinterArraySchema,
-          Array.isArray(registeredPrinterResponse.data) ? registeredPrinterResponse.data : [],
-          "Failed to load printers"
-        )
-      : [],
+    registeredPrinters: authorizationRejected ? [] : registeredPrinterResponse.success
+      ? registeredPrinterArraySchema.safeParse(registeredPrinterResponse.data).data || []
+      : [401, 403].includes(Number(registeredPrinterResponse.status || 0)) ? [] : previous?.registeredPrinters || [],
     preferredPrinterId,
   };
 }
 
 export async function refreshManufacturerPrinterRuntimeSnapshot(): Promise<ManufacturerPrinterRuntime> {
-  const key = queryKeys.printing.runtime(true);
+  const revision = ++runtimeRefreshRevision;
+  const scope = getRequestCoordinatorScope();
+  const key = queryKeys.printing.runtime(true, scope);
   await queryClient.cancelQueries({ queryKey: key });
-  const snapshot = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true });
+  const snapshot = await loadManufacturerPrinterRuntimeSnapshot(true, { force: true, previous: queryClient.getQueryData(key) });
+  if (scope !== getRequestCoordinatorScope() || revision !== runtimeRefreshRevision) {
+    throw new Error("Printer runtime refresh was superseded");
+  }
   queryClient.setQueryData(key, snapshot);
   return snapshot;
 }
 
 export function useManufacturerPrinterRuntime(includeInactive = true, enabled = true) {
+  const client = useQueryClient();
+  const key = queryKeys.printing.runtime(includeInactive, getRequestCoordinatorScope());
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const queryEnabled = enabled && !activePrintSuppressed;
   return useQuery({
-    queryKey: queryKeys.printing.runtime(includeInactive),
+    queryKey: key,
     enabled: queryEnabled,
     staleTime: pollingPolicy.printerRuntimeRefreshMs,
     refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.printerRuntimeRefreshMs) : false,
     refetchOnWindowFocus: false,
-    queryFn: () => loadManufacturerPrinterRuntimeSnapshot(includeInactive),
+    queryFn: () => loadManufacturerPrinterRuntimeSnapshot(includeInactive, { previous: client.getQueryData(key) }),
   });
 }

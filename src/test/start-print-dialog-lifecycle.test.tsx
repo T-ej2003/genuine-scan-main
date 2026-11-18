@@ -91,13 +91,17 @@ describe("Start print run dialogue lifecycle", () => {
     view.unmount();
   });
 
-  it.each([401, 429, 500])("renders verification unavailable in the mounted dialog after HTTP %i", async (status) => {
+  it.each([401, 429, 500])("blocks the mounted dialog after HTTP %i", async (status) => {
     const view = render(<QueryClientProvider client={queryClient}><MountedPrintDialog /></QueryClientProvider>);
     await waitFor(() => expect(screen.getByTestId("selected-profile")).toHaveTextContent("profile-1"));
     vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValueOnce({ success: false, status,
       error: "Verification unavailable" });
     fireEvent.click(screen.getByRole("button", { name: "Open print run" }));
-    await waitFor(() => expect(screen.getByText("Printer verification unavailable.")).toBeInTheDocument());
+    if (status === 401) {
+      await waitFor(() => expect(screen.getByTestId("selected-profile")).toBeEmptyDOMElement());
+    } else {
+      await waitFor(() => expect(screen.getByText("Printer verification unavailable.")).toBeInTheDocument());
+    }
     expect(screen.getByTestId("print-job-start-button")).toBeDisabled();
     expect(apiClient.createPrintJob).not.toHaveBeenCalled();
     view.unmount();

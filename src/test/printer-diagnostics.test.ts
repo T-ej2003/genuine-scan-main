@@ -189,7 +189,7 @@ describe("printer diagnostics summary", () => {
     expect(summary.badgeLabel).toBe("Needs attention");
   });
 
-  it("keeps a known-ready printer as refreshing during transient rate limits", () => {
+  it("keeps identity but blocks printing when the current status is rate limited", () => {
     const summary = getPrinterDiagnosticSummary({
       localAgent: { reachable: true, connected: true, error: null },
       remoteStatus: {
@@ -211,7 +211,7 @@ describe("printer diagnostics summary", () => {
     });
     const display = buildPrinterReadinessDisplay({
       diagnostics: summary,
-      ready: true,
+      ready: false,
       refreshPaused: true,
       rateLimited: true,
       stale: false,
@@ -220,10 +220,11 @@ describe("printer diagnostics summary", () => {
       identityLabel: "Zebra ZD421",
     });
 
-    expect(display.modeLabel).toBe("Refreshing");
-    expect(display.badgeLabel).toBe("Refreshing");
-    expect(display.tone).toBe("success");
-    expect(display.blocksPrintStart).toBe(false);
+    expect(summary.title).toBe("Printer status unavailable");
+    expect(display.modeLabel).toBe("Status unknown");
+    expect(display.badgeLabel).toBe("Needs check");
+    expect(display.tone).toBe("warning");
+    expect(display.blocksPrintStart).toBe(true);
   });
 
   it("blocks print start when trust is stale even if a printer was selected", () => {
