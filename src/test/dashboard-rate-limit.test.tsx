@@ -1,5 +1,5 @@
 import React from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 
@@ -42,6 +42,7 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 describe("Dashboard rate-limit partial state", () => {
+  afterEach(() => vi.useRealTimers());
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getDashboardStats).mockResolvedValue({
@@ -227,5 +228,27 @@ describe("Dashboard rate-limit partial state", () => {
     expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Rerender" }));
     expect(apiClient.streamDashboardEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a sparse authoritative read if a connected stream silently misses updates", async () => {
+    vi.useFakeTimers();
+    let onOpen: (() => void) | undefined;
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((message, _error, open) => {
+      onEvent = message as (envelope: unknown) => void;
+      onOpen = open;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(apiClient.getDashboardStats).toHaveBeenCalledOnce();
+    act(() => {
+      onOpen?.();
+      onEvent?.({ type: "snapshot", payload: { summary: { totalQRCodes: 100 }, qrStats: { dormant: 20 } } });
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(8 * 60_000); });
+    expect(apiClient.getDashboardStats).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(2 * 60_000); });
+    expect(apiClient.getDashboardStats).toHaveBeenCalledTimes(2);
   });
 });

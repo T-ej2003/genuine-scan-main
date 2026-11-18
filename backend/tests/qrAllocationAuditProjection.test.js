@@ -125,7 +125,21 @@ test('optional SIEM delivery does not gate internal projections or claim disable
       assert.equal(delivered.length, before + 1); assert.equal(invalidations.length, bumps + 4);
       assert.equal(completed, sent); assert.equal(skipped, disabled + 1); assert.equal(networkCalls, 0);
     }
+    claims = [claim('BATCH_UPDATED')]; unavailable = true;
+    const failedBeforeRedisOutage = failed, disabledBeforeRedisOutage = skipped;
+    await flushSecurityEventOutbox();
+    assert.equal(claims[0].terminal, true, 'optional realtime failure must not block SIEM outbox completion');
+    assert.equal(failed, failedBeforeRedisOutage);
+    assert.equal(skipped, disabledBeforeRedisOutage + 1);
+    unavailable = false;
     process.env.SIEM_WEBHOOK_URL = 'https://siem.example.invalid/events';
+    claims = [claim('BATCH_UPDATED')]; unavailable = true;
+    const completedBeforeRedisOutage = completed, failedBeforeWebhook = failed;
+    global.fetch = async () => { networkCalls++; return { ok: true, status: 200 }; };
+    await flushSecurityEventOutbox();
+    assert.equal(completed, completedBeforeRedisOutage + 1, 'healthy SIEM delivery must survive Redis outage');
+    assert.equal(failed, failedBeforeWebhook);
+    unavailable = false;
     for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST', 'BATCH_UPDATED']) {
       let attempts = 0;
       global.fetch = async (_url, options) => {

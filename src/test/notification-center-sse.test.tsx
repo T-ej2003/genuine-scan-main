@@ -34,6 +34,7 @@ describe("notification SSE recovery and scope", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     client.clear();
     setRequestCoordinatorScope(null);
@@ -99,5 +100,21 @@ describe("notification SSE recovery and scope", () => {
     expect(result.current.notifications).toEqual([]);
     act(() => onEvent?.({ kind: "auth_expired" }));
     expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("uses a sparse authoritative read if a connected stream silently stops delivering snapshots", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useDashboardNotificationCenter("actor-a"), { wrapper });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(apiClient.getNotifications).toHaveBeenCalledOnce();
+    act(() => {
+      onOpen?.();
+      onEvent?.({ kind: "snapshot", notifications: [], unread: 0 });
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60_000); });
+    expect(apiClient.getNotifications).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3 * 60_000); });
+    expect(apiClient.getNotifications).toHaveBeenCalledTimes(2);
+    expect(result.current.notificationsLive).toBe(true);
   });
 });

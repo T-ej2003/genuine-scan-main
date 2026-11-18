@@ -8,6 +8,7 @@ export const pollingPolicy = {
   hiddenTabBackoffMs: 30_000,
   dashboardFallbackMs: 120_000,
   notificationsMs: 180_000,
+  sseSafetySnapshotMs: 10 * 60_000,
   attentionQueueMs: 180_000,
   telemetryRouteDebounceMs: 60_000,
   telemetryRouteSampleRate: 0.25,

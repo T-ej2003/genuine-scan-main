@@ -149,7 +149,11 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
               || log.licenseeId !== claim.licenseeId || (log.orgId || null) !== (claim.organizationId || null)) {
             throw new Error("AUDIT_PROJECTION_AUTHORITY_MISMATCH");
           }
-          await publishCommittedQrAuditEvent(log);
+          try {
+            await publishCommittedQrAuditEvent(log);
+          } catch {
+            logger.warn("QR audit realtime projection unavailable", { outboxId: claim.id });
+          }
         }
         const delivered = await sendToWebhook({
           id: claim.id,

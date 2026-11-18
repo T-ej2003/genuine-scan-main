@@ -68,6 +68,7 @@ export default function Dashboard() {
   const stopSseRef = useRef<(() => void) | null>(null);
   const sseConnectedRef = useRef(false);
   const sseOpenedRef = useRef(false);
+  const lastAuthoritativeRefreshRef = useRef(Date.now());
   const refreshTimerRef = useRef<number | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
   const latestAuditLogsRef = useRef<AuditLogDTO[]>([]);
@@ -130,9 +131,11 @@ export default function Dashboard() {
 
     // start polling stats (fallback when SSE disconnects)
     closeRealtime();
+    lastAuthoritativeRefreshRef.current = Date.now();
     pollRef.current = window.setInterval(() => {
       if (!canPollVisibleDocument()) return;
-      if (sseConnectedRef.current) return;
+      if (sseConnectedRef.current && Date.now() - lastAuthoritativeRefreshRef.current < pollingPolicy.sseSafetySnapshotMs) return;
+      lastAuthoritativeRefreshRef.current = Date.now();
       void refreshDashboard();
     }, STATS_POLL_MS);
 
@@ -150,6 +153,7 @@ export default function Dashboard() {
       pendingPrintRefresh ||= reason === "print_job" || ["PrintJob", "PrintItem"].includes(entityType || "");
       pendingAuditRefresh ||= reason === "initial_race" && canReadAuditFeed;
       if (refreshTimerRef.current) return;
+      lastAuthoritativeRefreshRef.current = Date.now();
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
         const refreshBatches = pendingBatchRefresh;
@@ -186,6 +190,7 @@ export default function Dashboard() {
           return;
         }
         if (envelope?.type === "snapshot") {
+          lastAuthoritativeRefreshRef.current = Date.now();
           liveSummaryScopeRef.current = getAuthenticatedStreamScope();
           const payload = envelope?.payload || {};
           const { summary, qrStats } = applyDashboardSnapshotToCache(queryClient, scopedLicenseeId, payload);

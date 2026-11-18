@@ -115,6 +115,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
 
   const applyNotificationSnapshot = (rows: DashboardNotificationDTO[], unread: number, scope = securityScope) => {
     if (scope !== getAuthenticatedStreamScope()) return;
+    lastNotificationsLoadAtRef.current = Date.now();
     const signature = JSON.stringify([unread, rows]);
     if (snapshotScopeRef.current === scope && snapshotSignatureRef.current === signature) return;
     snapshotScopeRef.current = scope;
@@ -197,7 +198,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
     if (activePrintSuppressed) return;
     const timer = window.setInterval(() => {
       if (!canPollVisibleDocument()) return;
-      if (notificationsLiveRef.current) return;
+      if (notificationsLiveRef.current && Date.now() - lastNotificationsLoadAtRef.current < pollingPolicy.sseSafetySnapshotMs) return;
       void loadNotifications();
     }, pollingPolicy.notificationsMs);
     return () => window.clearInterval(timer);
