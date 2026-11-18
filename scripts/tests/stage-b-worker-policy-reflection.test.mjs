@@ -122,10 +122,11 @@ test('closure rejects malformed resource_drift rather than treating it as empty'
     }
 });
 
-test('committed-state compatibility rejects every unrelated Terraform edit without changing historical metadata',()=>{
+test('committed-state compatibility accepts only the reviewed QR registry render and rejects unrelated Terraform edits',()=>{
  const current=fs.readFileSync('infra/aws/terraform/production-green-stage-b/main.tf');
+ assert.equal(hash(current),'696148e3e8d3e87d76035b81c973d17224e05aa34676e105b33af7a088c36994');
  const historical=committedWorkerTerraformConfiguration(current);
  assert.deepEqual(committedWorkerTerraformConfiguration(historical),historical);
- for(const change of [s=>s+'\n',s=>s.replace('aws_ecs_task_definition.b03[*].arn','[]'),s=>s.replace('secret.name != "SMTP_PASS"','true'),s=>s.replace('kind != "worker"','true'),s=>s.replace('executorSecurityGroup','unreviewedSecurityGroup')+'# unrelated'])assert.throws(()=>committedWorkerTerraformConfiguration(Buffer.from(change(current.toString()))));
+ for(const change of [s=>s+'\n',s=>s.replace('"{{QR_SIGN_PUBLIC_KEYS_JSON}}"','"{{UNREVIEWED_SECRET}}"'),s=>s.replace('aws_ecs_task_definition.b03[*].arn','[]'),s=>s.replace('secret.name != "SMTP_PASS"','true'),s=>s.replace('kind != "worker"','true'),s=>s.replace('executorSecurityGroup','unreviewedSecurityGroup')+'# unrelated'])assert.throws(()=>committedWorkerTerraformConfiguration(Buffer.from(change(current.toString()))));
  assert.equal(hash(historical),WORKER_COMMITTED.terraformConfigurationSha256);
 });

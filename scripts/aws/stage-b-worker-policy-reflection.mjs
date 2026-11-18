@@ -14,9 +14,19 @@ export const WORKER_COMMITTED = freeze(JSON.parse(fs.readFileSync(new URL('./wor
 export function committedWorkerTerraformConfiguration(source) {
     const bytes = Buffer.from(source);
     if (workerReflectionHash(bytes) === WORKER_COMMITTED.terraformConfigurationSha256) return bytes;
-    assert.equal(workerReflectionHash(bytes), 'e93ec212af5551f895e29cb144892dc30e5764d12c063310df91edf1b6cfc750', 'Reviewed Terraform source changed');
+    const qrRegistrySuffix = ', "{{ARTIFACT_SIGN_PUBLIC_KEYS_JSON}}", var.production_rotation_secret_value_from.artifact_public_keys_json), "{{QR_SIGN_PUBLIC_KEYS_JSON}}", var.production_rotation_secret_value_from.qr_public_keys_json),';
+    const predecessorSuffix = ', "{{ARTIFACT_SIGN_PUBLIC_KEYS_JSON}}", var.production_rotation_secret_value_from.artifact_public_keys_json),';
+    let reviewed = bytes;
+    if (workerReflectionHash(reviewed) === '696148e3e8d3e87d76035b81c973d17224e05aa34676e105b33af7a088c36994') {
+        const current = reviewed.toString();
+        assert.equal(current.split(qrRegistrySuffix).length, 2, 'QR registry render transition is ambiguous');
+        const backendRenderPrefix = '    backend          = replace(replace(';
+        assert.equal(current.split(backendRenderPrefix).length, 2, 'Backend render transition is ambiguous');
+        reviewed = Buffer.from(current.replace(backendRenderPrefix, '    backend          = replace(').replace(qrRegistrySuffix, predecessorSuffix));
+    }
+    assert.equal(workerReflectionHash(reviewed), 'e93ec212af5551f895e29cb144892dc30e5764d12c063310df91edf1b6cfc750', 'Reviewed Terraform source changed');
     const filter = '      # The support-worker root owns the exact SMTP grant.\n      if kind != "worker" || secret.name != "SMTP_PASS"\n';
-    const text = bytes.toString(); assert.equal(text.split(filter).length, 2, 'Worker SMTP source transition is ambiguous');
+    const text = reviewed.toString(); assert.equal(text.split(filter).length, 2, 'Worker SMTP source transition is ambiguous');
     const historical = Buffer.from(text.replace(filter, ''));
     assert.equal(workerReflectionHash(historical), WORKER_COMMITTED.terraformConfigurationSha256, 'Unrelated Terraform source evolution');
     return historical;
