@@ -155,6 +155,51 @@ describe("Dashboard rate-limit partial state", () => {
     expect(apiClient.getQRStats).toHaveBeenCalledTimes(2);
   });
 
+  it("shows refreshed QR counts after a committed event replaces an earlier stream snapshot", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback as (envelope: unknown) => void;
+      return () => undefined;
+    });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const card = (await screen.findByText("Unassigned QR labels")).closest('[data-testid="dashboard-kpi-card"]');
+    act(() => onEvent?.({ type: "snapshot", payload: { summary: { totalQRCodes: 100 }, qrStats: { dormant: 20, allocated: 30 } } }));
+    expect(within(card as HTMLElement).getByText("20")).toBeInTheDocument();
+
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true, data: { dormant: 10, allocated: 40, printed: 40, scanned: 10 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "audit", entityType: "QRCode" } }));
+    await waitFor(() => expect(within(card as HTMLElement).getByText("10")).toBeInTheDocument());
+  });
+
+  it("restores missed audit rows after reconnecting while retaining new live deltas", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    let onOpen: (() => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback, _onError, opened) => {
+      onEvent = callback as (envelope: unknown) => void;
+      onOpen = opened;
+      return () => undefined;
+    });
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+      success: true, data: { logs: [{ id: "old-row", createdAt: "2026-11-18T10:00:00.000Z" }] },
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("old-row"));
+    act(() => {
+      onOpen?.();
+      onEvent?.({ type: "audit.delta", payload: { log: { id: "live-row", createdAt: "2026-11-18T11:00:00.000Z" } } });
+    });
+    expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("live-row,old-row");
+
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValue({
+      success: true, data: { logs: [{ id: "missed-row", createdAt: "2026-11-18T12:00:00.000Z" }] },
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
+    act(() => onOpen?.());
+    await waitFor(() => expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("missed-row"));
+    expect(screen.getByTestId("recent-log-ids")).not.toHaveTextContent("old-row");
+  });
+
   it("does not resubscribe the dashboard stream on an ordinary rerender", async () => {
     function Parent() {
       const [, rerender] = React.useState(0);

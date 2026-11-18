@@ -29,8 +29,8 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
     const offAudit = onAuditLog(async (log) => {
       try {
         if (closed) return;
-        if (!ready) { changedWhileLoading = true; return; }
         if (!await canDeliverDashboardAuditDelta(req, log.licenseeId) || closed) return;
+        if (!ready) { changedWhileLoading = true; return; }
         if (req.user!.role === UserRole.SUPER_ADMIN || req.user!.role === UserRole.PLATFORM_SUPER_ADMIN || req.user!.role === UserRole.LICENSEE_ADMIN) {
           writeSseRealtimeEnvelope(res, { channel: "dashboard", type: "audit.delta", payload: { log } });
         }

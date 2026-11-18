@@ -12,13 +12,14 @@ let auditListener;
 let printListener;
 let releaseInitial;
 const initial = new Promise((resolve) => { releaseInitial = resolve; });
+let snapshot = initial;
 mockModule("services/auditService.js", { onAuditLog: (callback) => { auditListener = callback; return () => { auditListener = null; }; } });
 mockModule("services/printJobRealtimeService.js", {
   onPrintJobRealtimeEvent: (callback) => { printListener = callback; return () => { printListener = null; }; },
   canUserReceivePrintJobEvent: (req, event) => req.user.licenseeId === event.licenseeId,
 });
 mockModule("services/dashboardSnapshotService.js", {
-  getDashboardSnapshot: () => initial,
+  getDashboardSnapshot: () => snapshot,
   canDeliverDashboardAuditDelta: async (req, licenseeId) => req.user.licenseeId === licenseeId,
 });
 const { dashboardEvents } = require("../dist/controllers/eventsController");
@@ -55,5 +56,20 @@ const { dashboardEvents } = require("../dist/controllers/eventsController");
   res.end();
   assert.equal(auditListener, null);
   assert.equal(printListener, null);
+
+  snapshot = new Promise((resolve) => { releaseInitial = resolve; });
+  const foreignWrites = [];
+  const foreignRes = new EventEmitter();
+  foreignRes.setHeader = res.setHeader;
+  foreignRes.flushHeaders = res.flushHeaders;
+  foreignRes.write = (chunk) => { foreignWrites.push(String(chunk)); return true; };
+  foreignRes.status = () => foreignRes;
+  foreignRes.end = () => foreignRes.emit("close");
+  const foreignRunning = dashboardEvents({ user: { licenseeId: "tenant-a", role: "LICENSEE_ADMIN" } }, foreignRes);
+  await auditListener({ id: "foreign-audit", licenseeId: "tenant-b", entityType: "Batch", action: "ALLOCATED" });
+  releaseInitial({ totalQRCodes: 1, activeLicensees: 1, manufacturers: 1, totalBatches: 1, qr: {} });
+  await foreignRunning;
+  assert(!foreignWrites.join("").includes('"reason":"initial_race"'), "foreign tenant activity must not dirty the initial snapshot");
+  foreignRes.end();
   console.log("dashboard event stream tests passed");
 })().catch((error) => { console.error(error); process.exitCode = 1; });

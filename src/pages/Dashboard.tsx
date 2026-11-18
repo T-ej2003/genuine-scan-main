@@ -85,6 +85,9 @@ export default function Dashboard() {
   const refreshDashboard = useCallback(async (options?: { bypassCache?: boolean }) => {
     if (activePrintSuppressed && !options?.bypassCache) return;
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    liveSummaryScopeRef.current = null;
+    setLiveSummary(null);
+    setLiveQrStats(null);
     if (options?.bypassCache) {
       clearDashboardReadCache(["dashboard:stats", "qr:stats", "audit:logs"]);
     }
@@ -151,6 +154,9 @@ export default function Dashboard() {
         const refreshPrinting = pendingPrintRefresh;
         pendingBatchRefresh = false;
         pendingPrintRefresh = false;
+        liveSummaryScopeRef.current = null;
+        setLiveSummary(null);
+        setLiveQrStats(null);
         clearDashboardReadCache(["dashboard:stats", "qr:stats"]);
         void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard.stats(scopedLicenseeId) });
         if (refreshPrinting) {
@@ -207,8 +213,20 @@ export default function Dashboard() {
       },
       () => {
         if (sseOpenedRef.current && canReadAuditFeed) {
+          liveLogsScopeRef.current = null;
+          setLiveLogs(null);
           clearDashboardReadCache(["audit:logs"]);
-          void auditLogsRefetch();
+          void auditLogsRefetch().then((result) => {
+            if (streamScope !== getAuthenticatedStreamScope() || !result.data?.logs) return;
+            const fresh = result.data.logs as AuditLogDTO[];
+            setLiveLogs((receivedDuringRead) => {
+              if (!receivedDuringRead || liveLogsScopeRef.current !== streamScope) return null;
+              const ids = new Set(receivedDuringRead.map((row) => row.id));
+              return [...receivedDuringRead, ...fresh.filter((row) => !ids.has(row.id))]
+                .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+                .slice(0, 10);
+            });
+          });
         }
         sseOpenedRef.current = true;
         sseConnectedRef.current = true;
