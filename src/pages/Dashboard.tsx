@@ -138,6 +138,7 @@ export default function Dashboard() {
 
     let pendingBatchRefresh = false;
     let pendingPrintRefresh = false;
+    let pendingAuditRefresh = false;
     const scheduleSummaryRefresh = (entityType?: string, reason?: string, action?: string) => {
       if (action === "EXPORT_QR_CODES") return;
       const affectsStats = reason === "print_job" || reason === "initial_race" ||
@@ -147,13 +148,16 @@ export default function Dashboard() {
       }
       pendingBatchRefresh ||= reason === "print_job" || ["QRCode", "QRRange", "Batch", "QrAllocationRequest"].includes(entityType || "");
       pendingPrintRefresh ||= reason === "print_job" || ["PrintJob", "PrintItem"].includes(entityType || "");
+      pendingAuditRefresh ||= reason === "initial_race" && canReadAuditFeed;
       if (refreshTimerRef.current) return;
       refreshTimerRef.current = window.setTimeout(() => {
         refreshTimerRef.current = null;
         const refreshBatches = pendingBatchRefresh;
         const refreshPrinting = pendingPrintRefresh;
+        const refreshAudit = pendingAuditRefresh;
         pendingBatchRefresh = false;
         pendingPrintRefresh = false;
+        pendingAuditRefresh = false;
         liveSummaryScopeRef.current = null;
         setLiveSummary(null);
         setLiveQrStats(null);
@@ -166,6 +170,10 @@ export default function Dashboard() {
           void queryClient.invalidateQueries({ queryKey: ["batches"] });
         }
         if (refreshBatches || refreshPrinting) void queryClient.invalidateQueries({ queryKey: queryKeys.layout.attentionQueue() });
+        if (refreshAudit) {
+          clearDashboardReadCache(["audit:logs"]);
+          void auditLogsRefetch();
+        }
       }, 250);
     };
 

@@ -200,6 +200,23 @@ describe("Dashboard rate-limit partial state", () => {
     expect(screen.getByTestId("recent-log-ids")).not.toHaveTextContent("old-row");
   });
 
+  it("recovers an audit row committed during the initial dashboard snapshot", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback as (envelope: unknown) => void;
+      return () => undefined;
+    });
+    vi.mocked(apiClient.getAuditLogs).mockResolvedValueOnce({
+      success: true, data: { logs: [{ id: "before-snapshot", createdAt: "2026-11-18T10:00:00.000Z" }] },
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>).mockResolvedValue({
+      success: true, data: { logs: [{ id: "during-snapshot", createdAt: "2026-11-18T11:00:00.000Z" }] },
+    } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() => expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("before-snapshot"));
+    act(() => onEvent?.({ type: "summary.refresh", payload: { reason: "initial_race" } }));
+    await waitFor(() => expect(screen.getByTestId("recent-log-ids")).toHaveTextContent("during-snapshot"));
+  });
+
   it("does not resubscribe the dashboard stream on an ordinary rerender", async () => {
     function Parent() {
       const [, rerender] = React.useState(0);
