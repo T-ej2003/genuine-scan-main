@@ -35,6 +35,9 @@ test("committed progress invalidation crosses instances without crossing tenant 
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "LICENSEE_ADMIN", licenseeId: "tenant-b" } }, event), false);
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_ADMIN", userId: "maker-b" } }, event), false);
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_ADMIN", userId: "maker-a" } }, event), true);
+  assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER", userId: "maker-a", licenseeId: null } }, event), true);
+  assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_USER", userId: "maker-a", licenseeId: null } }, event), true);
+  assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "MANUFACTURER_USER", userId: "maker-b", licenseeId: null } }, event), false);
   assert.equal(second.canUserReceivePrintJobEvent({ user: { role: "SUPER_ADMIN" }, licenseeId: "tenant-b" }, event), false);
   offFirst(); offSecond();
 });

@@ -76,9 +76,7 @@ export const canUserReceivePrintJobEvent = (req: AuthRequest, event: PrintJobRea
     const scopedLicenseeId = getEffectiveLicenseeId(req);
     return !scopedLicenseeId || scopedLicenseeId === event.licenseeId;
   }
-  if (
-    user.role === UserRole.MANUFACTURER_ADMIN
-  ) {
+  if (user.role === UserRole.MANUFACTURER || user.role === UserRole.MANUFACTURER_ADMIN || user.role === UserRole.MANUFACTURER_USER) {
     return user.userId === event.manufacturerId;
   }
   return Boolean(user.licenseeId && event.licenseeId && user.licenseeId === event.licenseeId);
