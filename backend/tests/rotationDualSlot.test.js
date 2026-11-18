@@ -66,6 +66,10 @@ try {
   assert.throws(() => verifyQrToken(`${oldToken.slice(0, -1)}x`), /could not be verified/);
   process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": current.publicKey });
   assert.throws(() => verifyQrToken(oldToken), /must not alias an existing public key/);
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": old.privateKey });
+  assert.throws(() => verifyQrToken(oldToken), /must not contain private keys/);
+  process.env.QR_SIGN_PUBLIC_KEYS_JSON = JSON.stringify({ "old-v1": Buffer.from(old.privateKey).toString("base64") });
+  assert.throws(() => verifyQrToken(oldToken), /must not contain private keys/);
   delete process.env.QR_SIGN_PUBLIC_KEYS_JSON;
   process.env.QR_SIGN_PUBLIC_KEY_PREVIOUS = old.publicKey;
   process.env.QR_SIGN_PREVIOUS_KEY_VERSION = "old-v1";

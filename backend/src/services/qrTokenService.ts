@@ -227,7 +227,11 @@ const readRetainedPublicKeys = (): Array<{ version: string; publicKey: KeyObject
     if (!isKeyVersion(version) || typeof pem !== "string" || !pem.trim()) {
       throw new Error("QR_SIGN_PUBLIC_KEYS_JSON contains an invalid key entry");
     }
-    const publicKey = createPublicKey(normalizePem(pem));
+    const normalizedPem = normalizePem(pem);
+    if (/PRIVATE KEY/i.test(normalizedPem)) {
+      throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must not contain private keys");
+    }
+    const publicKey = createPublicKey(normalizedPem);
     if (publicKey.asymmetricKeyType !== "ed25519") {
       throw new Error("QR_SIGN_PUBLIC_KEYS_JSON must contain Ed25519 public keys");
     }
