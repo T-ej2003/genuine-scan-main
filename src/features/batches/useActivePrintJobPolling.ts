@@ -1,7 +1,7 @@
-import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useSyncExternalStore, type Dispatch, type SetStateAction } from "react";
 
 import apiClient from "@/lib/api-client";
-import { getAuthenticatedStreamScope } from "@/lib/api/request-coordinator";
+import { getAuthenticatedStreamScope, onRequestCoordinatorScopeChange } from "@/lib/api/request-coordinator";
 import { updateActivePrintSession } from "@/lib/active-print-session";
 import { primePrintJobRealtimeSnapshot, usePrintJobRealtime } from "@/lib/print-job-realtime-store";
 import { canPollVisibleDocument, jitterMs, pollingPolicy } from "@/lib/query-polling-policy";
@@ -49,6 +49,7 @@ export function useActivePrintJobPolling({
   onBatchesChanged,
 }: ActivePrintJobPollingParams) {
   const refreshedSettledJobsRef = useRef(new Map<string, "SETTLED" | "CONFIRMED">());
+  const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const realtime = usePrintJobRealtime(printJobId);
   const realtimeJob = realtime.job as PrintJobRow | null;
   const realtimeJobRef = useRef(realtimeJob);
@@ -93,7 +94,7 @@ export function useActivePrintJobPolling({
     let cancelled = false;
     let inFlight = false;
     const polledJobId = printJobId;
-    const polledScope = getAuthenticatedStreamScope();
+    const polledScope = securityScope;
     const startedAt = Date.now();
     let nextDelayMs = jitterMs(pollingPolicy.activePrintJobMs);
     let failedAttempts = 0;
@@ -187,6 +188,7 @@ export function useActivePrintJobPolling({
     printProgressOpen,
     printProgressPhase,
     printing,
+    securityScope,
   ]);
   return realtimeJob;
 }

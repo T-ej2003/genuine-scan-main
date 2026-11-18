@@ -244,7 +244,8 @@ describe("active print job polling", () => {
     vi.mocked(apiClient.streamPrintJobStatus).mockImplementation(() => {
       const stop = vi.fn(); stops.push(stop); return stop;
     });
-    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValue({ success: true, data: baseJob } as any);
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValueOnce({ success: true, data: baseJob } as any)
+      .mockResolvedValue({ success: false, status: 403 } as any);
     act(() => setRequestCoordinatorScope({ id: "operator-a", role: "manufacturer" }));
     render(<PollingProbe job={baseJob} />);
     await flush();
