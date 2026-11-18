@@ -31,7 +31,7 @@ export const dashboardEvents = async (req: AuthRequest, res: Response) => {
         if (closed) return;
         if (!await canDeliverDashboardAuditDelta(req, log.licenseeId) || closed) return;
         if (!ready) { changedWhileLoading = true; return; }
-        if (req.user!.role === UserRole.SUPER_ADMIN || req.user!.role === UserRole.PLATFORM_SUPER_ADMIN || req.user!.role === UserRole.LICENSEE_ADMIN) {
+        if (req.user!.role === UserRole.SUPER_ADMIN || req.user!.role === UserRole.PLATFORM_SUPER_ADMIN || req.user!.role === UserRole.LICENSEE_ADMIN || req.user!.role === UserRole.ORG_ADMIN) {
           writeSseRealtimeEnvelope(res, { channel: "dashboard", type: "audit.delta", payload: { log } });
         }
         writeSseRealtimeEnvelope(res, {
