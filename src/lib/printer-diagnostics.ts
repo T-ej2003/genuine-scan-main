@@ -98,7 +98,7 @@ export type PrinterDiagnosticSummary = {
 };
 
 export type PrinterReadinessDisplay = {
-  modeLabel: "Ready" | "Refreshing" | "Needs review" | "Check setup" | "Needs help";
+  modeLabel: "Ready" | "Refreshing" | "Status unknown" | "Needs review" | "Check setup" | "Needs help";
   badgeLabel: "Ready" | "Refreshing" | "Needs check" | "Pending" | "Blocked";
   tone: "success" | "warning" | "neutral" | "danger";
   toneClass: string;
@@ -433,6 +433,19 @@ export const getPrinterDiagnosticSummary = (params: {
   const selectedPortHost = selectedPrinter?.windowsPortHost || null;
   const selectedPortNumber = selectedPrinter?.windowsPortNumber || (selectedPortHost ? 9100 : null);
 
+  if (remote?.refreshPaused || remote?.rateLimited) {
+    return {
+      state: "server_sync_pending",
+      badgeLabel: "Status unknown",
+      title: "Printer status unavailable",
+      summary: "MSCQR cannot confirm the current connector session. Printing remains blocked.",
+      detail: "The last known printer identity is retained, but its connection and signed heartbeat need a fresh server check.",
+      tone: "warning",
+      nextSteps: ["Keep the connector running and wait for status to recover before printing."],
+      selectedPrinter,
+    };
+  }
+
   if (remote?.connectorUpdateRequired) {
     const detected = remote.buildVersion || remote.agentVersion || "unknown";
     return {
@@ -664,11 +677,14 @@ export const buildPrinterReadinessDisplay = (params: {
   identityLabel?: string | null;
 }): PrinterReadinessDisplay => {
   const transientRefresh = Boolean((params.refreshPaused || params.rateLimited) && params.ready && !params.stale);
+  const statusUnknown = Boolean((params.refreshPaused || params.rateLimited) && !params.ready);
   const secureVerificationBlocked = Boolean(!params.ready && (params.stale || params.trusted === false || params.compatibilityMode));
-  const blocksPrintStart = Boolean(secureVerificationBlocked || params.stale || (!params.ready && params.diagnostics.tone === "danger"));
-  const tone = transientRefresh ? "success" : secureVerificationBlocked ? "warning" : params.diagnostics.tone;
+  const blocksPrintStart = Boolean(statusUnknown || secureVerificationBlocked || params.stale || (!params.ready && params.diagnostics.tone === "danger"));
+  const tone = transientRefresh ? "success" : statusUnknown || secureVerificationBlocked ? "warning" : params.diagnostics.tone;
   const modeLabel = transientRefresh
     ? "Refreshing"
+    : statusUnknown
+      ? "Status unknown"
     : params.ready
       ? "Ready"
       : secureVerificationBlocked
@@ -680,6 +696,8 @@ export const buildPrinterReadinessDisplay = (params: {
           : "Needs help";
   const badgeLabel = transientRefresh
     ? "Refreshing"
+    : statusUnknown
+      ? "Needs check"
     : params.ready
       ? "Ready"
       : secureVerificationBlocked
@@ -692,12 +710,16 @@ export const buildPrinterReadinessDisplay = (params: {
   const identity = String(params.identityLabel || params.diagnostics.selectedPrinter?.printerName || "Selected printer").trim();
   const summary = transientRefresh
     ? `${identity} was ready at the last trusted check. Status refresh is temporarily paused.`
+    : statusUnknown
+      ? "Current connector status is unavailable. Printing is blocked until verification recovers."
     : params.ready
       ? `${identity} is ready to print.`
       : secureVerificationBlocked
         ? "Printer verification expired. Refresh printer helper before printing."
       : params.diagnostics.summary;
-  const notice = transientRefresh
+  const notice = statusUnknown
+    ? "The last known printer identity is retained; its connection and heartbeat have not been verified."
+    : transientRefresh
     ? "Printer status refresh is temporarily paused. Last trusted status is retained."
     : params.ready && (!params.trusted || params.compatibilityMode)
       ? "Printer verification expired. Refresh printer helper before printing."

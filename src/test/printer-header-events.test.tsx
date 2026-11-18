@@ -97,6 +97,54 @@ describe("manufacturer header event ordering", () => {
     view.unmount();
   });
 
+  it("shows status uncertainty after HTTP 503 while retaining identity and blocking printing", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: false, error: "Unavailable" });
+    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({ success: false, error: "Unavailable" });
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockResolvedValue({ success: false, status: 503 });
+    const view = renderHook(() => useManufacturerPrinterConnection({ user, contextualHelpRoute: "/",
+      currentPath: "/", navigate: vi.fn(), toast: vi.fn() }));
+    await waitFor(() => expect(snapshot).toBeDefined());
+    act(() => snapshot({ serverTime: "2026-10-28T12:00:01.000Z", status: {
+      ...ready, registrationId: "registration-1", printerId: "queue-1", selectedPrinterId: "queue-1",
+      lastHeartbeatAt: "2026-10-28T12:00:00.000Z", ageSeconds: 1,
+    } }));
+    expect(view.result.current.securePrintReadiness.ready).toBe(true);
+    await act(async () => { await view.result.current.refreshPrinterConnectionStatus(); });
+    expect(view.result.current.securePrintReadiness.reasonCode).toBe("VERIFICATION_UNAVAILABLE");
+    expect(view.result.current.printerModeLabel).toBe("Status unknown");
+    expect(view.result.current.activePrinterId).toBe("queue-1");
+    expect(view.result.current.printerAgeSeconds).toBeNull();
+    expect(view.result.current.effectivePrinterReady).toBe(false);
+    act(() => snapshot({ serverTime: "2026-10-28T12:00:02.000Z", status: {
+      ...ready, connected: false, trusted: false, eligibleForPrinting: false,
+      registrationId: "registration-1", printerId: "queue-1", selectedPrinterId: "queue-1",
+    } }));
+    expect(view.result.current.printerModeLabel).not.toBe("Status unknown");
+    expect(view.result.current.effectivePrinterReady).toBe(false);
+    act(() => snapshot({ serverTime: "2026-10-28T12:00:03.000Z", status: {
+      ...ready, registrationId: "registration-1", printerId: "queue-1", selectedPrinterId: "queue-1",
+    } }));
+    expect(view.result.current.securePrintReadiness.ready).toBe(true);
+    view.unmount();
+  });
+
+  it("fails closed when the status transport rejects without a response", async () => {
+    vi.mocked(apiClient.getLocalPrintAgentStatus).mockResolvedValue({ success: false, error: "Unavailable" });
+    vi.mocked(apiClient.reportPrinterHeartbeat).mockResolvedValue({ success: false, error: "Unavailable" });
+    vi.mocked(apiClient.getPrinterConnectionStatus).mockRejectedValueOnce(new Error("network failure"));
+    const view = renderHook(() => useManufacturerPrinterConnection({ user, contextualHelpRoute: "/",
+      currentPath: "/", navigate: vi.fn(), toast: vi.fn() }));
+    await waitFor(() => expect(snapshot).toBeDefined());
+    act(() => snapshot({ serverTime: "2026-10-28T12:00:01.000Z", status: {
+      ...ready, registrationId: "registration-1", printerId: "queue-1", selectedPrinterId: "queue-1",
+    } }));
+    await act(async () => { await view.result.current.refreshPrinterConnectionStatus(); });
+    expect(view.result.current.printerModeLabel).toBe("Status unknown");
+    expect(view.result.current.activePrinterId).toBe("queue-1");
+    expect(view.result.current.securePrintReadiness.ready).toBe(false);
+    view.unmount();
+  });
+
   it("rejects events from the previous tenant after the effective scope changes", async () => {
     const callbacks: Array<Parameters<typeof apiClient.streamPrinterConnectionStatus>[0]> = [];
     vi.mocked(apiClient.streamPrinterConnectionStatus).mockImplementation((onSnapshot) => {
