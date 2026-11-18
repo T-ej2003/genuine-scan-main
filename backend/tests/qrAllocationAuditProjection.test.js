@@ -106,7 +106,7 @@ test('optional SIEM delivery does not gate internal projections or claim disable
     } finally { global.setInterval = originalSetInterval; global.clearInterval = originalClearInterval; }
     let networkCalls = 0;
     global.fetch = async () => { networkCalls++; throw new Error('Unexpected webhook'); };
-    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST']) {
+    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST', 'BATCH_UPDATED']) {
       claims = [claim(action)];
       const before = delivered.length, bumps = invalidations.length, sent = completed, disabled = skipped;
       await flushSecurityEventOutbox(); await flushSecurityEventOutbox();
@@ -114,7 +114,7 @@ test('optional SIEM delivery does not gate internal projections or claim disable
       assert.equal(completed, sent); assert.equal(skipped, disabled + 1); assert.equal(networkCalls, 0);
     }
     process.env.SIEM_WEBHOOK_URL = 'https://siem.example.invalid/events';
-    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST']) {
+    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST', 'BATCH_UPDATED']) {
       let attempts = 0;
       global.fetch = async (_url, options) => {
         assert.equal(options.headers['Idempotency-Key'], claims[0].id);

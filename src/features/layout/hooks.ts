@@ -349,7 +349,7 @@ export function useDashboardNotificationCenter(userId?: string | null, limit = 2
   };
 }
 
-export function useOperationalAttentionQueue(enabled: boolean, notificationsLive = false) {
+export function useOperationalAttentionQueue(enabled: boolean) {
   const securityScope = useSyncExternalStore(onRequestCoordinatorScopeChange, getAuthenticatedStreamScope, getAuthenticatedStreamScope);
   const activePrintSuppressed = useActivePrintSessionSuppression();
   const queryEnabled = enabled && !activePrintSuppressed;
@@ -357,7 +357,7 @@ export function useOperationalAttentionQueue(enabled: boolean, notificationsLive
     queryKey: [...queryKeys.layout.attentionQueue(), securityScope],
     enabled: queryEnabled,
     staleTime: pollingPolicy.attentionQueueMs,
-    refetchInterval: queryEnabled ? visibleRefetchInterval(notificationsLive ? 600_000 : pollingPolicy.attentionQueueMs) : false,
+    refetchInterval: queryEnabled ? visibleRefetchInterval(pollingPolicy.attentionQueueMs) : false,
     refetchOnWindowFocus: false,
     queryFn: async (): Promise<OperationalAttentionQueue> =>
       unwrapParsedApiResponse(
