@@ -119,7 +119,6 @@ const hasVirtualSelectedPrinter = (printerStatus: PrinterStatusLike | null | und
       .toLowerCase(),
     VIRTUAL_PRINTER_TERMS
   );
-
 const batchStateErrorCodes = new Set<PrintJobErrorCode>([
   "QR_CODES_REQUIRED",
   "PRINT_ACK_REQUIRED",

@@ -1141,11 +1141,12 @@ async function main() {
     '[{"qrCodeId":"${ids.qr}","tokenNonce":"${"a".repeat(64)}","tokenHash":"${hash("released-token")}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`, /INVALID_STATE_TRANSITION/);
 
-  const raceSql = (suffix) => `SELECT app_rls.printing_create_job(
-    '${caps.maker}','printing-create-job','${requestId()}','${ids.raceBatch}','${ids.printer}',1,
+  const raceSql = (suffix, capability = caps.maker) => `SELECT app_rls.printing_create_job(
+    '${capability}','printing-create-job','${requestId()}','${ids.raceBatch}','${ids.printer}',1,
     'LBL-0002','LBL-0002','LOCAL_AGENT','ZPL','${hash(`race-lock-${suffix}`)}',
     '[{"qrCodeId":"${ids.raceQr}","tokenNonce":"${suffix.repeat(64)}","tokenHash":"${hash(`race-token-${suffix}`)}","tokenIssuedAt":"${signedAt}","tokenExpiresAt":"${expires}"}]'::jsonb
   )`;
+  denied(app, raceSql("e", caps.outsider), /PRINTING_BOUNDARY_DENIED/);
   psql(admin, `UPDATE public."Batch" SET "suspendedAt"=now() WHERE id='${ids.raceBatch}'`);
   denied(app, raceSql("d"), /INVALID_STATE_TRANSITION/);
   psql(admin, `UPDATE public."Batch" SET "suspendedAt"=NULL WHERE id='${ids.raceBatch}'`);
