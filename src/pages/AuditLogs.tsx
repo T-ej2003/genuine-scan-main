@@ -387,7 +387,7 @@ export default function AuditLogs() {
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin]);
+  }, [licenseeFilter, fraudStatusFilter, isSuperAdmin, securityScope]);
 
   useEffect(() => {
     if (!isSuperAdmin) return;
