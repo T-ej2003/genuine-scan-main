@@ -8,10 +8,22 @@ on:
         required: true
         type: string
       connector_fresh_install_distribution:
-        description: Include the certified 2026.11.6.2 fresh-install distribution artifact
+        description: Include an exact-source certified fresh-install distribution artifact
         required: false
         type: boolean
         default: false
+      connector_distribution_artifact_id:
+        required: false
+        type: string
+      connector_distribution_run_id:
+        required: false
+        type: string
+      connector_distribution_archive_sha256:
+        required: false
+        type: string
+      connector_installer_sha256:
+        required: false
+        type: string
     outputs:
       image_ref:
         description: Immutable published backend image reference
@@ -32,10 +44,26 @@ on:
         required: true
         type: string
       connector_fresh_install_distribution:
-        description: Include the certified 2026.11.6.2 fresh-install distribution artifact
+        description: Include an exact-source certified fresh-install distribution artifact
         required: false
         type: boolean
         default: false
+      connector_distribution_artifact_id:
+        description: Exact successful certification artifact ID
+        required: false
+        type: string
+      connector_distribution_run_id:
+        description: Exact successful certification run ID
+        required: false
+        type: string
+      connector_distribution_archive_sha256:
+        description: SHA-256 of the certified distribution archive
+        required: false
+        type: string
+      connector_installer_sha256:
+        description: SHA-256 of the signed Windows installer
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -85,20 +113,40 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_HOST: github.com
+          ARTIFACT_ID: ${{ inputs.connector_distribution_artifact_id }}
+          RUN_ID: ${{ inputs.connector_distribution_run_id }}
+          ARCHIVE_SHA256: ${{ inputs.connector_distribution_archive_sha256 }}
+          INSTALLER_SHA256: ${{ inputs.connector_installer_sha256 }}
         run: |
           set -euo pipefail
           node --test backend/tests/verifyFreshInstallDistribution.test.mjs
-          git merge-base --is-ancestor f6b3dd7efed01148c20008bc6fb11829b847f948 "$RELEASE_SHA"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/14139769044 > "$RUNNER_TEMP/connector-artifact.json"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/runs/43660888390 > "$RUNNER_TEMP/connector-run.json"
-          gh api --hostname github.com repos/T-ej2003/genuine-scan-main/actions/artifacts/14139769044/zip > "$RUNNER_TEMP/connector-distribution.zip"
-          echo '69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c  '"$RUNNER_TEMP/connector-distribution.zip" | sha256sum --check --status
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const version = fs.readFileSync('backend/src/local-print-agent/version.ts', 'utf8').match(/LOCAL_PRINT_AGENT_SOURCE_VERSION\s*=\s*"([0-9.]+)"/)?.[1];
+          const manifest = JSON.parse(fs.readFileSync('backend/local-print-agent/releases/manifest.json', 'utf8'));
+          if (!version || manifest.latestVersion !== version) throw new Error('Connector source and manifest versions differ');
+          for (const name of ['ARTIFACT_ID', 'RUN_ID']) if (!/^[1-9][0-9]{0,17}$/.test(process.env[name] || '')) throw new Error(`Invalid ${name}`);
+          for (const name of ['ARTIFACT_ID', 'RUN_ID']) if (!Number.isSafeInteger(Number(process.env[name]))) throw new Error(`Unsafe ${name}`);
+          for (const name of ['ARCHIVE_SHA256', 'INSTALLER_SHA256']) if (!/^[a-f0-9]{64}$/.test(process.env[name] || '')) throw new Error(`Invalid ${name}`);
+          const contract = { repository: 'T-ej2003/genuine-scan-main', sourceSha: process.env.RELEASE_SHA,
+            runId: Number(process.env.RUN_ID), workflowId: 273963817, artifactId: Number(process.env.ARTIFACT_ID),
+            artifactDigest: `sha256:${process.env.ARCHIVE_SHA256}`, version, installerSha256: process.env.INSTALLER_SHA256,
+            previousVersion: '2026.10.29.1', previousSha256: 'b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011' };
+          fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-contract.json', JSON.stringify(contract));
+          fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-version', version);
+          fs.appendFileSync(process.env.GITHUB_ENV, `CONNECTOR_VERSION=${version}\n`);
+          NODE
+          CONNECTOR_VERSION="$(cat "$RUNNER_TEMP/connector-version")"
+          gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/artifacts/${ARTIFACT_ID}" > "$RUNNER_TEMP/connector-artifact.json"
+          gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/connector-run.json"
+          gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/connector-distribution.zip"
+          echo "${ARCHIVE_SHA256}  $RUNNER_TEMP/connector-distribution.zip" | sha256sum --check --status
           mkdir "$RUNNER_TEMP/connector-distribution"
           unzip -q "$RUNNER_TEMP/connector-distribution.zip" -d "$RUNNER_TEMP/connector-distribution"
           test -z "$(find "$RUNNER_TEMP/connector-distribution" -type l -print -quit)"
-          node backend/scripts/verify-fresh-install-distribution.mjs backend/local-print-agent/releases "$RUNNER_TEMP/connector-distribution" "$RUNNER_TEMP/connector-artifact.json" "$RUNNER_TEMP/connector-run.json"
+          node backend/scripts/verify-fresh-install-distribution.mjs backend/local-print-agent/releases "$RUNNER_TEMP/connector-distribution" "$RUNNER_TEMP/connector-artifact.json" "$RUNNER_TEMP/connector-run.json" "$RUNNER_TEMP/connector-contract.json"
           cp "$RUNNER_TEMP/connector-distribution/manifest.json" backend/local-print-agent/releases/manifest.json
-          cp -R "$RUNNER_TEMP/connector-distribution/2026.11.6.2" backend/local-print-agent/releases/
+          cp -R "$RUNNER_TEMP/connector-distribution/$CONNECTOR_VERSION" backend/local-print-agent/releases/
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -116,7 +164,7 @@ jobs:
           BACKEND_IMAGE_TAG: ${{ inputs.release_sha }}-backend-only
         run: |
           set -euo pipefail
-          if [[ "$CONNECTOR_DISTRIBUTION" == "true" ]]; then BACKEND_IMAGE_TAG="${RELEASE_SHA}-connector-2026.11.6.2"; fi
+          if [[ "$CONNECTOR_DISTRIBUTION" == "true" ]]; then BACKEND_IMAGE_TAG="${RELEASE_SHA}-connector-${CONNECTOR_VERSION}"; fi
           : > "$OUTPUT_FILE"
           MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/apply-ecr-repository-controls.sh backend
           IMAGE_TAG="$BACKEND_IMAGE_TAG" SOURCE_RELEASE_SHA="$RELEASE_SHA" PLATFORMS="$PLATFORMS" OUTPUT_FILE="$OUTPUT_FILE" MSCQR_AWS_CREDENTIAL_SOURCE=github-oidc-release-deployer ./scripts/aws/publish-ecs-images.sh backend
@@ -139,16 +187,18 @@ jobs:
 
       - name: Verify certified connector bytes inside the published image
         if: inputs.connector_fresh_install_distribution
+        env:
+          INSTALLER_SHA256: ${{ inputs.connector_installer_sha256 }}
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint node "$BACKEND_IMAGE" -e '
+          docker run --rm --env CONNECTOR_VERSION --env INSTALLER_SHA256 --entrypoint node "$BACKEND_IMAGE" -e '
             const fs = require("node:fs"), crypto = require("node:crypto"), root = "/app/local-print-agent/releases/";
             const manifest = JSON.parse(fs.readFileSync(root + "manifest.json", "utf8"));
-            if (manifest.latestVersion !== "2026.11.6.2" || manifest.releases.length < 2) process.exit(1);
-            for (const [version, digest] of [["2026.11.6.2", "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe"], ["2026.10.29.1", "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011"]]) {
+            if (manifest.latestVersion !== process.env.CONNECTOR_VERSION || manifest.releases.length < 2) process.exit(1);
+            for (const [version, digest] of [[process.env.CONNECTOR_VERSION, process.env.INSTALLER_SHA256], ["2026.10.29.1", "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011"]]) {
               const release = manifest.releases.find(item => item.version === version), windows = release?.platforms?.windows;
               if (!windows || windows.sha256 !== digest || !release.publishedAt) process.exit(1);
-              if (version === "2026.11.6.2" && windows.installationScope !== "fresh-install-only") process.exit(1);
+              if (version === process.env.CONNECTOR_VERSION && windows.installationScope !== "fresh-install-only") process.exit(1);
               if (crypto.createHash("sha256").update(fs.readFileSync(root + windows.relativePath)).digest("hex") !== digest) process.exit(1);
             }
           '
@@ -224,6 +274,11 @@ jobs:
           NODE
 
       - name: Generate SBOM, sign, attest, and verify immutable digest
+        env:
+          ARTIFACT_ID: ${{ inputs.connector_distribution_artifact_id }}
+          RUN_ID: ${{ inputs.connector_distribution_run_id }}
+          ARCHIVE_SHA256: ${{ inputs.connector_distribution_archive_sha256 }}
+          INSTALLER_SHA256: ${{ inputs.connector_installer_sha256 }}
         run: |
           set -euo pipefail
           docker save "$BACKEND_IMAGE" -o "$RUNNER_TEMP/backend.tar"
@@ -232,7 +287,11 @@ jobs:
           import fs from "node:fs";
           const [file, imageRef, releaseSha] = process.argv.slice(2);
           const metadata = { builtAt: new Date().toISOString(), platforms: ["linux/amd64"] };
-          if (process.env.CONNECTOR_DISTRIBUTION === "true") metadata.connectorDistribution = { sourceSha: "f6b3dd7efed01148c20008bc6fb11829b847f948", runId: 43660888390, artifactId: 14139769044, artifactDigest: "sha256:69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c", installerSha256: "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe" };
+          if (process.env.CONNECTOR_DISTRIBUTION === "true") metadata.connectorDistribution = {
+            sourceSha: releaseSha, runId: Number(process.env.RUN_ID), artifactId: Number(process.env.ARTIFACT_ID),
+            artifactDigest: `sha256:${process.env.ARCHIVE_SHA256}`, installerSha256: process.env.INSTALLER_SHA256,
+            version: process.env.CONNECTOR_VERSION,
+          };
           fs.writeFileSync(file, JSON.stringify({ buildType: "mscqr-release-provenance", subject: { imageRef }, invocation: { repository: process.env.GITHUB_REPOSITORY, sha: releaseSha, workflow: process.env.GITHUB_WORKFLOW, runId: process.env.GITHUB_RUN_ID }, metadata }, null, 2));
           NODE
           cosign sign --yes "$BACKEND_IMAGE"

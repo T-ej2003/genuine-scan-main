@@ -12,7 +12,7 @@ function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "mscqr-distribution-test-"));
   const sourceRoot = path.join(root, "source");
   const distributionRoot = path.join(root, "distribution");
-  const version = "2026.11.6.2";
+  const version = "2026.11.19.1";
   const previousVersion = "2026.10.29.1";
   const installer = Buffer.from("signed installer fixture");
   const previousInstaller = Buffer.from("previous signed fixture");
@@ -24,7 +24,8 @@ function fixture() {
     windows: { relativePath: previousRelativePath, sha256: contract.previousSha256 } } };
   const pending = { version, publishedAt: null, requiredProtocolVersion: "local-agent-direct-v2", minimumBuildVersion: "2026.11.6.1",
     transportDiagnosticsVersion: "transport-diagnostics-v1", summary: "Pending release.", platforms: {} };
-  const source = { productName: "MSCQR", latestVersion: version, minimumBuildVersion: "2026.11.6.1", capabilities: { supportsTestLabel: true }, releases: [pending, previous] };
+  const priorCandidate = { ...pending, version: "2026.11.6.2" };
+  const source = { productName: "MSCQR", latestVersion: version, minimumBuildVersion: "2026.11.6.1", capabilities: { supportsTestLabel: true }, releases: [pending, priorCandidate, previous] };
   const staged = structuredClone(source);
   staged.releases[0] = { ...pending, publishedAt: "2026-11-06T16:00:00.000Z", capabilities: source.capabilities,
     summary: "For new installations only.", notes: ["Existing connector upgrades require MSCQRAUTH."], platforms: { windows: {
@@ -60,8 +61,9 @@ for (const [name, tamper] of [
   ["upgrade scope", (f) => { delete f.staged.releases[0].platforms.windows.installationScope; }],
   ["unsigned installer", (f) => { f.staged.releases[0].platforms.windows.signatureStatus = "unsigned"; }],
   ["installer digest mismatch", (f) => { fs.writeFileSync(f.installer, "tampered"); }],
-  ["previous release changed", (f) => { f.staged.releases[1].publishedAt = null; }],
-  ["minimum build changed", (f) => { f.staged.minimumBuildVersion = "2026.11.6.2"; }],
+  ["previous signed release changed", (f) => { f.staged.releases[2].publishedAt = null; }],
+  ["prior candidate changed", (f) => { f.staged.releases[1].summary = "Modified"; }],
+  ["minimum build changed", (f) => { f.staged.minimumBuildVersion = "2026.11.19.1"; }],
 ]) {
   test(`rejects ${name}`, () => {
     const f = fixture();
