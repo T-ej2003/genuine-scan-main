@@ -5,6 +5,7 @@ import type { IncomingMessage } from "http";
 
 import { listLocalPrinters, resolveSelectedPrinter, waitForLocalPrintJobCompletion } from "./cups";
 import { reserveAutomaticDispatch } from "./dispatchJournal";
+import { maintenanceFenced, runUnfencedWork } from "./maintenanceFence";
 import { printLabel, validateZplPayloadForRawPrint } from "./render";
 import { loadAgentState } from "./state";
 import { buildPrinterAgentActionPayload, buildPrinterAgentSessionPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
@@ -1557,6 +1558,13 @@ const runOnce = async (timing?: TimingContext): Promise<DirectPrintCycleResult> 
 
 let activeDirectPrintWorkerStop: (() => void) | null = null;
 let activeDirectPrintWorkerWake: ((reason?: string) => void) | null = null;
+let activeMaintenanceClose: (() => void) | null = null;
+
+export const stopDirectPrintAcquisition = () => {
+  activeMaintenanceClose?.();
+  activeDirectPrintWorkerWake?.();
+};
+export const directPrintSocketClosed = () => !activeMaintenanceClose;
 
 let activeWakeUntil = 0;
 let activeWakeRemainingClaims = 0;
@@ -1632,8 +1640,10 @@ const startPersistentPrintSessionWorker = () => {
 
   const loop = async () => {
     while (!stopped) {
+      if (maintenanceFenced()) break;
       const backendUrl = await resolveBackendUrl();
       const selection = backendUrl ? await resolveSelection().catch(() => null) : null;
+      if (maintenanceFenced()) break;
       if (!backendUrl || !selection) {
         updatePersistentSessionStatus({
           connected: false,
@@ -1665,13 +1675,21 @@ const startPersistentPrintSessionWorker = () => {
       );
       const ws = createPersistentSessionSocket(sessionUrl);
       activeSocket = ws;
+      activeMaintenanceClose = () => {
+        if (processing) return;
+        if (ws.readyState === WebSocket.CONNECTING) ws.terminate();
+        else ws.close();
+      };
 
       const closeSession = () => {
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
           heartbeatTimer = null;
         }
-        if (activeSocket === ws) activeSocket = null;
+        if (activeSocket === ws) {
+          activeSocket = null;
+          activeMaintenanceClose = null;
+        }
         updatePersistentSessionStatus({
           connected: false,
           sessionId: null,
@@ -1786,23 +1804,25 @@ const startPersistentPrintSessionWorker = () => {
               });
               return;
             }
+            if (maintenanceFenced()) { ws.close(); return; }
             if (!session || processing || ws.readyState !== WebSocket.OPEN) return;
+            const workSession = session;
             if (payload?.type === "test_label") {
               processing = true;
               try {
-                await runPersistentDiagnosticTestJob(ws, session, payload, selection.selectedPrinterId);
+                await runUnfencedWork(() => runPersistentDiagnosticTestJob(ws, workSession, payload, selection.selectedPrinterId));
               } catch (error: unknown) {
                 console.error("persistent printer session test failed", { error: errorInfo(error).message || error });
               } finally {
                 processing = false;
-                if (selectionReconnect) ws.close();
+                if (selectionReconnect || maintenanceFenced()) ws.close();
               }
               return;
             }
             if (payload?.type === "print_chunk") {
               processing = true;
               try {
-                await runPersistentPrintChunk(ws, session, payload, selection.selectedPrinterId);
+                await runUnfencedWork(() => runPersistentPrintChunk(ws, workSession, payload, selection.selectedPrinterId));
               } catch (error: unknown) {
                 console.error("persistent printer session chunk failed", {
                   chunkId: String(payload?.chunkId || "").trim() || null,
@@ -1812,7 +1832,7 @@ const startPersistentPrintSessionWorker = () => {
                 });
               } finally {
                 processing = false;
-                if (selectionReconnect) ws.close();
+                if (selectionReconnect || maintenanceFenced()) ws.close();
               }
             }
           })();
@@ -1882,6 +1902,7 @@ const startPersistentPrintSessionWorker = () => {
     sleepWake?.();
     activeSocket?.close();
     activeDirectPrintWorkerWake = null;
+    activeMaintenanceClose = null;
     activeDirectPrintWorkerStop = null;
   };
   return activeDirectPrintWorkerStop;

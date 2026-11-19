@@ -1,6 +1,7 @@
 import os from "os";
 import { executeGatewayAttempt, flushGatewayPreDispatchFailures } from "./gatewayAttempt";
 import { reserveAutomaticDispatch } from "./dispatchJournal";
+import { maintenanceFenced, runUnfencedWork } from "./maintenanceFence";
 import { createHash } from "crypto";
 
 import { renderPdfLabelBuffer } from "../printing/pdfLabel";
@@ -459,12 +460,22 @@ const reportPreDispatchFailure = async (failure: any) => {
 };
 
 export const runGatewayCycle = async (connectionType: GatewayConnectionType) => {
+  return runUnfencedWork(async () => {
   const context = { gatewayId: GATEWAY_ID, backendUrl: BACKEND_URL, connectionType };
   await flushGatewayPreDispatchFailures(context, reportPreDispatchFailure);
+  if (maintenanceFenced()) return;
   // A queued diagnostic owns this printer's physical evidence lease. Claim it
   // before the normal route, which must reject automatic work during the lease.
-  const job = await claimTestJob() || await claimNextJob(connectionType);
+  const testJob = await claimTestJob();
+  if (!testJob && maintenanceFenced()) return;
+  const job = testJob || await claimNextJob(connectionType);
   if (!job) return;
+  if (maintenanceFenced()) {
+    // The claim may have committed before the fence. Persist and report a
+    // confirmed pre-dispatch failure instead of abandoning its backend lease.
+    await executeGatewayAttempt(context, job, async () => { throw new Error("Connector maintenance began before dispatch."); }, reportPreDispatchFailure);
+    return;
+  }
   await executeGatewayAttempt(context, job, async reserve => {
     const guardedReserve: typeof reserveGatewayAttempt = (claim, hash) => reserve(() => reserveGatewayAttempt(claim, hash));
     if (job.testJobId) {
@@ -475,6 +486,7 @@ export const runGatewayCycle = async (connectionType: GatewayConnectionType) => 
       else await runIppJob(job, guardedReserve);
     }
   }, reportPreDispatchFailure);
+  });
 };
 export const startGatewayWorker = () => {
   if (!configured()) {
@@ -486,6 +498,7 @@ export const startGatewayWorker = () => {
   const loop = async () => {
     while (!stopped) {
       try {
+        if (maintenanceFenced()) break;
         const heartbeatData = await heartbeat(null);
         connectionType = (heartbeatData?.connectionType as GatewayConnectionType | undefined) || connectionType;
         if (connectionType) {
