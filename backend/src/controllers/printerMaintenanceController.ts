@@ -39,7 +39,8 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       if (typeof raw !== "string") throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
       const stored = JSON.parse(raw);
       const challenge = upgradeChallengeSchema.parse(stored.challenge);
-      if (challenge.challengeId !== evidence.challengeId || challenge.attemptId !== binding.attemptId ||
+      if (Date.parse(challenge.expiresAt) <= Date.now() ||
+          challenge.challengeId !== evidence.challengeId || challenge.attemptId !== binding.attemptId ||
           stored.proofSha256 !== evidence.deviceProofSha256 ||
           ["agentId", "deviceFingerprint", "manufacturerId", "tenantId", "printerId", "registrationId",
             "sourceVersion", "targetVersion"].some(key => challenge[key as keyof typeof challenge] !== binding[key]))

@@ -1482,6 +1482,19 @@ async function main() {
     await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,binding:{...binding,tenantId:ids.orgB}})},409);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
     await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},403);
+    const expiredChallengeId=randomUUID();
+    const expiredProofSha256=hash(expiredChallengeId);
+    const expiredStatement={...statement,challengeId:expiredChallengeId,deviceProofSha256:expiredProofSha256};
+    const expiredChallenge={purpose:'mscqr-connector-upgrade-device-proof-v1',attemptId:binding.attemptId,
+      challengeId:expiredChallengeId,nonce:'N'.repeat(43),agentId:binding.agentId,
+      deviceFingerprint:binding.deviceFingerprint,manufacturerId:binding.manufacturerId,tenantId:binding.tenantId,
+      printerId:binding.printerId,registrationId:binding.registrationId,sourceVersion:binding.sourceVersion,
+      currentVersion:binding.sourceVersion,targetVersion:binding.targetVersion,
+      expiresAt:new Date(Date.now()-1000).toISOString()};
+    const expiredRedis=await require('../../../dist/services/redisService').getRedisClient();
+    await expiredRedis.set(`connector-upgrade:proof:${expiredChallengeId}`,
+      JSON.stringify({challenge:expiredChallenge,proofSha256:expiredProofSha256}),'PX',120000);
+    await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(expiredStatement)},403);
     let token=authorityResult.data.token;
     await postMaintenance('maker',{action:'consume',token,binding:{...binding,attemptId:randomUUID()}},403);
     const consumeResults=await Promise.all([postMaintenance('maker',{action:'consume',token,binding}),postMaintenance('maker',{action:'consume',token,binding})]);
