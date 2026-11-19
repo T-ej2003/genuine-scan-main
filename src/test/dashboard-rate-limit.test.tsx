@@ -134,6 +134,14 @@ describe("Dashboard rate-limit partial state", () => {
     expect(screen.queryByText("Scans today")).not.toBeInTheDocument();
   });
 
+  it("does not present historical scans as today's count when the field is missing", async () => {
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const scansCard = (await screen.findByText("Scans today")).closest('[data-testid="dashboard-kpi-card"]');
+    expect(scansCard).toHaveTextContent("Unavailable");
+    expect(scansCard).toHaveTextContent("Today's count is temporarily unavailable");
+    expect(scansCard).not.toHaveTextContent("10");
+  });
+
   it("keeps KPI data visible and shows friendly recent activity copy when audit reads are rate-limited", async () => {
     renderWithQueryClient(
       <MemoryRouter>

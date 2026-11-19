@@ -427,10 +427,10 @@ export default function Dashboard() {
       },
       {
         title: "Scans today",
-        value: scansToday ?? qrStatusData.scanned,
+        value: scansToday ?? "Unavailable",
         icon: FileText,
         variant: "success" as const,
-        subtitle: scansToday == null ? "Today count unavailable; showing all scans" : "Customer scans recorded today",
+        subtitle: scansToday == null ? "Today's count is temporarily unavailable" : "Customer scans recorded today",
         href: APP_PATHS.scanActivity,
         ctaLabel: "View scans",
       },

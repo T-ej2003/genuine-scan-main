@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5'
+    AND source_contract_sha256='8174e08a26983eae48973849f5b45b1cbd897aef0c5af566d8c78c018111d90c'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:8174e08a26983eae48973849f5b45b1cbd897aef0c5af566d8c78c018111d90c'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:8174e08a26983eae48973849f5b45b1cbd897aef0c5af566d8c78c018111d90c')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7066,6 +7066,7 @@ CREATE OR REPLACE FUNCTION app_rls.qr_scan_analytics(
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; tenant_id text; maker_id text; from_at timestamp; to_at timestamp;
   page_limit integer; page_offset integer; activity boolean; result jsonb;
+  linked_licensee_ids text[]; linked_licensee_id text; linked_count bigint; daily_total bigint:=0;
 BEGIN
   IF p_purpose IS DISTINCT FROM 'qr-scan-analytics' OR jsonb_typeof(p_filters) IS DISTINCT FROM 'object'
      OR p_filters - ARRAY['manufacturerId','batchQuery','code','status','firstScan','from','to','limit','offset','dailyCount'] <> '{}'::jsonb
@@ -7090,6 +7091,21 @@ BEGIN
   tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
   -- Platform analytics require an explicit tenant; manufacturer scope is bound to live ownership.
   IF tenant_id IS NULL THEN
+    IF p_filters ? 'dailyCount' AND actor.role='MANUFACTURER_ADMIN' THEN
+      SELECT array_agg(DISTINCT ml."licenseeId") INTO linked_licensee_ids
+        FROM public."ManufacturerLicenseeLink" ml
+          JOIN public."Licensee" l ON l.id=ml."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+          WHERE ml."manufacturerId"=actor."userId";
+      IF linked_licensee_ids IS NOT NULL THEN
+        FOREACH linked_licensee_id IN ARRAY linked_licensee_ids LOOP
+          SELECT (app_rls.qr_scan_analytics(p_capability,p_purpose,p_request_id,linked_licensee_id,p_filters)->>'scansToday')::bigint
+            INTO linked_count;
+          daily_total:=daily_total+linked_count;
+        END LOOP;
+      END IF;
+      RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',NULL),
+        'scansToday',daily_total);
+    END IF;
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);

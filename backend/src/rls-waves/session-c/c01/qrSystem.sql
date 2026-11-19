@@ -175,6 +175,7 @@ CREATE OR REPLACE FUNCTION app_rls.qr_scan_analytics(
 ) RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public AS $fn$
 DECLARE actor record; tenant_id text; maker_id text; from_at timestamp; to_at timestamp;
   page_limit integer; page_offset integer; activity boolean; result jsonb;
+  linked_licensee_ids text[]; linked_licensee_id text; linked_count bigint; daily_total bigint:=0;
 BEGIN
   IF p_purpose IS DISTINCT FROM 'qr-scan-analytics' OR jsonb_typeof(p_filters) IS DISTINCT FROM 'object'
      OR p_filters - ARRAY['manufacturerId','batchQuery','code','status','firstScan','from','to','limit','offset','dailyCount'] <> '{}'::jsonb
@@ -199,6 +200,21 @@ BEGIN
   tenant_id:=coalesce(p_licensee_id,CASE WHEN actor.role='LICENSEE_ADMIN' THEN actor."licenseeId" END);
   -- Platform analytics require an explicit tenant; manufacturer scope is bound to live ownership.
   IF tenant_id IS NULL THEN
+    IF p_filters ? 'dailyCount' AND actor.role='MANUFACTURER_ADMIN' THEN
+      SELECT array_agg(DISTINCT ml."licenseeId") INTO linked_licensee_ids
+        FROM public."ManufacturerLicenseeLink" ml
+          JOIN public."Licensee" l ON l.id=ml."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+          WHERE ml."manufacturerId"=actor."userId";
+      IF linked_licensee_ids IS NOT NULL THEN
+        FOREACH linked_licensee_id IN ARRAY linked_licensee_ids LOOP
+          SELECT (app_rls.qr_scan_analytics(p_capability,p_purpose,p_request_id,linked_licensee_id,p_filters)->>'scansToday')::bigint
+            INTO linked_count;
+          daily_total:=daily_total+linked_count;
+        END LOOP;
+      END IF;
+      RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',NULL),
+        'scansToday',daily_total);
+    END IF;
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);

@@ -31,6 +31,9 @@ const { readStats } = require(path.join(distRoot, "rls-waves/session-c/c01/qrSys
   const before = calls.length;
   assert.equal((await readStats({ ...input, licenseeId: null })).scansToday, undefined);
   assert.equal(calls.length, before + 1);
+  dailyCount = 5;
+  assert.equal((await readStats({ ...input, licenseeId: null, includeUnscopedManufacturerDaily: true })).scansToday, 5);
+  assert(calls.at(-1).values.includes(null));
   failDaily = true;
   await assert.rejects(readStats(input), /scan analytics unavailable/);
   console.log("QR daily stats mapping passed");

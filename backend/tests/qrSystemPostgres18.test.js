@@ -603,11 +603,15 @@ async function main(){
     ('40000000-0000-4000-9000-000000000309','${makerC}','${digest('refresh-maker-c')}',now()+interval '1 day','${digest(dailyCaps.makerC)}','sha256-v1','ADMIN_MFA',now()+interval '1 hour'),
     ('40000000-0000-4000-9000-000000000310','${makerEmpty}','${digest('refresh-maker-empty')}',now()+interval '1 day','${digest(dailyCaps.makerEmpty)}','sha256-v1','ADMIN_MFA',now()+interval '1 hour')`);
   const dailyAt=(cap,tenant,request)=>daily(cap,tenant,`40000000-0000-4000-8000-${request}`);
+  const unscopedDaily=(cap,request)=>JSON.parse(call("qr_scan_analytics",`'${cap}','qr-scan-analytics','40000000-0000-4000-8000-${request}',NULL,'{"dailyCount":true}'::jsonb`)).scansToday;
   const beforeTenantA=dailyAt(caps.tenant,ids.licenseeA,"000000000961");
   const beforeTenantB=dailyAt(caps.platform,ids.licenseeB,"000000000962");
   const beforeMakerA=dailyAt(caps.manufacturer,ids.licenseeA,"000000000963");
+  assert.equal(unscopedDaily(caps.manufacturer,"000000000960"),beforeMakerA);
   assert.equal(dailyAt(dailyCaps.makerB,ids.licenseeA,"000000000964"),0);
   assert.equal(dailyAt(dailyCaps.makerEmpty,ids.licenseeA,"000000000965"),0);
+  assert.equal(unscopedDaily(dailyCaps.makerB,"000000000976"),0);
+  assert.equal(unscopedDaily(dailyCaps.makerEmpty,"000000000977"),0);
   run(bootstrap,`INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","updatedAt") VALUES
     ('40000000-0000-4000-8000-000000000920','Daily maker A','${ids.licenseeA}','${ids.manufacturer}','DAILY_A','DAILY_A',1,now()),
     ('40000000-0000-4000-8000-000000000921','Daily maker B','${ids.licenseeA}','${makerB}','DAILY_B','DAILY_B',1,now()),
@@ -623,11 +627,27 @@ async function main(){
     ('40000000-0000-4000-8000-000000000943','daily-maker-c','40000000-0000-4000-8000-000000000932','${ids.licenseeB}','40000000-0000-4000-8000-000000000922','PRINTED',${todayStart}+interval '4 minutes')`);
   assert.equal(dailyAt(caps.tenant,ids.licenseeA,"000000000966"),beforeTenantA+3);
   assert.equal(dailyAt(caps.manufacturer,ids.licenseeA,"000000000967"),beforeMakerA+2);
+  assert.equal(unscopedDaily(caps.manufacturer,"000000000978"),beforeMakerA+2);
   assert.equal(dailyAt(dailyCaps.makerB,ids.licenseeA,"000000000968"),1);
+  assert.equal(unscopedDaily(dailyCaps.makerB,"000000000979"),1);
   assert.equal(dailyAt(dailyCaps.makerEmpty,ids.licenseeA,"000000000969"),0);
+  assert.equal(unscopedDaily(dailyCaps.makerEmpty,"000000000980"),0);
   assert.equal(dailyAt(caps.platform,ids.licenseeB,"000000000970"),beforeTenantB+1);
   assert.equal(dailyAt(dailyCaps.makerC,ids.licenseeB,"000000000971"),1);
+  assert.equal(unscopedDaily(dailyCaps.makerC,"000000000981"),1);
   denied(`SELECT app_rls.qr_scan_analytics('${caps.manufacturer}','qr-scan-analytics','40000000-0000-4000-8000-000000000972','${ids.licenseeB}','{"dailyCount":true}'::jsonb)`);
+  run(bootstrap,`INSERT INTO public."ManufacturerLicenseeLink"("manufacturerId","licenseeId","updatedAt")
+    VALUES('${ids.manufacturer}','${ids.licenseeB}',now());
+    INSERT INTO public."Batch"(id,name,"licenseeId","manufacturerId","startCode","endCode","totalCodes","updatedAt")
+    VALUES('40000000-0000-4000-8000-000000000923','Daily maker A second licensee','${ids.licenseeB}','${ids.manufacturer}','DAILY_A_B','DAILY_A_B',1,now());
+    INSERT INTO public."QRCode"(id,code,"displayCode","licenseeId","batchId",status,"updatedAt")
+    VALUES('40000000-0000-4000-8000-000000000933','daily-maker-a-b','DAILY_A_B','${ids.licenseeB}','40000000-0000-4000-8000-000000000923','PRINTED',now());
+    INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId","batchId",status,"scannedAt")
+    VALUES('40000000-0000-4000-8000-000000000944','daily-maker-a-b','40000000-0000-4000-8000-000000000933','${ids.licenseeB}','40000000-0000-4000-8000-000000000923','PRINTED',${todayStart}+interval '5 minutes')`);
+  assert.equal(dailyAt(caps.manufacturer,ids.licenseeA,"000000000982"),beforeMakerA+2);
+  assert.equal(dailyAt(caps.manufacturer,ids.licenseeB,"000000000983"),1);
+  assert.equal(unscopedDaily(caps.manufacturer,"000000000984"),beforeMakerA+3);
+  assert.equal(unscopedDaily(dailyCaps.makerC,"000000000985"),1);
   denied(`SELECT app_rls.qr_scan_analytics('${dailyCaps.makerB}','qr-scan-analytics','40000000-0000-4000-8000-000000000973','${ids.licenseeB}','{"dailyCount":true}'::jsonb)`);
   denied(`SELECT app_rls.qr_scan_analytics('${dailyCaps.makerC}','qr-scan-analytics','40000000-0000-4000-8000-000000000974','${ids.otherLicensee}','{"dailyCount":true}'::jsonb)`);
   denied(`SELECT app_rls.qr_scan_analytics('${caps.manufacturer}','qr-scan-analytics','40000000-0000-4000-8000-000000000975','${ids.licenseeA}','{"dailyCount":true,"manufacturerId":"${makerB}"}'::jsonb)`,/QR_INVALID_INPUT/);
