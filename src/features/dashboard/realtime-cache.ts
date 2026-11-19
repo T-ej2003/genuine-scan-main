@@ -1,7 +1,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { queryKeys } from "@/lib/query-keys";
-import { getRequestCoordinatorScope } from "@/lib/api/request-coordinator";
+import { getAuthenticatedStreamScope } from "@/lib/api/request-coordinator";
 import type { AuditLogDTO, DashboardStatsDTO, QrStatsDTO } from "../../../shared/contracts/runtime/dashboard.ts";
 
 export const normalizeDashboardSummary = (payload: Record<string, unknown>): DashboardStatsDTO => {
@@ -21,7 +21,7 @@ export const applyDashboardSnapshotToCache = (
 ) => {
   const summary = normalizeDashboardSummary(payload);
   const qrStats = (payload.qrStats || {}) as QrStatsDTO;
-  queryClient.setQueryData([...queryKeys.dashboard.stats(scopedLicenseeId), getRequestCoordinatorScope()], { summary, qrStats, refreshPaused: false });
+  queryClient.setQueryData([...queryKeys.dashboard.stats(scopedLicenseeId), getAuthenticatedStreamScope()], { summary, qrStats, refreshPaused: false });
   return { summary, qrStats };
 };
 
@@ -31,7 +31,9 @@ export const applyAuditDeltaToCache = (
   latestLogs: AuditLogDTO[],
   scopedLicenseeId?: string
 ) => {
-  const logs = [log, ...latestLogs].slice(0, 10);
-  queryClient.setQueryData([...queryKeys.dashboard.audit(5), scopedLicenseeId || null, getRequestCoordinatorScope()], { logs, refreshPaused: false });
+  const logs = [log, ...latestLogs.filter((entry) => entry.id !== log.id)]
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
+    .slice(0, 10);
+  queryClient.setQueryData([...queryKeys.dashboard.audit(5), scopedLicenseeId || null, getAuthenticatedStreamScope()], { logs, refreshPaused: false });
   return logs;
 };

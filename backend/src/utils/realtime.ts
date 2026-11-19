@@ -1,4 +1,5 @@
 import type { Response } from "express";
+import type { AuthRequest } from "../middleware/auth";
 
 type RealtimeChannel = "dashboard" | "notifications" | "printer" | "printJob";
 
@@ -21,4 +22,14 @@ export const writeSseRealtimeEnvelope = <TPayload>(
 
   res.write("event: realtime\n");
   res.write(`data: ${JSON.stringify(envelope)}\n\n`);
+};
+
+export const closeSseAtTokenExpiry = (req: AuthRequest, res: Response, channel: RealtimeChannel) => {
+  const expiresAt = req.sseTokenExpiresAtMs;
+  if (!Number.isFinite(expiresAt) || !expiresAt) return () => undefined;
+  const timer = setTimeout(() => {
+    writeSseRealtimeEnvelope(res, { channel, type: "session.expired", payload: {} });
+    res.end();
+  }, Math.max(0, expiresAt - Date.now()));
+  return () => clearTimeout(timer);
 };

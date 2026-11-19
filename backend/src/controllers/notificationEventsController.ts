@@ -6,7 +6,7 @@ import { b03BoundaryForRequest } from "../rls-waves/session-b/b03/requestBoundar
 import { resolveAccessibleLicenseeIdsForUser } from "../services/manufacturerScopeService";
 import { listNotificationsForUser, onNotificationEvent, type NotificationRealtimeEvent } from "../services/notificationService";
 import { canRoleViewNotificationType } from "../services/notificationVisibility";
-import { writeSseRealtimeEnvelope } from "../utils/realtime";
+import { closeSseAtTokenExpiry, writeSseRealtimeEnvelope } from "../utils/realtime";
 const toInt = (value: unknown, fallback: number, min: number, max: number) => {
   const n = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(n)) return fallback;
@@ -73,6 +73,13 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
     res.setHeader("Connection", "keep-alive");
     res.flushHeaders?.();
 
+    let closed = false;
+    let sending = true;
+    let pendingReason: string | null = null;
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let keepAlive: ReturnType<typeof setInterval> | null = null;
+    const closeExpiry = closeSseAtTokenExpiry(req, res, "notifications");
+
     const sendSnapshot = async (reason: string) => {
       const payload = await listNotificationsForUser({
         userId: req.user!.userId,
@@ -85,6 +92,7 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
         databaseBoundary,
       });
 
+      if (closed) return;
       writeSseRealtimeEnvelope(res, {
         channel: "notifications",
         type: "snapshot",
@@ -98,28 +106,59 @@ export const notificationEvents = async (req: AuthRequest, res: Response) => {
       });
     };
 
-    await sendSnapshot("initial");
+    const flush = async () => {
+      if (sending || closed) return;
+      sending = true;
+      try {
+        while (pendingReason && !closed) {
+          const reason = pendingReason;
+          pendingReason = null;
+          await sendSnapshot(reason);
+        }
+      } catch {
+        // Reconnect and resnapshot after a failed governed read.
+        res.end();
+      } finally {
+        sending = false;
+        if (pendingReason && !closed) queueSnapshot(pendingReason);
+      }
+    };
+    const queueSnapshot = (reason: string) => {
+      if (closed) return;
+      pendingReason = reason;
+      if (sending || refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        void flush();
+      }, 100);
+    };
+    const off = onNotificationEvent((event) => {
+      if (shouldDeliver(event, req.user!, accessibleLicenseeIds)) queueSnapshot(event.type);
+    });
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (keepAlive) clearInterval(keepAlive);
+      if (refreshTimer) clearTimeout(refreshTimer);
+      closeExpiry();
+      off();
+    };
+    res.on("close", cleanup);
 
-    const keepAlive = setInterval(() => {
+    try {
+      await sendSnapshot("initial");
+    } finally {
+      sending = false;
+    }
+    if (closed) return;
+    if (pendingReason) queueSnapshot(pendingReason);
+    keepAlive = setInterval(() => {
       res.write(": ping\n\n");
     }, 25_000);
 
-    const off = onNotificationEvent(async (event) => {
-      try {
-        if (!shouldDeliver(event, req.user!, accessibleLicenseeIds)) return;
-        await sendSnapshot(event.type);
-      } catch {
-        // ignore per-event failures
-      }
-    });
-
-    req.on("close", () => {
-      clearInterval(keepAlive);
-      off();
-      res.end();
-    });
   } catch (error) {
     console.error("notificationEvents error:", error);
+    if (res.headersSent) return res.end();
     return res.status(500).end();
   }
 };

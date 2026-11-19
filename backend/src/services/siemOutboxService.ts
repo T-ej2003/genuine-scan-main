@@ -12,7 +12,7 @@ import {
   withB03SiemWorkerContext,
 } from "../rls-waves/session-b/b03/systemContext";
 import { logger } from "../utils/logger";
-import { publishAuditedEventProjection } from "./auditService";
+import { publishAuditedEventProjection, publishCommittedQrAuditEvent } from "./auditService";
 import { withDistributedLease } from "./distributedLeaseService";
 
 const webhookUrl = () => String(process.env.SIEM_WEBHOOK_URL || "").trim();
@@ -140,6 +140,19 @@ const flushSecurityEventOutboxThroughB03Boundary = async () => {
               jobId: claim.id, payloadDigest: claim.payloadDigest, attemptedAt,
               sinkEventId: `projection:${claim.id}`,
             }));
+          }
+        } else if (claim.eventType === "AUDIT_LOG" && claim.licenseeId
+            && ["QRRange", "QRCode", "Batch", "QrAllocationRequest"].includes(String((claim.eventPayload as Record<string, unknown>)?.entityType || ""))
+            && (claim.eventPayload as Record<string, unknown>)?.action !== "EXPORT_QR_CODES") {
+          const log = claim.eventPayload as Record<string, unknown>;
+          if (b03PayloadDigest(log) !== claim.payloadDigest || log.userId !== claim.initiatingUserId
+              || log.licenseeId !== claim.licenseeId || (log.orgId || null) !== (claim.organizationId || null)) {
+            throw new Error("AUDIT_PROJECTION_AUTHORITY_MISMATCH");
+          }
+          try {
+            await publishCommittedQrAuditEvent(log);
+          } catch {
+            logger.warn("QR audit realtime projection unavailable", { outboxId: claim.id });
           }
         }
         const delivered = await sendToWebhook({

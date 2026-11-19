@@ -186,7 +186,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
   },
 
   streamNotifications(
-    onEvent: (payload: { kind: "snapshot"; notifications: NotificationStreamRow[]; unread: number; total: number; reason?: string } | { kind: "version"; reason?: string }) => void,
+    onEvent: (payload: { kind: "snapshot"; notifications: NotificationStreamRow[]; unread: number; total: number; reason?: string; serverTime?: string } | { kind: "version"; reason?: string } | { kind: "auth_expired" }) => void,
     onError?: () => void,
     onOpen?: () => void,
     options?: { limit?: number }
@@ -200,6 +200,10 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
       try {
         const envelope = JSON.parse(event.data || "{}");
         if (envelope?.channel !== "notifications") return;
+        if (envelope?.type === "session.expired") {
+          onEvent({ kind: "auth_expired" });
+          return;
+        }
         const payload = envelope?.payload || {};
         if (envelope?.type === "snapshot") {
           const notifications = Array.isArray(payload.notifications) ? payload.notifications : [];
@@ -211,6 +215,7 @@ export const createAdminOpsApi = (core: ApiClientCore) => ({
             unread,
             total,
             reason: typeof payload.reason === "string" ? payload.reason : undefined,
+            serverTime: typeof payload.serverTime === "string" ? payload.serverTime : undefined,
           });
           return;
         }

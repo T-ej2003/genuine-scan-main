@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router";
 import AuditLogs from "@/pages/AuditLogs";
 import apiClient from "@/lib/api-client";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 vi.mock("@/contexts/AuthContext", () => ({ useAuth: () => ({ user: { id: "admin", role: "super_admin" } }) }));
 vi.mock("@/components/layout/DashboardLayout", () => ({ DashboardLayout: ({ children }: any) => <div>{children}</div> }));
@@ -19,7 +20,30 @@ vi.mock("@/lib/api-client", () => ({ default: {
   getAuditLogs: vi.fn(), getFraudReports: vi.fn(), getLicensees: vi.fn(),
   streamAuditLogs: vi.fn(), listPrintJobs: vi.fn(),
 } }));
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); setRequestCoordinatorScope(null); vi.clearAllMocks(); });
+
+it("replaces an active audit stream when the authenticated scope changes", async () => {
+  const subscriptions: Array<{ receive: (log: any) => void; stop: ReturnType<typeof vi.fn> }> = [];
+  vi.mocked(apiClient.getLicensees).mockResolvedValue({ success: true, data: [{ id: "A", name: "Brand A" }] } as any);
+  vi.mocked(apiClient.getFraudReports).mockResolvedValue({ success: true, data: [] } as any);
+  vi.mocked(apiClient.getAuditLogs).mockResolvedValue({ success: true, data: [] });
+  vi.mocked(apiClient.streamAuditLogs).mockImplementation((receive) => {
+    const stop = vi.fn(); subscriptions.push({ receive, stop }); return stop;
+  });
+  act(() => setRequestCoordinatorScope({ id: "admin-1", role: "super_admin", licenseeId: "A" }));
+  render(<MemoryRouter><AuditLogs /></MemoryRouter>);
+  const select = (await screen.findAllByRole("combobox")).find(el => el.textContent?.includes("Brand A"))!;
+  fireEvent.change(select, { target: { value: "A" } });
+  await waitFor(() => expect(subscriptions).toHaveLength(1));
+  act(() => subscriptions[0].receive({ id: "old-row", licenseeId: "A", action: "LOGIN_SUCCESS", createdAt: new Date().toISOString(), user: { name: "Old Actor" } }));
+  expect(screen.getByText(/Old Actor/)).toBeInTheDocument();
+
+  act(() => setRequestCoordinatorScope({ id: "admin-2", role: "super_admin", licenseeId: "A" }));
+  await waitFor(() => expect(subscriptions).toHaveLength(2));
+  expect(subscriptions[0].stop).toHaveBeenCalledOnce();
+  act(() => subscriptions[0].receive({ id: "late-old-row", licenseeId: "A", action: "LOGIN_SUCCESS", createdAt: new Date().toISOString(), user: { name: "Late Old Actor" } }));
+  expect(screen.queryByText(/Old Actor|Late Old Actor/)).toBeNull();
+});
 
 it("suppresses unscoped REST/SSE and rejects old or foreign brand events", async () => {
   const subscriptions: Array<{ receive: (log: any) => void; stop: ReturnType<typeof vi.fn>; scope?: string }> = [];

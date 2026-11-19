@@ -4,9 +4,20 @@ const crypto = require('node:crypto');
 const originalFunctions = require('../dist/rls-waves/session-b/b03/repositoryFunctions');
 const digest = originalFunctions.b03PayloadDigest;
 let claims = [], delivered = [], invalidations = [], completed = 0, skipped = 0, failed = 0, uncertain = false, unavailable = false, cacheFailure = false, subscriber;
+const projected = new Set();
 const stub = (name, exports) => { const id = require.resolve('../dist/' + name); require.cache[id] = { id, filename: id, loaded: true, exports }; };
 stub('config/database', { default: {} });
 stub('services/redisService', { getRedisInstanceId: () => 'fixture', subscribeRedisJson: async (_, cb) => { subscriber = cb; },
+  getRedisClient: async () => unavailable ? null : { eval: async (_script, count, key, ...args) => {
+    assert.equal(count, 5);
+    if (cacheFailure) throw new Error('CACHE_UNAVAILABLE');
+    if (projected.has(key)) return 0;
+    projected.add(key);
+    for (const versionKey of args.slice(0, 4)) invalidations.push(versionKey.split(':')[1]);
+    subscriber?.({ ...JSON.parse(args.at(-1)), origin: 'other-instance' });
+    if (uncertain) { uncertain = false; throw new Error('UNCERTAIN_REDIS_RESPONSE'); }
+    return 1;
+  } },
   publishRedisJson: async (_, value) => { if (unavailable) return false; subscriber?.({ ...value, origin: 'other-instance' }); if (uncertain) { uncertain = false; throw new Error('UNCERTAIN_REDIS_RESPONSE'); } return true; } });
 stub('services/versionedCacheService', { bumpCacheNamespaceVersion: async name => { if (cacheFailure) throw new Error('CACHE_UNAVAILABLE'); invalidations.push(name); } });
 stub('rls-waves/session-b/b03/repositoryFunctions', { ...originalFunctions,
@@ -56,6 +67,42 @@ test('CREATE/REJECT durable audit projections retry safely without inserting aud
   } finally { stop(); claims = []; }
 });
 
+test('other committed QR audit rows reach the scoped live dashboard only after attribution checks', async () => {
+  const stop = onAuditLog(log => delivered.push(log));
+  try {
+    const row = claim('ALLOCATED');
+    row.eventPayload.entityType = 'Batch';
+    row.payloadDigest = digest(row.eventPayload);
+    claims = [row];
+    const before = delivered.length;
+    await flushSecurityEventOutbox();
+    assert.equal(delivered.length, before + 1);
+    assert.equal(delivered.at(-1).id, row.eventPayload.id);
+    assert.equal(claims[0].projectionCompleted, undefined, 'generic projection uses Redis atomic deduplication, not an unsupported B03 marker');
+    assert.equal(claims[0].terminal, true);
+
+    const forged = claim('DELETE_BATCH');
+    forged.eventPayload.entityType = 'Batch';
+    forged.payloadDigest = digest(forged.eventPayload);
+    forged.licenseeId = crypto.randomUUID();
+    claims = [forged];
+    const failedBefore = failed;
+    await flushSecurityEventOutbox();
+    assert.equal(failed, failedBefore + 1);
+    assert.equal(delivered.length, before + 1, 'a mismatched tenant must never reach the stream');
+
+    const exportRow = claim('EXPORT_QR_CODES');
+    exportRow.eventPayload.entityType = 'QRCode';
+    exportRow.eventPayload.licenseeId = null;
+    exportRow.licenseeId = null;
+    exportRow.payloadDigest = digest(exportRow.eventPayload);
+    claims = [exportRow];
+    await flushSecurityEventOutbox();
+    assert.equal(exportRow.terminal, true, 'unscoped exports must keep their existing SIEM path');
+    assert.equal(delivered.length, before + 1);
+  } finally { stop(); claims = []; }
+});
+
 
 test('optional SIEM delivery does not gate internal projections or claim disabled delivery succeeded', async () => {
   const stop = onAuditLog(log => delivered.push(log));
@@ -71,15 +118,29 @@ test('optional SIEM delivery does not gate internal projections or claim disable
     } finally { global.setInterval = originalSetInterval; global.clearInterval = originalClearInterval; }
     let networkCalls = 0;
     global.fetch = async () => { networkCalls++; throw new Error('Unexpected webhook'); };
-    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST']) {
+    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST', 'BATCH_UPDATED']) {
       claims = [claim(action)];
       const before = delivered.length, bumps = invalidations.length, sent = completed, disabled = skipped;
       await flushSecurityEventOutbox(); await flushSecurityEventOutbox();
       assert.equal(delivered.length, before + 1); assert.equal(invalidations.length, bumps + 4);
       assert.equal(completed, sent); assert.equal(skipped, disabled + 1); assert.equal(networkCalls, 0);
     }
+    claims = [claim('BATCH_UPDATED')]; unavailable = true;
+    const failedBeforeRedisOutage = failed, disabledBeforeRedisOutage = skipped;
+    await flushSecurityEventOutbox();
+    assert.equal(claims[0].terminal, true, 'optional realtime failure must not block SIEM outbox completion');
+    assert.equal(failed, failedBeforeRedisOutage);
+    assert.equal(skipped, disabledBeforeRedisOutage + 1);
+    unavailable = false;
     process.env.SIEM_WEBHOOK_URL = 'https://siem.example.invalid/events';
-    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST']) {
+    claims = [claim('BATCH_UPDATED')]; unavailable = true;
+    const completedBeforeRedisOutage = completed, failedBeforeWebhook = failed;
+    global.fetch = async () => { networkCalls++; return { ok: true, status: 200 }; };
+    await flushSecurityEventOutbox();
+    assert.equal(completed, completedBeforeRedisOutage + 1, 'healthy SIEM delivery must survive Redis outage');
+    assert.equal(failed, failedBeforeWebhook);
+    unavailable = false;
+    for (const action of ['CREATE_QR_ALLOCATION_REQUEST', 'REJECT_QR_ALLOCATION_REQUEST', 'BATCH_UPDATED']) {
       let attempts = 0;
       global.fetch = async (_url, options) => {
         assert.equal(options.headers['Idempotency-Key'], claims[0].id);
@@ -88,7 +149,7 @@ test('optional SIEM delivery does not gate internal projections or claim disable
       claims = [claim(action)];
       const before = delivered.length, bumps = invalidations.length, sent = completed;
       await flushSecurityEventOutbox();
-      assert.equal(claims[0].projectionCompleted, true); assert.equal(completed, sent);
+      assert.equal(claims[0].projectionCompleted, action === 'BATCH_UPDATED' ? undefined : true); assert.equal(completed, sent);
       await flushSecurityEventOutbox(); await flushSecurityEventOutbox();
       assert.equal(attempts, 2); assert.equal(completed, sent + 1);
       assert.equal(delivered.length, before + 1); assert.equal(invalidations.length, bumps + 4);

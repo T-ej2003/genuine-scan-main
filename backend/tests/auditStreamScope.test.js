@@ -21,7 +21,7 @@ for (const [module, exports] of Object.entries({
     verifyAccessToken: (token) => {
       if (token === "expired-token") throw Object.assign(new Error("expired fixture token"), { name: "TokenExpiredError" });
       if (token !== fixtureToken) throw new Error("invalid fixture token");
-      return actor;
+      return { ...actor, exp: Math.floor(Date.now() / 1000) + 300 };
     },
   },
   "services/auth/cookieTokenProtectionService": { openCookieToken: (value) => ["corrupt-cookie", "unavailable-key-cookie"].includes(value) ? null : value },

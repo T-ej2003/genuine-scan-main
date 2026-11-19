@@ -4,7 +4,7 @@ import { createTraceEventFromAuditLog } from "./traceEventService";
 import { hashIp, normalizeUserAgent } from "../utils/security";
 import { queueSecurityEvent } from "./siemOutboxService";
 import { appendForensicChainFromAuditLog } from "./forensicChainService";
-import { getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
+import { getRedisClient, getRedisInstanceId, publishRedisJson, subscribeRedisJson } from "./redisService";
 import { bumpCacheNamespaceVersion } from "./versionedCacheService";
 import { buildDateCursorWhere, encodeDateCursor } from "../utils/cursorPagination";
 import { queueAuditLogOutbox } from "./auditLogOutboxService";
@@ -73,6 +73,29 @@ export const publishAuditedEventProjection = async (log: any) => {
   if (!await publishRedisJson(AUDIT_LOG_CHANNEL, { origin: getRedisInstanceId(), log })) {
     throw new Error("AUDIT_PROJECTION_REDIS_UNAVAILABLE");
   }
+  emitAuditLog(log);
+};
+
+export const publishCommittedQrAuditEvent = async (log: any) => {
+  if (!log.id || !log.userId || !log.licenseeId || !["QRRange", "QRCode", "Batch", "QrAllocationRequest"].includes(log.entityType)) {
+    throw new Error("QR_AUDIT_PROJECTION_INVALID");
+  }
+  const redis = await getRedisClient();
+  if (!redis) throw new Error("QR_AUDIT_PROJECTION_REDIS_UNAVAILABLE");
+  // One Redis operation makes retries safe even when SIEM delivery is delayed or uncertain.
+  const applied = await redis.eval(`
+    for i = 2, #KEYS do
+      local version = redis.call('GET', KEYS[i])
+      if version and not string.match(version, '^%d+$') then return redis.error_reply('QR_AUDIT_CACHE_VERSION_INVALID') end
+    end
+    if not redis.call('SET', KEYS[1], '1', 'NX', 'PX', ARGV[1]) then return 0 end
+    for i = 2, #KEYS do redis.call('INCR', KEYS[i]) end
+    redis.call('PUBLISH', ARGV[2], ARGV[3])
+    return 1
+  `, 5, `audit:projection:${log.id}`,
+  ...["dashboard-snapshot", "attention-queue", "qr-batches", "print-jobs"].map((name) => `cache:${name}:version`),
+  172_800_000, AUDIT_LOG_CHANNEL, JSON.stringify({ origin: getRedisInstanceId(), log }));
+  if (applied !== 0 && applied !== 1) throw new Error("QR_AUDIT_PROJECTION_REDIS_INVALID");
   emitAuditLog(log);
 };
 

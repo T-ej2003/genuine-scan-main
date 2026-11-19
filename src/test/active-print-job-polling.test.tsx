@@ -7,6 +7,7 @@ import { PrintProgressDialog } from "@/components/printing/PrintProgressDialog";
 import { clearActivePrintSession, getActivePrintSessionSnapshot } from "@/lib/active-print-session";
 import { useActivePrintJobPolling } from "@/features/batches/useActivePrintJobPolling";
 import { getPrintJobRealtimeDebugState, resetPrintJobRealtimeStoreForTests } from "@/lib/print-job-realtime-store";
+import { setRequestCoordinatorScope } from "@/lib/api/request-coordinator";
 
 vi.mock("@/lib/api-client", () => ({
   default: {
@@ -96,6 +97,7 @@ describe("active print job polling", () => {
   afterEach(() => {
     clearActivePrintSession();
     resetPrintJobRealtimeStoreForTests();
+    setRequestCoordinatorScope(null);
     vi.useRealTimers();
     vi.clearAllMocks();
   });
@@ -234,6 +236,28 @@ describe("active print job polling", () => {
     second.unmount();
     expect(streamStop).toHaveBeenCalledTimes(1);
     expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([]);
+  });
+
+  it("discards the old print-job stream and snapshot after an authenticated scope change", async () => {
+    vi.useFakeTimers();
+    const stops: Array<ReturnType<typeof vi.fn>> = [];
+    vi.mocked(apiClient.streamPrintJobStatus).mockImplementation(() => {
+      const stop = vi.fn(); stops.push(stop); return stop;
+    });
+    vi.mocked(apiClient.getPrintJobStatus).mockResolvedValueOnce({ success: true, data: baseJob } as any)
+      .mockResolvedValue({ success: false, status: 403 } as any);
+    act(() => setRequestCoordinatorScope({ id: "operator-a", role: "manufacturer" }));
+    render(<PollingProbe job={baseJob} />);
+    await flush();
+    expect(stops).toHaveLength(1);
+    expect(screen.getByTestId("live-job-status")).toHaveTextContent("SENT");
+
+    act(() => setRequestCoordinatorScope({ id: "operator-b", role: "manufacturer" }));
+    await flush();
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(stops).toHaveLength(2);
+    expect(screen.getByTestId("live-job-status")).toBeEmptyDOMElement();
+    expect(getPrintJobRealtimeDebugState().subscriptions).toEqual([{ jobId: "job-live", refs: 1 }]);
   });
 
   it("accepts a committed JOB projection from the production SSE snapshot", async () => {
