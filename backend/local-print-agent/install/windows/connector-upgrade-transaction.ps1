@@ -211,13 +211,24 @@ function Wait-MscqrRuntime($Journal) {
   }
   throw $lastError
 }
+function Assert-MscqrJournalBinding($Journal,[string]$JournalPath) {
+  $expected = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'))
+  $backup = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetDirectoryName($JournalPath)) 'backup\dispatch-journal'))
+  if (-not $Journal.dispatchJournal -or $Journal.dispatchJournal.directory -ine $expected -or
+      $Journal.dispatchJournal.backup -ine $backup) { throw 'Dispatch journal snapshot binding is invalid.' }
+  Assert-MscqrPlainPath $expected
+  Assert-MscqrPlainPath $backup
+  Assert-MscqrDispatchJournalBackup $Journal.dispatchJournal
+}
 function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   if ($Journal.phase -in @('AUTHORIZED','STAGED','ABORTED')) {
     Write-MscqrTransaction $JournalPath $Journal 'ABORTED'
     return
   }
   if ($Journal.phase -eq 'COMMITTED') { return }
+  Assert-MscqrJournalBinding $Journal $JournalPath
   if ($Journal.phase -eq 'RESTORATION_VERIFIED') {
+    Assert-MscqrDispatchJournalLive $Journal.dispatchJournal
     Assert-MscqrStateDiscovery $Journal.stateDiscovery
     foreach($record in $Journal.records) {if((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256){throw 'Previously restored installation changed.'}}
     $Journal.expectedVersion=$Journal.binding.sourceVersion
@@ -243,6 +254,7 @@ function Restore-MscqrTransaction($Journal, [string]$JournalPath) {
   Assert-MscqrSignedFile (Join-Path ([IO.Path]::GetDirectoryName($JournalPath)) 'backup\runtime.bak') $Journal.binding.sourceSha256
   Stop-MscqrVerifiedRuntime $Journal.runtime $liveHash
   Restore-MscqrUpgradeBackup -Records $Journal.records
+  Restore-MscqrDispatchJournal $Journal.dispatchJournal
   Assert-MscqrSignedFile $Journal.runtime $Journal.binding.sourceSha256
   Restore-MscqrUninstallSnapshot $Journal.uninstall
   Write-MscqrTransaction $JournalPath $Journal 'RESTORED'
@@ -375,7 +387,7 @@ function Invoke-MscqrUpgradeTransaction {
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.exe')).Hash -ine $binding.uninstallerSha256 -or
           (Get-FileHash -LiteralPath (Join-Path $live 'unins000.dat')).Hash -ine $binding.uninstallDataSha256) {throw 'Previous uninstaller ownership binding mismatch.'}
       Invoke-MscqrMaintenance $auth 'consume' $binding
-      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
+      $journal = [pscustomobject]@{ phase='AUTHORIZED'; updatedAt=''; binding=$binding; runtime=$runtime; environmentFile=$environmentFile; stateFile=$StateFile; stateDiscovery=$StateDiscovery; startup=$StartupFile; startupHash=$startupHash; wrapper=$wrapper; wrapperHash=(Get-FileHash -LiteralPath $wrapper -Algorithm SHA256).Hash; expectedVersion=$Version; records=@(); dispatchJournal=$null; staged=''; protocol=$status.protocolVersion; uninstall=$uninstall }
       Write-MscqrTransaction $journalPath $journal 'AUTHORIZED'
       $stage = Join-Path $root 'stage'
       Protect-MscqrDirectory $stage
@@ -387,6 +399,10 @@ function Invoke-MscqrUpgradeTransaction {
       $extras = [ordered]@{ wrapper=$wrapper; uninstaller=(Join-Path $live 'unins000.exe'); uninstallData=(Join-Path $live 'unins000.dat') }
       foreach($name in (Get-MscqrSetupFiles).Keys) {$extras[$name]=Join-Path $live (Get-MscqrSetupFiles)[$name]}
       $journal.records = @(New-MscqrUpgradeBackup -BackupDirectory (Join-Path $root 'backup') -RuntimeFile $runtime -RuntimeSha256 $binding.sourceSha256 -RuntimeSignerSubject (Get-AuthenticodeSignature -LiteralPath $runtime).SignerCertificate.Subject -EnvironmentFile $environmentFile -StateFile $StateFile -StartupFile $StartupFile -AdditionalFiles $extras)
+      if ($env:PRINT_AGENT_DISPATCH_JOURNAL_DIR -or (Get-Content -LiteralPath $environmentFile -Raw) -match '(?m)^\s*PRINT_AGENT_DISPATCH_JOURNAL_DIR\s*=') { throw 'Custom dispatch journal location requires separate compatibility review.' }
+      $journalDirectory = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'))
+      Assert-MscqrPlainPath $journalDirectory
+      $journal.dispatchJournal = New-MscqrDispatchJournalBackup $journalDirectory (Join-Path $root 'backup\dispatch-journal')
       Assert-MscqrBackupBindings $journal
       Assert-MscqrStateDiscovery $journal.stateDiscovery
       Write-MscqrTransaction $journalPath $journal 'BACKED_UP'
@@ -394,6 +410,8 @@ function Invoke-MscqrUpgradeTransaction {
     }
     if ($Phase -eq 'Activate') {
       if ($journal.phase -cne 'BACKED_UP') { throw 'Upgrade is not ready for activation.' }
+      Assert-MscqrJournalBinding $journal $journalPath
+      Assert-MscqrDispatchJournalLive $journal.dispatchJournal
       $auth = Read-MscqrAuthorization $AuthFile
       Invoke-MscqrMaintenance $auth 'verify' $journal.binding
       Assert-MscqrBackupBindings $journal
@@ -424,6 +442,7 @@ function Invoke-MscqrUpgradeTransaction {
           if ((Get-FileHash -LiteralPath $record.original -Algorithm SHA256).Hash -ine $record.sha256) { throw 'Persistent state changed during startup.' }
         }
         Invoke-MscqrMaintenance $auth 'verify' $journal.binding
+        Assert-MscqrDispatchJournalLive $journal.dispatchJournal
         Assert-MscqrStateDiscovery $journal.stateDiscovery
         Write-MscqrTransaction $journalPath $journal 'VERIFIED'
       } catch {
@@ -444,6 +463,8 @@ function Invoke-MscqrUpgradeTransaction {
       }
     } elseif ($Phase -eq 'Commit') {
       if ($journal.phase -cne 'VERIFIED') { throw 'Unverified upgrade cannot commit.' }
+      Assert-MscqrJournalBinding $journal $journalPath
+      Assert-MscqrDispatchJournalLive $journal.dispatchJournal
       Wait-MscqrRuntime $journal | Out-Null
       Assert-MscqrStateDiscovery $journal.stateDiscovery
       $uninstall=Get-MscqrUninstallSnapshot $live
