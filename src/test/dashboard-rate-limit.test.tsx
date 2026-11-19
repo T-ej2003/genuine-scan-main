@@ -72,6 +72,76 @@ describe("Dashboard rate-limit partial state", () => {
     } as Awaited<ReturnType<typeof apiClient.getAuditLogs>>);
   });
 
+  it("includes assigned, printed, and scanned labels in the workspace percentage", async () => {
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true,
+      data: { total: 250, dormant: 170, allocated: 73, printed: 6, scanned: 0, blocked: 1, scansToday: 0 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const label = await screen.findByText("Labels assigned or printed");
+    expect(label.parentElement).toHaveTextContent("32%");
+    expect(label.parentElement?.parentElement?.querySelector('[role="progressbar"]')).toHaveAttribute("aria-valuenow", "32");
+    const scansCard = screen.getByText("Scans today").closest('[data-testid="dashboard-kpi-card"]');
+    expect(scansCard).not.toBeNull();
+    expect(within(scansCard as HTMLElement).getByText("0")).toBeInTheDocument();
+    expect(within(scansCard as HTMLElement).getByText("Customer scans recorded today")).toBeInTheDocument();
+  });
+
+  it("shows zero percent when there are no nonblocked labels", async () => {
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true, data: { total: 1, byStatus: { BLOCKED: 1 }, scansToday: 0 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const label = await screen.findByText("Labels assigned or printed");
+    expect(label.parentElement).toHaveTextContent("0%");
+    expect(label.parentElement?.parentElement?.querySelector('[role="progressbar"]')).toHaveAttribute("aria-valuenow", "0");
+  });
+
+  it("includes scanned labels in the assigned or printed percentage", async () => {
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true,
+      data: { dormant: 1, allocated: 1, printed: 1, scanned: 1, byStatus: { REDEEMED: 1 }, scansToday: 3 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const label = await screen.findByText("Labels assigned or printed");
+    expect(label.parentElement).toHaveTextContent("75%");
+    const scansCard = screen.getByText("Scans today").closest('[data-testid="dashboard-kpi-card"]');
+    expect(within(scansCard as HTMLElement).getByText("3")).toBeInTheDocument();
+  });
+
+  it("keeps the daily count when a stream snapshot has only status totals", async () => {
+    let onEvent: ((envelope: unknown) => void) | undefined;
+    vi.mocked(apiClient.streamDashboardEvents).mockImplementation((callback) => {
+      onEvent = callback as (envelope: unknown) => void;
+      return () => undefined;
+    });
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true, data: { dormant: 4, allocated: 3, printed: 2, scanned: 1, scansToday: 2 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const scansCard = (await screen.findByText("Scans today")).closest('[data-testid="dashboard-kpi-card"]');
+    await waitFor(() => expect(within(scansCard as HTMLElement).getByText("2")).toBeInTheDocument());
+    act(() => onEvent?.({ type: "snapshot", payload: {
+      summary: { totalQRCodes: 10 }, qrStats: { dormant: 3, allocated: 4, printed: 2, scanned: 1 },
+    } }));
+    expect(within(scansCard as HTMLElement).getByText("2")).toBeInTheDocument();
+  });
+
+  it("shows the QR statistics error when its API request fails", async () => {
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({ success: false, status: 503, error: "unavailable" });
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText("QR statistics are temporarily unavailable.")).toBeInTheDocument();
+    expect(screen.queryByText("Scans today")).not.toBeInTheDocument();
+  });
+
+  it("does not present historical scans as today's count when the field is missing", async () => {
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const scansCard = (await screen.findByText("Scans today")).closest('[data-testid="dashboard-kpi-card"]');
+    expect(scansCard).toHaveTextContent("Unavailable");
+    expect(scansCard).toHaveTextContent("Today's count is temporarily unavailable");
+    expect(scansCard).not.toHaveTextContent("10");
+  });
+
   it("keeps KPI data visible and shows friendly recent activity copy when audit reads are rate-limited", async () => {
     renderWithQueryClient(
       <MemoryRouter>

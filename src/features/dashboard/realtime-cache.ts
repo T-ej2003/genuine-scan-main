@@ -20,8 +20,11 @@ export const applyDashboardSnapshotToCache = (
   payload: Record<string, unknown>
 ) => {
   const summary = normalizeDashboardSummary(payload);
+  const queryKey = [...queryKeys.dashboard.stats(scopedLicenseeId), getAuthenticatedStreamScope()];
+  const previous = queryClient.getQueryData<{ qrStats?: QrStatsDTO | null }>(queryKey)?.qrStats;
   const qrStats = (payload.qrStats || {}) as QrStatsDTO;
-  queryClient.setQueryData([...queryKeys.dashboard.stats(scopedLicenseeId), getAuthenticatedStreamScope()], { summary, qrStats, refreshPaused: false });
+  if (qrStats.scansToday == null && previous?.scansToday != null) qrStats.scansToday = previous.scansToday;
+  queryClient.setQueryData(queryKey, { summary, qrStats, refreshPaused: false });
   return { summary, qrStats };
 };
 

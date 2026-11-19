@@ -37,8 +37,6 @@ type StatusFocus = "all" | "dormant" | "allocated" | "printed" | "scanned";
 type QrStatsDashboardExtras = QrStatsDTO & {
   suspiciousScans?: number;
   suspicious?: number;
-  scansToday?: number;
-  todayScans?: number;
 };
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -291,7 +289,7 @@ export default function Dashboard() {
       dormant: qrStats?.dormant ?? (by.DORMANT ?? 0) + (by.ACTIVE ?? 0),
       allocated: qrStats?.allocated ?? (by.ALLOCATED ?? 0) + (by.ACTIVATED ?? 0),
       printed: qrStats?.printed ?? by.PRINTED ?? 0,
-      scanned: (qrStats?.scanned ?? by.SCANNED ?? 0) + (by.REDEEMED ?? 0),
+      scanned: qrStats?.scanned ?? (by.SCANNED ?? 0) + (by.REDEEMED ?? 0),
     };
   }, [qrStats]);
 
@@ -336,10 +334,11 @@ export default function Dashboard() {
   const focusedRow = statusFocus === "all" ? null : statusRows.find((row) => row.key === statusFocus) || null;
   const totalTracked = statusRows.reduce((acc, row) => acc + row.value, 0);
   const fulfilled = qrStatusData.printed + qrStatusData.scanned;
-  const fulfillmentPct = totalTracked > 0 ? Math.round((fulfilled / totalTracked) * 100) : 0;
+  const assignedOrPrinted = qrStatusData.allocated + fulfilled;
+  const fulfillmentPct = totalTracked > 0 ? Math.round((assignedOrPrinted / totalTracked) * 100) : 0;
   const redemptionPct = fulfilled > 0 ? Math.round((qrStatusData.scanned / fulfilled) * 100) : 0;
   const qrStatsExtras = qrStats as QrStatsDashboardExtras | null;
-  const scansToday = qrStatsExtras?.scansToday ?? qrStatsExtras?.todayScans ?? null;
+  const scansToday = qrStats?.scansToday ?? dashboardQuery.data?.qrStats?.scansToday ?? null;
   const qrLabelsAvailable = qrStatusData.dormant;
 
   const roleLabel = useMemo(() => getRoleDisplayLabel(user?.role, user?.rawRole), [user?.rawRole, user?.role]);
@@ -428,10 +427,10 @@ export default function Dashboard() {
       },
       {
         title: "Scans today",
-        value: scansToday ?? qrStatusData.scanned,
+        value: scansToday ?? "Unavailable",
         icon: FileText,
         variant: "success" as const,
-        subtitle: scansToday == null ? "Today count unavailable; showing all scans" : "Customer scans recorded today",
+        subtitle: scansToday == null ? "Today's count is temporarily unavailable" : "Customer scans recorded today",
         href: APP_PATHS.scanActivity,
         ctaLabel: "View scans",
       },

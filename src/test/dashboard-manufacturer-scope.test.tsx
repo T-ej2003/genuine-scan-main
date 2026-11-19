@@ -101,6 +101,7 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
           REDEEMED: 80,
           BLOCKED: 4,
         },
+        scansToday: 3,
       },
     } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
 
@@ -128,6 +129,9 @@ describe("Dashboard manufacturer multi-licensee scope", () => {
     expect(vi.mocked(apiClient.getQRStats)).toHaveBeenCalledTimes(1);
     expect(screen.getByText("Brand workspaces you can print for")).toBeInTheDocument();
     expect(screen.getByText("900 assigned to manufacturers")).toBeInTheDocument();
+    const scansCard = screen.getByText("Scans today").closest('[data-testid="dashboard-kpi-card"]');
+    expect(scansCard).toHaveTextContent("3");
+    expect(scansCard).toHaveTextContent("Customer scans recorded today");
 
     fireEvent.click(screen.getByText("Open scope details"));
 

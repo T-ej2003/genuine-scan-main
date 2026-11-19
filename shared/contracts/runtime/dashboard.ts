@@ -17,6 +17,7 @@ export const qrStatsSchema = z
     allocated: z.number().optional(),
     printed: z.number().optional(),
     scanned: z.number().optional(),
+    scansToday: z.number().int().nonnegative().optional(),
     byStatus: statusCountRecordSchema.optional(),
     statusCounts: statusCountRecordSchema.optional(),
   })
