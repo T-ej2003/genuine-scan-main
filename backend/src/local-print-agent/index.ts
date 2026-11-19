@@ -479,9 +479,11 @@ app.post("/maintenance/device-proof", async (req, res) => {
   try {
     const challenge = upgradeChallengeSchema.parse(req.body);
     const state = await loadAgentState();
+    const now = Date.now();
+    const expiresAt = Date.parse(challenge.expiresAt);
     if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
-        challenge.sourceVersion !== AGENT_BUILD_VERSION || Date.parse(challenge.expiresAt) <= Date.now() ||
-        Date.parse(challenge.expiresAt) > Date.now() + 120_000) throw new Error("Device proof challenge rejected");
+        challenge.sourceVersion !== AGENT_BUILD_VERSION || expiresAt <= now - 180_000 ||
+        expiresAt > now + 300_000) throw new Error("Device proof challenge rejected");
     return res.json({ success: true, attemptId: challenge.attemptId,
       signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) });
   } catch {
