@@ -25,8 +25,10 @@ try {
   if (-not $failed -or [IO.File]::ReadAllText((Join-Path $journal $reservation)) -ne 'changed') { throw 'Conflicting journal entry was overwritten.' }
   [IO.File]::WriteAllText((Join-Path $journal $reservation),$reservationBody)
   Remove-Item -LiteralPath (Join-Path $journal $attempt)
+  [IO.File]::WriteAllText((Join-Path $journal ($attempt + '.mscqr-restore-next')),'partial copy from interrupted recovery')
   Restore-MscqrDispatchJournal $snapshot
   if ([IO.File]::ReadAllText((Join-Path $journal $attempt)) -ne $attemptBody) { throw 'Missing journal entry was not restored.' }
+  if (Test-Path -LiteralPath (Join-Path $journal ($attempt + '.mscqr-restore-next'))) { throw 'Interrupted restore staging copy was retained.' }
   [IO.File]::WriteAllText((Join-Path $journal 'extra.json'),'new work')
   $failed = $false
   try { Restore-MscqrDispatchJournal $snapshot } catch { $failed = $true }

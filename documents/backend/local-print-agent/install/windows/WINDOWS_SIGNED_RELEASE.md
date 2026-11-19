@@ -92,7 +92,8 @@ existing installer requires `MSCQRAUTH` for every existing installation.
 
 The transaction now snapshots every recognized flat file in the default dispatch journal
 under its private backup directory. It hashes the copy and live directory,
-refuses concurrent changes, restores missing entries without overwriting any
+refuses concurrent changes, atomically publishes flushed and hashed missing
+entries without overwriting any
 existing entry, and retains the backup after recovery. A custom journal path,
 nested layout, or oversized journal fails closed. This preserves evidence for
 an otherwise authorized transaction; it does **not** establish that a legacy

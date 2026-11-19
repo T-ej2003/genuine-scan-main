@@ -191,6 +191,16 @@ function Assert-MscqrDispatchJournalLive($Snapshot) {
 
 function Restore-MscqrDispatchJournal($Snapshot) {
   Assert-MscqrDispatchJournalBackup $Snapshot
+  # A crash may leave only our staged copy. The retained backup remains the
+  # authority; discard that exact staging name before checking live entries.
+  foreach ($record in $Snapshot.records) {
+    $staged = Join-Path $Snapshot.directory ($record.name + '.mscqr-restore-next')
+    if (Test-Path -LiteralPath $staged) {
+      $item = Get-Item -LiteralPath $staged -Force
+      if ($item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unexpected journal restore staging path.' }
+      Remove-Item -LiteralPath $staged -Force
+    }
+  }
   $files = @(Get-MscqrDispatchJournalFiles $Snapshot.directory)
   $expected = @($Snapshot.records | ForEach-Object { $_.name })
   foreach ($file in $files) {
@@ -220,12 +230,15 @@ function Restore-MscqrDispatchJournal($Snapshot) {
     $live = Join-Path $Snapshot.directory $record.name
     if (Test-Path -LiteralPath $live) { continue }
     $source = Join-Path $Snapshot.backup $record.name
+    $staged = $live + '.mscqr-restore-next'
     $inputStream = [IO.File]::Open($source,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     try {
-      $outputStream = New-Object IO.FileStream($live,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
+      $outputStream = New-Object IO.FileStream($staged,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
       try { $inputStream.CopyTo($outputStream); Flush-MscqrUpgradeSnapshot $outputStream }
       finally { $outputStream.Dispose() }
     } finally { $inputStream.Dispose() }
+    if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $record.sha256) { throw 'Journal restore staging hash mismatch.' }
+    [IO.File]::Move($staged,$live)
   }
   Assert-MscqrDispatchJournalLive $Snapshot
 }
