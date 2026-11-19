@@ -1643,6 +1643,7 @@ const startPersistentPrintSessionWorker = () => {
       if (maintenanceFenced()) break;
       const backendUrl = await resolveBackendUrl();
       const selection = backendUrl ? await resolveSelection().catch(() => null) : null;
+      if (maintenanceFenced()) break;
       if (!backendUrl || !selection) {
         updatePersistentSessionStatus({
           connected: false,
