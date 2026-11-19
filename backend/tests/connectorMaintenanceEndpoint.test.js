@@ -31,6 +31,24 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     assert.equal(spawnSync(process.execPath, [connector, '--initialize-state'], { env }).status, 0);
     await start();
     const url = `http://127.0.0.1:${port}/maintenance`;
+    const state = JSON.parse(await fs.readFile(env.PRINT_AGENT_STATE_FILE, 'utf8'));
+    const sourceVersion = spawnSync(process.execPath, [connector, '--version'], { env, encoding: 'utf8' }).stdout.trim();
+    const deviceProof = require('../dist/services/connectorUpgradeDeviceProof');
+    const challenge = deviceProof.createUpgradeDeviceChallenge({ agentId: state.agentId,
+      deviceFingerprint: state.deviceFingerprint, manufacturerId: 'manufacturer-test', tenantId: 'tenant-test',
+      printerId: 'd5e8d13e-4d73-411b-9b3f-6d1800e73609', registrationId: '839e55cd-86ea-4523-8544-ff4a62a15158',
+      sourceVersion, targetVersion: '2026.11.20.1' });
+    const proofResponse = await fetch(`${url}/device-proof`, { method: 'POST', headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
+      body: JSON.stringify(challenge) });
+    assert.equal(proofResponse.status, 200);
+    const signed = await proofResponse.json();
+    assert.equal(deviceProof.verifyUpgradeDeviceChallenge({ challenge, signature: signed.signature,
+      publicKeyPem: state.publicKeyPem, binding: { agentId: state.agentId, deviceFingerprint: state.deviceFingerprint,
+        manufacturerId: 'manufacturer-test', tenantId: 'tenant-test', printerId: challenge.printerId,
+        registrationId: challenge.registrationId, sourceVersion, targetVersion: challenge.targetVersion } }).attemptId, challenge.attemptId);
+    const wrongDevice = await fetch(`${url}/device-proof`, { method: 'POST', headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
+      body: JSON.stringify({ ...challenge, deviceFingerprint: 'device-other' }) });
+    assert.equal(wrongDevice.status, 403);
     assert.equal((await fetch(`${url}/fence`, { method: 'POST', headers: { origin: 'https://evil.example' } })).status, 403);
     const response = await fetch(`${url}/fence`, { method: 'POST', headers: { origin: 'https://www.mscqr.com' } });
     assert.equal(response.status, 200);

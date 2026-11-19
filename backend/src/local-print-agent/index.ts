@@ -39,6 +39,7 @@ import {
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "./crypto";
+import { signUpgradeDeviceChallenge, upgradeChallengeSchema } from "../services/connectorUpgradeDeviceProof";
 import { enterMaintenanceFence, maintenanceCheckpoint } from "./maintenanceFence";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
@@ -471,6 +472,21 @@ app.post("/maintenance/fence", (_req, res) => {
 app.get("/maintenance/checkpoint", (_req, res) => {
   res.setHeader("Cache-Control", "no-store");
   return res.json({ ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() });
+});
+
+app.post("/maintenance/device-proof", async (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    const challenge = upgradeChallengeSchema.parse(req.body);
+    const state = await loadAgentState();
+    if (challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
+        challenge.sourceVersion !== AGENT_BUILD_VERSION || Date.parse(challenge.expiresAt) <= Date.now() ||
+        Date.parse(challenge.expiresAt) > Date.now() + 120_000) throw new Error("Device proof challenge rejected");
+    return res.json({ success: true, attemptId: challenge.attemptId,
+      signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) });
+  } catch {
+    return res.status(403).json({ success: false, error: "Connector upgrade device challenge was rejected." });
+  }
 });
 
 app.get("/printers", async (_req, res) => {

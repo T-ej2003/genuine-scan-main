@@ -119,3 +119,22 @@ signed target version containing it is installed. They remain unsupported for
 automatic upgrade. General upgrade publication stays blocked until a separate
 authority verifies device proof, backend fencing, durable work state, and the
 existing installer transaction passes a real Windows upgrade certification.
+
+## Upgrade attempt device proof
+
+The authenticated manufacturer maintenance route can issue a two-minute device
+challenge only for a trusted, currently connected registration and a newer
+production-signed target release explicitly marked `certified-upgrade`. The
+challenge binds a random attempt ID and
+nonce to the agent, fingerprint, manufacturer, tenant, printer registration,
+source version, and target version. A connector containing the device-proof
+endpoint signs the canonical, domain-separated challenge with its existing
+Ed25519 identity key. The backend consumes the Redis challenge atomically,
+checks the live registration and signed session again, and retains a short-lived
+proof hash. Replays, scope substitutions, expired challenges, stale sessions,
+and changed release status fail closed. No private key leaves the connector.
+
+Device proof is only one input to a future independent evidence authority. It
+does not establish print isolation, journal integrity, physical reconciliation,
+or MSCQRAUTH issuance. Installed versions that lack this endpoint remain
+unsupported for automatic upgrade, and the signed release guard stays closed.

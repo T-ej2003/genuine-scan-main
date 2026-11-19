@@ -1,4 +1,5 @@
 import { requestConnectorMaintenance } from "../controllers/printerMaintenanceController";
+import { issueConnectorUpgradeChallenge, verifyConnectorUpgradeProof } from "../controllers/connectorUpgradeDeviceProofController";
 import { Request, type RequestHandler, Router } from "express";
 import {
   authenticate,
@@ -1860,6 +1861,21 @@ protectedMutationRouter.post(
   printMutationActorLimiter,
   requireCsrf,
   requestConnectorMaintenance
+);
+for (const [path, handler] of [
+  ["/manufacturer/printers/:id/maintenance/challenge", issueConnectorUpgradeChallenge],
+  ["/manufacturer/printers/:id/maintenance/device-proof", verifyConnectorUpgradeProof],
+] as const) protectedMutationRouter.post(path,
+  printMutationPreAuthRouteLimiter,
+  authenticate,
+  requireOpsUser,
+  requireRecentSensitiveAuth,
+  enforceTenantIsolation,
+  printMutationRouteLimiter,
+  printMutationIpLimiter,
+  printMutationActorLimiter,
+  requireCsrf,
+  handler
 );
 protectedMutationRouter.post(
   "/manufacturer/printers/:id/relink-local-agent",
