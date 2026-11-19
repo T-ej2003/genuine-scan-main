@@ -122,7 +122,7 @@ begin
      FileExists(ExpandConstant('{%USERPROFILE}\.authenticqr\local-print-agent-state.json'));
   if UpgradeMode then begin
     if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin
-      Result := 'Existing connector requires authenticated maintenance and independently verified reconciliation. Supply MSCQRAUTH. No upgrade was performed.';
+      Result := 'This connector cannot be upgraded automatically yet. Your existing installation and printer settings are unchanged. Please contact MSCQR support.';
       exit;
     end;
     ExtractTemporaryFiles('mscqr-payload\*');

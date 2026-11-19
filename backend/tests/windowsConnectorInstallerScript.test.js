@@ -210,6 +210,10 @@ const run = async () => {
     "app", "cmd", "tmp", "srcexe", "sys", "%USERPROFILE",
     "param:MSCQRAUTH|", "param:MSCQRRECOVER|",
   ]);
+  assert(installerTemplate.includes("if ExpandConstant('{param:MSCQRAUTH|}') = '' then begin") &&
+    installerTemplate.includes('This connector cannot be upgraded automatically yet. Your existing installation and printer settings are unchanged. Please contact MSCQR support.') &&
+    !installerTemplate.includes('Supply MSCQRAUTH.'),
+    'An unsupported existing installation must remain guarded and receive a manufacturer-facing message');
   for (const [, pathExpression] of installerTemplate.matchAll(/ExpandConstant\('([^']+)'\)/g)) {
     for (const [, constant] of pathExpression.matchAll(/\{([^{}]+)\}/g)) {
       assert(supportedInnoConstants.has(constant), "Unsupported Inno runtime constant: " + constant);
