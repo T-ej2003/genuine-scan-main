@@ -211,7 +211,7 @@ function Restore-MscqrDispatchJournal($Snapshot) {
     [IO.Directory]::CreateDirectory($Snapshot.directory) | Out-Null
     $acl = New-Object System.Security.AccessControl.DirectorySecurity
     $acl.SetAccessRuleProtection($true,$false)
-    foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User,(New-Object Security.Principal.SecurityIdentifier('S-1-5-18'))) {
+    foreach ($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User,(New-Object Security.Principal.SecurityIdentifier('S-1-5-18')))) {
       $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow')))
     }
     Set-Acl -LiteralPath $Snapshot.directory -AclObject $acl
