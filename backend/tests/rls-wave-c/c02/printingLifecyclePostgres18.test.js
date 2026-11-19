@@ -1423,7 +1423,30 @@ async function main() {
   const authority=generateKeyPairSync('ed25519');
   process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM=authority.publicKey.export({type:'spki',format:'pem'}).toString();
   const maintenanceServer=await new Promise(resolve=>{const server=createBackendApp().listen(0,'127.0.0.1',()=>resolve(server));});
+  let lastAuthorizeEvidence;
   const postMaintenance=async(name,body,expected,printerId=ids.printer)=>{
+    if(body?.action==='authorize' && body.evidence?.signature!=='AAAA' && !JSON.parse(body.evidence.statement).challengeId) {
+      const statement=JSON.parse(body.evidence.statement);
+      const challengeId=randomUUID();
+      const proofSha256=hash(challengeId);
+      const challenge={purpose:'mscqr-connector-upgrade-device-proof-v1',attemptId:statement.binding.attemptId,
+        challengeId,nonce:'N'.repeat(43),agentId:statement.binding.agentId,
+        deviceFingerprint:statement.binding.deviceFingerprint,manufacturerId:statement.binding.manufacturerId,
+        tenantId:statement.binding.tenantId,printerId:statement.binding.printerId,
+        registrationId:statement.binding.registrationId,sourceVersion:statement.binding.sourceVersion,
+        currentVersion:statement.binding.sourceVersion,
+        targetVersion:statement.binding.targetVersion,expiresAt:new Date(Date.now()+120000).toISOString()};
+      const redis=await require('../../../dist/services/redisService').getRedisClient();
+      assert(redis,'disposable PostgreSQL certification requires Redis for device proof');
+      await redis.set(`connector-upgrade:attempt:${challenge.attemptId}`,
+        JSON.stringify({...Object.fromEntries(['agentId','deviceFingerprint','manufacturerId','tenantId','printerId',
+          'registrationId','sourceVersion','targetVersion'].map(key=>[key,challenge[key]])),
+          fenceRequestId:statement.binding.fenceRequestId}), 'PX',900000);
+      await redis.set(`connector-upgrade:proof:${challengeId}`,JSON.stringify({challenge,proofSha256}),'PX',120000);
+      const next=JSON.stringify({...statement,challengeId,deviceProofSha256:proofSha256});
+      body={...body,evidence:{statement:next,signature:require('crypto').sign(null,Buffer.from(next),authority.privateKey).toString('base64')}};
+      lastAuthorizeEvidence=body.evidence;
+    }
     const role=name==='maker'?'MANUFACTURER_ADMIN':'LICENSEE_ADMIN';
     const scopeVersion=name==='maker'?psql(admin,`SELECT to_char("updatedAt" AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') FROM public."ManufacturerLicenseeLink" WHERE "manufacturerId"='${ids.maker}' AND "licenseeId"='${ids.licenseeA}'`):null;
     const headers=name?{authorization:`Bearer ${signAccessToken({userId:ids[name],email:'printing-http@example.invalid',role,sessionId:ids[`${name}Refresh`],orgId:name==='outsider'?ids.orgB:ids.orgA,licenseeId:name==='outsider'?ids.licenseeB:ids.licenseeA,scopeVersion,authenticatedAt:new Date().toISOString()})}`,
@@ -1458,6 +1481,7 @@ async function main() {
     // fixture below requires every entry for a real three-item unresolved set.
     await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,binding:{...binding,tenantId:ids.orgB}})},409);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
+    await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},403);
     let token=authorityResult.data.token;
     await postMaintenance('maker',{action:'consume',token,binding:{...binding,attemptId:randomUUID()}},403);
     const consumeResults=await Promise.all([postMaintenance('maker',{action:'consume',token,binding}),postMaintenance('maker',{action:'consume',token,binding})]);

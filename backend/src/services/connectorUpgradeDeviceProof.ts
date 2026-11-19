@@ -6,6 +6,7 @@ const purpose = "mscqr-connector-upgrade-device-proof-v1";
 export const upgradeChallengeSchema = z.object({
   purpose: z.literal(purpose),
   attemptId: z.string().uuid(),
+  challengeId: z.string().uuid(),
   nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   agentId: z.string().min(3).max(180),
   deviceFingerprint: z.string().min(8).max(256),
@@ -14,19 +15,22 @@ export const upgradeChallengeSchema = z.object({
   printerId: z.string().uuid(),
   registrationId: z.string().uuid(),
   sourceVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
+  currentVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
   targetVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
   expiresAt: z.string().datetime(),
 }).strict();
 export type UpgradeDeviceChallenge = z.infer<typeof upgradeChallengeSchema>;
+export const upgradeAttemptKey = (id: string) => `connector-upgrade:attempt:${id}`;
+export const upgradeProofKey = (id: string) => `connector-upgrade:proof:${id}`;
 
-export const createUpgradeDeviceChallenge = (binding: Omit<UpgradeDeviceChallenge, "purpose" | "attemptId" | "nonce" | "expiresAt">, now = Date.now()): UpgradeDeviceChallenge =>
-  upgradeChallengeSchema.parse({ ...binding, purpose, attemptId: randomUUID(), nonce: randomBytes(32).toString("base64url"),
+export const createUpgradeDeviceChallenge = (binding: Omit<UpgradeDeviceChallenge, "purpose" | "challengeId" | "nonce" | "expiresAt">, now = Date.now()): UpgradeDeviceChallenge =>
+  upgradeChallengeSchema.parse({ ...binding, purpose, challengeId: randomUUID(), nonce: randomBytes(32).toString("base64url"),
     expiresAt: new Date(now + 120_000).toISOString() });
 
 export const canonicalUpgradeDeviceChallenge = (input: UpgradeDeviceChallenge) => {
   const c = upgradeChallengeSchema.parse(input);
-  return JSON.stringify([c.purpose, c.attemptId, c.nonce, c.agentId, c.deviceFingerprint,
-    c.manufacturerId, c.tenantId, c.printerId, c.registrationId, c.sourceVersion, c.targetVersion, c.expiresAt]);
+  return JSON.stringify([c.purpose, c.attemptId, c.challengeId, c.nonce, c.agentId, c.deviceFingerprint,
+    c.manufacturerId, c.tenantId, c.printerId, c.registrationId, c.sourceVersion, c.currentVersion, c.targetVersion, c.expiresAt]);
 };
 
 export const signUpgradeDeviceChallenge = (privateKeyPem: string, input: UpgradeDeviceChallenge) =>
@@ -36,7 +40,7 @@ export const verifyUpgradeDeviceChallenge = (input: {
   challenge: UpgradeDeviceChallenge;
   signature: string;
   publicKeyPem: string;
-  binding: Omit<UpgradeDeviceChallenge, "purpose" | "attemptId" | "nonce" | "expiresAt">;
+  binding: Omit<UpgradeDeviceChallenge, "purpose" | "challengeId" | "nonce" | "expiresAt">;
   now?: number;
 }) => {
   const c = upgradeChallengeSchema.parse(input.challenge);

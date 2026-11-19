@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { generateKeyPairSync } = require('node:crypto');
+const { generateKeyPairSync, randomUUID } = require('node:crypto');
 const path = require('node:path');
 const dist = path.resolve(__dirname, '../dist');
 const mock = (name, exports) => { const filename = require.resolve(path.join(dist, name)); require.cache[filename] = { id: filename, filename, loaded: true, exports }; };
@@ -9,8 +9,9 @@ const privateKeyPem = keys.privateKey.export({ type: 'pkcs8', format: 'pem' }).t
 const publicKeyPem = keys.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const printerId = 'd5e8d13e-4d73-411b-9b3f-6d1800e73609';
 const registrationId = '839e55cd-86ea-4523-8544-ff4a62a15158';
-const binding = { agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'manufacturer-1',
-  tenantId: 'tenant-1', printerId, registrationId, sourceVersion: '2026.11.19.1', targetVersion: '2026.11.20.1' };
+const binding = { attemptId: randomUUID(), agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'manufacturer-1',
+  tenantId: 'tenant-1', printerId, registrationId, sourceVersion: '2026.11.19.1',
+  currentVersion: '2026.11.19.1', targetVersion: '2026.11.20.1' };
 const proof = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
 
 const challenge = proof.createUpgradeDeviceChallenge(binding, 1000);
@@ -28,11 +29,12 @@ assert.throws(() => proof.verifyUpgradeDeviceChallenge({ challenge, signature, p
 
 const redisRecords = new Map();
 const redis = {
-  set: async (key, value, _px, _ttl, _nx) => { if (redisRecords.has(key)) return null; redisRecords.set(key, value); return 'OK'; },
+  set: async (key, value, _px, _ttl, nx) => { if (nx === 'NX' && redisRecords.has(key)) return null; redisRecords.set(key, value); return 'OK'; },
+  get: async key => redisRecords.get(key) || null,
   eval: async (_script, _count, key) => { const value = redisRecords.get(key) || null; redisRecords.delete(key); return value; },
 };
 let tenantId = binding.tenantId;
-mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { readUpgradeDeviceBinding: async ({ printerId: id }) => {
+mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrintingPrinter: async () => ({state:'DISPATCH_FENCED',requestId:'fence-1'}), readUpgradeDeviceBinding: async ({ printerId: id }) => {
   assert.equal(id, printerId);
   return { ...binding, tenantId, publicKeyPem };
 } });
@@ -50,15 +52,28 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   assert.equal(issued.code, 200);
   const signed = proof.signUpgradeDeviceChallenge(privateKeyPem, issued.body.challenge);
   const accepted = response();
-  await controller.verifyConnectorUpgradeProof(request({ attemptId: issued.body.challenge.attemptId, signature: signed }), accepted);
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.challenge.challengeId, signature: signed }), accepted);
   assert.equal(accepted.code, 200);
   const replay = response();
-  await controller.verifyConnectorUpgradeProof(request({ attemptId: issued.body.challenge.attemptId, signature: signed }), replay);
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: issued.body.challenge.challengeId, signature: signed }), replay);
+  assert.equal(issued.body.challenge.attemptId, accepted.body.attemptId);
+  redisRecords.set(proof.upgradeAttemptKey(accepted.body.attemptId), JSON.stringify({ ...binding,
+    attemptId: undefined, fenceRequestId: 'fence-1' }));
+  const recovery = response();
+  await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion,
+    attemptId: accepted.body.attemptId }), recovery);
+  assert.equal(recovery.code, 200);
+  assert.equal(recovery.body.challenge.attemptId, accepted.body.attemptId);
+  assert.notEqual(recovery.body.challenge.challengeId, issued.body.challenge.challengeId);
+  const recovered = response();
+  await controller.verifyConnectorUpgradeProof(request({challengeId: recovery.body.challenge.challengeId,
+    signature: proof.signUpgradeDeviceChallenge(privateKeyPem, recovery.body.challenge)}), recovered);
+  assert.equal(recovered.code, 200);
   assert.equal(replay.code, 403);
   const second = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), second);
   const forged = response();
-  await controller.verifyConnectorUpgradeProof(request({ attemptId: second.body.challenge.attemptId,
+  await controller.verifyConnectorUpgradeProof(request({ challengeId: second.body.challenge.challengeId,
     signature: proof.signUpgradeDeviceChallenge(generateKeyPairSync('ed25519').privateKey.export({ type: 'pkcs8', format: 'pem' }).toString(), second.body.challenge) }), forged);
   assert.equal(forged.code, 403);
   const crossManufacturer = response();
