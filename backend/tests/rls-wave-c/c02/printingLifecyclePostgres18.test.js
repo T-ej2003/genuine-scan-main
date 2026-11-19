@@ -1443,7 +1443,13 @@ async function main() {
           'registrationId','sourceVersion','targetVersion'].map(key=>[key,challenge[key]])),
           fenceRequestId:statement.binding.fenceRequestId}), 'PX',900000);
       await redis.set(`connector-upgrade:proof:${challengeId}`,JSON.stringify({challenge,proofSha256}),'PX',120000);
-      const next=JSON.stringify({...statement,challengeId,deviceProofSha256:proofSha256});
+      const withProof={...statement,challengeId,deviceProofSha256:proofSha256};
+      if(typeof statement.padding==='string') {
+        // Preserve the signed-size boundary exercised by the history fixture.
+        const added=JSON.stringify(withProof).length-body.evidence.statement.length;
+        if(added>0 && withProof.padding.length>=added) withProof.padding=withProof.padding.slice(added);
+      }
+      const next=JSON.stringify(withProof);
       body={...body,evidence:{statement:next,signature:require('crypto').sign(null,Buffer.from(next),authority.privateKey).toString('base64')}};
       lastAuthorizeEvidence=body.evidence;
     }
@@ -1480,6 +1486,13 @@ async function main() {
     // Empty reconciliation is valid for this now-settled workset. The history
     // fixture below requires every entry for a real three-item unresolved set.
     await postMaintenance('maker',{action:'authorize',evidence:signedEvidence({...statement,binding:{...binding,tenantId:ids.orgB}})},409);
+    // Earlier lifecycle cases share the same actor quota; isolate the renewal
+    // assertions without changing the production rate limit.
+    const rateRedis=await require('../../../dist/services/redisService').getRedisClient();
+    assert(rateRedis);
+    const routeKey=require('../../../dist/middleware/publicRateLimit').buildPublicActorRateLimitKey(
+      {user:{userId:ids.maker}},'print.mutation',req=>req.user.userId);
+    await rateRedis.del(`rl:${routeKey}`);
     const authorityResult=await postMaintenance('maker',{action:'authorize',evidence:signedEvidence(statement)},200);
     await postMaintenance('maker',{action:'authorize',evidence:lastAuthorizeEvidence},403);
     const expiredChallengeId=randomUUID();
@@ -1518,7 +1531,11 @@ async function main() {
     assert.equal(released.data.dispatchFenced,false);
     assert.equal(json(app,maintenanceSql(caps.maker,'MAINTENANCE_STATUS')).state,'ACTIVE');
     await require('./maintenanceHistoryFixture')({admin,app,psql,psqlAsync,ids,capability:caps.maker,templateJobId:created.job.id,postMaintenance,binding,statement,signedEvidence,hash});
-  } finally {await new Promise(resolve=>maintenanceServer.close(resolve));delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;}
+  } finally {
+    await new Promise(resolve=>maintenanceServer.close(resolve));
+    await require('../../../dist/services/redisService').closeRedisConnections();
+    delete process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM;
+  }
 
   const stopJobId = "50000000-0000-4000-8000-000000000597";
   const stopBatchId = "50000000-0000-4000-8000-000000000503";
