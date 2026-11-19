@@ -31,7 +31,7 @@ import {
 } from "./state";
 import { buildDiagnosticTestZplPayload } from "./render";
 import { startGatewayWorker } from "./gateway";
-import { getPersistentPrintSessionStatus, requestDirectPrintWake, startDirectPrintWorker } from "./directPrintWorker";
+import { directPrintSocketClosed, getPersistentPrintSessionStatus, requestDirectPrintWake, startDirectPrintWorker, stopDirectPrintAcquisition } from "./directPrintWorker";
 import { buildPrinterAgentHeartbeatPayload, signPrinterAgentPayload } from "../services/printerAgentSigningService";
 import {
   LOCAL_AGENT_CAPABILITIES,
@@ -39,6 +39,7 @@ import {
   LOCAL_AGENT_TRANSPORT_DIAGNOSTICS_VERSION,
 } from "../services/localAgentProtocol";
 import { randomOpaqueToken } from "./crypto";
+import { enterMaintenanceFence, maintenanceCheckpoint } from "./maintenanceFence";
 import { resolveLocalPrintAgentBuildVersion, resolveLocalPrintAgentVersion } from "./version";
 
 const app = express();
@@ -455,6 +456,21 @@ app.get("/status", async (_req, res) => {
       },
     });
   }
+});
+
+// Local checkpoint only. It is never independent isolation evidence or upgrade authorization.
+app.post("/maintenance/fence", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    enterMaintenanceFence();
+    stopDirectPrintAcquisition();
+    return res.json({ success: true, checkpoint: { ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() } });
+  }
+  catch { return res.status(503).json({ success: false, error: "Maintenance fence could not be persisted; printing remains stopped." }); }
+});
+app.get("/maintenance/checkpoint", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() });
 });
 
 app.get("/printers", async (_req, res) => {

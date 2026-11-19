@@ -1,6 +1,7 @@
 import os from "os";
 import { executeGatewayAttempt, flushGatewayPreDispatchFailures } from "./gatewayAttempt";
 import { reserveAutomaticDispatch } from "./dispatchJournal";
+import { maintenanceFenced, runUnfencedWork } from "./maintenanceFence";
 import { createHash } from "crypto";
 
 import { renderPdfLabelBuffer } from "../printing/pdfLabel";
@@ -459,6 +460,7 @@ const reportPreDispatchFailure = async (failure: any) => {
 };
 
 export const runGatewayCycle = async (connectionType: GatewayConnectionType) => {
+  return runUnfencedWork(async () => {
   const context = { gatewayId: GATEWAY_ID, backendUrl: BACKEND_URL, connectionType };
   await flushGatewayPreDispatchFailures(context, reportPreDispatchFailure);
   // A queued diagnostic owns this printer's physical evidence lease. Claim it
@@ -475,6 +477,7 @@ export const runGatewayCycle = async (connectionType: GatewayConnectionType) => 
       else await runIppJob(job, guardedReserve);
     }
   }, reportPreDispatchFailure);
+  });
 };
 export const startGatewayWorker = () => {
   if (!configured()) {
@@ -486,6 +489,7 @@ export const startGatewayWorker = () => {
   const loop = async () => {
     while (!stopped) {
       try {
+        if (maintenanceFenced()) break;
         const heartbeatData = await heartbeat(null);
         connectionType = (heartbeatData?.connectionType as GatewayConnectionType | undefined) || connectionType;
         if (connectionType) {
