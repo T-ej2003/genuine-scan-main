@@ -51,7 +51,7 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     assert.equal(wrongDevice.status, 403);
     const skewed = await fetch(`${url}/device-proof`, { method: 'POST', headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
       body: JSON.stringify({ ...challenge, expiresAt: new Date(Date.now() + 250_000).toISOString() }) });
-    assert.equal(skewed.status, 200, 'connector clock skew must not block a server-valid challenge');
+    assert.equal(skewed.status, 200, 'connector clock skew must not block a plausible server challenge');
     const implausible = await fetch(`${url}/device-proof`, { method: 'POST', headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' },
       body: JSON.stringify({ ...challenge, expiresAt: new Date(Date.now() + 360_000).toISOString() }) });
     assert.equal(implausible.status, 403);
