@@ -97,6 +97,19 @@ async function main() {
   const redisUrl = new URL(process.env.REDIS_URL || "");
   assert(["127.0.0.1", "localhost", "redis"].includes(redisUrl.hostname), "Printing worker certification requires disposable Redis");
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int / 10000")), 18);
+  const upgradeBindingSql = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8")
+    .replaceAll("{{APP_ROLE}}", "mscqr_rls_cert_app");
+  psql(admin, `BEGIN;
+    SET ROLE "mscqr_rls_cert_owner";
+    GRANT CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_auth_owner";
+    ${upgradeBindingSql}
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_owner";
+    REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
+    COMMIT;`);
   const idempotencyKeyHash = hash("printing-idempotency-key");
   const idempotencyRequestHash = hash("printing-idempotency-request");
   const abortedKeyHash = hash("printing-idempotency-aborted-key");
@@ -183,6 +196,7 @@ async function main() {
       discovered: true, queueAvailable: true, online: true },
     printerId: ids.discoveredPrinter, selectedPrinterId: "printing-native",
     agentId: "printing-agent", deviceFingerprint: "printing-device",
+    connectorVersion: "2026.11.19.1",
     publicKeyFingerprint: hash(signingPublicKey), ...extra,
   });
   const sessionSql = (operation, id, payload, reg = ids.registration) =>
@@ -215,6 +229,17 @@ async function main() {
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
+  const deviceBinding = (capability) => `SELECT app_rls.printing_upgrade_device_binding(
+    '${capability}','${requestId()}','${ids.discoveredPrinter}')`;
+  const trustedDevice = json(app, deviceBinding(caps.maker));
+  assert.equal(trustedDevice.registrationId, ids.registration);
+  assert.equal(trustedDevice.manufacturerId, ids.maker);
+  assert.equal(trustedDevice.tenantId, ids.orgA);
+  assert.equal(trustedDevice.publicKeyPem, signingPublicKey);
+  assert.equal(trustedDevice.sourceVersion, "2026.11.19.1");
+  denied(app, deviceBinding(caps.outsider), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  denied(app, deviceBinding(caps.checker), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, 'SELECT "agentId" FROM public."PrinterAgentSession" LIMIT 1', /permission denied/);
   denied(app, advance(sessionA, 1), /CONNECTOR_SESSION_REPLAY/);
   psql(admin, `UPDATE public."PrinterRegistration" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.registration}';
     UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
@@ -224,6 +249,7 @@ async function main() {
   const parallel = await Promise.all([psqlAsync(app, advance(sessionA, 2)), psqlAsync(app, advance(sessionA, 2))]);
   assert.deepEqual(parallel.map(result => result.status === 0).sort(), [false, true]);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds' WHERE id='${sessionA}'`);
+  denied(app, deviceBinding(caps.maker), /query returned no rows|NO_DATA_FOUND/);
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   assert.equal(json(app, advance(sessionA, 3)).lastMessageSeq, 3);
   assert.equal(json(app, sessionSql("CHECK", sessionA, {})).state, "CONNECTED");

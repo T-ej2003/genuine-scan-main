@@ -5,8 +5,8 @@ export type LatestConnectorReleaseInfo = {
   release?: {
     productionSignedAvailable?: boolean;
     platforms?: {
-      macos?: { installationScope?: "fresh-install-only" | null } | null;
-      windows?: { installationScope?: "fresh-install-only" | null } | null;
+      macos?: { installationScope?: "fresh-install-only" | "certified-upgrade" | null } | null;
+      windows?: { installationScope?: "fresh-install-only" | "certified-upgrade" | null } | null;
     };
   };
 } | null;
@@ -43,7 +43,7 @@ export const evaluateConnectorCompatibility = (input: CompatibilityInput) => {
   const minimum = parts(input.minimumBuildVersion);
   const latest = parts(input.latestVersion);
   const freshOnly = input.installationScope === "fresh-install-only";
-  const knownScope = !input.installationScope || freshOnly;
+  const knownScope = !input.installationScope || freshOnly || input.installationScope === "certified-upgrade";
   const protocolMismatch = Boolean(input.protocolVersion && input.requiredProtocol && input.protocolVersion !== input.requiredProtocol);
   const belowMinimum = Boolean(installed && minimum && compare(installed, minimum) < 0);
   const unsupported = Boolean(input.backendUpdateRequired || protocolMismatch || belowMinimum);

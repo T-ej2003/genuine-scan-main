@@ -66,6 +66,7 @@ REVOKE ALL ON FUNCTION app_rls.printing_reissue_request(text,text,text,text,text
 REVOKE ALL ON FUNCTION app_rls.printing_worker_reconcile(text,text,integer) FROM PUBLIC;
 REVOKE ALL ON FUNCTION app_rls.printing_worker_network_job(text,text,text,jsonb) FROM PUBLIC;
 
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_device_binding(text,text,text);
 DROP FUNCTION IF EXISTS app_rls.printing_worker_reconcile(text,text,integer);
 DROP FUNCTION IF EXISTS app_rls.printing_worker_network_job(text,text,text,jsonb);
 DROP FUNCTION IF EXISTS app_rls.printing_reissue_request(text,text,text,text,text,text,integer,text,text,text,text);

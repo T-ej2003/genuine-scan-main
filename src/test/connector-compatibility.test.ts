@@ -26,7 +26,7 @@ describe("connector compatibility and installation matrix", () => {
     ["J missing minimum", { minimumBuildVersion: null }, "unknown", null, false],
     ["K historical missing scope", { installationScope: null }, "supported", false, true],
     ["L fresh only latest", {}, "supported", false, false],
-    ["M upgrade certified latest", { installationScope: null }, "supported", false, true],
+    ["M upgrade certified latest", { installationScope: "certified-upgrade" }, "supported", false, true],
     ["N unreachable connector", { reachable: false, buildVersion: null }, "unknown", null, true],
     ["O backend session rejected", { backendUpdateRequired: true }, "unsupported", true, false],
     ["P backend CONNECTOR_UPDATE_REQUIRED", { backendUpdateRequired: true }, "unsupported", true, false],

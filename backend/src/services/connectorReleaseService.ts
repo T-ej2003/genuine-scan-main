@@ -25,7 +25,7 @@ const connectorCapabilitiesSchema = z
 
 const connectorPlatformSchema = z.object({
   label: z.string().min(2),
-  installationScope: z.enum(["fresh-install-only"]).optional(),
+  installationScope: z.enum(["fresh-install-only", "certified-upgrade"]).optional(),
   installerKind: z.enum(["pkg", "zip", "exe", "msi"]),
   artifactType: z
     .enum(["macos-signed-package", "windows-signed-installer", "windows-unsigned-test-zip", "windows-legacy-installer"])

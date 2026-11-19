@@ -56,6 +56,16 @@ export const administerPrintingPrinter = (input: {
     ) AS result
   `);
 
+export const readUpgradeDeviceBinding = (input: {
+  capability: string;
+  requestId: string;
+  printerId: string;
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_upgrade_device_binding(
+    ${input.capability}::text,${input.requestId}::text,${input.printerId}::text
+  ) AS result
+`);
+
 export const beginPrintingIdempotency = (input: {
   capability: string;
   requestId: string;

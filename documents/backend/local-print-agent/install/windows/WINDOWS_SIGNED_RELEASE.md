@@ -119,3 +119,20 @@ signed target version containing it is installed. They remain unsupported for
 automatic upgrade. General upgrade publication stays blocked until a separate
 authority verifies device proof, backend fencing, durable work state, and the
 existing installer transaction passes a real Windows upgrade certification.
+
+## Upgrade attempt device proof
+
+The connector can sign a canonical, domain-separated, two-minute challenge with
+its existing Ed25519 device key. The challenge binds the attempt, nonce, agent,
+manufacturer, tenant, printer, registration, and source and target versions.
+The verifier rejects expiry, altered bindings, and incorrect keys. The private
+key remains on the connector.
+
+The manufacturer challenge route reads the trusted registration and current
+signed session through the incremental `printing_upgrade_device_binding` SQL
+function. It calls the existing authenticated maintenance boundary in the same
+transaction and then reads through existing printing RLS policies. The function
+must be installed before enabling this route in production. The challenge is consumed
+once in Redis, and verification repeats the live binding check. This proof
+does not establish print isolation, reconciliation, or MSCQRAUTH. The signed
+release upgrade guard remains closed.
