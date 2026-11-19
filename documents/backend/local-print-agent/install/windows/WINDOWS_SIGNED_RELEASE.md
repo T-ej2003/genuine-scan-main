@@ -128,9 +128,10 @@ manufacturer, tenant, printer, registration, and source and target versions.
 The verifier rejects expiry, altered bindings, and incorrect keys. The private
 key remains on the connector.
 
-A production challenge issuer and consumer still requires a dedicated RLS
-projection of the trusted registration and current signed session. A direct
-Prisma lookup after the existing printing boundary cannot access those rows
-under the app role. No manufacturer challenge route is enabled by this change.
-This proof does not establish print isolation, reconciliation, or MSCQRAUTH.
-The signed release upgrade guard remains closed.
+The manufacturer challenge route reads the trusted registration and current
+signed session through `MAINTENANCE_DEVICE_BINDING` inside the authenticated
+printing RLS boundary. The SQL replacement and updated printer policy must be
+installed before enabling this route in production. The challenge is consumed
+once in Redis, and verification repeats the live binding check. This proof
+does not establish print isolation, reconciliation, or MSCQRAUTH. The signed
+release upgrade guard remains closed.
