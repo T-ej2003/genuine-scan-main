@@ -2275,6 +2275,10 @@ async function main() {
   const functionRollbackAt = rollback.indexOf("REVOKE ALL ON FUNCTION");
   assert(functionRollbackAt > 0, "printing rollback must separate policy and function ownership phases");
   psql(admin, `BEGIN;
+    SET LOCAL ROLE "mscqr_rls_cert_auth_owner";
+    DROP FUNCTION app_rls.printing_upgrade_device_binding(text,text,text);
+    COMMIT;`);
+  psql(admin, `BEGIN;
     SET LOCAL ROLE "mscqr_rls_cert_owner";
     ${rollback.slice(0, functionRollbackAt)}
     RESET ROLE;
