@@ -43,7 +43,7 @@ BEGIN
 
   PERFORM set_config('app.printing_registration_id',registration_row.id,true),
     set_config('app.printing_operation','printing-readiness',true);
-  SELECT s."connectorVersion",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
+  SELECT s.metadata->>'connectorVersion' AS "connectorVersion",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
     INTO STRICT session_row FROM public."PrinterAgentSession" s
     WHERE s."registrationId"=registration_row.id AND s."connectionState"='CONNECTED'
       AND s."revokedAt" IS NULL AND s."expiresAt">transaction_timestamp()

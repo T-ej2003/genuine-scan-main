@@ -238,6 +238,8 @@ async function main() {
   assert.equal(trustedDevice.publicKeyPem, signingPublicKey);
   assert.equal(trustedDevice.sourceVersion, "2026.11.19.1");
   denied(app, deviceBinding(caps.outsider), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
+  denied(app, deviceBinding(caps.checker), /PRINTING_BOUNDARY_DENIED/);
+  denied(app, 'SELECT "agentId" FROM public."PrinterAgentSession" LIMIT 1', /permission denied/);
   denied(app, advance(sessionA, 1), /CONNECTOR_SESSION_REPLAY/);
   psql(admin, `UPDATE public."PrinterRegistration" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.registration}';
     UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
