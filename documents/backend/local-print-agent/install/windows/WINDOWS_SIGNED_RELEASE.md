@@ -122,19 +122,15 @@ existing installer transaction passes a real Windows upgrade certification.
 
 ## Upgrade attempt device proof
 
-The authenticated manufacturer maintenance route can issue a two-minute device
-challenge only for a trusted, currently connected registration and a newer
-production-signed target release explicitly marked `certified-upgrade`. The
-challenge binds a random attempt ID and
-nonce to the agent, fingerprint, manufacturer, tenant, printer registration,
-source version, and target version. A connector containing the device-proof
-endpoint signs the canonical, domain-separated challenge with its existing
-Ed25519 identity key. The backend consumes the Redis challenge atomically,
-checks the live registration and signed session again, and retains a short-lived
-proof hash. Replays, scope substitutions, expired challenges, stale sessions,
-and changed release status fail closed. No private key leaves the connector.
+The connector can sign a canonical, domain-separated, two-minute challenge with
+its existing Ed25519 device key. The challenge binds the attempt, nonce, agent,
+manufacturer, tenant, printer, registration, and source and target versions.
+The verifier rejects expiry, altered bindings, and incorrect keys. The private
+key remains on the connector.
 
-Device proof is only one input to a future independent evidence authority. It
-does not establish print isolation, journal integrity, physical reconciliation,
-or MSCQRAUTH issuance. Installed versions that lack this endpoint remain
-unsupported for automatic upgrade, and the signed release guard stays closed.
+A production challenge issuer and consumer still requires a dedicated RLS
+projection of the trusted registration and current signed session. A direct
+Prisma lookup after the existing printing boundary cannot access those rows
+under the app role. No manufacturer challenge route is enabled by this change.
+This proof does not establish print isolation, reconciliation, or MSCQRAUTH.
+The signed release upgrade guard remains closed.

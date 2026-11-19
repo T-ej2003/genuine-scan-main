@@ -10,7 +10,7 @@ export const upgradeChallengeSchema = z.object({
   agentId: z.string().min(3).max(180),
   deviceFingerprint: z.string().min(8).max(256),
   manufacturerId: z.string().min(1).max(180),
-  tenantId: z.string().min(1).max(180),
+  tenantId: z.string().min(1).max(180).nullable(),
   printerId: z.string().uuid(),
   registrationId: z.string().uuid(),
   sourceVersion: z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/),
