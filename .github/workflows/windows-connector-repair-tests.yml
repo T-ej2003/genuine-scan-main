@@ -38,6 +38,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./backend/tests/windowsConnectorStaging.test.ps1
           & ./backend/tests/windowsConnectorBackup.test.ps1
+          & ./backend/tests/windowsConnectorJournalBackup.test.ps1
           & ./backend/tests/windowsConnectorCleanup.test.ps1
           & ./backend/tests/windowsConnectorInitializationSafety.test.ps1
           & ./backend/tests/windowsConnectorOrigin.test.ps1
