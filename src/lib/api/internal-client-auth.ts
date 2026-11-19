@@ -201,7 +201,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
           };
           windows: null | {
             platform: "windows";
-            installationScope?: "fresh-install-only" | null;
+            installationScope?: "fresh-install-only" | "certified-upgrade" | null;
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
             artifactType?: string | null;
@@ -276,7 +276,7 @@ export const createAuthApi = (core: ApiClientCore) => ({
           };
           windows: null | {
             platform: "windows";
-            installationScope?: "fresh-install-only" | null;
+            installationScope?: "fresh-install-only" | "certified-upgrade" | null;
             label: string;
             installerKind: "pkg" | "zip" | "exe" | "msi";
             artifactType?: string | null;

@@ -50,7 +50,7 @@ type ConnectorPlatformRelease = {
   buildVersion?: string | null;
   legalDocumentsIncluded?: string[];
   releaseNotesIncluded?: boolean;
-  installationScope?: "fresh-install-only" | null;
+  installationScope?: "fresh-install-only" | "certified-upgrade" | null;
   notes: string[];
   contentType: string;
   downloadPath: string;
