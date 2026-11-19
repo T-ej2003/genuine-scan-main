@@ -18,7 +18,11 @@ const { runGatewayCycle } = require('../dist/local-print-agent/gateway');
   const previousFetch = global.fetch;
   global.fetch = async url => {
     calls.push(String(url));
-    if (String(url).endsWith('/print-gateway/test/claim')) { claimStarted(); await pendingClaim; }
+    if (String(url).endsWith('/print-gateway/test/claim')) {
+      claimStarted();
+      await pendingClaim;
+      return { ok: true, json: async () => ({ success: true, data: { testJobId: 'synthetic-diagnostic' } }) };
+    }
     return { ok: true, json: async () => ({ success: true, data: null }) };
   };
   try {
@@ -26,9 +30,12 @@ const { runGatewayCycle } = require('../dist/local-print-agent/gateway');
     await started;
     assert.equal(enterMaintenanceFence().idle, false, 'an in-flight claim must keep the checkpoint busy');
     finishClaim();
-    await cycle;
+    await assert.rejects(cycle, /maintenance began before dispatch/);
     assert.equal(maintenanceCheckpoint().idle, true);
-    assert.equal(calls.length, 1, 'fence must prevent the normal claim after the test claim returns');
+    assert.equal(calls.length, 2, 'fence must fail the committed test claim without opening a normal claim');
+    assert.match(calls[1], /\/print-gateway\/test\/fail$/);
+    const outbox = fs.readdirSync(path.join(root, 'journal')).find(name => name.endsWith('.gateway-attempt.json'));
+    assert.equal(JSON.parse(fs.readFileSync(path.join(root, 'journal', outbox), 'utf8')).state, 'PRE_DISPATCH_REPORTED');
     console.log('connector maintenance claim race tests passed');
   } finally { global.fetch = previousFetch; fs.rmSync(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

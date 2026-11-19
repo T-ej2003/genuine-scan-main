@@ -467,9 +467,15 @@ export const runGatewayCycle = async (connectionType: GatewayConnectionType) => 
   // A queued diagnostic owns this printer's physical evidence lease. Claim it
   // before the normal route, which must reject automatic work during the lease.
   const testJob = await claimTestJob();
-  if (maintenanceFenced()) return;
+  if (!testJob && maintenanceFenced()) return;
   const job = testJob || await claimNextJob(connectionType);
-  if (!job || maintenanceFenced()) return;
+  if (!job) return;
+  if (maintenanceFenced()) {
+    // The claim may have committed before the fence. Persist and report a
+    // confirmed pre-dispatch failure instead of abandoning its backend lease.
+    await executeGatewayAttempt(context, job, async () => { throw new Error("Connector maintenance began before dispatch."); }, reportPreDispatchFailure);
+    return;
+  }
   await executeGatewayAttempt(context, job, async reserve => {
     const guardedReserve: typeof reserveGatewayAttempt = (claim, hash) => reserve(() => reserveGatewayAttempt(claim, hash));
     if (job.testJobId) {
