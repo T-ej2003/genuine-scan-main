@@ -1,7 +1,7 @@
 import { Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
-import { administerPrintingPrinter } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { readUpgradeDeviceBinding } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { getConnectorReleaseManifest } from "../services/connectorReleaseService";
 import { getRedisClient } from "../services/redisService";
 import { createUpgradeDeviceChallenge, upgradeChallengeSchema, verifyUpgradeDeviceChallenge } from "../services/connectorUpgradeDeviceProof";
@@ -20,9 +20,9 @@ const newer = (target: string, source: string) => {
 const trustedBinding = async (req: AuthRequest) => {
   if (!req.user) throw new Error("CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID");
   const printerId = z.string().uuid().parse(req.params.id);
-  const result = await administerPrintingPrinter({ capability: String(req.databaseSessionCapability || ""),
+  const result = await readUpgradeDeviceBinding({ capability: String(req.databaseSessionCapability || ""),
     requestId: String((req as AuthRequest & { requestId?: string }).requestId || ""),
-    operation: "MAINTENANCE_DEVICE_BINDING", printerId });
+    printerId });
   const trusted = z.object({ agentId: z.string().min(3), deviceFingerprint: z.string().min(8),
     manufacturerId: z.string(), tenantId: z.string().nullable(), printerId: z.string().uuid(),
     registrationId: z.string().uuid(), publicKeyPem: z.string().min(1), sourceVersion: version }).parse(result);

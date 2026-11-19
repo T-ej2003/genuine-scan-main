@@ -15,6 +15,7 @@ const roles = read("backend/src/controllers/print-job/shared.ts");
 const printer = read("backend/src/controllers/printerController.ts");
 const createHandler = read("backend/src/controllers/print-job/createPrintJobHandler.ts");
 const upgradeDeviceProof = read("backend/src/controllers/connectorUpgradeDeviceProofController.ts");
+const upgradeDeviceBinding = read("backend/src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql");
 
 for (const name of [
   "printing_readiness",
@@ -75,9 +76,9 @@ assert.doesNotMatch(query, /getPrintJobOperationalView|listPrintJobsForManufactu
 assert.match(repository, /app_rls\.printing_connector_event/);
 assert.match(repository, /app_rls\.printing_connector_registration/);
 assert.match(repository, /app_rls\.printing_idempotency/);
-assert.match(sql, /p_operation='MAINTENANCE_DEVICE_BINDING'[\s\S]*'printing-readiness'[\s\S]*FROM public\."PrinterAgentSession"/);
-assert.match(policies, /printing-printer-admin-maintenance_device_binding/);
-assert.match(upgradeDeviceProof, /MAINTENANCE_DEVICE_BINDING/);
+assert.match(upgradeDeviceBinding, /printing_printer_administration\([\s\S]*'MAINTENANCE_STATUS'/);
+assert.match(upgradeDeviceBinding, /'printing-readiness'[\s\S]*FROM public\."PrinterAgentSession"/);
+assert.match(upgradeDeviceProof, /readUpgradeDeviceBinding/);
 assert.doesNotMatch(upgradeDeviceProof, /\bprisma\./);
 assert.match(repository, /const items = JSON\.stringify\(input\.items\)/);
 assert.doesNotMatch(repository, /\$\{input\.items\}::jsonb/);

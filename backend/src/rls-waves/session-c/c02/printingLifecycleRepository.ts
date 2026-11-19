@@ -43,7 +43,7 @@ export const readPrintingProjection = (input: {
 export const administerPrintingPrinter = (input: {
   capability: string;
   requestId: string;
-  operation: "CREATE" | "UPDATE" | "DELETE" | "RELINK" | "MAINTENANCE_REQUEST" | "MAINTENANCE_STATUS" | "MAINTENANCE_DEVICE_BINDING" | "MAINTENANCE_INVENTORY" | "MAINTENANCE_AUTHORIZE" | "MAINTENANCE_CONSUME" | "MAINTENANCE_VERIFY" | "MAINTENANCE_RELEASE" | "DIAGNOSTIC_LEASE" | "DIAGNOSTIC_COMPLETE" | "DIAGNOSTIC_ABORT" | "AUDIT_TEST" | "AUDIT_TEST_LABEL_ATTENTION" | "AUDIT_TEST_LABEL_CONFIRMED" | "AUDIT_TEST_LABEL_QUEUED" | "AUDIT_DISCOVERY";
+  operation: "CREATE" | "UPDATE" | "DELETE" | "RELINK" | "MAINTENANCE_REQUEST" | "MAINTENANCE_STATUS" | "MAINTENANCE_INVENTORY" | "MAINTENANCE_AUTHORIZE" | "MAINTENANCE_CONSUME" | "MAINTENANCE_VERIFY" | "MAINTENANCE_RELEASE" | "DIAGNOSTIC_LEASE" | "DIAGNOSTIC_COMPLETE" | "DIAGNOSTIC_ABORT" | "AUDIT_TEST" | "AUDIT_TEST_LABEL_ATTENTION" | "AUDIT_TEST_LABEL_CONFIRMED" | "AUDIT_TEST_LABEL_QUEUED" | "AUDIT_DISCOVERY";
   printerId?: string | null;
   payload?: Record<string, unknown>;
   client?: SqlClient;
@@ -55,6 +55,16 @@ export const administerPrintingPrinter = (input: {
       ${input.payload || {}}::jsonb
     ) AS result
   `);
+
+export const readUpgradeDeviceBinding = (input: {
+  capability: string;
+  requestId: string;
+  printerId: string;
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_upgrade_device_binding(
+    ${input.capability}::text,${input.requestId}::text,${input.printerId}::text
+  ) AS result
+`);
 
 export const beginPrintingIdempotency = (input: {
   capability: string;

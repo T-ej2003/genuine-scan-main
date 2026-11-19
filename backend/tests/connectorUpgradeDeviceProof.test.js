@@ -32,8 +32,7 @@ const redis = {
   eval: async (_script, _count, key) => { const value = redisRecords.get(key) || null; redisRecords.delete(key); return value; },
 };
 let tenantId = binding.tenantId;
-mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrintingPrinter: async ({ operation, printerId: id }) => {
-  assert.equal(operation, 'MAINTENANCE_DEVICE_BINDING');
+mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { readUpgradeDeviceBinding: async ({ printerId: id }) => {
   assert.equal(id, printerId);
   return { ...binding, tenantId, publicKeyPem };
 } });

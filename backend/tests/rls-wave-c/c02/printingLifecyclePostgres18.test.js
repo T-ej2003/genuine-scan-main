@@ -97,6 +97,19 @@ async function main() {
   const redisUrl = new URL(process.env.REDIS_URL || "");
   assert(["127.0.0.1", "localhost", "redis"].includes(redisUrl.hostname), "Printing worker certification requires disposable Redis");
   assert.equal(Number(psql(admin, "select current_setting('server_version_num')::int / 10000")), 18);
+  const upgradeBindingSql = readFileSync(path.join(__dirname,
+    "../../../src/rls-waves/session-c/c02/connectorUpgradeDeviceBinding.sql"), "utf8")
+    .replaceAll("{{APP_ROLE}}", "mscqr_rls_cert_app");
+  psql(admin, `BEGIN;
+    SET ROLE "mscqr_rls_cert_owner";
+    GRANT CREATE ON SCHEMA app_rls TO "mscqr_rls_cert_auth_owner";
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_auth_owner";
+    ${upgradeBindingSql}
+    RESET ROLE;
+    SET ROLE "mscqr_rls_cert_owner";
+    REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
+    COMMIT;`);
   const idempotencyKeyHash = hash("printing-idempotency-key");
   const idempotencyRequestHash = hash("printing-idempotency-request");
   const abortedKeyHash = hash("printing-idempotency-aborted-key");
@@ -216,8 +229,8 @@ async function main() {
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
-  const deviceBinding = (capability) => `SELECT app_rls.printing_printer_administration(
-    '${capability}','printing-printer-admin','${requestId()}','MAINTENANCE_DEVICE_BINDING','${ids.discoveredPrinter}','{}'::jsonb)`;
+  const deviceBinding = (capability) => `SELECT app_rls.printing_upgrade_device_binding(
+    '${capability}','${requestId()}','${ids.discoveredPrinter}')`;
   const trustedDevice = json(app, deviceBinding(caps.maker));
   assert.equal(trustedDevice.registrationId, ids.registration);
   assert.equal(trustedDevice.manufacturerId, ids.maker);

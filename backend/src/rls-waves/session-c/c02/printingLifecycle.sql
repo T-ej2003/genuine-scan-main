@@ -886,11 +886,10 @@ DECLARE
   maintenance_snapshot jsonb;
   maintenance_binding jsonb;
   maintenance_registration record;
-  maintenance_agent_session record;
 BEGIN
   IF p_purpose<>'printing-printer-admin'
      OR p_operation NOT IN (
-       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','MAINTENANCE_DEVICE_BINDING','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
+       'CREATE','UPDATE','DELETE','RELINK','MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE',
        'AUDIT_TEST','AUDIT_TEST_LABEL_ATTENTION','AUDIT_TEST_LABEL_CONFIRMED',
        'AUDIT_TEST_LABEL_QUEUED','AUDIT_DISCOVERY'
      )
@@ -939,7 +938,7 @@ BEGIN
         ))
       )
       OR (
-        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','MAINTENANCE_DEVICE_BINDING','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
+        (p_operation LIKE 'AUDIT_%' OR p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE')) AND printer_row."assignedUserId"=actor."userId"
         AND EXISTS (
           SELECT 1 FROM public."ManufacturerLicenseeLink" ml
           WHERE ml."manufacturerId"=actor."userId" AND ml."licenseeId"=printer_row."licenseeId"
@@ -952,7 +951,7 @@ BEGIN
 
   PERFORM set_config('app.printing_licensee_id',coalesce(scope_licensee,''),true),
           set_config('app.printing_organization_id',coalesce(scope_org,''),true);
-  IF p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','MAINTENANCE_DEVICE_BINDING','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
+  IF p_operation IN ('MAINTENANCE_REQUEST','MAINTENANCE_STATUS','DIAGNOSTIC_LEASE','DIAGNOSTIC_COMPLETE','DIAGNOSTIC_ABORT','MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
     IF printer_row."printerRegistrationId" IS NOT NULL AND NOT EXISTS (
       SELECT 1 FROM public."PrinterRegistration" pr WHERE pr.id=printer_row."printerRegistrationId"
         AND pr."userId" IS NOT DISTINCT FROM printer_row."assignedUserId"
@@ -960,43 +959,6 @@ BEGIN
     ) THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
     maintenance_scope:=CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN jsonb_build_array('local',printer_row."printerRegistrationId")::text WHEN printer_row."gatewayId" IS NOT NULL THEN jsonb_build_array('gateway',printer_row."gatewayId",printer_row."orgId",printer_row."licenseeId",printer_row."assignedUserId")::text ELSE jsonb_build_array('printer',printer_row.id)::text END;
     maintenance_snapshot:=app_rls.printing_maintenance_gate(maintenance_scope,'STATUS',actor."userId",'{}'::jsonb);
-    IF p_operation='MAINTENANCE_DEVICE_BINDING' THEN
-      IF actor.role<>'MANUFACTURER_ADMIN' OR NOT printer_row."isActive" OR printer_row."printerRegistrationId" IS NULL
-      THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
-      SELECT pr.id,pr."userId",pr."orgId",pr."licenseeId",pr."agentId",pr."deviceFingerprint",
-        pr."publicKeyPem",pr."trustStatus",pr."approvedAt",pr."revokedAt"
-        INTO STRICT maintenance_registration FROM public."PrinterRegistration" pr
-        WHERE pr.id=printer_row."printerRegistrationId";
-      IF maintenance_registration."userId" IS DISTINCT FROM actor."userId" OR
-         maintenance_registration."orgId" IS DISTINCT FROM printer_row."orgId" OR
-         maintenance_registration."licenseeId" IS DISTINCT FROM printer_row."licenseeId" OR
-         maintenance_registration."agentId" IS DISTINCT FROM printer_row."agentId" OR
-         maintenance_registration."deviceFingerprint" IS DISTINCT FROM printer_row."deviceFingerprint" OR
-         maintenance_registration."trustStatus"<>'TRUSTED' OR maintenance_registration."approvedAt" IS NULL OR
-         maintenance_registration."revokedAt" IS NOT NULL OR nullif(maintenance_registration."publicKeyPem",'') IS NULL
-      THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
-      PERFORM set_config('app.printing_registration_id',maintenance_registration.id,true),
-        set_config('app.printing_operation','printing-readiness',true);
-      SELECT s."connectorVersion",s."agentId",s."deviceFingerprint",s."publicKeyFingerprint",s."selectedPrinterId"
-        INTO STRICT maintenance_agent_session FROM public."PrinterAgentSession" s
-        WHERE s."registrationId"=maintenance_registration.id AND s."connectionState"='CONNECTED'
-          AND s."revokedAt" IS NULL AND s."expiresAt">transaction_timestamp()
-          AND s."lastSignedHeartbeatAt">transaction_timestamp()-interval '35 seconds'
-        ORDER BY s."lastSignedHeartbeatAt" DESC LIMIT 1;
-      IF maintenance_agent_session."agentId" IS DISTINCT FROM maintenance_registration."agentId" OR
-         maintenance_agent_session."deviceFingerprint" IS DISTINCT FROM maintenance_registration."deviceFingerprint" OR
-         maintenance_agent_session."publicKeyFingerprint" IS DISTINCT FROM encode(sha256(convert_to(maintenance_registration."publicKeyPem",'UTF8')),'hex') OR
-         (maintenance_agent_session."selectedPrinterId" IS DISTINCT FROM printer_row.id AND
-          maintenance_agent_session."selectedPrinterId" IS DISTINCT FROM printer_row."nativePrinterId") OR
-         maintenance_agent_session."connectorVersion" IS NULL OR
-         maintenance_agent_session."connectorVersion" !~ '^[0-9]+[.][0-9]+[.][0-9]+([.][0-9]+)?$'
-      THEN RAISE EXCEPTION 'PRINTING_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
-      RETURN jsonb_build_object('agentId',maintenance_registration."agentId",
-        'deviceFingerprint',maintenance_registration."deviceFingerprint",'manufacturerId',actor."userId",
-        'tenantId',printer_row."orgId",'printerId',printer_row.id,
-        'registrationId',maintenance_registration.id,'publicKeyPem',maintenance_registration."publicKeyPem",
-        'sourceVersion',maintenance_agent_session."connectorVersion",'maintenanceState',maintenance_snapshot->>'state');
-    END IF;
     IF p_operation IN ('MAINTENANCE_INVENTORY','MAINTENANCE_AUTHORIZE','MAINTENANCE_CONSUME','MAINTENANCE_VERIFY','MAINTENANCE_RELEASE') THEN
       SELECT array_agg(p.id ORDER BY p.id) INTO maintenance_printers FROM public."Printer" p
         WHERE CASE WHEN printer_row."printerRegistrationId" IS NOT NULL THEN p."printerRegistrationId"=printer_row."printerRegistrationId"

@@ -129,9 +129,10 @@ The verifier rejects expiry, altered bindings, and incorrect keys. The private
 key remains on the connector.
 
 The manufacturer challenge route reads the trusted registration and current
-signed session through `MAINTENANCE_DEVICE_BINDING` inside the authenticated
-printing RLS boundary. The SQL replacement and updated printer policy must be
-installed before enabling this route in production. The challenge is consumed
+signed session through the incremental `printing_upgrade_device_binding` SQL
+function. It calls the existing authenticated maintenance boundary in the same
+transaction and then reads through existing printing RLS policies. The function
+must be installed before enabling this route in production. The challenge is consumed
 once in Redis, and verification repeats the live binding check. This proof
 does not establish print isolation, reconciliation, or MSCQRAUTH. The signed
 release upgrade guard remains closed.
