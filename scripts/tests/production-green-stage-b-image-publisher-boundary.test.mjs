@@ -368,6 +368,7 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /BACKEND_IMAGE_TAG/);
   assert.match(text, /\$\{RELEASE_SHA\}-connector-\$\{CONNECTOR_VERSION\}/);
   assert.match(text, /connector-contract\.json/);
+  assert.match(text, /CONNECTOR_VERSION=\\"\$\(cat \\"\$RUNNER_TEMP\/connector-version\\"\)\\"/);
   assert.match(text, /INSTALLER_SHA256/);
   assert.match(text, /--env CONNECTOR_VERSION --env INSTALLER_SHA256 --entrypoint node/);
   assert.match(text, /backend-only/);

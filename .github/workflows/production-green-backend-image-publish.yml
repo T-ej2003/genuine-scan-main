@@ -133,8 +133,10 @@ jobs:
             artifactDigest: `sha256:${process.env.ARCHIVE_SHA256}`, version, installerSha256: process.env.INSTALLER_SHA256,
             previousVersion: '2026.10.29.1', previousSha256: 'b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011' };
           fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-contract.json', JSON.stringify(contract));
+          fs.writeFileSync(process.env.RUNNER_TEMP + '/connector-version', version);
           fs.appendFileSync(process.env.GITHUB_ENV, `CONNECTOR_VERSION=${version}\n`);
           NODE
+          CONNECTOR_VERSION="$(cat "$RUNNER_TEMP/connector-version")"
           gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/artifacts/${ARTIFACT_ID}" > "$RUNNER_TEMP/connector-artifact.json"
           gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/runs/${RUN_ID}" > "$RUNNER_TEMP/connector-run.json"
           gh api --hostname github.com "repos/T-ej2003/genuine-scan-main/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/connector-distribution.zip"
