@@ -15,7 +15,7 @@
   "deploymentModel": "clean-room-blue-green",
   "targetEnvironment": "certification",
   "deploymentId": "cert",
-  "sourceContractSha256": "8174e08a26983eae48973849f5b45b1cbd897aef0c5af566d8c78c018111d90c",
+  "sourceContractSha256": "85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -144,7 +144,7 @@
     },
     {
       "path": "backend/tests/qrSystemPostgres18.test.js",
-      "sha256": "89019644e7a36084222da122d7c61f0a87e9c3805bd5c52660dbc8dd61b188e5"
+      "sha256": "d5a666786c4841f0147de80f0708fa112e27fbc1514f8d127e33f8c2768f270e"
     },
     {
       "path": "documents/security/rls-program/staging-full-rls-executor-contract.json",
@@ -412,7 +412,7 @@
     "operator": "mscqr_rls_cert_operator",
     "migration": "mscqr_rls_cert_migration"
   },
-  "roleMarker": "mscqr-full-rls-clean-room:certification:8174e08a26983eae48973849f5b45b1cbd897aef0c5af566d8c78c018111d90c",
+  "roleMarker": "mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434",
   "administrativeExecutor": {
     "role": "certification-administrator",
     "brokered": true,
