@@ -34,9 +34,10 @@ const redis = {
   eval: async (_script, _count, key) => { const value = redisRecords.get(key) || null; redisRecords.delete(key); return value; },
 };
 let tenantId = binding.tenantId;
+let activeVersion = binding.sourceVersion;
 mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrintingPrinter: async () => ({state:'DISPATCH_FENCED',requestId:'fence-1'}), readUpgradeDeviceBinding: async ({ printerId: id }) => {
   assert.equal(id, printerId);
-  return { ...binding, tenantId, publicKeyPem };
+  return { ...binding, tenantId, sourceVersion: activeVersion, publicKeyPem };
 } });
 let installationScope = 'certified-upgrade';
 mock('services/connectorReleaseService.js', { getConnectorReleaseManifest: () => ({ releases: [{ version: binding.targetVersion,
@@ -69,6 +70,14 @@ const response = () => ({ code: 200, setHeader() {}, status(code) { this.code = 
   await controller.verifyConnectorUpgradeProof(request({challengeId: recovery.body.challenge.challengeId,
     signature: proof.signUpgradeDeviceChallenge(privateKeyPem, recovery.body.challenge)}), recovered);
   assert.equal(recovered.code, 200);
+  activeVersion = binding.targetVersion;
+  const replacedRecovery = response();
+  await controller.issueConnectorUpgradeChallenge(request({targetVersion:binding.targetVersion,
+    attemptId:accepted.body.attemptId}), replacedRecovery);
+  assert.equal(replacedRecovery.code, 200);
+  assert.equal(replacedRecovery.body.challenge.sourceVersion, binding.sourceVersion);
+  assert.equal(replacedRecovery.body.challenge.currentVersion, binding.targetVersion);
+  activeVersion = binding.sourceVersion;
   assert.equal(replay.code, 403);
   const second = response();
   await controller.issueConnectorUpgradeChallenge(request({ targetVersion: binding.targetVersion }), second);
