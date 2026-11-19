@@ -183,6 +183,7 @@ async function main() {
       discovered: true, queueAvailable: true, online: true },
     printerId: ids.discoveredPrinter, selectedPrinterId: "printing-native",
     agentId: "printing-agent", deviceFingerprint: "printing-device",
+    connectorVersion: "2026.11.19.1",
     publicKeyFingerprint: hash(signingPublicKey), ...extra,
   });
   const sessionSql = (operation, id, payload, reg = ids.registration) =>
@@ -215,6 +216,15 @@ async function main() {
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   denied(app, `UPDATE public."PrinterAgentSession" SET "lastMessageSeq"=100 WHERE id='${sessionA}'`);
   assert.equal(json(app, advance(sessionA, 1)).lastMessageSeq, 1);
+  const deviceBinding = (capability) => `SELECT app_rls.printing_printer_administration(
+    '${capability}','printing-printer-admin','${requestId()}','MAINTENANCE_DEVICE_BINDING','${ids.discoveredPrinter}','{}'::jsonb)`;
+  const trustedDevice = json(app, deviceBinding(caps.maker));
+  assert.equal(trustedDevice.registrationId, ids.registration);
+  assert.equal(trustedDevice.manufacturerId, ids.maker);
+  assert.equal(trustedDevice.tenantId, ids.orgA);
+  assert.equal(trustedDevice.publicKeyPem, signingPublicKey);
+  assert.equal(trustedDevice.sourceVersion, "2026.11.19.1");
+  denied(app, deviceBinding(caps.outsider), /PRINTING_BOUNDARY_DENIED|query returned no rows/);
   denied(app, advance(sessionA, 1), /CONNECTOR_SESSION_REPLAY/);
   psql(admin, `UPDATE public."PrinterRegistration" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.registration}';
     UPDATE public."Printer" SET "licenseeId"='${ids.licenseeB}' WHERE id='${ids.discoveredPrinter}'`);
@@ -224,6 +234,7 @@ async function main() {
   const parallel = await Promise.all([psqlAsync(app, advance(sessionA, 2)), psqlAsync(app, advance(sessionA, 2))]);
   assert.deepEqual(parallel.map(result => result.status === 0).sort(), [false, true]);
   psql(admin, `UPDATE public."PrinterAgentSession" SET "lastSignedHeartbeatAt"=now()-interval '36 seconds' WHERE id='${sessionA}'`);
+  denied(app, deviceBinding(caps.maker), /query returned no rows|NO_DATA_FOUND/);
   denied(app, sessionSql("CHECK", sessionA, {}), /PRINTER_HEALTH_NOT_READY/);
   assert.equal(json(app, advance(sessionA, 3)).lastMessageSeq, 3);
   assert.equal(json(app, sessionSql("CHECK", sessionA, {})).state, "CONNECTED");
