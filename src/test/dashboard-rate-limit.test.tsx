@@ -80,10 +80,21 @@ describe("Dashboard rate-limit partial state", () => {
     renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
     const label = await screen.findByText("Labels assigned or printed");
     expect(label.parentElement).toHaveTextContent("32%");
+    expect(label.parentElement?.parentElement?.querySelector('[role="progressbar"]')).toHaveAttribute("aria-valuenow", "32");
     const scansCard = screen.getByText("Scans today").closest('[data-testid="dashboard-kpi-card"]');
     expect(scansCard).not.toBeNull();
     expect(within(scansCard as HTMLElement).getByText("0")).toBeInTheDocument();
     expect(within(scansCard as HTMLElement).getByText("Customer scans recorded today")).toBeInTheDocument();
+  });
+
+  it("shows zero percent when there are no nonblocked labels", async () => {
+    vi.mocked(apiClient.getQRStats).mockResolvedValue({
+      success: true, data: { total: 1, byStatus: { BLOCKED: 1 }, scansToday: 0 },
+    } as Awaited<ReturnType<typeof apiClient.getQRStats>>);
+    renderWithQueryClient(<MemoryRouter><Dashboard /></MemoryRouter>);
+    const label = await screen.findByText("Labels assigned or printed");
+    expect(label.parentElement).toHaveTextContent("0%");
+    expect(label.parentElement?.parentElement?.querySelector('[role="progressbar"]')).toHaveAttribute("aria-valuenow", "0");
   });
 
   it("includes scanned labels in the assigned or printed percentage", async () => {

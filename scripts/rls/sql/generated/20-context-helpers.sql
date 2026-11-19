@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='e74f115e563c8a63910508afe3ea1e042a915b763bdf3090ed6bdc86f79516b0'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:e74f115e563c8a63910508afe3ea1e042a915b763bdf3090ed6bdc86f79516b0'
+    AND source_contract_sha256='b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:e74f115e563c8a63910508afe3ea1e042a915b763bdf3090ed6bdc86f79516b0')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:b4e3d561988ab5784b45820c4f4410161dfc944b45ee6c82b1ff98d17cfbbff5')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -7096,15 +7096,6 @@ BEGIN
   IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  IF p_filters ? 'dailyCount' THEN
-    -- Stored scan timestamps are UTC without time zone; London day bounds can span 23 or 25 hours.
-    from_at:=(date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
-    to_at:=((date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
-    RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',tenant_id),
-      'scansToday',(SELECT count(*) FROM public."QrScanLog" s
-        JOIN public."QRCode" q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
-        WHERE s."licenseeId"=tenant_id AND s."scannedAt">=from_at AND s."scannedAt"<to_at));
-  END IF;
   maker_id:=p_filters->>'manufacturerId';
   IF actor.role='MANUFACTURER_ADMIN' THEN
     IF maker_id IS NOT NULL AND maker_id<>actor."userId" THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
@@ -7113,6 +7104,19 @@ BEGIN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   IF maker_id IS NOT NULL AND maker_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  IF p_filters ? 'dailyCount' THEN
+    -- Stored scan timestamps are UTC without time zone; London day bounds can span 23 or 25 hours.
+    from_at:=(date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    to_at:=((date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',tenant_id),
+      'scansToday',(SELECT count(*) FROM public."QrScanLog" s
+        JOIN public."QRCode" q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
+        LEFT JOIN public."Batch" b ON b.id=q."batchId" AND b."licenseeId"=q."licenseeId"
+        JOIN public."Licensee" l ON l.id=q."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+        WHERE q."licenseeId"=tenant_id AND (maker_id IS NULL OR b."manufacturerId"=maker_id)
+          AND s."batchId" IS NOT DISTINCT FROM q."batchId"
+          AND s."scannedAt">=from_at AND s."scannedAt"<to_at));
+  END IF;
   activity:=p_filters ?| ARRAY['from','to','firstScan'];
   WITH inventory AS MATERIALIZED (
     SELECT q.id,q."displayCode",q."batchId",q."licenseeId",q.status,q."createdAt",

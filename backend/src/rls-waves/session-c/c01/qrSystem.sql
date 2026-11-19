@@ -205,15 +205,6 @@ BEGIN
   IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
-  IF p_filters ? 'dailyCount' THEN
-    -- Stored scan timestamps are UTC without time zone; London day bounds can span 23 or 25 hours.
-    from_at:=(date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
-    to_at:=((date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
-    RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',tenant_id),
-      'scansToday',(SELECT count(*) FROM public."QrScanLog" s
-        JOIN public."QRCode" q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
-        WHERE s."licenseeId"=tenant_id AND s."scannedAt">=from_at AND s."scannedAt"<to_at));
-  END IF;
   maker_id:=p_filters->>'manufacturerId';
   IF actor.role='MANUFACTURER_ADMIN' THEN
     IF maker_id IS NOT NULL AND maker_id<>actor."userId" THEN RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501'; END IF;
@@ -222,6 +213,19 @@ BEGIN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
   END IF;
   IF maker_id IS NOT NULL AND maker_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
+  IF p_filters ? 'dailyCount' THEN
+    -- Stored scan timestamps are UTC without time zone; London day bounds can span 23 or 25 hours.
+    from_at:=(date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    to_at:=((date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',tenant_id),
+      'scansToday',(SELECT count(*) FROM public."QrScanLog" s
+        JOIN public."QRCode" q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
+        LEFT JOIN public."Batch" b ON b.id=q."batchId" AND b."licenseeId"=q."licenseeId"
+        JOIN public."Licensee" l ON l.id=q."licenseeId" AND l."isActive" AND l."suspendedAt" IS NULL
+        WHERE q."licenseeId"=tenant_id AND (maker_id IS NULL OR b."manufacturerId"=maker_id)
+          AND s."batchId" IS NOT DISTINCT FROM q."batchId"
+          AND s."scannedAt">=from_at AND s."scannedAt"<to_at));
+  END IF;
   activity:=p_filters ?| ARRAY['from','to','firstScan'];
   WITH inventory AS MATERIALIZED (
     SELECT q.id,q."displayCode",q."batchId",q."licenseeId",q.status,q."createdAt",
