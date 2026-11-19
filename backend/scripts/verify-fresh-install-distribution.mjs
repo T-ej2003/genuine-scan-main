@@ -3,23 +3,10 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-const expected = Object.freeze({
-  repository: "T-ej2003/genuine-scan-main",
-  sourceSha: "f6b3dd7efed01148c20008bc6fb11829b847f948",
-  runId: 43660888390,
-  workflowId: 273963817,
-  artifactId: 14139769044,
-  artifactDigest: "sha256:69d34bda6bcdb2bc54684cf199b144cf58f7c3bf14cf0902237826e39e171a9c",
-  version: "2026.11.6.2",
-  installerSha256: "5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe",
-  previousVersion: "2026.10.29.1",
-  previousSha256: "b08e4865e77e57f83ac21976847a72f8b9ca4bafab93339bdb695c271133c011",
-});
-
 const sha256 = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const read = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
 
-export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, artifact, run, contract = expected) {
+export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, artifact, run, contract) {
   assert.equal(artifact.id, contract.artifactId);
   assert.equal(artifact.name, `mscqr-fresh-install-distribution-${contract.version}`);
   assert.equal(artifact.digest, contract.artifactDigest);
@@ -76,6 +63,7 @@ export function verifyFreshInstallDistribution(sourceRoot, distributionRoot, art
 }
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  const [sourceRoot, distributionRoot, artifactFile, runFile] = process.argv.slice(2);
-  verifyFreshInstallDistribution(sourceRoot, distributionRoot, read(artifactFile), read(runFile));
+  const [sourceRoot, distributionRoot, artifactFile, runFile, contractFile] = process.argv.slice(2);
+  if (!contractFile) throw new Error("Exact connector distribution contract is required");
+  verifyFreshInstallDistribution(sourceRoot, distributionRoot, read(artifactFile), read(runFile), read(contractFile));
 }

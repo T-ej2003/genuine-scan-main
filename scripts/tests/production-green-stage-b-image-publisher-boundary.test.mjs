@@ -348,9 +348,11 @@ test("publisher permissions are ECR-only for the reviewed repositories", () => {
 });
 
 test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first, and deployment-free", () => {
-  assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), ["release_sha", "connector_fresh_install_distribution"]);
-  assert.deepEqual(Object.keys(backendPublisher.on.workflow_call.inputs), ["release_sha", "connector_fresh_install_distribution"]);
-  assert.deepEqual(backendPublisher.on.workflow_dispatch.inputs.connector_fresh_install_distribution, { description: "Include the certified 2026.11.6.2 fresh-install distribution artifact", required: false, type: "boolean", default: false });
+  const inputs = ["release_sha", "connector_fresh_install_distribution", "connector_distribution_artifact_id",
+    "connector_distribution_run_id", "connector_distribution_archive_sha256", "connector_installer_sha256"];
+  assert.deepEqual(Object.keys(backendPublisher.on.workflow_dispatch.inputs), inputs);
+  assert.deepEqual(Object.keys(backendPublisher.on.workflow_call.inputs), inputs);
+  assert.deepEqual(backendPublisher.on.workflow_dispatch.inputs.connector_fresh_install_distribution, { description: "Include an exact-source certified fresh-install distribution artifact", required: false, type: "boolean", default: false });
   assert.deepEqual(backendPublisher.permissions, { contents: "read" });
   const job = backendPublisher.jobs["publish-and-verify"];
   assert.deepEqual(job.permissions, { contents: "read", actions: "read", "id-token": "write" });
@@ -364,9 +366,10 @@ test("dedicated backend publisher is exact-SHA, environment-scoped, digest-first
   assert.match(text, /apply-ecr-repository-controls\.sh backend/);
   assert.match(text, /publish-ecs-images\.sh backend/);
   assert.match(text, /BACKEND_IMAGE_TAG/);
-  assert.match(text, /\$\{RELEASE_SHA\}-connector-2026\.11\.6\.2/);
-  assert.match(text, /14139769044/);
-  assert.match(text, /5466c06db09c84d1f8d2b3c9c547c6039b2435e1ceba8aef52cec3b64a1eacbe/);
+  assert.match(text, /\$\{RELEASE_SHA\}-connector-\$\{CONNECTOR_VERSION\}/);
+  assert.match(text, /connector-contract\.json/);
+  assert.match(text, /INSTALLER_SHA256/);
+  assert.match(text, /--env CONNECTOR_VERSION --env INSTALLER_SHA256 --entrypoint node/);
   assert.match(text, /backend-only/);
   assert.match(text, /SOURCE_RELEASE_SHA/);
   assert.doesNotMatch(text, /IMAGE_TAG=\"\$RELEASE_SHA\"/);
