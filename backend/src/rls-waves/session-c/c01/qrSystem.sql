@@ -177,7 +177,9 @@ DECLARE actor record; tenant_id text; maker_id text; from_at timestamp; to_at ti
   page_limit integer; page_offset integer; activity boolean; result jsonb;
 BEGIN
   IF p_purpose IS DISTINCT FROM 'qr-scan-analytics' OR jsonb_typeof(p_filters) IS DISTINCT FROM 'object'
-     OR p_filters - ARRAY['manufacturerId','batchQuery','code','status','firstScan','from','to','limit','offset'] <> '{}'::jsonb
+     OR p_filters - ARRAY['manufacturerId','batchQuery','code','status','firstScan','from','to','limit','offset','dailyCount'] <> '{}'::jsonb
+     OR (p_filters ? 'dailyCount' AND p_filters->'dailyCount' <> 'true'::jsonb)
+     OR (p_filters ? 'dailyCount' AND p_filters - 'dailyCount' <> '{}'::jsonb)
   THEN RAISE EXCEPTION 'QR_INVALID_INPUT'; END IF;
   BEGIN
     page_limit:=coalesce((p_filters->>'limit')::integer,100);
@@ -202,6 +204,15 @@ BEGIN
   SELECT * INTO STRICT actor FROM app_rls.qr_bind_actor(p_capability,p_purpose,p_request_id,tenant_id);
   IF actor.role IN ('SUPER_ADMIN','PLATFORM_SUPER_ADMIN') AND current_setting('app.auth_assurance',true)<>'mfa-verified' THEN
     RAISE EXCEPTION 'QR_BOUNDARY_DENIED' USING ERRCODE='42501';
+  END IF;
+  IF p_filters ? 'dailyCount' THEN
+    -- Stored scan timestamps are UTC without time zone; London day bounds can span 23 or 25 hours.
+    from_at:=(date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    to_at:=((date_trunc('day',transaction_timestamp() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC';
+    RETURN jsonb_build_object('scope',jsonb_build_object('mode','daily-count','licenseeId',tenant_id),
+      'scansToday',(SELECT count(*) FROM public."QrScanLog" s
+        JOIN public."QRCode" q ON q.id=s."qrCodeId" AND q."licenseeId"=s."licenseeId"
+        WHERE s."licenseeId"=tenant_id AND s."scannedAt">=from_at AND s."scannedAt"<to_at));
   END IF;
   maker_id:=p_filters->>'manufacturerId';
   IF actor.role='MANUFACTURER_ADMIN' THEN

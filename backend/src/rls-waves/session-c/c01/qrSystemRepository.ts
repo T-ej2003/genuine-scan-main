@@ -121,7 +121,15 @@ export const readStats = async <T>(input: { capability: string; requestId: strin
       ${input.licenseeId || null}
     ) AS result`;
   if (rows.length !== 1 || !rows[0].result || typeof rows[0].result !== "object") throw new Error("Invalid QR stats result");
-  return rows[0].result as T;
+  if (!input.licenseeId) return rows[0].result as T;
+  const daily = await readScanAnalytics({
+    capability: input.capability, requestId: input.requestId, licenseeId: input.licenseeId,
+    filters: { dailyCount: true },
+  });
+  if (typeof daily.scansToday !== "number" || !Number.isSafeInteger(daily.scansToday) || daily.scansToday < 0) {
+    throw new Error("Invalid daily scan count");
+  }
+  return { ...rows[0].result, scansToday: daily.scansToday } as T;
 };
 
 export const readInventoryProjection = async <T, A = unknown>(input: {

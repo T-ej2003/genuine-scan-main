@@ -117,6 +117,22 @@ async function main(){
   denied(`SELECT app_rls.qr_stats('${caps.tenant}','qr-code-stats','40000000-0000-4000-8000-000000000626','${ids.licenseeB}')`);
   const platformStats=JSON.parse(call("qr_stats",`'${caps.platform}','qr-code-stats','40000000-0000-4000-8000-000000000627','${ids.licenseeB}'`));
   assert.equal(platformStats.total,1);
+  const daily=(capability,licenseeId,requestId)=>JSON.parse(call("qr_scan_analytics",`'${capability}','qr-scan-analytics','${requestId}','${licenseeId}','{"dailyCount":true}'::jsonb`)).scansToday;
+  assert.equal(daily(caps.tenant,ids.licenseeA,'40000000-0000-4000-8000-000000000626'),0);
+  denied(`SELECT app_rls.qr_scan_analytics('${caps.tenant}','qr-scan-analytics','40000000-0000-4000-8000-000000000627','${ids.licenseeB}','{"dailyCount":true}'::jsonb)`);
+  const londonBounds=(day)=>`(('${day}'::timestamp AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC')`;
+  assert.equal(last(bootstrap,`SELECT (${londonBounds('2026-03-30')}-${londonBounds('2026-03-29')})::text`),'23:00:00');
+  assert.equal(last(bootstrap,`SELECT (${londonBounds('2026-10-26')}-${londonBounds('2026-10-25')})::text`),'25:00:00');
+  const todayStart=`((date_trunc('day',now() AT TIME ZONE 'Europe/London') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC')`;
+  const tomorrowStart=`(((date_trunc('day',now() AT TIME ZONE 'Europe/London')+interval '1 day') AT TIME ZONE 'Europe/London') AT TIME ZONE 'UTC')`;
+  run(bootstrap,`INSERT INTO public."QrScanLog"(id,code,"qrCodeId","licenseeId",status,"scannedAt") VALUES
+    ('40000000-0000-4000-8000-000000000811','scan-a-start','40000000-0000-4000-8000-000000000501','${ids.licenseeA}','DORMANT',${todayStart}),
+    ('40000000-0000-4000-8000-000000000812','scan-a-last','40000000-0000-4000-8000-000000000501','${ids.licenseeA}','DORMANT',${tomorrowStart}-interval '1 millisecond'),
+    ('40000000-0000-4000-8000-000000000813','scan-a-next','40000000-0000-4000-8000-000000000501','${ids.licenseeA}','DORMANT',${tomorrowStart}),
+    ('40000000-0000-4000-8000-000000000814','scan-a-prev','40000000-0000-4000-8000-000000000501','${ids.licenseeA}','DORMANT',${todayStart}-interval '1 millisecond'),
+    ('40000000-0000-4000-8000-000000000815','scan-b-start','40000000-0000-4000-8000-000000000508','${ids.licenseeB}','DORMANT',${todayStart})`);
+  assert.equal(daily(caps.tenant,ids.licenseeA,'40000000-0000-4000-8000-000000000628'),2);
+  assert.equal(daily(caps.platform,ids.licenseeB,'40000000-0000-4000-8000-000000000629'),1);
   const exportAudit=JSON.parse(call("qr_batch_command",`'${caps.platform}','qr-batch-command','40000000-0000-4000-8000-000000000649','AUDIT_CODE_EXPORT','{"licenseeId":"${ids.licenseeA}","status":"DORMANT","query":null,"count":7}'::jsonb`));
   assert.equal(exportAudit.exportedCount,7);
   assert.equal(last(bootstrap,`SELECT count(*) FROM public."AuditLog" WHERE action='EXPORT_QR_CODES' AND "licenseeId"='${ids.licenseeA}' AND details->>'count'='7'`),"1");
