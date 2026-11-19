@@ -65,7 +65,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
     if (/MAINTENANCE_WORKSET_TOO_LARGE/.test(String(error?.message))) {
       return res.status(409).json({success:false,code:'MAINTENANCE_WORKSET_TOO_LARGE',error:'Unresolved maintenance work exceeds the supported bounded inventory. Keep dispatch fenced and reconcile accepted work through authenticated confirmation. Do not reset uncertain work or submit partial inventories; contact MSCQR support for governed continuation.'});
     }
-    const denied = /DENIED|permission|NO_DATA|query returned no rows|No .*found/i.test(String(error?.message));
+    const denied = /DENIED|CONNECTOR_UPGRADE_DEVICE_PROOF_INVALID|CONNECTOR_UPGRADE_ATTEMPT_MISMATCH|permission|NO_DATA|query returned no rows|No .*found/i.test(String(error?.message));
     return res.status(denied ? 403 : 409).json({ success: false,
       error: denied ? "Connector maintenance is not authorized." : "Connector maintenance could not be established." });
   }
