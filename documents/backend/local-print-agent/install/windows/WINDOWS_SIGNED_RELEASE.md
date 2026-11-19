@@ -62,3 +62,42 @@ subsets, or edit states to fit a limit. If uncertainty cannot be resolved and th
 remaining work exceeds these bounds, automated upgrade remains blocked. Supporting
 that workload requires a separately reviewed durable, paged reconciliation
 protocol bound to the complete inventory; this PR does not claim such a protocol.
+
+## Existing-installation compatibility (source audit, 2026-11-19)
+
+The release manifest records the versions below; a published installer does not
+prove that a particular workstation still has that version or that its journal
+is intact. `UNSUPPORTED` means automatic replacement remains fenced. The
+existing installer requires `MSCQRAUTH` for every existing installation.
+
+| Installed version | Dispatch stop / active-job proof | Durable journal | Device identity / registration | Installer replacement | Automatic upgrade |
+| --- | --- | --- | --- | --- | --- |
+| 2026.11.19.1 | SIGTERM exits immediately; `/status` does not attest idle dispatch | Default `.mscqr/dispatch-journal`, v2/v3 reservations and gateway attempt records | Modern or legacy state, Ed25519 keypair; backend registration must be read back | Current signed installer refuses existing installations without `MSCQRAUTH` | UNSUPPORTED |
+| 2026.11.6.2 | SIGTERM exits immediately; no proven idle attestation | Default `.mscqr/dispatch-journal`, v2 reservations | Modern or legacy Ed25519 state; live binding unverified | Installed package behavior must be verified on Windows; current target installer remains guarded | UNSUPPORTED |
+| 2026.11.6.1 | SIGTERM exits immediately; no proven idle attestation | Default `.mscqr/dispatch-journal`, v2 reservations | Modern or legacy Ed25519 state; live binding unverified | Installed package behavior must be verified on Windows; current target installer remains guarded | UNSUPPORTED |
+| 2026.10.29.1 | SIGTERM exits immediately in candidate source; no proven idle attestation | No `dispatchJournal.ts` in its release-preparation source; installed durable attempt format needs inspection | Ed25519 candidate state; live binding unverified | Installed package behavior must be verified on Windows; current target installer remains guarded | UNSUPPORTED |
+| 2026.10.29 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.26 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.25 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.16 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.15 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.14 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.13 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.12 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.6.11 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.5.23 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.5.19 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.5.10 | Not established from a source-bound installed binary | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+| 2026.3.12 | Unsigned historical entry; no trusted upgrade baseline | Not established | Not established | Installed package behavior unverified; target installer guarded | UNSUPPORTED |
+
+The transaction now snapshots every recognized flat file in the default dispatch journal
+under its private backup directory. It hashes the copy and live directory,
+refuses concurrent changes, atomically publishes flushed and hashed missing
+entries without overwriting any
+existing entry, and retains the backup after recovery. A custom journal path,
+nested layout, or oversized journal fails closed. This preserves evidence for
+an otherwise authorized transaction; it does **not** establish that a legacy
+connector is idle, authorize unknown physical outcomes, or permit an automatic
+upgrade. The backend maintenance fence and signed evidence checks remain in
+force. The current database gate still requires each unresolved work item to
+be reconciled before authorization.
