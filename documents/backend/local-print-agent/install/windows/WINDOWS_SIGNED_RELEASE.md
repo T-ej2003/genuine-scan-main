@@ -101,3 +101,21 @@ connector is idle, authorize unknown physical outcomes, or permit an automatic
 upgrade. The backend maintenance fence and signed evidence checks remain in
 force. The current database gate still requires each unresolved work item to
 be reconciled before authorization.
+
+## Target connector maintenance checkpoint
+
+New connector source can persist a local maintenance fence through
+`POST /maintenance/fence`. The fence stops new gateway claims and direct-session
+dispatch, lets work already accepted by the process finish, and survives a
+restart. `GET /maintenance/checkpoint` reports the local active-work count and
+socket closure; a caller must wait for `fenced: true`, `idle: true`, and
+`socketClosed: true`. A damaged marker fails closed. The endpoint never clears
+the fence and its response is **not** independent isolation evidence or an
+`MSCQRAUTH` credential. It does not prove the backend fence, journal integrity,
+device possession, or reconciliation of physical outcomes.
+
+Installed versions in the matrix above do not gain this checkpoint until a
+signed target version containing it is installed. They remain unsupported for
+automatic upgrade. General upgrade publication stays blocked until a separate
+authority verifies device proof, backend fencing, durable work state, and the
+existing installer transaction passes a real Windows upgrade certification.
