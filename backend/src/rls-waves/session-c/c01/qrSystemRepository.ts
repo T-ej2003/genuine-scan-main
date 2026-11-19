@@ -25,7 +25,7 @@ const client = () => getB01AuthenticatedPrisma();
 type AllocationRequest = import("@prisma/client").QrAllocationRequest;
 
 export const readScanAnalytics = async (input: {
-  capability: string; requestId: string; licenseeId?: string; filters: Record<string, unknown>;
+  capability: string; requestId: string; licenseeId?: string | null; filters: Record<string, unknown>;
 }) => {
   const rows = await client().$queryRaw<Array<{ result: Prisma.JsonObject }>>`
     SELECT app_rls.qr_scan_analytics(${required(input.capability,"a capability")},${"qr-scan-analytics"},
@@ -114,14 +114,22 @@ export const visitQrCodePages = async <T>(
   return total;
 };
 
-export const readStats = async <T>(input: { capability: string; requestId: string; licenseeId?: string | null }) => {
+export const readStats = async <T>(input: { capability: string; requestId: string; licenseeId?: string | null; includeUnscopedManufacturerDaily?: boolean }) => {
   const rows = await client().$queryRaw<Array<{ result: Prisma.JsonValue }>>`
     SELECT app_rls.qr_stats(
       ${required(input.capability,"a capability")},${"qr-code-stats"},${required(input.requestId,"a request ID")},
       ${input.licenseeId || null}
     ) AS result`;
   if (rows.length !== 1 || !rows[0].result || typeof rows[0].result !== "object") throw new Error("Invalid QR stats result");
-  return rows[0].result as T;
+  if (!input.licenseeId && !input.includeUnscopedManufacturerDaily) return rows[0].result as T;
+  const daily = await readScanAnalytics({
+    capability: input.capability, requestId: input.requestId, licenseeId: input.licenseeId,
+    filters: { dailyCount: true },
+  });
+  if (typeof daily.scansToday !== "number" || !Number.isSafeInteger(daily.scansToday) || daily.scansToday < 0) {
+    throw new Error("Invalid daily scan count");
+  }
+  return { ...rows[0].result, scansToday: daily.scansToday } as T;
 };
 
 export const readInventoryProjection = async <T, A = unknown>(input: {

@@ -864,9 +864,10 @@ export const getStats = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ success: false, error: "Not authenticated" });
     }
 
-    const stats = await readQrStatsBoundary<{ total: number; byStatus: Record<string, number> }>({
+    const stats = await readQrStatsBoundary<{ total: number; byStatus: Record<string, number>; scansToday?: number }>({
       capability: String(req.databaseSessionCapability || ""), requestId: qrRequestId(req),
-      licenseeId: (req.query.licenseeId as string | undefined) || null,
+      licenseeId: (req.query.licenseeId as string | undefined) || (role === "LICENSEE_ADMIN" ? req.user.licenseeId : null) || null,
+      includeUnscopedManufacturerDaily: role === "MANUFACTURER_ADMIN",
     });
     return res.json({ success: true, data: { ...stats, ...summarizeQrStatusCounts(stats.byStatus || {}) } });
   } catch (e) {
