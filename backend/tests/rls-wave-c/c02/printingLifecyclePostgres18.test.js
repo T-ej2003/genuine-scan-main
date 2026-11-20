@@ -110,6 +110,8 @@ async function main() {
     SET ROLE "mscqr_rls_cert_owner";
     REVOKE CREATE ON SCHEMA app_rls FROM "mscqr_rls_cert_auth_owner";
     COMMIT;`);
+  assert.equal(psql(admin, `SELECT has_function_privilege('mscqr_rls_cert_app',
+    'app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb)', 'EXECUTE')`), 't');
   const idempotencyKeyHash = hash("printing-idempotency-key");
   const idempotencyRequestHash = hash("printing-idempotency-request");
   const abortedKeyHash = hash("printing-idempotency-aborted-key");

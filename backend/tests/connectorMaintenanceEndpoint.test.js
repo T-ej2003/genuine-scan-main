@@ -66,6 +66,7 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.deepEqual((await response.json()).checkpoint, { fenced: true, active: 0, idle: true, socketClosed: true });
+    assert.equal((await fetch(`${url}/shutdown`, { method: 'POST', headers: { origin: 'https://evil.example' } })).status, 403);
     const checkpointEvidence = await fetch(`${url}/checkpoint-evidence`, { method: 'POST',
       headers: { origin: 'https://www.mscqr.com', 'content-type': 'application/json' }, body: JSON.stringify(challenge) });
     assert.equal(checkpointEvidence.status, 200);
@@ -88,6 +89,9 @@ const connector = path.resolve(__dirname, '../dist/local-print-agent/index.js');
     await start();
     const checkpoint = await fetch(`${url}/checkpoint`);
     assert.deepEqual(await checkpoint.json(), { fenced: true, active: 0, idle: true, socketClosed: true });
+    assert.equal((await fetch(`${url}/shutdown`, { method: 'POST', headers: { origin: 'https://www.mscqr.com' } })).status, 200);
+    await once(child, 'exit');
+    assert.equal(child.exitCode, 0, 'drained connector exits under its own maintenance endpoint');
     console.log('connector maintenance endpoint tests passed');
   } finally { await stop(); await fs.rm(root, { recursive: true, force: true }); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

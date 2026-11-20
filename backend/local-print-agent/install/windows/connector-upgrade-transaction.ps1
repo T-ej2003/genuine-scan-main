@@ -218,8 +218,10 @@ function Stop-MscqrVerifiedRuntime([string]$Runtime, [string]$Hash) {
     if (-not $drained) { throw 'Connector did not reach a drained maintenance checkpoint.' }
     $process = Get-Process -Id $processes[0].ProcessId -ErrorAction Stop
     if ($process.Path -ine $Runtime) { throw 'Connector process identity changed.' }
-    $process.Kill()
-    if (-not $process.WaitForExit(15000)) { throw 'Connector did not stop.' }
+    $shutdown=Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown' -Method Post -TimeoutSec 5 -ErrorAction Stop
+    if ($shutdown.success -isnot [bool] -or -not $shutdown.success -or -not $process.WaitForExit(15000)) {
+      throw 'Connector did not stop after its verified maintenance checkpoint.'
+    }
   }
   if (@(Get-MscqrRuntimeProcesses).Count -ne 0) { throw 'Connector restarted during shutdown.' }
 }

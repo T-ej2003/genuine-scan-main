@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { Response } from "express";
 import { z } from "zod";
 import { AuthRequest } from "../middleware/auth";
-import { administerPrintingPrinter } from "../rls-waves/session-c/c02/printingLifecycleRepository";
+import { administerPrintingPrinter, protectUpgradeUnknownAttempts } from "../rls-waves/session-c/c02/printingLifecycleRepository";
 import { issueConnectorIsolationEvidence, verifyConnectorIsolationEvidence } from "../services/connectorMaintenanceEvidence";
 import { upgradeAttemptKey, upgradeAuthorizationKey, upgradeChallengeSchema, upgradeHandoffKey, upgradeProofKey } from "../services/connectorUpgradeDeviceProof";
 import { verifyMaintenanceCheckpoint } from "../services/connectorUpgradeDeviceProof";
@@ -47,16 +47,38 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
         input.binding.protocolVersion !== LOCAL_AGENT_DIRECT_PROTOCOL_VERSION ||
         (attempt.fenceRequestId && input.binding.fenceRequestId !== attempt.fenceRequestId))
       throw new Error("CONNECTOR_UPGRADE_BINDING_INVALID");
-    const snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
+    let snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
       operation: "MAINTENANCE_INVENTORY", printerId: trusted.printerId, payload: {} });
     if (snapshot.state !== "DISPATCH_FENCED" || snapshot.requestId !== input.binding.fenceRequestId ||
         !/^[a-f0-9]{64}$/.test(String(proof.proofSha256 || "")) ||
         !/^[a-f0-9]{64}$/.test(String(snapshot.workDigest || "")) ||
-        !Array.isArray(snapshot.inventory?.items) || snapshot.inventory.items.length !== 0 ||
-        checkpoint.journal.count !== 0 ||
+        !Array.isArray(snapshot.inventory?.items) ||
         Object.keys(snapshot.inventory?.diagnostics || {}).length !== 0 ||
         (snapshot.inventory?.localDiagnostics || []).length !== 0)
       throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+    if (checkpoint.journal.count > 0) {
+      const fenceRequestId = input.binding.fenceRequestId;
+      if (typeof fenceRequestId !== "string") throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+      const protectedResult = await protectUpgradeUnknownAttempts({ capability: printingCapability(req),
+        requestId: printingRequestId(req), printerId: trusted.printerId,
+        fenceRequestId, journalSha256: checkpoint.journal.sha256,
+        entries: checkpoint.journal.entries });
+      if (protectedResult.protected !== checkpoint.journal.count) throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+      snapshot = await administerPrintingPrinter({ capability: printingCapability(req), requestId: printingRequestId(req),
+        operation: "MAINTENANCE_INVENTORY", printerId: trusted.printerId, payload: {} });
+    }
+    const journalByItem = new Map(checkpoint.journal.entries.map(entry => [entry.printItemId, entry]));
+    if (snapshot.state !== "DISPATCH_FENCED" || snapshot.requestId !== input.binding.fenceRequestId ||
+        snapshot.inventory.items.length !== journalByItem.size ||
+        snapshot.inventory.items.some((item: any) => {
+          const entry = journalByItem.get(item.id);
+          const marker = item.dispatchMetadata?.upgradeNoReplay;
+          return !entry || item.state !== "FROZEN" || item.pipelineState !== "NEEDS_OPERATOR_ACTION" ||
+            marker?.journalSha256 !== checkpoint.journal.sha256 || marker.entrySha256 !== entry.sha256 ||
+            marker.attemptId !== entry.attemptId;
+        })) throw new Error("MAINTENANCE_RECONCILIATION_REQUIRED");
+    const reconciliations = snapshot.inventory.items.map((item: any) => ({ itemId: item.id,
+      outcome: "PROTECTED_UNKNOWN", reference: journalByItem.get(item.id)!.sha256 }));
     const now = Date.now();
     const evidence = issueConnectorIsolationEvidence({ purpose: "mscqr-legacy-connector-isolation-v1",
       binding: input.binding, challengeId: challenge.challengeId, deviceProofSha256: proof.proofSha256,
@@ -65,7 +87,7 @@ export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest
       isolationEvidence: [
         { kind: "dispatch-isolation", sha256: createHash("sha256").update(input.checkpoint.statement).digest("hex"), reference: challenge.challengeId },
         { kind: "connector-work-inventory", sha256: checkpoint.journal.sha256, reference: challenge.challengeId },
-      ], reconciliations: [] });
+      ], reconciliations });
     return res.json({ success: true, evidence });
   } catch {
     return res.status(409).json({ success: false, error: "Verified connector maintenance evidence is unavailable." });

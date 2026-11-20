@@ -1,3 +1,9 @@
+DO $guard$ BEGIN
+  IF EXISTS (SELECT 1 FROM public."PrintItem" WHERE "dispatchMetadata" ? 'upgradeNoReplay')
+  THEN RAISE EXCEPTION 'Protected unknown print attempts prevent lifecycle rollback'; END IF;
+END $guard$;
+DROP FUNCTION IF EXISTS app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb);
+
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_insert ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_select ON public."ActionIdempotencyKey";
 DROP POLICY IF EXISTS printing_lifecycle_actionidempotencykey_update ON public."ActionIdempotencyKey";

@@ -66,6 +66,16 @@ export const readUpgradeDeviceBinding = (input: {
   ) AS result
 `);
 
+export const protectUpgradeUnknownAttempts = (input: {
+  capability: string; requestId: string; printerId: string; fenceRequestId: string;
+  journalSha256: string; entries: unknown[];
+}) => oneJson(prisma, Prisma.sql`
+  SELECT app_rls.printing_upgrade_protect_unknown(
+    ${input.capability}::text,${input.requestId}::text,${input.printerId}::text,
+    ${input.fenceRequestId}::text,${input.journalSha256}::text,${input.entries}::jsonb
+  ) AS result
+`);
+
 export const beginPrintingIdempotency = (input: {
   capability: string;
   requestId: string;

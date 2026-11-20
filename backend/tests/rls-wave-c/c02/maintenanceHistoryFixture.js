@@ -72,6 +72,21 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   await call({action:'verify',token:authorization.data.token,binding},403);
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
+  const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
+    sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  const journalHash=hash(JSON.stringify(uncertain.map(({name,sha256})=>[name,sha256])));
+  const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`;
+  assert.equal(JSON.parse(psql(app,protection)).protected,2,'uncertain attempts must be durably protected');
+  assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
+  assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE id IN ('${uncertain.map(item=>item.printItemId).join("','")}')
+    AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
+    AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'2');
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(uncertain)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${ids.foreignPrinter}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`,true),
+    /permission denied|PRINTING_BOUNDARY_DENIED|UPGRADE_NO_REPLAY_DENIED/);
   const claimed=await psqlAsync(app,`SELECT app_rls.printing_connector_event('${registration}','${agent}','${device}','history_fenced_claim_nonce',now()::timestamp,'${randomUUID()}','CLAIM','${randomUUID()}',NULL,'${printer}',NULL,NULL,'{}'::jsonb)`);
   assert.notEqual(claimed.status,0);assert.match(claimed.output,/CONNECTOR_MAINTENANCE_FENCED/);
   // A genuinely oversized *unresolved* workset must fail, not silently return

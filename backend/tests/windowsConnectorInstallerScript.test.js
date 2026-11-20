@@ -376,8 +376,9 @@ const run = async () => {
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") > 0 &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/fence'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
-    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf('$process.Kill()'),
-    "Upgrade must detect the owned installation and drain fenced work before stopping the connector"
+    upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/shutdown'") &&
+    !upgradeTransaction.includes('$process.Kill()'),
+    "Upgrade must drain fenced work and request a connector-owned shutdown before replacement"
   );
   assert(existingUpgradeCertification.includes("[Parameter(Mandatory=$true)][ValidateSet('Before','After')][string]$Stage") &&
     existingUpgradeCertification.includes(' -TargetVersion $expectedTargetVersion') &&

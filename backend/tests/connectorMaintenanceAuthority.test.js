@@ -25,6 +25,7 @@ const records = new Map([
   [proofService.upgradeAttemptKey(challenge.attemptId), JSON.stringify(attempt)],
 ]);
 let unresolved = false;
+let protectedEntries = [];
 let failHandoffStore = false;
 let authorizations = 0;
 let authorizedTokenHash;
@@ -45,9 +46,16 @@ mock('controllers/connectorUpgradeDeviceProofController.js', { trustedBinding: a
   publicKeyPem: publicPem, sourceVersion: attempt.sourceVersion,
 }) });
 let consumed = false;
-mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { administerPrintingPrinter: async input => {
+mock('rls-waves/session-c/c02/printingLifecycleRepository.js', { protectUpgradeUnknownAttempts: async input => {
+  protectedEntries = input.entries;
+  return { protected: input.entries.length };
+}, administerPrintingPrinter: async input => {
   if (input.operation === 'MAINTENANCE_INVENTORY') return { state: 'DISPATCH_FENCED', requestId: 'fence-1',
-    workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : [],
+    workDigest: hash('inventory'), inventory: { items: unresolved ? [{ id: 'unresolved' }] : protectedEntries.map(entry => ({
+      id: entry.printItemId, state: 'FROZEN', pipelineState: 'NEEDS_OPERATOR_ACTION',
+      dispatchMetadata: { upgradeNoReplay: { journalSha256: hash(JSON.stringify(protectedEntries.map(({ name, sha256 }) => [name, sha256]))),
+        entrySha256: entry.sha256, attemptId: entry.attemptId } },
+    })),
       diagnostics: {}, localDiagnostics: [] } };
   if (input.operation === 'MAINTENANCE_AUTHORIZE') {
     if (authorizations && (consumed || authorizedTokenHash !== input.payload.tokenHash))
@@ -103,7 +111,11 @@ const request = body => ({ body, params: { id: attempt.printerId }, user: { user
     const reservedResult = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId,
       checkpoint: reserved, binding }), reservedResult);
-    assert.equal(reservedResult.code, 409, '12 reserved records require authoritative item-by-item reconciliation');
+    assert.equal(reservedResult.code, 200, '12 reserved records can authorize only after durable item-by-item protection');
+    const protectedEvidence = require(path.join(dist, 'services/connectorMaintenanceEvidence')).verifyConnectorIsolationEvidence(reservedResult.body.evidence);
+    assert.equal(protectedEvidence.reconciliations.length, 12);
+    assert(protectedEvidence.reconciliations.every(item => item.outcome === 'PROTECTED_UNKNOWN'));
+    protectedEntries = [];
     const wrongInstaller = response();
     await controller.issueVerifiedConnectorMaintenanceEvidence(request({ challengeId: challenge.challengeId, checkpoint,
       binding: { ...binding, installerSha256: hash('other') } }), wrongInstaller);

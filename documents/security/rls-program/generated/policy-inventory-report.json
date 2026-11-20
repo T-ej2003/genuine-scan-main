@@ -4692,7 +4692,8 @@
         "contract:release-fix-5-record-sample:Licensee:SELECT",
         "contract:release-fix-5-reissue-request:Licensee:SELECT",
         "contract:release-fix-5-release-batch:Licensee:SELECT",
-        "contract:release-fix-5-test-label-job:Licensee:SELECT"
+        "contract:release-fix-5-test-label-job:Licensee:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Licensee:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -5237,7 +5238,8 @@
         "contract:release-fix-5-record-sample:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-reissue-request:ManufacturerLicenseeLink:SELECT",
         "contract:release-fix-5-release-batch:ManufacturerLicenseeLink:SELECT",
-        "contract:release-fix-5-test-label-job:ManufacturerLicenseeLink:SELECT"
+        "contract:release-fix-5-test-label-job:ManufacturerLicenseeLink:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:ManufacturerLicenseeLink:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -5894,7 +5896,8 @@
         "contract:release-fix-5-record-sample:Organization:SELECT",
         "contract:release-fix-5-reissue-request:Organization:SELECT",
         "contract:release-fix-5-release-batch:Organization:SELECT",
-        "contract:release-fix-5-test-label-job:Organization:SELECT"
+        "contract:release-fix-5-test-label-job:Organization:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Organization:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",
@@ -6666,6 +6669,7 @@
         "contract:release-fix-5-printer-administration:Printer:SELECT",
         "contract:release-fix-5-reissue-request:Printer:SELECT",
         "contract:release-fix-5-test-label-job:Printer:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:Printer:SELECT",
         "contract:release-fix-5-worker-network:Printer:SELECT"
       ],
       "workflowId": null,
@@ -7043,6 +7047,7 @@
         "contract:release-fix-5-readiness:PrintItem:SELECT",
         "contract:release-fix-5-reissue-request:PrintItem:SELECT",
         "contract:release-fix-5-release-batch:PrintItem:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItem:SELECT",
         "contract:release-fix-5-worker-network:PrintItem:SELECT",
         "contract:release-fix-5-worker-reconcile:PrintItem:SELECT"
       ],
@@ -7075,6 +7080,7 @@
         "contract:release-fix-5-control-job:PrintItem:UPDATE",
         "contract:release-fix-5-gateway-job:PrintItem:UPDATE",
         "contract:release-fix-5-reissue-request:PrintItem:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItem:UPDATE",
         "contract:release-fix-5-worker-network:PrintItem:UPDATE",
         "contract:release-fix-5-worker-reconcile:PrintItem:UPDATE"
       ],
@@ -7130,6 +7136,7 @@
       "sourceCommandRuleIds": [
         "contract:release-fix-5-connector-event:PrintItemEvent:INSERT",
         "contract:release-fix-5-gateway-job:PrintItemEvent:INSERT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintItemEvent:INSERT",
         "contract:release-fix-5-worker-reconcile:PrintItemEvent:INSERT"
       ],
       "workflowId": null,
@@ -7261,6 +7268,7 @@
         "contract:release-fix-5-record-sample:PrintJob:SELECT",
         "contract:release-fix-5-reissue-request:PrintJob:SELECT",
         "contract:release-fix-5-release-batch:PrintJob:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintJob:SELECT",
         "contract:release-fix-5-worker-network:PrintJob:SELECT",
         "contract:release-fix-5-worker-reconcile:PrintJob:SELECT"
       ],
@@ -7292,6 +7300,7 @@
         "contract:release-fix-5-connector-event:PrintJob:UPDATE",
         "contract:release-fix-5-control-job:PrintJob:UPDATE",
         "contract:release-fix-5-gateway-job:PrintJob:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintJob:UPDATE",
         "contract:release-fix-5-worker-network:PrintJob:UPDATE"
       ],
       "workflowId": null,
@@ -7505,6 +7514,7 @@
         "contract:release-fix-5-readiness:PrintSession:SELECT",
         "contract:release-fix-5-reissue-request:PrintSession:SELECT",
         "contract:release-fix-5-release-batch:PrintSession:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintSession:SELECT",
         "contract:release-fix-5-worker-network:PrintSession:SELECT"
       ],
       "workflowId": null,
@@ -7535,6 +7545,7 @@
         "contract:release-fix-5-connector-event:PrintSession:UPDATE",
         "contract:release-fix-5-control-job:PrintSession:UPDATE",
         "contract:release-fix-5-gateway-job:PrintSession:UPDATE",
+        "contract:release-fix-5-upgrade-protect-unknown:PrintSession:UPDATE",
         "contract:release-fix-5-worker-network:PrintSession:UPDATE"
       ],
       "workflowId": null,
@@ -10935,7 +10946,8 @@
         "contract:release-fix-5-record-sample:User:SELECT",
         "contract:release-fix-5-reissue-request:User:SELECT",
         "contract:release-fix-5-release-batch:User:SELECT",
-        "contract:release-fix-5-test-label-job:User:SELECT"
+        "contract:release-fix-5-test-label-job:User:SELECT",
+        "contract:release-fix-5-upgrade-protect-unknown:User:SELECT"
       ],
       "workflowId": null,
       "route": "Release Fix 5 exact printing boundary",

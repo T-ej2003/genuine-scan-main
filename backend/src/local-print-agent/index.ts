@@ -475,6 +475,16 @@ app.get("/maintenance/checkpoint", (_req, res) => {
   return res.json({ ...maintenanceCheckpoint(), socketClosed: directPrintSocketClosed() });
 });
 
+app.post("/maintenance/shutdown", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  const checkpoint = maintenanceCheckpoint();
+  if (!checkpoint.fenced || !checkpoint.idle || !directPrintSocketClosed()) {
+    return res.status(409).json({ success: false, error: "Connector maintenance has not drained." });
+  }
+  res.once("finish", () => setImmediate(() => process.exit(0)));
+  return res.json({ success: true });
+});
+
 app.post("/maintenance/device-proof", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   try {

@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb'
+    AND source_contract_sha256='6d2beecce676760c221c6f8c4029770a526451d779428dae240fb1da962c7949'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:6d2beecce676760c221c6f8c4029770a526451d779428dae240fb1da962c7949'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:6d2beecce676760c221c6f8c4029770a526451d779428dae240fb1da962c7949')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -9114,7 +9114,14 @@ BEGIN
       -- a claim that the legacy binary supports native drain acknowledgement.
       IF EXISTS(SELECT 1 FROM jsonb_array_elements(maintenance_inventory->'items') item
         WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
-          WHERE r->>'itemId'=item->>'id' AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
+          WHERE r->>'itemId'=item->>'id' AND (r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY')
+            OR (r->>'outcome'='PROTECTED_UNKNOWN' AND item->>'state'='FROZEN'
+              AND item->>'pipelineState'='NEEDS_OPERATOR_ACTION'
+              AND item->'dispatchMetadata'->'upgradeNoReplay'->>'entrySha256'=r->>'reference'
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'isolationEvidence') proof
+                WHERE proof->>'kind'='connector-work-inventory' AND proof->>'sha256'=
+                  item->'dispatchMetadata'->'upgradeNoReplay'->>'journalSha256')))
+            AND length(coalesce(r->>'reference',''))>0))
         OR EXISTS(SELECT 1 FROM jsonb_each(maintenance_inventory->'diagnostics') lease
           WHERE NOT EXISTS(SELECT 1 FROM jsonb_array_elements(p_payload->'evidence'->'reconciliations') r
             WHERE r->>'diagnosticId'=lease.key AND r->>'outcome' IN ('PHYSICAL_CONFIRMED','VOID_NO_REPLAY') AND length(coalesce(r->>'reference',''))>0))
@@ -11357,10 +11364,12 @@ BEGIN
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
       IF job_row.status NOT IN ('FAILED','PARTIALLY_COMPLETED','CONFIRMED','STOPPED','CANCELLED')
       THEN RAISE EXCEPTION 'INVALID_STATE_TRANSITION'; END IF;
-      IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION'
-      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
       original_session_id:=job_row.original_session_id;
       PERFORM set_config('app.printing_original_session_id',original_session_id,true);
+      IF job_row."pipelineState"='NEEDS_OPERATOR_ACTION' OR EXISTS (
+        SELECT 1 FROM public."PrintItem" pi WHERE pi."printSessionId"=job_row.original_session_id
+          AND pi."dispatchMetadata" ? 'upgradeNoReplay')
+      THEN RAISE EXCEPTION 'PHYSICAL_OUTCOME_UNCONFIRMED'; END IF;
       IF job_row.status='STOPPED' THEN
         IF job_row."pipelineState"<>'STOPPED' OR job_row.original_session_status<>'STOPPED'
            OR job_row."completedAt" IS NULL OR job_row.original_completed_at IS NULL
@@ -11946,6 +11955,96 @@ BEGIN
 END
 $fn$;
 
+-- Install as the existing printing auth-function owner after printingLifecycle.sql.
+-- The caller verifies the connector signature and journal hash. This function
+-- independently binds every record to the fenced manufacturer-owned database
+-- item, then makes its uncertain physical outcome durable and non-replayable.
+CREATE OR REPLACE FUNCTION app_rls.printing_upgrade_protect_unknown(
+  p_capability text, p_request_id text, p_printer_id text,
+  p_fence_request_id text, p_journal_sha256 text, p_entries jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path=pg_catalog,public
+AS $fn$
+DECLARE snapshot jsonb; registration_id text; expected_count integer;
+  matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
+BEGIN
+  IF session_user <> 'mscqr_rls_cert_app' OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
+     p_fence_request_id !~* '^[0-9a-f-]{36}$' OR jsonb_typeof(p_entries)<>'array' OR
+     jsonb_array_length(p_entries) NOT BETWEEN 1 AND 512
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
+  expected_count:=jsonb_array_length(p_entries);
+  IF EXISTS (
+    SELECT 1 FROM jsonb_to_recordset(p_entries) AS e(name text,sha256 text,"printJobId" text,"printItemId" text,"attemptId" text,state text)
+    WHERE e.name !~ '^[a-f0-9]{64}(\.gateway-attempt)?\.json$' OR e.sha256 !~ '^[a-f0-9]{64}$' OR
+      e.state NOT IN ('ATTEMPT_RESERVED','PREPARING','PRE_DISPATCH_FAILURE','PRE_DISPATCH_REPORTED') OR
+      e."printJobId" IS NULL OR e."printItemId" IS NULL OR
+      (e."attemptId" IS NOT NULL AND e."attemptId" !~* '^[0-9a-f-]{36}$')
+  ) OR (SELECT count(DISTINCT e."printItemId") FROM jsonb_to_recordset(p_entries) AS e("printItemId" text))<>expected_count OR
+       (SELECT count(DISTINCT e.name) FROM jsonb_to_recordset(p_entries) AS e(name text))<>expected_count
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
+
+  -- The maintenance gate serializes claims and this write on the same printer.
+  snapshot:=app_rls.printing_printer_administration(
+    p_capability,'printing-printer-admin',p_request_id,'MAINTENANCE_INVENTORY',p_printer_id,'{}'::jsonb);
+  IF current_setting('app.printing_role',true)<>'MANUFACTURER_ADMIN' OR
+     snapshot->>'state'<>'DISPATCH_FENCED' OR snapshot->>'requestId' IS DISTINCT FROM p_fence_request_id
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
+  SELECT p."printerRegistrationId" INTO STRICT registration_id FROM public."Printer" p
+    WHERE p.id=p_printer_id AND p."assignedUserId"=current_setting('app.printing_user_id',true)
+      AND p."isActive" AND p."printerRegistrationId" IS NOT NULL;
+  SELECT coalesce(jsonb_agg(jsonb_build_object('itemId',pi.id,'sessionId',ps.id,
+      'jobId',j.id,'qrCodeId',pi."qrCodeId",'entrySha256',e.sha256,'attemptId',e."attemptId") ORDER BY pi.id),'[]'::jsonb)
+    INTO matches FROM jsonb_to_recordset(p_entries)
+      AS e(name text,sha256 text,"printJobId" text,"printItemId" text,"attemptId" text,state text)
+    JOIN public."PrintItem" pi ON pi.id=e."printItemId"
+    JOIN public."PrintSession" ps ON ps.id=pi."printSessionId" AND ps."printJobId"=e."printJobId"
+    JOIN public."PrintJob" j ON j.id=ps."printJobId"
+    WHERE ps."printerRegistrationId"=registration_id AND
+      j."manufacturerId"=current_setting('app.printing_user_id',true) AND
+      pi."printConfirmedAt" IS NULL AND pi.state NOT IN ('PRINT_CONFIRMED','CLOSED') AND
+      (e."attemptId" IS NOT DISTINCT FROM pi."dispatchMetadata"->>'attemptId');
+  IF jsonb_array_length(matches)<>expected_count
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
+
+  FOR entry IN SELECT value FROM jsonb_array_elements(matches) ORDER BY value->>'itemId' LOOP
+    PERFORM set_config('app.printing_operation','printing-connector-upgrade-protect',true),
+      set_config('app.printing_registration_id',registration_id,true),
+      set_config('app.printing_session_row_id',entry->>'sessionId',true),
+      set_config('app.printing_job_id',entry->>'jobId',true),
+      set_config('app.printing_item_id',entry->>'itemId',true);
+    SELECT pi.state,pi."dispatchMetadata",pi."printConfirmedAt",pi."printSessionId",pi."qrCodeId"
+      INTO STRICT item_row FROM public."PrintItem" pi WHERE pi.id=entry->>'itemId' FOR UPDATE;
+    marker:=jsonb_build_object('journalSha256',p_journal_sha256,
+      'entrySha256',entry->>'entrySha256','attemptId',entry->>'attemptId');
+    IF item_row."printSessionId" IS DISTINCT FROM entry->>'sessionId' OR
+       item_row."qrCodeId" IS DISTINCT FROM entry->>'qrCodeId' OR
+       item_row."printConfirmedAt" IS NOT NULL OR item_row.state IN ('PRINT_CONFIRMED','CLOSED') OR
+       (item_row."dispatchMetadata" ? 'upgradeNoReplay' AND
+         item_row."dispatchMetadata"->'upgradeNoReplay' IS DISTINCT FROM marker)
+    THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
+    IF NOT (item_row."dispatchMetadata" ? 'upgradeNoReplay') THEN
+      UPDATE public."PrintItem" pi SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
+        "frozenAt"=coalesce(pi."frozenAt",clock_timestamp()),"failureReason"='physical_outcome_unconfirmed',
+        "dispatchMetadata"=coalesce(pi."dispatchMetadata",'{}'::jsonb)||jsonb_build_object('upgradeNoReplay',marker),
+        "updatedAt"=clock_timestamp() WHERE pi.id=entry->>'itemId';
+      INSERT INTO public."PrintItemEvent"(id,"printItemId","eventType","previousState","nextState",details,"actorUserId","createdAt")
+        VALUES(gen_random_uuid()::text,entry->>'itemId','INCIDENT_RAISED',item_row.state,'FROZEN',
+          jsonb_build_object('reason','upgrade_unknown_no_replay','journalSha256',p_journal_sha256),
+          current_setting('app.printing_user_id',true),clock_timestamp());
+      added:=added+1;
+    END IF;
+    UPDATE public."PrintSession" ps SET status=CASE WHEN ps.status IN ('ACTIVE','RESUME_PENDING') THEN 'PAUSED'::public."PrintSessionStatus" ELSE ps.status END,
+      "frozenItems"=(SELECT count(*) FROM public."PrintItem" pi WHERE pi."printSessionId"=ps.id AND pi.state='FROZEN'),
+      "failedReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp() WHERE ps.id=entry->>'sessionId';
+    UPDATE public."PrintJob" j SET status=CASE WHEN j.status IN ('PENDING','SENT') THEN 'PAUSED'::public."PrintJobStatus" ELSE j.status END,
+      "pipelineState"='NEEDS_OPERATOR_ACTION',"failureReason"='physical_outcome_unconfirmed',"updatedAt"=clock_timestamp()
+      WHERE j.id=entry->>'jobId';
+  END LOOP;
+  RETURN jsonb_build_object('protected',expected_count,'newlyProtected',added,'journalSha256',p_journal_sha256);
+END
+$fn$;
+REVOKE ALL ON FUNCTION app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb) FROM PUBLIC;
+
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_event(text,text,text,text,timestamp without time zone,text,text,text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_identity(text,text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_connector_registration(text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
@@ -11960,6 +12059,7 @@ GRANT EXECUTE ON FUNCTION app_rls.printing_record_sample(text,text,text,text,tex
 GRANT EXECUTE ON FUNCTION app_rls.printing_reissue_request(text,text,text,text,text,text,integer,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_release_batch(text,text,text,text,text,text) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_test_label_job(text,text,text,text,jsonb,jsonb) TO "mscqr_rls_cert_app";
+GRANT EXECUTE ON FUNCTION app_rls.printing_upgrade_protect_unknown(text,text,text,text,text,jsonb) TO "mscqr_rls_cert_app";
 GRANT EXECUTE ON FUNCTION app_rls.printing_worker_network_job(text,text,text,jsonb) TO "mscqr_rls_cert_worker";
 GRANT EXECUTE ON FUNCTION app_rls.printing_worker_reconcile(text,text,integer) TO "mscqr_rls_cert_worker";
 RESET ROLE;
