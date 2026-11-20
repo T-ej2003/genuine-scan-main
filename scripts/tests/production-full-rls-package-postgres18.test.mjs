@@ -1487,24 +1487,21 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       const upgradePrintingFunctions = fs.readFileSync(path.join(sqlRoot, "22-printing-upgrade.sql"), "utf8");
       const reissueIdentity = requirements.objects.routines.find((row) => row.identity.startsWith("app_rls.printing_reissue_request("))?.identity;
       assert.ok(reissueIdentity);
-      let c02Reissue;
-      await assert.rejects(administratorClient.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
-        await tx.$executeRawUnsafe("GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner");
-        await tx.$executeRawUnsafe("RESET ROLE");
-        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner");
-        await tx.$executeRawUnsafe(printingRoutine(basePrintingFunctions, "printing_reissue_request")
-          .replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_"));
-        await tx.$executeRawUnsafe("RESET ROLE");
-        await tx.$executeRawUnsafe("SET LOCAL ROLE mscqr_prd_rls_phase2_owner");
-        await tx.$executeRawUnsafe("REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner");
-        await tx.$executeRawUnsafe("RESET ROLE");
-        c02Reissue = hashProductionRlsCatalogue(await collectAppOnlyDatabaseCatalogueRows(tx)).routines
-          .find((row) => row.identity === reissueIdentity);
-        assert.ok(c02Reissue && c02Reissue.sha256 !== requirements.objects.routines.find((row) => row.identity === reissueIdentity).sha256);
-        throw new Error("ROLLBACK_C02_INTERMEDIATE_PROBE");
-      }, { maxWait: 10000, timeout: 30000 }), /ROLLBACK_C02_INTERMEDIATE_PROBE/);
-      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "intermediate probe rollback"), "f");
+      const replaceReissue = (source, label) => psql(greenUrl, ["-q", "-c", `BEGIN;
+        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
+        ${printingRoutine(source, "printing_reissue_request").replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_")}
+        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
+        REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
+        RESET ROLE; COMMIT;`], label);
+      replaceReissue(basePrintingFunctions, "probe historical C02 reissue in disposable database");
+      const c02Reissue = hashProductionRlsCatalogue(await collectCatalogueRows(verifier)).routines
+        .find((row) => row.identity === reissueIdentity);
+      assert.ok(c02Reissue && c02Reissue.sha256 !== requirements.objects.routines.find((row) => row.identity === reissueIdentity).sha256);
+      replaceReissue(upgradePrintingFunctions, "restore upgrade reissue after disposable probe");
+      assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements.objects);
+      assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "intermediate probe restoration"), "f");
       const oldPolicies = oldSource("scripts/rls/sql/generated/30-policies.sql");
       const oldGrants = oldSource("scripts/rls/sql/generated/21-runtime-grants.sql");
       const currentGrants = fs.readFileSync(path.join(sqlRoot, "21-runtime-grants.sql"), "utf8");
@@ -1662,14 +1659,7 @@ test("approved production package executes on disposable PostgreSQL 18 and rollb
       assert.deepEqual(await combinedC02Runtime.verifyCommittedCatalogue({ client: administratorClient, pkg: combinedPackage }), combinedPackage.finalCatalogue);
       assert.deepEqual(preservedTables.map(table => scalar(privilegedGreenUrl,
         `SELECT c.oid||':'||c.relrowsecurity||':'||c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relname='${table}'`, "table identity after")), tableIdentities);
-      psql(greenUrl, ["-q", "-c", `BEGIN;
-        SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
-        GRANT CREATE ON SCHEMA app_rls TO mscqr_prd_rls_phase2_auth_owner;
-        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_auth_owner;
-        ${printingRoutine(upgradePrintingFunctions, "printing_reissue_request").replaceAll("mscqr_rls_cert_", "mscqr_prd_rls_phase2_")};
-        RESET ROLE; SET LOCAL ROLE mscqr_prd_rls_phase2_owner;
-        REVOKE CREATE ON SCHEMA app_rls FROM mscqr_prd_rls_phase2_auth_owner;
-        RESET ROLE; COMMIT;`], "apply separate upgrade reissue replacement in disposable database");
+      replaceReissue(upgradePrintingFunctions, "apply separate upgrade reissue replacement in disposable database");
       assert.deepEqual(hashProductionRlsCatalogue(await collectCatalogueRows(verifier)), requirements.objects);
       assert.equal(scalar(greenUrl, "SELECT has_schema_privilege('mscqr_prd_rls_phase2_auth_owner','app_rls','CREATE')", "upgrade reissue privilege restoration"), "f");
     } finally { await Promise.all([maintenanceClient.$disconnect(), administratorClient.$disconnect(), verifier.$disconnect()]); }
