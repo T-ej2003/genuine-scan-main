@@ -124,6 +124,15 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
     AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'12');
   assert.equal(psql(admin,`SELECT state FROM public."PrintItem" WHERE id='${settledId}'`),'PRINT_CONFIRMED');
+  const retainedIds=psql(admin,`SELECT string_agg(id,',') FROM (SELECT id FROM public."PrintItem"
+    WHERE "printSessionId"='${historySession}' AND state='PRINT_CONFIRMED' ORDER BY id LIMIT 513) items`).split(',');
+  const retainedEntries=retainedIds.map((id,index)=>({name:`${hash(`retained-${index}`)}.json`,
+    sha256:hash(`retained-record-${index}`),printJobId:historyJob,printItemId:id,attemptId:null,state:'ATTEMPT_RESERVED'}));
+  const retainedHash=hash(JSON.stringify(retainedEntries.map(({name,sha256})=>[name,sha256])));
+  const retained=JSON.parse(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${retainedHash}','${JSON.stringify(retainedEntries)}'::jsonb)`));
+  assert.equal(retained.settled,513,'retained confirmed journal history must not hit a lower SQL bound');
+  assert.equal(retained.protected,0);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${hash('forged-journal')}','${JSON.stringify(journalEntries)}'::jsonb)`,true),/UPGRADE_NO_REPLAY_MISMATCH/);
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',

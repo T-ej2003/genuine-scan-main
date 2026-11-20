@@ -757,7 +757,7 @@ BEGIN
   IF session_user <> 'mscqr_prd_rls_phase2_app' OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
      p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
      p_entries IS NULL OR jsonb_typeof(p_entries) IS DISTINCT FROM 'array' OR
-     jsonb_array_length(p_entries) NOT BETWEEN 1 AND 512
+     jsonb_array_length(p_entries) NOT BETWEEN 1 AND 10000
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
   expected_count:=jsonb_array_length(p_entries);
   IF EXISTS (
