@@ -1,6 +1,19 @@
 \set ON_ERROR_STOP on
 BEGIN;
 
+DO $grant_preflight$
+BEGIN
+  IF current_user <> 'mscqr_prd_rls_phase2_auth_owner' OR
+     NOT pg_has_role(session_user,'mscqr_prd_rls_phase2_owner'::regrole,'SET')
+  THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_GRANT_IDENTITY_INVALID' USING ERRCODE='42501'; END IF;
+END
+$grant_preflight$;
+
+SET ROLE "mscqr_prd_rls_phase2_owner";
+GRANT UPDATE ("frozenAt") ON public."PrintItem" TO "mscqr_prd_rls_phase2_auth_owner";
+GRANT UPDATE ("frozenItems") ON public."PrintSession" TO "mscqr_prd_rls_phase2_auth_owner";
+SET ROLE "mscqr_prd_rls_phase2_auth_owner";
+
 DO $preflight$
 BEGIN
   IF NOT has_schema_privilege(current_user,'app_rls','CREATE') OR
@@ -863,4 +876,5 @@ $fn$;
 REVOKE ALL ON FUNCTION app_rls.printing_upgrade_handoff(text,text,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_rls.printing_upgrade_handoff(text,text,jsonb) TO "mscqr_prd_rls_phase2_app";
 
+RESET ROLE;
 COMMIT;

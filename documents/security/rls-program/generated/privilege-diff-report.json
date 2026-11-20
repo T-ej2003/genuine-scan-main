@@ -3296,6 +3296,7 @@
         "status",
         "issuedItems",
         "confirmedItems",
+        "frozenItems",
         "failedReason",
         "completedAt",
         "updatedAt"
@@ -3369,6 +3370,7 @@
         "agentAckedAt",
         "confirmationDeadlineAt",
         "printConfirmedAt",
+        "frozenAt",
         "failedAt",
         "failureReason",
         "updatedAt"

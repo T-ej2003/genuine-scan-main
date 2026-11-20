@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='6ee4adddc109cf8a6a71d27bff8befe9956f5c1583e45ea26ccff16e10cbfae5'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:6ee4adddc109cf8a6a71d27bff8befe9956f5c1583e45ea26ccff16e10cbfae5'
+    AND source_contract_sha256='d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d'
     AND administrator_role='certification-administrator'
 
     AND phase='context-helpers-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:6ee4adddc109cf8a6a71d27bff8befe9956f5c1583e45ea26ccff16e10cbfae5')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:d9012d0658e194fbe99c7c479db2e6b1140ece438fb0fe901f04ebca3c9f1c3d')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -257,10 +257,10 @@ GRANT INSERT ("id", "jobNumber", "batchId", "manufacturerId", "printerId", "stat
 GRANT UPDATE ("status", "pipelineState", "sentAt", "completedAt", "failureReason", "confirmedAt", "updatedAt") ON TABLE public."PrintJob" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "printJobId", "batchId", "manufacturerId", "printerRegistrationId", "printerId", "status", "totalItems", "issuedItems", "confirmedItems", "frozenItems", "failedReason", "startedAt", "completedAt", "createdAt", "updatedAt") ON TABLE public."PrintSession" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "printJobId", "batchId", "manufacturerId", "printerRegistrationId", "printerId", "status", "totalItems", "createdAt", "updatedAt") ON TABLE public."PrintSession" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("status", "issuedItems", "confirmedItems", "failedReason", "completedAt", "updatedAt") ON TABLE public."PrintSession" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("status", "issuedItems", "confirmedItems", "frozenItems", "failedReason", "completedAt", "updatedAt") ON TABLE public."PrintSession" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("id", "printSessionId", "qrCodeId", "code", "state", "pipelineState", "issueSequence", "attemptCount", "currentRenderTokenHash", "deviceJobRef", "dispatchMetadata", "confirmationEvidence", "issuedAt", "dispatchedAt", "agentAckedAt", "confirmationDeadlineAt", "printConfirmedAt", "closedAt", "frozenAt", "failedAt", "failureReason", "deadLetterReason", "createdAt", "updatedAt") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "printSessionId", "qrCodeId", "code", "state", "pipelineState", "issueSequence", "createdAt", "updatedAt") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
-GRANT UPDATE ("printSessionId", "state", "pipelineState", "issueSequence", "attemptCount", "deviceJobRef", "dispatchMetadata", "confirmationEvidence", "issuedAt", "dispatchedAt", "agentAckedAt", "confirmationDeadlineAt", "printConfirmedAt", "failedAt", "failureReason", "updatedAt") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
+GRANT UPDATE ("printSessionId", "state", "pipelineState", "issueSequence", "attemptCount", "deviceJobRef", "dispatchMetadata", "confirmationEvidence", "issuedAt", "dispatchedAt", "agentAckedAt", "confirmationDeadlineAt", "printConfirmedAt", "frozenAt", "failedAt", "failureReason", "updatedAt") ON TABLE public."PrintItem" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("printItemId") ON TABLE public."PrintItemEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT INSERT ("id", "printItemId", "eventType", "previousState", "nextState", "details", "actorUserId", "createdAt") ON TABLE public."PrintItemEvent" TO "mscqr_rls_cert_auth_owner";
 GRANT SELECT ("printJobId", "printSessionId") ON TABLE public."PrintJobChunk" TO "mscqr_rls_cert_auth_owner";

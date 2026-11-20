@@ -103,6 +103,10 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,
     sha256:hash(`upgrade-record-${index}`),printJobId:job,printItemId:item.id,attemptId:null,state:'ATTEMPT_RESERVED'}));
   const journalHash=hash(JSON.stringify(uncertain.map(({name,sha256})=>[name,sha256])));
+  for(const [table,column] of [['PrintItem','frozenAt'],['PrintSession','frozenItems']]) {
+    assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_auth_owner','public."${table}"','${column}','UPDATE')`),'t');
+    assert.equal(psql(admin,`SELECT has_column_privilege('mscqr_rls_cert_app','public."${table}"','${column}','UPDATE')`),'f');
+  }
   const protection=`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`;
   assert.equal(JSON.parse(psql(app,protection)).protected,12,'uncertain attempts must be durably protected');
