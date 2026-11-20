@@ -8,8 +8,8 @@ DO $$ BEGIN
     AND target_environment='certification'
     AND deployment_id='cert'
     AND green_database=current_database()
-    AND source_contract_sha256='85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434'
-    AND package_role_marker='mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434'
+    AND source_contract_sha256='6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb'
+    AND package_role_marker='mscqr-full-rls-clean-room:certification:6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb'
     AND administrator_role='certification-administrator'
 
     AND phase='ownership-installed'
@@ -24,7 +24,7 @@ DO $$ BEGIN
     ('mscqr_rls_cert_worker', true),
     ('mscqr_rls_cert_scheduled', true),
     ('mscqr_rls_cert_operator', true),
-    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:85325c2abe72d3160f6d328326a72670eb012eff94046ad1cefd70730d6ee434')
+    ('mscqr_rls_cert_migration', true)) spec(role_name,expected_login) ON spec.role_name=r.rolname WHERE r.rolcanlogin IS DISTINCT FROM spec.expected_login OR r.rolinherit OR r.rolsuper OR r.rolcreatedb OR r.rolcreaterole OR r.rolreplication OR r.rolbypassrls OR obj_description(r.oid,'pg_authid')<>'mscqr-full-rls-clean-room:certification:6a266470c8cbefe31a792dd608758a96eb5e786e59848ee74b0037aa6a5652eb')
   THEN RAISE EXCEPTION 'managed role attributes or package markers drifted'; END IF;
 
   IF false THEN
@@ -8152,6 +8152,15 @@ BEGIN
        p_details->'binding'->>'fenceRequestId' IS DISTINCT FROM current_value->>'requestId'
     THEN RAISE EXCEPTION 'MAINTENANCE_AUTHORIZATION_DENIED' USING ERRCODE='42501'; END IF;
     IF p_operation='AUTHORIZE' THEN
+      -- A lost HTTP response may retry the same signed evidence and token.
+      -- A consumed token or different evidence must never be reissued.
+      IF current_value->'upgrade'->>'state'='AUTHORIZED' AND
+         current_value->'upgrade'->>'actor'=p_actor AND
+         current_value->'upgrade'->>'tokenHash'=p_details->>'tokenHash' AND
+         current_value->'upgrade'->'binding'=p_details->'binding' AND
+         current_value->'upgrade'->'evidence'=p_details->'evidence' AND
+         (current_value->'upgrade'->>'expiresAt')::timestamptz>clock_timestamp()
+      THEN RETURN jsonb_build_object('authorized',true,'binding',p_details->'binding','dispatchFenced',true); END IF;
       IF coalesce(p_details->>'tokenHash','') !~ '^[a-f0-9]{64}$' OR
          (current_value ? 'upgrade' AND (
            current_value->'upgrade'->'binding' IS DISTINCT FROM p_details->'binding' OR
