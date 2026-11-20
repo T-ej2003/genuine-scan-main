@@ -14,7 +14,7 @@ const publicPem = device.publicKey.export({ type: 'spki', format: 'pem' }).toStr
 process.env.CONNECTOR_ISOLATION_AUTHORITY_PRIVATE_KEY_PEM = authority.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
 process.env.CONNECTOR_ISOLATION_AUTHORITY_PUBLIC_KEY_PEM = authority.publicKey.export({ type: 'spki', format: 'pem' }).toString();
 const proofService = require(path.join(dist, 'services/connectorUpgradeDeviceProof'));
-const attempt = { agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'maker-1', tenantId: 'tenant-1',
+const attempt = { agentId: 'agent-test', deviceFingerprint: 'device-test', manufacturerId: 'maker-1', tenantId: null,
   printerId: 'd5e8d13e-4d73-411b-9b3f-6d1800e73609', registrationId: '839e55cd-86ea-4523-8544-ff4a62a15158',
   sourceVersion: '2026.11.19.1', targetVersion: '2026.11.20.1' };
 const challenge = proofService.createUpgradeDeviceChallenge({ ...attempt, currentVersion: attempt.sourceVersion,

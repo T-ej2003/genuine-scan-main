@@ -109,6 +109,7 @@ const run = async () => {
   const smokeScript = fs.readFileSync(smokeScriptPath, "utf8");
   const installerTemplate = fs.readFileSync(installerTemplatePath, "utf8");
   const upgradeTransaction = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'connector-upgrade-transaction.ps1'), 'utf8');
+  const existingUpgradeCertification = fs.readFileSync(path.join(__dirname, '..', 'local-print-agent', 'install', 'windows', 'certify-existing-upgrade.ps1'), 'utf8');
   const readme = fs.readFileSync(readmePath, "utf8");
   const signedReleaseWorkflow = fs.readFileSync(signedReleaseWorkflowPath, "utf8");
 
@@ -377,6 +378,11 @@ const run = async () => {
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") > 0 &&
     upgradeTransaction.indexOf("Invoke-RestMethod -Uri 'http://127.0.0.1:17866/maintenance/checkpoint'") < upgradeTransaction.indexOf('$process.Kill()'),
     "Upgrade must detect the owned installation and drain fenced work before stopping the connector"
+  );
+  assert(existingUpgradeCertification.includes("$version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256") &&
+    existingUpgradeCertification.includes("$before.runtimeSha256 -ceq $record.runtimeSha256") &&
+    existingUpgradeCertification.includes("$before.journal | ConvertTo-Json"),
+    "Existing-install certification must prove the signed target replaced the old runtime without changing journal records"
   );
   assert(
     readme.includes("Needs attention: connector installed and running"),

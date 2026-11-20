@@ -14,13 +14,14 @@ import { openCookieToken, sealCookieToken } from "../services/auth/cookieTokenPr
 
 const printingCapability = (req: AuthRequest) => String(req.databaseSessionCapability || "").trim();
 const printingRequestId = (req: AuthRequest) => String((req as AuthRequest & { requestId?: string }).requestId || "").trim();
+const maintenanceBinding = z.record(z.string(), z.string().max(256).nullable());
 
 export const issueVerifiedConnectorMaintenanceEvidence = async (req: AuthRequest, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
   try {
     const input = z.object({ challengeId: z.string().uuid(),
       checkpoint: z.object({ statement: z.string().max(900_000), signature: z.string().max(200) }).strict(),
-      binding: z.record(z.string(), z.string().max(256)) }).strict().parse(req.body);
+      binding: maintenanceBinding }).strict().parse(req.body);
     const { binding: trusted, publicKeyPem, sourceVersion } = await trustedBinding(req);
     const redis = await getRedisClient();
     if (!redis) throw new Error("CONNECTOR_UPGRADE_PROOF_STORE_UNAVAILABLE");
@@ -77,7 +78,7 @@ export const requestConnectorMaintenance = async (req: AuthRequest, res: Respons
       z.object({ action: z.literal("request") }).strict(),
       z.object({ action: z.literal("inventory") }).strict(),
       z.object({ action: z.enum(["authorize","release"]), evidence: z.object({ statement: z.string().max(100000), signature: z.string().max(200) }).strict() }).strict(),
-      z.object({ action: z.enum(["consume", "verify"]), token: z.string().regex(/^[a-f0-9]{64}$/), binding: z.record(z.string(), z.string().max(256)) }).strict(),
+      z.object({ action: z.enum(["consume", "verify"]), token: z.string().regex(/^[a-f0-9]{64}$/), binding: maintenanceBinding }).strict(),
     ]).parse(req.body || {});
     let token: string | undefined;
     let payload: Record<string, unknown> = {};
@@ -145,7 +146,7 @@ export const redeemConnectorMaintenanceHandoff = async (req: AuthRequest, res: R
   res.setHeader("Cache-Control", "no-store");
   try {
     const input = z.object({ action: z.enum(["consume", "verify"]), token: z.string().regex(/^[a-f0-9]{64}$/),
-      binding: z.record(z.string(), z.string().max(256)) }).strict().parse(req.body);
+      binding: maintenanceBinding }).strict().parse(req.body);
     const tokenHash = createHash("sha256").update(input.token).digest("hex");
     const redis = await getRedisClient();
     const raw = redis && await redis.get(upgradeHandoffKey(tokenHash));

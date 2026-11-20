@@ -1,10 +1,16 @@
 param(
   [ValidateSet('Before','After')][string]$Stage,
   [Parameter(Mandatory=$true)][string]$EvidenceDirectory,
+  [Parameter(Mandatory=$true)][string]$TargetVersion,
+  [Parameter(Mandatory=$true)][string]$TargetRuntimeSha256,
   [int]$ExpectedJournalCount = 12
 )
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\connector-upgrade-transaction.ps1"
+if($TargetRuntimeSha256 -cnotmatch '^[a-fA-F0-9]{64}$' -or $TargetVersion -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?$') {
+  throw 'Expected target version and runtime digest are required.'
+}
+$TargetRuntimeSha256=$TargetRuntimeSha256.ToLowerInvariant()
 
 function Get-MscqrHash([string]$Value) {
   $sha=[Security.Cryptography.SHA256]::Create()
@@ -33,6 +39,11 @@ if([string]::IsNullOrWhiteSpace([string]$state.selectedPrinterId)) {throw 'Exist
 $uninstall=Get-MscqrUninstallSnapshot $live
 $version=[string](@($uninstall | Where-Object name -eq 'DisplayVersion')[0].value)
 if($version -cne (Get-MscqrRuntimeVersion $runtime)) {throw 'Installed version and AppId registration differ.'}
+$runtimeHash=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+if(($Stage -eq 'Before' -and [version]$version -ge [version]$TargetVersion) -or
+   ($Stage -eq 'After' -and ($version -cne $TargetVersion -or $runtimeHash -cne $TargetRuntimeSha256))) {
+  throw 'Installed connector does not match the expected upgrade stage and signed target.'
+}
 $journalDirectory=Join-Path $env:USERPROFILE '.mscqr\dispatch-journal'
 $journal=@(Get-MscqrDispatchJournalFiles $journalDirectory | ForEach-Object {
   [pscustomobject]@{name=[IO.Path]::GetFileName($_);sha256=(Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant()}
@@ -40,7 +51,7 @@ $journal=@(Get-MscqrDispatchJournalFiles $journalDirectory | ForEach-Object {
 if($journal.Count -ne $ExpectedJournalCount) {throw 'Dispatch journal count differs from the expected existing installation.'}
 $record=[pscustomobject]@{
   scope='local-state-only';stage=$Stage;version=$version;appId='{D9B7502F-CB24-4A65-B84F-A5D9390C0D8A}'
-  runtimeSha256=(Get-FileHash -LiteralPath $runtime -Algorithm SHA256).Hash.ToLowerInvariant()
+  targetVersion=$TargetVersion;targetRuntimeSha256=$TargetRuntimeSha256;runtimeSha256=$runtimeHash
   agentIdSha256=(Get-MscqrHash $state.agentId);deviceFingerprintSha256=(Get-MscqrHash $state.deviceFingerprint)
   publicKeySha256=$identity.publicKeySha256;selectedPrinterSha256=(Get-MscqrHash ([string]$state.selectedPrinterId))
   stateSha256=(Get-FileHash -LiteralPath $states[0] -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -53,7 +64,10 @@ if($Stage -eq 'After') {
   $beforeFile=Join-Path $evidence 'before.json'
   Assert-MscqrPrivatePath $beforeFile
   $before=Read-MscqrJson $beforeFile
-  if($before.appId -cne $record.appId -or $before.agentIdSha256 -cne $record.agentIdSha256 -or
+  if($before.appId -cne $record.appId -or $before.targetVersion -cne $record.targetVersion -or
+      $before.targetRuntimeSha256 -cne $record.targetRuntimeSha256 -or
+      $before.runtimeSha256 -ceq $record.runtimeSha256 -or
+      $before.agentIdSha256 -cne $record.agentIdSha256 -or
       $before.deviceFingerprintSha256 -cne $record.deviceFingerprintSha256 -or
       $before.publicKeySha256 -cne $record.publicKeySha256 -or
       $before.selectedPrinterSha256 -cne $record.selectedPrinterSha256 -or
