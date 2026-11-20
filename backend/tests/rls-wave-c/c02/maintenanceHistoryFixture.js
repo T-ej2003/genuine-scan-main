@@ -83,6 +83,8 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
     '${printer}','${snapshot.requestId}','${journalHash}','${JSON.stringify(uncertain)}'::jsonb)`;
   assert.equal(JSON.parse(psql(app,protection)).protected,12,'uncertain attempts must be durably protected');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
+  assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
+    '${printer}','${snapshot.requestId}','${journalHash}',NULL::jsonb)`,true),/UPGRADE_NO_REPLAY_DENIED/);
   assert.equal(psql(admin,`SELECT count(*) FROM public."PrintItem" WHERE id IN ('${uncertain.map(item=>item.printItemId).join("','")}')
     AND state='FROZEN' AND "pipelineState"='NEEDS_OPERATOR_ACTION'
     AND "dispatchMetadata"->'upgradeNoReplay'->>'journalSha256'='${journalHash}'`),'12');

@@ -725,14 +725,16 @@ AS $fn$
 DECLARE snapshot jsonb; registration_id text; expected_count integer;
   matches jsonb; entry jsonb; item_row record; marker jsonb; added integer:=0;
 BEGIN
-  IF session_user <> {{APP_ROLE}} OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
-     p_fence_request_id !~* '^[0-9a-f-]{36}$' OR jsonb_typeof(p_entries)<>'array' OR
+  IF session_user <> {{APP_ROLE}} OR p_journal_sha256 IS NULL OR p_journal_sha256 !~ '^[a-f0-9]{64}$' OR
+     p_fence_request_id IS NULL OR p_fence_request_id !~* '^[0-9a-f-]{36}$' OR
+     p_entries IS NULL OR jsonb_typeof(p_entries) IS DISTINCT FROM 'array' OR
      jsonb_array_length(p_entries) NOT BETWEEN 1 AND 512
   THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_DENIED' USING ERRCODE='42501'; END IF;
   expected_count:=jsonb_array_length(p_entries);
   IF EXISTS (
     SELECT 1 FROM jsonb_to_recordset(p_entries) AS e(name text,sha256 text,"printJobId" text,"printItemId" text,"attemptId" text,state text)
-    WHERE e.name !~ '^[a-f0-9]{64}(\.gateway-attempt)?\.json$' OR e.sha256 !~ '^[a-f0-9]{64}$' OR
+    WHERE e.name IS NULL OR e.sha256 IS NULL OR e.state IS NULL OR
+      e.name !~ '^[a-f0-9]{64}(\.gateway-attempt)?\.json$' OR e.sha256 !~ '^[a-f0-9]{64}$' OR
       e.state NOT IN ('ATTEMPT_RESERVED','PREPARING','PRE_DISPATCH_FAILURE','PRE_DISPATCH_REPORTED') OR
       e."printJobId" IS NULL OR e."printItemId" IS NULL OR
       (e."attemptId" IS NOT NULL AND e."attemptId" !~* '^[0-9a-f-]{36}$')
