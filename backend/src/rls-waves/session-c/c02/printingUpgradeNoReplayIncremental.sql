@@ -815,7 +815,7 @@ BEGIN
     IF item_row."printConfirmedAt" IS NOT NULL OR item_row.state IN ('PRINT_CONFIRMED','CLOSED')
     THEN RAISE EXCEPTION 'UPGRADE_NO_REPLAY_MISMATCH' USING ERRCODE='42501'; END IF;
     protected_ids:=protected_ids||jsonb_build_array(entry->>'itemId');
-    IF NOT (item_row."dispatchMetadata" ? 'upgradeNoReplay') THEN
+    IF NOT coalesce(item_row."dispatchMetadata" ? 'upgradeNoReplay',false) THEN
       UPDATE public."PrintItem" pi SET state='FROZEN',"pipelineState"='NEEDS_OPERATOR_ACTION',
         "frozenAt"=coalesce(pi."frozenAt",clock_timestamp()),"failureReason"='physical_outcome_unconfirmed',
         "dispatchMetadata"=coalesce(pi."dispatchMetadata",'{}'::jsonb)||jsonb_build_object('upgradeNoReplay',marker),

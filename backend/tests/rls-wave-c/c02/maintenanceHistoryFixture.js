@@ -116,6 +116,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   assert.equal(protectedResult.protected,12,'uncertain attempts must be durably protected');
   assert.equal(protectedResult.settled,1,'confirmed history must be verified without freezing it');
   assert.equal(protectedResult.protectedItemIds.length,12);
+  assert.equal(protectedResult.newlyProtected,12,'nullable dispatch metadata must not skip the first protection write');
   assert.equal(JSON.parse(psql(app,protection)).newlyProtected,0,'renewal must not reset protected attempts');
   assert.match(psql(app,`SELECT app_rls.printing_upgrade_protect_unknown('${capability}','${randomUUID()}',
     '${printer}','${snapshot.requestId}','${journalHash}',NULL::jsonb)`,true),/UPGRADE_NO_REPLAY_DENIED/);
