@@ -345,11 +345,10 @@ const qrSystemAppSignatures = qrSystemContracts.filter((contract) => contract.se
 const qrSystemWorkerSignatures = qrSystemContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const qrSystemOwnerPrivileges = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];
 const qrSystemOwnerPolicies = [...new Map(qrSystemContracts.flatMap((contract) => contract.security.ownerPolicies || []).map((entry) => [JSON.stringify(entry), entry])).values()];
-const printingLifecycleFunctionSource = printingLifecycleContracts.length
-  ? fs.readFileSync(path.join(repoRoot, printingLifecycleContracts[0].definitionLocation), "utf8")
-      .replaceAll("{{APP_ROLE}}", lit(roleNames.app))
-      .replaceAll("{{WORKER_ROLE}}", lit(roleNames.worker))
-  : "";
+const printingLifecycleFunctionSource = readContractSources(printingLifecycleContracts, [
+  ["{{APP_ROLE}}", lit(roleNames.app)],
+  ["{{WORKER_ROLE}}", lit(roleNames.worker)],
+]);
 const printingLifecycleAppSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("app")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleWorkerSignatures = printingLifecycleContracts.filter((contract) => contract.security.runtimeExecuteGrantees.includes("worker")).map((contract) => `app_rls.${contract.name}(${contract.signature})`);
 const printingLifecycleOwnerPrivileges = [...new Map(printingLifecycleContracts.flatMap((contract) => contract.security.ownerPrivileges || []).map((entry) => [JSON.stringify(entry), entry])).values()];

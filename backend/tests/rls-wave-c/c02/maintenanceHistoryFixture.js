@@ -73,6 +73,7 @@ module.exports=async function certifyHistory({admin,app,psql,psqlAsync,ids,capab
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,2);assert.equal(snapshot.inventory.settledHistory.items,100001);
   for(let index=0;index<10;index++)newItem('RESERVED',0);
+  psql(admin,`UPDATE public."PrintSession" SET "totalItems"=13 WHERE id='${session}'`);
   snapshot=inventory();
   assert.equal(snapshot.inventory.items.length,12,'twelve legacy reservations remain individually visible');
   const uncertain=snapshot.inventory.items.map((item,index)=>({name:`${hash(`upgrade-journal-${index}`)}.json`,

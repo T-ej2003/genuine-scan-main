@@ -202,6 +202,26 @@ if (cliArgs.has("--validate-state")) {
   }).catch(() => { console.error("Existing connector identity validation failed."); process.exit(1); });
 }
 
+if (cliArgs.has("--sign-upgrade-challenge")) {
+  (async () => {
+    let input = "";
+    for await (const chunk of process.stdin) {
+      input += String(chunk);
+      if (input.length > 4096) throw new Error("Upgrade challenge exceeds the bounded input.");
+    }
+    const challenge = upgradeChallengeSchema.parse(JSON.parse(input));
+    const state = await loadAgentState({ initialize: false });
+    if (challenge.targetVersion !== AGENT_BUILD_VERSION ||
+        challenge.agentId !== state.agentId || challenge.deviceFingerprint !== state.deviceFingerprint ||
+        Date.parse(challenge.expiresAt) <= Date.now() || Date.parse(challenge.expiresAt) > Date.now() + 120_000) {
+      throw new Error("Upgrade challenge does not match the existing device.");
+    }
+    console.log(JSON.stringify({ challengeId: challenge.challengeId,
+      signature: signUpgradeDeviceChallenge(state.privateKeyPem, challenge) }));
+    process.exit(0);
+  })().catch(() => { console.error("Upgrade device proof could not be established."); process.exit(1); });
+}
+
 if (cliArgs.has("--self-test")) {
   runSelfTest()
     .then(() => process.exit(0))
@@ -223,7 +243,7 @@ if (cliArgs.has("--self-test")) {
 
 let singleInstanceLock: { lockPath: string; fd: number } | null = null;
 try {
-  if (!cliArgs.has("--validate-state")) singleInstanceLock = acquireSingleInstanceLock();
+  if (!cliArgs.has("--validate-state") && !cliArgs.has("--sign-upgrade-challenge")) singleInstanceLock = acquireSingleInstanceLock();
 } catch (error: any) {
   console.error(
     JSON.stringify({
@@ -693,7 +713,8 @@ app.post("/print", async (_req, res) => {
   });
 });
 
-if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state")) {
+if (!cliArgs.has("--self-test") && !cliArgs.has("--validate-state") && !cliArgs.has("--initialize-state") &&
+    !cliArgs.has("--sign-upgrade-challenge")) {
   loadAgentState({ initialize: false }).then(() => {
     app.listen(PORT, HOST, () => {
       console.log(`MSCQR local print agent listening on http://${HOST}:${PORT}`);

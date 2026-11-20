@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { generateKeyPairSync } = require('node:crypto');
+const { generateKeyPairSync, randomUUID } = require('node:crypto');
 
 (async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'mscqr-identity-test-'));
@@ -30,6 +30,25 @@ const { generateKeyPairSync } = require('node:crypto');
     const validation=validate();
     assert.equal(validation.status,0,validation.stderr);
     assert.equal(JSON.parse(validation.stdout).agentId,first.agentId);
+    const { createUpgradeDeviceChallenge, verifyUpgradeDeviceChallenge } = require('../dist/services/connectorUpgradeDeviceProof');
+    const binding = { attemptId: randomUUID(), agentId: first.agentId,
+      deviceFingerprint: first.deviceFingerprint, manufacturerId: 'manufacturer-test', tenantId: null,
+      printerId: randomUUID(), registrationId: randomUUID(), sourceVersion: '2026.11.6.2',
+      currentVersion: '2026.11.6.2', targetVersion: '2026.11.19.1' };
+    const challenge = createUpgradeDeviceChallenge(binding);
+    const signChallenge = (value) => spawnSync(process.execPath,
+      [path.resolve(__dirname,'../dist/local-print-agent/index.js'),'--sign-upgrade-challenge'],
+      { input: JSON.stringify(value), encoding:'utf8', timeout:5000,
+        env:{...process.env,PRINT_AGENT_STATE_FILE:stateFile,PRINT_AGENT_LOCK_DIR:path.join(root,'lock')} });
+    const signed = signChallenge(challenge);
+    assert.equal(signed.status,0,signed.stderr);
+    const proof = JSON.parse(signed.stdout);
+    assert.equal(proof.challengeId,challenge.challengeId);
+    verifyUpgradeDeviceChallenge({challenge,signature:proof.signature,publicKeyPem:first.publicKeyPem,binding});
+    assert.equal(signed.stdout.includes(first.privateKeyPem),false);
+    assert.notEqual(signChallenge({...challenge,targetVersion:'2026.11.6.3'}).status,0);
+    assert.notEqual(signChallenge({...challenge,agentId:'wrong-device'}).status,0);
+    assert.notEqual(signChallenge({...challenge,expiresAt:new Date(Date.now()-1000).toISOString()}).status,0);
     const originalEvidence=JSON.parse(validation.stdout);
     await fs.writeFile(stateFile,JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(beforeValidation)).reverse())));
     const reorderedEvidence=JSON.parse(validate().stdout);
