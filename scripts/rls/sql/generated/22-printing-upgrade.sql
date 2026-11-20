@@ -772,8 +772,8 @@ BEGIN
     WHERE e."printJobId"=e."printItemId" AND
       e."printItemId" ~* '^diagnostic:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' AND
       EXISTS (SELECT 1 FROM public."AuditLog" a WHERE a."userId"=current_setting('app.printing_user_id',true)
-        AND a."orgId"=current_setting('app.printing_organization_id',true)
-        AND a."licenseeId"=current_setting('app.printing_licensee_id',true)
+        AND a."orgId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'')
+        AND a."licenseeId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_licensee_id',true),'')
         AND a.action='PRINTER_TEST_LABEL_CONFIRMED' AND a."entityType"='Printer'
         AND a."entityId"=p_printer_id AND a.details->>'testJobId'=substring(e."printItemId" from 12));
   PERFORM set_config('app.printing_operation',prior_operation,true);

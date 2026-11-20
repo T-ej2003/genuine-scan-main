@@ -1003,7 +1003,7 @@ const printingOwnerPolicies = [
   ["Licensee","SELECT",`${printingSession} OR (${printingConnector} AND id=current_setting('app.printing_licensee_id',true))`],
   ["Organization","SELECT",printingSession],
   ["AuditLog","INSERT",`(${printingSession} OR (${printingConnectorEvidence})) AND id=current_setting('app.printing_audit_id',true)`],
-  ["AuditLog","SELECT",`${printingSession} AND ${printingOperation}='printing-connector-upgrade-protect' AND "userId"=current_setting('app.printing_user_id',true) AND "orgId"=current_setting('app.printing_organization_id',true) AND "licenseeId"=current_setting('app.printing_licensee_id',true) AND action='PRINTER_TEST_LABEL_CONFIRMED' AND "entityType"='Printer' AND "entityId"=${printingPrinterId}`],
+  ["AuditLog","SELECT",`${printingSession} AND ${printingOperation}='printing-connector-upgrade-protect' AND "userId"=current_setting('app.printing_user_id',true) AND "orgId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'') AND "licenseeId" IS NOT DISTINCT FROM nullif(current_setting('app.printing_licensee_id',true),'') AND action='PRINTER_TEST_LABEL_CONFIRMED' AND "entityType"='Printer' AND "entityId"=${printingPrinterId}`],
   ["SecurityEventOutbox","INSERT",`(${printingSession} OR (${printingConnectorEvidence})) AND id=current_setting('app.printing_outbox_id',true)`],
   ["ActionIdempotencyKey","SELECT",`${printingSession} AND ${printingOperation} LIKE 'printing-idempotency-%' AND "keyHash"=${printingIdempotencyKeyHash}`],
   ["ActionIdempotencyKey","INSERT",`${printingSession} AND ${printingOperation}='printing-idempotency-begin' AND "keyHash"=${printingIdempotencyKeyHash}`],

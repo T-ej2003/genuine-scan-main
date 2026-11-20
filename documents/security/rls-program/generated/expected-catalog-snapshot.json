@@ -1,7 +1,7 @@
 {
   "schemaVersion": 3,
   "deploymentModel": "clean-room-blue-green",
-  "sourceContractSha256": "dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7",
+  "sourceContractSha256": "1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea",
   "migrationSetDigest": "44d992d15d512f410966173b42298d299c34692a874b9cb0eda6fca707d620a5",
   "sourceContractInputs": [
     {
@@ -94,7 +94,7 @@
     },
     {
       "path": "scripts/rls/lib/named-sql-function-contracts.mjs",
-      "sha256": "5dae06bed89351367346881ee6769b46ec11fb33fc46e7c2ed3c9931c8b4df26"
+      "sha256": "a871714f36d927ce98d1d245b35ac883a58e9699c6f2386c6b56d782d658a22c"
     },
     {
       "path": "scripts/rls/lib/restricted-owner-projection-contract.mjs",
@@ -2679,7 +2679,7 @@
         "release-fix-5-printing-lifecycle"
       ],
       "scopeType": "security-definer-owner-capability-or-exact-runtime-and-row-local-printing-scope",
-      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"userId\"=current_setting('app.printing_user_id',true) AND \"orgId\"=current_setting('app.printing_organization_id',true) AND \"licenseeId\"=current_setting('app.printing_licensee_id',true) AND action='PRINTER_TEST_LABEL_CONFIRMED' AND \"entityType\"='Printer' AND \"entityId\"=current_setting('app.printing_printer_id',true)",
+      "scopePredicate": "current_user='mscqr_rls_cert_auth_owner' AND session_user='mscqr_rls_cert_app' AND current_setting('app.printing_session_id',true)<>'' AND current_setting('app.printing_operation',true)='printing-connector-upgrade-protect' AND \"userId\"=current_setting('app.printing_user_id',true) AND \"orgId\" IS NOT DISTINCT FROM nullif(current_setting('app.printing_organization_id',true),'') AND \"licenseeId\" IS NOT DISTINCT FROM nullif(current_setting('app.printing_licensee_id',true),'') AND action='PRINTER_TEST_LABEL_CONFIRMED' AND \"entityType\"='Printer' AND \"entityId\"=current_setting('app.printing_printer_id',true)",
       "columns": [],
       "sourceCommandRuleIds": [
         "contract:release-fix-5-upgrade-protect-unknown:AuditLog:SELECT"
@@ -12993,55 +12993,55 @@
       "key": "owner",
       "name": "mscqr_rls_cert_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "authOwner",
       "name": "mscqr_rls_cert_auth_owner",
       "login": false,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "app",
       "name": "mscqr_rls_cert_app",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "read",
       "name": "mscqr_rls_cert_read",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "preauth",
       "name": "mscqr_rls_cert_preauth",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "worker",
       "name": "mscqr_rls_cert_worker",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "scheduled",
       "name": "mscqr_rls_cert_scheduled",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "operator",
       "name": "mscqr_rls_cert_operator",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     },
     {
       "key": "migration",
       "name": "mscqr_rls_cert_migration",
       "login": true,
-      "marker": "mscqr-full-rls-clean-room:certification:dab303369143eb934ca7ba51a02628efb5291c3847a8eb9b527f724b2dff11e7"
+      "marker": "mscqr-full-rls-clean-room:certification:1088427c4715d45d232e5d958328c5600f708206cb2e8e379f3e5ac3325ff2ea"
     }
   ]
 }
